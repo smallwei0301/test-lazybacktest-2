@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📈 LazyBacktest - 台股回測系統 v0.1.1</title>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+      :root {
+        --background: #ffffff;
+        --foreground: #4b5563;
+        --card: #f9fafb;
+        --card-foreground: #374151;
+        --popover: #ffffff;
+        --popover-foreground: #4b5563;
+        --primary: #0891b2;
+        --primary-foreground: #ffffff;
+        --secondary: #f59e0b;
+        --secondary-foreground: #ffffff;
+        --muted: #b0b0b0;
+        --muted-foreground: #4b5563;
+        --accent: #f59e0b;
+        --accent-foreground: #ffffff;
+        --destructive: #dc2626;
+        --destructive-foreground: #ffffff;
+        --border: #e5e7eb;
+        --input: #ffffff;
+        --ring: rgba(8, 145, 178, 0.5);
+        --radius: 0.5rem;
+      }
+      
+      .card {
+        background-color: var(--card);
+        color: var(--card-foreground);
+        border-radius: calc(var(--radius) + 2px);
+        border: 1px solid var(--border);
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+      }
+      
+      .card-header {
+        padding: 1.5rem 1.5rem 0 1.5rem;
+      }
+      
+      .card-content {
+        padding: 1.5rem;
+      }
+      
+      .card-title {
+        font-weight: 600;
+        line-height: 1;
+        margin-bottom: 0.375rem;
+        font-size: 1.125rem; /* 18px - 確保標題比內容大 */
+      }
+      
+      /* 調整交易記錄的字體大小和樣式 */
+      #trade-results {
+        width: 100%;
+      }
+      
+      .trade-list {
+        width: 100%;
+        background-color: var(--background);
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        overflow: visible !important; /* 強制取消滾動，顯示所有內容 */
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        height: auto !important; /* 強制自動高度 */
+        max-height: none !important; /* 強制移除最大高度限制 */
+        min-height: auto !important; /* 強制移除最小高度限制 */
+      }
+      
+      .trade-list .trade-signal {
+        font-size: 0.875rem;
+        padding: 1.25rem 1.5rem; /* 增加上下左右的 padding */
+        border-bottom: 1px solid var(--border);
+        background-color: var(--card);
+        transition: all 0.15s ease;
+        margin-bottom: 0.5rem; /* 增加項目間距 */
+      }
+      
+      .trade-list .trade-signal:hover {
+        background-color: var(--muted);
+      }
+      
+      .trade-list .trade-signal:last-child {
+        border-bottom: none;
+      }
+      
+      .trade-list .trade-signal .text-xs {
+        font-size: 0.75rem !important;
+        line-height: 1.4;
+      }
+      
+      .trade-list .trade-signal .text-sm {
+        font-size: 0.875rem !important;
+        line-height: 1.4;
+        font-weight: 500;
+      }
+      
+      .trade-list .trade-signal .text-base {
+        font-size: 1rem !important;
+        line-height: 1.4;
+      }
+      
+      /* 交易操作標籤樣式 */
+      .trade-action {
+        font-size: 0.75rem !important;
+        font-weight: 600;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        white-space: nowrap;
+      }
+      
+      /* 提示區域樣式 */
+      #trade-hints, #trade-hints-mobile {
+        font-size: 0.75rem;
+        line-height: 1.5;
+      }
+      
+      #trade-hints p, #trade-hints-mobile p {
+        margin-bottom: 0.5rem;
+        line-height: 1.5;
+      }
+      
+      #trade-hints p:last-child, #trade-hints-mobile p:last-child {
+        margin-bottom: 0;
+      }
+      
+      /* 獨立滾動區域樣式 */
+      @media (min-width: 1024px) {
+        .lg\\:h-screen {
+          height: calc(100vh - 12rem); /* 減去header和padding高度 */
+        }
+        
+        /* 左側面板滾動樣式 */
+        .lg\\:overflow-y-auto:first-child {
+          padding-right: 0.5rem;
+        }
+        
+        /* 右側面板滾動樣式 */
+        .lg\\:overflow-y-auto:last-child {
+          padding-left: 0.5rem;
+        }
+        
+        /* Webkit滾動條樣式 */
+        .lg\\:overflow-y-auto::-webkit-scrollbar {
+          width: 8px;
+        }
+        
+        .lg\\:overflow-y-auto::-webkit-scrollbar-track {
+          background: var(--muted);
+          border-radius: 4px;
+        }
+        
+        .lg\\:overflow-y-auto::-webkit-scrollbar-thumb {
+          background: var(--border);
+          border-radius: 4px;
+          transition: background 0.2s ease;
+        }
+        
+        .lg\\:overflow-y-auto::-webkit-scrollbar-thumb:hover {
+          background: var(--muted-foreground);
+        }
+        
+        /* Firefox滾動條樣式 */
+        .lg\\:overflow-y-auto {
+          scrollbar-width: thin;
+          scrollbar-color: var(--border) var(--muted);
+        }
+        
+        /* 防止橫向滾動並確保寬度限制 */
+        .main-grid {
+          max-width: 100%;
+          overflow-x: hidden;
+        }
+        
+        .main-grid > * {
+          min-width: 0;
+          overflow-x: hidden;
+        }
+        
+        /* 左側面板樣式 */
+        .left-panel {
+          padding-right: 0.75rem; /* 左側面板右邊距 */
+        }
+        
+        .left-panel::-webkit-scrollbar {
+          width: 8px;
+        }
+        
+        .left-panel::-webkit-scrollbar-track {
+          margin-right: 8px; /* 滾動軸軌道右側留白 */
+        }
+        
+        /* 右側面板樣式 */
+        .right-panel {
+          padding-right: 2rem; /* 增加右側內距避免卡片被裁斷 */
+          padding-left: 0.75rem; /* 右側面板左邊距 */
+        }
+        
+        /* 右側面板內的卡片和內容確保不被裁斷 */
+        .right-panel .card {
+          max-width: 100%;
+          margin-right: 0;
+        }
+        
+        .right-panel .card-content {
+          padding-right: 1.5rem;
+        }
+        
+        /* Sticky 標題樣式 - 只對導航標籤生效 */
+        .sticky-header {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background-color: var(--background);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          margin-bottom: 1.5rem;
+        }
+        
+        /* 確保 sticky header 在滾動容器中正確顯示 */
+        .sticky-header .card-header {
+          background-color: var(--card);
+          border-bottom: 1px solid var(--border);
+        }
+        
+        /* 確保標籤內容區域有足夠空間，避免被 sticky header 遮擋 */
+        .tab-content {
+          padding-top: 0;
+        }
+        
+        /* 移除標籤內容卡片的 sticky 設定，避免滾動衝突 */
+        .tab-content .card {
+          position: static; /* 確保所有卡片正常滾動 */
+          z-index: auto;
+        }
+        
+        .tab-content .card-header {
+          background-color: var(--card);
+          border-bottom: 1px solid var(--border);
+        }
+        
+        /* 交易紀錄卡片特殊高度設定 */
+        #trade-results {
+          min-height: 900px; /* 原來 300px 的三倍 */
+        }
+      }
+      
+      /* 響應式調整 */
+      @media (max-width: 1023px) {
+        .grid.grid-cols-1.lg\\:grid-cols-12 {
+          grid-template-columns: 1fr;
+        }
+      }
+      
+      .card-description {
+        color: var(--muted-foreground);
+        font-size: 0.875rem;
+      }
+      
+      .btn-primary {
+        background-color: var(--primary);
+        color: var(--primary-foreground);
+        border: 1px solid var(--primary);
+      }
+      
+      .btn-primary:hover {
+        background-color: color-mix(in srgb, var(--primary) 90%, black);
+      }
+      
+      .btn-secondary {
+        background-color: var(--secondary);
+        color: var(--secondary-foreground);
+        border: 1px solid var(--secondary);
+      }
+      
+      .btn-outline {
+        background-color: transparent;
+        color: var(--foreground);
+        border: 1px solid var(--border);
+      }
+      
+      .btn-outline:hover {
+        background-color: var(--accent);
+        color: var(--accent-foreground);
+      }
+      
+      .text-primary { color: var(--primary); }
+      .text-secondary { color: var(--secondary); }
+      .text-accent { color: var(--accent); }
+      .text-muted { color: var(--muted-foreground); }
+      .bg-primary { background-color: var(--primary); }
+      .bg-secondary { background-color: var(--secondary); }
+      .bg-accent { background-color: var(--accent); }
+      .border-primary { border-color: var(--primary); }
+      .border-secondary { border-color: var(--secondary); }
+      .border-accent { border-color: var(--accent); }
+      
+      .lucide {
+        width: 1.25rem;
+        height: 1.25rem;
+        stroke-width: 2;
+      }
+      
+      .lucide-sm {
+        width: 1rem;
+        height: 1rem;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
+</head>
+<body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
+    <div class="relative flex size-full min-h-screen flex-col overflow-x-hidden">
+        <div class="layout-container flex h-full grow flex-col">
+            <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
+                <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
+                            <div class="w-5 h-5 flex flex-col justify-between">
+                                <div class="flex justify-between">
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
+                                </div>
+                                <div class="flex justify-between items-end">
+                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
+                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                                    <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
+                            <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
+                        </div>
+                    </div>
+                    <nav class="hidden md:flex items-center space-x-6">
+                        <div class="text-sm text-muted" style="color: var(--muted-foreground);">
+                            鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline hover:text-primary" style="color: var(--foreground);">smallwei0301@gmail.com</a>
+                        </div>
+                    </nav>
+                </div>
+            </header>
+
+            <!-- Main Content -->
+            <div class="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
+                <!-- Hero Section -->
+                <div class="bg-background border-b flex-shrink-0" style="background-color: var(--background); border-color: var(--border);">
+                    <div class="container mx-auto px-4 py-12">
+                        <div class="text-center">
+                            <h1 class="text-4xl lg:text-5xl font-bold text-foreground mb-6" style="color: var(--foreground);">
+                                股票回測工具
+                            </h1>
+                            <p class="text-lg text-muted mb-8 max-w-3xl mx-auto" style="color: var(--muted-foreground);">
+                                透過歷史數據驗證您的交易策略，做出更明智的投資決策
+                            </p>
+                            
+                            <!-- 一鍵回測按鈕 -->
+                            <button 
+                                id="quickBacktestBtn"
+                                class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center mx-auto"
+                                style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                            >
+                                <i data-lucide="zap" class="lucide mr-3"></i>
+                                一鍵回測台積電
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="container mx-auto px-4 py-8 flex-1 overflow-hidden">
+                    <div class="grid lg:grid-cols-[30%_70%] gap-1 h-full overflow-hidden overflow-x-hidden main-grid">
+                        <!-- Left Panel - Settings and Controls -->
+                        <div class="space-y-6 lg:overflow-y-auto lg:h-screen lg:sticky lg:top-0 lg:pb-8 overflow-x-hidden left-panel" style="scrollbar-width: thin; scrollbar-color: var(--muted) var(--background);">
+
+                            <!-- Settings Cards -->
+                            <div class="space-y-6">
+                                <!-- Basic Settings Card -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <span class="tooltip">
+                                                基本設定
+                                                <span class="tooltiptext">更改代碼或日期範圍會觸發重新獲取數據。</span>
+                                            </span>
+                                        </h3>
+                                        <p class="card-description">設定股票代碼、時間範圍和初始資金</p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div>
+                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">股票/ETF/指數代碼</label>
+                                            <div class="flex gap-2 items-center">
+                                                <input 
+                                                    id="stockNo" 
+                                                    type="text" 
+                                                    value="2330" 
+                                                    placeholder="例如: 2330, 0050, TAIEX" 
+                                                    class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                />
+                                                <div class="flex items-center gap-2 text-xs">
+                                                    <span class="text-muted-foreground" style="color: var(--muted-foreground);">市場:</span>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="marketSwitch" class="sr-only peer">
+                                                        <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                                        <span id="marketLabel" class="ml-2 text-xs font-medium text-foreground" style="color: var(--foreground);">上市</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
+                                                <!-- 股票名稱和市場切換提示將顯示在這裡 -->
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <input type="checkbox" id="adjustedPriceCheckbox" disabled class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2" />
+                                            <label for="adjustedPriceCheckbox" class="text-xs text-muted cursor-not-allowed" style="color: var(--muted-foreground);">除權息還原股價 (開發中)</label>
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label for="startDate" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">開始日期</label>
+                                                <input 
+                                                    type="date" 
+                                                    id="startDate" 
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label for="endDate" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">結束日期</label>
+                                                <input 
+                                                    type="date" 
+                                                    id="endDate" 
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div class="flex items-end gap-2">
+                                            <div class="flex-grow">
+                                                <label for="recentYears" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最近N年</label>
+                                                <input 
+                                                    type="number" 
+                                                    id="recentYears" 
+                                                    value="5" 
+                                                    min="1" 
+                                                    max="50" 
+                                                    step="1" 
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                />
+                                            </div>
+                                            <button id="applyYearsBtn" title="設定開始日期" class="px-3 py-2 bg-primary hover:bg-primary text-white text-xs rounded-md transition duration-150 ease-in-out whitespace-nowrap" style="background-color: var(--primary);">套用</button>
+                                        </div>
+                                        <div>
+                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金 (元)</label>
+                                            <input 
+                                                type="number" 
+                                                id="initialCapital" 
+                                                value="100000" 
+                                                step="1000" 
+                                                class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Trading Settings Card -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="trending-up" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            交易設定
+                                        </h3>
+                                        <p class="card-description">設定交易時機和手續費</p>
+                                    </div>
+                                    <div class="card-content">
+                                        <div class="space-y-3 mb-4 pb-3 border-b" style="border-color: var(--border);">
+                                            <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">買賣時間點</p>
+                                            <div class="flex items-center">
+                                                <input type="radio" id="tradeTimingClose" name="tradeTiming" value="close" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
+                                                <label for="tradeTimingClose" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
+                                                    當日 (N) 收盤價
+                                                    <span class="tooltiptext">使用信號產生當日的收盤價交易。</span>
+                                                </label>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <input type="radio" id="tradeTimingOpen" name="tradeTiming" value="open" class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
+                                                <label for="tradeTimingOpen" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
+                                                    隔日 (N+1) 開盤價
+                                                    <span class="tooltiptext">使用信號產生次日的開盤價交易。</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-4">
+                                            <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">交易成本設定 (%)</p>
+                                            <div class="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label for="buyFee" class="tooltip block text-xs font-medium text-muted mb-1" style="color: var(--muted-foreground);">
+                                                        買入手續費 (%)
+                                                        <span class="tooltiptext">預設會根據股票/ETF代碼自動判斷。一般股票為0.1425%，ETF 通常為 0.1% (但依券商可能不同)。可自行修改。</span>
+                                                    </label>
+                                                    <input type="number" id="buyFee" value="0.1425" min="0" max="5" step="0.0001" class="w-full px-2 py-1 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                </div>
+                                                <div>
+                                                    <label for="sellFee" class="tooltip block text-xs font-medium text-muted mb-1" style="color: var(--muted-foreground);">
+                                                        賣出手續費+稅 (%)
+                                                        <span class="tooltiptext">預設會根據代碼自動判斷。一般股票為 0.1425% 手續費 + 0.3% 交易稅 = 0.4425%。ETF 為 0.1% 手續費 + 0.1% 交易稅 = 0.2%。可自行修改。</span>
+                                                    </label>
+                                                    <input type="number" id="sellFee" value="0.4425" min="0" max="5" step="0.0001" class="w-full px-2 py-1 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Risk Management Card -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="shield" class="lucide text-destructive" style="color: var(--destructive);"></i>
+                                            風險管理
+                                        </h3>
+                                        <p class="card-description">設定部位大小和停損停利 (多空共用)</p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div class="space-y-2">
+                                            <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
+                                                部位大小計算基準
+                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                            </label>
+                                            <div class="flex items-center gap-4">
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
+                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
+                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label for="positionSize" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                                部位大小 (%)
+                                                <span class="tooltiptext">單次進場使用的 **計算基準** (上方選擇) 的百分比 (多空獨立計算)。</span>
+                                            </label>
+                                            <input type="number" id="positionSize" value="100" min="1" max="100" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                        </div>
+                                        <div>
+                                            <label for="stopLoss" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                                固定停損 (%)
+                                                <span class="tooltiptext">虧損達此%強制出場(多單停損/空單回補),優先於策略信號。0=不啟用。</span>
+                                            </label>
+                                            <input type="number" id="stopLoss" value="0" min="0" max="100" step="0.5" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                        </div>
+                                        <div>
+                                            <label for="takeProfit" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                                固定停利 (%)
+                                                <span class="tooltiptext">獲利達此%強制出場(多單停利/空單回補),優先於策略信號。0=不啟用。</span>
+                                            </label>
+                                            <input type="number" id="takeProfit" value="0" min="0" max="1000" step="0.5" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Strategy Settings Card -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="target" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            策略設定
+                                        </h3>
+                                        <p class="card-description">設定進場和出場條件</p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div class="grid md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label for="entryStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">
+                                                    <i data-lucide="arrow-up-circle" class="lucide-sm inline mr-1 text-green-600"></i>
+                                                    做多進場策略
+                                                </label>
+                                                <select
+                                                    id="entryStrategy"
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                >
+                                                    <option value="ma_cross">均線黃金交叉</option>
+                                                    <option value="ma_above">價格突破均線</option>
+                                                    <option value="rsi_oversold">RSI超賣</option>
+                                                    <option value="macd_cross">MACD黃金交叉 (DI版)</option>
+                                                    <option value="bollinger_breakout">布林通道突破</option>
+                                                    <option value="k_d_cross">KD黃金交叉 (D&lt;X)</option>
+                                                    <option value="volume_spike">成交量暴增</option>
+                                                    <option value="price_breakout">價格突破前高</option>
+                                                    <option value="williams_oversold">威廉指標超賣</option>
+                                                    <option value="turtle_breakout">海龜突破 (僅進場)</option>
+                                                </select>
+                                                <div id="entryParams" class="mt-4 space-y-3"></div>
+                                            </div>
+
+                                            <div>
+                                                <label for="exitStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">
+                                                    <i data-lucide="arrow-down-circle" class="lucide-sm inline mr-1 text-red-600"></i>
+                                                    做多出場策略
+                                                </label>
+                                                <select
+                                                    id="exitStrategy"
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                >
+                                                    <option value="ma_cross">均線死亡交叉</option>
+                                                    <option value="ma_below">價格跌破均線</option>
+                                                    <option value="rsi_overbought">RSI超買</option>
+                                                    <option value="macd_cross">MACD死亡交叉 (DI版)</option>
+                                                    <option value="bollinger_reversal">布林通道反轉</option>
+                                                    <option value="k_d_cross">KD死亡交叉 (D&gt;Y)</option>
+                                                    <option value="volume_spike">成交量暴增</option>
+                                                    <option value="price_breakdown">價格跌破前低</option>
+                                                    <option value="williams_overbought">威廉指標超買</option>
+                                                    <option value="turtle_stop_loss">海龜停損 (N日低)</option>
+                                                    <option value="trailing_stop">移動停損 (%)</option>
+                                                    <option value="fixed_stop_loss">(由風險管理控制)</option>
+                                                </select>
+                                                <div id="exitParams" class="mt-4 space-y-3"></div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Short Selling Option -->
+                                        <div class="border-t pt-4" style="border-color: var(--border);">
+                                            <label class="flex items-center mb-4">
+                                                <input type="checkbox" id="enableShortSelling" class="mr-2" />
+                                                <span class="text-xs font-medium text-foreground" style="color: var(--foreground);">
+                                                    <i data-lucide="trending-down" class="lucide-sm inline mr-1 text-red-600"></i>
+                                                    啟用做空交易
+                                                </span>
+                                            </label>
+
+                                            <div id="short-strategy-area" class="hidden space-y-4">
+                                                <div class="grid md:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label for="shortEntryStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">做空進場策略</label>
+                                                        <select
+                                                            id="shortEntryStrategy"
+                                                            class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                        >
+                                                            <option value="short_ma_cross">均線死亡交叉 (做空)</option>
+                                                            <option value="short_ma_below">價格跌破均線 (做空)</option>
+                                                            <option value="short_rsi_overbought">RSI超買 (做空)</option>
+                                                            <option value="short_macd_cross">MACD死亡交叉 (DI版) (做空)</option>
+                                                            <option value="short_bollinger_reversal">布林通道反轉 (做空)</option>
+                                                            <option value="short_k_d_cross">KD死亡交叉 (D&gt;Y) (做空)</option>
+                                                            <option value="short_price_breakdown">價格跌破前低 (做空)</option>
+                                                            <option value="short_williams_overbought">威廉指標超買 (做空)</option>
+                                                            <option value="short_turtle_stop_loss">海龜N日低 (做空)</option>
+                                                        </select>
+                                                        <div id="shortEntryParams" class="mt-3 space-y-2"></div>
+                                                    </div>
+
+                                                    <div>
+                                                        <label for="shortExitStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">回補出場策略</label>
+                                                        <select
+                                                            id="shortExitStrategy"
+                                                            class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                        >
+                                                            <option value="cover_ma_cross">均線黃金交叉 (回補)</option>
+                                                            <option value="cover_ma_above">價格突破均線 (回補)</option>
+                                                            <option value="cover_rsi_oversold">RSI超賣 (回補)</option>
+                                                            <option value="cover_macd_cross">MACD黃金交叉 (DI版) (回補)</option>
+                                                            <option value="cover_bollinger_breakout">布林通道突破 (回補)</option>
+                                                            <option value="cover_k_d_cross">KD黃金交叉 (D&lt;X) (回補)</option>
+                                                            <option value="cover_price_breakout">價格突破前高 (回補)</option>
+                                                            <option value="cover_williams_oversold">威廉指標超賣 (回補)</option>
+                                                            <option value="cover_turtle_breakout">海龜N日高 (回補)</option>
+                                                            <option value="cover_trailing_stop">移動停損 (%) (空單停損)</option>
+                                                            <option value="cover_fixed_stop_loss">(由風險管理控制)</option>
+                                                        </select>
+                                                        <div id="shortExitParams" class="mt-3 space-y-2"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Strategy Management -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="file-text" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        <span class="tooltip">
+                                            策略管理
+                                            <span class="tooltiptext">儲存、載入、刪除您的回測策略設定 (包含風險管理)。指標會儲存最後回測結果。</span>
+                                        </span>
+                                    </h3>
+                                </div>
+                                <div class="card-content space-y-3">
+                                    <div>
+                                        <label for="loadStrategySelect" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">已儲存策略 (名稱 | 年化% | 夏普值)</label>
+                                        <select id="loadStrategySelect" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                            <option value="">-- 選擇要載入的策略 --</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button id="saveStrategyBtn" class="px-3 py-2 bg-transparent text-primary hover:bg-accent border border-primary text-sm rounded-md transition duration-150 ease-in-out flex-grow sm:flex-grow-0" style="color: var(--primary); border-color: var(--primary);">
+                                            <i data-lucide="save" class="lucide-sm mr-1"></i>儲存目前
+                                        </button>
+                                        <button id="loadStrategyBtn" class="px-3 py-2 bg-transparent text-primary hover:bg-accent border border-primary text-sm rounded-md transition duration-150 ease-in-out flex-grow sm:flex-grow-0" style="color: var(--primary); border-color: var(--primary);">
+                                            <i data-lucide="folder-open" class="lucide-sm mr-1"></i>載入選定
+                                        </button>
+                                        <button id="deleteStrategyBtn" class="px-3 py-2 bg-transparent text-primary hover:bg-accent border border-primary text-sm rounded-md transition duration-150 ease-in-out flex-grow sm:flex-grow-0" style="color: var(--primary); border-color: var(--primary);">
+                                            <i data-lucide="trash-2" class="lucide-sm mr-1"></i>刪除選定
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quick Results -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="zap" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        快速結果
+                                    </h3>
+                                </div>
+                                <div class="card-content">
+                                    <div
+                                        id="result"
+                                        class="text-sm text-muted min-h-[100px] flex items-center justify-center border-2 border-dashed rounded-lg p-4"
+                                        style="color: var(--muted-foreground); border-color: var(--card);"
+                                    >
+                                        執行回測後將顯示結果摘要
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Today Suggestion -->
+                            <div class="card hidden" id="today-suggestion-area">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="lightbulb" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        今日建議
+                                    </h3>
+                                </div>
+                                <div class="card-content">
+                                    <div id="suggestion-text" class="text-sm text-muted" style="color: var(--muted-foreground);">基於您的策略，今日操作建議將在這裡顯示</div>
+                                </div>
+                            </div>
+
+                            <!-- Loading/Progress -->
+                            <div class="card hidden" id="loading">
+                                <div class="card-header">
+                                    <h3 class="card-title">執行中...</h3>
+                                </div>
+                                <div class="card-content">
+                                    <div class="space-y-2">
+                                        <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                            <div
+                                                id="progressBar"
+                                                class="bg-primary h-2 rounded-full transition-all duration-300"
+                                                style="width: 0%; background-color: var(--primary);"
+                                            ></div>
+                                        </div>
+                                        <p id="loadingText" class="text-sm text-muted" style="color: var(--muted-foreground);">
+                                            準備中...
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="card shadow-lg border-2 border-primary/20" style="border-color: color-mix(in srgb, var(--primary) 20%, transparent);">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2 text-primary" style="color: var(--primary);">
+                                        <i data-lucide="play" class="lucide"></i>
+                                        執行回測
+                                    </h3>
+                                </div>
+                                <div class="card-content space-y-4">
+                                    <button
+                                        id="backtestBtn"
+                                        class="w-full btn-primary text-lg py-6 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center justify-center"
+                                    >
+                                        <i data-lucide="play" class="lucide mr-2"></i>
+                                        開始回測
+                                    </button>
+
+                                    <div class="grid grid-cols-1 gap-2">
+                                        <button id="resetBtn" class="btn-outline text-sm py-2 rounded-md font-medium transition duration-150 ease-in-out flex items-center justify-center">
+                                            <i data-lucide="refresh-cw" class="lucide-sm mr-1"></i>
+                                            重置設定
+                                        </button>
+                                        <button id="randomizeBtn" class="btn-outline text-sm py-2 rounded-md font-medium transition duration-150 ease-in-out flex items-center justify-center">
+                                            <i data-lucide="shuffle" class="lucide-sm mr-1"></i>
+                                            隨機參數
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Right Panel - Tabs Content -->
+                        <div class="space-y-6 lg:overflow-y-auto lg:h-screen lg:pb-8 overflow-x-hidden right-panel" style="scrollbar-width: thin; scrollbar-color: var(--muted) var(--background);">
+                            <!-- Tab Navigation -->
+                            <div class="card sticky-header">
+                                <div class="card-header pb-4">
+                                    <div class="border-b border-border" style="border-color: var(--border);">
+                                        <nav class="flex space-x-8 overflow-x-auto">
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--primary); border-color: var(--primary);"
+                                                data-tab="summary"
+                                                aria-current="page"
+                                            >
+                                                <i data-lucide="clipboard-list" class="lucide-sm inline mr-1"></i>摘要
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="performance"
+                                            >
+                                                <i data-lucide="bar-chart-3" class="lucide-sm inline mr-1"></i>績效分析
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="trades"
+                                            >
+                                                <i data-lucide="receipt" class="lucide-sm inline mr-1"></i>交易記錄
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="optimization"
+                                            >
+                                                <i data-lucide="sliders-horizontal" class="lucide-sm inline mr-1"></i>參數優化
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="batch-optimization"
+                                            >
+                                                <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
+                                            </button>
+                                        </nav>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Summary Tab -->
+                            <div class="tab-content active" id="summary-tab">
+                                <!-- Chart Area -->
+                                <div class="card shadow-lg mb-8">
+                                    <div class="card-header">
+                                        <h3 class="card-title">淨值曲線圖</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div id="chart-container" class="h-96 bg-muted/20 rounded-lg flex items-center justify-center border-2 border-dashed relative" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); border-color: var(--card);">
+                                            <canvas id="chart" class="w-full h-full absolute inset-0"></canvas>
+                                            <div class="text-muted text-center" style="color: var(--muted-foreground);">
+                                                <i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                                                <p>執行回測後將顯示淨值曲線</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Summary Results -->
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">回測摘要</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div
+                                            id="backtest-result"
+                                            class="text-muted min-h-[200px] flex items-center justify-center border-2 border-dashed rounded-lg"
+                                            style="color: var(--muted-foreground); border-color: var(--card);"
+                                        >
+                                            執行回測後將顯示詳細結果
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Performance Tab -->
+                            <div class="tab-content hidden" id="performance-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">期間績效分析</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div
+                                            id="performance-table-container"
+                                            class="overflow-x-auto min-h-[200px] flex items-center justify-center border-2 border-dashed rounded-lg"
+                                            style="border-color: var(--card);"
+                                        >
+                                            <p class="text-muted" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Trades Tab -->
+                            <div class="tab-content hidden" id="trades-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">交易記錄</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div
+                                            id="trade-results"
+                                            class="min-h-[900px] w-full border-2 border-dashed rounded-lg p-6 overflow-y-auto"
+                                            style="border-color: var(--card);"
+                                        >
+                                            <div class="w-full h-full flex items-center justify-center">
+                                                <p class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">執行回測後將顯示交易明細</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Optimization Tab -->
+                            <div class="tab-content hidden" id="optimization-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="zap" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            參數優化
+                                        </h3>
+                                        <p class="card-description">自動尋找最佳參數組合</p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <!-- 優化控制區域 -->
+                                        <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                            <div class="card-header">
+                                                <h4 class="card-title flex items-center gap-2">
+                                                    <i data-lucide="sliders-horizontal" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                    優化控制
+                                                </h4>
+                                            </div>
+                                            <div class="card-content">
+                                                <!-- 做多策略優化 -->
+                                                <div class="mb-6">
+                                                    <h5 class="text-md font-semibold text-foreground mb-3" style="color: var(--foreground);">做多策略優化</h5>
+                                                    <div class="grid md:grid-cols-3 gap-4">
+                                                        <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
+                                                            <button id="optimizeEntryBtn" class="btn-primary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                                <i data-lucide="settings" class="lucide-sm mr-1"></i>
+                                                                優化進場
+                                                            </button>
+                                                            <select
+                                                                id="optimizeEntryParamSelect"
+                                                                class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
+                                                                style="background-color: var(--input); color: var(--foreground);"
+                                                            ></select>
+                                                        </div>
+
+                                                        <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
+                                                            <button id="optimizeExitBtn" class="btn-secondary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                                <i data-lucide="wrench" class="lucide-sm mr-1"></i>
+                                                                優化出場
+                                                            </button>
+                                                            <select
+                                                                id="optimizeExitParamSelect"
+                                                                class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
+                                                                style="background-color: var(--input); color: var(--foreground);"
+                                                            ></select>
+                                                        </div>
+
+                                                        <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
+                                                            <button id="optimizeRiskBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                                <i data-lucide="sliders-horizontal" class="lucide-sm mr-1"></i>
+                                                                優化風控
+                                                            </button>
+                                                            <select
+                                                                id="optimizeRiskParamSelect"
+                                                                class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
+                                                                style="background-color: var(--input); color: var(--foreground);"
+                                                            >
+                                                                <option value="stopLoss">停損 (%)</option>
+                                                                <option value="takeProfit">停利 (%)</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 做空策略優化 -->
+                                                <div>
+                                                    <h5 class="text-md font-semibold text-foreground mb-3" style="color: var(--foreground);">做空策略優化</h5>
+                                                    <div class="grid md:grid-cols-2 gap-4">
+                                                        <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
+                                                            <button id="optimizeShortEntryBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                                <i data-lucide="trending-down" class="lucide-sm mr-1"></i>
+                                                                優化做空進場
+                                                            </button>
+                                                            <select
+                                                                id="optimizeShortEntryParamSelect"
+                                                                class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
+                                                                style="background-color: var(--input); color: var(--foreground);"
+                                                            ></select>
+                                                        </div>
+                                                        <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
+                                                            <button id="optimizeShortExitBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                                <i data-lucide="trending-up" class="lucide-sm mr-1"></i>
+                                                                優化回補出場
+                                                            </button>
+                                                            <select
+                                                                id="optimizeShortExitParamSelect"
+                                                                class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
+                                                                style="background-color: var(--input); color: var(--foreground);"
+                                                            ></select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- 優化進度區域 -->
+                                        <div id="optimization-progress-section" class="card bg-primary/5 border-2 border-primary/20 hidden" style="background-color: color-mix(in srgb, var(--primary) 5%, transparent); border-color: color-mix(in srgb, var(--primary) 20%, transparent);">
+                                            <div class="card-header">
+                                                <h4 class="card-title flex items-center gap-2">
+                                                    <i data-lucide="loader" class="lucide text-primary animate-spin" style="color: var(--primary);"></i>
+                                                    優化進行中
+                                                </h4>
+                                            </div>
+                                            <div class="card-content">
+                                                <div class="mb-3">
+                                                    <span id="optimization-status-text" class="text-foreground font-medium" style="color: var(--foreground);">⌛ 準備優化...</span>
+                                                </div>
+                                                <div class="w-full bg-muted rounded-full h-3 shadow-inner" style="background-color: var(--muted);">
+                                                    <div 
+                                                        id="optimization-progress-bar" 
+                                                        class="bg-primary h-3 rounded-full transition-all duration-500 ease-out"
+                                                        style="width: 0%; background-color: var(--primary);"
+                                                    ></div>
+                                                </div>
+                                                <div class="mt-2 text-sm text-muted font-medium" style="color: var(--muted-foreground);">
+                                                    進度: <span id="optimization-progress-text" class="text-primary" style="color: var(--primary);">0%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- 優化結果區域 -->
+                                        <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                            <div class="card-header">
+                                                <h4 id="optimization-title" class="card-title flex items-center gap-2">
+                                                    <i data-lucide="trending-up" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                    優化結果
+                                                </h4>
+                                            </div>
+                                            <div class="card-content">
+                                                <div id="optimization-results" class="optimization-results">
+                                                    <p class="text-muted" style="color: var(--muted-foreground);">請選擇要優化的策略參數，然後點選優化按鈕開始優化。</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Batch Optimization Tab -->
+                            <div class="tab-content hidden" id="batch-optimization-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="users" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            批量策略優化
+                                        </h3>
+                                        <p class="card-description">同時測試多種策略組合</p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div id="batch-optimization-content">
+                                            <div class="space-y-6">
+                                                <!-- 策略選擇區域 -->
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <h4 class="card-title flex items-center gap-2">
+                                                            <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                            策略組合選擇
+                                                        </h4>
+                                                    </div>
+                                                    <div class="card-content">
+                                                        <div class="grid md:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">買入策略 (可多選)</label>
+                                                                <div id="buy-strategies-list" class="space-y-2 max-h-48 overflow-y-auto border border-border rounded-md p-3" style="border-color: var(--border);">
+                                                                    <!-- 動態生成買入策略選項 -->
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">賣出策略 (可多選)</label>
+                                                                <div id="sell-strategies-list" class="space-y-2 max-h-48 overflow-y-auto border border-border rounded-md p-3" style="border-color: var(--border);">
+                                                                    <!-- 動態生成賣出策略選項 -->
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="flex items-center gap-2 mt-4">
+                                                            <button id="select-all-buy" class="btn-outline text-sm py-2 px-3 rounded">全選買入</button>
+                                                            <button id="select-all-sell" class="btn-outline text-sm py-2 px-3 rounded">全選賣出</button>
+                                                            <button id="clear-all" class="btn-outline text-sm py-2 px-3 rounded">清除全部</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- 優化設定區域 -->
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <h4 class="card-title flex items-center gap-2">
+                                                            <i data-lucide="sliders-horizontal" class="lucide text-accent" style="color: var(--accent);"></i>
+                                                            優化設定
+                                                        </h4>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div>
+                                                            <h4 class="font-medium text-foreground mb-3" style="color: var(--foreground);">優化目標指標</h4>
+                                                            <div class="flex flex-wrap gap-4">
+                                                                <label class="flex items-center">
+                                                                    <input type="radio" name="batch-target-metric" value="annualizedReturn" checked class="mr-2" />
+                                                                    <span class="text-sm" style="color: var(--foreground);">年化報酬率</span>
+                                                                </label>
+                                                                <label class="flex items-center">
+                                                                    <input type="radio" name="batch-target-metric" value="sharpeRatio" class="mr-2" />
+                                                                    <span class="text-sm" style="color: var(--foreground);">夏普比率</span>
+                                                                </label>
+                                                                <label class="flex items-center">
+                                                                    <input type="radio" name="batch-target-metric" value="sortinoRatio" class="mr-2" />
+                                                                    <span class="text-sm" style="color: var(--foreground);">索提諾比率</span>
+                                                                </label>
+                                                                <label class="flex items-center">
+                                                                    <input type="radio" name="batch-target-metric" value="maxDrawdown" class="mr-2" />
+                                                                    <span class="text-sm" style="color: var(--foreground);">最大回撤</span>
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="grid md:grid-cols-3 gap-4">
+                                                            <div>
+                                                                <label for="batch-optimize-parameter-trials" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">參數優化次數</label>
+                                                                <input type="number" id="batch-optimize-parameter-trials" value="100" min="10" max="1000" step="10" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">對每個策略進行參數優化的測試次數</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="batch-optimize-concurrency" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">優化併發數</label>
+                                                                <input type="number" id="batch-optimize-concurrency" value="4" min="1" max="32" step="1" title="建議設定為 CPU 實體/邏輯核心數（navigator.hardwareConcurrency），較高併發會增加 CPU 與記憶體負載" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">建議值：≤ CPU 核心數（若瀏覽器支援）。預設 4。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="batch-optimize-iteration-limit" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">迭代上限 (迭代次數上限)</label>
+                                                                <input type="number" id="batch-optimize-iteration-limit" value="6" min="1" max="100" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制每個組合在 "交替優化" 流程中的最大迭代次數。預設 6。</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- 執行按鈕 -->
+                                            <div class="flex justify-center gap-4 mb-6 mt-6">
+                                                <button id="start-batch-optimization" class="btn-primary px-8 py-3 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center" style="background: linear-gradient(135deg, var(--primary), var(--accent));">
+                                                    <i data-lucide="rocket" class="lucide mr-2"></i>
+                                                    開始批量優化
+                                                </button>
+                                                <button id="stop-batch-optimization" class="btn-outline px-8 py-3 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center hidden" style="border-color: var(--destructive); color: var(--destructive);">
+                                                    <i data-lucide="square" class="lucide mr-2"></i>
+                                                    停止優化
+                                                </button>
+                                            </div>
+                                            
+                                            <!-- 進度顯示 -->
+                                            <div id="batch-optimization-progress" class="hidden mb-6">
+                                                <div class="card bg-muted/20" style="background-color: color-mix(in srgb, var(--primary) 5%, transparent);">
+                                                    <div class="card-header pb-3">
+                                                        <div class="flex items-center justify-between">
+                                                            <h5 class="card-title text-sm font-medium flex items-center">
+                                                                <i id="batch-progress-hourglass" data-lucide="hourglass" class="lucide mr-2 animate-spin text-primary" style="color: var(--primary);"></i>
+                                                                優化進度
+                                                            </h5>
+                                                            <span id="batch-progress-text" class="text-sm text-primary" style="color: var(--primary);">0%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="w-full bg-muted rounded-full h-3" style="background-color: var(--muted);">
+                                                            <div id="batch-progress-bar" class="bg-primary h-3 rounded-full transition-all duration-300" style="width: 0%; background-color: var(--primary);"></div>
+                                                        </div>
+                                                        <div class="text-sm space-y-1">
+                                                            <div id="batch-progress-detail" class="text-primary" style="color: var(--primary);">準備中...</div>
+                                                            <div id="batch-progress-combination" class="font-medium text-primary" style="color: var(--primary);"></div>
+                                                            <div id="batch-time-estimate" class="font-medium text-foreground" style="color: var(--foreground);"></div>
+                                                            <div id="batch-long-wait-notice" class="hidden p-2 bg-accent/10 border border-accent/20 rounded text-accent" style="background-color: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);">
+                                                                <i data-lucide="clock" class="lucide mr-1"></i>
+                                                                由於測試次數與選擇策略較多，預估需要較長等待時間，請耐心等候...
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Worker 狀態面板 -->
+                                            <div id="batch-worker-status-panel" class="hidden mb-6">
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <div class="flex items-center justify-between">
+                                                            <h5 class="card-title text-sm font-medium">運行狀態</h5>
+                                                            <div class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">
+                                                                <span>併發上限: <strong id="batch-current-concurrency">-</strong></span>
+                                                                <span class="ml-3">運行中: <strong id="batch-inflight-count">0</strong></span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">以下列出目前正在執行或剛完成的組合 (如多則顯示最新若干筆)</div>
+                                                    </div>
+                                                    <div class="card-content">
+                                                        <div class="overflow-x-auto">
+                                                            <table id="batch-worker-status-list" class="min-w-full divide-y divide-border text-sm" style="border-color: var(--border);">
+                                                                <thead class="bg-muted" style="background-color: var(--muted);">
+                                                                    <tr>
+                                                                        <th class="px-2 py-1 text-left text-xs font-medium text-muted-foreground uppercase" style="color: var(--muted-foreground);">#</th>
+                                                                        <th class="px-2 py-1 text-left text-xs font-medium text-muted-foreground uppercase" style="color: var(--muted-foreground);">買入策略</th>
+                                                                        <th class="px-2 py-1 text-left text-xs font-medium text-muted-foreground uppercase" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-2 py-1 text-left text-xs font-medium text-muted-foreground uppercase" style="color: var(--muted-foreground);">狀態</th>
+                                                                        <th class="px-2 py-1 text-left text-xs font-medium text-muted-foreground uppercase" style="color: var(--muted-foreground);">執行時間</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody id="batch-worker-status-tbody" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 交叉優化進度顯示 -->
+                                            <div id="cross-optimization-progress" class="hidden mb-6">
+                                                <div class="card bg-muted/20" style="background-color: color-mix(in srgb, var(--accent) 5%, transparent);">
+                                                    <div class="card-header pb-3">
+                                                        <div class="flex items-center justify-between">
+                                                            <h5 class="card-title text-sm font-medium flex items-center">
+                                                                <i id="cross-progress-icon" data-lucide="arrow-right-left" class="lucide mr-2 animate-pulse text-accent" style="color: var(--accent);"></i>
+                                                                交叉優化進度
+                                                            </h5>
+                                                            <span id="cross-progress-text" class="text-sm text-accent" style="color: var(--accent);">0%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="w-full bg-muted rounded-full h-3" style="background-color: var(--muted);">
+                                                            <div id="cross-progress-bar" class="bg-accent h-3 rounded-full transition-all duration-300" style="width: 0%; background-color: var(--accent);"></div>
+                                                        </div>
+                                                        <div class="text-sm space-y-1">
+                                                            <div id="cross-progress-detail" class="text-accent" style="color: var(--accent);">準備中...</div>
+                                                            <div id="cross-progress-status" class="font-medium text-accent" style="color: var(--accent);"></div>
+                                                            <div id="cross-time-estimate" class="font-medium text-foreground" style="color: var(--foreground);"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 結果顯示 -->
+                                            <div id="batch-optimization-results" class="hidden">
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <div class="flex items-center justify-between">
+                                                            <h4 class="card-title text-lg font-semibold">優化結果</h4>
+                                                            <div class="flex items-center gap-2">
+                                                                <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
+                                                                <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    <option value="annualizedReturn">年化報酬率</option>
+                                                                    <option value="sharpeRatio">夏普比率</option>
+                                                                    <option value="maxDrawdown">最大回撤</option>
+                                                                    <option value="tradeCount">交易次數</option>
+                                                                </select>
+                                                                <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
+                                                                    <i data-lucide="arrow-down" class="lucide"></i>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-content">
+                                                        <div class="overflow-x-auto">
+                                                            <table id="batch-results-table" class="min-w-full divide-y divide-border" style="border-color: var(--border);">
+                                                                <thead class="bg-muted" style="background-color: var(--muted);">
+                                                                    <tr>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">排名</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">買入策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬率</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">最大回撤</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">交易次數</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">操作</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody id="batch-results-tbody" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+                <div class="container mx-auto px-4">
+                    <div class="grid md:grid-cols-4 gap-8">
+                        <div>
+                            <div class="flex items-center space-x-3 mb-4">
+                                <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                    <!-- simple brand mark -->
+                                    <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                        <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                    <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
+                                </div>
+                            </div>
+                            <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！</br> 如果這個網站幫助您投資順利</br> 或者單純想支持一下韭菜胖叔叔</br>歡迎斗內讓我可以上車繼續更新</br> 用奶粉發電，不再用愛發電</p>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                            <ul class="space-y-2 text-sm">
+                                <li>
+                                    <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a>
+                                </li>
+                                <li>
+                                    <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a>
+                                </li>
+                                <li>
+                                    <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                            <ul class="space-y-2 text-sm">
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                            <ul class="space-y-2 text-sm">
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+                                <li><a href="#" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                        <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                        <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/backtest.js"></script>
+    <script src="js/loader.js"></script>
+    <script src="js/batch-optimization.js"></script>
+    
+    <script>
+        // Initialize Lucide icons
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+            
+            // 一鍵回測台積電功能
+            const quickBacktestBtn = document.getElementById('quickBacktestBtn');
+            if (quickBacktestBtn) {
+                let originalButtonContent = quickBacktestBtn.innerHTML;
+                let progressInterval;
+                let currentProgress = 0;
+                
+                quickBacktestBtn.addEventListener('click', function() {
+                    // 禁用按鈕並改變樣式
+                    quickBacktestBtn.disabled = true;
+                    quickBacktestBtn.style.opacity = '0.7';
+                    currentProgress = 0;
+                    
+                    // 更新按鈕內容為回測中狀態
+                    const updateProgress = () => {
+                        currentProgress += Math.random() * 15 + 5; // 隨機增加 5-20%
+                        if (currentProgress > 95) currentProgress = 95; // 最多到 95%
+                        
+                        quickBacktestBtn.innerHTML = `
+                            <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
+                            回測中...${Math.round(currentProgress)}%
+                        `;
+                        
+                        // 重新初始化圖標
+                        if (typeof lucide !== 'undefined') {
+                            lucide.createIcons();
+                        }
+                    };
+                    
+                    // 立即顯示進度並開始定期更新
+                    updateProgress();
+                    progressInterval = setInterval(updateProgress, 800);
+                    
+                    // 設定台積電的默認參數
+                    const stockInput = document.getElementById('stockInput');
+                    if (stockInput) {
+                        stockInput.value = '2330';
+                    }
+                    
+                    // 設定默認日期範圍（最近一年）
+                    const endDate = new Date();
+                    const startDate = new Date();
+                    startDate.setFullYear(endDate.getFullYear() - 1);
+                    
+                    const startDateInput = document.getElementById('startDate');
+                    const endDateInput = document.getElementById('endDate');
+                    if (startDateInput) {
+                        startDateInput.value = startDate.toISOString().split('T')[0];
+                    }
+                    if (endDateInput) {
+                        endDateInput.value = endDate.toISOString().split('T')[0];
+                    }
+                    
+                    // 監聽回測完成事件
+                    const checkBacktestComplete = () => {
+                        const resultElement = document.getElementById('backtest-result');
+                        const tradeResultsElement = document.getElementById('trade-results');
+                        
+                        // 檢查是否有結果顯示（簡單檢查文本內容是否改變）
+                        if (resultElement && resultElement.textContent.trim() !== '執行回測後將顯示詳細結果') {
+                            // 回測完成
+                            clearInterval(progressInterval);
+                            
+                            // 顯示完成狀態
+                            quickBacktestBtn.innerHTML = `
+                                <i data-lucide="check-circle" class="lucide mr-3"></i>
+                                完成！請看下面績效表現
+                            `;
+                            
+                            // 重新初始化圖標
+                            if (typeof lucide !== 'undefined') {
+                                lucide.createIcons();
+                            }
+                            
+                            // 3秒後恢復原始狀態
+                            setTimeout(() => {
+                                quickBacktestBtn.innerHTML = originalButtonContent;
+                                quickBacktestBtn.disabled = false;
+                                quickBacktestBtn.style.opacity = '1';
+                                if (typeof lucide !== 'undefined') {
+                                    lucide.createIcons();
+                                }
+                            }, 3000);
+                            
+                        } else {
+                            // 繼續檢查
+                            setTimeout(checkBacktestComplete, 500);
+                        }
+                    };
+                    
+                    // 觸發回測
+                    const backtestBtn = document.getElementById('backtestBtn');
+                    if (backtestBtn) {
+                        // 滾動到左邊畫面的開始回測按鈕
+                        backtestBtn.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'center',
+                            inline: 'nearest'
+                        });
+                        
+                        // 稍微延遲後觸發回測，確保滾動完成
+                        setTimeout(() => {
+                            backtestBtn.click();
+                        }, 800);
+                        
+                        // 開始檢查回測狀態
+                        setTimeout(checkBacktestComplete, 1800);
+                    }
+                });
+            }
+            
+            // Tab switching functionality with updated design
+            document.querySelectorAll('[data-tab]').forEach(button => {
+                button.addEventListener('click', function() {
+                    const tabName = this.getAttribute('data-tab');
+                    
+                    // Update button states
+                    document.querySelectorAll('[data-tab]').forEach(btn => {
+                        btn.className = 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap';
+                        btn.style.color = 'var(--muted-foreground)';
+                        btn.style.borderColor = 'transparent';
+                    });
+                    this.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap';
+                    this.style.color = 'var(--primary)';
+                    this.style.borderColor = 'var(--primary)';
+                    
+                    // Show corresponding content
+                    document.querySelectorAll('.tab-content').forEach(tab => {
+                        tab.classList.add('hidden');
+                        tab.classList.remove('active');
+                    });
+                    const targetTab = document.getElementById(tabName + '-tab');
+                    if (targetTab) {
+                        targetTab.classList.remove('hidden');
+                        targetTab.classList.add('active');
+                    }
+                });
+            });
+            
+            // Enhanced hover effects for tabs
+            document.querySelectorAll('[data-tab]').forEach(button => {
+                button.addEventListener('mouseenter', function() {
+                    if (!this.classList.contains('border-primary')) {
+                        this.style.color = 'var(--foreground)';
+                        this.style.borderColor = 'color-mix(in srgb, var(--border) 60%, transparent)';
+                    }
+                });
+                
+                button.addEventListener('mouseleave', function() {
+                    if (!this.classList.contains('border-primary')) {
+                        this.style.color = 'var(--muted-foreground)';
+                        this.style.borderColor = 'transparent';
+                    }
+                });
+            });
+            
+            // Enhanced button hover effects
+            document.querySelectorAll('.btn-outline').forEach(button => {
+                button.addEventListener('mouseenter', function() {
+                    this.style.backgroundColor = 'var(--accent)';
+                    this.style.color = 'var(--accent-foreground)';
+                    this.style.borderColor = 'var(--accent)';
+                });
+                
+                button.addEventListener('mouseleave', function() {
+                    this.style.backgroundColor = 'transparent';
+                    this.style.color = 'var(--foreground)';
+                    this.style.borderColor = 'var(--border)';
+                });
+            });
+            
+            // Primary button hover effects
+            document.querySelectorAll('.btn-primary').forEach(button => {
+                button.addEventListener('mouseenter', function() {
+                    this.style.backgroundColor = 'color-mix(in srgb, var(--primary) 90%, black)';
+                });
+                
+                button.addEventListener('mouseleave', function() {
+                    this.style.backgroundColor = 'var(--primary)';
+                });
+            });
+            
+            // Secondary button hover effects  
+            document.querySelectorAll('.btn-secondary').forEach(button => {
+                button.addEventListener('mouseenter', function() {
+                    this.style.backgroundColor = 'color-mix(in srgb, var(--secondary) 90%, black)';
+                });
+                
+                button.addEventListener('mouseleave', function() {
+                    this.style.backgroundColor = 'var(--secondary)';
+                });
+            });
+            
+            // Initialize default tab (summary)
+            const defaultTabButton = document.querySelector('[data-tab="summary"]');
+            if (defaultTabButton) {
+                defaultTabButton.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap';
+                defaultTabButton.style.color = 'var(--primary)';
+                defaultTabButton.style.borderColor = 'var(--primary)';
+            }
+            
+            const defaultTabContent = document.getElementById('summary-tab');
+            if (defaultTabContent) {
+                defaultTabContent.classList.remove('hidden');
+                defaultTabContent.classList.add('active');
+            }
+        });
+    </script>
+</body>
+</html>

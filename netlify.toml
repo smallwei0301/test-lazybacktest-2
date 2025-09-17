@@ -1,0 +1,8 @@
+# Netlify Redirects for Proxying API Requests
+# This rule forwards requests from /api/tpex/ to the TPEX website to avoid CORS issues.
+
+[[redirects]]
+  from = "/api/tpex/*"
+  to = "https://www.tpex.org.tw/:splat"
+  status = 200
+  force = true # Ensures this rule is applied even if a file exists at the path
