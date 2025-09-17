@@ -1,16 +1,8 @@
 ?plugins=forms,container-queries:64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
 (anonymous) @ ?plugins=forms,container-queries:64
-(anonymous) @ ?plugins=forms,container-queries:64
-worker.js:214 [TPEX Worker] Could not find header row in CSV for 3260 on 114/09. CSV content might have changed.
-fetchTPEXMonthData @ worker.js:214
-await in fetchTPEXMonthData
-fetchStockData @ worker.js:85
-self.onmessage @ worker.js:800
-worker.js:833 Worker 執行 runBacktest 期間錯誤: Error: 指定範圍 (2025-09-01 ~ 2025-09-17) 無 3260 交易數據
-    at fetchStockData (/js/worker.js:116:15)
-    at async self.onmessage (/js/worker.js:800:30)
-self.onmessage @ worker.js:833
+backtest.js:1810 Uncaught SyntaxError: Unexpected token '<<'
+loader.js:201 [Loader/Main Init] Error during initial setup: ReferenceError: populateSavedStrategiesDropdown is not defined
+    at HTMLDocument.<anonymous> (loader.js:82:9)
+(anonymous) @ loader.js:201
 
-
-Sep 17, 12:58:34 PM: ed3f8521 INFO   [Proxy Handler] Final Target URL: https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=114%2F09&s=3260
-Sep 17, 12:58:39 PM: ed3f8521 Duration: 5367.15 ms	Memory Usage: 111 MB
+Netlify 代理伺服器部屬失敗

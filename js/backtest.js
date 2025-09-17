@@ -1807,27 +1807,13 @@ async function fetchStockNameFromTPEX(stockCode) {
 // 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockCode) {
     try {
-<<<<<<< HEAD
-    // 使用相對路徑，方便本地與 Netlify proxy
-    const now = new Date();
-    const rocYear = now.getFullYear() - 1911;
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const queryDate = `${rocYear}/${month}`;
-    const proxyUrl = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
-    console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
-=======
-        // 檢查代理伺服器是否可用
-        const proxyBaseUrl = '';
-        
+        // 使用相對路徑，方便本地與 Netlify proxy
         const now = new Date();
         const rocYear = now.getFullYear() - 1911;
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const queryDate = `${rocYear}/${month}`;
-        
-        const proxyUrl = `${proxyBaseUrl}/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
-        
+        const proxyUrl = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
         console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
->>>>>>> parent of 249091c (update)
         
         const response = await fetch(proxyUrl, {
             method: 'GET',
