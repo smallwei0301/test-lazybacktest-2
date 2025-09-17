@@ -117,7 +117,6 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
         // 添加延遲避免過於頻繁的請求
         await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
     }
-        }
 
         const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
         self.postMessage({ 
