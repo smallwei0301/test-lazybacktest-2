@@ -72,63 +72,81 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// 在 worker.js 中，替換 fetchStockData 函式 (加入終極診斷日誌)
+// 在 worker.js 中，用此版本完整替換舊的 fetchStockData 函式
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
     console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
-    let allData = [];
+
+    let rawData;
     let dataSource = '未知';
     let stockName = '';
 
-    // --- 關鍵診斷：我們將直接在這裡處理，繞過市場判斷，直接測試 tpex-proxy ---
     try {
-        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
-        const response = await fetch(proxyUrl);
-
-        // --- 終極診斷日誌：將收到的原始文字印出 ---
-        const rawText = await response.text();
-        console.log('[Worker Ultimate Diagnostics] 從代理收到的原始回應文字:', rawText);
-        // --- 診斷結束 ---
-
-        if (!response.ok) {
-            throw new Error(`代理伺服器錯誤: ${response.status}. 內容: ${rawText}`);
-        }
-        
-        // 嘗試手動解析
-        const data = JSON.parse(rawText);
-
-        if (data.error) {
-            throw new Error(`代理回傳錯誤: ${data.error}`);
-        }
-        
-        // --- 再次診斷解析後的物件 ---
-        console.log('[Worker Ultimate Diagnostics] 成功解析後的物件:', data);
-        if (data.aaData) {
-            console.log(`[Worker Ultimate Diagnostics] 解析後的 aaData 筆數: ${data.aaData.length}`);
+        let proxyUrl;
+        if (marketType === 'tpex') {
+            proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
         } else {
-            console.error('[Worker Ultimate Diagnostics] 錯誤：解析後的物件中找不到 aaData 鍵！');
+            // 為了架構統一，即使是上市股票也應通過代理（此處暫留舊邏輯，未來可擴充）
+            // 暫時只處理上櫃
+            throw new Error(`市場類型 ${marketType} 的處理邏輯尚未完全遷移至新架構。`);
         }
-        // --- 診斷結束 ---
-
-        allData = data.aaData || []; // 加上保護
+        
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error(`代理伺服器錯誤: ${response.status}`);
+        
+        const data = await response.json();
+        if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
+        
+        rawData = data.aaData || [];
         dataSource = data.dataSource || '未知';
         stockName = data.stockName || '';
 
     } catch (error) {
-         console.error('[Worker] 處理代理回應時發生嚴重錯誤:', error);
-         // 即使出錯，也回傳空資料，避免系統崩潰
-         return { data: [], dataSource: '錯誤', stockName: stockNo };
+        console.error(`[Worker] 獲取資料時發生錯誤:`, error);
+        return { data: [], dataSource: '錯誤', stockName: stockNo };
     }
-    
-    // --- 後續的日期篩選邏輯 (暫時保持不變) ---
-    const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : (p || 0)), parseInt(String(d[8]).replace(/,/g, '') / 1000, 10) ]);
-    const filteredData = formattedData.filter(d => {
-        if (!d[0] || typeof d[0] !== 'string') return false;
-        const date = new Date(d[0].replace(/(\d+)\/(\d+)\/(\d+)/, (m, y, mo, d) => `${parseInt(y) + 1911}-${mo}-${d}`));
-        return date >= new Date(startDate) && date <= new Date(endDate);
-    });
+
+    if (rawData.length === 0) {
+        console.warn(`[Worker] 從代理處未收到任何原始數據`);
+        return { data: [], dataSource, stockName };
+    }
+
+    // --- 全新的、更強韌的數據處理與篩選邏輯 ---
+    const sDate = new Date(startDate);
+    const eDate = new Date(endDate);
+
+    const filteredData = rawData.map(d => {
+        // d[0] 是民國年格式 "113/08/01"
+        const rocDateStr = d[0];
+        if (!rocDateStr || typeof rocDateStr !== 'string') return null;
+
+        const dateParts = rocDateStr.split('/');
+        if (dateParts.length !== 3) return null;
+
+        const year = parseInt(dateParts[0], 10) + 1911;
+        const month = parseInt(dateParts[1], 10) - 1; // JS 月份是 0-11
+        const day = parseInt(dateParts[2], 10);
+        
+        const currentDate = new Date(year, month, day);
+
+        // 進行日期篩選
+        if (currentDate >= sDate && currentDate <= eDate) {
+            // 返回回測引擎需要的格式：[民國日期, 開, 高, 低, 收, 成交量(千股)]
+            return [
+                rocDateStr,
+                d[3], // open
+                d[4], // high
+                d[5], // low
+                d[6], // close
+                parseInt(String(d[8] || 0).replace(/,/g, '') / 1000, 10)
+            ];
+        }
+        return null;
+    }).filter(Boolean); // 過濾掉所有 null 的結果
+
+    console.log(`[Worker] 原始數據 ${rawData.length} 筆，篩選後剩下 ${filteredData.length} 筆`);
 
     if (filteredData.length === 0) {
         console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
