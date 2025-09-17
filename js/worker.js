@@ -166,131 +166,79 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
 }
 
 // --- TPEX 月數據獲取 (使用新的日報價API) ---
-// --- TPEX 月數據獲取 (由於CORS限制，回到舊API) ---
+// --- TPEX 月數據獲取 (使用新的 CSV API) ---
 async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
     try {
-        console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
-        
-        // 由於新API有CORS限制，在Worker中我們仍然可以嘗試直接調用
-        // 但如果失敗，則使用舊的API格式
-        
-        // 首先嘗試舊的月份API (在Worker中可能不受CORS限制)
         const year = parseInt(month.substring(0, 4));
         const monthNum = month.substring(4, 6);
         const rocYear = year - 1911;
         const queryDate = `${rocYear}/${monthNum}`;
+
+        // The proxy will handle the new endpoint and params
+        const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
         
-        const attempts = [
-            // 方法1: 使用代理伺服器 (如果可用)
-            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            // 方法2: 直接調用 (可能會有CORS問題，但在Worker中有時能成功)
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            // 方法3: 不同參數順序
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?stkno=${stockNo}&d=${queryDate}&l=zh-tw&_=${Date.now()}`,
-            // 方法4: 簡化參數
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
-        ];
-        
-        for (let i = 0; i < attempts.length; i++) {
+        console.log(`[TPEX Worker] Fetching new CSV API via proxy: ${url}`);
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            console.warn(`[TPEX Worker] CSV fetch failed: ${response.status}`);
+            return [];
+        }
+
+        const csvText = await response.text();
+        if (!csvText || csvText.length < 50) {
+             console.warn(`[TPEX Worker] Received empty or invalid CSV for ${stockNo} on ${queryDate}`);
+             return [];
+        }
+
+        const lines = csvText.split('\n');
+        const allData = [];
+
+        for (const line of lines) {
+            if (!line.trim() || !line.startsWith('"')) continue; // Skip headers and empty lines
+
+            const columns = line.trim().split('","').map(c => c.replace(/"/g, '').trim());
+
+            // Expected format: "日期","成交仟股","成交仟元","開盤","最高","最低","收盤","漲跌","筆數"
+            if (columns.length < 7) continue;
+
+            const dateStr = formatTWDateWorker(columns[0]);
+            if (!dateStr) continue;
+
+            const itemDate = new Date(dateStr);
+            if (isNaN(itemDate) || itemDate < startDate || itemDate > endDate) continue;
+
             try {
-                const url = attempts[i];
-                console.log(`[TPEX Worker] 嘗試方法 ${i + 1}: ${url}`);
-                
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Cache-Control': 'no-cache'
-                    }
+                const volume = parseFloat(columns[1].replace(/,/g, '')) * 1000; // Convert 仟股 to 股
+                const open = parseFloat(columns[3].replace(/,/g, ''));
+                const high = parseFloat(columns[4].replace(/,/g, ''));
+                const low = parseFloat(columns[5].replace(/,/g, ''));
+                const close = parseFloat(columns[6].replace(/,/g, ''));
+
+                if ([open, high, low, close, volume].some(isNaN)) {
+                    continue;
+                }
+
+                allData.push({
+                    date: dateStr,
+                    open: open,
+                    high: high,
+                    low: low,
+                    close: close,
+                    volume: volume / 1000 // The rest of the app expects volume in thousands
                 });
-                
-                if (!response.ok) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
-                    continue;
-                }
-                
-                const text = await response.text();
-                if (!text.trim()) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
-                    continue;
-                }
-                
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} JSON 解析失敗: ${e.message}`);
-                    continue;
-                }
-                
-                if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {
-                    console.log(`[TPEX Worker] 方法 ${i + 1} 成功取得數據，筆數: ${data.aaData.length}`);
-                    
-                    // 處理數據格式
-                    const filtered = data.aaData.map(item => {
-                        if (!Array.isArray(item) || item.length < 5) return null;
-                        
-                        const dateStr = formatTWDateWorker(item[0]);
-                        if (!dateStr) return null;
-                        
-                        const itemDate = new Date(dateStr);
-                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
-                            // TPEX 數據格式解析
-                            let o, h, l, c, v;
-                            
-                            // 格式 1: [日期, 成交股數, 收盤價, 漲跌, 開盤價, 最高價, 最低價, ...]
-                            if (item.length >= 7) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
-                                c = parseFloat(String(item[2]).replace(/[,\s]/g,'')) || 0;
-                                o = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
-                                h = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
-                                l = parseFloat(String(item[6]).replace(/[,\s]/g,'')) || 0;
-                            }
-                            // 格式 2: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, ...]
-                            else if (item.length >= 6) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
-                                o = parseFloat(String(item[3]).replace(/[,\s]/g,'')) || 0;
-                                h = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
-                                l = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
-                                c = parseFloat(String(item[6] || item[2]).replace(/[,\s]/g,'')) || 0;
-                            } else {
-                                return null;
-                            }
-                            
-                            // 數據驗證
-                            if (c <= 0 || isNaN(c)) return null;
-                            
-                            // 修正異常數據
-                            if (o <= 0 || isNaN(o)) o = c;
-                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
-                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
-                            
-                            return { 
-                                date: dateStr, 
-                                open: o, 
-                                high: h, 
-                                low: l, 
-                                close: c, 
-                                volume: v/1000 
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
-                    
-                    console.log(`[TPEX Worker] ${stockNo} 成功處理 ${filtered.length} 筆數據`);
-                    return filtered;
-                }
-                
-            } catch (error) {
-                console.error(`[TPEX Worker] 方法 ${i + 1} 發生錯誤:`, error);
+            } catch (e) {
+                console.warn(`[TPEX Worker] Failed to parse row: ${line}`, e);
+                continue;
             }
         }
         
-        console.warn(`[TPEX Worker] ${stockNo} 所有方法都失敗`);
-        return [];
-        
+        console.log(`[TPEX Worker] Parsed ${allData.length} rows from CSV for ${stockNo} on ${queryDate}`);
+        return allData;
+
     } catch (error) {
-        console.error(`[TPEX Worker] ${stockNo} (${month.substring(0,6)}) 嚴重錯誤:`, error);
+        console.error(`[TPEX Worker] Major error fetching/parsing ${stockNo} for ${month}:`, error);
         return [];
     }
 }
