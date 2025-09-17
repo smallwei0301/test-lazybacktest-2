@@ -928,7 +928,13 @@ self.onmessage = async function(e) {
                  fetched = true;
                  self.workerCachedStockData = dataToUse; 
              }
-             if(!dataToUse || dataToUse.length === 0) throw new Error("無法獲取或使用股票數據");
+             if(!dataToUse || dataToUse.length === 0) {
+                 // 回傳友善的 no_data 訊息給主執行緒，讓 UI 顯示查無資料而不是把 Worker 異常化
+                 const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 交易數據`;
+                 console.warn(`[Worker] ${msg}`);
+                 self.postMessage({ type: 'no_data', data: { stockNo: params.stockNo, start: params.startDate, end: params.endDate, message: msg } });
+                 return;
+             }
 
              const result = runStrategy(params, dataToUse);
              if (useCachedData || !fetched) { result.rawData = null; } // Don't send back data if it wasn't fetched by this worker call
