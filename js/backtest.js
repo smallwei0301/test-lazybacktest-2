@@ -10,6 +10,7 @@ function runBacktestInternal() {
     if (!workerUrl) { showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); hideLoading(); return; }
     try {
         const params=getBacktestParams();
+        console.log('[DEBUG] PARAMS CAPTURED FROM UI:', JSON.stringify(params, null, 2));
         console.log("[Main] Params:", params);
         const isValid = validateBacktestParams(params);
         console.log("[Main] Validation:", isValid);

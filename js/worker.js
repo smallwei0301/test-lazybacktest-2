@@ -166,7 +166,7 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
 }
 
 // --- TPEX 月數據獲取 (使用新的日報價API) ---
-// --- TPEX 月數據獲取 (使用新的 CSV API, v2) ---
+// --- TPEX 月數據獲取 (使用新的 CSV API, v3) ---
 async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
     try {
         const year = parseInt(month.substring(0, 4));
@@ -175,8 +175,7 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         const queryDate = `${rocYear}/${monthNum}`;
 
         const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
-        console.log(`[TPEX Worker] Fetching new CSV API via proxy: ${url}`);
-
+        
         const response = await fetch(url);
         if (!response.ok) {
             console.warn(`[TPEX Worker] CSV fetch failed for ${stockNo} on ${queryDate}: ${response.status}`);
@@ -184,9 +183,10 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         }
 
         const csvText = await response.text();
-        if (!csvText || csvText.length < 50) {
-            console.warn(`[TPEX Worker] Received empty or invalid CSV for ${stockNo} on ${queryDate}`);
-            return [];
+        // Handle cases where API returns no data or an error message in the CSV body
+        if (!csvText || csvText.length < 50 || csvText.includes("查無資料")) {
+             console.log(`[TPEX Worker] No data found in CSV for ${stockNo} on ${queryDate}.`);
+             return [];
         }
 
         const lines = csvText.split('\n').filter(line => line.trim() !== '');
@@ -195,7 +195,6 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
             return [];
         }
 
-        // Find header row and dynamically map columns
         let headerRowIndex = -1;
         let columnMap = {};
         const expectedHeaders = ['日期', '開盤', '最高', '最低', '收盤', '成交仟股'];
@@ -212,7 +211,7 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         }
 
         if (headerRowIndex === -1) {
-            console.warn(`[TPEX Worker] Could not find header row in CSV for ${stockNo} on ${queryDate}`);
+            console.warn(`[TPEX Worker] Could not find header row in CSV for ${stockNo} on ${queryDate}. CSV content might have changed.`);
             return [];
         }
 
@@ -254,7 +253,6 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
             }
         }
 
-        console.log(`[TPEX Worker] Parsed ${allData.length} rows from CSV for ${stockNo} on ${queryDate}`);
         return allData;
 
     } catch (error) {
