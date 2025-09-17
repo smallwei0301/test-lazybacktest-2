@@ -74,6 +74,12 @@ function formatTWDateWorker(twDate) {
 
 // 在 worker.js 中，替換 fetchStockData 函式
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
+    // --- 新增的保護機制 ---
+    if (!marketType) {
+        throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
+    }
+    // --- 保護機制結束 ---
+
     console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
     let allData = [];
     let dataSource = '未知';
@@ -668,7 +674,7 @@ async function runOptimization(baseParams, optimizeTargetStrategy, optParamName,
             stockData = workerCachedStockData;
             console.log("[Worker Opt] Using worker's cached data.");
         } else {
-            stockData = await fetchStockData(baseParams.stockNo, baseParams.startDate, baseParams.endDate, baseParams.market || 'TWSE');
+            stockData = await fetchStockData(baseParams.stockNo, baseParams.startDate, baseParams.endDate, baseParams.marketType);
             workerCachedStockData = stockData;
             dataFetched = true;
             if (!stockData || stockData.length === 0) throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
