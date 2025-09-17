@@ -1808,7 +1808,7 @@ async function fetchStockNameFromTPEX(stockCode) {
 async function fetchTPEXNameViaProxy(stockCode) {
     try {
         // 檢查代理伺服器是否可用
-        const proxyBaseUrl = 'http://localhost:3000';
+        const proxyBaseUrl = '';
         
         const now = new Date();
         const rocYear = now.getFullYear() - 1911;
