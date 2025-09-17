@@ -74,6 +74,9 @@ function formatTWDateWorker(twDate) {
 
 // 在 worker.js 中，替換 fetchStockData 函式
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
+    if (!marketType) {
+        throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
+    }
     console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
     let allData = [];
     let dataSource = '未知';
@@ -89,6 +92,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         dataSource = data.dataSource || '未知';
         stockName = data.stockName || '';
     } else {
+        // ... (上市股票邏輯保持不變) ...
         const start = new Date(startDate);
         const end = new Date(endDate);
         let current = new Date(start.getFullYear(), start.getMonth(), 1);
@@ -112,13 +116,27 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         allData = monthDataArr;
     }
     
-    const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : p), parseInt(String(d[8]).replace(/,/g, '') / 1000, 10) ]);
+    // --- 關鍵診斷日誌 ---
+    console.log(`[Worker Diagnosics] 從代理收到的原始資料筆數: ${allData.length}`);
+    if (allData.length > 0) {
+        console.log('[Worker Diagnosics] 抽樣第一筆資料:', allData[0]);
+        console.log('[Worker Diagnosics] 抽樣中間一筆資料:', allData[Math.floor(allData.length / 2)]);
+        console.log('[Worker Diagnosics] 抽樣最後一筆資料:', allData[allData.length - 1]);
+    }
+    // --- 診斷結束 ---
+
+    const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : (p || 0)), parseInt(String(d[8]).replace(/,/g, '') / 1000, 10) ]);
     const filteredData = formattedData.filter(d => {
+        if (!d[0] || typeof d[0] !== 'string') return false; // 增加保護
         const date = new Date(d[0].replace(/(\d+)\/(\d+)\/(\d+)/, (m, y, mo, d) => `${parseInt(y) + 1911}-${mo}-${d}`));
         return date >= new Date(startDate) && date <= new Date(endDate);
     });
 
-    if (filteredData.length === 0) { return { data: [], dataSource, stockName }; }
+    if (filteredData.length === 0) {
+        console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
+        return { data: [], dataSource, stockName };
+    }
+    
     workerCachedStockData = filteredData;
     return { data: filteredData, dataSource, stockName };
 }
