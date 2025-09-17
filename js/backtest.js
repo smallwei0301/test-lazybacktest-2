@@ -1820,20 +1820,28 @@ async function fetchTPEXNameViaProxy(stockCode) {
             headers: {
                 'Accept': 'application/json, text/plain, */*',
                 'Cache-Control': 'no-cache'
-            }
+            },
+            redirect: 'manual' // 不自動跟隨 redirect
         });
-        
-        if (!response.ok) {
-            console.warn(`[TPEX Proxy] HTTP錯誤: ${response.status}`);
+
+        // 偵測 redirect 或非 200 狀態
+        if (response.type === 'opaqueredirect' || response.status >= 300) {
+            console.warn(`[TPEX Proxy] 代理回應為 redirect 或非 200，查無資料`);
             return null;
         }
-        
+
         const text = await response.text();
         if (!text.trim()) {
             console.warn(`[TPEX Proxy] 回應內容為空`);
             return null;
         }
-        
+
+        // 偵測是否為 tpex 錯誤頁（通常是 HTML 而非 JSON）
+        if (text.includes('<title>') && text.includes('錯誤') || text.includes('Error')) {
+            console.warn(`[TPEX Proxy] 回應內容為錯誤頁，查無資料`);
+            return null;
+        }
+
         let data;
         try {
             data = JSON.parse(text);
@@ -1841,7 +1849,7 @@ async function fetchTPEXNameViaProxy(stockCode) {
             console.warn(`[TPEX Proxy] JSON解析失敗: ${e.message}`);
             return null;
         }
-        
+
         if (data.stat === 'OK' && data.aaData && data.aaData.length > 0) {
             for (const row of data.aaData) {
                 if (row && row[0] === stockCode && row[1]) {
@@ -1850,7 +1858,8 @@ async function fetchTPEXNameViaProxy(stockCode) {
                 }
             }
         }
-        
+
+        // 其餘狀況一律視為查無資料
         return null;
         
     } catch (error) {

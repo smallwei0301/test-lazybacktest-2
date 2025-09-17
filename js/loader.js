@@ -77,9 +77,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // or by ensuring this loader script is the last one.
 
     try {
+
         initDates();
         initTabs(); // This function is in backtest.js
-        populateSavedStrategiesDropdown(); // This function is in backtest.js
+        if (typeof populateSavedStrategiesDropdown === 'function') {
+            populateSavedStrategiesDropdown(); // This function is in backtest.js
+        } else {
+            console.warn('[Loader] populateSavedStrategiesDropdown 尚未定義，略過初始化。');
+        }
 
         // Event Listeners from the original main script's DOMContentLoaded
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears); // in main.js
