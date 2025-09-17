@@ -1,0 +1,9 @@
+{
+  "name": "test-lazybacktest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LazyBacktest with Netlify Functions proxy",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}

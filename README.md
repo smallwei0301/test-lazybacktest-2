@@ -32,6 +32,8 @@ app.listen(3000);
 2. 確認 `netlify.toml` 已在專案根目錄。
 3. 部署後，所有 `/api/tpex/*` 請求會自動 proxy 到 tpex 官網。
 
+注意：如果你在 Functions 中使用了第三方套件（例如 `node-fetch` 或其他），請確保專案根目錄有 `package.json` 並把相依套件列入 `dependencies`。Netlify 在部署時會自動安裝這些相依套件；在本機測試前也可以先執行 `npm install`。
+
 ## 4. 前端如何呼叫
 
 直接 fetch `/api/tpex/st43_result.php?...`，不用寫死 localhost。
