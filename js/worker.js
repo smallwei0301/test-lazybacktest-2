@@ -1,3 +1,97 @@
+// --- TPEX 月數據獲取 ---
+async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
+    try {
+        console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
+        const year = parseInt(month.substring(0, 4));
+        const monthNum = month.substring(4, 6);
+        const rocYear = year - 1911;
+        const queryDate = `${rocYear}/${monthNum}`;
+        const attempts = [
+            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?stkno=${stockNo}&d=${queryDate}&l=zh-tw&_=${Date.now()}`,
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
+        ];
+        for (let i = 0; i < attempts.length; i++) {
+            try {
+                const url = attempts[i];
+                console.log(`[TPEX Worker] 嘗試方法 ${i + 1}: ${url}`);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                if (!response.ok) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
+                    continue;
+                }
+                const text = await response.text();
+                if (!text.trim()) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
+                    continue;
+                }
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} JSON 解析失敗: ${e.message}`);
+                    continue;
+                }
+                if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {
+                    console.log(`[TPEX Worker] 方法 ${i + 1} 成功取得數據，筆數: ${data.aaData.length}`);
+                    const filtered = data.aaData.map(item => {
+                        if (!Array.isArray(item) || item.length < 5) return null;
+                        const dateStr = formatTWDateWorker(item[0]);
+                        if (!dateStr) return null;
+                        const itemDate = new Date(dateStr);
+                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
+                            let o, h, l, c, v;
+                            if (item.length >= 7) {
+                                v = parseFloat(String(item[1]).replace(/[\,\s]/g, '')) || 0;
+                                c = parseFloat(String(item[2]).replace(/[\,\s]/g, '')) || 0;
+                                o = parseFloat(String(item[4]).replace(/[\,\s]/g, '')) || 0;
+                                h = parseFloat(String(item[5]).replace(/[\,\s]/g, '')) || 0;
+                                l = parseFloat(String(item[6]).replace(/[\,\s]/g, '')) || 0;
+                            } else if (item.length >= 6) {
+                                v = parseFloat(String(item[1]).replace(/[\,\s]/g, '')) || 0;
+                                o = parseFloat(String(item[3]).replace(/[\,\s]/g, '')) || 0;
+                                h = parseFloat(String(item[4]).replace(/[\,\s]/g, '')) || 0;
+                                l = parseFloat(String(item[5]).replace(/[\,\s]/g, '')) || 0;
+                                c = parseFloat(String(item[6] || item[2]).replace(/[\,\s]/g, '')) || 0;
+                            } else {
+                                return null;
+                            }
+                            if (c <= 0 || isNaN(c)) return null;
+                            if (o <= 0 || isNaN(o)) o = c;
+                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
+                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
+                            return {
+                                date: dateStr,
+                                open: o,
+                                high: h,
+                                low: l,
+                                close: c,
+                                volume: v / 1000
+                            };
+                        }
+                        return null;
+                    }).filter(item => item !== null);
+                    console.log(`[TPEX Worker] ${stockNo} 成功處理 ${filtered.length} 筆數據`);
+                    return filtered;
+                }
+            } catch (error) {
+                console.error(`[TPEX Worker] 方法 ${i + 1} 發生錯誤:`, error);
+            }
+        }
+        console.warn(`[TPEX Worker] ${stockNo} 所有方法都失敗`);
+        return [];
+    } catch (error) {
+        console.error(`[TPEX Worker] ${stockNo} (${month.substring(0, 6)}) 嚴重錯誤:`, error);
+        return [];
+    }
+}
 // --- Web Worker (backtest-worker.js) - v3.4.1 ---
 // 變更:
 // - getSuggestion: 修正建議邏輯，確保正確反映賣出/回補/等待狀態
