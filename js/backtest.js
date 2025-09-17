@@ -1806,74 +1806,44 @@ async function fetchStockNameFromTPEX(stockCode) {
 
 // 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockCode) {
-    // 使用相對路徑，方便本地與 Netlify proxy
-    const now = new Date();
-    const rocYear = now.getFullYear() - 1911;
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const queryDate = `${rocYear}/${month}`;
-    const proxyUrl = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
-    console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
+    // 櫃買中心的 API 只需要股票代號即可查詢名稱，不需要日期
+    // 但我們的代理函式需要一個日期參數，所以我們傳遞一個固定的歷史月份
+    const placeholderDate = '113/01'; // 使用一個固定的歷史月份，例如民國113年1月
 
+    // **關鍵修正：使用正確的 Netlify Function 路徑**
+    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockCode}&date=${placeholderDate}`;
+    
+    console.log(`[TPEX Proxy Name] Fetching name for ${stockCode} via proxy: ${url}`);
+    
     try {
-        const response = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json, text/plain, */*',
-                'Cache-Control': 'no-cache'
-            },
-            redirect: 'manual' // 不自動跟隨 redirect
-        });
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
+            return { error: `HTTP status ${response.status}` };
+        }
+        const data = await response.json();
 
-        if (response.status >= 400) {
-            console.warn(`[TPEX Proxy] 代理回傳 HTTP ${response.status}`);
-            return null;
+        // 檢查代理是否回傳了我們自訂的錯誤
+        if (data.error) {
+            console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
+            return data;
         }
 
-        const text = await response.text();
-        if (!text || !text.trim()) {
-            console.warn(`[TPEX Proxy] 回應內容為空`);
-            return null;
+        // 從回傳的資料中提取股票名稱 (通常在 iTotalRecords > 0 時的 stockName 欄位)
+        if (data.iTotalRecords > 0 && data.stockName) {
+            return { name: data.stockName.trim() };
+        } else if (data.aaData && data.aaData.length > 0) {
+            // 備用方案：從資料陣列中解析名稱 (通常是第二個元素)
+            // "3260 聯詠" -> "聯詠"
+            const nameField = data.aaData[0][1] || '';
+            const name = nameField.replace(stockCode, '').trim();
+            return { name: name };
+        } else {
+            return { error: 'no_data' };
         }
-
-        // 如果 function 回傳標準化錯誤 JSON
-        try {
-            const maybeJson = JSON.parse(text);
-            if (maybeJson && (maybeJson.error === 'no_data' || maybeJson.error === 'proxy_error')) {
-                console.warn('[TPEX Proxy] 代理回傳錯誤標記', maybeJson);
-                return null;
-            }
-        } catch (e) {
-            // not json -> fallthrough to HTML/text checks
-        }
-
-        // 偵測 HTML 錯誤頁
-        if ((text.includes('<title>') && text.includes('錯誤')) || text.includes('Error') || text.toLowerCase().includes('<html')) {
-            console.warn(`[TPEX Proxy] 回應內容為錯誤頁，查無資料`);
-            return null;
-        }
-
-        // 嘗試解析為 TPEX JSON
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            console.warn(`[TPEX Proxy] JSON解析失敗: ${e.message}`);
-            return null;
-        }
-
-        if (data && data.stat === 'OK' && Array.isArray(data.aaData) && data.aaData.length > 0) {
-            for (const row of data.aaData) {
-                if (row && String(row[0]).trim() === String(stockCode).trim() && row[1]) {
-                    console.log(`[TPEX Proxy] 成功取得股票名稱: ${row[1].trim()}`);
-                    return row[1].trim();
-                }
-            }
-        }
-
-        return null;
     } catch (error) {
-        console.warn(`[TPEX Proxy] 代理查詢失敗:`, error && error.message ? error.message : error);
-        return null;
+        console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);
+        return { error: error.message };
     }
 }
 
