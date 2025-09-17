@@ -39,7 +39,7 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// --- 增強版股票數據獲取函數 (v4 - Hybrid月/日查詢) ---
+// --- 增強版股票數據獲取函數 (v5 - Final) ---
 async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     const startDate = new Date(start);
     const endDate = new Date(end);
@@ -55,66 +55,47 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     let allData = [];
     self.postMessage({ type: 'progress', progress: 5, message: '準備獲取數據...' });
 
-    if (market === 'TWSE') {
-        // TWSE logic remains the same (monthly fetch)
-        const months = [];
-        let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-        while (current <= endDate) {
-            const y = current.getFullYear();
-            const m = String(current.getMonth() + 1).padStart(2, '0');
-            months.push(`${y}${m}01`);
-            current.setMonth(current.getMonth() + 1);
+    // Common fetch logic for both markets, only the functions differ
+    const fetchFunction = market === 'TWSE' ? fetchTWSEMonthData : fetchTPEXMonthData;
+    const dailyFetchFunction = market === 'TPEX' ? fetchTPEXDayData : null; // Only TPEX has daily fetch for now
+
+    // Determine month/day ranges
+    const today = new Date();
+    const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    const monthsToFetch = [];
+    let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    while (currentMonth < firstDayOfCurrentMonth && currentMonth <= endDate) {
+        const y = currentMonth.getFullYear();
+        const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
+        monthsToFetch.push(`${y}${m}01`);
+        currentMonth.setMonth(currentMonth.getMonth() + 1);
+    }
+
+    const daysToFetch = [];
+    if (market === 'TPEX' && endDate >= firstDayOfCurrentMonth) {
+        let startDay = (startDate > firstDayOfCurrentMonth) ? startDate : firstDayOfCurrentMonth;
+        let currentDay = new Date(startDay);
+        while (currentDay <= endDate && currentDay <= today) { // Do not fetch future days
+            daysToFetch.push(new Date(currentDay));
+            currentDay.setDate(currentDay.getDate() + 1);
         }
-        for (let i = 0; i < months.length; i++) {
-            const month = months[i];
-            console.log(`[TWSE] Fetching month: ${month.substring(0, 6)}`);
-            const monthData = await fetchTWSEMonthData(stockNo, month, startDate, endDate);
+    }
+
+    // Execute fetches
+    if (monthsToFetch.length > 0) {
+        console.log(`[${market}] Fetching ${monthsToFetch.length} full months...`);
+        for (const month of monthsToFetch) {
+            const monthData = await fetchFunction(stockNo, month, startDate, endDate);
             if (monthData.length > 0) allData.push(...monthData);
-            else console.log(`[TWSE] No data for month: ${month.substring(0, 6)}`);
-            const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
-            self.postMessage({ type: 'progress', progress: progress, message: `已獲取 ${month.substring(0,6)} 數據...` });
-            await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
         }
-    } else if (market === 'TPEX') {
-        // TPEX logic: Hybrid monthly and daily fetch
-        const today = new Date();
-        const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    }
 
-        // 1. Fetch full months for the past
-        const monthsToFetch = [];
-        let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-        while (currentMonth < firstDayOfCurrentMonth && currentMonth <= endDate) {
-            const y = currentMonth.getFullYear();
-            const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
-            monthsToFetch.push(`${y}${m}01`);
-            currentMonth.setMonth(currentMonth.getMonth() + 1);
-        }
-
-        if (monthsToFetch.length > 0) {
-            console.log(`[TPEX] Fetching full months:`, monthsToFetch.map(m => m.substring(0,6)));
-            for (const month of monthsToFetch) {
-                const monthData = await fetchTPEXMonthData(stockNo, month, startDate, endDate);
-                if (monthData.length > 0) allData.push(...monthData);
-            }
-        }
-
-        // 2. Fetch daily data for the current month if it's in the date range
-        if (startDate < new Date(today.getFullYear(), today.getMonth() + 1, 1) && endDate >= firstDayOfCurrentMonth) {
-            const startDay = (startDate > firstDayOfCurrentMonth) ? startDate : firstDayOfCurrentMonth;
-            const daysToFetch = [];
-            let currentDay = new Date(startDay);
-            while (currentDay <= endDate && currentDay <= today) { // Do not fetch future days
-                daysToFetch.push(new Date(currentDay));
-                currentDay.setDate(currentDay.getDate() + 1);
-            }
-
-            if (daysToFetch.length > 0) {
-                console.log(`[TPEX] Fetching ${daysToFetch.length} days for the current month...`);
-                for (const day of daysToFetch) {
-                    const dayData = await fetchTPEXDayData(stockNo, day);
-                    if (dayData) allData.push(dayData);
-                }
-            }
+    if (daysToFetch.length > 0) {
+        console.log(`[${market}] Fetching ${daysToFetch.length} individual days for the current month...`);
+        for (const day of daysToFetch) {
+            const dayData = await dailyFetchFunction(stockNo, day);
+            if (dayData) allData.push(dayData);
         }
     }
 
@@ -135,7 +116,7 @@ async function fetchTPEXDayData(stockNo, date) {
     const day = String(date.getDate()).padStart(2, '0');
     const queryDate = `${rocYear}/${month}/${day}`;
 
-    const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
+    const url = `https://your-proxy-name.herokuapp.com/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}`;
     console.log(`[TPEX Daily] Fetching: ${queryDate}`);
 
     try {
@@ -150,7 +131,6 @@ async function fetchTPEXDayData(stockNo, date) {
             return null;
         }
 
-        // Assuming the daily API returns a single row in aaData
         const item = data.aaData[0];
         const dateStr = formatTWDateWorker(item[0]);
         if (!dateStr) return null;
@@ -178,7 +158,7 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
     const rocYear = year - 1911;
     const queryDate = `${rocYear}/${monthNum}`;
 
-    const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
+    const url = `https://your-proxy-name.herokuapp.com/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}`;
     console.log(`[TPEX Monthly] Fetching: ${queryDate}`);
 
     try {

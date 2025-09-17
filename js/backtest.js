@@ -1759,7 +1759,7 @@ async function fetchTPEXNameViaProxy(stockCode) {
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const queryDate = `${rocYear}/${month}`;
         
-        const proxyUrl = `${proxyBaseUrl}/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
+        const proxyUrl = `https://your-proxy-name.herokuapp.com/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
         
         console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
         
