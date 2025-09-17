@@ -325,7 +325,15 @@ function calculateAllIndicators(data, params) { /* ... (程式碼與上次 Part 
         } const getParam = (longParam, shortParam, defaultVal) => { const p1 = longParam; const p2 = enableShorting ? shortParam : undefined; if (p1 !== undefined && p2 !== undefined && p1 !== p2) { return { long: p1 ?? defaultVal, short: p2 ?? defaultVal }; } if (p1 !== undefined) return p1 ?? defaultVal; if (p2 !== undefined) return p2 ?? defaultVal; return defaultVal; }; const rsiEntryPeriod = getParam(ep?.period, sxp?.period, 14); const rsiExitPeriod = getParam(xp?.period, sep?.period, 14); indic.rsiEntry = calculateRSI(closes, typeof rsiEntryPeriod === 'object' ? rsiEntryPeriod.long : rsiEntryPeriod); indic.rsiExit = calculateRSI(closes, typeof rsiExitPeriod === 'object' ? rsiExitPeriod.long : rsiExitPeriod); if (enableShorting) { indic.rsiCover = calculateRSI(closes, typeof rsiEntryPeriod === 'object' ? rsiEntryPeriod.short : rsiEntryPeriod); indic.rsiShortEntry = calculateRSI(closes, typeof rsiExitPeriod === 'object' ? rsiExitPeriod.short : rsiExitPeriod); } const macdEntryShort = ep?.shortPeriod || 12; const macdEntryLong = ep?.longPeriod || 26; const macdEntrySignal = ep?.signalPeriod || 9; const macdCoverShort = enableShorting ? (sxp?.shortPeriod ?? macdEntryShort) : macdEntryShort; const macdCoverLong = enableShorting ? (sxp?.longPeriod ?? macdEntryLong) : macdEntryLong; const macdCoverSignal = enableShorting ? (sxp?.signalPeriod ?? macdEntrySignal) : macdEntrySignal; if (!enableShorting || (macdEntryShort === macdCoverShort && macdEntryLong === macdCoverLong && macdEntrySignal === macdCoverSignal)) { const macdResult = calculateMACD(highs, lows, closes, macdEntryShort, macdEntryLong, macdEntrySignal); indic.macdEntry = macdResult.macd; indic.macdSignalEntry = macdResult.signal; indic.macdHistEntry = macdResult.histogram; if (enableShorting) { indic.macdCover = indic.macdEntry; indic.macdSignalCover = indic.macdSignalEntry; indic.macdHistCover = indic.macdHistEntry; } } else { const macdEntryResult = calculateMACD(highs, lows, closes, macdEntryShort, macdEntryLong, macdEntrySignal); indic.macdEntry = macdEntryResult.macd; indic.macdSignalEntry = macdEntryResult.signal; indic.macdHistEntry = macdEntryResult.histogram; const macdCoverResult = calculateMACD(highs, lows, closes, macdCoverShort, macdCoverLong, macdCoverSignal); indic.macdCover = macdCoverResult.macd; indic.macdSignalCover = macdCoverResult.signal; indic.macdHistCover = macdCoverResult.histogram; } const macdExitShort = xp?.shortPeriod || 12; const macdExitLong = xp?.longPeriod || 26; const macdExitSignal = xp?.signalPeriod || 9; const macdShortEntryShort = enableShorting ? (sep?.shortPeriod ?? macdExitShort) : macdExitShort; const macdShortEntryLong = enableShorting ? (sep?.longPeriod ?? macdExitLong) : macdExitLong; const macdShortEntrySignal = enableShorting ? (sep?.signalPeriod ?? macdExitSignal) : macdExitSignal; if (!enableShorting || (macdExitShort === macdShortEntryShort && macdExitLong === macdShortEntryLong && macdExitSignal === macdShortEntrySignal)) { const macdResult = calculateMACD(highs, lows, closes, macdExitShort, macdExitLong, macdExitSignal); indic.macdExit = macdResult.macd; indic.macdSignalExit = macdResult.signal; indic.macdHistExit = macdResult.histogram; if (enableShorting) { indic.macdShortEntry = indic.macdExit; indic.macdSignalShortEntry = indic.macdSignalExit; indic.macdHistShortEntry = indic.macdHistExit; } } else { const macdExitResult = calculateMACD(highs, lows, closes, macdExitShort, macdExitLong, macdExitSignal); indic.macdExit = macdExitResult.macd; indic.macdSignalExit = macdExitResult.signal; indic.macdHistExit = macdExitResult.histogram; const macdShortEntryResult = calculateMACD(highs, lows, closes, macdShortEntryShort, macdShortEntryLong, macdShortEntrySignal); indic.macdShortEntry = macdShortEntryResult.macd; indic.macdSignalShortEntry = macdShortEntryResult.signal; indic.macdHistShortEntry = macdShortEntryResult.histogram; } const bbEntryPeriod = ep?.period || 20; const bbEntryDev = ep?.deviations || 2; const bbCoverPeriod = enableShorting ? (sxp?.period ?? bbEntryPeriod) : bbEntryPeriod; const bbCoverDev = enableShorting ? (sxp?.deviations ?? bbEntryDev) : bbEntryDev; if (!enableShorting || (bbEntryPeriod === bbCoverPeriod && bbEntryDev === bbCoverDev)) { const bbResult = calculateBollingerBands(closes, bbEntryPeriod, bbEntryDev); indic.bollingerUpperEntry = bbResult.upper; indic.bollingerMiddleEntry = bbResult.middle; indic.bollingerLowerEntry = bbResult.lower; if (enableShorting) { indic.bollingerUpperCover = indic.bollingerUpperEntry; indic.bollingerMiddleCover = indic.bollingerMiddleEntry; indic.bollingerLowerCover = indic.bollingerLowerEntry; } } else { const bbEntryResult = calculateBollingerBands(closes, bbEntryPeriod, bbEntryDev); indic.bollingerUpperEntry = bbEntryResult.upper; indic.bollingerMiddleEntry = bbEntryResult.middle; indic.bollingerLowerEntry = bbEntryResult.lower; const bbCoverResult = calculateBollingerBands(closes, bbCoverPeriod, bbCoverDev); indic.bollingerUpperCover = bbCoverResult.upper; indic.bollingerMiddleCover = bbCoverResult.middle; indic.bollingerLowerCover = bbCoverResult.lower; } const bbExitPeriod = xp?.period || 20; const bbExitDev = xp?.deviations || 2; const bbShortEntryPeriod = enableShorting ? (sep?.period ?? bbExitPeriod) : bbExitPeriod; const bbShortEntryDev = enableShorting ? (sep?.deviations ?? bbExitDev) : bbExitDev; if (!enableShorting || (bbExitPeriod === bbShortEntryPeriod && bbExitDev === bbShortEntryDev)) { const bbResult = calculateBollingerBands(closes, bbExitPeriod, bbExitDev); indic.bollingerUpperExit = bbResult.upper; indic.bollingerMiddleExit = bbResult.middle; indic.bollingerLowerExit = bbResult.lower; if (enableShorting) { indic.bollingerUpperShortEntry = indic.bollingerUpperExit; indic.bollingerMiddleShortEntry = indic.bollingerMiddleExit; indic.bollingerLowerShortEntry = indic.bollingerLowerExit; } } else { const bbExitResult = calculateBollingerBands(closes, bbExitPeriod, bbExitDev); indic.bollingerUpperExit = bbExitResult.upper; indic.bollingerMiddleExit = bbExitResult.middle; indic.bollingerLowerExit = bbExitResult.lower; const bbShortEntryResult = calculateBollingerBands(closes, sep?.period || 20, sep?.deviations || 2); indic.bollingerUpperShortEntry = bbShortEntryResult.upper; indic.bollingerMiddleShortEntry = bbShortEntryResult.middle; indic.bollingerLowerShortEntry = bbShortEntryResult.lower; } const kdEntryPeriod = ep?.period || 9; const kdCoverPeriod = enableShorting ? (sxp?.period ?? kdEntryPeriod) : kdEntryPeriod; if (!enableShorting || kdEntryPeriod === kdCoverPeriod) { const kdResult = calculateKD(highs, lows, closes, kdEntryPeriod); indic.kEntry = kdResult.k; indic.dEntry = kdResult.d; if (enableShorting) { indic.kCover = indic.kEntry; indic.dCover = indic.dEntry; } } else { const kdEntryResult = calculateKD(highs, lows, closes, kdEntryPeriod); indic.kEntry = kdEntryResult.k; indic.dEntry = kdEntryResult.d; const kdCoverResult = calculateKD(highs, lows, closes, kdCoverPeriod); indic.kCover = kdCoverResult.k; indic.dCover = kdCoverResult.d; } const kdExitPeriod = xp?.period || 9; const kdShortEntryPeriod = enableShorting ? (sep?.period ?? kdExitPeriod) : kdExitPeriod; if (!enableShorting || kdExitPeriod === kdShortEntryPeriod) { const kdResult = calculateKD(highs, lows, closes, kdExitPeriod); indic.kExit = kdResult.k; indic.dExit = kdResult.d; if (enableShorting) { indic.kShortEntry = indic.kExit; indic.dShortEntry = indic.dExit; } } else { const kdExitResult = calculateKD(highs, lows, closes, kdExitPeriod); indic.kExit = kdExitResult.k; indic.dExit = kdExitResult.d; const kdShortEntryResult = calculateKD(highs, lows, closes, kdShortEntryPeriod); indic.kShortEntry = kdShortEntryResult.k; indic.dShortEntry = kdShortEntryResult.d; } indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20); const wrEntryPeriod = ep?.period || 14; const wrCoverPeriod = enableShorting ? (sxp?.period ?? wrEntryPeriod) : wrEntryPeriod; if (!enableShorting || wrEntryPeriod === wrCoverPeriod) { indic.williamsEntry = calculateWilliams(highs,lows,closes, wrEntryPeriod); if (enableShorting) indic.williamsCover = indic.williamsEntry; } else { indic.williamsEntry = calculateWilliams(highs,lows,closes, wrEntryPeriod); indic.williamsCover = calculateWilliams(highs,lows,closes, wrCoverPeriod); } const wrExitPeriod = xp?.period || 14; const wrShortEntryPeriod = enableShorting ? (sep?.period ?? wrExitPeriod) : wrExitPeriod; if (!enableShorting || wrExitPeriod === wrShortEntryPeriod) { indic.williamsExit = calculateWilliams(highs,lows,closes, wrExitPeriod); if (enableShorting) indic.williamsShortEntry = indic.williamsExit; } else { indic.williamsExit = calculateWilliams(highs,lows,closes, wrExitPeriod); indic.williamsShortEntry = calculateWilliams(highs,lows,closes, wrShortEntryPeriod); } } catch (calcError) { console.error("[Worker] Indicator calculation error:", calcError); throw new Error(`計算技術指標時發生錯誤: ${calcError.message}`); } self.postMessage({ type: 'progress', progress: 65, message: '指標計算完成...' }); return indic; }
 
 // --- 運行策略回測 (修正年化報酬率計算) ---
-function runStrategy(params, data) {
+function runStrategy(data, params) {
+    // --- 新增的保護機制 ---
+    if (!Array.isArray(data)) {
+        // 如果傳進來的不是陣列，就拋出一個更明確的錯誤
+        console.error("傳遞給 runStrategy 的資料格式錯誤，收到了:", data);
+        throw new TypeError('傳遞給 runStrategy 的資料格式錯誤，必須是陣列。');
+    }
+    // --- 保護機制結束 ---
+
     self.postMessage({ type: 'progress', progress: 70, message: '回測模擬中...' });
     const n = data.length;
     // 初始化隔日交易追蹤
@@ -708,7 +716,7 @@ async function runOptimization(baseParams, optimizeTargetStrategy, optParamName,
             }
         }
         try {
-            const result = runStrategy(testParams, stockData);
+            const result = runStrategy(stockData, testParams);
             if (result) {
                 results.push({ paramValue: curVal, annualizedReturn: result.annualizedReturn, returnRate: result.returnRate, maxDrawdown: result.maxDrawdown, winRate: result.winRate, tradesCount: result.tradesCount, sharpeRatio: result.sharpeRatio, sortinoRatio: result.sortinoRatio });
             }
@@ -789,14 +797,15 @@ self.onmessage = async function(e) {
      const { type, params, useCachedData, cachedData, optimizeTargetStrategy, optimizeParamName, optimizeRange, lookbackDays } = e.data;
      try {
          if (type === 'runBacktest') {
-             let dataToUse = null; let fetched = false;
+             let dataToUse = null; let fetched = false; let outcome = null;
              if (useCachedData && cachedData) {
                  console.log("[Worker] Using cached data for backtest.");
                  dataToUse = cachedData;
                  self.workerCachedStockData = dataToUse; 
              } else {
                  console.log("[Worker] Fetching new data for backtest.");
-                 dataToUse = await fetchStockData(params.stockNo, params.startDate, params.endDate, params.market || 'TWSE');
+                 outcome = await fetchStockData(params.stockNo, params.startDate, params.endDate, params.marketType);
+                 dataToUse = outcome.data;
                  fetched = true;
                  self.workerCachedStockData = dataToUse; 
              }
@@ -808,9 +817,18 @@ self.onmessage = async function(e) {
                  return;
              }
 
-             const result = runStrategy(params, dataToUse);
-             if (useCachedData || !fetched) { result.rawData = null; } // Don't send back data if it wasn't fetched by this worker call
-             self.postMessage({ type: 'result', data: result });
+             // 關鍵修正：
+             // 我們需要傳遞的是 K 線資料，而不是整個包裹
+             const backtestResult = runStrategy(dataToUse, params); 
+             if (useCachedData || !fetched) { backtestResult.rawData = null; } // Don't send back data if it wasn't fetched by this worker call
+             
+             // 將結果與資料來源一起回傳
+             self.postMessage({
+                 type: 'result',
+                 data: backtestResult,
+                 stockName: outcome ? outcome.stockName : '',
+                 dataSource: outcome ? outcome.dataSource : '未知'
+             });
 
         } else if (type === 'runOptimization') {
             if (!optimizeTargetStrategy || !optimizeParamName || !optimizeRange) throw new Error("優化目標、參數名或範圍未指定");
