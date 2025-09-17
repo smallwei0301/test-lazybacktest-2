@@ -42,6 +42,7 @@ function formatTWDateWorker(twDate) {
 // --- 增強版股票數據獲取函數 (支援市場選擇和 TAIEX) ---
 async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     const startDate = new Date(start);
+    const endDate = new Date(end);
     
     if (isNaN(startDate) || isNaN(endDate)) {
         throw new Error("Invalid date range");
