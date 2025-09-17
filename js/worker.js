@@ -7,10 +7,7 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         const rocYear = year - 1911;
         const queryDate = `${rocYear}/${monthNum}`;
         const attempts = [
-            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?stkno=${stockNo}&d=${queryDate}&l=zh-tw&_=${Date.now()}`,
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
+            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
         ];
         for (let i = 0; i < attempts.length; i++) {
             try {
@@ -283,14 +280,8 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
         const queryDate = `${rocYear}/${monthNum}`;
         
         const attempts = [
-            // 方法1: 使用代理伺服器 (相對路徑，方便本地與 Netlify proxy)
-            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            // 方法2: 直接調用 (可能會有CORS問題，但在Worker中有時能成功)
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
-            // 方法3: 不同參數順序
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?stkno=${stockNo}&d=${queryDate}&l=zh-tw&_=${Date.now()}`,
-            // 方法4: 簡化參數
-            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
+            // 只使用 proxy (Netlify Function 或 本地 proxy)
+            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
         ];
         
         for (let i = 0; i < attempts.length; i++) {

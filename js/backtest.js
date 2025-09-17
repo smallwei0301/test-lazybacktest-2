@@ -1806,15 +1806,15 @@ async function fetchStockNameFromTPEX(stockCode) {
 
 // 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockCode) {
+    // 使用相對路徑，方便本地與 Netlify proxy
+    const now = new Date();
+    const rocYear = now.getFullYear() - 1911;
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const queryDate = `${rocYear}/${month}`;
+    const proxyUrl = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
+    console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
+
     try {
-        // 使用相對路徑，方便本地與 Netlify proxy
-        const now = new Date();
-        const rocYear = now.getFullYear() - 1911;
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const queryDate = `${rocYear}/${month}`;
-        const proxyUrl = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&_=${Date.now()}`;
-        console.log(`[TPEX Proxy] 使用代理查詢: ${proxyUrl}`);
-        
         const response = await fetch(proxyUrl, {
             method: 'GET',
             headers: {
@@ -1824,24 +1824,35 @@ async function fetchTPEXNameViaProxy(stockCode) {
             redirect: 'manual' // 不自動跟隨 redirect
         });
 
-        // 偵測 redirect 或非 200 狀態
-        if (response.type === 'opaqueredirect' || response.status >= 300) {
-            console.warn(`[TPEX Proxy] 代理回應為 redirect 或非 200，查無資料`);
+        if (response.status >= 400) {
+            console.warn(`[TPEX Proxy] 代理回傳 HTTP ${response.status}`);
             return null;
         }
 
         const text = await response.text();
-        if (!text.trim()) {
+        if (!text || !text.trim()) {
             console.warn(`[TPEX Proxy] 回應內容為空`);
             return null;
         }
 
-        // 偵測是否為 tpex 錯誤頁（通常是 HTML 而非 JSON）
-        if (text.includes('<title>') && text.includes('錯誤') || text.includes('Error')) {
+        // 如果 function 回傳標準化錯誤 JSON
+        try {
+            const maybeJson = JSON.parse(text);
+            if (maybeJson && (maybeJson.error === 'no_data' || maybeJson.error === 'proxy_error')) {
+                console.warn('[TPEX Proxy] 代理回傳錯誤標記', maybeJson);
+                return null;
+            }
+        } catch (e) {
+            // not json -> fallthrough to HTML/text checks
+        }
+
+        // 偵測 HTML 錯誤頁
+        if ((text.includes('<title>') && text.includes('錯誤')) || text.includes('Error') || text.toLowerCase().includes('<html')) {
             console.warn(`[TPEX Proxy] 回應內容為錯誤頁，查無資料`);
             return null;
         }
 
+        // 嘗試解析為 TPEX JSON
         let data;
         try {
             data = JSON.parse(text);
@@ -1850,20 +1861,18 @@ async function fetchTPEXNameViaProxy(stockCode) {
             return null;
         }
 
-        if (data.stat === 'OK' && data.aaData && data.aaData.length > 0) {
+        if (data && data.stat === 'OK' && Array.isArray(data.aaData) && data.aaData.length > 0) {
             for (const row of data.aaData) {
-                if (row && row[0] === stockCode && row[1]) {
+                if (row && String(row[0]).trim() === String(stockCode).trim() && row[1]) {
                     console.log(`[TPEX Proxy] 成功取得股票名稱: ${row[1].trim()}`);
                     return row[1].trim();
                 }
             }
         }
 
-        // 其餘狀況一律視為查無資料
         return null;
-        
     } catch (error) {
-        console.warn(`[TPEX Proxy] 代理查詢失敗:`, error.message);
+        console.warn(`[TPEX Proxy] 代理查詢失敗:`, error && error.message ? error.message : error);
         return null;
     }
 }
