@@ -1,13 +1,14 @@
 const https = require('https');
 const url = require('url');
 
-// Helper to fetch with redirects
 const fetchWithRedirect = (requestUrl, options, retries = 3) => {
     return new Promise((resolve, reject) => {
+        console.log(`[Proxy Fetch] Attempting to fetch: ${requestUrl}`);
         const request = https.get(requestUrl, options, (response) => {
+            console.log(`[Proxy Fetch] Status: ${response.statusCode} for ${requestUrl}`);
             if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 if (retries > 0) {
-                    console.log(`Redirecting to: ${response.headers.location}`);
+                    console.log(`[Proxy Fetch] Redirecting to: ${response.headers.location}`);
                     fetchWithRedirect(response.headers.location, options, retries - 1)
                         .then(resolve)
                         .catch(reject);
@@ -36,8 +37,12 @@ const fetchWithRedirect = (requestUrl, options, retries = 3) => {
 };
 
 exports.handler = async function(event, context) {
+    console.log('[Proxy Handler] Received request');
+    console.log(`[Proxy Handler] Event Path: ${event.path}`);
+    console.log(`[Proxy Handler] Query Params: ${JSON.stringify(event.queryStringParameters)}`);
+
     const { path, queryStringParameters } = event;
-    const apiPath = path.replace('/api', ''); // e.g., /tpex/st43_result.php
+    const apiPath = path.replace('/api', '');
 
     let targetUrl;
     const params = new url.URLSearchParams(queryStringParameters).toString();
@@ -55,13 +60,14 @@ exports.handler = async function(event, context) {
     }
 
     if (!targetUrl) {
+        console.error(`[Proxy Handler] API path not found for: ${apiPath}`);
         return {
             statusCode: 404,
             body: JSON.stringify({ error: 'API path not found' })
         };
     }
 
-    console.log(`Proxying to: ${targetUrl}`);
+    console.log(`[Proxy Handler] Target URL: ${targetUrl}`);
 
     try {
         const response = await fetchWithRedirect(targetUrl, {
@@ -74,10 +80,19 @@ exports.handler = async function(event, context) {
             }
         });
 
+        console.log(`[Proxy Handler] Response Status: ${response.statusCode}`);
+        console.log(`[Proxy Handler] Response Headers: ${JSON.stringify(response.headers)}`);
+
+        const contentType = response.headers['content-type'] || '';
+        if (!contentType.includes('application/json')) {
+            console.warn(`[Proxy Handler] Warning: Response content-type is not JSON: ${contentType}`);
+            console.warn(`[Proxy Handler] Response Body (first 300 chars): ${response.body.substring(0, 300)}`);
+        }
+
         return {
             statusCode: response.statusCode,
             headers: {
-                'Content-Type': response.headers['content-type'] || 'application/json',
+                'Content-Type': contentType || 'application/json',
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET, OPTIONS',
                 'Access-Control-Allow-Headers': 'Content-Type',
@@ -85,7 +100,7 @@ exports.handler = async function(event, context) {
             body: response.body
         };
     } catch (error) {
-        console.error('Proxy Error:', error);
+        console.error('[Proxy Handler] CATCH Block Error:', error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: 'Proxy error', message: error.message })
