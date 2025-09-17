@@ -1805,15 +1805,13 @@ async function fetchStockNameFromTPEX(stockCode) {
 }
 
 // 使用代理伺服器獲取TPEX股票名稱
-async function fetchTPEXNameViaProxy(stockCode) {
-    // 櫃買中心的 API 只需要股票代號即可查詢名稱，不需要日期
-    // 但我們的代理函式需要一個日期參數，所以我們傳遞一個固定的歷史月份
-    const placeholderDate = '113/01'; // 使用一個固定的歷史月份，例如民國113年1月
+async function fetchTPEXNameViaProxy(stockNo) {
+    // **關鍵修正：使用一個固定的、格式完整的歷史日期**
+    const placeholderDate = '113/01/01'; 
 
-    // **關鍵修正：使用正確的 Netlify Function 路徑**
-    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockCode}&date=${placeholderDate}`;
+    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
     
-    console.log(`[TPEX Proxy Name] Fetching name for ${stockCode} via proxy: ${url}`);
+    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
     
     try {
         const response = await fetch(url);
@@ -1823,23 +1821,19 @@ async function fetchTPEXNameViaProxy(stockCode) {
         }
         const data = await response.json();
 
-        // 檢查代理是否回傳了我們自訂的錯誤
         if (data.error) {
             console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
             return data;
         }
 
-        // 從回傳的資料中提取股票名稱 (通常在 iTotalRecords > 0 時的 stockName 欄位)
         if (data.iTotalRecords > 0 && data.stockName) {
             return { name: data.stockName.trim() };
         } else if (data.aaData && data.aaData.length > 0) {
-            // 備用方案：從資料陣列中解析名稱 (通常是第二個元素)
-            // "3260 聯詠" -> "聯詠"
             const nameField = data.aaData[0][1] || '';
-            const name = nameField.replace(stockCode, '').trim();
+            const name = nameField.replace(stockNo, '').trim();
             return { name: name };
         } else {
-            return { error: 'no_data' };
+             return { error: 'no_data' };
         }
     } catch (error) {
         console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);

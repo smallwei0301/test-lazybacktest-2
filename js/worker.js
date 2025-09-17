@@ -1,110 +1,34 @@
 // --- TPEX 月數據獲取 ---
-async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
+async function fetchTPEXMonthData(stockNo, year, month) {
+    const rocYear = year - 1911;
+    const formattedMonth = String(month).padStart(2, '0');
+    
+    // **關鍵修正：確保日期字串是完整的 "年/月/日" 格式**
+    const dateStr = `${rocYear}/${formattedMonth}/01`;
+
+    const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${dateStr}`;
+    console.log(`[TPEX Worker] 準備透過代理請求 (格式修正): ${proxyUrl}`);
+
     try {
-        console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
-        const year = parseInt(month.substring(0, 4));
-        const monthNum = month.substring(4, 6);
-        const rocYear = year - 1911;
-        const queryDate = `${rocYear}/${monthNum}`;
-        // 關鍵檢查點：確保 proxy 路徑完全正確
-        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${queryDate}`;
-        console.log(`[TPEX Worker] 準備透過代理請求: ${proxyUrl}`);
-        const attempts = [ proxyUrl ];
-        for (let i = 0; i < attempts.length; i++) {
-            try {
-                const url = attempts[i];
-                console.log(`[TPEX Worker] 嘗試方法 ${i + 1}: ${url}`);
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Cache-Control': 'no-cache'
-                    }
-                });
-
-                // 當 response 被 CORS 預檢或其他原因阻擋時，fetch 會拋錯；
-                // 若 response.ok === false，我們跳過此嘗試。
-                if (!response.ok) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
-                    continue;
-                }
-
-                const text = await response.text();
-                if (!text || !String(text).trim()) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
-                    continue;
-                }
-
-                // 嘗試解析 JSON；若代理回傳標準化的 { error: 'no_data' }，視為無資料
-                let data = null;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    // 不是 JSON，可能是原站回傳文字或 HTML；當中若包含 error 頁面，我們視為無資料
-                    const lower = String(text).toLowerCase();
-                    if (lower.includes('error') || lower.includes('<html') || lower.includes('查無資料') || lower.includes('no data')) {
-                        console.warn(`[TPEX Worker] 方法 ${i + 1} 回傳為錯誤/HTML 內容，視為無資料`);
-                        continue;
-                    }
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} 非 JSON 回應，但看起來不是錯誤頁，會嘗試下一種方法`);
-                    continue;
-                }
-
-                if (data && data.error === 'no_data') {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} 代理回傳查無資料`);
-                    continue;
-                }
-                if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {
-                    console.log(`[TPEX Worker] 方法 ${i + 1} 成功取得數據，筆數: ${data.aaData.length}`);
-                    const filtered = data.aaData.map(item => {
-                        if (!Array.isArray(item) || item.length < 5) return null;
-                        const dateStr = formatTWDateWorker(item[0]);
-                        if (!dateStr) return null;
-                        const itemDate = new Date(dateStr);
-                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
-                            let o, h, l, c, v;
-                            if (item.length >= 7) {
-                                v = parseFloat(String(item[1]).replace(/[\,\s]/g, '')) || 0;
-                                c = parseFloat(String(item[2]).replace(/[\,\s]/g, '')) || 0;
-                                o = parseFloat(String(item[4]).replace(/[\,\s]/g, '')) || 0;
-                                h = parseFloat(String(item[5]).replace(/[\,\s]/g, '')) || 0;
-                                l = parseFloat(String(item[6]).replace(/[\,\s]/g, '')) || 0;
-                            } else if (item.length >= 6) {
-                                v = parseFloat(String(item[1]).replace(/[\,\s]/g, '')) || 0;
-                                o = parseFloat(String(item[3]).replace(/[\,\s]/g, '')) || 0;
-                                h = parseFloat(String(item[4]).replace(/[\,\s]/g, '')) || 0;
-                                l = parseFloat(String(item[5]).replace(/[\,\s]/g, '')) || 0;
-                                c = parseFloat(String(item[6] || item[2]).replace(/[\,\s]/g, '')) || 0;
-                            } else {
-                                return null;
-                            }
-                            if (c <= 0 || isNaN(c)) return null;
-                            if (o <= 0 || isNaN(o)) o = c;
-                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
-                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
-                            return {
-                                date: dateStr,
-                                open: o,
-                                high: h,
-                                low: l,
-                                close: c,
-                                volume: v / 1000
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
-                    console.log(`[TPEX Worker] ${stockNo} 成功處理 ${filtered.length} 筆數據`);
-                    return filtered;
-                }
-            } catch (error) {
-                console.error(`[TPEX Worker] 方法 ${i + 1} 發生錯誤:`, error);
-            }
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+            console.error(`[TPEX Worker] 代理伺服器回應錯誤: ${response.status}`);
+            const errorBody = await response.text();
+            console.error(`[TPEX Worker] 錯誤內容:`, errorBody);
+            return { error: `Proxy Error: ${response.status}` };
         }
-        console.warn(`[TPEX Worker] ${stockNo} 所有方法都失敗`);
-        return [];
+
+        const data = await response.json();
+        
+        if (data.error) {
+            console.warn(`[TPEX Worker] 代理回傳查無資料或錯誤:`, data);
+            return { error: data.error, diagnostics: data.diagnostics }; 
+        }
+        
+        return data.aaData || [];
     } catch (error) {
-        console.error(`[TPEX Worker] ${stockNo} (${month.substring(0, 6)}) 嚴重錯誤:`, error);
-        return [];
+        console.error(`[TPEX Worker] 呼叫代理時發生錯誤 for ${stockNo} ${dateStr}:`, error);
+        return { error: error.message };
     }
 }
 // --- Web Worker (backtest-worker.js) - v3.4.1 ---
@@ -190,7 +114,53 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
             if (market === 'TWSE') {
                 monthData = await fetchTWSEMonthData(stockNo, month, startDate, endDate);
             } else if (market === 'TPEX') {
-                monthData = await fetchTPEXMonthData(stockNo, month, startDate, endDate);
+                const year = parseInt(month.substring(0, 4), 10);
+                const monthNum = parseInt(month.substring(4, 6), 10);
+                const rawData = await fetchTPEXMonthData(stockNo, year, monthNum);
+                if (Array.isArray(rawData)) {
+                    monthData = rawData.map(item => {
+                        if (!Array.isArray(item) || item.length < 5) return null;
+                        const dateStrTW = formatTWDateWorker(item[0]);
+                        if (!dateStrTW) return null;
+                        const itemDate = new Date(dateStrTW);
+                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
+                            let o, h, l, c, v;
+                            if (item.length >= 7) {
+                                v = parseFloat(String(item[1]).replace(/[,\s]/g, '')) || 0;
+                                c = parseFloat(String(item[2]).replace(/[,\s]/g, '')) || 0;
+                                o = parseFloat(String(item[4]).replace(/[,\s]/g, '')) || 0;
+                                h = parseFloat(String(item[5]).replace(/[,\s]/g, '')) || 0;
+                                l = parseFloat(String(item[6]).replace(/[,\s]/g, '')) || 0;
+                            } else if (item.length >= 6) {
+                                v = parseFloat(String(item[1]).replace(/[,\s]/g, '')) || 0;
+                                o = parseFloat(String(item[3]).replace(/[,\s]/g, '')) || 0;
+                                h = parseFloat(String(item[4]).replace(/[,\s]/g, '')) || 0;
+                                l = parseFloat(String(item[5]).replace(/[,\s]/g, '')) || 0;
+                                c = parseFloat(String(item[6] || item[2]).replace(/[,\s]/g, '')) || 0;
+                            } else {
+                                return null;
+                            }
+                            if (c <= 0 || isNaN(c)) return null;
+                            if (o <= 0 || isNaN(o)) o = c;
+                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
+                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
+                            return {
+                                date: dateStrTW,
+                                open: o,
+                                high: h,
+                                low: l,
+                                close: c,
+                                volume: v / 1000
+                            };
+                        }
+                        return null;
+                    }).filter(item => item !== null);
+                } else if (rawData && rawData.error) {
+                    console.warn(`[TPEX Worker] ${stockNo} 代理回傳錯誤:`, rawData);
+                    monthData = [];
+                } else {
+                    monthData = [];
+                }
             } else {
                 throw new Error(`不支援的市場類型: ${market}`);
             }
