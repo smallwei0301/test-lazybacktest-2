@@ -1,71 +1,59 @@
-// netlify/functions/tpex-proxy.js
-
-// 為了在 Netlify Function 中使用 fetch，我們需要安裝 node-fetch
-// 請在您的專案根目錄執行: npm install node-fetch
+// netlify/functions/tpex-proxy.js (偵錯強化版)
 const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
-    // 1. 從前端請求的 URL 中解析出股票代號和日期
-    const { stockNo, date } = event.queryStringParameters || {};
+    console.log('[Proxy] 函式啟動，接收到請求');
+    const params = event.queryStringParameters || {};
+    const stockNo = params.stockNo;
+    const date = params.date;
+    console.log(`[Proxy] 解析參數: stockNo=${stockNo}, date=${date}`);
 
     if (!stockNo || !date) {
-        return {
-            statusCode: 400,
-            body: JSON.stringify({ error: '缺少股票代號 (stockNo) 或日期 (date) 參數' }),
-        };
+        console.error('[Proxy] 錯誤: 缺少必要參數');
+        return { statusCode: 400, body: JSON.stringify({ error: '缺少股票代號或日期參數' }) };
     }
 
-    // 2. 組合目標 TPEX API 的 URL
-    // date 格式應為 YYYY/MM/DD, e.g., "113/05/20"
     const targetUrl = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${date}&stkno=${stockNo}`;
+    console.log(`[Proxy] 準備請求 TPEX URL: ${targetUrl}`);
 
     try {
-        // 3. 發出伺服器端的 fetch 請求
         const response = await fetch(targetUrl, {
             method: 'GET',
             headers: {
-                // 模擬真實瀏覽器行為，這是最關鍵的一步！
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
                 'Referer': 'https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43.php',
             },
         });
 
-        // 4. 檢查 TPEX 伺服器的回應狀態
+        console.log(`[Proxy] 收到 TPEX 回應，狀態碼: ${response.status}`);
+
+        // 非常重要的一步：無論回應是否成功，都先讀取原始文字內容
+        const rawText = await response.text();
+        console.log('[Proxy] 收到 TPEX 原始回應內容:', rawText);
+
         if (!response.ok) {
-            // 如果 TPEX 回應 404, 500 等錯誤，我們在這裡就能捕捉到
-            console.error(`TPEX API error: Status ${response.status} for URL: ${targetUrl}`);
-            return {
-                statusCode: response.status,
-                body: JSON.stringify({ error: `上櫃中心伺服器錯誤，狀態碼: ${response.status}` }),
-            };
+            console.error(`[Proxy] TPEX 伺服器回傳錯誤狀態`);
+            return { statusCode: response.status, body: JSON.stringify({ error: `TPEX 伺服器錯誤`, diagnostics: { status: response.status, body: rawText } }) };
         }
 
-        // 5. 解析回應的 JSON 資料
-        const data = await response.json();
+        // 嘗試解析 JSON
+        try {
+            const data = JSON.parse(rawText);
+            if (!data || !data.aaData || data.aaData.length === 0) {
+                console.warn(`[Proxy] TPEX 回傳 JSON，但查無資料 (aaData 為空)`);
+                return { statusCode: 200, body: JSON.stringify({ error: 'no_data', diagnostics: { message: 'TPEX returned JSON with empty aaData.' } }) };
+            }
+            console.log(`[Proxy] 成功解析資料並找到 ${data.aaData.length} 筆數據，準備回傳給前端`);
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
 
-        // TPEX 在查無資料時，會回傳一個特定的 JSON 結構，例如 { "aaData": [] }
-        // 我們可以根據這個特性判斷是否有資料
-        if (!data || !data.aaData || data.aaData.length === 0) {
-             console.log(`TPEX API returned empty data for ${stockNo} on ${date}. URL: ${targetUrl}`);
-             // 即使是空資料，也正常回傳，讓前端去判斷
+        } catch (jsonError) {
+            console.error('[Proxy] JSON 解析失敗:', jsonError);
+            // 如果 TPEX 回傳的不是 JSON (例如 HTML 錯誤頁)，就會在這裡捕捉到
+            return { statusCode: 500, body: JSON.stringify({ error: 'json_parse_error', diagnostics: { message: 'Failed to parse TPEX response as JSON.', body: rawText } }) };
         }
-
-        // 6. 成功！將從 TPEX 獲取的資料回傳給前端
-        return {
-            statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*', // 允許所有來源的前端呼叫
-            },
-            body: JSON.stringify(data),
-        };
 
     } catch (error) {
-        // 7. 捕捉所有可能的執行錯誤 (網路問題、JSON 解析失敗等)
-        console.error('Netlify Function 內部錯誤:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ error: `代理伺服器內部錯誤: ${error.message}` }),
-        };
+        console.error('[Proxy] 請求 TPEX 過程中發生網路層級錯誤:', error);
+        return { statusCode: 500, body: JSON.stringify({ error: `代理伺服器內部網路錯誤: ${error.message}` }) };
     }
 };

@@ -164,7 +164,7 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     const allData = [];
     const months = [];
     let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-    
+
     self.postMessage({ type: 'progress', progress: 5, message: '準備獲取數據...' });
 
     // 生成月份列表
@@ -174,24 +174,7 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
         months.push(`${y}${m}01`);
         current.setMonth(current.getMonth() + 1);
     }
-    
-    if (months.length === 0 && startDate <= endDate) {
-        const y = startDate.getFullYear();
-        const m = String(startDate.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-    }
 
-    // 根據市場類型獲取數據
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        let monthData = [];
-    // 生成月份列表
-    while (current <= endDate) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-        current.setMonth(current.getMonth() + 1);
-    }
     if (months.length === 0 && startDate <= endDate) {
         const y = startDate.getFullYear();
         const m = String(startDate.getMonth() + 1).padStart(2, '0');
@@ -223,17 +206,6 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
             progress: progress, 
             message: `已獲取 ${month.substring(0,6)} 數據...` 
         });
-        // 添加延遲避免過於頻繁的請求
-        await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
-    }
-
-        const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
-        self.postMessage({ 
-            type: 'progress', 
-            progress: progress, 
-            message: `已獲取 ${month.substring(0,6)} 數據...` 
-        });
-        
         // 添加延遲避免過於頻繁的請求
         await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
     }
