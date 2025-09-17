@@ -23,20 +23,37 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
                         'Cache-Control': 'no-cache'
                     }
                 });
+
+                // 當 response 被 CORS 預檢或其他原因阻擋時，fetch 會拋錯；
+                // 若 response.ok === false，我們跳過此嘗試。
                 if (!response.ok) {
                     console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
                     continue;
                 }
+
                 const text = await response.text();
-                if (!text.trim()) {
+                if (!text || !String(text).trim()) {
                     console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
                     continue;
                 }
-                let data;
+
+                // 嘗試解析 JSON；若代理回傳標準化的 { error: 'no_data' }，視為無資料
+                let data = null;
                 try {
                     data = JSON.parse(text);
                 } catch (e) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} JSON 解析失敗: ${e.message}`);
+                    // 不是 JSON，可能是原站回傳文字或 HTML；當中若包含 error 頁面，我們視為無資料
+                    const lower = String(text).toLowerCase();
+                    if (lower.includes('error') || lower.includes('<html') || lower.includes('查無資料') || lower.includes('no data')) {
+                        console.warn(`[TPEX Worker] 方法 ${i + 1} 回傳為錯誤/HTML 內容，視為無資料`);
+                        continue;
+                    }
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} 非 JSON 回應，但看起來不是錯誤頁，會嘗試下一種方法`);
+                    continue;
+                }
+
+                if (data && data.error === 'no_data') {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} 代理回傳查無資料`);
                     continue;
                 }
                 if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {

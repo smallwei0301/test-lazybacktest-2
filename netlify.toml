@@ -2,6 +2,6 @@
 
 [[redirects]]
   from = "/api/tpex/*"
-  to = "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/:splat"
+  to = "/.netlify/functions/tpex?path=:splat"
   status = 200
   force = true
