@@ -72,89 +72,152 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// 在 worker.js 中，用此版本完整替換舊的 fetchStockData 函式
+// 在 worker.js 中，用此版本替換舊的 fetchStockData：
+// - 根據 marketType 選擇現有的代理 (/netlify/functions/tpex-proxy 或 /netlify/functions/twse-proxy)
+// - 產生回測引擎所需的物件陣列格式：{ date: 'YYYY-MM-DD', open, high, low, close, volume }
+// - 支援多種代理回傳格式（aaData 為陣列或代理直接回傳物件陣列）
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
     console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
 
-    let rawData;
-    let dataSource = '未知';
-    let stockName = '';
+    const m = String(marketType || '').toUpperCase();
+    // 決定要呼叫哪一個代理（預設為 TWSE）
+    let proxyUrl;
+    if (m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx') ) {
+        proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+    } else {
+        proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+    }
 
     try {
-        let proxyUrl;
-        if (marketType === 'tpex') {
-            proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
-        } else {
-            // 為了架構統一，即使是上市股票也應通過代理（此處暫留舊邏輯，未來可擴充）
-            // 暫時只處理上櫃
-            throw new Error(`市場類型 ${marketType} 的處理邏輯尚未完全遷移至新架構。`);
+        const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (!response.ok) {
+            throw new Error(`代理伺服器錯誤: ${response.status}`);
         }
-        
-        const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error(`代理伺服器錯誤: ${response.status}`);
-        
-        const data = await response.json();
-        if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
-        
-        rawData = data.aaData || [];
-        dataSource = data.dataSource || '未知';
-        stockName = data.stockName || '';
+
+        const payload = await response.json();
+        if (payload.error) {
+            throw new Error(`代理回傳錯誤: ${payload.error}`);
+        }
+
+        const dataSource = payload.dataSource || '未知';
+        const stockName = payload.stockName || '';
+
+        // 支援不同代理的主要資料容器名：aaData (DataTables)、data、payload 本身
+        let raw = payload.aaData || payload.data || payload.payload || payload;
+        if (!Array.isArray(raw)) raw = [];
+
+        if (raw.length === 0) {
+            console.warn(`[Worker] 從代理 ${proxyUrl} 未收到任何原始數據`);
+            return { data: [], dataSource, stockName };
+        }
+
+        const sDate = new Date(startDate);
+        const eDate = new Date(endDate);
+
+        const normalized = raw.map(item => {
+            try {
+                // 支援兩種形式：陣列型 (aaData 常見) 或 物件型 ({date, open, ...})
+                let dateStr = null;
+                let o = null, h = null, l = null, c = null, v = null;
+
+                if (Array.isArray(item)) {
+                    dateStr = item[0];
+                    // 常見映射： idx 1=成交股數, 2=收盤, 3=開盤,4=最高,5=最低,6=收盤(另類)
+                    if (item.length >= 7) {
+                        // 依據不同代理的格式嘗試解析
+                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
+                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
+                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
+                        c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
+                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
+                    } else if (item.length >= 6) {
+                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
+                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
+                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
+                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
+                        c = parseFloat(String(item[2] || item[6] || 0).replace(/,/g, '')) || null;
+                    } else {
+                        // 無法解析
+                        return null;
+                    }
+                } else if (item && typeof item === 'object') {
+                    // 物件型：支援多種 key 命名
+                    dateStr = item.date || item[0] || item.tradeDate || item交易日 || null;
+                    o = item.open || item.O || item.開盤價 || item['開盤'] || null;
+                    h = item.high || item.H || item.最高價 || null;
+                    l = item.low || item.L || item.最低價 || null;
+                    c = item.close || item.C || item.收盤價 || item['收盤'] || null;
+                    v = item.volume || item.V || item.成交股數 || item.成交量 || 0;
+                    // 可能值為字串
+                    if (typeof o === 'string') o = parseFloat(o.replace(/,/g, '')) || null;
+                    if (typeof h === 'string') h = parseFloat(h.replace(/,/g, '')) || null;
+                    if (typeof l === 'string') l = parseFloat(l.replace(/,/g, '')) || null;
+                    if (typeof c === 'string') c = parseFloat(c.replace(/,/g, '')) || null;
+                    if (typeof v === 'string') v = parseFloat(v.replace(/,/g, '')) || 0;
+                } else {
+                    return null;
+                }
+
+                // 解析日期：若為民國格式 (YY/MM/DD 或 YYY/MM/DD)，使用 formatTWDateWorker
+                let isoDate = null;
+                if (typeof dateStr === 'string' && /^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(dateStr.trim())) {
+                    isoDate = formatTWDateWorker(dateStr.trim());
+                } else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+                    isoDate = dateStr.trim();
+                } else if (typeof dateStr === 'string') {
+                    // 嘗試各種分隔符
+                    const ds = dateStr.replace(/\./g, '/').replace(/-/g, '/');
+                    if (/^\d{3}\/\d{1,2}\/\d{1,2}$/.test(ds) || /^\d{2}\/\d{1,2}\/\d{1,2}$/.test(ds)) {
+                        isoDate = formatTWDateWorker(ds);
+                    } else {
+                        // 最後嘗試建立 Date
+                        const tryD = new Date(dateStr);
+                        if (!isNaN(tryD)) isoDate = tryD.toISOString().split('T')[0];
+                    }
+                }
+
+                if (!isoDate) return null;
+                const dObj = new Date(isoDate);
+                if (isNaN(dObj)) return null;
+                if (dObj < sDate || dObj > eDate) return null;
+
+                // 若欄位缺值，嘗試用 close 填補 open/high/low
+                if ((!o || o === 0) && c) o = c;
+                if ((!h || h === 0) && c) h = Math.max(o || 0, c);
+                if ((!l || l === 0) && c) l = Math.min(o || c, c);
+
+                const volInThousands = Math.round((parseFloat(v) || 0) / 1000);
+
+                return {
+                    date: isoDate,
+                    open: (o === null || isNaN(o)) ? null : o,
+                    high: (h === null || isNaN(h)) ? null : h,
+                    low: (l === null || isNaN(l)) ? null : l,
+                    close: (c === null || isNaN(c)) ? null : c,
+                    volume: volInThousands
+                };
+            } catch (e) {
+                return null;
+            }
+        }).filter(Boolean);
+
+        console.log(`[Worker] 原始數據 ${raw.length} 筆，正常化後 ${normalized.length} 筆`);
+
+        if (normalized.length === 0) {
+            console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
+            return { data: [], dataSource, stockName };
+        }
+
+        workerCachedStockData = normalized;
+        return { data: normalized, dataSource, stockName };
 
     } catch (error) {
-        console.error(`[Worker] 獲取資料時發生錯誤:`, error);
+        console.error(`[Worker] 獲取或處理資料時發生錯誤:`, error);
         return { data: [], dataSource: '錯誤', stockName: stockNo };
     }
-
-    if (rawData.length === 0) {
-        console.warn(`[Worker] 從代理處未收到任何原始數據`);
-        return { data: [], dataSource, stockName };
-    }
-
-    // --- 全新的、更強韌的數據處理與篩選邏輯 ---
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-
-    const filteredData = rawData.map(d => {
-        // d[0] 是民國年格式 "113/08/01"
-        const rocDateStr = d[0];
-        if (!rocDateStr || typeof rocDateStr !== 'string') return null;
-
-        const dateParts = rocDateStr.split('/');
-        if (dateParts.length !== 3) return null;
-
-        const year = parseInt(dateParts[0], 10) + 1911;
-        const month = parseInt(dateParts[1], 10) - 1; // JS 月份是 0-11
-        const day = parseInt(dateParts[2], 10);
-        
-        const currentDate = new Date(year, month, day);
-
-        // 進行日期篩選
-        if (currentDate >= sDate && currentDate <= eDate) {
-            // 返回回測引擎需要的格式：[民國日期, 開, 高, 低, 收, 成交量(千股)]
-            return [
-                rocDateStr,
-                d[3], // open
-                d[4], // high
-                d[5], // low
-                d[6], // close
-                parseInt(String(d[8] || 0).replace(/,/g, '') / 1000, 10)
-            ];
-        }
-        return null;
-    }).filter(Boolean); // 過濾掉所有 null 的結果
-
-    console.log(`[Worker] 原始數據 ${rawData.length} 筆，篩選後剩下 ${filteredData.length} 筆`);
-
-    if (filteredData.length === 0) {
-        console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
-        return { data: [], dataSource, stockName };
-    }
-    
-    workerCachedStockData = filteredData;
-    return { data: filteredData, dataSource, stockName };
 }
 
 // --- TWSE 月數據獲取 ---
