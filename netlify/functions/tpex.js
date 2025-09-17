@@ -35,6 +35,7 @@ exports.handler = async function(event, context) {
     const targetBase = 'https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/';
     const targetUrl = path ? (qs ? `${targetBase}${path}?${qs}` : `${targetBase}${path}`) : (qs ? `${targetBase}?${qs}` : targetBase);
 
+    console.log('[tpex function] fetching:', targetUrl);
     // Use global fetch (Node 18+ in Netlify). If not present, this will throw.
     const res = await fetch(targetUrl, {
       method: 'GET',
@@ -44,7 +45,9 @@ exports.handler = async function(event, context) {
       }
     });
 
+    const contentType = res.headers.get('content-type') || '';
     const text = await res.text();
+    console.log('[tpex function] fetched', { status: res.status, contentType, length: (text || '').length });
 
     // If remote returned non-ok or HTML error page, standardize as no_data
     if (!res.ok || looksLikeHtml(text) || /errors?/i.test(text)) {
@@ -72,6 +75,7 @@ exports.handler = async function(event, context) {
       };
     }
   } catch (err) {
+    console.error('[tpex function] error', err && err.stack ? err.stack : err);
     return {
       statusCode: 502,
       headers: CORS_HEADERS,

@@ -245,9 +245,13 @@ async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     self.postMessage({ type: 'progress', progress: 50, message: '數據處理完成...' });
 
     if (sortedData.length === 0) {
-        throw new Error(`指定範圍 (${start} ~ ${end}) 無 ${stockNo} 交易數據`);
+        const msg = `指定範圍 (${start} ~ ${end}) 無 ${stockNo} 交易數據`;
+        console.warn(`[Worker fetchStockData] ${msg}`);
+        // 通知主執行緒進度/狀態
+        self.postMessage({ type: 'progress', progress: 50, message: msg });
+        return [];
     }
-    
+
     return sortedData;
 }
 
