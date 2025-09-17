@@ -6,9 +6,10 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         const monthNum = month.substring(4, 6);
         const rocYear = year - 1911;
         const queryDate = `${rocYear}/${monthNum}`;
-        const attempts = [
-            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
-        ];
+        // 關鍵檢查點：確保 proxy 路徑完全正確
+        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${queryDate}`;
+        console.log(`[TPEX Worker] 準備透過代理請求: ${proxyUrl}`);
+        const attempts = [ proxyUrl ];
         for (let i = 0; i < attempts.length; i++) {
             try {
                 const url = attempts[i];
@@ -254,11 +255,11 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
         const monthNum = month.substring(4, 6);
         const rocYear = year - 1911;
         const queryDate = `${rocYear}/${monthNum}`;
-        
-        const attempts = [
-            // 只使用 proxy (Netlify Function 或 本地 proxy)
-            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
-        ];
+
+        // 關鍵檢查點：確保 proxy 路徑完全正確
+        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${queryDate}`;
+        console.log(`[TPEX Worker] 準備透過代理請求: ${proxyUrl}`);
+        const attempts = [ proxyUrl ];
         
         for (let i = 0; i < attempts.length; i++) {
             try {

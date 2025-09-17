@@ -2,10 +2,10 @@
 
 ## 1. Proxy 設定（Netlify Function）
 
-此專案現在使用 Netlify Function 作為 proxy，位於 `netlify/functions/tpex.js`，
+此專案現在使用 Netlify Function 作為 proxy，位於 `netlify/functions/tpex-proxy.js`，
 目的是由伺服端向 TPEX 取得資料，並在回應中加入 `Access-Control-Allow-Origin: *` 來避免瀏覽器的 CORS 錯誤。
 
-已在 `netlify.toml` 建立一個 redirect，將 `/api/tpex/*` 重新導向到 `/.netlify/functions/tpex?path=:splat`。因此前端仍可使用 `fetch('/api/tpex/st43_result.php?...')`。
+已在 `netlify.toml` 建立一個 redirect，將 `/api/tpex/*` 重新導向到 `/.netlify/functions/tpex-proxy?path=:splat`。因此前端仍可使用 `fetch('/api/tpex/st43_result.php?...')`。
 
 ## 2. 本地開發 Proxy
 
