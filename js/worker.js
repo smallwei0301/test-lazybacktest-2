@@ -72,130 +72,55 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// --- 增強版股票數據獲取函數 (支援市場選擇和 TAIEX) ---
-async function fetchStockData(stockNo, start, end, market = 'TWSE') {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    
-    if (isNaN(startDate) || isNaN(endDate)) {
-        throw new Error("Invalid date range");
-    }
+// 在 worker.js 中，替換 fetchStockData 函式
+async function fetchStockData(stockNo, startDate, endDate, marketType) {
+    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
+    let allData = [];
+    let dataSource = '未知';
+    let stockName = '';
 
-    // 特殊處理 TAIEX (台灣加權指數)
-    if (stockNo.toUpperCase() === 'TAIEX') {
-        return await fetchTAIEXData(start, end);
-    }
-
-    const allData = [];
-    const months = [];
-    let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-
-    self.postMessage({ type: 'progress', progress: 5, message: '準備獲取數據...' });
-
-    // 生成月份列表
-    while (current <= endDate) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-        current.setMonth(current.getMonth() + 1);
-    }
-
-    if (months.length === 0 && startDate <= endDate) {
-        const y = startDate.getFullYear();
-        const m = String(startDate.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-    }
-
-    // 根據市場類型獲取數據
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        let monthData = [];
-        try {
-            if (market === 'TWSE') {
-                monthData = await fetchTWSEMonthData(stockNo, month, startDate, endDate);
-            } else if (market === 'TPEX') {
-                const year = parseInt(month.substring(0, 4), 10);
-                const monthNum = parseInt(month.substring(4, 6), 10);
-                const rawData = await fetchTPEXMonthData(stockNo, year, monthNum);
-                if (Array.isArray(rawData)) {
-                    monthData = rawData.map(item => {
-                        if (!Array.isArray(item) || item.length < 5) return null;
-                        const dateStrTW = formatTWDateWorker(item[0]);
-                        if (!dateStrTW) return null;
-                        const itemDate = new Date(dateStrTW);
-                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
-                            let o, h, l, c, v;
-                            if (item.length >= 7) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g, '')) || 0;
-                                c = parseFloat(String(item[2]).replace(/[,\s]/g, '')) || 0;
-                                o = parseFloat(String(item[4]).replace(/[,\s]/g, '')) || 0;
-                                h = parseFloat(String(item[5]).replace(/[,\s]/g, '')) || 0;
-                                l = parseFloat(String(item[6]).replace(/[,\s]/g, '')) || 0;
-                            } else if (item.length >= 6) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g, '')) || 0;
-                                o = parseFloat(String(item[3]).replace(/[,\s]/g, '')) || 0;
-                                h = parseFloat(String(item[4]).replace(/[,\s]/g, '')) || 0;
-                                l = parseFloat(String(item[5]).replace(/[,\s]/g, '')) || 0;
-                                c = parseFloat(String(item[6] || item[2]).replace(/[,\s]/g, '')) || 0;
-                            } else {
-                                return null;
-                            }
-                            if (c <= 0 || isNaN(c)) return null;
-                            if (o <= 0 || isNaN(o)) o = c;
-                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
-                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
-                            return {
-                                date: dateStrTW,
-                                open: o,
-                                high: h,
-                                low: l,
-                                close: c,
-                                volume: v / 1000
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
-                } else if (rawData && rawData.error) {
-                    console.warn(`[TPEX Worker] ${stockNo} 代理回傳錯誤:`, rawData);
-                    monthData = [];
-                } else {
-                    monthData = [];
+    if (marketType === 'tpex') {
+        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error(`代理伺服器錯誤: ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
+        allData = data.aaData;
+        dataSource = data.dataSource || '未知';
+        stockName = data.stockName || '';
+    } else {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        let current = new Date(start.getFullYear(), start.getMonth(), 1);
+        let monthDataArr = [];
+        while (current <= end) {
+            const year = current.getFullYear();
+            const month = String(current.getMonth() + 1).padStart(2, '0');
+            const dateStr = `${year}${month}01`;
+            const proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${stockNo}&date=${dateStr}`;
+            const response = await fetch(proxyUrl);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.aaData && data.aaData.length > 0) {
+                    monthDataArr.push(...data.aaData);
+                    dataSource = data.dataSource || 'TWSE';
+                    stockName = data.stockName || '';
                 }
-            } else {
-                throw new Error(`不支援的市場類型: ${market}`);
             }
-            if (monthData.length > 0) {
-                allData.push(...monthData);
-            }
-        } catch (e) {
-            console.error(`獲取 ${stockNo} (${month.substring(0,6)}) 數據失敗:`, e);
-            continue;
+            current.setMonth(current.getMonth() + 1);
         }
-        const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
-        self.postMessage({ 
-            type: 'progress', 
-            progress: progress, 
-            message: `已獲取 ${month.substring(0,6)} 數據...` 
-        });
-        // 添加延遲避免過於頻繁的請求
-        await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
+        allData = monthDataArr;
     }
-
-    // 去重並排序
-    const uniqueData = Array.from(new Map(allData.map(item => [item.date, item])).values());
-    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    self.postMessage({ type: 'progress', progress: 50, message: '數據處理完成...' });
+    const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : p), parseInt(String(d[8]).replace(/,/g, '') / 1000, 10) ]);
+    const filteredData = formattedData.filter(d => {
+        const date = new Date(d[0].replace(/(\d+)\/(\d+)\/(\d+)/, (m, y, mo, d) => `${parseInt(y) + 1911}-${mo}-${d}`));
+        return date >= new Date(startDate) && date <= new Date(endDate);
+    });
 
-    if (sortedData.length === 0) {
-        const msg = `指定範圍 (${start} ~ ${end}) 無 ${stockNo} 交易數據`;
-        console.warn(`[Worker fetchStockData] ${msg}`);
-        // 通知主執行緒進度/狀態
-        self.postMessage({ type: 'progress', progress: 50, message: msg });
-        return [];
-    }
-
-    return sortedData;
+    if (filteredData.length === 0) { return { data: [], dataSource, stockName }; }
+    workerCachedStockData = filteredData;
+    return { data: filteredData, dataSource, stockName };
 }
 
 // --- TWSE 月數據獲取 ---
