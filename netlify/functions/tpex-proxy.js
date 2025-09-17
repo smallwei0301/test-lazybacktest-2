@@ -1,73 +1,51 @@
-// netlify/functions/tpex-proxy.js (最終穩定版 v2.1 - 強韌的錯誤處理)
+// netlify/functions/tpex-proxy.js (v3.0 - The Final Solution)
 const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
-    console.log('[Proxy v2.1] 函式啟動');
+    console.log('[Proxy v3.0] 函式啟動');
     
-    const { stockNo, date } = event.queryStringParameters;
-    console.log(`[Proxy v2.1] 解析參數: stockNo=${stockNo}, date=${date}`);
+    const { stockNo, date } = event.queryStringParameters; // date format: 113/08/01
+    console.log(`[Proxy v3.0] 解析參數: stockNo=${stockNo}, date=${date}`);
 
     if (!stockNo || !date) {
         return { statusCode: 400, body: JSON.stringify({ error: '缺少股票代號或日期參數' }) };
     }
 
+    // 這個備用 API 端點只需要 年/月 格式
     const parts = date.split('/');
-    if (parts.length !== 3) {
-        return { statusCode: 400, body: JSON.stringify({ error: '日期格式錯誤，應為 年/月/日' }) };
+    if (parts.length < 2) {
+         return { statusCode: 400, body: JSON.stringify({ error: '日期格式錯誤' }) };
     }
-    const year = parseInt(parts[0], 10) + 1911;
-    const formattedDate = `${year}${parts[1]}${parts[2]}`;
-    
-    const targetUrl = `https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes/${formattedDate}`;
-    console.log(`[Proxy v2.1] 準備請求 API URL: ${targetUrl}`);
+    const queryDate = `${parts[0]}/${parts[1]}`; // e.g., "113/08"
+
+    // **關鍵：切換至 TPEX 網站內部使用的、穩定可靠的 API 端點**
+    const targetUrl = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}`;
+    console.log(`[Proxy v3.0] 準備請求業界備用 API: ${targetUrl}`);
 
     try {
         const response = await fetch(targetUrl, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+                // 為了模擬真實瀏覽器，這個 Header 至關重要
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'
+            },
         });
+
+        console.log(`[Proxy v3.0] 收到 API 回應，狀態碼: ${response.status}`);
         
-        console.log(`[Proxy v2.1] 收到 API 回應，狀態碼: ${response.status}`);
-        
-        // --- 關鍵升級：先讀取純文字，再嘗試解析 ---
-        const rawText = await response.text();
+        const data = await response.json();
 
-        let data;
-        try {
-            data = JSON.parse(rawText);
-        } catch (e) {
-            console.error(`[Proxy v2.1] JSON 解析失敗。API 可能回傳了 HTML。原始內容:`, rawText.substring(0, 500) + '...');
-            // 即使解析失敗，我們也不崩潰，而是回傳一個「無資料」的正常結果
-            return {
-                statusCode: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ aaData: [], error: 'no_data', diagnostics: 'API did not return valid JSON.' })
-            };
-        }
-        // --- 升級結束 ---
-
-        const stockData = data.find(item => item.SecuritiesCompanyCode === stockNo);
-
-        if (!stockData) {
-            console.warn(`[Proxy v2.1] 在 ${formattedDate} 的資料中找不到股票代號: ${stockNo}`);
+        // 檢查回傳的 JSON 是否真的沒有資料
+        if (!data || !data.aaData || data.aaData.length === 0) {
+            console.warn(`[Proxy v3.0] API 回傳無資料 for ${stockNo} on ${queryDate}.`);
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aaData: [] }) };
         }
 
-        const formattedResult = {
-            stockName: stockData.CompanyName,
-            iTotalRecords: 1,
-            aaData: [[
-                date, stockData.SecuritiesCompanyCode, stockData.CompanyName,
-                stockData.Open, stockData.High, stockData.Low, stockData.Close,
-                stockData.Change, stockData.Transaction,
-            ]]
-        };
-
-        console.log(`[Proxy v2.1] 成功找到資料並回傳`);
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formattedResult) };
+        console.log(`[Proxy v3.0] 成功獲取 ${data.aaData.length} 筆資料，回傳給前端`);
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
 
     } catch (error) {
-        console.error('[Proxy v2.1] 函式發生網路層級錯誤:', error);
-        return { statusCode: 500, body: JSON.stringify({ error: `代理伺服器網路錯誤: ${error.message}` }) };
+        console.error('[Proxy v3.0] 函式內部發生錯誤:', error);
+        return { statusCode: 500, body: JSON.stringify({ error: `代理伺服器錯誤: ${error.message}` }) };
     }
 };
