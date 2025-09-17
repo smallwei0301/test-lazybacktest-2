@@ -72,7 +72,7 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// 在 worker.js 中，替換 fetchStockData 函式
+// 在 worker.js 中，替換 fetchStockData 函式 (加入終極診斷日誌)
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
@@ -82,52 +82,50 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     let dataSource = '未知';
     let stockName = '';
 
-    if (marketType === 'tpex') {
+    // --- 關鍵診斷：我們將直接在這裡處理，繞過市場判斷，直接測試 tpex-proxy ---
+    try {
         const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
         const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error(`代理伺服器錯誤: ${response.status}`);
-        const data = await response.json();
-        if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
-        allData = data.aaData;
+
+        // --- 終極診斷日誌：將收到的原始文字印出 ---
+        const rawText = await response.text();
+        console.log('[Worker Ultimate Diagnostics] 從代理收到的原始回應文字:', rawText);
+        // --- 診斷結束 ---
+
+        if (!response.ok) {
+            throw new Error(`代理伺服器錯誤: ${response.status}. 內容: ${rawText}`);
+        }
+        
+        // 嘗試手動解析
+        const data = JSON.parse(rawText);
+
+        if (data.error) {
+            throw new Error(`代理回傳錯誤: ${data.error}`);
+        }
+        
+        // --- 再次診斷解析後的物件 ---
+        console.log('[Worker Ultimate Diagnostics] 成功解析後的物件:', data);
+        if (data.aaData) {
+            console.log(`[Worker Ultimate Diagnostics] 解析後的 aaData 筆數: ${data.aaData.length}`);
+        } else {
+            console.error('[Worker Ultimate Diagnostics] 錯誤：解析後的物件中找不到 aaData 鍵！');
+        }
+        // --- 診斷結束 ---
+
+        allData = data.aaData || []; // 加上保護
         dataSource = data.dataSource || '未知';
         stockName = data.stockName || '';
-    } else {
-        // ... (上市股票邏輯保持不變) ...
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        let current = new Date(start.getFullYear(), start.getMonth(), 1);
-        let monthDataArr = [];
-        while (current <= end) {
-            const year = current.getFullYear();
-            const month = String(current.getMonth() + 1).padStart(2, '0');
-            const dateStr = `${year}${month}01`;
-            const proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${stockNo}&date=${dateStr}`;
-            const response = await fetch(proxyUrl);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.aaData && data.aaData.length > 0) {
-                    monthDataArr.push(...data.aaData);
-                    dataSource = data.dataSource || 'TWSE';
-                    stockName = data.stockName || '';
-                }
-            }
-            current.setMonth(current.getMonth() + 1);
-        }
-        allData = monthDataArr;
+
+    } catch (error) {
+         console.error('[Worker] 處理代理回應時發生嚴重錯誤:', error);
+         // 即使出錯，也回傳空資料，避免系統崩潰
+         return { data: [], dataSource: '錯誤', stockName: stockNo };
     }
     
-    // --- 關鍵診斷日誌 ---
-    console.log(`[Worker Diagnosics] 從代理收到的原始資料筆數: ${allData.length}`);
-    if (allData.length > 0) {
-        console.log('[Worker Diagnosics] 抽樣第一筆資料:', allData[0]);
-        console.log('[Worker Diagnosics] 抽樣中間一筆資料:', allData[Math.floor(allData.length / 2)]);
-        console.log('[Worker Diagnosics] 抽樣最後一筆資料:', allData[allData.length - 1]);
-    }
-    // --- 診斷結束 ---
-
+    // --- 後續的日期篩選邏輯 (暫時保持不變) ---
     const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : (p || 0)), parseInt(String(d[8]).replace(/,/g, '') / 1000, 10) ]);
     const filteredData = formattedData.filter(d => {
-        if (!d[0] || typeof d[0] !== 'string') return false; // 增加保護
+        if (!d[0] || typeof d[0] !== 'string') return false;
         const date = new Date(d[0].replace(/(\d+)\/(\d+)\/(\d+)/, (m, y, mo, d) => `${parseInt(y) + 1911}-${mo}-${d}`));
         return date >= new Date(startDate) && date <= new Date(endDate);
     });
