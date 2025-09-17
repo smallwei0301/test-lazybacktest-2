@@ -1,4 +1,7 @@
+# Netlify Proxy 設定範例
+
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/proxy/:splat"
+  from = "/api/tpex/*"
+  to = "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/:splat"
   status = 200
+  force = true

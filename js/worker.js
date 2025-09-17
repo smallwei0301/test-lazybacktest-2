@@ -39,76 +39,171 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-// --- 增強版股票數據獲取函數 (v5 - Final) ---
+<<<<<<< HEAD
+// --- 增強版股票數據獲取函數 (支援市場選擇和 TAIEX) ---
+=======
+// --- 增強版股票數據獲取函數 (v4 - Hybrid月/日查詢) ---
+>>>>>>> parent of 249091c (update)
 async function fetchStockData(stockNo, start, end, market = 'TWSE') {
     const startDate = new Date(start);
     const endDate = new Date(end);
     
     if (isNaN(startDate) || isNaN(endDate)) {
-        throw new Error("無效的日期範圍");
+        throw new Error("Invalid date range");
     }
 
+    // 特殊處理 TAIEX (台灣加權指數)
     if (stockNo.toUpperCase() === 'TAIEX') {
         return await fetchTAIEXData(start, end);
     }
 
-    let allData = [];
+    const allData = [];
+    const months = [];
+    let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    
     self.postMessage({ type: 'progress', progress: 5, message: '準備獲取數據...' });
 
-    // Common fetch logic for both markets, only the functions differ
-    const fetchFunction = market === 'TWSE' ? fetchTWSEMonthData : fetchTPEXMonthData;
-    const dailyFetchFunction = market === 'TPEX' ? fetchTPEXDayData : null; // Only TPEX has daily fetch for now
-
-    // Determine month/day ranges
-    const today = new Date();
-    const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-    const monthsToFetch = [];
-    let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-    while (currentMonth < firstDayOfCurrentMonth && currentMonth <= endDate) {
-        const y = currentMonth.getFullYear();
-        const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
-        monthsToFetch.push(`${y}${m}01`);
-        currentMonth.setMonth(currentMonth.getMonth() + 1);
+<<<<<<< HEAD
+    // 生成月份列表
+    while (current <= endDate) {
+        const y = current.getFullYear();
+        const m = String(current.getMonth() + 1).padStart(2, '0');
+        months.push(`${y}${m}01`);
+        current.setMonth(current.getMonth() + 1);
+    }
+    
+    if (months.length === 0 && startDate <= endDate) {
+        const y = startDate.getFullYear();
+        const m = String(startDate.getMonth() + 1).padStart(2, '0');
+        months.push(`${y}${m}01`);
     }
 
-    const daysToFetch = [];
-    if (market === 'TPEX' && endDate >= firstDayOfCurrentMonth) {
-        let startDay = (startDate > firstDayOfCurrentMonth) ? startDate : firstDayOfCurrentMonth;
-        let currentDay = new Date(startDay);
-        while (currentDay <= endDate && currentDay <= today) { // Do not fetch future days
-            daysToFetch.push(new Date(currentDay));
-            currentDay.setDate(currentDay.getDate() + 1);
+    // 根據市場類型獲取數據
+    for (let i = 0; i < months.length; i++) {
+        const month = months[i];
+        let monthData = [];
+        
+        try {
+            if (market === 'TWSE') {
+                monthData = await fetchTWSEMonthData(stockNo, month, startDate, endDate);
+            } else if (market === 'TPEX') {
+                monthData = await fetchTPEXMonthData(stockNo, month, startDate, endDate);
+            } else {
+                throw new Error(`不支援的市場類型: ${market}`);
+            }
+            
+            if (monthData.length > 0) {
+                allData.push(...monthData);
+            }
+        } catch (e) {
+            console.error(`獲取 ${stockNo} (${month.substring(0,6)}) 數據失敗:`, e);
+            continue;
+=======
+    if (market === 'TWSE') {
+        // TWSE logic remains the same (monthly fetch)
+        const months = [];
+        let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+        while (current <= endDate) {
+            const y = current.getFullYear();
+            const m = String(current.getMonth() + 1).padStart(2, '0');
+            months.push(`${y}${m}01`);
+            current.setMonth(current.getMonth() + 1);
         }
-    }
-
-    // Execute fetches
-    if (monthsToFetch.length > 0) {
-        console.log(`[${market}] Fetching ${monthsToFetch.length} full months...`);
-        for (const month of monthsToFetch) {
-            const monthData = await fetchFunction(stockNo, month, startDate, endDate);
+        for (let i = 0; i < months.length; i++) {
+            const month = months[i];
+            console.log(`[TWSE] Fetching month: ${month.substring(0, 6)}`);
+            const monthData = await fetchTWSEMonthData(stockNo, month, startDate, endDate);
             if (monthData.length > 0) allData.push(...monthData);
+            else console.log(`[TWSE] No data for month: ${month.substring(0, 6)}`);
+            const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
+            self.postMessage({ type: 'progress', progress: progress, message: `已獲取 ${month.substring(0,6)} 數據...` });
+            await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
         }
+    } else if (market === 'TPEX') {
+        // TPEX logic: Hybrid monthly and daily fetch
+        const today = new Date();
+        const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+        // 1. Fetch full months for the past
+        const monthsToFetch = [];
+        let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+        while (currentMonth < firstDayOfCurrentMonth && currentMonth <= endDate) {
+            const y = currentMonth.getFullYear();
+            const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
+            monthsToFetch.push(`${y}${m}01`);
+            currentMonth.setMonth(currentMonth.getMonth() + 1);
+        }
+
+        if (monthsToFetch.length > 0) {
+            console.log(`[TPEX] Fetching full months:`, monthsToFetch.map(m => m.substring(0,6)));
+            for (const month of monthsToFetch) {
+                const monthData = await fetchTPEXMonthData(stockNo, month, startDate, endDate);
+                if (monthData.length > 0) allData.push(...monthData);
+            }
+        }
+
+        // 2. Fetch daily data for the current month if it's in the date range
+        if (startDate < new Date(today.getFullYear(), today.getMonth() + 1, 1) && endDate >= firstDayOfCurrentMonth) {
+            const startDay = (startDate > firstDayOfCurrentMonth) ? startDate : firstDayOfCurrentMonth;
+            const daysToFetch = [];
+            let currentDay = new Date(startDay);
+            while (currentDay <= endDate && currentDay <= today) { // Do not fetch future days
+                daysToFetch.push(new Date(currentDay));
+                currentDay.setDate(currentDay.getDate() + 1);
+            }
+
+            if (daysToFetch.length > 0) {
+                console.log(`[TPEX] Fetching ${daysToFetch.length} days for the current month...`);
+                for (const day of daysToFetch) {
+                    const dayData = await fetchTPEXDayData(stockNo, day);
+                    if (dayData) allData.push(dayData);
+                }
+            }
+>>>>>>> parent of 249091c (update)
+        }
+
+        const progress = 5 + Math.floor(((i + 1) / months.length) * 45);
+        self.postMessage({ 
+            type: 'progress', 
+            progress: progress, 
+            message: `已獲取 ${month.substring(0,6)} 數據...` 
+        });
+        
+        // 添加延遲避免過於頻繁的請求
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
     }
 
-    if (daysToFetch.length > 0) {
-        console.log(`[${market}] Fetching ${daysToFetch.length} individual days for the current month...`);
-        for (const day of daysToFetch) {
-            const dayData = await dailyFetchFunction(stockNo, day);
-            if (dayData) allData.push(dayData);
-        }
-    }
-
+    // 去重並排序
+    const uniqueData = Array.from(new Map(allData.map(item => [item.date, item])).values());
+    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
     self.postMessage({ type: 'progress', progress: 50, message: '數據處理完成...' });
 
-    if (allData.length === 0) {
+    if (sortedData.length === 0) {
         throw new Error(`指定範圍 (${start} ~ ${end}) 無 ${stockNo} 交易數據`);
     }
-
-    const uniqueData = Array.from(new Map(allData.map(item => [item.date, item])).values());
-    return uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    return sortedData;
 }
 
+<<<<<<< HEAD
+// --- TWSE 月數據獲取 ---
+async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
+    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockNo}&date=${month}&_=${Date.now()}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+        console.warn(`TWSE ${stockNo} (${month.substring(0,6)}) failed: ${response.status}`);
+        return [];
+    }
+    
+    const data = await response.json();
+    if (data.stat !== "OK" || !Array.isArray(data.data)) {
+        return [];
+    }
+    
+    const filtered = data.data.map(item => {
+=======
 // --- TPEX 日數據獲取 (JSON) ---
 async function fetchTPEXDayData(stockNo, date) {
     const rocYear = date.getFullYear() - 1911;
@@ -116,7 +211,7 @@ async function fetchTPEXDayData(stockNo, date) {
     const day = String(date.getDate()).padStart(2, '0');
     const queryDate = `${rocYear}/${month}/${day}`;
 
-    const url = `https://your-proxy-name.herokuapp.com/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}`;
+    const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
     console.log(`[TPEX Daily] Fetching: ${queryDate}`);
 
     try {
@@ -131,68 +226,176 @@ async function fetchTPEXDayData(stockNo, date) {
             return null;
         }
 
+        // Assuming the daily API returns a single row in aaData
         const item = data.aaData[0];
+>>>>>>> parent of 249091c (update)
         const dateStr = formatTWDateWorker(item[0]);
         if (!dateStr) return null;
-
-        const o = parseFloat(item[4].replace(/,/g, ''));
-        const h = parseFloat(item[5].replace(/,/g, ''));
-        const l = parseFloat(item[6].replace(/,/g, ''));
-        const c = parseFloat(item[2].replace(/,/g, ''));
-        const v = parseFloat(item[1].replace(/,/g, ''));
-
-        if ([o, h, l, c, v].some(isNaN)) return null;
-
-        return { date: dateStr, open: o, high: h, low: l, close: c, volume: v };
-
-    } catch (e) {
-        console.error(`[TPEX Daily] Error fetching or parsing for ${queryDate}:`, e);
+        
+        const itemDate = new Date(dateStr);
+        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
+            const o = parseFloat(item[3].replace(/,/g,''));
+            const h = parseFloat(item[4].replace(/,/g,''));
+            const l = parseFloat(item[5].replace(/,/g,''));
+            const c = parseFloat(item[6].replace(/,/g,''));
+            const v = parseFloat(item[1].replace(/,/g,''));
+            
+            if ([o,h,l,c,v].some(isNaN)) {
+                return null;
+            }
+            
+            return { 
+                date: dateStr, 
+                open: o, 
+                high: h, 
+                low: l, 
+                close: c, 
+                volume: v/1000 
+            };
+        }
         return null;
-    }
+    }).filter(item => item !== null);
+    
+    return filtered;
 }
 
-// --- TPEX 月數據獲取 (JSON) ---
+// --- TPEX 月數據獲取 (使用新的日報價API) ---
+// --- TPEX 月數據獲取 (由於CORS限制，回到舊API) ---
 async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
+<<<<<<< HEAD
+=======
     const year = parseInt(month.substring(0, 4));
     const monthNum = month.substring(4, 6);
     const rocYear = year - 1911;
     const queryDate = `${rocYear}/${monthNum}`;
 
-    const url = `https://your-proxy-name.herokuapp.com/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}`;
+    const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
     console.log(`[TPEX Monthly] Fetching: ${queryDate}`);
 
+>>>>>>> parent of 249091c (update)
     try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            console.warn(`[TPEX Monthly] Fetch failed for ${queryDate}: ${response.status}`);
-            return [];
+        console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
+        
+        // 由於新API有CORS限制，在Worker中我們仍然可以嘗試直接調用
+        // 但如果失敗，則使用舊的API格式
+        
+        // 首先嘗試舊的月份API (在Worker中可能不受CORS限制)
+        const year = parseInt(month.substring(0, 4));
+        const monthNum = month.substring(4, 6);
+        const rocYear = year - 1911;
+        const queryDate = `${rocYear}/${monthNum}`;
+        
+        const attempts = [
+            // 方法1: 使用代理伺服器 (相對路徑，方便本地與 Netlify proxy)
+            `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
+            // 方法2: 直接調用 (可能會有CORS問題，但在Worker中有時能成功)
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`,
+            // 方法3: 不同參數順序
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?stkno=${stockNo}&d=${queryDate}&l=zh-tw&_=${Date.now()}`,
+            // 方法4: 簡化參數
+            `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`
+        ];
+        
+        for (let i = 0; i < attempts.length; i++) {
+            try {
+                const url = attempts[i];
+                console.log(`[TPEX Worker] 嘗試方法 ${i + 1}: ${url}`);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                
+                if (!response.ok) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
+                    continue;
+                }
+                
+                const text = await response.text();
+                if (!text.trim()) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
+                    continue;
+                }
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    console.warn(`[TPEX Worker] 方法 ${i + 1} JSON 解析失敗: ${e.message}`);
+                    continue;
+                }
+                
+                if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {
+                    console.log(`[TPEX Worker] 方法 ${i + 1} 成功取得數據，筆數: ${data.aaData.length}`);
+                    
+                    // 處理數據格式
+                    const filtered = data.aaData.map(item => {
+                        if (!Array.isArray(item) || item.length < 5) return null;
+                        
+                        const dateStr = formatTWDateWorker(item[0]);
+                        if (!dateStr) return null;
+                        
+                        const itemDate = new Date(dateStr);
+                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
+                            // TPEX 數據格式解析
+                            let o, h, l, c, v;
+                            
+                            // 格式 1: [日期, 成交股數, 收盤價, 漲跌, 開盤價, 最高價, 最低價, ...]
+                            if (item.length >= 7) {
+                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
+                                c = parseFloat(String(item[2]).replace(/[,\s]/g,'')) || 0;
+                                o = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
+                                h = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
+                                l = parseFloat(String(item[6]).replace(/[,\s]/g,'')) || 0;
+                            }
+                            // 格式 2: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, ...]
+                            else if (item.length >= 6) {
+                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
+                                o = parseFloat(String(item[3]).replace(/[,\s]/g,'')) || 0;
+                                h = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
+                                l = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
+                                c = parseFloat(String(item[6] || item[2]).replace(/[,\s]/g,'')) || 0;
+                            } else {
+                                return null;
+                            }
+                            
+                            // 數據驗證
+                            if (c <= 0 || isNaN(c)) return null;
+                            
+                            // 修正異常數據
+                            if (o <= 0 || isNaN(o)) o = c;
+                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
+                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
+                            
+                            return { 
+                                date: dateStr, 
+                                open: o, 
+                                high: h, 
+                                low: l, 
+                                close: c, 
+                                volume: v/1000 
+                            };
+                        }
+                        return null;
+                    }).filter(item => item !== null);
+                    
+                    console.log(`[TPEX Worker] ${stockNo} 成功處理 ${filtered.length} 筆數據`);
+                    return filtered;
+                }
+                
+            } catch (error) {
+                console.error(`[TPEX Worker] 方法 ${i + 1} 發生錯誤:`, error);
+            }
         }
-        const data = await response.json();
-        if (data.stat !== 'OK' || !data.aaData || data.aaData.length === 0) {
-            console.log(`[TPEX Monthly] No data for ${queryDate}`);
-            return [];
-        }
-
-        return data.aaData.map(item => {
-            const dateStr = formatTWDateWorker(item[0]);
-            if (!dateStr) return null;
-
-            const itemDate = new Date(dateStr);
-            if (isNaN(itemDate) || itemDate < startDate || itemDate > endDate) return null;
-
-            const o = parseFloat(item[4].replace(/,/g, ''));
-            const h = parseFloat(item[5].replace(/,/g, ''));
-            const l = parseFloat(item[6].replace(/,/g, ''));
-            const c = parseFloat(item[2].replace(/,/g, ''));
-            const v = parseFloat(item[1].replace(/,/g, ''));
-
-            if ([o, h, l, c, v].some(isNaN)) return null;
-
-            return { date: dateStr, open: o, high: h, low: l, close: c, volume: v };
-        }).filter(item => item !== null);
-
-    } catch (e) {
-        console.error(`[TPEX Monthly] Error fetching or parsing for ${queryDate}:`, e);
+        
+        console.warn(`[TPEX Worker] ${stockNo} 所有方法都失敗`);
+        return [];
+        
+    } catch (error) {
+        console.error(`[TPEX Worker] ${stockNo} (${month.substring(0,6)}) 嚴重錯誤:`, error);
         return [];
     }
 }

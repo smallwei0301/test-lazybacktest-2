@@ -1,103 +1,16 @@
 ?plugins=forms,container-queries:64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
 (anonymous) @ ?plugins=forms,container-queries:64
 (anonymous) @ ?plugins=forms,container-queries:64
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/10: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/11: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/12: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/13: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/14: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/15: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/16: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/17: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
-fetchTPEXDayData @ worker.js:169
-await in fetchTPEXDayData
-fetchStockData @ worker.js:114
-await in fetchStockData
-self.onmessage @ worker.js:756
-worker.js:789 Worker 執行 runBacktest 期間錯誤: Error: 指定範圍 (2025-09-10 ~ 2025-09-17) 無 3260 交易數據
-    at fetchStockData (/js/worker.js:124:15)
-    at async self.onmessage (/js/worker.js:756:30)
-self.onmessage @ worker.js:789
+worker.js:214 [TPEX Worker] Could not find header row in CSV for 3260 on 114/09. CSV content might have changed.
+fetchTPEXMonthData @ worker.js:214
+await in fetchTPEXMonthData
+fetchStockData @ worker.js:85
+self.onmessage @ worker.js:800
+worker.js:833 Worker 執行 runBacktest 期間錯誤: Error: 指定範圍 (2025-09-01 ~ 2025-09-17) 無 3260 交易數據
+    at fetchStockData (/js/worker.js:116:15)
+    at async self.onmessage (/js/worker.js:800:30)
+self.onmessage @ worker.js:833
 
-Sep 17, 01:26:21 PM: 54c234b1 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086782898&d=114%2F09%2F10&l=zh-tw&stkno=3260
-Sep 17, 01:26:22 PM: 54c234b1 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:23 PM: 54c234b1 Duration: 1988.21 ms	Memory Usage: 88 MB
-Sep 17, 01:26:23 PM: 6695a7f7 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086785649&d=114%2F09%2F11&l=zh-tw&stkno=3260
-Sep 17, 01:26:23 PM: 6695a7f7 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:25 PM: 6695a7f7 Duration: 1613.68 ms	Memory Usage: 98 MB
-Sep 17, 01:26:25 PM: 32f16969 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086787618&d=114%2F09%2F12&l=zh-tw&stkno=3260
-Sep 17, 01:26:25 PM: 32f16969 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:26 PM: 32f16969 Duration: 1261.6 ms	Memory Usage: 98 MB
-Sep 17, 01:26:27 PM: 377a4db8 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086789228&d=114%2F09%2F13&l=zh-tw&stkno=3260
-Sep 17, 01:26:27 PM: 377a4db8 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:28 PM: 377a4db8 Duration: 1220.31 ms	Memory Usage: 98 MB
-Sep 17, 01:26:28 PM: 9ccb9c3b INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086790806&d=114%2F09%2F14&l=zh-tw&stkno=3260
-Sep 17, 01:26:29 PM: 9ccb9c3b INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:30 PM: 9ccb9c3b Duration: 1246.4 ms	Memory Usage: 98 MB
-Sep 17, 01:26:30 PM: e3b2bd5b INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086792412&d=114%2F09%2F15&l=zh-tw&stkno=3260
-Sep 17, 01:26:30 PM: e3b2bd5b INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:31 PM: e3b2bd5b Duration: 1259.43 ms	Memory Usage: 98 MB
-Sep 17, 01:26:32 PM: 50a3562c INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086794054&d=114%2F09%2F16&l=zh-tw&stkno=3260
-Sep 17, 01:26:32 PM: 50a3562c INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:33 PM: 50a3562c Duration: 1224.17 ms	Memory Usage: 98 MB
-Sep 17, 01:26:33 PM: 8a5966c3 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086795637&d=114%2F09%2F17&l=zh-tw&stkno=3260
-Sep 17, 01:26:33 PM: 8a5966c3 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:26:34 PM: 8a5966c3 Duration: 1239.72 ms	Memory Usage: 98 MB
-Sep 17, 01:27:49 PM: 588cd581 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086870983&d=114%2F09%2F10&l=zh-tw&stkno=3260
-Sep 17, 01:27:50 PM: 588cd581 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:50 PM: 588cd581 Duration: 1937.99 ms	Memory Usage: 99 MB
-Sep 17, 01:27:51 PM: bfc59286 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086873281&d=114%2F09%2F11&l=zh-tw&stkno=3260
-Sep 17, 01:27:51 PM: bfc59286 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:52 PM: bfc59286 Duration: 1084.7 ms	Memory Usage: 99 MB
-Sep 17, 01:27:52 PM: addd98ba INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086874721&d=114%2F09%2F12&l=zh-tw&stkno=3260
-Sep 17, 01:27:52 PM: addd98ba INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:53 PM: addd98ba Duration: 1098.13 ms	Memory Usage: 99 MB
-Sep 17, 01:27:54 PM: 031bea0f INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086876179&d=114%2F09%2F13&l=zh-tw&stkno=3260
-Sep 17, 01:27:54 PM: 031bea0f INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:55 PM: 031bea0f Duration: 1085.58 ms	Memory Usage: 99 MB
-Sep 17, 01:27:55 PM: 6c8addb1 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086877655&d=114%2F09%2F14&l=zh-tw&stkno=3260
-Sep 17, 01:27:55 PM: 6c8addb1 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:56 PM: 6c8addb1 Duration: 1083.6 ms	Memory Usage: 99 MB
-Sep 17, 01:27:57 PM: 3e2f4024 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086879101&d=114%2F09%2F15&l=zh-tw&stkno=3260
-Sep 17, 01:27:57 PM: 3e2f4024 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:58 PM: 3e2f4024 Duration: 1079.5 ms	Memory Usage: 101 MB
-Sep 17, 01:27:58 PM: fde9600c INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086880530&d=114%2F09%2F16&l=zh-tw&stkno=3260
-Sep 17, 01:27:58 PM: fde9600c INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:27:59 PM: fde9600c Duration: 1079.02 ms	Memory Usage: 106 MB
-Sep 17, 01:28:00 PM: 2f606459 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086881973&d=114%2F09%2F17&l=zh-tw&stkno=3260
-Sep 17, 01:28:00 PM: 2f606459 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
-Sep 17, 01:28:01 PM: 2f606459 Duration: 1084.35 ms	Memory Usage: 106 MB
+
+Sep 17, 12:58:34 PM: ed3f8521 INFO   [Proxy Handler] Final Target URL: https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=114%2F09&s=3260
+Sep 17, 12:58:39 PM: ed3f8521 Duration: 5367.15 ms	Memory Usage: 111 MB
