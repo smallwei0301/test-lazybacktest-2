@@ -157,32 +157,7 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
         return [];
     }
     
-    const filtered = data.data.map(item => {
-        const dateStr = formatTWDateWorker(item[0]);
-        if (!dateStr) return null;
-        const itemDate = new Date(dateStr);
-        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
-            const o = parseFloat(item[3].replace(/,/g, ''));
-            const h = parseFloat(item[4].replace(/,/g, ''));
-            const l = parseFloat(item[5].replace(/,/g, ''));
-            const c = parseFloat(item[6].replace(/,/g, ''));
-            const v = parseFloat(item[1].replace(/,/g, ''));
-            if ([o, h, l, c, v].some(isNaN)) {
-                return null;
-            }
-            return {
-                date: dateStr,
-                open: o,
-                high: h,
-                low: l,
-                close: c,
-                volume: v / 1000
-            };
-        }
-        return null;
-    }).filter(item => item !== null);
-    return filtered;
-}
+    // 移除多餘的結束大括號，確保下面的 await 在 async function 內
     try {
         console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
         
