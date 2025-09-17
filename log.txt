@@ -1,16 +1,160 @@
+Sep 17, 01:17:06 PM: f1b444da INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086227658&d=114%2F09%2F01&l=zh-tw&stkno=3260
+Sep 17, 01:17:07 PM: f1b444da INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:08 PM: f1b444da Duration: 1933.15 ms	Memory Usage: 87 MB
+Sep 17, 01:17:08 PM: 7f3a17a6 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086230368&d=114%2F09%2F02&l=zh-tw&stkno=3260
+Sep 17, 01:17:08 PM: 7f3a17a6 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:09 PM: 7f3a17a6 Duration: 1343.64 ms	Memory Usage: 98 MB
+Sep 17, 01:17:10 PM: fcdaced1 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086232078&d=114%2F09%2F03&l=zh-tw&stkno=3260
+Sep 17, 01:17:10 PM: fcdaced1 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:11 PM: fcdaced1 Duration: 965.61 ms	Memory Usage: 98 MB
+Sep 17, 01:17:11 PM: 9deb2034 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086233420&d=114%2F09%2F04&l=zh-tw&stkno=3260
+Sep 17, 01:17:11 PM: 9deb2034 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:12 PM: 9deb2034 Duration: 971.57 ms	Memory Usage: 98 MB
+Sep 17, 01:17:12 PM: 36080ca2 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086234750&d=114%2F09%2F05&l=zh-tw&stkno=3260
+Sep 17, 01:17:12 PM: 36080ca2 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:13 PM: 36080ca2 Duration: 976.35 ms	Memory Usage: 98 MB
+Sep 17, 01:17:14 PM: 5cfe4939 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086236089&d=114%2F09%2F06&l=zh-tw&stkno=3260
+Sep 17, 01:17:14 PM: 5cfe4939 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:15 PM: 5cfe4939 Duration: 952.11 ms	Memory Usage: 98 MB
+Sep 17, 01:17:15 PM: 9f8329a3 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086237409&d=114%2F09%2F07&l=zh-tw&stkno=3260
+Sep 17, 01:17:15 PM: 9f8329a3 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:16 PM: 9f8329a3 Duration: 1389.45 ms	Memory Usage: 98 MB
+Sep 17, 01:17:17 PM: a72c720f INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086239243&d=114%2F09%2F08&l=zh-tw&stkno=3260
+Sep 17, 01:17:17 PM: a72c720f INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:18 PM: a72c720f Duration: 1275.32 ms	Memory Usage: 98 MB
+Sep 17, 01:17:18 PM: e24e0036 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086240890&d=114%2F09%2F09&l=zh-tw&stkno=3260
+Sep 17, 01:17:19 PM: e24e0036 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:20 PM: e24e0036 Duration: 1270.5 ms	Memory Usage: 98 MB
+Sep 17, 01:17:20 PM: c0167d4f INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086242520&d=114%2F09%2F10&l=zh-tw&stkno=3260
+Sep 17, 01:17:20 PM: c0167d4f INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:21 PM: c0167d4f Duration: 1272.72 ms	Memory Usage: 98 MB
+Sep 17, 01:17:22 PM: 1b314da2 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086244187&d=114%2F09%2F11&l=zh-tw&stkno=3260
+Sep 17, 01:17:22 PM: 1b314da2 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:23 PM: 1b314da2 Duration: 1270.4 ms	Memory Usage: 98 MB
+Sep 17, 01:17:23 PM: 9e51b001 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086245820&d=114%2F09%2F12&l=zh-tw&stkno=3260
+Sep 17, 01:17:24 PM: 9e51b001 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:25 PM: 9e51b001 Duration: 1256.84 ms	Memory Usage: 98 MB
+Sep 17, 01:17:25 PM: fc699f2b INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086247432&d=114%2F09%2F13&l=zh-tw&stkno=3260
+Sep 17, 01:17:25 PM: fc699f2b INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:26 PM: fc699f2b Duration: 1248.44 ms	Memory Usage: 99 MB
+Sep 17, 01:17:27 PM: 82b57ee7 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086249040&d=114%2F09%2F14&l=zh-tw&stkno=3260
+Sep 17, 01:17:27 PM: 82b57ee7 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:28 PM: 82b57ee7 Duration: 1242.09 ms	Memory Usage: 99 MB
+Sep 17, 01:17:28 PM: b3508bcc INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086250658&d=114%2F09%2F15&l=zh-tw&stkno=3260
+Sep 17, 01:17:28 PM: b3508bcc INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:29 PM: b3508bcc Duration: 1229.11 ms	Memory Usage: 99 MB
+Sep 17, 01:17:30 PM: f67b87d0 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086252250&d=114%2F09%2F16&l=zh-tw&stkno=3260
+Sep 17, 01:17:30 PM: f67b87d0 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:31 PM: f67b87d0 Duration: 1240.44 ms	Memory Usage: 99 MB
+Sep 17, 01:17:31 PM: 19552236 INFO   [Proxy Handler] Forwarding to: https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?_=1758086253851&d=114%2F09%2F17&l=zh-tw&stkno=3260
+Sep 17, 01:17:32 PM: 19552236 INFO   [Proxy] Redirecting to: https://www.tpex.org.tw/errors
+Sep 17, 01:17:33 PM: 19552236 Duration: 1233.46 ms	Memory Usage: 101 MB
+
+
 ?plugins=forms,container-queries:64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
 (anonymous) @ ?plugins=forms,container-queries:64
-(anonymous) @ ?plugins=forms,container-queries:64
-worker.js:214 [TPEX Worker] Could not find header row in CSV for 3260 on 114/09. CSV content might have changed.
-fetchTPEXMonthData @ worker.js:214
-await in fetchTPEXMonthData
-fetchStockData @ worker.js:85
-self.onmessage @ worker.js:800
-worker.js:833 Worker 執行 runBacktest 期間錯誤: Error: 指定範圍 (2025-09-01 ~ 2025-09-17) 無 3260 交易數據
-    at fetchStockData (/js/worker.js:116:15)
-    at async self.onmessage (/js/worker.js:800:30)
-self.onmessage @ worker.js:833
-
-
-Sep 17, 12:58:34 PM: ed3f8521 INFO   [Proxy Handler] Final Target URL: https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=114%2F09&s=3260
-Sep 17, 12:58:39 PM: ed3f8521 Duration: 5367.15 ms	Memory Usage: 111 MB
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/01: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/02: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/03: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/04: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/05: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/06: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/07: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/08: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/09: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/10: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/11: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/12: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/13: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/14: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/15: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/16: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:169 [TPEX Daily] Error fetching or parsing for 114/09/17: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+fetchTPEXDayData @ worker.js:169
+await in fetchTPEXDayData
+fetchStockData @ worker.js:114
+await in fetchStockData
+self.onmessage @ worker.js:756
+worker.js:789 Worker 執行 runBacktest 期間錯誤: Error: 指定範圍 (2025-09-01 ~ 2025-09-17) 無 3260 交易數據
+    at fetchStockData (/js/worker.js:124:15)
+    at async self.onmessage (/js/worker.js:756:30)
+self.onmessage @ worker.js:789
