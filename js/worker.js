@@ -166,7 +166,7 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
 }
 
 // --- TPEX 月數據獲取 (使用新的日報價API) ---
-// --- TPEX 月數據獲取 (使用新的 CSV API) ---
+// --- TPEX 月數據獲取 (使用新的 CSV API, v2) ---
 async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
     try {
         const year = parseInt(month.substring(0, 4));
@@ -174,49 +174,70 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
         const rocYear = year - 1911;
         const queryDate = `${rocYear}/${monthNum}`;
 
-        // The proxy will handle the new endpoint and params
         const url = `/api/tpex/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockNo}&_=${Date.now()}`;
-        
         console.log(`[TPEX Worker] Fetching new CSV API via proxy: ${url}`);
 
         const response = await fetch(url);
-
         if (!response.ok) {
-            console.warn(`[TPEX Worker] CSV fetch failed: ${response.status}`);
+            console.warn(`[TPEX Worker] CSV fetch failed for ${stockNo} on ${queryDate}: ${response.status}`);
             return [];
         }
 
         const csvText = await response.text();
         if (!csvText || csvText.length < 50) {
-             console.warn(`[TPEX Worker] Received empty or invalid CSV for ${stockNo} on ${queryDate}`);
-             return [];
+            console.warn(`[TPEX Worker] Received empty or invalid CSV for ${stockNo} on ${queryDate}`);
+            return [];
         }
 
-        const lines = csvText.split('\n');
+        const lines = csvText.split('\n').filter(line => line.trim() !== '');
+        if (lines.length < 2) {
+            console.warn(`[TPEX Worker] CSV for ${stockNo} on ${queryDate} has no data rows.`);
+            return [];
+        }
+
+        // Find header row and dynamically map columns
+        let headerRowIndex = -1;
+        let columnMap = {};
+        const expectedHeaders = ['日期', '開盤', '最高', '最低', '收盤', '成交仟股'];
+
+        for (let i = 0; i < lines.length; i++) {
+            const columns = lines[i].trim().split('","').map(c => c.replace(/"/g, '').trim());
+            if (expectedHeaders.every(header => columns.includes(header))) {
+                headerRowIndex = i;
+                columns.forEach((col, index) => {
+                    columnMap[col] = index;
+                });
+                break;
+            }
+        }
+
+        if (headerRowIndex === -1) {
+            console.warn(`[TPEX Worker] Could not find header row in CSV for ${stockNo} on ${queryDate}`);
+            return [];
+        }
+
         const allData = [];
-
-        for (const line of lines) {
-            if (!line.trim() || !line.startsWith('"')) continue; // Skip headers and empty lines
-
+        for (let i = headerRowIndex + 1; i < lines.length; i++) {
+            const line = lines[i];
             const columns = line.trim().split('","').map(c => c.replace(/"/g, '').trim());
 
-            // Expected format: "日期","成交仟股","成交仟元","開盤","最高","最低","收盤","漲跌","筆數"
-            if (columns.length < 7) continue;
+            if (columns.length < Object.keys(columnMap).length) continue;
 
-            const dateStr = formatTWDateWorker(columns[0]);
+            const dateStr = formatTWDateWorker(columns[columnMap['日期']]);
             if (!dateStr) continue;
 
             const itemDate = new Date(dateStr);
             if (isNaN(itemDate) || itemDate < startDate || itemDate > endDate) continue;
 
             try {
-                const volume = parseFloat(columns[1].replace(/,/g, '')) * 1000; // Convert 仟股 to 股
-                const open = parseFloat(columns[3].replace(/,/g, ''));
-                const high = parseFloat(columns[4].replace(/,/g, ''));
-                const low = parseFloat(columns[5].replace(/,/g, ''));
-                const close = parseFloat(columns[6].replace(/,/g, ''));
+                const open = parseFloat(columns[columnMap['開盤']].replace(/,/g, ''));
+                const high = parseFloat(columns[columnMap['最高']].replace(/,/g, ''));
+                const low = parseFloat(columns[columnMap['最低']].replace(/,/g, ''));
+                const close = parseFloat(columns[columnMap['收盤']].replace(/,/g, ''));
+                const volume = parseFloat(columns[columnMap['成交仟股']].replace(/,/g, '')); // Already in thousands
 
                 if ([open, high, low, close, volume].some(isNaN)) {
+                    console.warn(`[TPEX Worker] NaN value in row: ${line}`);
                     continue;
                 }
 
@@ -226,14 +247,13 @@ async function fetchTPEXMonthData(stockNo, month, startDate, endDate) {
                     high: high,
                     low: low,
                     close: close,
-                    volume: volume / 1000 // The rest of the app expects volume in thousands
+                    volume: volume
                 });
             } catch (e) {
                 console.warn(`[TPEX Worker] Failed to parse row: ${line}`, e);
-                continue;
             }
         }
-        
+
         console.log(`[TPEX Worker] Parsed ${allData.length} rows from CSV for ${stockNo} on ${queryDate}`);
         return allData;
 

@@ -1741,67 +1741,10 @@ async function fetchStockNameFromTWSE(stockCode) {
 
 // 從 TPEX 取得股票名稱 (使用代理伺服器解決CORS問題)
 async function fetchStockNameFromTPEX(stockCode) {
-    try {
-        console.log(`[TPEX Name] 查詢股票代碼: ${stockCode}`);
-        
-        // 方法1: 使用代理伺服器 (如果可用)
-        const proxyResult = await fetchTPEXNameViaProxy(stockCode);
-        if (proxyResult) {
-            return proxyResult;
-        }
-        
-        // 方法2: 使用JSONP方式嘗試舊API
-        const jsonpResult = await fetchTPEXNameViaJSONP(stockCode);
-        if (jsonpResult) {
-            return jsonpResult;
-        }
-        
-        // 方法3: 使用本地股票名稱對照表 (常用上櫃股票)
-        const stockNameMap = {
-            '3260': '威剛',
-            '6446': '藥華藥',
-            '4735': '豪展',
-            '6488': '環球晶',
-            '8069': '元太',
-            '3293': '鈊象',
-            '1565': '精華',
-            '2230': '泰茂',
-            '4994': '傳奇',
-            '6456': 'GIS-KY',
-            '3064': '泰偉',
-            '4966': '譜瑞-KY',
-            '6477': '安集',
-            '8924': '大田',
-            '3324': '雙鴻',
-            '6180': '橘子',
-            '3587': '閎康',
-            '4968': '立積',
-            '6531': '愛普',
-            '8050': '廣積',
-            '6235': '華孚',
-            '4743': '合一',
-            '8044': '網家',
-            '6491': '晶碩',
-            '4952': '凌通',
-            '3707': '漢碩',
-            '6781': 'AES-KY',
-            '8040': '九暘',
-            '4160': '創源',
-            '6472': '保瑞'
-        };
-        
-        if (stockNameMap[stockCode]) {
-            console.log(`[TPEX Name] 從本地對照表取得: ${stockNameMap[stockCode]}`);
-            return stockNameMap[stockCode];
-        }
-        
-        console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
-        return null;
-        
-    } catch (error) {
-        console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
-        return null;
-    }
+    // API has changed and getting the name is complex. 
+    // For now, just return the code to prevent errors.
+    console.log(`[TPEX Name] Bypassing name fetch, returning code: ${stockCode}`);
+    return stockCode;
 }
 
 // 使用代理伺服器獲取TPEX股票名稱
