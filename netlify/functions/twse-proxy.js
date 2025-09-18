@@ -71,6 +71,5 @@ export default async (req, context) => {
 };
 
 export const config = {
-  path: "/.netlify/functions/twse-proxy",
   prefer_static: true
 };
