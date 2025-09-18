@@ -161,54 +161,8 @@ function clearPreviousResults() {
     }
 }
 
-function updateDataSourceDisplay(dataSource, stockName) {
-    const displayEl = document.getElementById('dataSourceDisplay');
-    if (!displayEl) return;
-
-    if (dataSource) {
-        let sourceText = `數據來源: ${dataSource}`;
-        displayEl.textContent = sourceText;
-        displayEl.classList.remove('hidden');
-    } else {
-        displayEl.classList.add('hidden');
-    }
-}
-
-function displayPerformanceTable(subPeriodResults) {
-    const container = document.getElementById('performance-table-container');
-    if (!container) return;
-
-    if (!subPeriodResults || Object.keys(subPeriodResults).length === 0) {
-        container.innerHTML = `<p class="text-muted" style="color: var(--muted-foreground);">無期間績效數據可顯示。</p>`;
-        return;
-    }
-
-    let tableHtml = `<div class="overflow-x-auto"><table class="w-full text-sm text-left">
-        <thead class="text-xs uppercase bg-gray-50">
-            <tr>
-                <th scope="col" class="px-4 py-3">期間</th>
-                <th scope="col" class="px-4 py-3">年化報酬率</th>
-                <th scope="col" class="px-4 py-3">夏普值</th>
-            </tr>
-        </thead>
-        <tbody>`;
-
-    for (const [label, metrics] of Object.entries(subPeriodResults)) {
-        const annReturn = metrics.annualizedReturn !== null ? `${metrics.annualizedReturn.toFixed(2)}%` : 'N/A';
-        const sharpe = metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : 'N/A';
-        tableHtml += `<tr class="border-b">
-            <td class="px-4 py-2 font-medium">${label}</td>
-            <td class="px-4 py-2">${annReturn}</td>
-            <td class="px-4 py-2">${sharpe}</td>
-        </tr>`;
-    }
-
-    tableHtml += `</tbody></table></div>`;
-    container.innerHTML = tableHtml;
-}
-
 function handleBacktestResult(result, stockName, dataSource) {
-    console.log("[Main] Executing v9.4 handleBacktestResult.");
+    console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
@@ -221,11 +175,9 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastOverallResult = result;
         lastSubPeriodResults = result.subPeriodResults;
 
-        updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
-        displayPerformanceTable(lastSubPeriodResults);
         activateTab('summary');
 
         setTimeout(() => {
