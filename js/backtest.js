@@ -163,7 +163,6 @@ function clearPreviousResults() {
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] handleBacktestResult received:", result);
-    updateDataSourceDisplay(dataSource, stockName);
     const suggestionArea = document.getElementById('today-suggestion-area');
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
