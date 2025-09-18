@@ -147,42 +147,42 @@
       
       /* 獨立滾動區域樣式 */
       @media (min-width: 1024px) {
-        .lg\\:h-screen {
+        .lg\:h-screen {
           height: calc(100vh - 12rem); /* 減去header和padding高度 */
         }
         
         /* 左側面板滾動樣式 */
-        .lg\\:overflow-y-auto:first-child {
+        .lg\:overflow-y-auto:first-child {
           padding-right: 0.5rem;
         }
         
         /* 右側面板滾動樣式 */
-        .lg\\:overflow-y-auto:last-child {
+        .lg\:overflow-y-auto:last-child {
           padding-left: 0.5rem;
         }
         
         /* Webkit滾動條樣式 */
-        .lg\\:overflow-y-auto::-webkit-scrollbar {
+        .lg\:overflow-y-auto::-webkit-scrollbar {
           width: 8px;
         }
         
-        .lg\\:overflow-y-auto::-webkit-scrollbar-track {
+        .lg\:overflow-y-auto::-webkit-scrollbar-track {
           background: var(--muted);
           border-radius: 4px;
         }
         
-        .lg\\:overflow-y-auto::-webkit-scrollbar-thumb {
+        .lg\:overflow-y-auto::-webkit-scrollbar-thumb {
           background: var(--border);
           border-radius: 4px;
           transition: background 0.2s ease;
         }
         
-        .lg\\:overflow-y-auto::-webkit-scrollbar-thumb:hover {
+        .lg\:overflow-y-auto::-webkit-scrollbar-thumb:hover {
           background: var(--muted-foreground);
         }
         
         /* Firefox滾動條樣式 */
-        .lg\\:overflow-y-auto {
+        .lg\:overflow-y-auto {
           scrollbar-width: thin;
           scrollbar-color: var(--border) var(--muted);
         }
@@ -267,7 +267,7 @@
       
       /* 響應式調整 */
       @media (max-width: 1023px) {
-        .grid.grid-cols-1.lg\\:grid-cols-12 {
+        .grid.grid-cols-1.lg\:grid-cols-12 {
           grid-template-columns: 1fr;
         }
       }
@@ -516,7 +516,8 @@
                                             </div>
                                         </div>
                                         <div class="space-y-4">
-                                            <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">交易成本設定 (%)</p>
+                                            <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">交易成本設定 (%)
+                                            </p>
                                             <div class="grid grid-cols-2 gap-3">
                                                 <div>
                                                     <label for="buyFee" class="tooltip block text-xs font-medium text-muted mb-1" style="color: var(--muted-foreground);">
@@ -640,7 +641,8 @@
                                                     <option value="price_breakdown">價格跌破前低</option>
                                                     <option value="williams_overbought">威廉指標超買</option>
                                                     <option value="turtle_stop_loss">海龜停損 (N日低)</option>
-                                                    <option value="trailing_stop">移動停損 (%)</option>
+                                                    <option value="trailing_stop">移動停損 (%)
+                                                    </option>
                                                     <option value="fixed_stop_loss">(由風險管理控制)</option>
                                                 </select>
                                                 <div id="exitParams" class="mt-4 space-y-3"></div>
@@ -1001,8 +1003,10 @@
                                                                 class="flex-grow px-2 py-2 bg-input text-foreground text-sm rounded-r-md focus:outline-none"
                                                                 style="background-color: var(--input); color: var(--foreground);"
                                                             >
-                                                                <option value="stopLoss">停損 (%)</option>
-                                                                <option value="takeProfit">停利 (%)</option>
+                                                                <option value="stopLoss">停損 (%)
+                                                                </option>
+                                                                <option value="takeProfit">停利 (%)
+                                                                </option>
                                                             </select>
                                                         </div>
                                                     </div>
@@ -1385,19 +1389,11 @@
         </div>
     </div>
 
-<<<<<<< HEAD
     <script src="js/config.js" defer></script>
-    <script src="js/backtest.js" defer></script>
     <script src="js/main.js" defer></script>
+    <script src="js/backtest.js" defer></script>
     <script src="js/loader.js" defer></script>
     <script src="js/batch-optimization.js" defer></script>
-=======
-    <script src="js/config.js"></script>
-    <script src="js/main.js"></script>
-    <script src="js/backtest.js"></script>
-    <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
->>>>>>> parent of fcbe645 (JavaScript 檔案載入順序)
     
     <script>
         // Initialize Lucide icons
@@ -1500,7 +1496,7 @@
                     const backtestBtn = document.getElementById('backtestBtn');
                     if (backtestBtn) {
                         // 滾動到左邊畫面的開始回測按鈕
-                        backtestBtn.scrollIntoView({ 
+                        backtestBtn.scrollIntoView({
                             behavior: 'smooth', 
                             block: 'center',
                             inline: 'nearest'
