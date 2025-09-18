@@ -162,7 +162,7 @@ function clearPreviousResults() {
 }
 
 function handleBacktestResult(result, stockName, dataSource) {
-    console.log("[Main] handleBacktestResult received:", result);
+    console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
@@ -178,7 +178,6 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
-        displayPerformanceTable(lastSubPeriodResults);
         activateTab('summary');
 
         setTimeout(() => {
