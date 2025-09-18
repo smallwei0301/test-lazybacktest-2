@@ -106,7 +106,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
                 const dateStr = `${year}${month}01`;
                 
                 // --- 關鍵修正：使用正確的 Netlify Functions 路徑 ---
-                const proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${stockNo}&date=${dateStr}`;
+                const proxyUrl = `/api/twse/?stockNo=${stockNo}&date=${dateStr}`;
                 // --- 修正結束 ---
 
                 const response = await fetch(proxyUrl);
