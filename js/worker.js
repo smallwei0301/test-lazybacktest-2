@@ -80,51 +80,30 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
-    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType}) from ${startDate} to ${endDate}`);
-
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-    const months = [];
-    let current = new Date(sDate.getFullYear(), sDate.getMonth(), 1);
-
-    while (current <= eDate) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-        current.setMonth(current.getMonth() + 1);
-    }
-     if (months.length === 0 && sDate <= eDate) {
-        const y = sDate.getFullYear();
-        const m = String(sDate.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-    }
-
-    const allRawData = [];
-    let dataSource = '未知';
-    let stockName = '';
+    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType})`);
 
     const m = String(marketType || '').toUpperCase();
-    const isTpex = m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx');
-    const proxyPath = isTpex ? '/api/tpex/' : '/api/twse/';
+    // 決定要呼叫哪一個代理（預設為 TWSE）
+    let proxyUrl;
+    if (m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx') ) {
+        proxyUrl = `/api/tpex/?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+    } else {
+        proxyUrl = `/api/twse/?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+    }
 
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        const proxyUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
-        try {
-            self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
-            const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            if (!response.ok) {
-                console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                continue; // Try next month
-            }
-            const payload = await response.json();
-            if (payload.error) {
-                console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
-                continue;
-            }
-            
-            dataSource = payload.dataSource || (isTpex ? 'TPEX' : 'TWSE');
-            if (payload.stockName && !stockName) stockName = payload.stockName;
+    try {
+        const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+        if (!response.ok) {
+            throw new Error(`代理伺服器錯誤: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (payload.error) {
+            throw new Error(`代理回傳錯誤: ${payload.error}`);
+        }
+
+        const dataSource = payload.dataSource || '未知';
+        const stockName = payload.stockName || '';
 
             let raw = payload.aaData || payload.data || [];
             if (raw.length > 0) {
