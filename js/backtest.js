@@ -100,7 +100,7 @@ function runBacktestInternal() {
 
         const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
         if(useCache && cachedStockData) {
-            workerMsg.cachedData = cachedStockData; // Send main thread cache to worker
+            workerMsg.cachedData = cachedStockData;
             console.log("[Main] Sending cached data to worker for backtest.");
         } else {
             console.log("[Main] Fetching new data for backtest.");
@@ -183,8 +183,6 @@ function handleBacktestResult(result, stockName, dataSource) {
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
-
-// ... (The rest of the file from the user's provided text, followed by the new function)
 
 function updateDataSourceDisplay(dataSource, stockName) {
     const dataSourceEl = document.getElementById('dataSourceDisplay');
