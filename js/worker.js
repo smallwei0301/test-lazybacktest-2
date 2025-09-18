@@ -6,7 +6,7 @@ async function fetchTPEXMonthData(stockNo, year, month) {
     // **關鍵修正：確保日期字串是完整的 "年/月/日" 格式**
     const dateStr = `${rocYear}/${formattedMonth}/01`;
 
-    const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${dateStr}`;
+    const proxyUrl = `/api/tpex/?stockNo=${stockNo}&date=${dateStr}`;
     console.log(`[TPEX Worker] 準備透過代理請求 (格式修正): ${proxyUrl}`);
 
     try {
@@ -86,9 +86,9 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     // 決定要呼叫哪一個代理（預設為 TWSE）
     let proxyUrl;
     if (m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx') ) {
-        proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+        proxyUrl = `/api/tpex/?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
     } else {
-        proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+        proxyUrl = `/api/twse/?stockNo=${encodeURIComponent(stockNo)}&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
     }
 
     try {
@@ -249,7 +249,7 @@ async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
         const queryDate = `${rocYear}/${monthNum}`;
 
         // 關鍵檢查點：確保 proxy 路徑完全正確
-        const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${queryDate}`;
+        const proxyUrl = `/api/tpex/?stockNo=${stockNo}&date=${queryDate}`;
         console.log(`[TPEX Worker] 準備透過代理請求: ${proxyUrl}`);
         const attempts = [ proxyUrl ];
         

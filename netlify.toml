@@ -1,10 +1,15 @@
-# Netlify Proxy 設定範例
-
+# Netlify Proxy 設定
 [functions]
   directory = "netlify/functions"
 
 [[redirects]]
   from = "/api/tpex/*"
-  to = "/.netlify/functions/tpex-proxy?path=:splat"
+  to = "/.netlify/functions/tpex-proxy"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/twse/*"
+  to = "/.netlify/functions/twse-proxy"
   status = 200
   force = true
