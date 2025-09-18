@@ -161,6 +161,19 @@ function clearPreviousResults() {
     }
 }
 
+function updateDataSourceDisplay(dataSource, stockName) {
+    const displayEl = document.getElementById('dataSourceDisplay');
+    if (!displayEl) return;
+
+    if (dataSource) {
+        let sourceText = `數據來源: ${dataSource}`;
+        displayEl.textContent = sourceText;
+        displayEl.classList.remove('hidden');
+    } else {
+        displayEl.classList.add('hidden');
+    }
+}
+
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
@@ -175,6 +188,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastOverallResult = result;
         lastSubPeriodResults = result.subPeriodResults;
 
+        updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
