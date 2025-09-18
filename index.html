@@ -421,13 +421,15 @@
                                                     class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                     style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                 />
-                                                <div class="flex items-center gap-2 text-xs">
-                                                    <span class="text-muted-foreground" style="color: var(--muted-foreground);">市場:</span>
-                                                    <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" id="marketSwitch" class="sr-only peer">
-                                                        <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                                        <span id="marketLabel" class="ml-2 text-xs font-medium text-foreground" style="color: var(--foreground);">上市</span>
-                                                    </label>
+                                                <div class="flex items-center space-x-4">
+                                                    <div class="flex items-center">
+                                                        <input type="radio" id="market-twse" name="market-type" value="twse" class="h-4 w-4 text-primary focus:ring-primary border-gray-300" checked>
+                                                        <label for="market-twse" class="ml-2 block text-sm font-medium text-gray-700">上市 (TWSE)</label>
+                                                    </div>
+                                                    <div class="flex items-center">
+                                                        <input type="radio" id="market-tpex" name="market-type" value="tpex" class="h-4 w-4 text-primary focus:ring-primary border-gray-300">
+                                                        <label for="market-tpex" class="ml-2 block text-sm font-medium text-gray-700">上櫃 (TPEX)</label>
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
@@ -1389,11 +1391,12 @@
         </div>
     </div>
 
-    <script src="js/config.js" defer></script>
-    <script src="js/main.js" defer></script>
-    <script src="js/backtest.js" defer></script>
-    <script src="js/batch-optimization.js" defer></script>
-    <script src="js/loader.js" defer></script>
+    <script src="js/config.js"></script>
+    <script src="js/backtest.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/batch-optimization.js"></script>
+
+    <script src="js/loader.js"></script>
     
     <script>
         // Initialize Lucide icons

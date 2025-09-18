@@ -1,3 +1,4 @@
+let currentMarket = 'twse'; // 初始化當前市場，預設為 'twse' (上市)
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
