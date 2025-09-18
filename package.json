@@ -4,6 +4,7 @@
   "private": true,
   "description": "LazyBacktest with Netlify Functions proxy",
   "dependencies": {
+    "@netlify/blobs": "^6.0.0",
     "node-fetch": "^2.6.7"
   }
 }
