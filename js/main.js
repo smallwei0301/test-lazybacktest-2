@@ -150,8 +150,4 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) {
         console.error('[Main] Initialization failed:', error);
     }
-<<<<<<< HEAD
 });
-=======
-});
->>>>>>> parent of 2443748 ( JavaScript 檔案合併)
