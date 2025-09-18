@@ -101,8 +101,3 @@ export default async (req, context) => {
         }
     }
 };
-
-export const config = {
-  path: "/.netlify/functions/tpex-proxy",
-  prefer_static: true
-};

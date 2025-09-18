@@ -69,8 +69,3 @@ export default async (req, context) => {
         return new Response(JSON.stringify({ error: error.message }), { status: 500 });
     }
 };
-
-export const config = {
-  path: "/.netlify/functions/twse-proxy",
-  prefer_static: true
-};

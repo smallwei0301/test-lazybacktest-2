@@ -113,26 +113,11 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         try {
             self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
             const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            
             if (!response.ok) {
                 console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                try {
-                    const errorText = await response.text();
-                    console.warn(`[Worker] 代理錯誤內容:`, errorText);
-                } catch (e) {}
                 continue; // Try next month
             }
-
-            const responseText = await response.text();
-            let payload;
-            try {
-                payload = JSON.parse(responseText);
-            } catch (e) {
-                console.error(`[Worker] 呼叫代理 ${proxyUrl} 失敗: JSON 解析錯誤`, e);
-                console.error(`[Worker] 代理回傳的原始內容:`, responseText);
-                continue;
-            }
-
+            const payload = await response.json();
             if (payload.error) {
                 console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
                 continue;
@@ -147,7 +132,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             }
             await new Promise(r => setTimeout(r, 250 + Math.random() * 100)); // Be nice to the proxy
         } catch (error) {
-            console.error(`[Worker] 呼叫代理 ${proxyUrl} 發生網路層級錯誤:`, error);
+            console.error(`[Worker] 呼叫代理 ${proxyUrl} 失敗:`, error);
             continue;
         }
     }
