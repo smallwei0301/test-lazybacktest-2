@@ -1627,7 +1627,6 @@ function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(
 // 全域變數
 let currentMarket = 'TWSE'; // 預設為上市
 let isAutoSwitching = false; // 防止無限重複切換
-let isFetchingName = false; // 防止重複查詢股票名稱
 
 // 初始化市場切換功能
 function initializeMarketSwitch() {
@@ -1700,79 +1699,37 @@ function debouncedFetchStockName(stockCode) {
     }, 800); // 800ms 防抖
 }
 
-// 取得股票名稱 (v9.3 升級版)
+// 取得股票名稱
 async function fetchStockName(stockCode) {
     if (!stockCode || stockCode === 'TAIEX') return;
-
-    // 避免重複查詢
-    if (window.isFetchingName) {
-        console.log('[Stock Name] 已有進行中的查詢，跳過本次請求');
-        return;
-    }
-    window.isFetchingName = true;
-
-    console.log(`[Stock Name v9.3] 查詢股票名稱: ${stockCode} (市場: ${currentMarket})`);
-
+    
+    console.log(`[Stock Name] 查詢股票名稱: ${stockCode} (市場: ${currentMarket})`);
+    
     try {
-        showStockName('查詢中...', 'info');
-
-        // 先在當前市場查詢
-        let result = null;
-        if (currentMarket === 'TWSE') {
-            result = await fetchStockNameFromTWSE(stockCode);
-        } else {
-            result = await fetchStockNameFromTPEX(stockCode);
-        }
-
-        // fetchStockNameFromTPEX 可能回傳 { name: '...', error: '...' } 或直接字串
         let stockName = null;
-        if (result) {
-            if (typeof result === 'string') stockName = result;
-            else if (typeof result === 'object' && result.name) stockName = result.name;
+        
+        // 先在當前選擇的市場查詢
+        if (currentMarket === 'TWSE') {
+            stockName = await fetchStockNameFromTWSE(stockCode);
+        } else {
+            stockName = await fetchStockNameFromTPEX(stockCode);
         }
-
+        
         if (stockName) {
             showStockName(stockName, 'success');
-            window.isFetchingName = false;
             return;
         }
-
-        // 當前市場查不到，嘗試在另一個市場查詢並自動切換
+        
+        // 當前市場查不到，顯示切換市場的建議
         const otherMarket = currentMarket === 'TWSE' ? 'TPEX' : 'TWSE';
         const currentMarketName = currentMarket === 'TWSE' ? '上市' : '上櫃';
         const otherMarketName = otherMarket === 'TWSE' ? '上市' : '上櫃';
-
-        // 嘗試在另一個市場查詢
-        let otherResult = null;
-        if (otherMarket === 'TWSE') {
-            otherResult = await fetchStockNameFromTWSE(stockCode);
-        } else {
-            otherResult = await fetchStockNameFromTPEX(stockCode);
-        }
-
-        let otherStockName = null;
-        if (otherResult) {
-            if (typeof otherResult === 'string') otherStockName = otherResult;
-            else if (typeof otherResult === 'object' && otherResult.name) otherStockName = otherResult.name;
-        }
-
-        if (otherStockName) {
-            // 自動切換市場並顯示名稱
-            // switchToMarket 會處理 UI 與 isAutoSwitching
-            await switchToMarket(otherMarket, stockCode, otherMarketName);
-            // switchToMarket 自身會顯示成功訊息
-            window.isFetchingName = false;
-            return;
-        }
-
-        // 兩個市場都查無此代碼，顯示建議按鈕切換
+        
         showMarketSwitchSuggestion(stockCode, currentMarketName, otherMarketName, otherMarket);
-
+        
     } catch (error) {
-        console.error('[Stock Name v9.3] 查詢錯誤:', error);
+        console.error('[Stock Name] 查詢錯誤:', error);
         showStockName('查詢失敗', 'error');
-    } finally {
-        window.isFetchingName = false;
     }
 }
 
