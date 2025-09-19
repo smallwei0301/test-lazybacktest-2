@@ -11,10 +11,9 @@ function isQuotaError(error) {
 export default async (req, context) => {
     const params = new URL(req.url).searchParams;
     const stockNo = params.get('stockNo');
-    const date = params.get('date');
-    if (!stockNo || !date) return new Response(JSON.stringify({ error: '缺少參數' }), { status: 400 });
+    if (!stockNo) return new Response(JSON.stringify({ error: '缺少股票代號' }), { status: 400 });
 
-    const cacheKey = `${stockNo}_${date}`;
+    const cacheKey = stockNo; // Cache by stockNo only, as we'll fetch all data
 
     // --- Tier 1: 嘗試 Netlify Blobs ---
     try {
@@ -41,7 +40,7 @@ export default async (req, context) => {
 
     // --- 快取未命中，請求遠端資料 ---
     console.log(`[TWSE Proxy v9.4] 快取未命中，請求 TWSE for ${cacheKey}`);
-    const targetUrl = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${date}&stockNo=${stockNo}`;
+    const targetUrl = `https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=json&stockNo=${stockNo}`;
     try {
         const response = await fetch(targetUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
         const data = await response.json();
@@ -50,7 +49,8 @@ export default async (req, context) => {
         if (data.stat !== 'OK') {
            finalResult = { stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: 'TWSE' };
         } else {
-            const stockName = data.title.split(' ')[2];
+            // STOCK_DAY_ALL might not have 'title', so use stockNo as fallback for name
+            const stockName = data.stockName || data.title?.split(' ')[2] || stockNo;
             const formattedAaData = data.data.map(item => [ item[0], stockNo, stockName, parseFloat(item[3].replace(/,/g, '')), parseFloat(item[4].replace(/,/g, '')), parseFloat(item[5].replace(/,/g, '')), parseFloat(item[6].replace(/,/g, '')), parseFloat(item[8].replace(/,/g, '')), parseInt(item[1].replace(/,/g, ''), 10) ]);
             finalResult = { stockName, iTotalRecords: formattedAaData.length, aaData: formattedAaData, dataSource: 'TWSE' };
         }
