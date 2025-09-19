@@ -73,9 +73,15 @@ export default async (req, context) => {
                 console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含非預期錯誤: ${cached.data.error}，將嘗試重新獲取。`);
                 // Fall through to re-fetch data
             } else {
-                console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
-                cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
-                return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
+                // Add a check for the format of cached.data.aaData
+                if (cached.data && Array.isArray(cached.data.aaData) && cached.data.aaData.length > 0 && typeof cached.data.aaData[0][0] === 'string' && /^\d{2,4}[\/\.]\d{1,2}[\/\.]\d{1,2}$/.test(cached.data.aaData[0][0])) {
+                    console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
+                    cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
+                    return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
+                } else {
+                    console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據格式異常，將嘗試重新獲取。`);
+                    // Fall through to re-fetch data
+                }
             }
         }
     } catch (error) {
