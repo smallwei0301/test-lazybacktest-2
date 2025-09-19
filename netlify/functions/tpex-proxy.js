@@ -66,8 +66,11 @@ export default async (req, context) => {
         const cached = await store.get(symbol, { type: 'json' });
         if (cached && (Date.now() - cached.timestamp < 12 * 60 * 60 * 1000)) {
             // Check if cached data itself contains an error
-            if (cached.data && cached.data.error) {
+            if (cached.data && cached.data.error && (typeof cached.data.error === 'string' && cached.data.error.includes('缺少參數'))) {
                 console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含錯誤: ${cached.data.error}，將嘗試重新獲取。`);
+                // Fall through to re-fetch data
+            } else if (cached.data && cached.data.error) { // Handle other types of errors in cached data
+                console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含非預期錯誤: ${cached.data.error}，將嘗試重新獲取。`);
                 // Fall through to re-fetch data
             } else {
                 console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
