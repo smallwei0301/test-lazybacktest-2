@@ -25,6 +25,7 @@ function runBacktestInternal() {
         let cachedEntry = null;
         if (useCache) {
             cachedEntry = cachedDataStore.get(cacheKey);
+
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
                 const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
                 cachedStockData = sliced;
@@ -32,6 +33,7 @@ function runBacktestInternal() {
                 console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
+
                 useCache = false;
                 cachedEntry = null;
             }
@@ -114,6 +116,7 @@ function runBacktestInternal() {
                      lastFetchSettings = curSettings;
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
+
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }

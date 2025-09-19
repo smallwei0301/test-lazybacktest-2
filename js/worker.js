@@ -1,3 +1,4 @@
+
 // --- Worker Data Acquisition & Cache (v10.2) ---
 const WORKER_DATA_VERSION = "v10.2";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
@@ -189,6 +190,7 @@ function mergeMonthlyData(entry, newRows) {
   entry.data = Array.from(map.values()).sort((a, b) =>
     a.date.localeCompare(b.date),
   );
+
 }
 
 function getWorkerCacheEntry(marketKey, cacheKey) {
@@ -562,6 +564,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         stockName: monthStockName,
         usedCache,
       };
+
       } finally {
         completed += 1;
         const progress = 10 + Math.round((completed / months.length) * 35);
@@ -690,6 +693,7 @@ function calculateMA(prices, period) {
     if (i >= period - 1 && validCount === period) {
       result[i] = sum / period;
     }
+
   }
 
   return result;
@@ -900,6 +904,7 @@ function calculateMACD(
       histogram[i] = macd[i] - signal[i];
     }
   }
+
 
   return { macd, signal, histogram };
 }
@@ -2860,6 +2865,7 @@ function runStrategy(data, params) {
             );
             shortShares = 0;
           }
+
         } else {
           console.warn(
             `[Worker SHORT] Invalid trade price (${tradePrice}) for Short Signal on ${dates[i]}`,
