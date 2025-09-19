@@ -1,363 +1,297 @@
-// --- TPEX 月數據獲取 ---
-async function fetchTPEXMonthData(stockNo, year, month) {
-    const rocYear = year - 1911;
-    const formattedMonth = String(month).padStart(2, '0');
-    
-    // **關鍵修正：確保日期字串是完整的 "年/月/日" 格式**
-    const dateStr = `${rocYear}/${formattedMonth}/01`;
-
-    const proxyUrl = `/api/tpex/?stockNo=${stockNo}&date=${dateStr}`;
-    console.log(`[TPEX Worker] 準備透過代理請求 (格式修正): ${proxyUrl}`);
-
-    try {
-        const response = await fetch(proxyUrl);
-        if (!response.ok) {
-            console.error(`[TPEX Worker] 代理伺服器回應錯誤: ${response.status}`);
-            const errorBody = await response.text();
-            console.error(`[TPEX Worker] 錯誤內容:`, errorBody);
-            return { error: `Proxy Error: ${response.status}` };
-        }
-
-        const data = await response.json();
-        
-        if (data.error) {
-            console.warn(`[TPEX Worker] 代理回傳查無資料或錯誤:`, data);
-            return { error: data.error, diagnostics: data.diagnostics }; 
-        }
-        
-        return data.aaData || [];
-    } catch (error) {
-        console.error(`[TPEX Worker] 呼叫代理時發生錯誤 for ${stockNo} ${dateStr}:`, error);
-        return { error: error.message };
-    }
-}
-// --- Web Worker (backtest-worker.js) - v3.4.1 ---
-// 變更:
-// - getSuggestion: 修正建議邏輯，確保正確反映賣出/回補/等待狀態
-// - runStrategy: 驗證年化報酬率計算
-// - 確保 workerCachedStockData 正確傳遞和使用
-
-// 全局變數 (Worker 範圍)
-let workerCachedStockData = null; // 在 Worker 中快取數據
+// --- Worker Data Acquisition & Cache (v10.0) ---
+const WORKER_DATA_VERSION = 'v10.0';
+const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
+let workerLastDataset = null;
+let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
-// --- 輔助函數 (指標計算 & 風險指標 - 同 v3.3.x) ---
-function calculateMA(prices, period) { /* ... (程式碼與 Part 1/2 相同) ... */ if (!Array.isArray(prices) || period <= 0 || prices.length < period) { return new Array(prices.length).fill(null); } const ma = new Array(prices.length).fill(null); let sum = 0; let iCount = 0; for (let i = 0; i < period; i++) { if (prices[i] !== null && !isNaN(prices[i])) { sum += prices[i]; iCount++; } } if(iCount < period && prices.length >= period) { let firstValidWindowFound = false; for(let start = 0; start <= prices.length - period; start++) { sum = 0; iCount = 0; let windowIsValid = true; for(let k=0; k<period; k++) { if (prices[start+k] !== null && !isNaN(prices[start+k])) { sum += prices[start+k]; iCount++; } else { windowIsValid = false; break; } } if (windowIsValid && iCount === period) { ma[start + period - 1] = sum / period; firstValidWindowFound = true; for (let i = start + period; i < prices.length; i++) { if (prices[i] === null || isNaN(prices[i]) || prices[i-period] === null || isNaN(prices[i-period])) { ma[i] = null; sum = NaN; continue; } if (isNaN(sum)) { let recoverySum = 0; let recoveryCount = 0; for (let j = 0; j < period; j++) { const priceIndex = i - period + 1 + j; if (priceIndex >= 0 && prices[priceIndex] !== null && !isNaN(prices[priceIndex])) { recoverySum += prices[priceIndex]; recoveryCount++; } else { recoveryCount = 0; break; } } if (recoveryCount === period) { sum = recoverySum; ma[i] = sum / period; } else { ma[i] = null; } } else { try { sum = sum - prices[i - period] + prices[i]; ma[i] = sum / period; } catch(e) { ma[i] = null; sum = NaN; } } } return ma; } } if (!firstValidWindowFound) { /* console.warn(`[Worker MA] No valid window of size ${period} found.`); */ return new Array(prices.length).fill(null); } } else if (prices.length < period) { /* console.warn(`[Worker MA] prices length ${prices.length} < period ${period}`); */ return new Array(prices.length).fill(null); } if (iCount === period) { ma[period - 1] = sum / period; } else { return new Array(prices.length).fill(null); } for (let i = period; i < prices.length; i++) { if (prices[i] === null || isNaN(prices[i]) || prices[i-period] === null || isNaN(prices[i-period])) { ma[i] = null; sum = NaN; continue; } if (isNaN(sum)) { let recoverySum = 0; let recoveryCount = 0; for (let j = 0; j < period; j++) { const priceIndex = i - period + 1 + j; if (priceIndex >= 0 && prices[priceIndex] !== null && !isNaN(prices[priceIndex])) { recoverySum += prices[priceIndex]; recoveryCount++; } else { recoveryCount = 0; break; } } if (recoveryCount === period) { sum = recoverySum; ma[i] = sum / period; } else { ma[i] = null; } } else { try { sum = sum - prices[i - period] + prices[i]; ma[i] = sum / period; } catch(e) { /* console.error(`[Worker MA] Error at index ${i}:`, e); */ ma[i] = null; sum = NaN; } } } return ma; }
-function calculateEMA(prices, period) { /* ... (程式碼與 Part 1/2 相同) ... */ if (!Array.isArray(prices) || period <= 0 || prices.length < period) { return new Array(prices.length).fill(null); } const ema = new Array(prices.length).fill(null); const multiplier = 2 / (period + 1); let emaPrev = null; let sum = 0; let validCount = 0; for(let i=0; i<period; i++){ if(prices[i] !== null && !isNaN(prices[i])){ sum += prices[i]; validCount++; } } if(validCount < period) return new Array(prices.length).fill(null); emaPrev = sum / period; ema[period - 1] = emaPrev; for (let i = period; i < prices.length; i++) { if (prices[i] === null || isNaN(prices[i]) || emaPrev === null) { ema[i] = null; emaPrev = null; continue; } try { const emaCurrent = (prices[i] - emaPrev) * multiplier + emaPrev; ema[i] = emaCurrent; emaPrev = emaCurrent; } catch(e) { ema[i] = null; emaPrev = null; } } return ema; }
-function calculateRSI(prices, period = 14) { /* ... (程式碼與 Part 1/2 相同) ... */ if (!Array.isArray(prices) || period <= 0 || prices.length <= period) { return new Array(prices.length).fill(null); } const rsi = new Array(prices.length).fill(null); const changes = []; let firstValidIdx = -1; for (let i = 1; i < prices.length; i++) { if(prices[i] !== null && !isNaN(prices[i]) && prices[i-1] !== null && !isNaN(prices[i-1])) { changes.push(prices[i] - prices[i - 1]); if (firstValidIdx === -1) firstValidIdx = i - 1; } else { changes.push(null); } } if(firstValidIdx === -1 || firstValidIdx > prices.length - period - 1) { return new Array(prices.length).fill(null); } let gains = 0; let losses = 0; let validCount = 0; const startIdx = firstValidIdx; if (startIdx + period > changes.length) return new Array(prices.length).fill(null); for (let i = startIdx; i < startIdx + period; i++) { if (changes[i] === null) return new Array(prices.length).fill(null); if (changes[i] > 0) gains += changes[i]; else losses -= changes[i]; validCount++; } if(validCount < period) return new Array(prices.length).fill(null); let avgGain = gains / period; let avgLoss = losses / period; const firstRsiIdx = startIdx + period; if(firstRsiIdx >= prices.length) return new Array(prices.length).fill(null); try { if (avgLoss === 0) { rsi[firstRsiIdx] = 100; } else { const rs = avgGain / avgLoss; rsi[firstRsiIdx] = 100 - (100 / (1 + rs)); } } catch(e) { rsi[firstRsiIdx] = null; } for (let i = startIdx + period; i < changes.length; i++) { const currentChange = changes[i]; const targetIdx = i + 1; if(targetIdx >= prices.length) break; if (currentChange === null || avgGain === null || avgLoss === null) { avgGain = null; avgLoss = null; rsi[targetIdx] = null; continue; } try { const currentGain = currentChange > 0 ? currentChange : 0; const currentLoss = currentChange < 0 ? -currentChange : 0; avgGain = (avgGain * (period - 1) + currentGain) / period; avgLoss = (avgLoss * (period - 1) + currentLoss) / period; if (avgLoss === 0) { rsi[targetIdx] = 100; } else { const rs = avgGain / avgLoss; rsi[targetIdx] = 100 - (100 / (1 + rs)); } } catch(e) { rsi[targetIdx] = null; }} return rsi; }
-function calculateDIEMA(diValues, period) { /* ... (程式碼與 Part 1/2 相同) ... */ if (!Array.isArray(diValues) || period <= 0 || diValues.length < period) { return new Array(diValues.length).fill(null); } const ema = new Array(diValues.length).fill(null); let emaPrev = null; let firstEmaIdx = -1; let sum = 0; let count = 0; for (let i = 0; i < period; i++) { if (diValues[i] !== null && !isNaN(diValues[i])) { sum += diValues[i]; count++; } } if (count === period) { ema[period - 1] = sum / period; emaPrev = ema[period - 1]; firstEmaIdx = period - 1; } else { return ema; } for (let i = period; i < diValues.length; i++) { if (diValues[i] === null || isNaN(diValues[i]) || emaPrev === null) { ema[i] = null; emaPrev = null; continue; } try { ema[i] = (emaPrev * (period - 1) + diValues[i] * 2) / (period + 1); emaPrev = ema[i]; } catch (e) { ema[i] = null; emaPrev = null; } } return ema; }
-function calculateMACD(highs, lows, closes, shortP=12, longP=26, signalP=9) { /* ... (程式碼與上次 Part 3 相同) ... */ const n = highs.length; if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || highs.length !== n || lows.length !== n || closes.length !== n || shortP <= 0 || longP <= shortP || signalP <= 0 || n < longP) { return { macd: Array(n).fill(null), signal: Array(n).fill(null), histogram: Array(n).fill(null) }; } const diValues = Array(n).fill(null); for (let i = 0; i < n; i++) { if (highs[i] !== null && !isNaN(highs[i]) && lows[i] !== null && !isNaN(lows[i]) && closes[i] !== null && !isNaN(closes[i])) { try { diValues[i] = (highs[i] + lows[i] + 2 * closes[i]) / 4; } catch (e) { diValues[i] = null; } } } const emaN = calculateDIEMA(diValues, shortP); const emaM = calculateDIEMA(diValues, longP); const difLine = Array(n).fill(null); const validDifValues = []; let firstDifIdx = -1; for (let i = longP - 1; i < n; i++) { if (emaN[i] !== null && emaM[i] !== null) { try { difLine[i] = emaN[i] - emaM[i]; if (firstDifIdx === -1) firstDifIdx = i; validDifValues.push({ index: i, value: difLine[i] }); } catch (e) { difLine[i] = null; } } } const signalLine = Array(n).fill(null); if (validDifValues.length >= signalP) { let signalPrev = null; for (let i = 0; i < validDifValues.length; i++) { const currentDifData = validDifValues[i]; const targetIdx = currentDifData.index; if (i === signalP - 1) { let sum = 0; let count = 0; for (let j = 0; j < signalP; j++) { if (validDifValues[j].value !== null && !isNaN(validDifValues[j].value)) { sum += validDifValues[j].value; count++; } } if (count === signalP) { signalLine[targetIdx] = sum / signalP; signalPrev = signalLine[targetIdx]; } else { signalLine[targetIdx] = null; signalPrev = null; } } else if (i >= signalP) { if (signalPrev !== null && currentDifData.value !== null && !isNaN(currentDifData.value)) { try { signalLine[targetIdx] = (signalPrev * (signalP - 1) + currentDifData.value * 2) / (signalP + 1); signalPrev = signalLine[targetIdx]; } catch (e) { signalLine[targetIdx] = null; signalPrev = null; } } else { signalLine[targetIdx] = null; signalPrev = null; } } else { signalLine[targetIdx] = null; } } } const hist = Array(n).fill(null); for (let i = 0; i < n; i++) { if (difLine[i] !== null && signalLine[i] !== null) { try { hist[i] = difLine[i] - signalLine[i]; } catch (e) { hist[i] = null; } } } return { macd: difLine, signal: signalLine, histogram: hist }; }
-function calculateBollingerBands(prices, period=20, deviations=2) { /* ... (程式碼與上次 Part 3 相同) ... */ if (!Array.isArray(prices) || period <= 0 || deviations <= 0 || prices.length < period) { return { upper: Array(prices.length).fill(null), middle: Array(prices.length).fill(null), lower: Array(prices.length).fill(null) }; } const middle = calculateMA(prices, period); const upper = Array(prices.length).fill(null); const lower = Array(prices.length).fill(null); for (let i = period - 1; i < prices.length; i++) { if (middle[i] === null) { upper[i] = null; lower[i] = null; continue; } let vSum = 0; let count = 0; for (let j = i - period + 1; j <= i; j++) { if(prices[j] === null || isNaN(prices[j])) { vSum = NaN; break; } try { vSum += Math.pow(prices[j] - middle[i], 2); count++; } catch(e) { vSum = NaN; break; } } if (isNaN(vSum) || count < period) { upper[i] = null; lower[i] = null; continue; } try { const stdDev = Math.sqrt(vSum / period); upper[i] = middle[i] + deviations * stdDev; lower[i] = middle[i] - deviations * stdDev; } catch(e) { upper[i] = null; lower[i] = null; } } return { upper, middle, lower }; }
-function calculateKD(highs, lows, closes, period = 9) { /* ... (程式碼與上次 Part 3 相同) ... */ const n = closes.length; if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || highs.length !== n || lows.length !== n || period <= 0 || n < period) { /* console.warn("[Worker KD] Invalid input data or period."); */ return { k: Array(n).fill(null), d: Array(n).fill(null) }; } const rsvArr = Array(n).fill(null); const kLine = Array(n).fill(null); const dLine = Array(n).fill(null); for (let i = period - 1; i < n; i++) { let hh = -Infinity; let ll = Infinity; let validPeriod = true; for (let j = i - period + 1; j <= i; j++) { if (j < 0 || highs[j] === null || isNaN(highs[j]) || lows[j] === null || isNaN(lows[j])) { validPeriod = false; break; } hh = Math.max(hh, highs[j]); ll = Math.min(ll, lows[j]); } if (!validPeriod || closes[i] === null || isNaN(closes[i])) { rsvArr[i] = null; continue; } try { if (hh === ll) { rsvArr[i] = (i > 0 && rsvArr[i-1] !== null) ? rsvArr[i-1] : 50; } else { rsvArr[i] = ((closes[i] - ll) / (hh - ll)) * 100; } } catch(e) { /* console.error(`[Worker KD] RSV Error at ${i}:`, e); */ rsvArr[i] = null; } } let kPrev = null; let dPrev = null; for(let i = 0; i < n; i++) { const currentRsv = rsvArr[i]; if (currentRsv === null) { kLine[i] = null; dLine[i] = null; kPrev = null; dPrev = null; continue; } const yesterdayK = (kPrev !== null) ? kPrev : 50.0; const yesterdayD = (dPrev !== null) ? dPrev : 50.0; let kNow = null; let dNow = null; try { kNow = (1/3) * currentRsv + (2/3) * yesterdayK; dNow = (1/3) * kNow + (2/3) * yesterdayD; kLine[i] = Math.max(0, Math.min(100, kNow)); dLine[i] = Math.max(0, Math.min(100, dNow)); } catch (e) { /* console.error(`[Worker KD] K/D Error at ${i}:`, e); */ kLine[i] = null; dLine[i] = null; } kPrev = kLine[i]; dPrev = dLine[i]; } return { k: kLine, d: dLine }; }
-function calculateWilliams(highs, lows, closes, period=14) { /* ... (程式碼與上次 Part 3 相同) ... */ if (!Array.isArray(highs) || !Array.isArray(lows) || !Array.isArray(closes) || highs.length !== lows.length || highs.length !== closes.length || period <= 0 || closes.length < period) { return Array(closes.length).fill(null); } const williams = Array(closes.length).fill(null); for (let i = period - 1; i < closes.length; i++) { let hh = -Infinity; let ll = Infinity; let validP = true; for (let j = i - period + 1; j <= i; j++) { if (highs[j] === null || isNaN(highs[j]) || lows[j] === null || isNaN(lows[j])) { validP = false; break; } hh = Math.max(hh, highs[j]); ll = Math.min(ll, lows[j]); } if (!validP || closes[i] === null || isNaN(closes[i])) { williams[i] = null; continue; } try { if (hh === ll) { williams[i] = (i > 0 && williams[i-1] !== null) ? williams[i-1] : -50; } else { williams[i] = ((hh - closes[i]) / (hh - ll)) * -100; } } catch(e) { williams[i] = null; } } return williams; }
-function calculateDailyReturns(portfolioVals, dates) { /* ... (程式碼與上次 Part 3 相同) ... */ if (!portfolioVals || portfolioVals.length < 2) return []; const returns = []; for (let i = 1; i < portfolioVals.length; i++) { if (portfolioVals[i] !== null && !isNaN(portfolioVals[i]) && portfolioVals[i - 1] !== null && !isNaN(portfolioVals[i - 1]) && portfolioVals[i - 1] !== 0) { returns.push((portfolioVals[i] / portfolioVals[i - 1]) - 1); } else { returns.push(0); } } return returns; }
-function calculateSharpeRatio(dailyReturns, annualReturn) { /* ... (程式碼與上次 Part 3 相同) ... */ const rfAnnual = 0.01; if (!dailyReturns || dailyReturns.length === 0) return 0; const avgReturn = dailyReturns.reduce((s, r) => s + r, 0) / dailyReturns.length; const variance = dailyReturns.reduce((s, r) => s + Math.pow(r - avgReturn, 2), 0) / dailyReturns.length; const stdDev = Math.sqrt(variance); if (stdDev === 0) return 0; const annStdDev = stdDev * Math.sqrt(252); const annExcessReturn = (annualReturn / 100) - rfAnnual; return annStdDev !== 0 ? annExcessReturn / annStdDev : 0; }
-function calculateSortinoRatio(dailyReturns, annualReturn) { /* ... (程式碼與上次 Part 3 相同) ... */ const targetAnn = 0.01; const targetDay = Math.pow(1 + targetAnn, 1 / 252) - 1; if (!dailyReturns || dailyReturns.length === 0) return 0; const downsideDiffs = dailyReturns.map(r => Math.min(0, r - targetDay)); const downsideVar = downsideDiffs.reduce((s, d) => s + Math.pow(d, 2), 0) / dailyReturns.length; const downsideDev = Math.sqrt(downsideVar); if (downsideDev === 0) return Infinity; const annDownsideDev = downsideDev * Math.sqrt(252); const annExcessReturn = (annualReturn / 100) - targetAnn; return annDownsideDev !== 0 ? annExcessReturn / annDownsideDev : Infinity; }
-function calculateMaxDrawdown(portfolioValues) { /* ... (程式碼與上次 Part 3 相同) ... */ let peak = -Infinity; let maxDD = 0; for (const value of portfolioValues) { if (value === null || isNaN(value)) continue; peak = Math.max(peak, value); const drawdown = peak > 0 ? ((peak - value) / peak) * 100 : 0; maxDD = Math.max(maxDD, drawdown); } return maxDD; }
+function getMarketKey(marketType) {
+    return (marketType || 'TWSE').toUpperCase();
+}
 
-// --- 數據獲取 ---
-// --- 日期格式化函數 ---
+function buildCacheKey(stockNo, startDate, endDate) {
+    return `${stockNo}__${startDate}__${endDate}`;
+}
+
+function ensureMarketCache(marketKey) {
+    if (!workerCachedStockData.has(marketKey)) {
+        workerCachedStockData.set(marketKey, new Map());
+    }
+    return workerCachedStockData.get(marketKey);
+}
+
+function getWorkerCacheEntry(marketKey, cacheKey) {
+    const marketCache = workerCachedStockData.get(marketKey);
+    if (!marketCache) return null;
+    const entry = marketCache.get(cacheKey);
+    if (entry && Array.isArray(entry.data)) {
+        workerLastDataset = entry.data;
+        workerLastMeta = { ...entry.meta, marketKey, dataSource: entry.dataSource, stockName: entry.stockName };
+        return entry;
+    }
+    return null;
+}
+
+function setWorkerCacheEntry(marketKey, cacheKey, entry) {
+    const marketCache = ensureMarketCache(marketKey);
+    marketCache.set(cacheKey, entry);
+    workerLastDataset = entry.data;
+    workerLastMeta = { ...entry.meta, marketKey, dataSource: entry.dataSource, stockName: entry.stockName };
+}
+
+function pad2(value) {
+    return String(value).padStart(2, '0');
+}
+
 function formatTWDateWorker(twDate) {
     try {
         if (!twDate || typeof twDate !== 'string') return null;
         const parts = twDate.split('/');
         if (parts.length !== 3) return null;
         const [y, m, d] = parts;
-        const yInt = parseInt(y);
-        if (isNaN(yInt) || parseInt(m) < 1 || parseInt(m) > 12 || parseInt(d) < 1 || parseInt(d) > 31) return null;
-        return `${1911 + yInt}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        const yInt = parseInt(y, 10);
+        const mInt = parseInt(m, 10);
+        const dInt = parseInt(d, 10);
+        if (Number.isNaN(yInt) || mInt < 1 || mInt > 12 || dInt < 1 || dInt > 31) return null;
+        return `${1911 + yInt}-${pad2(mInt)}-${pad2(dInt)}`;
     } catch (e) {
         console.warn(`Worker Date Error: ${twDate}`, e);
         return null;
     }
 }
 
-// 在 worker.js 中，用此版本替換舊的 fetchStockData：
-// - 根據 marketType 選擇現有的代理 (/netlify/functions/tpex-proxy 或 /netlify/functions/twse-proxy)
-// - 產生回測引擎所需的物件陣列格式：{ date: 'YYYY-MM-DD', open, high, low, close, volume }
-// - 支援多種代理回傳格式（aaData 為陣列或代理直接回傳物件陣列）
+function enumerateMonths(startDate, endDate) {
+    const months = [];
+    const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const last = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (cursor <= last) {
+        const monthKey = `${cursor.getFullYear()}${pad2(cursor.getMonth() + 1)}`;
+        const monthStart = new Date(cursor);
+        const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+        const rangeStart = startDate > monthStart ? new Date(startDate) : monthStart;
+        const rangeEnd = endDate < monthEnd ? new Date(endDate) : monthEnd;
+        months.push({
+            monthKey,
+            label: `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`,
+            rangeStart,
+            rangeEnd,
+            rangeStartISO: rangeStart.toISOString().split('T')[0],
+            rangeEndISO: rangeEnd.toISOString().split('T')[0]
+        });
+        cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months;
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchWithAdaptiveRetry(url, options = {}, attempt = 1) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+        if ((response.status === 429 || response.status >= 500) && attempt < 4) {
+            const backoff = Math.min(1500, 250 * Math.pow(2, attempt - 1));
+            await delay(backoff);
+            return fetchWithAdaptiveRetry(url, options, attempt + 1);
+        }
+        const bodyText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${bodyText?.slice(0, 120)}`);
+    }
+    return response.json();
+}
+
+function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
+    try {
+        let dateStr = null;
+        let open = null, high = null, low = null, close = null, volume = 0;
+        if (Array.isArray(item)) {
+            dateStr = item[0];
+            const parseNumber = (val) => {
+                if (val === null || val === undefined) return null;
+                const num = Number(String(val).replace(/,/g, ''));
+                return Number.isFinite(num) ? num : null;
+            };
+            if (isTpex) {
+                volume = parseNumber(item[1]) || 0;
+                open = parseNumber(item[3]);
+                high = parseNumber(item[4]);
+                low = parseNumber(item[5]);
+                close = parseNumber(item[6]);
+            } else {
+                volume = parseNumber(item[1]) || 0;
+                open = parseNumber(item[3]);
+                high = parseNumber(item[4]);
+                low = parseNumber(item[5]);
+                close = parseNumber(item[6]);
+            }
+        } else if (item && typeof item === 'object') {
+            dateStr = item.date || item.Date || item.tradeDate || null;
+            open = Number(item.open ?? item.Open ?? item.Opening ?? null);
+            high = Number(item.high ?? item.High ?? item.max ?? null);
+            low = Number(item.low ?? item.Low ?? item.min ?? null);
+            close = Number(item.close ?? item.Close ?? null);
+            volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+        } else {
+            return null;
+        }
+        if (!dateStr) return null;
+        let isoDate = null;
+        const trimmed = String(dateStr).trim();
+        if (/^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(trimmed)) {
+            isoDate = formatTWDateWorker(trimmed);
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+            isoDate = trimmed;
+        } else if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(trimmed)) {
+            const [y, m, d] = trimmed.split('/');
+            isoDate = `${y}-${pad2(parseInt(m, 10))}-${pad2(parseInt(d, 10))}`;
+        }
+        if (!isoDate) return null;
+        const d = new Date(isoDate);
+        if (Number.isNaN(d.getTime()) || d < startDateObj || d > endDateObj) return null;
+        if ((open === null || open === 0) && close !== null) open = close;
+        if ((high === null || high === 0) && close !== null) high = Math.max(open ?? close, close);
+        if ((low === null || low === 0) && close !== null) low = Math.min(open ?? close, close);
+        const clean = (val) => (val === null || Number.isNaN(val)) ? null : val;
+        const volNumber = Number(String(volume).replace(/,/g, '')) || 0;
+        return {
+            date: isoDate,
+            open: clean(open),
+            high: clean(high),
+            low: clean(low),
+            close: clean(close),
+            volume: Math.round(volNumber / 1000)
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+function dedupeAndSortData(rows) {
+    const map = new Map();
+    rows.forEach(row => {
+        if (row && row.date) map.set(row.date, row);
+    });
+    return Array.from(map.values()).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function summariseDataSourceFlags(flags, defaultLabel) {
+    if (!flags || flags.size === 0) return defaultLabel;
+    if (flags.size === 1) return Array.from(flags)[0];
+    const hasCache = Array.from(flags).some(src => /快取|cache/i.test(src));
+    const hasRemote = Array.from(flags).some(src => !/快取|cache/i.test(src));
+    if (hasRemote && hasCache) return `${defaultLabel} (部分快取)`;
+    if (hasCache) return `${defaultLabel} (快取)`;
+    return Array.from(flags).join(' / ');
+}
+
+async function runWithConcurrency(items, limit, workerFn) {
+    const results = new Array(items.length);
+    let index = 0;
+    async function runner() {
+        while (index < items.length) {
+            const currentIndex = index++;
+            results[currentIndex] = await workerFn(items[currentIndex], currentIndex);
+        }
+    }
+    const workers = Array.from({ length: Math.min(limit, items.length) }, () => runner());
+    await Promise.all(workers);
+    return results;
+}
+
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
-    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType}) from ${startDate} to ${endDate}`);
-
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-    const months = [];
-    let current = new Date(sDate.getFullYear(), sDate.getMonth(), 1);
-
-    while (current <= eDate) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-        current.setMonth(current.getMonth() + 1);
+    const startDateObj = new Date(startDate);
+    const endDateObj = new Date(endDate);
+    if (Number.isNaN(startDateObj.getTime()) || Number.isNaN(endDateObj.getTime())) {
+        throw new Error('日期格式無效');
     }
-     if (months.length === 0 && sDate <= eDate) {
-        const y = sDate.getFullYear();
-        const m = String(sDate.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
+    if (startDateObj > endDateObj) {
+        throw new Error('開始日期需早於結束日期');
+    }
+    const marketKey = getMarketKey(marketType);
+    const cacheKey = buildCacheKey(stockNo, startDate, endDate);
+    const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
+    if (cachedEntry) {
+        self.postMessage({ type: 'progress', progress: 15, message: '命中背景快取...' });
+        return {
+            data: cachedEntry.data,
+            dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
+            stockName: cachedEntry.stockName || stockNo
+        };
     }
 
-    const allRawData = [];
-    let dataSource = '未知';
-    let stockName = '';
-
-    const m = String(marketType || '').toUpperCase();
-    const isTpex = m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx');
-    const proxyPath = isTpex ? '/api/tpex/' : '/api/twse/';
-
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        const proxyUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
+    self.postMessage({ type: 'progress', progress: 5, message: '準備抓取原始數據...' });
+    const months = enumerateMonths(startDateObj, endDateObj);
+    if (months.length === 0) {
+        const entry = { data: [], stockName: stockNo, dataSource: marketKey, timestamp: Date.now(), meta: { stockNo, startDate, endDate } };
+        setWorkerCacheEntry(marketKey, cacheKey, entry);
+        return { data: [], dataSource: marketKey, stockName };
+    }
+    const proxyPath = marketKey === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+    const isTpex = marketKey === 'TPEX';
+    const concurrencyLimit = isTpex ? 3 : 4;
+    let completed = 0;
+    const monthResults = await runWithConcurrency(months, concurrencyLimit, async (monthInfo, index) => {
+        const params = new URLSearchParams({
+            stockNo,
+            month: monthInfo.monthKey,
+            start: monthInfo.rangeStartISO,
+            end: monthInfo.rangeEndISO
+        });
+        const url = `${proxyPath}?${params.toString()}`;
         try {
-            self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
-            const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            if (!response.ok) {
-                console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                continue; // Try next month
-            }
-            const payload = await response.json();
-            if (payload.error) {
-                console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
-                continue;
-            }
-            
-            dataSource = payload.dataSource || (isTpex ? 'TPEX' : 'TWSE');
-            if (payload.stockName && !stockName) stockName = payload.stockName;
-
-            let raw = payload.aaData || payload.data || [];
-            if (raw.length > 0) {
-                allRawData.push(...raw);
-            }
-            await new Promise(r => setTimeout(r, 250 + Math.random() * 100)); // Be nice to the proxy
-        } catch (error) {
-            console.error(`[Worker] 呼叫代理 ${proxyUrl} 失敗:`, error);
-            continue;
-        }
-    }
-
-    if (allRawData.length === 0) {
-        console.warn(`[Worker] 從代理 ${proxyPath} 未收到任何原始數據`);
-        return { data: [], dataSource, stockName };
-    }
-
-    const normalized = allRawData.map(item => {
-        try {
-            let dateStr = null;
-            let o = null, h = null, l = null, c = null, v = null;
-
-            if (Array.isArray(item)) {
-                dateStr = item[0];
-                if (isTpex) {
-                     // TPEX format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, ... ]
-                    if (item.length >= 7) {
-                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
-                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
-                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
-                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
-                        c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
-                } else {
-                    // TWSE format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, 成交筆數]
-                    if (item.length >= 9) {
-                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
-                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
-                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
-                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
-                        c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
-                }
-            } else if (item && typeof item === 'object') {
-                dateStr = item.date || item.Date || item.tradeDate || null;
-                o = item.open || item.Open || null;
-                h = item.high || item.High || null;
-                l = item.low || item.Low || null;
-                c = item.close || item.Close || null;
-                v = item.volume || item.Volume || item.Trading_Volume || 0;
-            } else {
-                return null;
-            }
-
-            let isoDate = null;
-            if (typeof dateStr === 'string' && /^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(dateStr.trim())) {
-                isoDate = formatTWDateWorker(dateStr.trim());
-            } else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
-                isoDate = dateStr.trim();
-            }
-            if (!isoDate) return null;
-
-            const dObj = new Date(isoDate);
-            if (isNaN(dObj) || dObj < sDate || dObj > eDate) return null;
-
-            if ((!o || o === 0) && c) o = c;
-            if ((!h || h === 0) && c) h = Math.max(o || 0, c);
-            if ((!l || l === 0) && c) l = Math.min(o || c, c);
-
-            return {
-                date: isoDate,
-                open: (o === null || isNaN(o)) ? null : o,
-                high: (h === null || isNaN(h)) ? null : h,
-                low: (l === null || isNaN(l)) ? null : l,
-                close: (c === null || isNaN(c)) ? null : c,
-                volume: Math.round((parseFloat(String(v).replace(/,/g, '')) || 0) / 1000)
+            const payload = await fetchWithAdaptiveRetry(url, { headers: { 'Accept': 'application/json' } });
+            const rows = Array.isArray(payload?.aaData) ? payload.aaData : (Array.isArray(payload?.data) ? payload.data : []);
+            const result = {
+                rows,
+                source: payload?.dataSource || (isTpex ? 'TPEX' : 'TWSE'),
+                stockName: payload?.stockName || ''
             };
-        } catch (e) {
-            return null;
+            return result;
+        } catch (error) {
+            console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+            return { rows: [], source: isTpex ? 'TPEX' : 'TWSE', stockName: '' };
+        } finally {
+            completed += 1;
+            const progress = 10 + Math.round((completed / months.length) * 35);
+            self.postMessage({ type: 'progress', progress, message: `處理 ${monthInfo.label} 數據...` });
         }
-    }).filter(Boolean);
-    
-    const uniqueData = Array.from(new Map(normalized.map(item => [item.date, item])).values());
-    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
+    });
 
-    console.log(`[Worker] 原始數據 ${allRawData.length} 筆，最終整理後 ${sortedData.length} 筆`);
+    const normalizedRows = [];
+    const sourceFlags = new Set();
+    let stockName = '';
+    monthResults.forEach(res => {
+        if (!res) return;
+        if (res.stockName && !stockName) stockName = res.stockName;
+        if (res.source) sourceFlags.add(res.source);
+        (res.rows || []).forEach(row => {
+            const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj);
+            if (normalized) normalizedRows.push(normalized);
+        });
+    });
 
-    if (sortedData.length === 0) {
+    self.postMessage({ type: 'progress', progress: 55, message: '整理數據...' });
+    const deduped = dedupeAndSortData(normalizedRows);
+    const dataSourceLabel = summariseDataSourceFlags(sourceFlags, isTpex ? 'TPEX' : 'TWSE');
+
+    setWorkerCacheEntry(marketKey, cacheKey, {
+        data: deduped,
+        stockName: stockName || stockNo,
+        dataSource: dataSourceLabel,
+        timestamp: Date.now(),
+        meta: { stockNo, startDate, endDate }
+    });
+
+    if (deduped.length === 0) {
         console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
     }
 
-    workerCachedStockData = sortedData;
-    return { data: sortedData, dataSource, stockName };
+    return { data: deduped, dataSource: dataSourceLabel, stockName: stockName || stockNo };
 }
-
-// --- TWSE 月數據獲取 ---
-async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
-    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockNo}&date=${month}&_=${Date.now()}`;
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-        console.warn(`TWSE ${stockNo} (${month.substring(0,6)}) failed: ${response.status}`);
-        return [];
-    }
-    
-    const data = await response.json();
-    if (data.stat !== "OK" || !Array.isArray(data.data)) {
-        return [];
-    }
-    
-    // 移除多餘的結束大括號，確保下面的 await 在 async function 內
-    try {
-        console.log(`[TPEX Worker] 查詢 ${stockNo}，範圍: ${startDate.toISOString().split('T')[0]} 到 ${endDate.toISOString().split('T')[0]}`);
-        
-        // 由於新API有CORS限制，在Worker中我們仍然可以嘗試直接調用
-        // 但如果失敗，則使用舊的API格式
-        
-        // 首先嘗試舊的月份API (在Worker中可能不受CORS限制)
-        const year = parseInt(month.substring(0, 4));
-        const monthNum = month.substring(4, 6);
-        const rocYear = year - 1911;
-        const queryDate = `${rocYear}/${monthNum}`;
-
-        // 關鍵檢查點：確保 proxy 路徑完全正確
-        const proxyUrl = `/api/tpex/?stockNo=${stockNo}&date=${queryDate}`;
-        console.log(`[TPEX Worker] 準備透過代理請求: ${proxyUrl}`);
-        const attempts = [ proxyUrl ];
-        
-        for (let i = 0; i < attempts.length; i++) {
-            try {
-                const url = attempts[i];
-                console.log(`[TPEX Worker] 嘗試方法 ${i + 1}: ${url}`);
-                
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Cache-Control': 'no-cache'
-                    }
-                });
-                
-                if (!response.ok) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} HTTP 錯誤: ${response.status}`);
-                    continue;
-                }
-                
-                const text = await response.text();
-                if (!text.trim()) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} 回應內容為空`);
-                    continue;
-                }
-                
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    console.warn(`[TPEX Worker] 方法 ${i + 1} JSON 解析失敗: ${e.message}`);
-                    continue;
-                }
-                
-                if (data.stat === 'OK' && data.aaData && Array.isArray(data.aaData) && data.aaData.length > 0) {
-                    console.log(`[TPEX Worker] 方法 ${i + 1} 成功取得數據，筆數: ${data.aaData.length}`);
-                    
-                    // 處理數據格式
-                    const filtered = data.aaData.map(item => {
-                        if (!Array.isArray(item) || item.length < 5) return null;
-                        
-                        const dateStr = formatTWDateWorker(item[0]);
-                        if (!dateStr) return null;
-                        
-                        const itemDate = new Date(dateStr);
-                        if (!isNaN(itemDate) && itemDate >= startDate && itemDate <= endDate) {
-                            // TPEX 數據格式解析
-                            let o, h, l, c, v;
-                            
-                            // 格式 1: [日期, 成交股數, 收盤價, 漲跌, 開盤價, 最高價, 最低價, ...]
-                            if (item.length >= 7) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
-                                c = parseFloat(String(item[2]).replace(/[,\s]/g,'')) || 0;
-                                o = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
-                                h = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
-                                l = parseFloat(String(item[6]).replace(/[,\s]/g,'')) || 0;
-                            }
-                            // 格式 2: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, ...]
-                            else if (item.length >= 6) {
-                                v = parseFloat(String(item[1]).replace(/[,\s]/g,'')) || 0;
-                                o = parseFloat(String(item[3]).replace(/[,\s]/g,'')) || 0;
-                                h = parseFloat(String(item[4]).replace(/[,\s]/g,'')) || 0;
-                                l = parseFloat(String(item[5]).replace(/[,\s]/g,'')) || 0;
-                                c = parseFloat(String(item[6] || item[2]).replace(/[,\s]/g,'')) || 0;
-                            } else {
-                                return null;
-                            }
-                            
-                            // 數據驗證
-                            if (c <= 0 || isNaN(c)) return null;
-                            
-                            // 修正異常數據
-                            if (o <= 0 || isNaN(o)) o = c;
-                            if (h <= 0 || isNaN(h)) h = Math.max(o, c);
-                            if (l <= 0 || isNaN(l)) l = Math.min(o, c);
-                            
-                            return { 
-                                date: dateStr, 
-                                open: o, 
-                                high: h, 
-                                low: l, 
-                                close: c, 
-                                volume: v/1000 
-                            };
-                        }
-                        return null;
-                    }).filter(item => item !== null);
-                    
-                    console.log(`[TPEX Worker] ${stockNo} 成功處理 ${filtered.length} 筆數據`);
-                    return filtered;
-                }
-                
-            } catch (error) {
-                console.error(`[TPEX Worker] 方法 ${i + 1} 發生錯誤:`, error);
-            }
-        }
-        
-        console.warn(`[TPEX Worker] ${stockNo} 所有方法都失敗`);
-        return [];
-        
-    } catch (error) {
-        console.error(`[TPEX Worker] ${stockNo} (${month.substring(0,6)}) 嚴重錯誤:`, error);
-        return [];
-    }
-}
-
-
 
 // --- TAIEX 數據獲取 ---
 async function fetchTAIEXData(start, end) {
@@ -747,13 +681,13 @@ async function runOptimization(baseParams, optimizeTargetStrategy, optParamName,
     let dataFetched = false;
 
     // Data acquisition policy:
-    // - If useCache === true: only use provided cachedData or workerCachedStockData; NEVER fetch from TWSE.
-    // - If useCache === false: use cached data when available, otherwise fetch from TWSE.
+    // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
+    // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
     if (useCache) {
         if (Array.isArray(cachedData) && cachedData.length > 0) {
             stockData = cachedData;
-        } else if (Array.isArray(workerCachedStockData) && workerCachedStockData.length > 0) {
-            stockData = workerCachedStockData;
+        } else if (Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+            stockData = workerLastDataset;
             console.log("[Worker Opt] Using worker's cached data.");
         } else {
             throw new Error('優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。');
@@ -761,14 +695,14 @@ async function runOptimization(baseParams, optimizeTargetStrategy, optParamName,
     } else {
         if (Array.isArray(cachedData) && cachedData.length > 0) {
             stockData = cachedData;
-        } else if (Array.isArray(workerCachedStockData) && workerCachedStockData.length > 0) {
-            stockData = workerCachedStockData;
+        } else if (Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+            stockData = workerLastDataset;
             console.log("[Worker Opt] Using worker's cached data.");
         } else {
-            stockData = await fetchStockData(baseParams.stockNo, baseParams.startDate, baseParams.endDate, baseParams.marketType || baseParams.market || 'TWSE');
-            workerCachedStockData = stockData;
+            const fetched = await fetchStockData(baseParams.stockNo, baseParams.startDate, baseParams.endDate, baseParams.marketType || baseParams.market || 'TWSE');
+            stockData = fetched?.data || [];
             dataFetched = true;
-            if (!stockData || stockData.length === 0) throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
+            if (!Array.isArray(stockData) || stockData.length === 0) throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
             self.postMessage({ type: 'progress', progress: 50, message: '數據獲取完成，開始優化...' });
         }
     }
@@ -895,18 +829,28 @@ self.onmessage = async function(e) {
      try {
          if (type === 'runBacktest') {
              let dataToUse = null; let fetched = false; let outcome = null;
-             if (useCachedData && cachedData) {
+             const marketKey = getMarketKey(params.marketType || params.market || 'TWSE');
+             const cacheKey = buildCacheKey(params.stockNo, params.startDate, params.endDate);
+             if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
                  console.log("[Worker] Using cached data for backtest.");
                  dataToUse = cachedData;
-                 self.workerCachedStockData = dataToUse; 
+                 const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
+                 if (!existingEntry) {
+                     setWorkerCacheEntry(marketKey, cacheKey, {
+                         data: cachedData,
+                         stockName: params.stockNo,
+                         dataSource: '主執行緒快取',
+                         timestamp: Date.now(),
+                         meta: { stockNo: params.stockNo, startDate: params.startDate, endDate: params.endDate }
+                     });
+                 }
              } else {
                  console.log("[Worker] Fetching new data for backtest.");
                  outcome = await fetchStockData(params.stockNo, params.startDate, params.endDate, params.marketType);
                  dataToUse = outcome.data;
                  fetched = true;
-                 self.workerCachedStockData = dataToUse; 
              }
-             if(!dataToUse || dataToUse.length === 0) {
+             if(!Array.isArray(dataToUse) || dataToUse.length === 0) {
                  // 回傳友善的 no_data 訊息給主執行緒，讓 UI 顯示查無資料而不是把 Worker 異常化
                  const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 交易數據`;
                  console.warn(`[Worker] ${msg}`);
@@ -920,11 +864,12 @@ self.onmessage = async function(e) {
              if (useCachedData || !fetched) { backtestResult.rawData = null; } // Don't send back data if it wasn't fetched by this worker call
              
              // 將結果與資料來源一起回傳
+             const metaInfo = outcome || workerLastMeta || { stockName: params.stockNo, dataSource: fetched ? (params.marketType || params.market || '未知') : '快取' };
              self.postMessage({
                  type: 'result',
                  data: backtestResult,
-                 stockName: outcome ? outcome.stockName : '',
-                 dataSource: outcome ? outcome.dataSource : '未知'
+                 stockName: metaInfo?.stockName || '',
+                 dataSource: metaInfo?.dataSource || '未知'
              });
 
         } else if (type === 'runOptimization') {
@@ -932,20 +877,20 @@ self.onmessage = async function(e) {
             // Enforce cache-only when requested: do not allow worker to fetch remote data in this mode.
             if (useCachedData) {
                 const hasProvidedCache = Array.isArray(cachedData) && cachedData.length > 0;
-                const hasWorkerCache = Array.isArray(self.workerCachedStockData) && self.workerCachedStockData.length > 0;
+                const hasWorkerCache = Array.isArray(workerLastDataset) && workerLastDataset.length > 0;
                 if (!hasProvidedCache && !hasWorkerCache) {
                     throw new Error('優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。');
                 }
             }
-            const optOutcome = await runOptimization(params, optimizeTargetStrategy, optimizeParamName, optimizeRange, useCachedData, cachedData || self.workerCachedStockData); 
+            const optOutcome = await runOptimization(params, optimizeTargetStrategy, optimizeParamName, optimizeRange, useCachedData, cachedData || workerLastDataset);
             self.postMessage({ type: 'result', data: optOutcome });
 
          } else if (type === 'getSuggestion') {
               console.log("[Worker] Received getSuggestion request.");
-              if (!self.workerCachedStockData) { throw new Error("Worker 中無可用快取數據，請先執行回測。"); }
-              if (self.workerCachedStockData.length < lookbackDays) { throw new Error(`Worker 快取數據不足 (${self.workerCachedStockData.length})，無法回看 ${lookbackDays} 天。`); }
+              if (!workerLastDataset) { throw new Error("Worker 中無可用快取數據，請先執行回測。"); }
+              if (workerLastDataset.length < lookbackDays) { throw new Error(`Worker 快取數據不足 (${workerLastDataset.length})，無法回看 ${lookbackDays} 天。`); }
 
-              const recentData = self.workerCachedStockData.slice(-lookbackDays);
+              const recentData = workerLastDataset.slice(-lookbackDays);
               const suggestionTextResult = runSuggestionSimulation(params, recentData);
               self.postMessage({ type: 'suggestionResult', data: { suggestion: suggestionTextResult } });
          }

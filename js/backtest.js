@@ -16,10 +16,25 @@ function runBacktestInternal() {
         console.log("[Main] Validation:", isValid);
         if(!isValid) return;
 
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate};
-        const useCache=!needsDataFetch(curSettings);
+        const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
+        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey};
+        let useCache=!needsDataFetch(curSettings);
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
+        const cacheKey = buildCacheKey(curSettings);
+        let cachedEntry = null;
+        if (useCache) {
+            cachedEntry = cachedDataStore.get(cacheKey);
+            if (cachedEntry && Array.isArray(cachedEntry.data) && cachedEntry.data.length > 0) {
+                cachedStockData = cachedEntry.data;
+                lastFetchSettings = curSettings;
+                console.log(`[Main] 從快取命中 ${cacheKey}`);
+            } else {
+                console.warn('[Main] 快取內容不存在或數據不足，改為重新抓取。');
+                useCache = false;
+                cachedEntry = null;
+            }
+        }
         clearPreviousResults(); // Clear previous results including suggestion
 
         if(backtestWorker) { // Ensure previous worker is terminated
@@ -55,10 +70,26 @@ function runBacktestInternal() {
                 }
             } else if(type==='result'){
                 if(!useCache&&data?.rawData){
+                     cachedDataStore.set(cacheKey, {
+                         data: data.rawData,
+                         stockName: stockName || params.stockNo,
+                         dataSource: dataSource || '',
+                         fetchedAt: Date.now()
+                     });
                      cachedStockData = data.rawData;
                      lastFetchSettings=curSettings;
-                     console.log(`[Main] Data cached for ${curSettings.stockNo}.`);
-                } else if (useCache && cachedStockData ) {
+                     console.log(`[Main] Data cached for ${cacheKey}.`);
+                } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
+                     cachedStockData = cachedEntry.data;
+                     lastFetchSettings = curSettings;
+                     if ((stockName && cachedEntry.stockName !== stockName) || (dataSource && cachedEntry.dataSource !== dataSource)) {
+                         cachedDataStore.set(cacheKey, {
+                             ...cachedEntry,
+                             stockName: stockName || cachedEntry.stockName || params.stockNo,
+                             dataSource: dataSource || cachedEntry.dataSource || '',
+                             fetchedAt: cachedEntry.fetchedAt || Date.now()
+                         });
+                     }
                      console.log("[Main] Using main thread cached data for worker if needed.");
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
@@ -1414,7 +1445,7 @@ function updateStrategyParams(type) {
         }
     }
 }
-function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; lastFetchSettings=null; clearPreviousResults(); showSuccess("設定已重置"); }
+function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; clearPreviousResults(); showSuccess("設定已重置"); }
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 
