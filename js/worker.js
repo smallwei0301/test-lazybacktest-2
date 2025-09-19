@@ -31,7 +31,7 @@ async function fetchTPEXMonthData(stockNo, year, month) {
         return { error: error.message };
     }
 }
-// --- Web Worker (backtest-worker.js) - v3.4.2 ---
+// --- Web Worker (backtest-worker.js) - v3.4.1 ---
 // 變更:
 // - getSuggestion: 修正建議邏輯，確保正確反映賣出/回補/等待狀態
 // - runStrategy: 驗證年化報酬率計算
@@ -72,36 +72,11 @@ function formatTWDateWorker(twDate) {
     }
 }
 
-function buildMonthRange(startDate, endDate) {
-    const months = [];
-    if (!(startDate instanceof Date) || isNaN(startDate) || !(endDate instanceof Date) || isNaN(endDate)) {
-        return months;
-    }
-    if (startDate > endDate) {
-        return months;
-    }
-
-    let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-    const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-    while (cursor <= endCursor) {
-        const year = cursor.getFullYear();
-        const month = String(cursor.getMonth() + 1).padStart(2, '0');
-        months.push(`${year}${month}01`);
-        cursor.setMonth(cursor.getMonth() + 1);
-    }
-
-    return months;
-}
-
 // 在 worker.js 中，用此版本替換舊的 fetchStockData：
 // - 根據 marketType 選擇現有的代理 (/netlify/functions/tpex-proxy 或 /netlify/functions/twse-proxy)
 // - 產生回測引擎所需的物件陣列格式：{ date: 'YYYY-MM-DD', open, high, low, close, volume }
 // - 支援多種代理回傳格式（aaData 為陣列或代理直接回傳物件陣列）
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
-
-    // Version Tag: LBW-20240413
-
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
@@ -109,91 +84,61 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
 
     const sDate = new Date(startDate);
     const eDate = new Date(endDate);
-    if (isNaN(sDate) || isNaN(eDate)) {
-        throw new Error(`[Worker] 無效的日期區間: ${startDate} ~ ${endDate}`);
+    const months = [];
+    let current = new Date(sDate.getFullYear(), sDate.getMonth(), 1);
+
+    while (current <= eDate) {
+        const y = current.getFullYear();
+        const m = String(current.getMonth() + 1).padStart(2, '0');
+        months.push(`${y}${m}01`);
+        current.setMonth(current.getMonth() + 1);
     }
-
-
-    const months = buildMonthRange(sDate, eDate);
-    if (months.length === 0) {
-        console.warn(`[Worker] 指定區間沒有任何月份可查詢 (${startDate} ~ ${endDate})`);
-
+     if (months.length === 0 && sDate <= eDate) {
+        const y = sDate.getFullYear();
+        const m = String(sDate.getMonth() + 1).padStart(2, '0');
+        months.push(`${y}${m}01`);
     }
 
     const allRawData = [];
     let dataSource = '未知';
     let stockName = '';
-    let stockInfoPosted = false;
-
-    const postStockInfo = () => {
-        if (stockInfoPosted) return;
-        stockInfoPosted = true;
-        try {
-            self.postMessage({ type: 'stockNameInfo', stockName: stockName || '', stockNo, marketType });
-        } catch (postError) {
-            console.error('[Worker] 回報股票資訊時發生錯誤:', postError);
-        }
-    };
 
     const m = String(marketType || '').toUpperCase();
     const isTpex = m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx');
-    const proxyPath = isTpex ? '/api/tpex' : '/api/twse';
+    const proxyPath = isTpex ? '/api/tpex/' : '/api/twse/';
 
     for (let i = 0; i < months.length; i++) {
         const month = months[i];
-        const monthUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
-
+        const proxyUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
         try {
             self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
-
-            const response = await fetch(monthUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+            const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
             if (!response.ok) {
                 console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                let errorText = '';
-                try {
-                    errorText = await response.text();
-                } catch (readError) {
-                    console.warn('[Worker] 讀取代理錯誤內容失敗:', readError);
-                }
-                const message = `${stockNo} ${month.substring(0, 6)} HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}${errorText ? ` - ${errorText}` : ''}`;
-                self.postMessage({ type: 'marketError', message, marketType });
-                continue;
+                continue; // Try next month
             }
-
             const payload = await response.json();
             if (payload.error) {
                 console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
-                const diagnostics = payload.diagnostics ? ` (${payload.diagnostics})` : '';
-                const message = `${stockNo} ${month.substring(0, 6)} 代理回傳錯誤: ${payload.error}${diagnostics}`;
-                self.postMessage({ type: 'marketError', message, marketType });
                 continue;
             }
-
+            
             dataSource = payload.dataSource || (isTpex ? 'TPEX' : 'TWSE');
-            if (payload.stockName && !stockName) {
-                stockName = payload.stockName;
-            }
+            if (payload.stockName && !stockName) stockName = payload.stockName;
 
-
-            const raw = payload.aaData || payload.data || [];
-            if (Array.isArray(raw) && raw.length > 0) {
+            let raw = payload.aaData || payload.data || [];
+            if (raw.length > 0) {
                 allRawData.push(...raw);
             }
-
-            await new Promise(r => setTimeout(r, 250 + Math.random() * 100));
+            await new Promise(r => setTimeout(r, 250 + Math.random() * 100)); // Be nice to the proxy
         } catch (error) {
-            console.error(`[Worker] 呼叫代理 ${monthUrl} 失敗:`, error);
-            const message = `${stockNo} ${month.substring(0, 6)} 請求失敗: ${error.message || error}`;
-            self.postMessage({ type: 'marketError', message, marketType });
+            console.error(`[Worker] 呼叫代理 ${proxyUrl} 失敗:`, error);
             continue;
         }
     }
 
-    self.postMessage({ type: 'progress', progress: 25, message: '歷史數據下載完成，整理中...' });
-
     if (allRawData.length === 0) {
         console.warn(`[Worker] 從代理 ${proxyPath} 未收到任何原始數據`);
-        postStockInfo();
         return { data: [], dataSource, stockName };
     }
 
@@ -205,7 +150,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             if (Array.isArray(item)) {
                 dateStr = item[0];
                 if (isTpex) {
-                    // TPEX format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, ... ]
+                     // TPEX format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, ... ]
                     if (item.length >= 7) {
                         v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
                         o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
@@ -261,7 +206,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             return null;
         }
     }).filter(Boolean);
-
+    
     const uniqueData = Array.from(new Map(normalized.map(item => [item.date, item])).values());
     const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -272,9 +217,6 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     }
 
     workerCachedStockData = sortedData;
-
-    postStockInfo();
-
     return { data: sortedData, dataSource, stockName };
 }
 
