@@ -1,5 +1,5 @@
-// netlify/functions/twse-proxy.js (v10.0 - Range-aware tiered cache for TWSE)
-// Patch Tag: LB-PRICE-MODE-20240513A
+// netlify/functions/twse-proxy.js (v10.1 - TWSE primary with FinMind fallback, Yahoo for adjusted)
+// Patch Tag: LB-PRICE-MODE-20240516A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -83,6 +83,90 @@ function buildMonthCacheKey(stockNo, monthKey, adjusted) {
 
 function safeRound(value) {
     return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
+async function fetchTwseMonth(stockNo, monthKey) {
+    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${monthKey}01&stockNo=${stockNo}`;
+    console.log(`[TWSE Proxy v10.1] 下載 ${stockNo} 的 ${monthKey} 月資料`);
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!response.ok) {
+        throw new Error(`TWSE HTTP ${response.status}`);
+    }
+    const raw = await response.json();
+    if (raw?.stat !== 'OK' || !Array.isArray(raw?.data)) {
+        throw new Error(`TWSE 回應異常: ${raw?.stat || '未知錯誤'}`);
+    }
+    const parsed = parseTWSEPayload(raw, stockNo);
+    return { ...parsed, dataSource: 'TWSE' };
+}
+
+async function hydrateFinMindDaily(store, stockNo, adjusted) {
+    const token = process.env.FINMIND_TOKEN;
+    if (!token) {
+        throw new Error('未設定 FinMind Token');
+    }
+    const dataset = adjusted ? 'TaiwanStockPriceAdj' : 'TaiwanStockPrice';
+    const url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&data_id=${stockNo}&token=${token}`;
+    console.log(`[TWSE Proxy v10.1] 嘗試 FinMind 來源: ${dataset} ${stockNo}`);
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`FinMind HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+        throw new Error(`FinMind 回應錯誤: ${json?.msg || '未知錯誤'}`);
+    }
+
+    const monthlyBuckets = new Map();
+    let stockName = '';
+    for (const item of json.data) {
+        const isoDate = item.date;
+        const rocDate = isoToRoc(isoDate);
+        if (!rocDate) continue;
+        if (!stockName && item.stock_name) {
+            stockName = item.stock_name;
+        }
+        const open = safeRound(Number(item.open ?? item.Open ?? item.Opening));
+        const high = safeRound(Number(item.max ?? item.High ?? item.high));
+        const low = safeRound(Number(item.min ?? item.Low ?? item.low));
+        const closeValue = safeRound(Number(item.close ?? item.Close));
+        const change = safeRound(Number(item.spread ?? item.change ?? item.Change ?? 0));
+        const volumeSource = Number(item.Trading_Volume ?? item.volume ?? item.Volume);
+        const volume = Number.isFinite(volumeSource) ? Math.round(volumeSource) : 0;
+
+        if (open === null && high === null && low === null && closeValue === null) {
+            continue;
+        }
+
+        const finalOpen = open ?? closeValue ?? 0;
+        const finalHigh = high ?? Math.max(finalOpen, closeValue ?? finalOpen);
+        const finalLow = low ?? Math.min(finalOpen, closeValue ?? finalOpen);
+        const finalClose = closeValue ?? finalOpen;
+        const finalChange = change ?? 0;
+
+        const monthKey = isoDate.slice(0, 7).replace('-', '');
+        if (!monthlyBuckets.has(monthKey)) monthlyBuckets.set(monthKey, []);
+        monthlyBuckets.get(monthKey).push([
+            rocDate,
+            stockNo,
+            stockName || stockNo,
+            safeRound(finalOpen),
+            safeRound(finalHigh),
+            safeRound(finalLow),
+            safeRound(finalClose),
+            safeRound(finalChange) ?? 0,
+            volume,
+        ]);
+    }
+
+    const label = adjusted ? 'FinMind (還原備援)' : 'FinMind (原始備援)';
+    for (const [monthKey, rows] of monthlyBuckets.entries()) {
+        rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+        const payload = { stockName: stockName || stockNo, aaData: rows, dataSource: label };
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), payload);
+    }
+
+    return label;
 }
 
 async function fetchYahooDaily(stockNo) {
@@ -206,9 +290,9 @@ async function readCache(store, cacheKey) {
         }
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn(`[TWSE Proxy v10.0] Blobs 流量受限，改用記憶體快取。`);
+            console.warn(`[TWSE Proxy v10.1] Blobs 流量受限，改用記憶體快取。`);
         } else {
-            console.error('[TWSE Proxy v10.0] 讀取 Blobs 時發生錯誤:', error);
+            console.error('[TWSE Proxy v10.1] 讀取 Blobs 時發生錯誤:', error);
         }
     }
     return null;
@@ -220,9 +304,9 @@ async function writeCache(store, cacheKey, payload) {
         await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TWSE Proxy v10.0] Blobs 流量受限，僅寫入記憶體快取。');
+            console.warn('[TWSE Proxy v10.1] Blobs 流量受限，僅寫入記憶體快取。');
         } else {
-            console.error('[TWSE Proxy v10.0] 寫入 Blobs 失敗:', error);
+            console.error('[TWSE Proxy v10.1] 寫入 Blobs 失敗:', error);
         }
     }
 }
@@ -316,6 +400,8 @@ export default async (req) => {
         let stockName = '';
         let yahooHydrated = false;
         let yahooSourceLabel = '';
+        let finmindHydrated = false;
+        let finmindSourceLabel = '';
 
         for (const month of months) {
             const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
@@ -332,28 +418,49 @@ export default async (req) => {
                             const yahooData = await fetchYahooDaily(stockNo);
                             yahooSourceLabel = await persistYahooEntries(store, stockNo, yahooData, true);
                         } catch (error) {
-                            console.error('[TWSE Proxy v10.0] Yahoo 抓取失敗:', error);
-                            yahooSourceLabel = 'Yahoo Finance (還原)';
+                            console.error('[TWSE Proxy v10.1] Yahoo 抓取失敗:', error);
+                            yahooSourceLabel = '';
+                            if (!finmindHydrated) {
+                                try {
+                                    finmindSourceLabel = await hydrateFinMindDaily(store, stockNo, true);
+                                } catch (finmindError) {
+                                    console.error('[TWSE Proxy v10.1] FinMind 還原備援失敗:', finmindError);
+                                    finmindSourceLabel = '';
+                                }
+                                finmindHydrated = true;
+                            }
                         }
                         yahooHydrated = true;
                     }
                     payload = await readCache(store, cacheKey);
-                    if (payload && yahooSourceLabel) {
-                        sourceFlags.add(yahooSourceLabel);
+                    if (payload) {
+                        if (yahooSourceLabel) {
+                            sourceFlags.add(yahooSourceLabel);
+                        } else if (finmindSourceLabel) {
+                            sourceFlags.add(finmindSourceLabel);
+                        }
                     }
                 } else {
-                    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${month}01&stockNo=${stockNo}`;
-                    console.log(`[TWSE Proxy v10.0] 下載 ${stockNo} 的 ${month} 月資料`);
-                    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                    if (!response.ok) {
-                        console.warn(`[TWSE Proxy v10.0] TWSE 回應 ${response.status}，略過 ${month}`);
+                    try {
+                        payload = await fetchTwseMonth(stockNo, month);
+                        await writeCache(store, cacheKey, payload);
                         sourceFlags.add('remote');
-                        continue;
+                    } catch (twseError) {
+                        console.warn(`[TWSE Proxy v10.1] TWSE 主來源失敗 (${month}):`, twseError.message || twseError);
+                        if (!finmindHydrated) {
+                            try {
+                                finmindSourceLabel = await hydrateFinMindDaily(store, stockNo, false);
+                            } catch (finmindError) {
+                                console.error('[TWSE Proxy v10.1] FinMind 備援失敗:', finmindError);
+                                finmindSourceLabel = '';
+                            }
+                            finmindHydrated = true;
+                        }
+                        payload = await readCache(store, cacheKey);
+                        if (payload && finmindSourceLabel) {
+                            sourceFlags.add(finmindSourceLabel);
+                        }
                     }
-                    const parsed = parseTWSEPayload(await response.json(), stockNo);
-                    payload = { ...parsed, dataSource: 'TWSE' };
-                    await writeCache(store, cacheKey, payload);
-                    sourceFlags.add('remote');
                 }
             } else {
                 sourceFlags.add(payload.source === 'blob' ? 'blob' : 'memory');
@@ -400,7 +507,7 @@ export default async (req) => {
             headers: { 'Content-Type': 'application/json' }
         });
     } catch (error) {
-        console.error('[TWSE Proxy v10.0] 發生未預期錯誤:', error);
+        console.error('[TWSE Proxy v10.1] 發生未預期錯誤:', error);
         return new Response(JSON.stringify({ error: error.message || 'TWSE Proxy error' }), { status: 500 });
     }
 };
