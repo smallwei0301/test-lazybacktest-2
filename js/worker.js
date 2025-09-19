@@ -99,129 +99,166 @@ function buildMonthRange(startDate, endDate) {
 // - 產生回測引擎所需的物件陣列格式：{ date: 'YYYY-MM-DD', open, high, low, close, volume }
 // - 支援多種代理回傳格式（aaData 為陣列或代理直接回傳物件陣列）
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
-
-    // Version Tag: LBW-20240413
+    const VERSION = "LBW-20240919-RANGE";
+    console.log(`[Worker] fetchStockData (${VERSION}) start for ${stockNo} (${marketType}) ${startDate} -> ${endDate}`);
 
     if (!marketType) {
-        throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
-    }
-    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType}) from ${startDate} to ${endDate}`);
-
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-    if (isNaN(sDate) || isNaN(eDate)) {
-        throw new Error(`[Worker] 無效的日期區間: ${startDate} ~ ${endDate}`);
+        throw new Error('fetchStockData missing marketType; cannot determine market.');
     }
 
-
-    const months = buildMonthRange(sDate, eDate);
-    if (months.length === 0) {
-        console.warn(`[Worker] 指定區間沒有任何月份可查詢 (${startDate} ~ ${endDate})`);
-
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+        throw new Error(`[Worker] Invalid date range ${startDate} ~ ${endDate}`);
     }
 
-    const allRawData = [];
-    let dataSource = '未知';
+    const marketFlag = String(marketType).toUpperCase();
+    const isTpex = ['TPEX', 'OTC', 'TWO'].some(flag => marketFlag.includes(flag));
+
+    const rawRows = [];
+    let dataSource = isTpex ? 'TPEX' : 'TWSE';
     let stockName = '';
-    let stockInfoPosted = false;
+    let postedInfo = false;
 
     const postStockInfo = () => {
-        if (stockInfoPosted) return;
-        stockInfoPosted = true;
+        if (postedInfo) return;
+        postedInfo = true;
         try {
             self.postMessage({ type: 'stockNameInfo', stockName: stockName || '', stockNo, marketType });
-        } catch (postError) {
-            console.error('[Worker] 回報股票資訊時發生錯誤:', postError);
+        } catch (err) {
+            console.error('[Worker] Failed to post stock info', err);
         }
     };
 
-    const m = String(marketType || '').toUpperCase();
-    const isTpex = m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx');
-    const proxyPath = isTpex ? '/api/tpex' : '/api/twse';
+    let usedRange = false;
+    try {
+        const query = new URLSearchParams({ stockNo, startDate, endDate, marketType }).toString();
+        const rangeUrl = `/api/stock-range?${query}`;
+        self.postMessage({ type: 'progress', progress: 8, message: 'Loading history from server cache...' });
 
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        const monthUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
+        const response = await fetch(rangeUrl, { headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+            throw new Error(`Range endpoint HTTP ${response.status}`);
+        }
 
-        try {
-            self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
+        const payload = await response.json();
+        if (payload && payload.error) {
+            throw new Error(payload.error);
+        }
 
-            const response = await fetch(monthUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            if (!response.ok) {
-                console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                let errorText = '';
-                try {
-                    errorText = await response.text();
-                } catch (readError) {
-                    console.warn('[Worker] 讀取代理錯誤內容失敗:', readError);
+        usedRange = true;
+        dataSource = payload.dataSource || dataSource;
+        if (payload.stockName) {
+            stockName = payload.stockName;
+        }
+        const rows = payload.aaData || payload.data || [];
+        if (Array.isArray(rows) && rows.length > 0) {
+            console.log(`[Worker] Range endpoint returned ${rows.length} rows.`);
+            rawRows.push(...rows);
+        } else {
+            console.log('[Worker] Range endpoint returned no rows for the requested window.');
+        }
+        self.postMessage({ type: 'progress', progress: 20, message: 'Server cache hit, normalising data...' });
+    } catch (rangeError) {
+        console.warn('[Worker] Range endpoint unavailable, fallback to month fetch.', rangeError);
+    }
+
+    if (!usedRange) {
+        const months = buildMonthRange(start, end);
+        if (months.length === 0) {
+            console.warn(`[Worker] No months to query for ${startDate} ~ ${endDate}`);
+        }
+
+        const proxyPath = isTpex ? '/api/tpex' : '/api/twse';
+        for (let i = 0; i < months.length; i++) {
+            const month = months[i];
+            const monthUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
+            try {
+                const progress = 5 + Math.floor(((i + 1) / Math.max(1, months.length)) * 45);
+                self.postMessage({ type: 'progress', progress, message: `Fetching ${month.substring(0, 6)}...` });
+
+                const response = await fetch(monthUrl, { headers: { Accept: 'application/json' } });
+                if (!response.ok) {
+                    let errorText = '';
+                    try {
+                        errorText = await response.text();
+                    } catch (readErr) {
+                        console.warn('[Worker] Could not read error payload', readErr);
+                    }
+                    const msg = `${stockNo} ${month.substring(0, 6)} HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}${errorText ? ` - ${errorText}` : ''}`;
+                    self.postMessage({ type: 'marketError', message: msg, marketType });
+                    continue;
                 }
-                const message = `${stockNo} ${month.substring(0, 6)} HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}${errorText ? ` - ${errorText}` : ''}`;
-                self.postMessage({ type: 'marketError', message, marketType });
-                continue;
+
+                const payload = await response.json();
+                if (payload.error) {
+                    const diagnostics = payload.diagnostics ? ` (${payload.diagnostics})` : '';
+                    const msg = `${stockNo} ${month.substring(0, 6)} error: ${payload.error}${diagnostics}`;
+                    self.postMessage({ type: 'marketError', message: msg, marketType });
+                    continue;
+                }
+
+                dataSource = payload.dataSource || dataSource;
+                if (payload.stockName && !stockName) {
+                    stockName = payload.stockName;
+                }
+
+                const rows = payload.aaData || payload.data || [];
+                if (Array.isArray(rows) && rows.length > 0) {
+                    rawRows.push(...rows);
+                }
+
+                const throttleNeeded = !(payload.dataSource && /cache/i.test(payload.dataSource));
+                if (throttleNeeded) {
+                    await new Promise(resolve => setTimeout(resolve, 250 + Math.random() * 100));
+                }
+            } catch (err) {
+                const msg = `${stockNo} ${month.substring(0, 6)} fetch failed: ${err.message || err}`;
+                console.error(`[Worker] ${msg}`);
+                self.postMessage({ type: 'marketError', message: msg, marketType });
             }
-
-            const payload = await response.json();
-            if (payload.error) {
-                console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
-                const diagnostics = payload.diagnostics ? ` (${payload.diagnostics})` : '';
-                const message = `${stockNo} ${month.substring(0, 6)} 代理回傳錯誤: ${payload.error}${diagnostics}`;
-                self.postMessage({ type: 'marketError', message, marketType });
-                continue;
-            }
-
-            dataSource = payload.dataSource || (isTpex ? 'TPEX' : 'TWSE');
-            if (payload.stockName && !stockName) {
-                stockName = payload.stockName;
-            }
-
-
-            const raw = payload.aaData || payload.data || [];
-            if (Array.isArray(raw) && raw.length > 0) {
-                allRawData.push(...raw);
-            }
-
-            await new Promise(r => setTimeout(r, 250 + Math.random() * 100));
-        } catch (error) {
-            console.error(`[Worker] 呼叫代理 ${monthUrl} 失敗:`, error);
-            const message = `${stockNo} ${month.substring(0, 6)} 請求失敗: ${error.message || error}`;
-            self.postMessage({ type: 'marketError', message, marketType });
-            continue;
         }
     }
 
-    self.postMessage({ type: 'progress', progress: 25, message: '歷史數據下載完成，整理中...' });
+    self.postMessage({ type: 'progress', progress: 25, message: 'Merging historical data...' });
 
-    if (allRawData.length === 0) {
-        console.warn(`[Worker] 從代理 ${proxyPath} 未收到任何原始數據`);
+    if (rawRows.length === 0) {
+        console.warn('[Worker] No raw rows collected from proxy.');
         postStockInfo();
         return { data: [], dataSource, stockName };
     }
 
-    const normalized = allRawData.map(item => {
+    const normalised = rawRows.map(item => {
         try {
             let dateStr = null;
-            let o = null, h = null, l = null, c = null, v = null;
+            let o = null;
+            let h = null;
+            let l = null;
+            let c = null;
+            let v = null;
 
             if (Array.isArray(item)) {
                 dateStr = item[0];
                 if (isTpex) {
-                    // TPEX format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, ... ]
                     if (item.length >= 7) {
                         v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
                         o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
                         h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
                         l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
                         c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
+                    } else {
+                        return null;
+                    }
                 } else {
-                    // TWSE format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, 成交筆數]
                     if (item.length >= 9) {
                         v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
                         o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
                         h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
                         l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
                         c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
+                    } else {
+                        return null;
+                    }
                 }
             } else if (item && typeof item === 'object') {
                 dateStr = item.date || item.Date || item.tradeDate || null;
@@ -235,15 +272,15 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             }
 
             let isoDate = null;
-            if (typeof dateStr === 'string' && /^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(dateStr.trim())) {
+            if (typeof dateStr === 'string' && /^\\d{2,3}\\/\\d{1,2}\\/\\d{1,2}$/.test(dateStr.trim())) {
                 isoDate = formatTWDateWorker(dateStr.trim());
-            } else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+            } else if (typeof dateStr === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr.trim())) {
                 isoDate = dateStr.trim();
             }
             if (!isoDate) return null;
 
-            const dObj = new Date(isoDate);
-            if (isNaN(dObj) || dObj < sDate || dObj > eDate) return null;
+            const ts = new Date(isoDate);
+            if (Number.isNaN(ts.getTime()) || ts < start || ts > end) return null;
 
             if ((!o || o === 0) && c) o = c;
             if ((!h || h === 0) && c) h = Math.max(o || 0, c);
@@ -251,34 +288,30 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
 
             return {
                 date: isoDate,
-                open: (o === null || isNaN(o)) ? null : o,
-                high: (h === null || isNaN(h)) ? null : h,
-                low: (l === null || isNaN(l)) ? null : l,
-                close: (c === null || isNaN(c)) ? null : c,
+                open: (o === null || Number.isNaN(o)) ? null : o,
+                high: (h === null || Number.isNaN(h)) ? null : h,
+                low: (l === null || Number.isNaN(l)) ? null : l,
+                close: (c === null || Number.isNaN(c)) ? null : c,
                 volume: Math.round((parseFloat(String(v).replace(/,/g, '')) || 0) / 1000)
             };
-        } catch (e) {
+        } catch (_) {
             return null;
         }
     }).filter(Boolean);
 
-    const uniqueData = Array.from(new Map(normalized.map(item => [item.date, item])).values());
-    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
+    const unique = Array.from(new Map(normalised.map(row => [row.date, row])).values());
+    const sorted = unique.sort((a, b) => new Date(a.date) - new Date(b.date));
+    console.log(`[Worker] Consolidated ${rawRows.length} raw rows into ${sorted.length} cleaned rows.`);
 
-    console.log(`[Worker] 原始數據 ${allRawData.length} 筆，最終整理後 ${sortedData.length} 筆`);
-
-    if (sortedData.length === 0) {
-        console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
+    if (sorted.length === 0) {
+        console.warn(`[Worker] No trading data for ${stockNo} in ${startDate} ~ ${endDate}.`);
     }
 
-    workerCachedStockData = sortedData;
-
+    workerCachedStockData = sorted;
     postStockInfo();
 
-    return { data: sortedData, dataSource, stockName };
-}
-
-// --- TWSE 月數據獲取 ---
+    return { data: sorted, dataSource, stockName };
+}// --- TWSE 月數據獲取 ---
 async function fetchTWSEMonthData(stockNo, month, startDate, endDate) {
     const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockNo}&date=${month}&_=${Date.now()}`;
     
