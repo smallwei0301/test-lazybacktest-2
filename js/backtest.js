@@ -1782,46 +1782,22 @@ function showMarketSwitchSuggestion(stockCode, currentMarket, otherMarket, targe
 }
 
 // 切換到指定市場並重新查詢
-async function switchToMarket(targetMarket, stockCode, marketName) {
-    console.log(`[Market Switch] 切換到 ${targetMarket} 查詢 ${stockCode}`);
-    
-    // 設定為自動切換狀態
-    isAutoSwitching = true;
-    
-    // 更新市場狀態
-    currentMarket = targetMarket;
+// 切換到指定市場 (v9.7) - 簡化版，只負責更新UI狀態
+function switchToMarket(targetMarket) {
     const marketSwitch = document.getElementById('marketSwitch');
     const marketLabel = document.getElementById('marketLabel');
-    
-    marketSwitch.checked = (targetMarket === 'TPEX');
-    marketLabel.textContent = marketName;
-    
-    // 顯示查詢中狀態
-    showStockName('查詢中...', 'info');
-    
-    try {
-        let stockName = null;
-        
-        // 在新市場查詢
-        if (targetMarket === 'TWSE') {
-            stockName = await fetchStockNameFromTWSE(stockCode);
-        } else {
-            stockName = await fetchStockNameFromTPEX(stockCode);
-        }
-        
-        if (stockName) {
-            showStockName(`${stockName} (已切換至${marketName})`, 'success');
-            showSuccess(`已切換至${marketName}市場並找到: ${stockName}`);
-        } else {
-            showStockName(`兩個市場都查無此代碼`, 'error');
-        }
-    } catch (error) {
-        console.error('[Market Switch] 查詢錯誤:', error);
-        showStockName('查詢失敗', 'error');
+
+    if (!marketSwitch || !marketLabel) {
+        console.error('[Market Switch] UI elements not found!');
+        return;
     }
+
+    const upperMarket = targetMarket.toUpperCase();
+    currentMarket = upperMarket;
+    marketSwitch.checked = (upperMarket === 'TPEX');
+    marketLabel.textContent = (upperMarket === 'TPEX') ? '上櫃' : '上市';
     
-    // 重置自動切換狀態
-    isAutoSwitching = false;
+    console.log(`[Market Switch v9.7] UI 已更新到: ${currentMarket}`);
 }
 
 // 顯示股票名稱

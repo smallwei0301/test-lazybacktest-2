@@ -5,13 +5,25 @@ import fetch from 'node-fetch';
 const inMemoryCache = new Map();
 
 async function fetchYahooName(symbol) {
-    const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
+    // 使用 v8/chart API 並請求極短的日期範圍，此方法更為穩定
+    const period2 = Math.floor(Date.now() / 1000);
+    const period1 = period2 - (24 * 60 * 60); // 1 day ago
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
+    
     const response = await fetch(yahooUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!response.ok) throw new Error('Yahoo Quote API request failed');
+    if (!response.ok) throw new Error(`Yahoo Chart API request failed with status ${response.status}`);
+    
     const data = await response.json();
-    const result = data.quoteResponse.result[0];
-    if (!result || !result.shortName) throw new Error('Stock not found on Yahoo Finance');
-    return result.shortName;
+    if (data.chart.error) {
+        throw new Error(`Yahoo Chart API returned an error: ${data.chart.error.description}`);
+    }
+    
+    const result = data.chart.result[0];
+    if (!result || !result.meta || !result.meta.shortName) {
+        throw new Error('Stock name not found in Yahoo Chart API response');
+    }
+    
+    return result.meta.shortName;
 }
 
 async function fetchFromYahoo(stockNo, symbol, startDate, endDate) {
