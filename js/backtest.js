@@ -25,12 +25,15 @@ function runBacktestInternal() {
         let cachedEntry = null;
         if (useCache) {
             cachedEntry = cachedDataStore.get(cacheKey);
-            if (cachedEntry && Array.isArray(cachedEntry.data) && cachedEntry.data.length > 0) {
-                cachedStockData = cachedEntry.data;
+
+            if (cachedEntry && Array.isArray(cachedEntry.data)) {
+                const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
+                cachedStockData = sliced;
                 lastFetchSettings = curSettings;
-                console.log(`[Main] 從快取命中 ${cacheKey}`);
+                console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
-                console.warn('[Main] 快取內容不存在或數據不足，改為重新抓取。');
+                console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
+
                 useCache = false;
                 cachedEntry = null;
             }
@@ -70,27 +73,50 @@ function runBacktestInternal() {
                 }
             } else if(type==='result'){
                 if(!useCache&&data?.rawData){
-                     cachedDataStore.set(cacheKey, {
-                         data: data.rawData,
-                         stockName: stockName || params.stockNo,
-                         dataSource: dataSource || '',
-                         fetchedAt: Date.now()
-                     });
-                     cachedStockData = data.rawData;
-                     lastFetchSettings=curSettings;
-                     console.log(`[Main] Data cached for ${cacheKey}.`);
-                } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
-                     cachedStockData = cachedEntry.data;
-                     lastFetchSettings = curSettings;
-                     if ((stockName && cachedEntry.stockName !== stockName) || (dataSource && cachedEntry.dataSource !== dataSource)) {
-                         cachedDataStore.set(cacheKey, {
-                             ...cachedEntry,
-                             stockName: stockName || cachedEntry.stockName || params.stockNo,
-                             dataSource: dataSource || cachedEntry.dataSource || '',
-                             fetchedAt: cachedEntry.fetchedAt || Date.now()
+                     const existingEntry = cachedDataStore.get(cacheKey);
+                     const mergedDataMap = new Map(Array.isArray(existingEntry?.data) ? existingEntry.data.map(row => [row.date, row]) : []);
+                     if (Array.isArray(data.rawData)) {
+                         data.rawData.forEach(row => {
+                             if (row && row.date) {
+                                 mergedDataMap.set(row.date, row);
+                             }
                          });
                      }
-                     console.log("[Main] Using main thread cached data for worker if needed.");
+                     const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
+                     const mergedCoverage = mergeIsoCoverage(existingEntry?.coverage || [], { start: curSettings.startDate, end: curSettings.endDate });
+                     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
+                     if (dataSource) sourceSet.add(dataSource);
+                     const sourceArray = Array.from(sourceSet);
+                     const cacheEntry = {
+                         data: mergedData,
+                         stockName: stockName || existingEntry?.stockName || params.stockNo,
+                         dataSources: sourceArray,
+                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
+                         coverage: mergedCoverage,
+                         fetchedAt: Date.now()
+                     };
+                     cachedDataStore.set(cacheKey, cacheEntry);
+                     cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
+                     lastFetchSettings=curSettings;
+                     console.log(`[Main] Data cached/merged for ${cacheKey}.`);
+                     cachedEntry = cacheEntry;
+                } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
+                     const updatedSources = new Set(Array.isArray(cachedEntry.dataSources) ? cachedEntry.dataSources : []);
+                     if (dataSource) updatedSources.add(dataSource);
+                     const updatedArray = Array.from(updatedSources);
+                     const updatedEntry = {
+                         ...cachedEntry,
+                         stockName: stockName || cachedEntry.stockName || params.stockNo,
+                         dataSources: updatedArray,
+                         dataSource: summariseSourceLabels(updatedArray),
+                         fetchedAt: cachedEntry.fetchedAt || Date.now()
+                     };
+                     cachedDataStore.set(cacheKey, updatedEntry);
+                     cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
+                     lastFetchSettings = curSettings;
+                     cachedEntry = updatedEntry;
+                     console.log("[Main] 使用主執行緒快取資料執行回測。");
+
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }
