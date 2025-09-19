@@ -1,11 +1,14 @@
 // --- Worker Data Acquisition & Cache (v10.0) ---
+
 const WORKER_DATA_VERSION = "v10.1";
+
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 function getMarketKey(marketType) {
+
   return (marketType || "TWSE").toUpperCase();
 }
 
@@ -652,6 +655,7 @@ function calculateBollingerBands(prices, period = 20, deviations = 2) {
   const middle = calculateMA(prices, period);
   const upper = new Array(prices.length).fill(null);
   const lower = new Array(prices.length).fill(null);
+
 
   for (let i = period - 1; i < prices.length; i++) {
     if (!Number.isFinite(middle[i])) continue;
@@ -2525,6 +2529,7 @@ function runStrategy(data, params) {
             maxInvestmentAllowed,
           );
 
+
           // 記錄隔日做空交易意圖
           pendingNextDayTrade = {
             type: "short",
@@ -2596,6 +2601,7 @@ function runStrategy(data, params) {
             );
             shortShares = 0;
           }
+
         } else {
           console.warn(
             `[Worker SHORT] Invalid trade price (${tradePrice}) for Short Signal on ${dates[i]}`,
@@ -2834,6 +2840,7 @@ function runStrategy(data, params) {
           console.warn(
             `[Worker] B&H duration (${bhYears.toFixed(4)} years) too short for meaningful annualization. Using total B&H return rate.`,
           );
+
         }
       }
     }
@@ -3759,6 +3766,7 @@ function runSuggestionSimulation(params, recentData) {
 }
 
 // --- Worker 消息處理 ---
+
 self.onmessage = async function (e) {
   const {
     type,
@@ -3906,5 +3914,6 @@ self.onmessage = async function (e) {
       });
     }
   }
+
 };
 // --- Web Worker End ---
