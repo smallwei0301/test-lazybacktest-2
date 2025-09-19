@@ -79,8 +79,3 @@ export default async (req, context) => {
         return new Response(JSON.stringify({ error: `主力資料來源請求失敗: ${error.message}` }), { status: 500 });
     }
 };
-
-export const config = {
-  path: "/.netlify/functions/tpex-proxy",
-  prefer_static: true
-};
