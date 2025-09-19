@@ -1,4 +1,5 @@
 
+// Patch Tag: LB-PRICE-MODE-20240513A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -17,7 +18,7 @@ function runBacktestInternal() {
         if(!isValid) return;
 
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey};
+        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, priceMode: params.adjustedPrice ? 'adjusted' : 'raw'};
         let useCache=!needsDataFetch(curSettings);
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
@@ -93,7 +94,9 @@ function runBacktestInternal() {
                          dataSources: sourceArray,
                          dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                          coverage: mergedCoverage,
-                         fetchedAt: Date.now()
+                         fetchedAt: Date.now(),
+                         adjustedPrice: params.adjustedPrice,
+                         priceMode: params.adjustedPrice ? 'adjusted' : 'raw'
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
@@ -109,7 +112,9 @@ function runBacktestInternal() {
                          stockName: stockName || cachedEntry.stockName || params.stockNo,
                          dataSources: updatedArray,
                          dataSource: summariseSourceLabels(updatedArray),
-                         fetchedAt: cachedEntry.fetchedAt || Date.now()
+                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
+                         adjustedPrice: params.adjustedPrice,
+                         priceMode: params.adjustedPrice ? 'adjusted' : 'raw'
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);

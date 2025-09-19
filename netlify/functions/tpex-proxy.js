@@ -1,4 +1,5 @@
 // netlify/functions/tpex-proxy.js (v10.0 - Range-aware tiered cache for TPEX)
+// Patch Tag: LB-PRICE-MODE-20240513A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -11,6 +12,10 @@ function isQuotaError(error) {
 
 function pad2(value) {
     return String(value).padStart(2, '0');
+}
+
+function buildMonthCacheKey(stockNo, monthKey, adjusted) {
+    return `${stockNo}_${monthKey}${adjusted ? '_ADJ' : ''}`;
 }
 
 function parseDate(value) {
@@ -111,7 +116,7 @@ async function writeCache(store, cacheKey, payload) {
     }
 }
 
-async function fetchFromYahoo(stockNo) {
+async function fetchFromYahoo(stockNo, adjusted) {
     const symbol = `${stockNo}.TWO`;
     console.log(`[TPEX Proxy v10.0] 嘗試 Yahoo Finance: ${symbol}`);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=20y&interval=1d`;
@@ -132,48 +137,79 @@ async function fetchFromYahoo(stockNo) {
     const quotes = result?.indicators?.quote?.[0] || {};
     const stockName = result?.meta?.shortName || symbol;
     const entries = [];
+    let prevRawClose = null;
+    let prevAdjClose = null;
 
     for (let i = 0; i < result.timestamp.length; i++) {
         const ts = result.timestamp[i];
-        const close = adjclose[i];
-        if (close == null) continue;
-        const open = quotes.open?.[i] ?? close;
-        const high = quotes.high?.[i] ?? Math.max(open, close);
-        const low = quotes.low?.[i] ?? Math.min(open, close);
-        const rawClose = quotes.close?.[i] ?? close;
-        const volume = quotes.volume?.[i] ?? 0;
-        const prevClose = i > 0 && adjclose[i - 1] != null ? adjclose[i - 1] : null;
-
-        const adjFactor = rawClose ? close / rawClose : 1;
+        const rawCloseValue = quotes.close?.[i];
+        const adjCloseValue = adjclose[i];
+        const volume = Number(quotes.volume?.[i]) || 0;
         const date = new Date(ts * 1000);
         if (Number.isNaN(date.getTime())) continue;
         const isoDate = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
         const rocDate = isoToRoc(isoDate);
         if (!rocDate) continue;
+        const openRaw = Number(quotes.open?.[i]);
+        const highRaw = Number(quotes.high?.[i]);
+        const lowRaw = Number(quotes.low?.[i]);
+        const baseClose = Number.isFinite(rawCloseValue) ? rawCloseValue : Number.isFinite(adjCloseValue) ? adjCloseValue : Number.isFinite(openRaw) ? openRaw : null;
+        if (!Number.isFinite(baseClose)) continue;
+        const baseOpen = Number.isFinite(openRaw) ? openRaw : baseClose;
+        const baseHigh = Number.isFinite(highRaw) ? highRaw : Math.max(baseOpen, baseClose);
+        const baseLow = Number.isFinite(lowRaw) ? lowRaw : Math.min(baseOpen, baseClose);
 
-        const adjOpen = Number((open * adjFactor).toFixed(4));
-        const adjHigh = Number((high * adjFactor).toFixed(4));
-        const adjLow = Number((low * adjFactor).toFixed(4));
-        const adjClose = Number(close.toFixed(4));
-        const change = prevClose != null ? Number((close - prevClose).toFixed(4)) : 0;
-        const vol = Number(volume) || 0;
+        let finalOpen;
+        let finalHigh;
+        let finalLow;
+        let finalClose;
+        let change;
+
+        if (adjusted) {
+            const adjClose = Number.isFinite(adjCloseValue) ? adjCloseValue : baseClose;
+            const scale = baseClose ? adjClose / baseClose : 1;
+            finalClose = Number(adjClose.toFixed(4));
+            finalOpen = Number((baseOpen * scale).toFixed(4));
+            finalHigh = Number((baseHigh * scale).toFixed(4));
+            finalLow = Number((baseLow * scale).toFixed(4));
+            const prev = Number.isFinite(prevAdjClose) ? prevAdjClose : null;
+            change = prev !== null ? Number((finalClose - prev).toFixed(4)) : 0;
+            prevAdjClose = finalClose;
+            if (Number.isFinite(baseClose)) {
+                prevRawClose = Number(baseClose.toFixed(4));
+            }
+        } else {
+            const rawClose = Number.isFinite(baseClose) ? baseClose : Number.isFinite(adjCloseValue) ? adjCloseValue : baseOpen;
+            finalClose = Number(rawClose.toFixed(4));
+            finalOpen = Number(baseOpen.toFixed(4));
+            finalHigh = Number(baseHigh.toFixed(4));
+            finalLow = Number(baseLow.toFixed(4));
+            const prev = Number.isFinite(prevRawClose) ? prevRawClose : null;
+            change = prev !== null ? Number((finalClose - prev).toFixed(4)) : 0;
+            prevRawClose = finalClose;
+            if (Number.isFinite(adjCloseValue)) {
+                prevAdjClose = Number(adjCloseValue.toFixed(4));
+            }
+        }
 
         entries.push({
             isoDate,
-            aaRow: [rocDate, stockNo, stockName, adjOpen, adjHigh, adjLow, adjClose, change, vol]
+            aaRow: [rocDate, stockNo, stockName, finalOpen, finalHigh, finalLow, finalClose, change || 0, volume]
         });
     }
 
-    return { stockName, entries, dataSource: 'Yahoo Finance' };
+    const dataSource = adjusted ? 'Yahoo Finance (還原)' : 'Yahoo Finance (原始)';
+    return { stockName, entries, dataSource };
 }
 
-async function fetchFromFinMind(stockNo) {
+async function fetchFromFinMind(stockNo, adjusted) {
     console.warn('[TPEX Proxy v10.0] Yahoo 失敗，改用 FinMind 備援來源');
     const token = process.env.FINMIND_TOKEN;
     if (!token) {
         throw new Error('未設定 FinMind Token');
     }
-    const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPriceAdj&data_id=${stockNo}&token=${token}`;
+    const dataset = adjusted ? 'TaiwanStockPriceAdj' : 'TaiwanStockPrice';
+    const url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&data_id=${stockNo}&token=${token}`;
     const response = await fetch(url);
     if (!response.ok) {
         throw new Error(`FinMind HTTP ${response.status}`);
@@ -191,19 +227,20 @@ async function fetchFromFinMind(stockNo) {
         const open = Number(item.open) || Number(item.Open) || Number(item.Opening) || 0;
         const high = Number(item.max) || Number(item.high) || 0;
         const low = Number(item.min) || Number(item.low) || 0;
-        const close = Number(item.close) || Number(item.Close) || 0;
+        const closeValue = Number(item.close) || Number(item.Close) || 0;
         const spread = Number(item.spread ?? item.change ?? 0) || 0;
         const volume = Number(item.Trading_Volume ?? item.volume ?? 0) || 0;
 
         entries.push({
             isoDate,
-            aaRow: [rocDate, stockNo, stockNo, open, high, low, close, spread, volume]
+            aaRow: [rocDate, stockNo, stockNo, open, high, low, closeValue, spread, volume]
         });
     }
-    return { stockName: stockNo, entries, dataSource: 'FinMind (備援)' };
+    const dataSource = adjusted ? 'FinMind (還原備援)' : 'FinMind (原始備援)';
+    return { stockName: stockNo, entries, dataSource };
 }
 
-async function persistEntries(store, stockNo, entries, stockName, dataSource) {
+async function persistEntries(store, stockNo, entries, stockName, dataSource, adjusted) {
     const buckets = new Map(); // Map<monthKey, aaData[]>
     for (const entry of entries) {
         const monthKey = entry.isoDate.slice(0, 7).replace('-', '');
@@ -216,20 +253,20 @@ async function persistEntries(store, stockNo, entries, stockName, dataSource) {
     for (const [monthKey, rows] of buckets.entries()) {
         rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
         const payload = { stockName, aaData: rows, dataSource };
-        await writeCache(store, `${stockNo}_${monthKey}`, payload);
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), payload);
     }
     return buckets;
 }
 
-async function hydrateMissingMonths(store, stockNo) {
+async function hydrateMissingMonths(store, stockNo, adjusted) {
     try {
-        const yahooResult = await fetchFromYahoo(stockNo);
-        await persistEntries(store, stockNo, yahooResult.entries, yahooResult.stockName, yahooResult.dataSource);
+        const yahooResult = await fetchFromYahoo(stockNo, adjusted);
+        await persistEntries(store, stockNo, yahooResult.entries, yahooResult.stockName, yahooResult.dataSource, adjusted);
         return yahooResult.dataSource;
     } catch (yahooError) {
         console.warn('[TPEX Proxy v10.0] Yahoo 來源失敗:', yahooError.message);
-        const finmindResult = await fetchFromFinMind(stockNo);
-        await persistEntries(store, stockNo, finmindResult.entries, finmindResult.stockName, finmindResult.dataSource);
+        const finmindResult = await fetchFromFinMind(stockNo, adjusted);
+        await persistEntries(store, stockNo, finmindResult.entries, finmindResult.stockName, finmindResult.dataSource, adjusted);
         return finmindResult.dataSource;
     }
 }
@@ -256,6 +293,7 @@ export default async (req) => {
         const startParam = params.get('start');
         const endParam = params.get('end');
         const legacyDate = params.get('date');
+        const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
 
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
@@ -287,7 +325,7 @@ export default async (req) => {
         let stockName = '';
 
         for (const month of months) {
-            const cacheKey = `${stockNo}_${month}`;
+            const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
             const monthStart = new Date(Number(month.slice(0, 4)), Number(month.slice(4)) - 1, 1);
             const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
             const rangeStart = startDate > monthStart ? startDate : monthStart;
@@ -295,7 +333,7 @@ export default async (req) => {
 
             let payload = await readCache(store, cacheKey);
             if (!payload) {
-                const sourceLabel = await hydrateMissingMonths(store, stockNo);
+                const sourceLabel = await hydrateMissingMonths(store, stockNo, adjusted);
                 payload = await readCache(store, cacheKey);
                 if (payload) {
                     sourceFlags.add(sourceLabel);

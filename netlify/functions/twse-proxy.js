@@ -1,4 +1,5 @@
 // netlify/functions/twse-proxy.js (v10.0 - Range-aware tiered cache for TWSE)
+// Patch Tag: LB-PRICE-MODE-20240513A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -69,6 +70,128 @@ function withinRange(rocDate, start, end) {
     return !(Number.isNaN(d.getTime()) || d < start || d > end);
 }
 
+function isoToRoc(isoDate) {
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return null;
+    const rocYear = date.getFullYear() - 1911;
+    return `${rocYear}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}`;
+}
+
+function buildMonthCacheKey(stockNo, monthKey, adjusted) {
+    return `${stockNo}_${monthKey}${adjusted ? '_ADJ' : ''}`;
+}
+
+function safeRound(value) {
+    return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
+async function fetchYahooDaily(stockNo) {
+    const symbol = `${stockNo}.TW`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=20y&interval=1d`;
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!response.ok) {
+        throw new Error(`Yahoo HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    if (json?.chart?.error) {
+        throw new Error(`Yahoo 回應錯誤: ${json.chart.error.description}`);
+    }
+    const result = json?.chart?.result?.[0];
+    if (!result || !Array.isArray(result.timestamp)) {
+        throw new Error('Yahoo 回傳資料格式異常');
+    }
+
+    const quote = result.indicators?.quote?.[0] || {};
+    const adj = result.indicators?.adjclose?.[0]?.adjclose || [];
+    const rows = [];
+    for (let i = 0; i < result.timestamp.length; i++) {
+        const ts = result.timestamp[i];
+        if (!Number.isFinite(ts)) continue;
+        const date = new Date(ts * 1000);
+        if (Number.isNaN(date.getTime())) continue;
+        const isoDate = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+        const open = Number(quote.open?.[i]);
+        const high = Number(quote.high?.[i]);
+        const low = Number(quote.low?.[i]);
+        const close = Number(quote.close?.[i]);
+        const volume = Number(quote.volume?.[i]) || 0;
+        const adjClose = Number(adj?.[i]);
+        rows.push({ isoDate, open, high, low, close, adjClose, volume });
+    }
+
+    return {
+        stockName: result.meta?.shortName || stockNo,
+        rows,
+    };
+}
+
+async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
+    const { stockName, rows } = yahooData;
+    const monthlyBuckets = new Map();
+    let prevRawClose = null;
+    let prevAdjClose = null;
+    for (const row of rows) {
+        const rocDate = isoToRoc(row.isoDate);
+        if (!rocDate) continue;
+        const baseClose = Number.isFinite(row.close) ? row.close : Number.isFinite(row.adjClose) ? row.adjClose : Number.isFinite(row.open) ? row.open : null;
+        if (!Number.isFinite(baseClose)) continue;
+        const baseOpen = Number.isFinite(row.open) ? row.open : baseClose;
+        const baseHigh = Number.isFinite(row.high) ? row.high : Math.max(baseOpen, baseClose);
+        const baseLow = Number.isFinite(row.low) ? row.low : Math.min(baseOpen, baseClose);
+        const monthKey = row.isoDate.slice(0, 7).replace('-', '');
+        let finalOpen;
+        let finalHigh;
+        let finalLow;
+        let finalClose;
+        let change;
+
+        if (adjusted) {
+            const adjClose = Number.isFinite(row.adjClose) ? row.adjClose : baseClose;
+            const scale = baseClose ? adjClose / baseClose : 1;
+            finalClose = safeRound(adjClose);
+            finalOpen = safeRound(baseOpen * scale);
+            finalHigh = safeRound(baseHigh * scale);
+            finalLow = safeRound(baseLow * scale);
+            const prev = Number.isFinite(prevAdjClose) ? prevAdjClose : null;
+            change = prev !== null && finalClose !== null ? safeRound(finalClose - prev) : 0;
+            prevAdjClose = finalClose !== null ? finalClose : prevAdjClose;
+            if (Number.isFinite(baseClose)) {
+                prevRawClose = safeRound(baseClose);
+            }
+        } else {
+            const rawClose = Number.isFinite(baseClose) ? baseClose : Number.isFinite(row.adjClose) ? row.adjClose : baseOpen;
+            finalClose = safeRound(rawClose);
+            finalOpen = safeRound(baseOpen);
+            finalHigh = safeRound(baseHigh);
+            finalLow = safeRound(baseLow);
+            const prev = Number.isFinite(prevRawClose) ? prevRawClose : null;
+            change = prev !== null && finalClose !== null ? safeRound(finalClose - prev) : 0;
+            prevRawClose = finalClose !== null ? finalClose : prevRawClose;
+            if (Number.isFinite(row.adjClose)) {
+                prevAdjClose = safeRound(row.adjClose);
+            }
+        }
+
+        if (finalOpen === null || finalHigh === null || finalLow === null || finalClose === null) {
+            continue;
+        }
+
+        const vol = Number.isFinite(row.volume) ? Math.round(row.volume) : 0;
+        const aaRow = [rocDate, stockNo, stockName, finalOpen, finalHigh, finalLow, finalClose, change || 0, vol];
+        if (!monthlyBuckets.has(monthKey)) monthlyBuckets.set(monthKey, []);
+        monthlyBuckets.get(monthKey).push(aaRow);
+    }
+
+    const dataSource = adjusted ? 'Yahoo Finance (還原)' : 'Yahoo Finance (原始)';
+    for (const [monthKey, rowsOfMonth] of monthlyBuckets.entries()) {
+        rowsOfMonth.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+        const payload = { stockName, aaData: rowsOfMonth, dataSource };
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), payload);
+    }
+
+    return dataSource;
+}
+
 async function readCache(store, cacheKey) {
     const memoryHit = inMemoryCache.get(cacheKey);
     if (memoryHit && Date.now() - memoryHit.timestamp < TWSE_CACHE_TTL_MS) {
@@ -133,17 +256,19 @@ function parseTWSEPayload(raw, stockNo) {
 
 function selectDataSourceLabel(sources) {
     if (sources.size === 0) return 'TWSE';
-    if (sources.size === 1) {
-        const [label] = sources;
-        if (label === 'memory') return 'TWSE (記憶體快取)';
-        if (label === 'blob') return 'TWSE (快取)';
-        return label;
+    const labels = Array.from(sources);
+    const primaryYahoo = labels.find(label => /Yahoo Finance/i.test(label));
+    const primaryTwse = labels.find(label => /^TWSE/i.test(label));
+    const hasCache = labels.some(label => /memory|blob|快取/i.test(label));
+    const hasRemote = labels.includes('remote');
+    const primary = primaryYahoo || primaryTwse || (hasRemote ? 'TWSE' : labels.find(label => !/memory|blob/.test(label)) || 'TWSE');
+    if (primaryYahoo) {
+        return hasCache ? `${primary} (快取)` : primary;
     }
-    const hasFresh = sources.has('remote');
-    const hasCache = sources.has('memory') || sources.has('blob');
-    if (hasFresh && hasCache) return 'TWSE (部分快取)';
-    if (hasCache) return 'TWSE (快取)';
-    return 'TWSE';
+    if (hasRemote && hasCache) return `${primary} (部分快取)`;
+    if (hasCache) return `${primary} (快取)`;
+    if (hasRemote) return `${primary} (遠端)`;
+    return primary;
 }
 
 export default async (req) => {
@@ -158,6 +283,7 @@ export default async (req) => {
         const startParam = params.get('start');
         const endParam = params.get('end');
         const legacyDate = params.get('date');
+        const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
 
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
@@ -188,9 +314,11 @@ export default async (req) => {
         const combinedRows = [];
         const sourceFlags = new Set();
         let stockName = '';
+        let yahooHydrated = false;
+        let yahooSourceLabel = '';
 
         for (const month of months) {
-            const cacheKey = `${stockNo}_${month}`;
+            const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
             const monthStart = new Date(Number(month.slice(0, 4)), Number(month.slice(4)) - 1, 1);
             const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
             const rangeStart = startDate > monthStart ? startDate : monthStart;
@@ -198,24 +326,47 @@ export default async (req) => {
 
             let payload = await readCache(store, cacheKey);
             if (!payload) {
-                const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${month}01&stockNo=${stockNo}`;
-                console.log(`[TWSE Proxy v10.0] 下載 ${stockNo} 的 ${month} 月資料`);
-                const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                if (!response.ok) {
-                    console.warn(`[TWSE Proxy v10.0] TWSE 回應 ${response.status}，略過 ${month}`);
+                if (adjusted) {
+                    if (!yahooHydrated) {
+                        try {
+                            const yahooData = await fetchYahooDaily(stockNo);
+                            yahooSourceLabel = await persistYahooEntries(store, stockNo, yahooData, true);
+                        } catch (error) {
+                            console.error('[TWSE Proxy v10.0] Yahoo 抓取失敗:', error);
+                            yahooSourceLabel = 'Yahoo Finance (還原)';
+                        }
+                        yahooHydrated = true;
+                    }
+                    payload = await readCache(store, cacheKey);
+                    if (payload && yahooSourceLabel) {
+                        sourceFlags.add(yahooSourceLabel);
+                    }
+                } else {
+                    const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${month}01&stockNo=${stockNo}`;
+                    console.log(`[TWSE Proxy v10.0] 下載 ${stockNo} 的 ${month} 月資料`);
+                    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                    if (!response.ok) {
+                        console.warn(`[TWSE Proxy v10.0] TWSE 回應 ${response.status}，略過 ${month}`);
+                        sourceFlags.add('remote');
+                        continue;
+                    }
+                    const parsed = parseTWSEPayload(await response.json(), stockNo);
+                    payload = { ...parsed, dataSource: 'TWSE' };
+                    await writeCache(store, cacheKey, payload);
                     sourceFlags.add('remote');
-                    continue;
                 }
-                const parsed = parseTWSEPayload(await response.json(), stockNo);
-                payload = { ...parsed };
-                await writeCache(store, cacheKey, payload);
-                sourceFlags.add('remote');
             } else {
                 sourceFlags.add(payload.source === 'blob' ? 'blob' : 'memory');
             }
 
+            if (!payload) continue;
+
             if (!stockName && payload.stockName) {
                 stockName = payload.stockName;
+            }
+
+            if (payload?.dataSource) {
+                sourceFlags.add(payload.dataSource);
             }
 
             const monthRows = Array.isArray(payload.aaData) ? payload.aaData : [];
