@@ -79,23 +79,23 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         // 將從 proxy 獲得的完整資料進行日期篩選與格式化
         console.log(`[Worker] Raw data aaData length: ${data.aaData.length}`);
         const formattedData = data.aaData.map((item, index) => {
-            // console.log(`[Worker] Processing item ${index}:`, item); // Log each item
+            console.log(`[Worker] Processing item ${index}:`, item); // Log each item
             const dateStr = formatTWDateWorker(item[0]);
-            // console.log(`[Worker] Item ${index} - Original Date: ${item[0]}, Formatted Date: ${dateStr}`);
+            console.log(`[Worker] Item ${index} - Original Date: ${item[0]}, Formatted Date: ${dateStr}`);
             if (!dateStr) {
-                // console.warn(`[Worker] Item ${index} - Invalid formatted date: ${item[0]}`);
+                console.warn(`[Worker] Item ${index} - Invalid formatted date: ${item[0]}`);
                 return null;
             }
 
             const itemDate = new Date(dateStr);
-            // console.log(`[Worker] Item ${index} - Parsed Date Object: ${itemDate}, isNaN: ${isNaN(itemDate.getTime())}`);
+            console.log(`[Worker] Item ${index} - Parsed Date Object: ${itemDate}, isNaN: ${isNaN(itemDate.getTime())}`);
             if (isNaN(itemDate.getTime())) {
-                // console.warn(`[Worker] Item ${index} - Invalid date object after parsing: ${dateStr}`);
+                console.warn(`[Worker] Item ${index} - Invalid date object after parsing: ${dateStr}`);
                 return null;
             }
 
             // 篩選日期
-            // console.log(`[Worker] Item ${index} - Comparing ${itemDate.toISOString().split('T')[0]} with Start: ${startDate} and End: ${endDate}`);
+            console.log(`[Worker] Item ${index} - Comparing ${itemDate.toISOString().split('T')[0]} with Start: ${startDate} and End: ${endDate}`);
             if (itemDate >= new Date(startDate) && itemDate <= new Date(endDate)) {
                 const o = parseFloat(String(item[3]).replace(/,/g, ''));
                 const h = parseFloat(String(item[4]).replace(/,/g, ''));
@@ -104,7 +104,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
                 const v = parseInt(String(item[8]).replace(/,/g, ''), 10);
                 
                 if ([o, h, l, c, v].some(isNaN)) {
-                    // console.warn(`[Worker] Item ${index} - Invalid OHLCV values:`, {o, h, l, c, v});
+                    console.warn(`[Worker] Item ${index} - Invalid OHLCV values:`, {o, h, l, c, v});
                     return null;
                 }
                 
