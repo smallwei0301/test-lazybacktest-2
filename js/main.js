@@ -1,4 +1,4 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.1 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.2 ---
 
 // 全局變量
 let stockChart = null;
@@ -54,11 +54,19 @@ function createProgressAnimator() {
     const MAX_DURATION = 2400;
     const MS_PER_PERCENT = 45;
     const SHORT_TASK_THRESHOLD = 4000;
-    const SHORT_FAST_RATIO = 0.45;
-    const SHORT_FIRST_SEGMENT_PROGRESS = 55;
-    const SHORT_SECOND_SEGMENT_PROGRESS = 35;
-    const SHORT_FINAL_MIN_DURATION = 1300;
-    const SHORT_FINAL_MAX_DURATION = 1800;
+    const SHORT_FIRST_SEGMENT_PROGRESS = 50;
+    const SHORT_SECOND_SEGMENT_PROGRESS = 50;
+    const SHORT_FIRST_SEGMENT_SPEEDUP = 3;
+    const SHORT_SECOND_SEGMENT_SLOWDOWN = 2;
+    const SHORT_SECOND_SEGMENT_MULTIPLIER = 1 / SHORT_SECOND_SEGMENT_SLOWDOWN;
+    const SHORT_TIME_WEIGHT =
+        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
+        + (SHORT_SECOND_SEGMENT_PROGRESS / SHORT_SECOND_SEGMENT_MULTIPLIER);
+    const SHORT_FIRST_SEGMENT_TIME_RATIO =
+        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
+        / SHORT_TIME_WEIGHT;
+    const SHORT_FINAL_MIN_DURATION = 1700;
+    const SHORT_FINAL_MAX_DURATION = 2600;
 
     const raf =
         (typeof window !== 'undefined' && window.requestAnimationFrame)
@@ -186,13 +194,16 @@ function createProgressAnimator() {
             let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
             const elapsed = startTimestamp ? now() - startTimestamp : 0;
             if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                const ratio = elapsed / SHORT_TASK_THRESHOLD;
-                if (ratio <= SHORT_FAST_RATIO) {
-                    const fastProgress = (ratio / SHORT_FAST_RATIO) * SHORT_FIRST_SEGMENT_PROGRESS;
+                const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
+                if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
+                    const fastRatio = normalizedTime / SHORT_FIRST_SEGMENT_TIME_RATIO;
+                    const fastProgress = fastRatio * SHORT_FIRST_SEGMENT_PROGRESS;
                     nextCeiling = Math.max(nextCeiling, fastProgress);
                 } else {
-                    const slowRatio = (ratio - SHORT_FAST_RATIO) / (1 - SHORT_FAST_RATIO);
-                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS + (slowRatio * SHORT_SECOND_SEGMENT_PROGRESS);
+                    const remainingTimeRatio = (normalizedTime - SHORT_FIRST_SEGMENT_TIME_RATIO)
+                        / (1 - SHORT_FIRST_SEGMENT_TIME_RATIO);
+                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS
+                        + (remainingTimeRatio * SHORT_SECOND_SEGMENT_PROGRESS);
                     nextCeiling = Math.max(nextCeiling, slowProgress);
                 }
             }
