@@ -1871,10 +1871,10 @@ async function fetchTPEXNameViaProxy(stockNo) {
 
     const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
     
-    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
+    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${proxyUrl}`);
     
     try {
-        const response = await fetch(url);
+        const response = await fetch(proxyUrl);
         if (!response.ok) {
             console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
             return { error: `HTTP status ${response.status}` };

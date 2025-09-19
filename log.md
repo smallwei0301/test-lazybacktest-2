@@ -15,13 +15,46 @@ batch-optimization.js:210 [Batch Optimization] Strategy options generated succes
 batch-optimization.js:280 [Batch Optimization] Events bound successfully
 batch-optimization.js:143 [Batch Optimization] Initialized successfully
 backtest.js:2080 [Market Switch] 市場切換功能已初始化
+backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TWSE)
 backtest.js:1454 [Fees] Set default fees for 3260 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
+backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
+backtest.js:1862 [TPEX Name] 查詢股票名稱失敗: ReferenceError: url is not defined
+    at fetchTPEXNameViaProxy (backtest.js:1874:78)
+    at fetchStockNameFromTPEX (backtest.js:1808:35)
+    at fetchStockName (backtest.js:1744:33)
+fetchStockNameFromTPEX @ backtest.js:1862
+await in fetchStockNameFromTPEX
+fetchStockName @ backtest.js:1744
+await in fetchStockName
+(anonymous) @ backtest.js:1693
+setTimeout
+debouncedFetchStockName @ backtest.js:1692
+(anonymous) @ backtest.js:1674
 backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TWSE)
 backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
+backtest.js:1862 [TPEX Name] 查詢股票名稱失敗: ReferenceError: url is not defined
+    at fetchTPEXNameViaProxy (backtest.js:1874:78)
+    at fetchStockNameFromTPEX (backtest.js:1808:35)
+    at fetchStockName (backtest.js:1744:33)
+fetchStockNameFromTPEX @ backtest.js:1862
+await in fetchStockNameFromTPEX
+fetchStockName @ backtest.js:1744
+await in fetchStockName
+(anonymous) @ backtest.js:1693
+setTimeout
+debouncedFetchStockName @ backtest.js:1692
+(anonymous) @ backtest.js:1683
 backtest.js:1997 [Market Switch] 切換到 TPEX 查詢 3260
 backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
+backtest.js:1862 [TPEX Name] 查詢股票名稱失敗: ReferenceError: url is not defined
+    at fetchTPEXNameViaProxy (backtest.js:1874:78)
+    at fetchStockNameFromTPEX (backtest.js:1808:35)
+    at switchToMarket (backtest.js:2020:31)
+    at HTMLButtonElement.onclick ((index):1:1)
+fetchStockNameFromTPEX @ backtest.js:1862
+await in fetchStockNameFromTPEX
+switchToMarket @ backtest.js:2020
+onclick @ (index):1
 backtest.js:10 [Main] runBacktestInternal called
 backtest.js:14 [Main] Params: {stockNo: '3260', startDate: '2020-09-19', endDate: '2025-09-19', initialCapital: 100000, positionSize: 100, …}
 backtest.js:16 [Main] Validation: true
@@ -42,9 +75,5 @@ worker.js:853 Worker 執行 runBacktest 期間錯誤: Error: 代理伺服器錯�
 self.onmessage @ worker.js:853
 backtest.js:37 [Main] Received message from worker: error {message: 'Worker runBacktest 錯誤: 代理伺服器錯誤: 400 - {"error":"缺少參數"}'}
 
-Function tpex-proxy
-
-Sep 19, 10:53:19 AM: 18b83d0f INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 10:53:20 AM: 18b83d0f Duration: 486.03 ms	Memory Usage: 125 MB
-Sep 19, 10:53:20 AM: b295f288 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 10:53:20 AM: b295f288 Duration: 113.4 ms	Memory Usage: 133 MB
+Function twse-proxy
+Sep 19, 11:15:48 AM: d7845640 Duration: 106.65 ms	Memory Usage: 105 MB
