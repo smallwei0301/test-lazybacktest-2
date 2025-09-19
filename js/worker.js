@@ -80,144 +80,76 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
-    console.log(`[Worker] fetchStockData 啟動 for ${stockNo} (${marketType}) from ${startDate} to ${endDate}`);
+    self.postMessage({ type: 'progress', progress: 5, message: `準備從 ${marketType.toUpperCase()} 獲取數據...` });
 
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-    const months = [];
-    let current = new Date(sDate.getFullYear(), sDate.getMonth(), 1);
+    // 根據市場類型決定代理路徑
+    const proxyPath = marketType === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
+    const proxyUrl = `/.netlify/functions/${proxyPath}?stockNo=${stockNo}`;
 
-    while (current <= eDate) {
-        const y = current.getFullYear();
-        const m = String(current.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-        current.setMonth(current.getMonth() + 1);
-    }
-     if (months.length === 0 && sDate <= eDate) {
-        const y = sDate.getFullYear();
-        const m = String(sDate.getMonth() + 1).padStart(2, '0');
-        months.push(`${y}${m}01`);
-    }
-
-    const allRawData = [];
-    let dataSource = '未知';
-    let stockName = '';
-
-    const m = String(marketType || '').toUpperCase();
-    const isTpex = m.includes('TPEX') || m.includes('OTC') || m.includes('TPEx');
-    const proxyPath = isTpex ? '/api/tpex/' : '/api/twse/';
-
-    for (let i = 0; i < months.length; i++) {
-        const month = months[i];
-        const proxyUrl = `${proxyPath}?stockNo=${encodeURIComponent(stockNo)}&date=${month}`;
-        try {
-            self.postMessage({ type: 'progress', progress: 5 + Math.floor(((i + 1) / months.length) * 45), message: `已獲取 ${month.substring(0,6)} 數據...` });
-            const response = await fetch(proxyUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
-            if (!response.ok) {
-                console.warn(`[Worker] 代理 for ${month} 錯誤: ${response.status}`);
-                continue; // Try next month
-            }
-            const payload = await response.json();
-            if (payload.error) {
-                console.warn(`[Worker] 代理 for ${month} 回傳錯誤: ${payload.error}`);
-                continue;
-            }
-            
-            dataSource = payload.dataSource || (isTpex ? 'TPEX' : 'TWSE');
-            if (payload.stockName && !stockName) stockName = payload.stockName;
-
-            let raw = payload.aaData || payload.data || [];
-            if (raw.length > 0) {
-                allRawData.push(...raw);
-            }
-            await new Promise(r => setTimeout(r, 250 + Math.random() * 100)); // Be nice to the proxy
-        } catch (error) {
-            console.error(`[Worker] 呼叫代理 ${proxyUrl} 失敗:`, error);
-            continue;
+    try {
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`代理伺服器錯誤: ${response.status} - ${errorBody}`);
         }
-    }
+        
+        const data = await response.json();
+        if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
+        
+        self.postMessage({ type: 'progress', progress: 25, message: '數據獲取成功，處理中...' });
 
-    if (allRawData.length === 0) {
-        console.warn(`[Worker] 從代理 ${proxyPath} 未收到任何原始數據`);
-        return { data: [], dataSource, stockName };
-    }
+        if (!data.aaData || data.aaData.length === 0) {
+            console.warn(`[Worker] 從代理 ${marketType.toUpperCase()} 未收到任何原始數據`);
+            // 向主線程發送股票名稱資訊
+            self.postMessage({ type: 'stockNameInfo', stockName: data.stockName || stockNo, stockNo: stockNo, marketType: marketType });
+            return { data: [], dataSource: data.dataSource, stockName: data.stockName };
+        }
+        
+        // 向主線程發送股票名稱資訊
+        self.postMessage({ type: 'stockNameInfo', stockName: data.stockName || stockNo, stockNo: stockNo, marketType: marketType });
+        
+        // 將從 proxy 獲得的完整資料進行日期篩選與格式化
+        const formattedData = data.aaData.map(item => {
+            const dateStr = formatTWDateWorker(item[0]);
+            if (!dateStr) return null;
 
-    const normalized = allRawData.map(item => {
-        try {
-            let dateStr = null;
-            let o = null, h = null, l = null, c = null, v = null;
+            const itemDate = new Date(dateStr);
+            if (isNaN(itemDate.getTime())) return null;
 
-            if (Array.isArray(item)) {
-                dateStr = item[0];
-                if (isTpex) {
-                     // TPEX format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, ... ]
-                    if (item.length >= 7) {
-                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
-                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
-                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
-                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
-                        c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
-                } else {
-                    // TWSE format: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, 成交筆數]
-                    if (item.length >= 9) {
-                        v = parseFloat(String(item[1]).replace(/,/g, '')) || 0;
-                        o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
-                        h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
-                        l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
-                        c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
-                    } else return null;
-                }
-            } else if (item && typeof item === 'object') {
-                dateStr = item.date || item.Date || item.tradeDate || null;
-                o = item.open || item.Open || null;
-                h = item.high || item.High || null;
-                l = item.low || item.Low || null;
-                c = item.close || item.Close || null;
-                v = item.volume || item.Volume || item.Trading_Volume || 0;
-            } else {
-                return null;
+            // 篩選日期
+            if (itemDate >= new Date(startDate) && itemDate <= new Date(endDate)) {
+                const o = parseFloat(String(item[3]).replace(/,/g, ''));
+                const h = parseFloat(String(item[4]).replace(/,/g, ''));
+                const l = parseFloat(String(item[5]).replace(/,/g, ''));
+                const c = parseFloat(String(item[6]).replace(/,/g, ''));
+                const v = parseInt(String(item[8]).replace(/,/g, ''), 10);
+                
+                if ([o, h, l, c, v].some(isNaN)) return null;
+                
+                return { date: dateStr, open: o, high: h, low: l, close: c, volume: v / 1000 };
             }
-
-            let isoDate = null;
-            if (typeof dateStr === 'string' && /^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(dateStr.trim())) {
-                isoDate = formatTWDateWorker(dateStr.trim());
-            } else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
-                isoDate = dateStr.trim();
-            }
-            if (!isoDate) return null;
-
-            const dObj = new Date(isoDate);
-            if (isNaN(dObj) || dObj < sDate || dObj > eDate) return null;
-
-            if ((!o || o === 0) && c) o = c;
-            if ((!h || h === 0) && c) h = Math.max(o || 0, c);
-            if ((!l || l === 0) && c) l = Math.min(o || c, c);
-
-            return {
-                date: isoDate,
-                open: (o === null || isNaN(o)) ? null : o,
-                high: (h === null || isNaN(h)) ? null : h,
-                low: (l === null || isNaN(l)) ? null : l,
-                close: (c === null || isNaN(c)) ? null : c,
-                volume: Math.round((parseFloat(String(v).replace(/,/g, '')) || 0) / 1000)
-            };
-        } catch (e) {
             return null;
+        }).filter(item => item !== null);
+
+        // 按日期排序確保順序正確
+        const sortedData = formattedData.sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        self.postMessage({ type: 'progress', progress: 50, message: '數據處理完成...' });
+        
+        if (sortedData.length === 0) {
+            throw new Error(`指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
         }
-    }).filter(Boolean);
-    
-    const uniqueData = Array.from(new Map(normalized.map(item => [item.date, item])).values());
-    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    console.log(`[Worker] 原始數據 ${allRawData.length} 筆，最終整理後 ${sortedData.length} 筆`);
+        return { data: sortedData, dataSource: data.dataSource, stockName: data.stockName };
 
-    if (sortedData.length === 0) {
-        console.warn(`[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
+    } catch (error) {
+        console.error(`[Worker] 獲取或處理 ${stockNo} (${marketType}) 資料時發生錯誤:`, error);
+        // 如果是查無資料的特定錯誤，發送 marketError
+        if (error.message.includes("not found")) {
+             self.postMessage({ type: 'marketError', message: `在 ${marketType.toUpperCase()} 市場中找不到股票代號 ${stockNo}。`, stockNo: stockNo, marketType: marketType });
+        }
+        throw error;
     }
-
-    workerCachedStockData = sortedData;
-    return { data: sortedData, dataSource, stockName };
 }
 
 // --- TWSE 月數據獲取 ---
