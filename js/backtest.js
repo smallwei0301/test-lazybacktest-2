@@ -1695,64 +1695,275 @@ function debouncedFetchStockName(stockCode) {
 }
 
 // 取得股票名稱 (v9.3 升級版)
-async function fetchStockName(stockNo) {
-    if (isFetchingName) return;
-    isFetchingName = true;
-    showStockName('查詢中...', 'info');
+async function fetchStockName(stockCode) {
+    if (!stockCode || stockCode === 'TAIEX') return;
 
-    const marketsToTry = ['twse', 'tpex'];
-    let foundName = null;
-    let foundMarket = null;
-
-    for (const market of marketsToTry) {
-        try {
-            console.log(`[Stock Name v9.7] 正在嘗試於 ${market.toUpperCase()} 市場尋找 ${stockNo}`);
-            let proxyUrl;
-            // --- 關鍵升級：名稱查詢使用專用指令 ---
-            if (market === 'twse') {
-                // 對於上市股票，我們仍然需要一個日期來查詢，但這次只用於名稱，不會污染回測快取
-                const today = new Date();
-                const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}01`;
-                proxyUrl = `/.netlify/functions/twse-proxy?stockNo=${stockNo}&date=${dateStr}&lookup=name`;
-            } else { // tpex
-                proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&lookup=name`;
-            }
-            // --- 升級結束 ---
-            
-            const response = await fetch(proxyUrl);
-            if (!response.ok) continue;
-            
-            const data = await response.json();
-            if (data && data.stockName && data.stockName.trim() && !data.error) {
-                foundName = data.stockName.replace(stockNo, '').trim();
-                foundMarket = market;
-                break;
-            }
-        } catch (error) {
-            console.warn(`在 ${market.toUpperCase()} 市場查詢 ${stockNo} 時發生錯誤:`, error);
-        }
+    // 避免重複查詢
+    if (window.isFetchingName) {
+        console.log('[Stock Name] 已有進行中的查詢，跳過本次請求');
+        return;
     }
+    window.isFetchingName = true;
 
-    if (foundName) {
-        showStockName(`${stockNo} ${foundName}`);
-        console.log(`[Market Switch] 自動偵測到 ${stockNo} 屬於 ${foundMarket.toUpperCase()} 市場`);
-        if (currentMarket !== foundMarket) {
-            const marketButton = document.querySelector(`input[name="market-type"][value="${foundMarket}"]`);
-            if (marketButton) {
-                marketButton.checked = true;
-                switchToMarket(foundMarket);
-            }
+    console.log(`[Stock Name v9.3] 查詢股票名稱: ${stockCode} (市場: ${currentMarket})`);
+
+    try {
+        showStockName('查詢中...', 'info');
+
+        // 先在當前市場查詢
+        let result = null;
+        if (currentMarket === 'TWSE') {
+            result = await fetchStockNameFromTWSE(stockCode);
+        } else {
+            result = await fetchStockNameFromTPEX(stockCode);
         }
-    } else {
-        showStockName(`找不到股票代碼 ${stockNo}`, 'error');
-        const tpexButton = document.querySelector('input[name="market-type"][value="tpex"]');
-        if (tpexButton) tpexButton.checked = true;
-        switchToMarket('tpex');
+
+        // fetchStockNameFromTPEX 可能回傳 { name: '...', error: '...' } 或直接字串
+        let stockName = null;
+        if (result) {
+            if (typeof result === 'string') stockName = result;
+            else if (typeof result === 'object' && result.name) stockName = result.name;
+        }
+
+        if (stockName) {
+            showStockName(stockName, 'success');
+            window.isFetchingName = false;
+            return;
+        }
+
+        // 當前市場查不到，嘗試在另一個市場查詢並自動切換
+        const otherMarket = currentMarket === 'TWSE' ? 'TPEX' : 'TWSE';
+        const currentMarketName = currentMarket === 'TWSE' ? '上市' : '上櫃';
+        const otherMarketName = otherMarket === 'TWSE' ? '上市' : '上櫃';
+
+        // 嘗試在另一個市場查詢
+        let otherResult = null;
+        if (otherMarket === 'TWSE') {
+            otherResult = await fetchStockNameFromTWSE(stockCode);
+        } else {
+            otherResult = await fetchStockNameFromTPEX(stockCode);
+        }
+
+        let otherStockName = null;
+        if (otherResult) {
+            if (typeof otherResult === 'string') otherStockName = otherResult;
+            else if (typeof otherResult === 'object' && otherResult.name) otherStockName = otherResult.name;
+        }
+
+        if (otherStockName) {
+            // 自動切換市場並顯示名稱
+            // switchToMarket 會處理 UI 與 isAutoSwitching
+            await switchToMarket(otherMarket, stockCode, otherMarketName);
+            // switchToMarket 自身會顯示成功訊息
+            window.isFetchingName = false;
+            return;
+        }
+
+        // 兩個市場都查無此代碼，顯示建議按鈕切換
+        showMarketSwitchSuggestion(stockCode, currentMarketName, otherMarketName, otherMarket);
+
+    } catch (error) {
+        console.error('[Stock Name v9.3] 查詢錯誤:', error);
+        showStockName('查詢失敗', 'error');
+    } finally {
+        window.isFetchingName = false;
     }
-    isFetchingName = false;
 }
 
+// 從 TWSE 取得股票名稱
+async function fetchStockNameFromTWSE(stockCode) {
+    try {
+        // 使用當月第一天作為查詢日期
+        const now = new Date();
+        const queryDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}01`;
+        
+        const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockCode}&date=${queryDate}&_=${Date.now()}`;
+        const response = await fetch(url);
+        
+        if (!response.ok) return null;
+        
+        const data = await response.json();
+        
+        if (data.stat === 'OK' && data.title) {
+            // 從 title 提取股票名稱，通常格式為："110年01月 2330 台積電 各日成交資訊"
+            const match = data.title.match(/\d+年\d+月\s+\d+\s+(.+?)\s+各日成交資訊/);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('[TWSE API] 查詢股票名稱失敗:', error);
+        return null;
+    }
+}
 
+// 從 TPEX 取得股票名稱 (使用代理伺服器解決CORS問題)
+async function fetchStockNameFromTPEX(stockCode) {
+    try {
+        console.log(`[TPEX Name] 查詢股票代碼: ${stockCode}`);
+        
+        // 方法1: 使用代理伺服器 (如果可用)
+        const proxyResult = await fetchTPEXNameViaProxy(stockCode);
+        if (proxyResult) {
+            return proxyResult;
+        }
+        
+        // 方法2: 使用JSONP方式嘗試舊API
+        const jsonpResult = await fetchTPEXNameViaJSONP(stockCode);
+        if (jsonpResult) {
+            return jsonpResult;
+        }
+        
+        // 方法3: 使用本地股票名稱對照表 (常用上櫃股票)
+        const stockNameMap = {
+            '3260': '威剛',
+            '6446': '藥華藥',
+            '4735': '豪展',
+            '6488': '環球晶',
+            '8069': '元太',
+            '3293': '鈊象',
+            '1565': '精華',
+            '2230': '泰茂',
+            '4994': '傳奇',
+            '6456': 'GIS-KY',
+            '3064': '泰偉',
+            '4966': '譜瑞-KY',
+            '6477': '安集',
+            '8924': '大田',
+            '3324': '雙鴻',
+            '6180': '橘子',
+            '3587': '閎康',
+            '4968': '立積',
+            '6531': '愛普',
+            '8050': '廣積',
+            '6235': '華孚',
+            '4743': '合一',
+            '8044': '網家',
+            '6491': '晶碩',
+            '4952': '凌通',
+            '3707': '漢碩',
+            '6781': 'AES-KY',
+            '8040': '九暘',
+            '4160': '創源',
+            '6472': '保瑞'
+        };
+        
+        if (stockNameMap[stockCode]) {
+            console.log(`[TPEX Name] 從本地對照表取得: ${stockNameMap[stockCode]}`);
+            return stockNameMap[stockCode];
+        }
+        
+        console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
+        return null;
+        
+    } catch (error) {
+        console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
+        return null;
+    }
+}
+
+// 使用代理伺服器獲取TPEX股票名稱
+async function fetchTPEXNameViaProxy(stockNo) {
+    // **關鍵修正：使用一個固定的、格式完整的歷史日期**
+    const placeholderDate = '113/01/01'; 
+
+    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
+    
+    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
+            return { error: `HTTP status ${response.status}` };
+        }
+        const data = await response.json();
+
+        if (data.error) {
+            console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
+            return data;
+        }
+
+        if (data.iTotalRecords > 0 && data.stockName) {
+            return { name: data.stockName.trim() };
+        } else if (data.aaData && data.aaData.length > 0) {
+            const nameField = data.aaData[0][1] || '';
+            const name = nameField.replace(stockNo, '').trim();
+            return { name: name };
+        } else {
+             return { error: 'no_data' };
+        }
+    } catch (error) {
+        console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);
+        return { error: error.message };
+    }
+}
+
+// 使用JSONP方式嘗試獲取TPEX股票名稱
+function fetchTPEXNameViaJSONP(stockCode) {
+    return new Promise((resolve) => {
+        try {
+            // 嘗試使用支援JSONP的舊API端點
+            const now = new Date();
+            const rocYear = now.getFullYear() - 1911;
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const queryDate = `${rocYear}/${month}`;
+            
+            const callbackName = `tpexCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const script = document.createElement('script');
+            
+            // 設置超時
+            const timeout = setTimeout(() => {
+                cleanup();
+                resolve(null);
+            }, 5000);
+            
+            const cleanup = () => {
+                clearTimeout(timeout);
+                if (script.parentNode) {
+                    script.parentNode.removeChild(script);
+                }
+                if (window[callbackName]) {
+                    delete window[callbackName];
+                }
+            };
+            
+            window[callbackName] = (data) => {
+                cleanup();
+                
+                try {
+                    if (data && data.stat === 'OK' && data.aaData) {
+                        for (const row of data.aaData) {
+                            if (row && row[0] === stockCode && row[1]) {
+                                resolve(row[1].trim());
+                                return;
+                            }
+                        }
+                    }
+                    resolve(null);
+                } catch (e) {
+                    console.warn(`[TPEX JSONP] 解析錯誤:`, e);
+                    resolve(null);
+                }
+            };
+            
+            // 嘗試JSONP格式的URL
+            script.src = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&callback=${callbackName}`;
+            script.onerror = () => {
+                cleanup();
+                resolve(null);
+            };
+            
+            document.head.appendChild(script);
+            
+        } catch (error) {
+            console.warn(`[TPEX JSONP] 設置錯誤:`, error);
+            resolve(null);
+        }
+    });
+}
 
 // 顯示市場切換建議
 function showMarketSwitchSuggestion(stockCode, currentMarket, otherMarket, targetMarket) {
@@ -1782,22 +1993,46 @@ function showMarketSwitchSuggestion(stockCode, currentMarket, otherMarket, targe
 }
 
 // 切換到指定市場並重新查詢
-// 切換到指定市場 (v9.7) - 簡化版，只負責更新UI狀態
-function switchToMarket(targetMarket) {
+async function switchToMarket(targetMarket, stockCode, marketName) {
+    console.log(`[Market Switch] 切換到 ${targetMarket} 查詢 ${stockCode}`);
+    
+    // 設定為自動切換狀態
+    isAutoSwitching = true;
+    
+    // 更新市場狀態
+    currentMarket = targetMarket;
     const marketSwitch = document.getElementById('marketSwitch');
     const marketLabel = document.getElementById('marketLabel');
-
-    if (!marketSwitch || !marketLabel) {
-        console.error('[Market Switch] UI elements not found!');
-        return;
-    }
-
-    const upperMarket = targetMarket.toUpperCase();
-    currentMarket = upperMarket;
-    marketSwitch.checked = (upperMarket === 'TPEX');
-    marketLabel.textContent = (upperMarket === 'TPEX') ? '上櫃' : '上市';
     
-    console.log(`[Market Switch v9.7] UI 已更新到: ${currentMarket}`);
+    marketSwitch.checked = (targetMarket === 'TPEX');
+    marketLabel.textContent = marketName;
+    
+    // 顯示查詢中狀態
+    showStockName('查詢中...', 'info');
+    
+    try {
+        let stockName = null;
+        
+        // 在新市場查詢
+        if (targetMarket === 'TWSE') {
+            stockName = await fetchStockNameFromTWSE(stockCode);
+        } else {
+            stockName = await fetchStockNameFromTPEX(stockCode);
+        }
+        
+        if (stockName) {
+            showStockName(`${stockName} (已切換至${marketName})`, 'success');
+            showSuccess(`已切換至${marketName}市場並找到: ${stockName}`);
+        } else {
+            showStockName(`兩個市場都查無此代碼`, 'error');
+        }
+    } catch (error) {
+        console.error('[Market Switch] 查詢錯誤:', error);
+        showStockName('查詢失敗', 'error');
+    }
+    
+    // 重置自動切換狀態
+    isAutoSwitching = false;
 }
 
 // 顯示股票名稱
