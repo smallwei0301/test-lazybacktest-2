@@ -1869,7 +1869,7 @@ async function fetchTPEXNameViaProxy(stockNo) {
     // **關鍵修正：使用一個固定的、格式完整的歷史日期**
     const placeholderDate = '113/01/01'; 
 
-    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
+    const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}`;
     
     console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
     

@@ -1,26 +1,50 @@
+?plugins=forms,container-queries:64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
+(anonymous) @ ?plugins=forms,container-queries:64
+(anonymous) @ ?plugins=forms,container-queries:64
+main.js:135 [Main] DOM loaded, initializing...
+main.js:149 [Main] Initialization completed
+backtest.js:4 Chart object: function
+backtest.js:5 Available Chart plugins: (8) ['colors', 'decimation', 'filler', 'legend', 'subtitle', 'title', 'tooltip', 'zoom']
+loader.js:3 [Loader] DOMContentLoaded event fired.
+loader.js:6 [Loader] Set workerUrl to: js/worker.js
+backtest.js:1454 [Fees] Set default fees for 2330 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
+loader.js:130 [Main] Initial setup complete.
+loader.js:138 [Loader] Loader script finished.
+batch-optimization.js:106 [Batch Optimization] Initializing...
+batch-optimization.js:210 [Batch Optimization] Strategy options generated successfully
+batch-optimization.js:280 [Batch Optimization] Events bound successfully
+batch-optimization.js:143 [Batch Optimization] Initialized successfully
+backtest.js:2080 [Market Switch] 市場切換功能已初始化
+backtest.js:1454 [Fees] Set default fees for 3260 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
+backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TWSE)
+backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
+backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
+backtest.js:1997 [Market Switch] 切換到 TPEX 查詢 3260
+backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
+backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
 backtest.js:10 [Main] runBacktestInternal called
-backtest.js:14 [Main] Params: {stockNo: '3260', startDate: '2024-09-19', endDate: '2025-09-19', initialCapital: 100000, positionSize: 100, …}
+backtest.js:14 [Main] Params: {stockNo: '3260', startDate: '2020-09-19', endDate: '2025-09-19', initialCapital: 100000, positionSize: 100, …}
 backtest.js:16 [Main] Validation: true
 backtest.js:30 [Main] WorkerUrl: js/worker.js
 backtest.js:31 [Main] Creating worker...
 backtest.js:120 [Main] Fetching new data for backtest.
-worker.js:835 [Worker] Fetching new data for backtest.
+worker.js:803 [Worker] Fetching new data for backtest.
 backtest.js:37 [Main] Received message from worker: progress undefined
-worker.js:146 [Worker] 獲取或處理 3260 (TPEX) 資料時發生錯誤: Error: 代理伺服器錯誤: 400 - {"error":"缺少參數"}
-    at fetchStockData (/js/worker.js:93:19)
-    at async self.onmessage (/js/worker.js:836:28)
-fetchStockData @ worker.js:146
+worker.js:114 [Worker] 獲取或處理 3260 (TPEX) 資料時發生錯誤: Error: 代理伺服器錯誤: 400 - {"error":"缺少參數"}
+    at fetchStockData (/js/worker.js:61:19)
+    at async self.onmessage (/js/worker.js:804:28)
+fetchStockData @ worker.js:114
 await in fetchStockData
-self.onmessage @ worker.js:836
-worker.js:885 Worker 執行 runBacktest 期間錯誤: Error: 代理伺服器錯誤: 400 - {"error":"缺少參數"}
-    at fetchStockData (/js/worker.js:93:19)
-    at async self.onmessage (/js/worker.js:836:28)
-self.onmessage @ worker.js:885
+self.onmessage @ worker.js:804
+worker.js:853 Worker 執行 runBacktest 期間錯誤: Error: 代理伺服器錯誤: 400 - {"error":"缺少參數"}
+    at fetchStockData (/js/worker.js:61:19)
+    at async self.onmessage (/js/worker.js:804:28)
+self.onmessage @ worker.js:853
 backtest.js:37 [Main] Received message from worker: error {message: 'Worker runBacktest 錯誤: 代理伺服器錯誤: 400 - {"error":"缺少參數"}'}
 
 Function tpex-proxy
 
-Sep 19, 10:13:26 AM: c0bbd444 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 10:13:26 AM: c0bbd444 Duration: 429.17 ms	Memory Usage: 124 MB
-Sep 19, 10:13:27 AM: bc7ae816 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 10:13:27 AM: bc7ae816 Duration: 337.02 ms	Memory Usage: 141 MB
+Sep 19, 10:53:19 AM: 18b83d0f INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 10:53:20 AM: 18b83d0f Duration: 486.03 ms	Memory Usage: 125 MB
+Sep 19, 10:53:20 AM: b295f288 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 10:53:20 AM: b295f288 Duration: 113.4 ms	Memory Usage: 133 MB
