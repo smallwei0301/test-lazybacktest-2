@@ -16,21 +16,19 @@ batch-optimization.js:280 [Batch Optimization] Events bound successfully
 batch-optimization.js:143 [Batch Optimization] Initialized successfully
 backtest.js:2080 [Market Switch] 市場切換功能已初始化
 backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TWSE)
+backtest.js:1454 [Fees] Set default fees for 3260 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
 backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
 backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260
+backtest.js:1703 [Stock Name] 已有進行中的查詢，跳過本次請求
 backtest.js:1997 [Market Switch] 切換到 TPEX 查詢 3260
 backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
 backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260
-backtest.js:1454 [Fees] Set default fees for 3260 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
 backtest.js:10 [Main] runBacktestInternal called
 backtest.js:14 [Main] Params: {stockNo: '3260', startDate: '2020-09-19', endDate: '2025-09-19', initialCapital: 100000, positionSize: 100, …}
 backtest.js:16 [Main] Validation: true
 backtest.js:30 [Main] WorkerUrl: js/worker.js
 backtest.js:31 [Main] Creating worker...
 backtest.js:120 [Main] Fetching new data for backtest.
-backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TPEX)
-backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260
 worker.js:803 [Worker] Fetching new data for backtest.
 backtest.js:37 [Main] Received message from worker: progress undefined
 worker.js:114 [Worker] 獲取或處理 3260 (TPEX) 資料時發生錯誤: Error: 代理伺服器錯誤: 400 - {"error":"缺少參數"}
@@ -45,10 +43,10 @@ worker.js:853 Worker 執行 runBacktest 期間錯誤: Error: 代理伺服器錯�
 self.onmessage @ worker.js:853
 backtest.js:37 [Main] Received message from worker: error {message: 'Worker runBacktest 錯誤: 代理伺服器錯誤: 400 - {"error":"缺少參數"}'}
 
+
 Function tpex-proxy
-Sep 19, 11:19:09 AM: de884556 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 11:19:09 AM: de884556 Duration: 414.28 ms	Memory Usage: 127 MB
-Sep 19, 11:19:10 AM: 0d316976 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 11:19:10 AM: 0d316976 Duration: 279.04 ms	Memory Usage: 143 MB
-Sep 19, 11:19:15 AM: b2be3431 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 11:19:15 AM: b2be3431 Duration: 63.32 ms	Memory Usage: 143 MB
+
+Sep 19, 11:33:31 AM: 3d7a64bd INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 11:33:31 AM: 3d7a64bd Duration: 426.57 ms	Memory Usage: 125 MB
+Sep 19, 11:33:31 AM: f71734bc INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 11:33:31 AM: f71734bc Duration: 133.81 ms	Memory Usage: 133 MB
