@@ -99,7 +99,9 @@ function buildMonthRange(startDate, endDate) {
 // - 產生回測引擎所需的物件陣列格式：{ date: 'YYYY-MM-DD', open, high, low, close, volume }
 // - 支援多種代理回傳格式（aaData 為陣列或代理直接回傳物件陣列）
 async function fetchStockData(stockNo, startDate, endDate, marketType) {
+
     // Version Tag: LBW-20240413
+
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。');
     }
@@ -111,9 +113,11 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
         throw new Error(`[Worker] 無效的日期區間: ${startDate} ~ ${endDate}`);
     }
 
+
     const months = buildMonthRange(sDate, eDate);
     if (months.length === 0) {
         console.warn(`[Worker] 指定區間沒有任何月份可查詢 (${startDate} ~ ${endDate})`);
+
     }
 
     const allRawData = [];
@@ -169,6 +173,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             if (payload.stockName && !stockName) {
                 stockName = payload.stockName;
             }
+
 
             const raw = payload.aaData || payload.data || [];
             if (Array.isArray(raw) && raw.length > 0) {
