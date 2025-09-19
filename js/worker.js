@@ -1,36 +1,4 @@
-// --- TPEX 月數據獲取 ---
-async function fetchTPEXMonthData(stockNo, year, month) {
-    const rocYear = year - 1911;
-    const formattedMonth = String(month).padStart(2, '0');
-    
-    // **關鍵修正：確保日期字串是完整的 "年/月/日" 格式**
-    const dateStr = `${rocYear}/${formattedMonth}/01`;
 
-    const proxyUrl = `/api/tpex/?stockNo=${stockNo}&date=${dateStr}`;
-    console.log(`[TPEX Worker] 準備透過代理請求 (格式修正): ${proxyUrl}`);
-
-    try {
-        const response = await fetch(proxyUrl);
-        if (!response.ok) {
-            console.error(`[TPEX Worker] 代理伺服器回應錯誤: ${response.status}`);
-            const errorBody = await response.text();
-            console.error(`[TPEX Worker] 錯誤內容:`, errorBody);
-            return { error: `Proxy Error: ${response.status}` };
-        }
-
-        const data = await response.json();
-        
-        if (data.error) {
-            console.warn(`[TPEX Worker] 代理回傳查無資料或錯誤:`, data);
-            return { error: data.error, diagnostics: data.diagnostics }; 
-        }
-        
-        return data.aaData || [];
-    } catch (error) {
-        console.error(`[TPEX Worker] 呼叫代理時發生錯誤 for ${stockNo} ${dateStr}:`, error);
-        return { error: error.message };
-    }
-}
 // --- Web Worker (backtest-worker.js) - v3.4.1 ---
 // 變更:
 // - getSuggestion: 修正建議邏輯，確保正確反映賣出/回補/等待狀態
