@@ -1,4 +1,4 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.0 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.1 ---
 
 // 全局變量
 let stockChart = null;
@@ -53,6 +53,12 @@ function createProgressAnimator() {
     const MIN_DURATION = 320;
     const MAX_DURATION = 2400;
     const MS_PER_PERCENT = 45;
+    const SHORT_TASK_THRESHOLD = 4000;
+    const SHORT_FAST_RATIO = 0.45;
+    const SHORT_FIRST_SEGMENT_PROGRESS = 55;
+    const SHORT_SECOND_SEGMENT_PROGRESS = 35;
+    const SHORT_FINAL_MIN_DURATION = 1300;
+    const SHORT_FINAL_MAX_DURATION = 1800;
 
     const raf =
         (typeof window !== 'undefined' && window.requestAnimationFrame)
@@ -72,6 +78,7 @@ function createProgressAnimator() {
     let autoTimer = null;
     let reportedValue = 0;
     let autoCeiling = 0;
+    let startTimestamp = 0;
 
     function now() {
         if (typeof performance !== 'undefined' && performance.now) {
@@ -138,7 +145,13 @@ function createProgressAnimator() {
         let duration = distance * MS_PER_PERCENT;
         duration = Math.max(MIN_DURATION, Math.min(MAX_DURATION, duration));
         if (targetValue >= 100) {
-            duration = Math.min(duration, 900);
+            const elapsed = startTimestamp ? now() - startTimestamp : 0;
+            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
+                duration = Math.max(duration, SHORT_FINAL_MIN_DURATION);
+                duration = Math.min(duration, SHORT_FINAL_MAX_DURATION);
+            } else {
+                duration = Math.min(duration, 900);
+            }
         }
         animationEnd = animationStart + duration;
         apply(currentValue);
@@ -170,10 +183,20 @@ function createProgressAnimator() {
                 stopAutoTimer();
                 return;
             }
-            autoCeiling = Math.min(
-                MAX_AUTO_PROGRESS,
-                Math.max(reportedValue, autoCeiling + AUTO_STEP)
-            );
+            let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
+            const elapsed = startTimestamp ? now() - startTimestamp : 0;
+            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
+                const ratio = elapsed / SHORT_TASK_THRESHOLD;
+                if (ratio <= SHORT_FAST_RATIO) {
+                    const fastProgress = (ratio / SHORT_FAST_RATIO) * SHORT_FIRST_SEGMENT_PROGRESS;
+                    nextCeiling = Math.max(nextCeiling, fastProgress);
+                } else {
+                    const slowRatio = (ratio - SHORT_FAST_RATIO) / (1 - SHORT_FAST_RATIO);
+                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS + (slowRatio * SHORT_SECOND_SEGMENT_PROGRESS);
+                    nextCeiling = Math.max(nextCeiling, slowProgress);
+                }
+            }
+            autoCeiling = Math.min(MAX_AUTO_PROGRESS, nextCeiling);
             if (autoCeiling > targetValue + 0.05) {
                 setTarget(autoCeiling);
             }
@@ -214,6 +237,7 @@ function createProgressAnimator() {
 
     return {
         start() {
+            startTimestamp = now();
             ensureAutoTimer();
         },
         stop() {
@@ -230,6 +254,7 @@ function createProgressAnimator() {
             animationEnd = 0;
             reportedValue = 0;
             autoCeiling = 0;
+            startTimestamp = 0;
             apply(0);
         },
         update(nextProgress) {
