@@ -65,9 +65,15 @@ export default async (req, context) => {
     try {
         const cached = await store.get(symbol, { type: 'json' });
         if (cached && (Date.now() - cached.timestamp < 12 * 60 * 60 * 1000)) {
-            console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
-            cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
-            return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
+            // Check if cached data itself contains an error
+            if (cached.data && cached.data.error) {
+                console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含錯誤: ${cached.data.error}，將嘗試重新獲取。`);
+                // Fall through to re-fetch data
+            } else {
+                console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
+                cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
+                return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
+            }
         }
     } catch (error) {
         if (isQuotaError(error)) {
