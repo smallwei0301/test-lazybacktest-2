@@ -1865,38 +1865,45 @@ async function fetchStockNameFromTPEX(stockCode) {
 }
 
 // 使用代理伺服器獲取TPEX股票名稱
+// 使用代理伺服器獲取TPEX股票名稱 (v9.5)
 async function fetchTPEXNameViaProxy(stockNo) {
-    // **關鍵修正：使用一個固定的、格式完整的歷史日期**
-    const placeholderDate = '113/01/01'; 
+    // v9.5 修正: 為了符合新版 proxy API，提供一個固定的短日期範圍
+    const startDate = '2024-01-01';
+    const endDate = '2024-01-05';
 
-    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
+    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&startDate=${startDate}&endDate=${endDate}`;
     
-    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
+    console.log(`[TPEX Proxy Name v9.5] Fetching name for ${stockNo} via proxy: ${url}`);
     
     try {
         const response = await fetch(url);
-        if (!response.ok) {
-            console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
-            return { error: `HTTP status ${response.status}` };
-        }
         const data = await response.json();
 
+        if (!response.ok) {
+            console.error(`[TPEX Proxy Name v9.5] 代理回傳 HTTP ${response.status}. Response:`, data);
+            // 即使請求失敗，有時 stockName 也會被回傳
+            if (data && data.stockName) {
+                return { name: data.stockName.trim() };
+            }
+            return { error: `HTTP status ${response.status}` };
+        }
+
         if (data.error) {
-            console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
+            console.warn('[TPEX Proxy Name v9.5] 代理回傳錯誤:', data.error);
+            if (data.stockName) {
+                 return { name: data.stockName.trim() };
+            }
             return data;
         }
 
-        if (data.iTotalRecords > 0 && data.stockName) {
+        if (data.stockName) {
             return { name: data.stockName.trim() };
-        } else if (data.aaData && data.aaData.length > 0) {
-            const nameField = data.aaData[0][1] || '';
-            const name = nameField.replace(stockNo, '').trim();
-            return { name: name };
         } else {
-             return { error: 'no_data' };
+            console.warn(`[TPEX Proxy Name v9.5] 代理成功回應，但缺少 stockName 欄位 for ${stockNo}`);
+            return { error: 'no_name_in_response' };
         }
     } catch (error) {
-        console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);
+        console.error('[TPEX Proxy Name v9.5] 呼叫代理時發生嚴重錯誤:', error);
         return { error: error.message };
     }
 }
