@@ -29,6 +29,13 @@ async function fetchFromYahoo(stockNo, symbol) {
         const adjFactor = adjclose[i] / result.indicators.quote[0].close[i];
         return [ fDate, stockNo, '', (result.indicators.quote[0].open[i] * adjFactor), (result.indicators.quote[0].high[i] * adjFactor), (result.indicators.quote[0].low[i] * adjFactor), adjclose[i], (adjclose[i] - adjclose[i-1]), result.indicators.quote[0].volume[i] ];
     }).filter(Boolean);
+
+    // Validate formatted data before returning
+    if (!Array.isArray(formatted) || formatted.length === 0 || !Array.isArray(formatted[0]) || formatted[0].length < 9 || typeof formatted[0][0] !== 'string' || !/^\\d{2,4}[\\/\\.]\\d{1,2}[\\/\\.]\\d{1,2}$/.test(formatted[0][0])) {
+        console.error(`[TPEX Proxy v9.4] Yahoo Finance 返回數據格式異常，將視為失敗。`);
+        throw new Error('Yahoo Finance 返回數據格式異常');
+    }
+
     console.log(`[TPEX Proxy v9.4] 成功從 Yahoo 獲取資料`);
     return { stockName: result.meta.shortName || symbol, iTotalRecords: formatted.length, aaData: formatted, dataSource: 'Yahoo Finance' };
 }
@@ -48,6 +55,13 @@ async function fetchFromFinMind(stockNo, symbol) {
         const fDate = `${rocYear}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
         return [ fDate, d.stock_id, '', d.open, d.max, d.min, d.close, d.spread, d.Trading_Volume ];
     });
+
+    // Validate formatted data before returning
+    if (!Array.isArray(formatted) || formatted.length === 0 || !Array.isArray(formatted[0]) || formatted[0].length < 9 || typeof formatted[0][0] !== 'string' || !/^\\d{2,4}[\\/\\.]\\d{1,2}[\\/\\.]\\d{1,2}$/.test(formatted[0][0])) {
+        console.error(`[TPEX Proxy v9.4] FinMind 返回數據格式異常，將視為失敗。`);
+        throw new Error('FinMind 返回數據格式異常');
+    }
+
     console.log(`[TPEX Proxy v9.4] 成功從 FinMind 獲取資料`);
     return { stockName: stockNo, iTotalRecords: formatted.length, aaData: formatted, dataSource: 'FinMind (備援)' };
 }
