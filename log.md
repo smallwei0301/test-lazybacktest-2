@@ -11,20 +11,20 @@ backtest.js:16 [Main] Validation: true
 backtest.js:30 [Main] WorkerUrl: js/worker.js
 backtest.js:31 [Main] Creating worker...
 backtest.js:120 [Main] Fetching new data for backtest.
-worker.js:817 [Worker] Fetching new data for backtest.
-backtest.js:37 [Main] Received message from worker: progress undefined
 backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TPEX)
 backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
 backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260
+worker.js:817 [Worker] Fetching new data for backtest.
+backtest.js:37 [Main] Received message from worker: progress undefined
 worker.js:80 [Worker] Raw data aaData length: 1310
 backtest.js:37 [Main] Received message from worker: progress undefined
-worker.js:82 [Worker] Processing item 0: (9) ['0050', '3260', '(股)', 2597748047, 56.5, 56.95, 56.25, 0.6, null]
-worker.js:84 [Worker] Item 0 - Original Date: 0050, Formatted Date: null
-worker.js:86 [Worker] Item 0 - Invalid formatted date: 0050
-(anonymous) @ worker.js:86
-fetchStockData @ worker.js:81
+/js/worker.js:82 [Worker] Processing item 0: (9) ['0050', '3260', '(股)', 2597748047, 56.5, 56.95, 56.25, 0.6, null]
+/js/worker.js:84 [Worker] Item 0 - Original Date: 0050, Formatted Date: null
+/js/worker.js:86 [Worker] Item 0 - Invalid formatted date: 0050
+(anonymous) @ /js/worker.js:86
+fetchStockData @ /js/worker.js:81
 await in fetchStockData
-self.onmessage @ worker.js:818
+self.onmessage @ /js/worker.js:818
 /js/worker.js:82 [Worker] Processing item 1: (9) ['0051', '3260', '(股)', 8019020, 85.6, 86.15, 85.6, 1.15, null]
 /js/worker.js:84 [Worker] Item 1 - Original Date: 0051, Formatted Date: null
 /js/worker.js:86 [Worker] Item 1 - Invalid formatted date: 0051
@@ -158,7 +158,6 @@ self.onmessage @ /js/worker.js:818
 fetchStockData @ /js/worker.js:81
 await in fetchStockData
 self.onmessage @ /js/worker.js:818
- [Main] Received message from worker: stockNameInfo undefined
 /js/worker.js:82 [Worker] Processing item 20: (9) ['00636', '3260', '(股)', 28476464, 25.19, 25.34, 25.12, -0.05, null]
 /js/worker.js:84 [Worker] Item 20 - Original Date: 00636, Formatted Date: null
 /js/worker.js:86 [Worker] Item 20 - Invalid formatted date: 00636
@@ -174,6 +173,7 @@ fetchStockData @ /js/worker.js:81
 await in fetchStockData
 self.onmessage @ /js/worker.js:818
 /js/worker.js:82 [Worker] Processing item 22: (9) ['00637L', '3260', '(股)', 985012790, 19.58, 19.76, 19.33, -0.16, null]
+ [Main] Received message from worker: stockNameInfo undefined
 /js/worker.js:84 [Worker] Item 22 - Original Date: 00637L, Formatted Date: null
 /js/worker.js:86 [Worker] Item 22 - Invalid formatted date: 00637L
 (anonymous) @ /js/worker.js:86
@@ -4570,217 +4570,217 @@ fetchStockData @ /js/worker.js:81
 await in fetchStockData
 self.onmessage @ /js/worker.js:818
 /js/worker.js:82 [Worker] Processing item 650: (9) ['2597', '3260', '(股)', 28082399, 155, 155, 153, 0.5, null]
-/js/worker.js:84 [Worker] Item 650 - Original Date: 2597, Formatted Date: null
-/js/worker.js:86 [Worker] Item 650 - Invalid formatted date: 2597
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+worker.js:84 [Worker] Item 650 - Original Date: 2597, Formatted Date: null
+worker.js:86 [Worker] Item 650 - Invalid formatted date: 2597
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 651: (9) ['2601', '3260', '(股)', 5804189, 5.89, 5.93, 5.89, 0.07, null]
-/js/worker.js:84 [Worker] Item 651 - Original Date: 2601, Formatted Date: null
-/js/worker.js:86 [Worker] Item 651 - Invalid formatted date: 2601
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 651: (9) ['2601', '3260', '(股)', 5804189, 5.89, 5.93, 5.89, 0.07, null]
+worker.js:84 [Worker] Item 651 - Original Date: 2601, Formatted Date: null
+worker.js:86 [Worker] Item 651 - Invalid formatted date: 2601
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 652: (9) ['2603', '3260', '(股)', 795320215, 185, 185, 183.5, 1, null]
-/js/worker.js:84 [Worker] Item 652 - Original Date: 2603, Formatted Date: null
-/js/worker.js:86 [Worker] Item 652 - Invalid formatted date: 2603
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 652: (9) ['2603', '3260', '(股)', 795320215, 185, 185, 183.5, 1, null]
+worker.js:84 [Worker] Item 652 - Original Date: 2603, Formatted Date: null
+worker.js:86 [Worker] Item 652 - Invalid formatted date: 2603
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 653: (9) ['2605', '3260', '(股)', 66857996, 23.1, 23.55, 23.1, 0.4, null]
-/js/worker.js:84 [Worker] Item 653 - Original Date: 2605, Formatted Date: null
-/js/worker.js:86 [Worker] Item 653 - Invalid formatted date: 2605
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 653: (9) ['2605', '3260', '(股)', 66857996, 23.1, 23.55, 23.1, 0.4, null]
+worker.js:84 [Worker] Item 653 - Original Date: 2605, Formatted Date: null
+worker.js:86 [Worker] Item 653 - Invalid formatted date: 2605
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 654: (9) ['2606', '3260', '(股)', 304433874, 57.1, 58.3, 57.1, 1.4, null]
-/js/worker.js:84 [Worker] Item 654 - Original Date: 2606, Formatted Date: null
-/js/worker.js:86 [Worker] Item 654 - Invalid formatted date: 2606
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 654: (9) ['2606', '3260', '(股)', 304433874, 57.1, 58.3, 57.1, 1.4, null]
+worker.js:84 [Worker] Item 654 - Original Date: 2606, Formatted Date: null
+worker.js:86 [Worker] Item 654 - Invalid formatted date: 2606
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 655: (9) ['2607', '3260', '(股)', 77063621, 34.7, 34.85, 34.3, -0.35, null]
-/js/worker.js:84 [Worker] Item 655 - Original Date: 2607, Formatted Date: null
-/js/worker.js:86 [Worker] Item 655 - Invalid formatted date: 2607
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 655: (9) ['2607', '3260', '(股)', 77063621, 34.7, 34.85, 34.3, -0.35, null]
+worker.js:84 [Worker] Item 655 - Original Date: 2607, Formatted Date: null
+worker.js:86 [Worker] Item 655 - Invalid formatted date: 2607
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 656: (9) ['2608', '3260', '(股)', 3933265, 34.3, 34.4, 34.15, -0.05, null]
-/js/worker.js:84 [Worker] Item 656 - Original Date: 2608, Formatted Date: null
-/js/worker.js:86 [Worker] Item 656 - Invalid formatted date: 2608
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 656: (9) ['2608', '3260', '(股)', 3933265, 34.3, 34.4, 34.15, -0.05, null]
+worker.js:84 [Worker] Item 656 - Original Date: 2608, Formatted Date: null
+worker.js:86 [Worker] Item 656 - Invalid formatted date: 2608
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 657: (9) ['2609', '3260', '(股)', 418798284, 56.2, 56.5, 56, 0, null]
-/js/worker.js:84 [Worker] Item 657 - Original Date: 2609, Formatted Date: null
-/js/worker.js:86 [Worker] Item 657 - Invalid formatted date: 2609
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 657: (9) ['2609', '3260', '(股)', 418798284, 56.2, 56.5, 56, 0, null]
+worker.js:84 [Worker] Item 657 - Original Date: 2609, Formatted Date: null
+worker.js:86 [Worker] Item 657 - Invalid formatted date: 2609
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 658: (9) ['2610', '3260', '(股)', 261673575, 21.15, 21.25, 20.95, 0.15, null]
-/js/worker.js:84 [Worker] Item 658 - Original Date: 2610, Formatted Date: null
-/js/worker.js:86 [Worker] Item 658 - Invalid formatted date: 2610
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 658: (9) ['2610', '3260', '(股)', 261673575, 21.15, 21.25, 20.95, 0.15, null]
+worker.js:84 [Worker] Item 658 - Original Date: 2610, Formatted Date: null
+worker.js:86 [Worker] Item 658 - Invalid formatted date: 2610
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 659: (9) ['2611', '3260', '(股)', 3195350, 15.8, 15.9, 15.8, 0.15, null]
-/js/worker.js:84 [Worker] Item 659 - Original Date: 2611, Formatted Date: null
-/js/worker.js:86 [Worker] Item 659 - Invalid formatted date: 2611
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 659: (9) ['2611', '3260', '(股)', 3195350, 15.8, 15.9, 15.8, 0.15, null]
+worker.js:84 [Worker] Item 659 - Original Date: 2611, Formatted Date: null
+worker.js:86 [Worker] Item 659 - Invalid formatted date: 2611
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 660: (9) ['2612', '3260', '(股)', 57561058, 55.1, 56, 55.1, 0.8, null]
-/js/worker.js:84 [Worker] Item 660 - Original Date: 2612, Formatted Date: null
-/js/worker.js:86 [Worker] Item 660 - Invalid formatted date: 2612
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 660: (9) ['2612', '3260', '(股)', 57561058, 55.1, 56, 55.1, 0.8, null]
+worker.js:84 [Worker] Item 660 - Original Date: 2612, Formatted Date: null
+worker.js:86 [Worker] Item 660 - Invalid formatted date: 2612
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 661: (9) ['2613', '3260', '(股)', 5384027, 26.25, 26.3, 26.05, 0.1, null]
-/js/worker.js:84 [Worker] Item 661 - Original Date: 2613, Formatted Date: null
-/js/worker.js:86 [Worker] Item 661 - Invalid formatted date: 2613
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 661: (9) ['2613', '3260', '(股)', 5384027, 26.25, 26.3, 26.05, 0.1, null]
+worker.js:84 [Worker] Item 661 - Original Date: 2613, Formatted Date: null
+worker.js:86 [Worker] Item 661 - Invalid formatted date: 2613
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 662: (9) ['2614', '3260', '(股)', 31563905, 21.7, 21.95, 21.5, 0.15, null]
-/js/worker.js:84 [Worker] Item 662 - Original Date: 2614, Formatted Date: null
-/js/worker.js:86 [Worker] Item 662 - Invalid formatted date: 2614
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 662: (9) ['2614', '3260', '(股)', 31563905, 21.7, 21.95, 21.5, 0.15, null]
+worker.js:84 [Worker] Item 662 - Original Date: 2614, Formatted Date: null
+worker.js:86 [Worker] Item 662 - Invalid formatted date: 2614
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 663: (9) ['2615', '3260', '(股)', 266699790, 81, 81.1, 80.3, 0.7, null]
-/js/worker.js:84 [Worker] Item 663 - Original Date: 2615, Formatted Date: null
-/js/worker.js:86 [Worker] Item 663 - Invalid formatted date: 2615
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 663: (9) ['2615', '3260', '(股)', 266699790, 81, 81.1, 80.3, 0.7, null]
+worker.js:84 [Worker] Item 663 - Original Date: 2615, Formatted Date: null
+worker.js:86 [Worker] Item 663 - Invalid formatted date: 2615
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 664: (9) ['2616', '3260', '(股)', 774651, 14.75, 14.8, 14.65, -0.1, null]
-/js/worker.js:84 [Worker] Item 664 - Original Date: 2616, Formatted Date: null
-/js/worker.js:86 [Worker] Item 664 - Invalid formatted date: 2616
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 664: (9) ['2616', '3260', '(股)', 774651, 14.75, 14.8, 14.65, -0.1, null]
+worker.js:84 [Worker] Item 664 - Original Date: 2616, Formatted Date: null
+worker.js:86 [Worker] Item 664 - Invalid formatted date: 2616
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 665: (9) ['2617', '3260', '(股)', 12772380, 27.25, 27.4, 27.25, 0.1, null]
-/js/worker.js:84 [Worker] Item 665 - Original Date: 2617, Formatted Date: null
-/js/worker.js:86 [Worker] Item 665 - Invalid formatted date: 2617
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 665: (9) ['2617', '3260', '(股)', 12772380, 27.25, 27.4, 27.25, 0.1, null]
+worker.js:84 [Worker] Item 665 - Original Date: 2617, Formatted Date: null
+worker.js:86 [Worker] Item 665 - Invalid formatted date: 2617
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 666: (9) ['2618', '3260', '(股)', 635022197, 38.9, 39.1, 38.6, 0, null]
-/js/worker.js:84 [Worker] Item 666 - Original Date: 2618, Formatted Date: null
-/js/worker.js:86 [Worker] Item 666 - Invalid formatted date: 2618
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 666: (9) ['2618', '3260', '(股)', 635022197, 38.9, 39.1, 38.6, 0, null]
+worker.js:84 [Worker] Item 666 - Original Date: 2618, Formatted Date: null
+worker.js:86 [Worker] Item 666 - Invalid formatted date: 2618
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 667: (9) ['2630', '3260', '(股)', 377067603, 59.8, 60.4, 56.5, -1.8, null]
-/js/worker.js:84 [Worker] Item 667 - Original Date: 2630, Formatted Date: null
-/js/worker.js:86 [Worker] Item 667 - Invalid formatted date: 2630
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 667: (9) ['2630', '3260', '(股)', 377067603, 59.8, 60.4, 56.5, -1.8, null]
+worker.js:84 [Worker] Item 667 - Original Date: 2630, Formatted Date: null
+worker.js:86 [Worker] Item 667 - Invalid formatted date: 2630
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 668: (9) ['2633', '3260', '(股)', 43068817, 27.8, 27.9, 27.8, -0.05, null]
-/js/worker.js:84 [Worker] Item 668 - Original Date: 2633, Formatted Date: null
-/js/worker.js:86 [Worker] Item 668 - Invalid formatted date: 2633
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 668: (9) ['2633', '3260', '(股)', 43068817, 27.8, 27.9, 27.8, -0.05, null]
+worker.js:84 [Worker] Item 668 - Original Date: 2633, Formatted Date: null
+worker.js:86 [Worker] Item 668 - Invalid formatted date: 2633
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 669: (9) ['2634', '3260', '(股)', 1997551794, 63.9, 65.8, 62.2, -0.2, null]
-/js/worker.js:84 [Worker] Item 669 - Original Date: 2634, Formatted Date: null
-/js/worker.js:86 [Worker] Item 669 - Invalid formatted date: 2634
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 669: (9) ['2634', '3260', '(股)', 1997551794, 63.9, 65.8, 62.2, -0.2, null]
+worker.js:84 [Worker] Item 669 - Original Date: 2634, Formatted Date: null
+worker.js:86 [Worker] Item 669 - Invalid formatted date: 2634
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 670: (9) ['2636', '3260', '(股)', 12311856, 70.7, 71.2, 70.6, 0.7, null]
-/js/worker.js:84 [Worker] Item 670 - Original Date: 2636, Formatted Date: null
-/js/worker.js:86 [Worker] Item 670 - Invalid formatted date: 2636
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 670: (9) ['2636', '3260', '(股)', 12311856, 70.7, 71.2, 70.6, 0.7, null]
+worker.js:84 [Worker] Item 670 - Original Date: 2636, Formatted Date: null
+worker.js:86 [Worker] Item 670 - Invalid formatted date: 2636
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 671: (9) ['2637', '3260', '(股)', 145494356, 59.4, 60.5, 59.4, 1.3, null]
-/js/worker.js:84 [Worker] Item 671 - Original Date: 2637, Formatted Date: null
-/js/worker.js:86 [Worker] Item 671 - Invalid formatted date: 2637
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 671: (9) ['2637', '3260', '(股)', 145494356, 59.4, 60.5, 59.4, 1.3, null]
+worker.js:84 [Worker] Item 671 - Original Date: 2637, Formatted Date: null
+worker.js:86 [Worker] Item 671 - Invalid formatted date: 2637
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 672: (9) ['2642', '3260', '(股)', 2873080, 28.85, 29.7, 28.85, 0.55, null]
-/js/worker.js:84 [Worker] Item 672 - Original Date: 2642, Formatted Date: null
-/js/worker.js:86 [Worker] Item 672 - Invalid formatted date: 2642
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 672: (9) ['2642', '3260', '(股)', 2873080, 28.85, 29.7, 28.85, 0.55, null]
+worker.js:84 [Worker] Item 672 - Original Date: 2642, Formatted Date: null
+worker.js:86 [Worker] Item 672 - Invalid formatted date: 2642
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 673: (9) ['2645', '3260', '(股)', 1229202146, 179, 180.5, 168.5, -8, null]
-/js/worker.js:84 [Worker] Item 673 - Original Date: 2645, Formatted Date: null
-/js/worker.js:86 [Worker] Item 673 - Invalid formatted date: 2645
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 673: (9) ['2645', '3260', '(股)', 1229202146, 179, 180.5, 168.5, -8, null]
+worker.js:84 [Worker] Item 673 - Original Date: 2645, Formatted Date: null
+worker.js:86 [Worker] Item 673 - Invalid formatted date: 2645
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 674: (9) ['2646', '3260', '(股)', 110577050, 25.15, 25.15, 24.9, -0.1, null]
-/js/worker.js:84 [Worker] Item 674 - Original Date: 2646, Formatted Date: null
-/js/worker.js:86 [Worker] Item 674 - Invalid formatted date: 2646
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 674: (9) ['2646', '3260', '(股)', 110577050, 25.15, 25.15, 24.9, -0.1, null]
+worker.js:84 [Worker] Item 674 - Original Date: 2646, Formatted Date: null
+worker.js:86 [Worker] Item 674 - Invalid formatted date: 2646
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 675: (9) ['2701', '3260', '(股)', 1147313, 11.15, 11.15, 11.1, 0, null]
-/js/worker.js:84 [Worker] Item 675 - Original Date: 2701, Formatted Date: null
-/js/worker.js:86 [Worker] Item 675 - Invalid formatted date: 2701
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 675: (9) ['2701', '3260', '(股)', 1147313, 11.15, 11.15, 11.1, 0, null]
+worker.js:84 [Worker] Item 675 - Original Date: 2701, Formatted Date: null
+worker.js:86 [Worker] Item 675 - Invalid formatted date: 2701
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 676: (9) ['2702', '3260', '(股)', 435630, 12.45, 12.5, 12.4, 0, null]
-/js/worker.js:84 [Worker] Item 676 - Original Date: 2702, Formatted Date: null
-/js/worker.js:86 [Worker] Item 676 - Invalid formatted date: 2702
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 676: (9) ['2702', '3260', '(股)', 435630, 12.45, 12.5, 12.4, 0, null]
+worker.js:84 [Worker] Item 676 - Original Date: 2702, Formatted Date: null
+worker.js:86 [Worker] Item 676 - Invalid formatted date: 2702
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 677: (9) ['2704', '3260', '(股)', 3131788, 44.35, 44.8, 44.35, -0.05, null]
-/js/worker.js:84 [Worker] Item 677 - Original Date: 2704, Formatted Date: null
-/js/worker.js:86 [Worker] Item 677 - Invalid formatted date: 2704
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 677: (9) ['2704', '3260', '(股)', 3131788, 44.35, 44.8, 44.35, -0.05, null]
+worker.js:84 [Worker] Item 677 - Original Date: 2704, Formatted Date: null
+worker.js:86 [Worker] Item 677 - Invalid formatted date: 2704
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 678: (9) ['2705', '3260', '(股)', 1332050, 17.2, 17.25, 17.15, -0.05, null]
-/js/worker.js:84 [Worker] Item 678 - Original Date: 2705, Formatted Date: null
-/js/worker.js:86 [Worker] Item 678 - Invalid formatted date: 2705
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 678: (9) ['2705', '3260', '(股)', 1332050, 17.2, 17.25, 17.15, -0.05, null]
+worker.js:84 [Worker] Item 678 - Original Date: 2705, Formatted Date: null
+worker.js:86 [Worker] Item 678 - Invalid formatted date: 2705
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 679: (9) ['2706', '3260', '(股)', 2125017, 13.45, 13.45, 13.4, null, null]
-/js/worker.js:84 [Worker] Item 679 - Original Date: 2706, Formatted Date: null
-/js/worker.js:86 [Worker] Item 679 - Invalid formatted date: 2706
-(anonymous) @ /js/worker.js:86
-fetchStockData @ /js/worker.js:81
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 679: (9) ['2706', '3260', '(股)', 2125017, 13.45, 13.45, 13.4, null, null]
+worker.js:84 [Worker] Item 679 - Original Date: 2706, Formatted Date: null
+worker.js:86 [Worker] Item 679 - Invalid formatted date: 2706
+(anonymous) @ worker.js:86
+fetchStockData @ worker.js:81
 await in fetchStockData
-self.onmessage @ /js/worker.js:818
-/js/worker.js:82 [Worker] Processing item 680: (9) ['2707', '3260', '(股)', 28621014, 200, 200, 196.5, -1, null]
-/js/worker.js:84 [Worker] Item 680 - Original Date: 2707, Formatted Date: null
+self.onmessage @ worker.js:818
+worker.js:82 [Worker] Processing item 680: (9) ['2707', '3260', '(股)', 28621014, 200, 200, 196.5, -1, null]
+worker.js:84 [Worker] Item 680 - Original Date: 2707, Formatted Date: null
 /js/worker.js:86 [Worker] Item 680 - Invalid formatted date: 2707
 (anonymous) @ /js/worker.js:86
 fetchStockData @ /js/worker.js:81
@@ -9201,12 +9201,10 @@ backtest.js:37 [Main] Received message from worker: progress undefined
     at async self.onmessage (/js/worker.js:818:28)
 self.onmessage @ /js/worker.js:867
 backtest.js:37 [Main] Received message from worker: error {message: 'Worker runBacktest 錯誤: 指定範圍 (2020-09-19 ~ 2025-09-19) 無 3260 交易數據'}
-
 Function tpex-proxy
-
-Sep 19, 12:02:43 PM: 258554c6 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 12:02:43 PM: 258554c6 Duration: 412.28 ms	Memory Usage: 124 MB
-Sep 19, 12:02:43 PM: 649496de INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 12:02:43 PM: 649496de Duration: 137.89 ms	Memory Usage: 133 MB
-Sep 19, 12:02:47 PM: 73152294 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 12:02:47 PM: 73152294 Duration: 260.66 ms	Memory Usage: 142 MB
+Sep 19, 12:44:20 PM: d05f08c8 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 12:44:20 PM: d05f08c8 Duration: 518.58 ms	Memory Usage: 125 MB
+Sep 19, 12:44:21 PM: 08e9374b INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 12:44:21 PM: 08e9374b Duration: 118.69 ms	Memory Usage: 129 MB
+Sep 19, 12:44:25 PM: e0940f35 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
+Sep 19, 12:44:25 PM: e0940f35 Duration: 265.06 ms	Memory Usage: 142 MB

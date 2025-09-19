@@ -29,13 +29,6 @@ async function fetchFromYahoo(stockNo, symbol) {
         const adjFactor = adjclose[i] / result.indicators.quote[0].close[i];
         return [ fDate, stockNo, '', (result.indicators.quote[0].open[i] * adjFactor), (result.indicators.quote[0].high[i] * adjFactor), (result.indicators.quote[0].low[i] * adjFactor), adjclose[i], (adjclose[i] - adjclose[i-1]), result.indicators.quote[0].volume[i] ];
     }).filter(Boolean);
-
-    // Validate formatted data before returning
-    if (!Array.isArray(formatted) || formatted.length === 0 || !Array.isArray(formatted[0]) || formatted[0].length < 9 || typeof formatted[0][0] !== 'string' || !/^\\d{2,4}[\\/\\.]\\d{1,2}[\\/\\.]\\d{1,2}$/.test(formatted[0][0])) {
-        console.error(`[TPEX Proxy v9.4] Yahoo Finance 返回數據格式異常，將視為失敗。`);
-        throw new Error('Yahoo Finance 返回數據格式異常');
-    }
-
     console.log(`[TPEX Proxy v9.4] 成功從 Yahoo 獲取資料`);
     return { stockName: result.meta.shortName || symbol, iTotalRecords: formatted.length, aaData: formatted, dataSource: 'Yahoo Finance' };
 }
@@ -55,13 +48,6 @@ async function fetchFromFinMind(stockNo, symbol) {
         const fDate = `${rocYear}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
         return [ fDate, d.stock_id, '', d.open, d.max, d.min, d.close, d.spread, d.Trading_Volume ];
     });
-
-    // Validate formatted data before returning
-    if (!Array.isArray(formatted) || formatted.length === 0 || !Array.isArray(formatted[0]) || formatted[0].length < 9 || typeof formatted[0][0] !== 'string' || !/^\\d{2,4}[\\/\\.]\\d{1,2}[\\/\\.]\\d{1,2}$/.test(formatted[0][0])) {
-        console.error(`[TPEX Proxy v9.4] FinMind 返回數據格式異常，將視為失敗。`);
-        throw new Error('FinMind 返回數據格式異常');
-    }
-
     console.log(`[TPEX Proxy v9.4] 成功從 FinMind 獲取資料`);
     return { stockName: stockNo, iTotalRecords: formatted.length, aaData: formatted, dataSource: 'FinMind (備援)' };
 }
@@ -79,24 +65,9 @@ export default async (req, context) => {
     try {
         const cached = await store.get(symbol, { type: 'json' });
         if (cached && (Date.now() - cached.timestamp < 12 * 60 * 60 * 1000)) {
-            // Check if cached data itself contains an error
-            if (cached.data && cached.data.error && (typeof cached.data.error === 'string' && cached.data.error.includes('缺少參數'))) {
-                console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含錯誤: ${cached.data.error}，將嘗試重新獲取。`);
-                // Fall through to re-fetch data
-            } else if (cached.data && cached.data.error) { // Handle other types of errors in cached data
-                console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據包含非預期錯誤: ${cached.data.error}，將嘗試重新獲取。`);
-                // Fall through to re-fetch data
-            } else {
-                // Add a check for the format of cached.data.aaData
-                if (cached.data && Array.isArray(cached.data.aaData) && cached.data.aaData.length > 0 && typeof cached.data.aaData[0][0] === 'string' && /^\d{2,4}[\/\.]\d{1,2}[\/\.]\d{1,2}$/.test(cached.data.aaData[0][0])) {
-                    console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
-                    cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
-                    return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
-                } else {
-                    console.warn(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol} 但快取數據格式異常，將嘗試重新獲取。`);
-                    // Fall through to re-fetch data
-                }
-            }
+            console.log(`[TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for ${symbol}`);
+            cached.data.dataSource = `${cached.data.dataSource.split(' ')[0]} (快取)`;
+            return new Response(JSON.stringify(cached.data), { headers: { 'Content-Type': 'application/json' } });
         }
     } catch (error) {
         if (isQuotaError(error)) {
@@ -115,15 +86,12 @@ export default async (req, context) => {
     // --- 快取未命中，請求遠端資料 ---
     try {
         const result = await fetchFromYahoo(stockNo, symbol);
-        console.log(`[TPEX Proxy v9.4] fetchFromYahoo result:`, JSON.stringify(result, null, 2)); // Added log
         try { await store.setJSON(symbol, { timestamp: Date.now(), data: result }); } catch (e) { console.warn('寫入 Blobs 失敗，僅寫入記憶體快取'); }
         inMemoryCache.set(symbol, { timestamp: Date.now(), data: result });
         return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
     } catch (yahooError) {
-        console.error(`[TPEX Proxy v9.4] fetchFromYahoo failed:`, yahooError); // Added log
         try {
             const result = await fetchFromFinMind(stockNo, symbol);
-            console.log(`[TPEX Proxy v9.4] fetchFromFinMind result:`, JSON.stringify(result, null, 2)); // Added log
             try { await store.setJSON(symbol, { timestamp: Date.now(), data: result }); } catch (e) { console.warn('寫入 Blobs 失敗，僅寫入記憶體快取'); }
             inMemoryCache.set(symbol, { timestamp: Date.now(), data: result });
             return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
