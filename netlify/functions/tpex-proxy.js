@@ -101,12 +101,15 @@ export default async (req, context) => {
     // --- 快取未命中，請求遠端資料 ---
     try {
         const result = await fetchFromYahoo(stockNo, symbol);
+        console.log(`[TPEX Proxy v9.4] fetchFromYahoo result:`, JSON.stringify(result, null, 2)); // Added log
         try { await store.setJSON(symbol, { timestamp: Date.now(), data: result }); } catch (e) { console.warn('寫入 Blobs 失敗，僅寫入記憶體快取'); }
         inMemoryCache.set(symbol, { timestamp: Date.now(), data: result });
         return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
     } catch (yahooError) {
+        console.error(`[TPEX Proxy v9.4] fetchFromYahoo failed:`, yahooError); // Added log
         try {
             const result = await fetchFromFinMind(stockNo, symbol);
+            console.log(`[TPEX Proxy v9.4] fetchFromFinMind result:`, JSON.stringify(result, null, 2)); // Added log
             try { await store.setJSON(symbol, { timestamp: Date.now(), data: result }); } catch (e) { console.warn('寫入 Blobs 失敗，僅寫入記憶體快取'); }
             inMemoryCache.set(symbol, { timestamp: Date.now(), data: result });
             return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
