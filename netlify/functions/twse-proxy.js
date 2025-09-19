@@ -5,11 +5,46 @@ import fetch from 'node-fetch';
 async function fetchTwseData(stockNo, date) {
     const targetUrl = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${date}&stockNo=${stockNo}`;
     const response = await fetch(targetUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!response.ok) {
+        throw new Error(`TWSE API request failed with status ${response.status}`);
+    }
     const data = await response.json();
-    if (data.stat !== 'OK') throw new Error(`TWSE API 回應錯誤: ${data.stat}`);
+    if (data.stat !== 'OK') {
+        // Return a specific error if no data for that month
+        if (data.stat === '很抱歉，沒有符合條件的資料!'){
+             return { stockName: '', iTotalRecords: 0, aaData: [], dataSource: 'TWSE', error: 'no_data' };
+        }
+        throw new Error(`TWSE API responded with error: ${data.stat}`);
+    }
+
+    // Defensive parsing
+    const titleParts = data.title ? data.title.split(' ') : [];
+    const stockName = titleParts.length > 2 ? titleParts[2] : stockNo;
     
-    const stockName = data.title.split(' ')[2];
-    const formattedAaData = data.data.map(item => [ item[0], stockNo, stockName, parseFloat(item[3].replace(/,/g, '')), parseFloat(item[4].replace(/,/g, '')), parseFloat(item[5].replace(/,/g, '')), parseFloat(item[6].replace(/,/g, '')), parseFloat(item[8].replace(/,/g, '')), parseInt(item[1].replace(/,/g, ''), 10) ]);
+    if (!data.data || !Array.isArray(data.data)) {
+        // No data array, return empty
+        return { stockName, iTotalRecords: 0, aaData: [], dataSource: 'TWSE' };
+    }
+
+    const formattedAaData = data.data.map(item => {
+        try {
+            if (!Array.isArray(item) || item.length < 9) return null;
+            return [ 
+                item[0], 
+                stockNo, 
+                stockName, 
+                parseFloat(item[3].replace(/,/g, '')), 
+                parseFloat(item[4].replace(/,/g, '')), 
+                parseFloat(item[5].replace(/,/g, '')), 
+                parseFloat(item[6].replace(/,/g, '')), 
+                parseFloat(item[8].replace(/,/g, '')), 
+                parseInt(item[1].replace(/,/g, ''), 10) 
+            ];
+        } catch {
+            return null; // Ignore rows that fail to parse
+        }
+    }).filter(Boolean); // Remove nulls
+
     return { stockName, iTotalRecords: formattedAaData.length, aaData: formattedAaData, dataSource: 'TWSE' };
 }
 
