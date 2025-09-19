@@ -80,32 +80,27 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     if (!marketType) {
         throw new Error('fetchStockData 缺少 marketType 參數!');
     }
-    console.log(`[Worker v9.5] fetchStockData 啟動 for ${stockNo} (${marketType})`);
-    let allData = [];
+    console.log(`[Worker v9.6] fetchStockData 啟動 for ${stockNo} (${marketType})`);
+    let allRawData = [];
     let dataSource = '未知';
     let stockName = '';
 
     if (marketType === 'tpex') {
-        // --- 關鍵升級：在請求 URL 中加入 startDate 和 endDate ---
         const proxyUrl = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&startDate=${startDate}&endDate=${endDate}`;
-        console.log(`[Worker v9.5] 向上櫃代理請求精準日期範圍`);
-        // --- 升級結束 ---
+        console.log(`[Worker v9.6] 向上櫃代理請求精準日期範圍: ${proxyUrl}`);
         const response = await fetch(proxyUrl);
         if (!response.ok) throw new Error(`代理伺服器錯誤: ${response.status}`);
         const data = await response.json();
         if (data.error) throw new Error(`代理回傳錯誤: ${data.error}`);
         
-        // 現在從後端直接獲取的就是篩選好的數據
-        allData = data.aaData || [];
-        dataSource = data.dataSource || '未知';
+        allRawData = data.aaData || [];
+        dataSource = data.dataSource || 'TPEX';
         stockName = data.stockName || '';
 
     } else { // marketType === 'twse'
-        // 上市股票的邏輯保持不變，因為它本來就是逐月請求
         const start = new Date(startDate);
         const end = new Date(endDate);
         let current = new Date(start.getFullYear(), start.getMonth(), 1);
-        let monthDataArr = [];
         while (current <= end) {
             const year = current.getFullYear();
             const month = String(current.getMonth() + 1).padStart(2, '0');
@@ -115,41 +110,79 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
             if (response.ok) {
                 const data = await response.json();
                 if (data.aaData && data.aaData.length > 0) {
-                    monthDataArr.push(...data.aaData);
+                    allRawData.push(...data.aaData);
                     dataSource = data.dataSource || 'TWSE';
                     stockName = data.stockName || '';
                 }
             }
             current.setMonth(current.getMonth() + 1);
         }
-        allData = monthDataArr;
     }
     
-    // --- 關鍵升級：移除針對 TPEX 的前端日期篩選，只保留格式化 ---
-    // (上市股票仍然需要前端篩選，因為後端是回傳整個月的資料)
-    let processedData;
-    if (marketType === 'tpex') {
-        // 上櫃資料已在後端篩選完畢，只需格式化
-        processedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : (p || 0)), parseInt(String(d[8] || 0).replace(/,/g, '') / 1000, 10) ]);
-    } else {
-        // 上市資料需要先格式化，再篩選
-        const formattedData = allData.map(d => [ d[0], ...d.slice(3, 9).map(p => typeof p === 'string' ? parseFloat(p.replace(/,/g, '')) : (p || 0)), parseInt(String(d[8] || 0).replace(/,/g, '') / 1000, 10) ]);
-        processedData = formattedData.filter(d => {
-            if (!d[0] || typeof d[0] !== 'string') return false;
-            const date = new Date(d[0].replace(/(\d+)\/(\d+)\/(\d+)/, (m, y, mo, d) => `${parseInt(y) + 1911}-${mo}-${d}`));
-            return date >= new Date(startDate) && date <= new Date(endDate);
-        });
-    }
-    // --- 升級結束 ---
+    // --- 關鍵修正：恢復產生 { date, open, ... } 物件陣列的標準化流程 ---
+    const sDate = new Date(startDate);
+    const eDate = new Date(endDate);
 
-    if (processedData.length === 0) {
-        console.warn(`[Worker v9.5] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
+    const normalized = allRawData.map(item => {
+        try {
+            let dateStr, o, h, l, c, v;
+
+            if (!Array.isArray(item)) return null;
+
+            dateStr = item[0];
+            // TWSE 格式: [日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌, 成交筆數]
+            // TPEX 格式 (來自 proxy): [日期, 代號, 名稱, 開, 高, 低, 收, 價差, 量]
+            // 統一處理, 假設格式為 [日期, ... , 開, 高, 低, 收, ... , 量]
+            o = parseFloat(String(item[3]).replace(/,/g, '')) || null;
+            h = parseFloat(String(item[4]).replace(/,/g, '')) || null;
+            l = parseFloat(String(item[5]).replace(/,/g, '')) || null;
+            c = parseFloat(String(item[6]).replace(/,/g, '')) || null;
+            // 成交量在 TWSE 是 item[1], 在 TPEX proxy 是 item[8]
+            v = parseFloat(String(item[8] ?? item[1]).replace(/,/g, '')) || 0;
+
+            let isoDate = null;
+            if (typeof dateStr === 'string' && /^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(dateStr.trim())) {
+                isoDate = formatTWDateWorker(dateStr.trim());
+            } else if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+                isoDate = dateStr.trim();
+            }
+            if (!isoDate) return null;
+
+            // 對 TWSE 數據進行前端過濾 (TPEX 已在後端過濾)
+            if (marketType === 'twse') {
+                const dObj = new Date(isoDate);
+                if (isNaN(dObj) || dObj < sDate || dObj > eDate) return null;
+            }
+
+            if ((!o || o === 0) && c) o = c;
+            if ((!h || h === 0) && c) h = Math.max(o || 0, c);
+            if ((!l || l === 0) && c) l = Math.min(o || c, c);
+
+            return {
+                date: isoDate,
+                open: (o === null || isNaN(o)) ? null : o,
+                high: (h === null || isNaN(h)) ? null : h,
+                low: (l === null || isNaN(l)) ? null : l,
+                close: (c === null || isNaN(c)) ? null : c,
+                volume: Math.round(v / 1000)
+            };
+        } catch (e) {
+            return null;
+        }
+    }).filter(Boolean);
+
+    const uniqueData = Array.from(new Map(normalized.map(item => [item.date, item])).values());
+    const sortedData = uniqueData.sort((a, b) => new Date(a.date) - new Date(b.date));
+    // --- 修正結束 ---
+
+    if (sortedData.length === 0) {
+        console.warn(`[Worker v9.6] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`);
         return { data: [], dataSource, stockName };
     }
     
-    workerCachedStockData = processedData;
-    console.log(`[Worker v9.5] 最終處理後數據筆數: ${processedData.length}`);
-    return { data: processedData, dataSource, stockName };
+    workerCachedStockData = sortedData;
+    console.log(`[Worker v9.6] 最終處理後數據筆數: ${sortedData.length}`);
+    return { data: sortedData, dataSource, stockName };
 }
 
 // --- TWSE 月數據獲取 ---
