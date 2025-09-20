@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.5 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.6 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -8,9 +8,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241105A
 // Patch Tag: LB-ADJ-COMPOSER-20241112A
 // Patch Tag: LB-ADJ-COMPOSER-20241119A
+// Patch Tag: LB-ADJ-COMPOSER-20241123A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241119A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241123A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -287,19 +288,79 @@ function readField(raw, key) {
   return undefined;
 }
 
+function normaliseKeyName(key) {
+  if (!key && key !== 0) return '';
+  return String(key)
+    .replace(/([A-Z])/g, '_$1')
+    .replace(/__+/g, '_')
+    .replace(/[^a-z0-9_]/gi, '_')
+    .toLowerCase();
+}
+
 function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
   const parseOptions = options.treatAsRatio ? { treatAsRatio: true } : {};
+  const visited = new Set();
+  const addVisited = (key) => {
+    if (!key && key !== 0) return;
+    visited.add(normaliseKeyName(key));
+  };
+  addVisited(primaryKey);
+  for (const key of partKeys) {
+    addVisited(key);
+  }
+
+  let total = 0;
   const primaryValue = parseNumber(readField(raw, primaryKey), parseOptions);
   if (Number.isFinite(primaryValue) && primaryValue > 0) {
-    return primaryValue;
+    total += primaryValue;
   }
-  let total = 0;
+
   for (const partKey of partKeys) {
     const partValue = parseNumber(readField(raw, partKey), parseOptions);
     if (Number.isFinite(partValue) && partValue > 0) {
       total += partValue;
     }
   }
+
+  if (total > 0) {
+    return total;
+  }
+
+  if (options.allowFuzzy !== false && raw && typeof raw === 'object') {
+    const prefix = normaliseKeyName(options.fallbackPrefix || primaryKey);
+    const bannedTokens = new Set([
+      'date',
+      'year',
+      'announcement',
+      'announcement_date',
+      'declare',
+      'description',
+      'type',
+      'notes',
+      'remark',
+      'name',
+    ]);
+    for (const [rawKey, rawValue] of Object.entries(raw)) {
+      if (!rawKey) continue;
+      const normalisedKey = normaliseKeyName(rawKey);
+      if (visited.has(normalisedKey)) continue;
+      if (!normalisedKey.includes(prefix)) continue;
+      let shouldSkip = false;
+      for (const token of bannedTokens) {
+        if (normalisedKey.includes(token)) {
+          shouldSkip = true;
+          break;
+        }
+      }
+      if (shouldSkip) continue;
+      const candidate = parseNumber(rawValue, parseOptions);
+      if (Number.isFinite(candidate) && candidate > 0) {
+        total += candidate;
+        visited.add(normalisedKey);
+      }
+    }
+  }
+
   return total > 0 ? total : 0;
 }
 
@@ -609,9 +670,16 @@ function prepareDividendEvents(dividendRecords) {
   return events;
 }
 
-function applyBackwardAdjustments(priceRows, dividendRecords) {
+function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
+  const preparedEvents = Array.isArray(options.preparedEvents)
+    ? options.preparedEvents
+    : null;
   if (!Array.isArray(priceRows) || priceRows.length === 0) {
-    return { rows: [], adjustments: [] };
+    return {
+      rows: [],
+      adjustments: [],
+      events: preparedEvents || [],
+    };
   }
 
   const sortedRows = [...priceRows].sort(
@@ -620,7 +688,7 @@ function applyBackwardAdjustments(priceRows, dividendRecords) {
   const multipliers = new Array(sortedRows.length).fill(1);
   const adjustments = [];
 
-  const events = prepareDividendEvents(dividendRecords);
+  const events = preparedEvents || prepareDividendEvents(dividendRecords);
 
   for (const event of events) {
     const exIndex = sortedRows.findIndex((row) => row.date >= event.date);
@@ -692,7 +760,7 @@ function applyBackwardAdjustments(priceRows, dividendRecords) {
     }
   }
 
-  return { rows: adjustedRows, adjustments };
+  return { rows: adjustedRows, adjustments, events };
 }
 
 async function fetchTwseMonth(stockNo, monthQuery) {
@@ -984,23 +1052,39 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
 function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendStats = {}) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
-  const uniqueSources = new Set([basePriceSource, 'FinMind (除權息)']);
+  const uniqueSources = new Set([basePriceSource, 'FinMind (除權息還原)']);
   const {
     filteredCount,
     totalCount,
+    normalizedCount,
     lookbackWindowDays,
     fetchStartISO,
     fetchEndISO,
   } = dividendStats || {};
+  const appliedEvents = Array.isArray(adjustments)
+    ? adjustments.filter((event) => !event?.skipped)
+    : [];
+  const skippedEvents = Array.isArray(adjustments)
+    ? adjustments.filter((event) => event?.skipped)
+    : [];
+  const skipReasonCounts = skippedEvents.reduce((acc, event) => {
+    const reasonKey = event?.reason ? String(event.reason) : null;
+    if (!reasonKey) return acc;
+    const current = acc[reasonKey] || 0;
+    acc[reasonKey] = current + 1;
+    return acc;
+  }, {});
   return {
     priceRows: Array.isArray(priceData.rows) ? priceData.rows.length : 0,
     dividendRows: Number.isFinite(filteredCount) ? filteredCount : undefined,
     dividendRowsTotal: Number.isFinite(totalCount) ? totalCount : undefined,
+    dividendEvents: Number.isFinite(normalizedCount) ? normalizedCount : undefined,
     dividendFetchStart: fetchStartISO || undefined,
     dividendFetchEnd: fetchEndISO || undefined,
     dividendLookbackDays: Number.isFinite(lookbackWindowDays) ? lookbackWindowDays : undefined,
-    adjustmentEvents: adjustments.filter((event) => !event.skipped).length,
-    skippedEvents: adjustments.filter((event) => event.skipped).length,
+    adjustmentEvents: appliedEvents.length,
+    skippedEvents: skippedEvents.length,
+    adjustmentSkipReasons: Object.keys(skipReasonCounts).length > 0 ? skipReasonCounts : undefined,
     priceSource: basePriceSource,
     dividendSource: 'FinMind (TaiwanStockDividend)',
     sources: Array.from(uniqueSources),
@@ -1070,9 +1154,12 @@ export const handler = async (event) => {
       priceRangeEndISO || endISO,
     );
 
-    const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(
+    const preparedDividendEvents = prepareDividendEvents(filteredDividendSeries);
+
+    const { rows: adjustedRows, adjustments, events } = applyBackwardAdjustments(
       priceRows,
       filteredDividendSeries,
+      { preparedEvents: preparedDividendEvents },
     );
 
     const combinedSourceLabel = `${
@@ -1094,6 +1181,7 @@ export const handler = async (event) => {
         {
           filteredCount: filteredDividendSeries.length,
           totalCount: dividendSeries.length,
+          normalizedCount: preparedDividendEvents.length,
           lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
           fetchStartISO: dividendPayload?.fetchStartISO || null,
           fetchEndISO: dividendPayload?.fetchEndISO || null,
@@ -1101,6 +1189,7 @@ export const handler = async (event) => {
       ),
       data: adjustedRows,
       adjustments,
+      dividendEvents: events,
     };
 
     return jsonResponse(200, responseBody);

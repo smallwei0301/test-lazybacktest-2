@@ -234,6 +234,8 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const priceSource = payload?.priceSource || payload?.summary?.priceSource;
             const dividendRows = payload?.summary?.dividendRows;
             const dividendRowsTotal = payload?.summary?.dividendRowsTotal;
+            const dividendEvents = payload?.summary?.dividendEvents;
+            const adjustmentSkipReasons = payload?.summary?.adjustmentSkipReasons;
             const dividendFetchStart = payload?.summary?.dividendFetchStart;
             const dividendFetchEnd = payload?.summary?.dividendFetchEnd;
             const lookbackDays = payload?.summary?.dividendLookbackDays;
@@ -262,6 +264,11 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     `FinMind 股利筆數: <span class="font-semibold">${dividendRows}</span> 筆`,
                 );
             }
+            if (Number.isFinite(dividendEvents)) {
+                lines.push(
+                    `FinMind 有效股利事件: <span class="font-semibold">${dividendEvents}</span> 件`,
+                );
+            }
             if (dividendFetchStart || dividendFetchEnd) {
                 const rangeStart = dividendFetchStart || '—';
                 const rangeEnd = dividendFetchEnd || '—';
@@ -271,6 +278,20 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 lines.push(
                     `FinMind 股利查詢區間: <span class="font-semibold">${rangeStart} ~ ${rangeEnd}</span>${suffix}`,
                 );
+            }
+            if (
+                adjustmentSkipReasons &&
+                typeof adjustmentSkipReasons === 'object' &&
+                Object.keys(adjustmentSkipReasons).length > 0
+            ) {
+                const skipDetails = Object.entries(adjustmentSkipReasons)
+                    .map(([reason, count]) => `${reason}×${count}`)
+                    .join('、');
+                if (skipDetails) {
+                    lines.push(
+                        `跳過原因統計: <span class="font-semibold">${skipDetails}</span>`,
+                    );
+                }
             }
             detailHtml = lines.join('<br>');
         } else {
