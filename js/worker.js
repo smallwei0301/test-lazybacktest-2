@@ -1,7 +1,7 @@
 
-// --- Worker Data Acquisition & Cache (v10.4) ---
-// Patch Tag: LB-ADJ-COMPOSER-20240525A
-const WORKER_DATA_VERSION = "v10.4";
+// --- Worker Data Acquisition & Cache (v10.5) ---
+// Patch Tag: LB-YAHOO-ADJ-20240601A
+const WORKER_DATA_VERSION = "v10.5";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -439,77 +439,12 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
     };
   }
 
-  if (adjusted) {
-    self.postMessage({
-      type: "progress",
-      progress: 10,
-      message: "向雲端計算服務請求還原價...",
-    });
-    const params = new URLSearchParams({
-      stockNo,
-      startDate,
-      endDate,
-      market: marketKey,
-    });
-    const url = `/.netlify/functions/calculateAdjustedPrice?${params.toString()}`;
-    try {
-      const payload = await fetchWithAdaptiveRetry(url, {
-        headers: { Accept: "application/json" },
-      });
-      const rows = Array.isArray(payload?.data) ? payload.data : [];
-      const normalized = [];
-      rows.forEach((row) => {
-        const normalizedRow = normalizeProxyRow(
-          row,
-          marketKey === "TPEX",
-          startDateObj,
-          endDateObj,
-        );
-        if (normalizedRow) {
-          if (Number.isFinite(row?.adjustedFactor)) {
-            normalizedRow.adjustedFactor = row.adjustedFactor;
-          }
-          normalized.push(normalizedRow);
-        }
-      });
-      normalized.sort((a, b) => a.date.localeCompare(b.date));
-      const entry = {
-        data: normalized,
-        stockName: payload?.stockName || stockNo,
-        dataSource:
-          payload?.dataSource || "TWSE + FinMind (向後還原)",
-        timestamp: Date.now(),
-        meta: {
-          stockNo,
-          startDate,
-          endDate,
-          adjusted: true,
-          priceMode: "ADJ",
-          marketType: marketKey,
-          summary: payload?.summary || null,
-        },
-      };
-      setWorkerCacheEntry(marketKey, cacheKey, entry);
-      self.postMessage({
-        type: "progress",
-        progress: 45,
-        message: "已取得還原股價資料...",
-      });
-      return {
-        data: normalized,
-        dataSource: entry.dataSource,
-        stockName: entry.stockName,
-      };
-    } catch (error) {
-      console.error("[Worker] 還原價雲端計算失敗:", error);
-      throw error;
-    }
-  }
-
   self.postMessage({
     type: "progress",
-    progress: 5,
-    message: "準備抓取原始數據...",
+    progress: adjusted ? 8 : 5,
+    message: adjusted
+      ? "準備抓取還原股價..."
+      : "準備抓取原始數據...",
   });
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -533,121 +468,120 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
     async (monthInfo) => {
       try {
         let monthEntry = getMonthlyCacheEntry(
-        marketKey,
-        stockNo,
-        monthInfo.monthKey,
-        adjusted,
-      );
-      if (!monthEntry) {
-        monthEntry = {
-          data: [],
-          coverage: [],
-          sources: new Set(),
-          stockName: "",
-          lastUpdated: 0,
-        };
-        setMonthlyCacheEntry(
           marketKey,
           stockNo,
           monthInfo.monthKey,
-          monthEntry,
           adjusted,
         );
-      }
-
-      const existingCoverage = Array.isArray(monthEntry.coverage)
-        ? monthEntry.coverage.map((range) => ({ ...range }))
-        : [];
-      const missingRanges = computeMissingRanges(
-        existingCoverage,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-      );
-      const coveredLengthBefore = getCoveredLength(
-        existingCoverage,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-      );
-      const monthSourceFlags = new Set(
-        monthEntry.sources instanceof Set
-          ? Array.from(monthEntry.sources)
-          : monthEntry.sources || [],
-      );
-      let monthStockName = monthEntry.stockName || "";
-
-      if (missingRanges.length > 0) {
-        for (let i = 0; i < missingRanges.length; i += 1) {
-          const missingRange = missingRanges[i];
-          const { startISO, endISO } = rangeBoundsToISO(missingRange);
-          const params = new URLSearchParams({
+        if (!monthEntry) {
+          monthEntry = {
+            data: [],
+            coverage: [],
+            sources: new Set(),
+            stockName: "",
+            lastUpdated: 0,
+          };
+          setMonthlyCacheEntry(
+            marketKey,
             stockNo,
-            month: monthInfo.monthKey,
-            start: startISO,
-            end: endISO,
-          });
-          if (adjusted) {
-            params.set("adjusted", "1");
-          }
-          const url = `${proxyPath}?${params.toString()}`;
-          try {
-            const payload = await fetchWithAdaptiveRetry(url, {
-              headers: { Accept: "application/json" },
+            monthInfo.monthKey,
+            monthEntry,
+            adjusted,
+          );
+        }
+
+        const existingCoverage = Array.isArray(monthEntry.coverage)
+          ? monthEntry.coverage.map((range) => ({ ...range }))
+          : [];
+        const missingRanges = computeMissingRanges(
+          existingCoverage,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        const coveredLengthBefore = getCoveredLength(
+          existingCoverage,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        const monthSourceFlags = new Set(
+          monthEntry.sources instanceof Set
+            ? Array.from(monthEntry.sources)
+            : monthEntry.sources || [],
+        );
+        let monthStockName = monthEntry.stockName || "";
+
+        if (missingRanges.length > 0) {
+          for (let i = 0; i < missingRanges.length; i += 1) {
+            const missingRange = missingRanges[i];
+            const { startISO, endISO } = rangeBoundsToISO(missingRange);
+            const params = new URLSearchParams({
+              stockNo,
+              month: monthInfo.monthKey,
+              start: startISO,
+              end: endISO,
             });
-            const rows = Array.isArray(payload?.aaData)
-              ? payload.aaData
-              : Array.isArray(payload?.data)
-                ? payload.data
-                : [];
-            const normalized = [];
-            rows.forEach((row) => {
-              const normalizedRow = normalizeProxyRow(
-                row,
-                isTpex,
-                startDateObj,
-                endDateObj,
-              );
-              if (normalizedRow) normalized.push(normalizedRow);
-            });
-            if (payload?.stockName) {
-              monthStockName = payload.stockName;
+            if (adjusted) {
+              params.set("adjusted", "1");
             }
-            const sourceLabel =
-              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-            if (sourceLabel) {
-              monthSourceFlags.add(sourceLabel);
-              monthEntry.sources.add(sourceLabel);
+            const url = `${proxyPath}?${params.toString()}`;
+            try {
+              const payload = await fetchWithAdaptiveRetry(url, {
+                headers: { Accept: "application/json" },
+              });
+              const rows = Array.isArray(payload?.aaData)
+                ? payload.aaData
+                : Array.isArray(payload?.data)
+                  ? payload.data
+                  : [];
+              const normalized = [];
+              rows.forEach((row) => {
+                const normalizedRow = normalizeProxyRow(
+                  row,
+                  isTpex,
+                  startDateObj,
+                  endDateObj,
+                );
+                if (normalizedRow) normalized.push(normalizedRow);
+              });
+              if (payload?.stockName) {
+                monthStockName = payload.stockName;
+              }
+              const sourceLabel =
+                payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+              if (sourceLabel) {
+                monthSourceFlags.add(sourceLabel);
+                monthEntry.sources.add(sourceLabel);
+              }
+              if (normalized.length > 0) {
+                mergeMonthlyData(monthEntry, normalized);
+              }
+              addCoverage(monthEntry, startISO, endISO);
+              monthEntry.lastUpdated = Date.now();
+              if (!monthEntry.stockName && monthStockName) {
+                monthEntry.stockName = monthStockName;
+              }
+            } catch (error) {
+              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
             }
-            if (normalized.length > 0) {
-              mergeMonthlyData(monthEntry, normalized);
-            }
-            addCoverage(monthEntry, startISO, endISO);
-            monthEntry.lastUpdated = Date.now();
-            if (!monthEntry.stockName && monthStockName) {
-              monthEntry.stockName = monthStockName;
-            }
-          } catch (error) {
-            console.error(`[Worker] 抓取 ${url} 失敗:`, error);
           }
         }
-      }
 
-      const rowsForRange = (monthEntry.data || []).filter(
-        (row) =>
-          row &&
-          row.date >= monthInfo.rangeStartISO &&
-          row.date <= monthInfo.rangeEndISO,
-      );
+        const rowsForRange = (monthEntry.data || []).filter(
+          (row) =>
+            row &&
+            row.date >= monthInfo.rangeStartISO &&
+            row.date <= monthInfo.rangeEndISO,
+        );
 
-      const usedCache =
-        missingRanges.length === 0 || coveredLengthBefore > 0;
+        const usedCache =
+          missingRanges.length === 0 || coveredLengthBefore > 0;
 
-      return {
-        rows: rowsForRange,
-        sourceFlags: Array.from(monthSourceFlags),
-        stockName: monthStockName,
-        usedCache,
-      };
-
+        return {
+          rows: rowsForRange,
+          sourceFlags: Array.from(monthSourceFlags),
+          stockName: monthStockName,
+          usedCache,
+        };
       } finally {
         completed += 1;
         const progress = 10 + Math.round((completed / months.length) * 35);

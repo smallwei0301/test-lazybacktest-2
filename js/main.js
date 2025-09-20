@@ -10,6 +10,30 @@ let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
+const DATA_SOURCE_OPTIONS = {
+  TWSE: {
+    RAW: [
+      { id: 'twse', label: 'TWSE 主來源', description: '證交所公開日線資料' },
+      { id: 'finmind', label: 'FinMind 備援', description: 'FinMind 原始股價資料' },
+      { id: 'yahoo', label: 'Yahoo Finance', description: 'Yahoo 原始股價' },
+    ],
+    ADJ: [
+      { id: 'yahoo', label: 'Yahoo 還原價', description: 'Yahoo 調整後股價' },
+      { id: 'finmind', label: 'FinMind 還原價', description: 'FinMind 調整價備援' },
+    ],
+  },
+  TPEX: {
+    RAW: [
+      { id: 'finmind', label: 'FinMind 主來源', description: 'FinMind 上櫃原始股價' },
+      { id: 'yahoo', label: 'Yahoo 備援', description: 'Yahoo 上櫃原始股價' },
+    ],
+    ADJ: [
+      { id: 'yahoo', label: 'Yahoo 還原價', description: 'Yahoo 調整後股價' },
+      { id: 'finmind', label: 'FinMind 還原價', description: 'FinMind 調整價備援' },
+    ],
+  },
+};
+
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
@@ -287,6 +311,196 @@ function createProgressAnimator() {
         },
     };
 }
+
+function gatherDataSourceTestInputs() {
+  const stockInput = document.getElementById('stockNo');
+  const startInput = document.getElementById('startDate');
+  const endInput = document.getElementById('endDate');
+  const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
+  const marketSwitch = document.getElementById('marketSwitch');
+  return {
+    stockNo: (stockInput?.value || '').trim().toUpperCase(),
+    startDate: startInput?.value || '',
+    endDate: endInput?.value || '',
+    adjusted: !!adjustedCheckbox?.checked,
+    market: marketSwitch && marketSwitch.checked ? 'TPEX' : 'TWSE',
+  };
+}
+
+function setDataSourceTestResult(status, text) {
+  const resultEl = document.getElementById('dataSourceTestResult');
+  if (!resultEl) return;
+  resultEl.textContent = text || '';
+  resultEl.classList.remove('text-green-600', 'text-red-600', 'text-blue-600', 'text-muted-foreground');
+  resultEl.classList.add('text-xs');
+  if (status === 'success') {
+    resultEl.classList.add('text-green-600');
+  } else if (status === 'error') {
+    resultEl.classList.add('text-red-600');
+  } else if (status === 'loading') {
+    resultEl.classList.add('text-blue-600');
+  } else {
+    resultEl.classList.add('text-muted-foreground');
+  }
+}
+
+function updateDataSourceTestMode() {
+  const modeEl = document.getElementById('dataSourceTestMode');
+  if (!modeEl) return;
+  const { market, adjusted, stockNo, startDate, endDate } = gatherDataSourceTestInputs();
+  const marketLabel = market === 'TPEX' ? '上櫃 (TPEX)' : '上市 (TWSE)';
+  const modeLabel = adjusted ? '還原股價模式' : '原始股價模式';
+  const rangeLabel = startDate && endDate ? `${startDate} ~ ${endDate}` : '尚未設定日期';
+  modeEl.textContent = `目前設定：${marketLabel} ・ ${modeLabel} ・ ${stockNo || '---'} ・ ${rangeLabel}`;
+}
+
+function renderDataSourceTestButtons() {
+  const container = document.getElementById('dataSourceTestButtons');
+  if (!container) return;
+  container.innerHTML = '';
+  const { market, adjusted } = gatherDataSourceTestInputs();
+  const options = (DATA_SOURCE_OPTIONS[market] || {})[adjusted ? 'ADJ' : 'RAW'] || [];
+  if (options.length === 0) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = '此模式暫無可測試來源。';
+    placeholder.style.color = 'var(--muted-foreground)';
+    container.appendChild(placeholder);
+    return;
+  }
+  options.forEach((option) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = option.label;
+    button.className = 'text-xs px-3 py-1 border rounded-md transition-colors';
+    button.style.borderColor = 'var(--border)';
+    button.style.backgroundColor = 'var(--background)';
+    button.style.color = 'var(--foreground)';
+    if (option.description) {
+      button.title = option.description;
+    }
+    button.addEventListener('click', () => runDataSourceTest(option, button));
+    container.appendChild(button);
+  });
+}
+
+function handleDataSourceInputChange() {
+  const panel = document.getElementById('dataSourceTestPanel');
+  if (!panel || panel.classList.contains('hidden')) return;
+  updateDataSourceTestMode();
+  setDataSourceTestResult('info', '請選擇資料來源進行測試');
+}
+
+async function runDataSourceTest(option, button) {
+  const inputs = gatherDataSourceTestInputs();
+  const { stockNo, startDate, endDate, adjusted, market } = inputs;
+  if (!stockNo || !/^[0-9A-Z]{3,7}$/.test(stockNo)) {
+    setDataSourceTestResult('error', '請輸入有效的股票代碼後再測試');
+    return;
+  }
+  if (!startDate || !endDate) {
+    setDataSourceTestResult('error', '請先設定完整的日期範圍');
+    return;
+  }
+  if (new Date(startDate) > new Date(endDate)) {
+    setDataSourceTestResult('error', '開始日期需早於結束日期');
+    return;
+  }
+
+  const basePath = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+  const search = new URLSearchParams({
+    stockNo,
+    start: startDate,
+    end: endDate,
+    forceSource: option.id,
+  });
+  if (adjusted) search.set('adjusted', '1');
+
+  setDataSourceTestResult('loading', `${option.label} 測試中...`);
+  if (button) {
+    button.disabled = true;
+    button.style.opacity = '0.6';
+  }
+
+  try {
+    const response = await fetch(`${basePath}?${search.toString()}`, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      throw new Error(`無法解析回應: ${text.slice(0, 120)}`);
+    }
+    if (!response.ok) {
+      throw new Error(data?.error || `HTTP ${response.status}`);
+    }
+    const rows = Array.isArray(data.aaData) ? data.aaData.length : 0;
+    const summaryParts = [];
+    if (data.dataSource) summaryParts.push(`來源：${data.dataSource}`);
+    summaryParts.push(`筆數：${rows}`);
+    if (data.summary?.remoteRows !== undefined) {
+      summaryParts.push(`遠端筆數：${data.summary.remoteRows}`);
+    }
+    setDataSourceTestResult('success', `${option.label} 成功，${summaryParts.join('，')}`);
+    console.log('[DataSourceTest]', option.id, data);
+  } catch (error) {
+    setDataSourceTestResult('error', `${option.label} 失敗：${error.message}`);
+    console.error('[DataSourceTest] 錯誤', option.id, error);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.style.opacity = '';
+    }
+  }
+}
+
+function initDataSourceTester() {
+  const toggleBtn = document.getElementById('dataSourceTestToggle');
+  const panel = document.getElementById('dataSourceTestPanel');
+  if (!toggleBtn || !panel) return;
+
+  const refreshPanel = () => {
+    renderDataSourceTestButtons();
+    updateDataSourceTestMode();
+    setDataSourceTestResult('info', '請選擇資料來源進行測試');
+  };
+
+  toggleBtn.addEventListener('click', () => {
+    const isHidden = panel.classList.contains('hidden');
+    if (isHidden) {
+      panel.classList.remove('hidden');
+      refreshPanel();
+    } else {
+      panel.classList.add('hidden');
+    }
+  });
+
+  const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
+  if (adjustedCheckbox) {
+    adjustedCheckbox.addEventListener('change', () => {
+      if (panel.classList.contains('hidden')) return;
+      refreshPanel();
+    });
+  }
+
+  const marketSwitch = document.getElementById('marketSwitch');
+  if (marketSwitch) {
+    marketSwitch.addEventListener('change', () => {
+      if (panel.classList.contains('hidden')) return;
+      refreshPanel();
+    });
+  }
+
+  ['stockNo', 'startDate', 'endDate'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', handleDataSourceInputChange);
+      el.addEventListener('change', handleDataSourceInputChange);
+    }
+  });
+}
 function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
 function getBacktestParams() { const sN=document.getElementById("stockNo").value.trim().toUpperCase()||"2330"; const sD=document.getElementById("startDate").value; const eD=document.getElementById("endDate").value; const iC=parseFloat(document.getElementById("initialCapital").value)||100000; const pS=parseFloat(document.getElementById("positionSize").value)||100; const sL=parseFloat(document.getElementById("stopLoss").value)||0; const tP=parseFloat(document.getElementById("takeProfit").value)||0; const tT=document.querySelector('input[name="tradeTiming"]:checked')?.value||'close'; const adjP=document.getElementById("adjustedPriceCheckbox").checked; const eS=document.getElementById("entryStrategy").value; const xS=document.getElementById("exitStrategy").value; const eP=getStrategyParams('entry'); const xP=getStrategyParams('exit'); const enableShorting = document.getElementById("enableShortSelling").checked; let shortES = null, shortXS = null, shortEP = {}, shortXP = {}; if (enableShorting) { shortES = document.getElementById("shortEntryStrategy").value; shortXS = document.getElementById("shortExitStrategy").value; shortEP = getStrategyParams('shortEntry'); shortXP = getStrategyParams('shortExit'); } const buyFee = parseFloat(document.getElementById("buyFee").value) || 0; const sellFee = parseFloat(document.getElementById("sellFee").value) || 0;     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital'; const marketSwitch = document.getElementById("marketSwitch"); const market = (marketSwitch && marketSwitch.checked) ? 'TPEX' : 'TWSE'; return { stockNo: sN, startDate: sD, endDate: eD, initialCapital: iC, positionSize: pS, stopLoss: sL, takeProfit: tP, tradeTiming: tT, adjustedPrice: adjP, entryStrategy: eS, exitStrategy: xS, entryParams: eP, exitParams: xP, enableShorting: enableShorting, shortEntryStrategy: shortES, shortExitStrategy: shortXS, shortEntryParams: shortEP, shortExitParams: shortXP, buyFee: buyFee, sellFee: sellFee, positionBasis: positionBasis, market: market, marketType: currentMarket, priceMode: adjP ? 'adjusted' : 'raw' }; }
 function validateBacktestParams(p) { if(!/^[0-9A-Z]{3,7}$/.test(p.stockNo)){showError("請輸入有效代碼");return false;} if(!p.startDate||!p.endDate){showError("請選擇日期");return false;} if(new Date(p.startDate)>=new Date(p.endDate)){showError("結束日期需晚於開始日期");return false;} if(p.initialCapital<=0){showError("本金需>0");return false;} if(p.positionSize<=0||p.positionSize>100){showError("部位大小1-100%");return false;} if(p.stopLoss<0||p.stopLoss>100){showError("停損0-100%");return false;} if(p.takeProfit<0){showError("停利>=0%");return false;} if (p.buyFee < 0) { showError("買入手續費不能小於 0%"); return false; } if (p.sellFee < 0) { showError("賣出手續費+稅不能小於 0%"); return false; } const chkP=(ps,t)=>{ if (!ps) return true; for(const k in ps){ if(typeof ps[k]!=='number'||isNaN(ps[k])){ if(Object.keys(ps).length > 0) { showError(`${t}策略的參數 ${k} 錯誤 (值: ${ps[k]})`); return false; } } } return true; }; if(!chkP(p.entryParams,'做多進場'))return false; if(!chkP(p.exitParams,'做多出場'))return false; if (p.enableShorting) { if(!chkP(p.shortEntryParams,'做空進場'))return false; if(!chkP(p.shortExitParams,'回補出場'))return false; } return true; }
@@ -504,12 +718,15 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // 初始化頁籤功能
         initTabs();
-        
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
         }, 100);
-        
+
+        // 初始化資料來源測試工具
+        initDataSourceTester();
+
         console.log('[Main] Initialization completed');
     } catch (error) {
         console.error('[Main] Initialization failed:', error);
