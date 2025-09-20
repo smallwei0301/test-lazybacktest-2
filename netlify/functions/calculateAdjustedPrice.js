@@ -4,9 +4,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
 // Patch Tag: LB-ADJ-COMPOSER-20241024A
 // Patch Tag: LB-ADJ-COMPOSER-20241027A
+// Patch Tag: LB-ADJ-COMPOSER-20241030A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241027A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241030A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -195,6 +196,51 @@ function safeRound(value) {
   return Number(Math.round(value * 10000) / 10000);
 }
 
+function readField(raw, key) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(raw, key)) return raw[key];
+  const camelKey = key.replace(/_([a-z])/g, (_, ch) => ch.toUpperCase());
+  if (Object.prototype.hasOwnProperty.call(raw, camelKey)) return raw[camelKey];
+  const pascalKey = camelKey.charAt(0).toUpperCase() + camelKey.slice(1);
+  if (Object.prototype.hasOwnProperty.call(raw, pascalKey)) return raw[pascalKey];
+  const upperKey = key.toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(raw, upperKey)) return raw[upperKey];
+  return undefined;
+}
+
+function resolveDividendAmount(raw, primaryKey, partKeys = []) {
+  const primaryValue = parseNumber(readField(raw, primaryKey));
+  if (Number.isFinite(primaryValue) && primaryValue > 0) {
+    return primaryValue;
+  }
+  let total = 0;
+  for (const partKey of partKeys) {
+    const partValue = parseNumber(readField(raw, partKey));
+    if (Number.isFinite(partValue) && partValue > 0) {
+      total += partValue;
+    }
+  }
+  return total > 0 ? total : 0;
+}
+
+function resolveSubscriptionPrice(raw) {
+  const candidateKeys = [
+    'cash_capital_increase_subscription_price',
+    'cash_capital_increase_subscribe_price',
+    'subscription_price',
+  ];
+  let best = null;
+  for (const key of candidateKeys) {
+    const value = parseNumber(readField(raw, key));
+    if (Number.isFinite(value) && value > 0) {
+      if (!Number.isFinite(best) || value < best) {
+        best = value;
+      }
+    }
+  }
+  return Number.isFinite(best) && best > 0 ? best : 0;
+}
+
 function enumerateMonths(startDate, endDate) {
   const months = [];
   const cursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
@@ -215,19 +261,32 @@ function enumerateMonths(startDate, endDate) {
 function normaliseDividendRecord(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const dateCandidate =
-    raw.cash_dividend_ex_date ||
-    raw.stock_dividend_ex_date ||
-    raw.ex_dividend_date ||
-    raw.ex_rights_date ||
-    raw.date;
+    readField(raw, 'cash_dividend_ex_date') ||
+    readField(raw, 'stock_dividend_ex_date') ||
+    readField(raw, 'ex_dividend_date') ||
+    readField(raw, 'ex_rights_date') ||
+    readField(raw, 'ex_dividend_rights_date') ||
+    readField(raw, 'date');
   const isoDate = toISODate(dateCandidate);
   if (!isoDate) return null;
 
-  const cashDividend = Math.max(0, parseNumber(raw.cash_dividend) ?? 0);
-  const stockDividend = Math.max(0, parseNumber(raw.stock_dividend) ?? 0);
-  const cashCapitalIncrease = Math.max(0, parseNumber(raw.cash_capital_increase) ?? 0);
-  const stockCapitalIncrease = Math.max(0, parseNumber(raw.stock_capital_increase) ?? 0);
-  const subscriptionPrice = Math.max(0, parseNumber(raw.cash_capital_increase_subscription_price) ?? 0);
+  const cashDividend = resolveDividendAmount(raw, 'cash_dividend', [
+    'cash_dividend_from_earnings',
+    'cash_dividend_from_retain_earnings',
+    'cash_dividend_from_capital_reserve',
+    'cash_dividend_from_capital_surplus',
+    'cash_dividend_from_capital',
+  ]);
+  const stockDividend = resolveDividendAmount(raw, 'stock_dividend', [
+    'stock_dividend_from_earnings',
+    'stock_dividend_from_retain_earnings',
+    'stock_dividend_from_capital_reserve',
+    'stock_dividend_from_capital_surplus',
+    'stock_dividend_from_capital',
+  ]);
+  const cashCapitalIncrease = Math.max(0, parseNumber(readField(raw, 'cash_capital_increase')) ?? 0);
+  const stockCapitalIncrease = Math.max(0, parseNumber(readField(raw, 'stock_capital_increase')) ?? 0);
+  const subscriptionPrice = resolveSubscriptionPrice(raw);
 
   if (
     cashDividend === 0 &&
@@ -278,6 +337,80 @@ function computeAdjustmentRatio(baseClose, record) {
   return ratio;
 }
 
+function prepareDividendEvents(dividendRecords) {
+  const eventMap = new Map();
+  for (const rawRecord of dividendRecords || []) {
+    const normalised = normaliseDividendRecord(rawRecord);
+    if (!normalised) continue;
+    const key = normalised.date;
+    const signature = normalised.raw ? JSON.stringify(normalised.raw) : null;
+    const existing = eventMap.get(key);
+    if (existing) {
+      if (signature && existing.signatures.has(signature)) {
+        continue;
+      }
+      if (signature) existing.signatures.add(signature);
+      existing.cashDividend += normalised.cashDividend;
+      existing.stockDividend += normalised.stockDividend;
+      existing.cashCapitalIncrease += normalised.cashCapitalIncrease;
+      existing.stockCapitalIncrease += normalised.stockCapitalIncrease;
+      if (
+        Number.isFinite(normalised.subscriptionPrice) &&
+        normalised.subscriptionPrice > 0 &&
+        (!Number.isFinite(existing.subscriptionPrice) ||
+          existing.subscriptionPrice <= 0 ||
+          normalised.subscriptionPrice < existing.subscriptionPrice)
+      ) {
+        existing.subscriptionPrice = normalised.subscriptionPrice;
+      }
+      if (normalised.raw) {
+        existing.rawRecords.push(normalised.raw);
+      }
+    } else {
+      const payload = {
+        date: normalised.date,
+        cashDividend: normalised.cashDividend,
+        stockDividend: normalised.stockDividend,
+        cashCapitalIncrease: normalised.cashCapitalIncrease,
+        stockCapitalIncrease: normalised.stockCapitalIncrease,
+        subscriptionPrice: normalised.subscriptionPrice,
+        rawRecords: normalised.raw ? [normalised.raw] : [],
+        signatures: new Set(),
+      };
+      if (signature) {
+        payload.signatures.add(signature);
+      }
+      eventMap.set(key, payload);
+    }
+  }
+
+  const events = Array.from(eventMap.values())
+    .map((event) => {
+      event.cashDividend = Math.max(0, safeRound(event.cashDividend) ?? 0);
+      event.stockDividend = Math.max(0, safeRound(event.stockDividend) ?? 0);
+      event.cashCapitalIncrease = Math.max(0, safeRound(event.cashCapitalIncrease) ?? 0);
+      event.stockCapitalIncrease = Math.max(0, safeRound(event.stockCapitalIncrease) ?? 0);
+      if (!Number.isFinite(event.subscriptionPrice) || event.subscriptionPrice <= 0) {
+        event.subscriptionPrice = null;
+      } else {
+        event.subscriptionPrice = safeRound(event.subscriptionPrice) ?? event.subscriptionPrice;
+      }
+      event.raw = event.rawRecords.length > 0 ? event.rawRecords[0] : null;
+      delete event.signatures;
+      return event;
+    })
+    .filter(
+      (event) =>
+        event.cashDividend > 0 ||
+        event.stockDividend > 0 ||
+        event.cashCapitalIncrease > 0 ||
+        event.stockCapitalIncrease > 0,
+    )
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  return events;
+}
+
 function applyBackwardAdjustments(priceRows, dividendRecords) {
   if (!Array.isArray(priceRows) || priceRows.length === 0) {
     return { rows: [], adjustments: [] };
@@ -289,29 +422,37 @@ function applyBackwardAdjustments(priceRows, dividendRecords) {
   const multipliers = new Array(sortedRows.length).fill(1);
   const adjustments = [];
 
-  const events = (dividendRecords || [])
-    .map((record) => normaliseDividendRecord(record))
-    .filter(Boolean)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const events = prepareDividendEvents(dividendRecords);
 
   for (const event of events) {
     const exIndex = sortedRows.findIndex((row) => row.date >= event.date);
-    if (exIndex <= 0) {
+    if (exIndex === -1) {
+      adjustments.push({ ...event, ratio: 1, skipped: true, reason: 'missingPriceRow' });
       continue;
     }
-    const baseClose = sortedRows[exIndex]?.close;
-    if (!Number.isFinite(baseClose) || baseClose <= 0) {
+    let baseIndex = exIndex;
+    let baseClose = null;
+    while (baseIndex < sortedRows.length) {
+      const candidate = sortedRows[baseIndex]?.close;
+      if (Number.isFinite(candidate) && candidate > 0) {
+        baseClose = candidate;
+        break;
+      }
+      baseIndex += 1;
+    }
+    if (!Number.isFinite(baseClose) || baseIndex <= 0) {
+      adjustments.push({ ...event, ratio: 1, skipped: true, reason: 'invalidBaseClose' });
       continue;
     }
     const ratio = computeAdjustmentRatio(baseClose, event);
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
-      adjustments.push({ ...event, ratio: 1, skipped: true });
+      adjustments.push({ ...event, ratio: 1, skipped: true, reason: 'ratioOutOfRange' });
       continue;
     }
-    for (let i = 0; i < exIndex; i += 1) {
+    for (let i = 0; i < baseIndex; i += 1) {
       multipliers[i] *= ratio;
     }
-    adjustments.push({ ...event, ratio });
+    adjustments.push({ ...event, ratio, appliedDate: sortedRows[baseIndex]?.date || event.date });
   }
 
   const adjustedRows = sortedRows.map((row, index) => {
