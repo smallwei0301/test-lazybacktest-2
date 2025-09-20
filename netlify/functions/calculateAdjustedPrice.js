@@ -1,9 +1,21 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.0 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.1 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
+// Patch Tag: LB-ADJ-COMPOSER-20241022A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241020A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241022A';
+
+function jsonResponse(statusCode, payload, headers = {}) {
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify(payload),
+  };
+}
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -246,17 +258,40 @@ async function fetchTwseMonth(stockNo, monthQuery) {
 async function fetchTwseRange(stockNo, startDate, endDate) {
   const months = enumerateMonths(startDate, endDate);
   const combined = [];
+  const monthQueue = [...months];
+  const chunkSize = 5;
   let stockName = stockNo;
-  for (const month of months) {
-    const { stockName: monthName, rows } = await fetchTwseMonth(stockNo, month.query);
-    if (monthName) stockName = monthName;
-    for (const row of rows) {
-      const date = new Date(row.date);
-      if (Number.isNaN(date.getTime())) continue;
-      if (date < startDate || date > endDate) continue;
-      combined.push({ ...row, stockName });
+
+  while (monthQueue.length > 0) {
+    const chunk = monthQueue.splice(0, chunkSize);
+    const chunkResults = await Promise.all(
+      chunk.map(async (month) => {
+        try {
+          return await fetchTwseMonth(stockNo, month.query);
+        } catch (error) {
+          const enriched = new Error(
+            `[TWSE 月資料失敗] ${stockNo} ${month.label}: ${error.message || error}`,
+          );
+          enriched.original = error;
+          throw enriched;
+        }
+      }),
+    );
+
+    for (const monthResult of chunkResults) {
+      if (monthResult?.stockName) {
+        stockName = monthResult.stockName;
+      }
+      const monthRows = Array.isArray(monthResult?.rows) ? monthResult.rows : [];
+      for (const row of monthRows) {
+        const date = new Date(row.date);
+        if (Number.isNaN(date.getTime())) continue;
+        if (date < startDate || date > endDate) continue;
+        combined.push({ ...row, stockName });
+      }
     }
   }
+
   combined.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   return { stockName, rows: combined, priceSource: 'TWSE (原始)' };
 }
@@ -351,15 +386,15 @@ export const handler = async (event) => {
     const market = marketParam.toUpperCase() === 'TPEX' ? 'TPEX' : 'TWSE';
 
     if (!stockNo) {
-      return new Response(JSON.stringify({ error: '缺少股票代號' }), { status: 400 });
+      return jsonResponse(400, { error: '缺少股票代號' });
     }
     if (!startISO || !endISO) {
-      return new Response(JSON.stringify({ error: '日期格式無效' }), { status: 400 });
+      return jsonResponse(400, { error: '日期格式無效' });
     }
     const startDate = new Date(startISO);
     const endDate = new Date(endISO);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate > endDate) {
-      return new Response(JSON.stringify({ error: '日期範圍不正確' }), { status: 400 });
+      return jsonResponse(400, { error: '日期範圍不正確' });
     }
 
     let priceData;
@@ -413,18 +448,14 @@ export const handler = async (event) => {
       adjustments,
     };
 
-    return new Response(JSON.stringify(responseBody), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(200, responseBody);
   } catch (error) {
     console.error('[calculateAdjustedPrice] 執行錯誤:', error);
-    return new Response(
-      JSON.stringify({
-        error: error.message || 'calculateAdjustedPrice failed',
-        version: FUNCTION_VERSION,
-      }),
-      { status: 500 },
-    );
+    const statusCode = error?.statusCode && Number.isFinite(error.statusCode) ? error.statusCode : 500;
+    return jsonResponse(statusCode, {
+      error: error?.message || 'calculateAdjustedPrice failed',
+      version: FUNCTION_VERSION,
+    });
   }
 };
 
