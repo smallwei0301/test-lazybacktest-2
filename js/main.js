@@ -18,8 +18,11 @@ const DATA_SOURCE_OPTIONS = {
       { id: 'yahoo', label: 'Yahoo Finance', description: 'Yahoo 原始股價' },
     ],
     ADJ: [
-      { id: 'yahoo', label: 'Yahoo 還原價', description: 'Yahoo 調整後股價' },
-      { id: 'finmind', label: 'FinMind 還原價', description: 'FinMind 調整價備援' },
+      {
+        id: 'adjusted-service',
+        label: 'TWSE + FinMind 還原服務',
+        description: '以證交所日線與 FinMind 權息資料向後還原',
+      },
     ],
   },
   TPEX: {
@@ -28,8 +31,11 @@ const DATA_SOURCE_OPTIONS = {
       { id: 'yahoo', label: 'Yahoo 備援', description: 'Yahoo 上櫃原始股價' },
     ],
     ADJ: [
-      { id: 'yahoo', label: 'Yahoo 還原價', description: 'Yahoo 調整後股價' },
-      { id: 'finmind', label: 'FinMind 還原價', description: 'FinMind 調整價備援' },
+      {
+        id: 'adjusted-service',
+        label: 'FinMind 還原服務',
+        description: '使用 FinMind 原始價結合權息向後還原',
+      },
     ],
   },
 };
@@ -406,14 +412,28 @@ async function runDataSourceTest(option, button) {
     return;
   }
 
-  const basePath = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
-  const search = new URLSearchParams({
-    stockNo,
-    start: startDate,
-    end: endDate,
-    forceSource: option.id,
-  });
-  if (adjusted) search.set('adjusted', '1');
+  let requestUrl = '';
+  let usingAdjustedService = false;
+  if (adjusted && option.id === 'adjusted-service') {
+    const search = new URLSearchParams({
+      stockNo,
+      startDate,
+      endDate,
+      market,
+    });
+    requestUrl = `/.netlify/functions/calculateAdjustedPrice?${search.toString()}`;
+    usingAdjustedService = true;
+  } else {
+    const basePath = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+    const search = new URLSearchParams({
+      stockNo,
+      start: startDate,
+      end: endDate,
+      forceSource: option.id,
+    });
+    if (adjusted) search.set('adjusted', '1');
+    requestUrl = `${basePath}?${search.toString()}`;
+  }
 
   setDataSourceTestResult('loading', `${option.label} 測試中...`);
   if (button) {
@@ -422,7 +442,7 @@ async function runDataSourceTest(option, button) {
   }
 
   try {
-    const response = await fetch(`${basePath}?${search.toString()}`, {
+    const response = await fetch(requestUrl, {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
@@ -436,14 +456,38 @@ async function runDataSourceTest(option, button) {
     if (!response.ok) {
       throw new Error(data?.error || `HTTP ${response.status}`);
     }
-    const rows = Array.isArray(data.aaData) ? data.aaData.length : 0;
+    const rows = Array.isArray(data.aaData)
+      ? data.aaData.length
+      : Array.isArray(data.data)
+        ? data.data.length
+        : 0;
     const summaryParts = [];
     if (data.dataSource) summaryParts.push(`來源：${data.dataSource}`);
-    summaryParts.push(`筆數：${rows}`);
-    if (data.summary?.remoteRows !== undefined) {
+    if (Array.isArray(data.dataSources) && data.dataSources.length > 0) {
+      summaryParts.push(`快取來源：${data.dataSources.join(' / ')}`);
+    }
+    if (usingAdjustedService && data.summary) {
+      const { priceRows, adjustmentEvents, skippedEvents } = data.summary;
+      if (typeof priceRows === 'number') {
+        summaryParts.push(`原始筆數：${priceRows}`);
+      }
+      if (typeof adjustmentEvents === 'number') {
+        summaryParts.push(`權息事件：${adjustmentEvents}`);
+      }
+      if (typeof skippedEvents === 'number') {
+        summaryParts.push(`略過事件：${skippedEvents}`);
+      }
+    }
+    const recordCount =
+      typeof data.iTotalRecords === 'number' ? data.iTotalRecords : rows;
+    summaryParts.push(`回傳筆數：${recordCount}`);
+    if (!usingAdjustedService && data.summary?.remoteRows !== undefined) {
       summaryParts.push(`遠端筆數：${data.summary.remoteRows}`);
     }
-    setDataSourceTestResult('success', `${option.label} 成功，${summaryParts.join('，')}`);
+    setDataSourceTestResult(
+      'success',
+      `${option.label} 成功，${summaryParts.join('，')}`,
+    );
     console.log('[DataSourceTest]', option.id, data);
   } catch (error) {
     setDataSourceTestResult('error', `${option.label} 失敗：${error.message}`);

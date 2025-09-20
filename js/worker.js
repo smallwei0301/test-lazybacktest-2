@@ -1,7 +1,7 @@
 
-// --- Worker Data Acquisition & Cache (v10.6) ---
-// Patch Tag: LB-DATA-RESTORE-20240920A
-const WORKER_DATA_VERSION = "v10.6";
+// --- Worker Data Acquisition & Cache (v10.7) ---
+// Patch Tag: LB-ADJ-HANDOFF-20240921A
+const WORKER_DATA_VERSION = "v10.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 let workerLastDataset = null;
 let workerLastMeta = null;
@@ -245,22 +245,29 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
 
-  const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
-  const params = new URLSearchParams({
-    stockNo,
-    start: startDate,
-    end: endDate,
-  });
+  let url = "";
+  const headers = { Accept: "application/json" };
   if (adjusted) {
-    params.set("adjusted", "1");
+    const params = new URLSearchParams({
+      stockNo,
+      startDate,
+      endDate,
+      market: marketKey,
+    });
+    url = `/.netlify/functions/calculateAdjustedPrice?${params.toString()}`;
+  } else {
+    const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
+    const params = new URLSearchParams({
+      stockNo,
+      start: startDate,
+      end: endDate,
+    });
+    url = `${proxyPath}?${params.toString()}`;
   }
-  const url = `${proxyPath}?${params.toString()}`;
 
   let payload;
   try {
-    payload = await fetchWithAdaptiveRetry(url, {
-      headers: { Accept: "application/json" },
-    });
+    payload = await fetchWithAdaptiveRetry(url, { headers });
   } catch (error) {
     console.error(`[Worker] 抓取 ${url} 失敗:`, error);
     throw error;
@@ -293,10 +300,12 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
       if (flag) sourceFlags.add(flag);
     });
   }
-  const dataSourceLabel = summariseDataSourceFlags(
-    sourceFlags,
-    isTpex ? "TPEX" : "TWSE",
-  );
+  const defaultLabel = adjusted
+    ? "TWSE + FinMind"
+    : isTpex
+      ? "TPEX"
+      : "TWSE";
+  const dataSourceLabel = summariseDataSourceFlags(sourceFlags, defaultLabel);
   const stockName = payload?.stockName || stockNo;
 
   setWorkerCacheEntry(marketKey, cacheKey, {
