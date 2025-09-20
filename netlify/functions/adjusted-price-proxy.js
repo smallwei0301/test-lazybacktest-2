@@ -1,13 +1,16 @@
-// netlify/functions/adjusted-price-proxy.js (v1.4 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241102A
+// netlify/functions/adjusted-price-proxy.js (v1.5 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241105A
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241102A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.4]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241105A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.5]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
+const FINMIND_MAX_RETRIES = 3;
+const FINMIND_RETRY_BASE_DELAY_MS = 400;
+const FINMIND_RETRY_BACKOFF = 2;
 
 function logDebug(message, context = {}) {
   try {
@@ -127,6 +130,32 @@ function createProxyRequest(url) {
 function applyFactor(value, factor) {
   if (!Number.isFinite(value) || !Number.isFinite(factor)) return null;
   return safeRound(value * factor);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryFinMind(error) {
+  if (!error) return false;
+  const status = Number.isFinite(error.status) ? Number(error.status) : null;
+  if (status && (status >= 500 || status === 408 || status === 429)) {
+    return true;
+  }
+  const code = error.code || error.name;
+  if (code === 'ETIMEDOUT' || code === 'FetchError' || code === 'ECONNRESET') {
+    return true;
+  }
+  const message = String(error.message || '').toLowerCase();
+  if (
+    message.includes('timeout') ||
+    message.includes('逾時') ||
+    message.includes('fetch failed') ||
+    message.includes('network')
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function formatPrice(value) {
@@ -508,7 +537,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FINMIND_TIMEOUT_M
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('FinMind Dividend 來源逾時，請稍後再試');
+      const timeoutError = new Error('FinMind Dividend 來源逾時，請稍後再試');
+      timeoutError.code = 'ETIMEDOUT';
+      throw timeoutError;
     }
     throw error;
   } finally {
@@ -549,22 +580,46 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
     if (i > 0) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    const response = await fetchWithTimeout(url.toString());
-    if (!response.ok) {
-      const body = await response.text();
-      const error = new Error(
-        `FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`,
-      );
-      logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
-      throw error;
+    let segmentData = null;
+    for (let attempt = 1; attempt <= FINMIND_MAX_RETRIES; attempt += 1) {
+      try {
+        const response = await fetchWithTimeout(url.toString());
+        if (!response.ok) {
+          const body = await response.text();
+          const error = new Error(
+            `FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`,
+          );
+          error.status = response.status;
+          throw error;
+        }
+        const json = await response.json();
+        if (json?.status !== 200 || !Array.isArray(json?.data)) {
+          const error = new Error(
+            `FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`,
+          );
+          error.status = json?.status;
+          throw error;
+        }
+        segmentData = json.data;
+        break;
+      } catch (error) {
+        const retryable = shouldRetryFinMind(error);
+        logDebug('fetchDividendSegment.retry', {
+          stockNo,
+          segmentIndex: i + 1,
+          attempt,
+          retryable,
+          error: error.message,
+        });
+        if (!retryable || attempt === FINMIND_MAX_RETRIES) {
+          logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
+          throw error;
+        }
+        const delayMs = FINMIND_RETRY_BASE_DELAY_MS * (FINMIND_RETRY_BACKOFF ** (attempt - 1));
+        await delay(delayMs);
+      }
     }
-    const json = await response.json();
-    if (json?.status !== 200 || !Array.isArray(json?.data)) {
-      const error = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
-      logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
-      throw error;
-    }
-    aggregated.push(...json.data);
+    aggregated.push(...(segmentData || []));
   }
 
   logDebug('fetchDividendSeries.success', {
@@ -637,10 +692,24 @@ export const handler = async (event) => {
 
     const normalizedMarket = marketType === 'tpex' ? 'tpex' : 'twse';
 
-    const [rawPayload, dividendRecords] = await Promise.all([
+    const [rawPayload, dividendOutcome] = await Promise.all([
       fetchRawSeries(stockNo, startISO, endISO, normalizedMarket),
-      fetchDividendSeries(stockNo, startISO, endISO),
+      (async () => {
+        try {
+          const records = await fetchDividendSeries(stockNo, startISO, endISO);
+          return { records, error: null };
+        } catch (error) {
+          return { records: [], error };
+        }
+      })(),
     ]);
+
+    if (dividendOutcome.error) {
+      logDebug('handler.dividend.degraded', {
+        stockNo,
+        error: dividendOutcome.error.message,
+      });
+    }
 
     logDebug('handler.payload.ready', {
       stockNo,
@@ -649,11 +718,11 @@ export const handler = async (event) => {
         : Array.isArray(rawPayload?.data)
           ? rawPayload.data.length
           : 0,
-      dividendRecords: dividendRecords.length,
+      dividendRecords: dividendOutcome.records.length,
     });
 
     const priceRows = normalisePriceRows(rawPayload?.aaData || rawPayload?.data);
-    const dividendMap = buildDividendMap(dividendRecords);
+    const dividendMap = buildDividendMap(dividendOutcome.records);
     const { rows: adjustedRows, adjustments } = applyAdjustments(priceRows, dividendMap);
     const aaData = buildAdjustedAaData(adjustedRows);
 
@@ -672,7 +741,19 @@ export const handler = async (event) => {
       aaData,
       dataSource: `${normalizedMarket.toUpperCase()} + FinMind (Adjusted)`,
       adjustments,
+      diagnostics: {
+        dividendStatus: dividendOutcome.error ? 'degraded' : 'ok',
+        dividendMessage: dividendOutcome.error ? dividendOutcome.error.message : null,
+        dividendRecords: dividendOutcome.records.length,
+      },
     };
+
+    if (dividendOutcome.error) {
+      responseBody.dataSource = `${normalizedMarket.toUpperCase()} + FinMind (Adjusted - Dividend Degraded)`;
+      responseBody.warnings = [
+        `FinMind 股利資料暫時無法取得：${dividendOutcome.error.message}`,
+      ];
+    }
 
     return jsonResponse(200, responseBody);
   } catch (error) {

@@ -387,3 +387,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-11-02 — LB-ADJ-ENDPOINT-20241102A
 - AdjustedPriceProxy v1.4 將單次調整因子改為以「前一交易日收盤價」與 FinMind 除息參考價計算，並同步考慮現金/股票股利複合事件，確保除息區間會正確產生還原事件。
 - 調整事件紀錄新增參考價、前一日收盤與現金/股票調整因子，方便備援 API 在 Netlify Console 中持續追蹤調整過程。
+
+### 2024-11-05 — LB-ADJ-ENDPOINT-20241105A
+- AdjustedPriceProxy v1.5 為 FinMind 股利抓取加入重試與指數回退機制，針對 5xx、逾時或網路錯誤自動補抓，降低備援端點出現 HTTP 502 的機率。
+- 若 FinMind 仍無法取得資料，會以 degraded 狀態回應原始行情並附帶 warnings，讓前端與營運能持續獲得 API 回應並保留除錯資訊。
