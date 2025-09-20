@@ -1,11 +1,11 @@
-// netlify/functions/adjusted-price-proxy.js (v1.6 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241108A
+// netlify/functions/adjusted-price-proxy.js (v1.6.1 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241109A
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241108A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241109A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6.1]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
 const FINMIND_MAX_RETRIES = 3;
@@ -644,9 +644,12 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   logDebug('fetchRawSeries.start', { stockNo, startISO, endISO, market });
   const params = new URLSearchParams({ stockNo, start: startISO, end: endISO });
   const path = market === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
-  const handler = market === 'tpex' ? runtimeTpexProxy : runtimeTwseProxy;
+  const proxyHandler = market === 'tpex' ? runtimeTpexProxy : runtimeTwseProxy;
   const url = `https://internal/${path}?${params.toString()}`;
-  const response = await handler(createProxyRequest(url));
+  if (typeof proxyHandler !== 'function') {
+    throw new Error('原始資料服務處理函式無效');
+  }
+  const response = await proxyHandler(createProxyRequest(url));
   if (!response || typeof response.json !== 'function') {
     throw new Error('無法呼叫原始資料服務');
   }

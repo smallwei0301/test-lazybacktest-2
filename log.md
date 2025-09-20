@@ -395,3 +395,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-11-08 — LB-ADJ-ENDPOINT-20241108A
 - AdjustedPriceProxy v1.6 加入測試覆寫注入機制，允許以模擬的 TWSE/TPEX/FinMind 回應執行自動化回歸測試。
 - 建立 node:test 驗證流程，確保 FinMind 失敗時會回傳 degraded warnings 與 diagnostics，方便持續追蹤備援 API 穩定度。
+
+### 2024-11-09 — LB-ADJ-ENDPOINT-20241109A
+- AdjustedPriceProxy v1.6.1 修正 Netlify 打包後的 handler 命名衝突，改以 proxyHandler 轉呼叫 TWSE/TPEX 代理，避免「handler2 is not a function」導致備援來源回傳 502。
+- 若偵測到代理函式非預期類型，立即回報結構化錯誤訊息並輸出除錯日誌，避免靜默失敗影響前端回測流程。
