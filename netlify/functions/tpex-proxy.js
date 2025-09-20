@@ -1,9 +1,9 @@
-// netlify/functions/tpex-proxy.js (v10.2 - Source tester & range-aware fetch for TPEX)
-// Patch Tag: LB-SOURCE-TEST-20240530A
+// netlify/functions/tpex-proxy.js (v10.3 - Yahoo raw price fix & Response return)
+// Patch Tag: LB-YF-RAWFIX-20240921A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-SOURCE-TEST-20240530A';
+const FUNCTION_VERSION = 'LB-YF-RAWFIX-20240921A';
 const TPEX_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const DAY_MS = 24 * 60 * 60 * 1000;
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
@@ -100,14 +100,13 @@ function expandRange(startDate, endDate) {
 }
 
 function createJsonResponse(statusCode, payload, extraHeaders = {}) {
-    return {
-        statusCode,
+    return new Response(JSON.stringify(payload), {
+        status: statusCode,
         headers: {
             'Content-Type': 'application/json',
             ...extraHeaders,
         },
-        body: JSON.stringify(payload),
-    };
+    });
 }
 
 async function readCache(store, cacheKey) {
@@ -196,13 +195,14 @@ async function fetchFromYahoo(stockNo, adjusted, fetchStart, fetchEnd) {
         const openRaw = Number(quotes.open?.[i]);
         const highRaw = Number(quotes.high?.[i]);
         const lowRaw = Number(quotes.low?.[i]);
-        const baseClose = Number.isFinite(rawCloseValue)
-            ? rawCloseValue
-            : Number.isFinite(adjCloseValue)
-                ? adjCloseValue
-                : Number.isFinite(openRaw)
-                    ? openRaw
-                    : null;
+        const hasRawClose = Number.isFinite(rawCloseValue);
+        const hasAdjClose = Number.isFinite(adjCloseValue);
+        if (!adjusted && !hasRawClose) {
+            continue;
+        }
+        const baseClose = adjusted
+            ? (hasAdjClose ? adjCloseValue : hasRawClose ? rawCloseValue : Number.isFinite(openRaw) ? openRaw : null)
+            : rawCloseValue;
         if (!Number.isFinite(baseClose)) continue;
 
         const baseOpen = Number.isFinite(openRaw) ? openRaw : baseClose;
@@ -216,7 +216,7 @@ async function fetchFromYahoo(stockNo, adjusted, fetchStart, fetchEnd) {
         let change;
 
         if (adjusted) {
-            const adjClose = Number.isFinite(adjCloseValue) ? adjCloseValue : baseClose;
+            const adjClose = hasAdjClose ? adjCloseValue : baseClose;
             const scale = baseClose ? adjClose / baseClose : 1;
             finalClose = Number(adjClose.toFixed(4));
             finalOpen = Number((baseOpen * scale).toFixed(4));
@@ -225,25 +225,17 @@ async function fetchFromYahoo(stockNo, adjusted, fetchStart, fetchEnd) {
             const prev = Number.isFinite(prevAdjClose) ? prevAdjClose : null;
             change = prev !== null ? Number((finalClose - prev).toFixed(4)) : 0;
             prevAdjClose = finalClose;
-            if (Number.isFinite(baseClose)) {
-                prevRawClose = Number(baseClose.toFixed(4));
+            if (hasRawClose) {
+                prevRawClose = Number(rawCloseValue.toFixed(4));
             }
         } else {
-            const rawClose = Number.isFinite(baseClose)
-                ? baseClose
-                : Number.isFinite(adjCloseValue)
-                    ? adjCloseValue
-                    : baseOpen;
-            finalClose = Number(rawClose.toFixed(4));
+            finalClose = Number(baseClose.toFixed(4));
             finalOpen = Number(baseOpen.toFixed(4));
             finalHigh = Number(baseHigh.toFixed(4));
             finalLow = Number(baseLow.toFixed(4));
             const prev = Number.isFinite(prevRawClose) ? prevRawClose : null;
             change = prev !== null ? Number((finalClose - prev).toFixed(4)) : 0;
             prevRawClose = finalClose;
-            if (Number.isFinite(adjCloseValue)) {
-                prevAdjClose = Number(adjCloseValue.toFixed(4));
-            }
         }
 
         entries.push({
