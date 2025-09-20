@@ -1,7 +1,7 @@
 
-// --- Worker Data Acquisition & Cache (v10.8) ---
-// Patch Tag: LB-ADJ-FLOW-20240922A
-const WORKER_DATA_VERSION = "v10.8";
+// --- Worker Data Acquisition & Cache (v10.9) ---
+// Patch Tag: LB-DATAPIPE-20241007A
+const WORKER_DATA_VERSION = "v10.9";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -519,6 +519,7 @@ async function fetchStockData(
             ? Array.from(monthEntry.sources)
             : monthEntry.sources || [],
         );
+        const monthCacheFlags = new Set();
         let monthStockName = monthEntry.stockName || "";
 
         if (missingRanges.length > 0) {
@@ -539,6 +540,19 @@ async function fetchStockData(
               });
               if (payload?.error) {
                 throw new Error(payload.error);
+              }
+              if (payload?.source === "blob") {
+                const cacheLabel = isTpex
+                  ? "TPEX (快取)"
+                  : "TWSE (快取)";
+                monthCacheFlags.add(cacheLabel);
+                monthEntry.sources.add(cacheLabel);
+              } else if (payload?.source === "memory") {
+                const cacheLabel = isTpex
+                  ? "TPEX (記憶體快取)"
+                  : "TWSE (記憶體快取)";
+                monthCacheFlags.add(cacheLabel);
+                monthEntry.sources.add(cacheLabel);
               }
               const rows = Array.isArray(payload?.aaData)
                 ? payload.aaData
@@ -585,15 +599,9 @@ async function fetchStockData(
             row.date <= monthInfo.rangeEndISO,
         );
 
-        if (payload?.source === "blob") {
-          const cacheLabel = isTpex ? "TPEX (快取)" : "TWSE (快取)";
-          monthSourceFlags.add(cacheLabel);
-          monthEntry.sources.add(cacheLabel);
-        } else if (payload?.source === "memory") {
-          const cacheLabel = isTpex ? "TPEX (記憶體快取)" : "TWSE (記憶體快取)";
-          monthSourceFlags.add(cacheLabel);
-          monthEntry.sources.add(cacheLabel);
-        }
+        monthCacheFlags.forEach((label) => {
+          monthSourceFlags.add(label);
+        });
 
         const usedCache =
           missingRanges.length === 0 || coveredLengthBefore > 0;

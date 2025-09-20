@@ -1,10 +1,11 @@
-// netlify/functions/tpex-proxy.js (v10.2 - FinMind primary with Yahoo fallback, Yahoo primary for adjusted)
-// Patch Tag: LB-DATASOURCE-20241005A
+// netlify/functions/tpex-proxy.js (v10.3 - FinMind primary with range-limited Yahoo fallback)
+// Patch Tag: LB-DATASOURCE-20241007A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
 const TPEX_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
+const DAY_SECONDS = 24 * 60 * 60;
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -40,6 +41,16 @@ function parseDate(value) {
         return Number.isNaN(date.getTime()) ? null : date;
     }
     return null;
+}
+
+function cloneDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+        const cloned = new Date(value.getTime());
+        return Number.isNaN(cloned.getTime()) ? null : cloned;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function ensureMonthList(startDate, endDate) {
@@ -127,12 +138,21 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
         throw new Error('未設定 FinMind Token');
     }
     const dataset = adjusted ? 'TaiwanStockPriceAdj' : 'TaiwanStockPrice';
+    const todayISO = new Date().toISOString().split('T')[0];
+    let startISO = startDateISO || '';
+    let endISO = endDateISO || '';
+    if (endISO && endISO > todayISO) {
+        endISO = todayISO;
+    }
+    if (startISO && endISO && startISO > endISO) {
+        startISO = endISO;
+    }
     const url = new URL('https://api.finmindtrade.com/api/v4/data');
     url.searchParams.set('dataset', dataset);
     url.searchParams.set('data_id', stockNo);
     url.searchParams.set('token', token);
-    if (startDateISO) url.searchParams.set('start_date', startDateISO);
-    if (endDateISO) url.searchParams.set('end_date', endDateISO);
+    if (startISO) url.searchParams.set('start_date', startISO);
+    if (endISO) url.searchParams.set('end_date', endISO);
 
     console.log(`[TPEX Proxy v10.2] 呼叫 FinMind: ${dataset} ${stockNo}`);
     const response = await fetch(url.toString());
@@ -199,11 +219,42 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
     return label;
 }
 
-async function fetchYahooDaily(stockNo) {
+function buildYahooPeriodRange(startDate, endDate) {
+    const now = new Date();
+    let from = cloneDate(startDate);
+    let to = cloneDate(endDate);
+    if (!from) {
+        from = new Date(now);
+        from.setFullYear(from.getFullYear() - 10);
+    } else {
+        from.setMonth(from.getMonth() - 2);
+    }
+    if (!to) {
+        to = new Date(now);
+    } else {
+        to.setMonth(to.getMonth() + 2);
+    }
+    if (to > now) {
+        to = new Date(now);
+    }
+    if (to <= from) {
+        to = new Date(from.getTime() + DAY_SECONDS * 1000);
+    }
+    const period1 = Math.max(0, Math.floor(from.getTime() / 1000));
+    const period2 = Math.max(period1 + DAY_SECONDS, Math.floor(to.getTime() / 1000) + DAY_SECONDS);
+    return { period1, period2 };
+}
+
+async function fetchYahooDaily(stockNo, startDate, endDate) {
     const symbol = `${stockNo}.TWO`;
     console.log(`[TPEX Proxy v10.2] 嘗試 Yahoo Finance: ${symbol}`);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=20y&interval=1d`;
-    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const { period1, period2 } = buildYahooPeriodRange(startDate, endDate);
+    const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+    url.searchParams.set('interval', '1d');
+    url.searchParams.set('includeAdjustedClose', 'true');
+    if (Number.isFinite(period1)) url.searchParams.set('period1', String(period1));
+    if (Number.isFinite(period2)) url.searchParams.set('period2', String(period2));
+    const response = await fetch(url.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!response.ok) {
         throw new Error(`Yahoo HTTP ${response.status}`);
     }
@@ -425,7 +476,7 @@ export default async (req) => {
                         yahooLabel = await persistYahooEntries(
                             store,
                             stockNo,
-                            await fetchYahooDaily(stockNo),
+                            await fetchYahooDaily(stockNo, startDate, endDate),
                             adjusted,
                         );
                         payload = await readCache(store, cacheKey);
@@ -445,7 +496,7 @@ export default async (req) => {
                                 yahooLabel = await persistYahooEntries(
                                     store,
                                     stockNo,
-                                    await fetchYahooDaily(stockNo),
+                                    await fetchYahooDaily(stockNo, startDate, endDate),
                                     true,
                                 );
                             } catch (error) {
@@ -485,12 +536,12 @@ export default async (req) => {
                             } catch (error) {
                                 console.warn('[TPEX Proxy v10.2] FinMind 主來源失敗:', error.message);
                                 try {
-                                    yahooLabel = await persistYahooEntries(
-                                        store,
-                                        stockNo,
-                                        await fetchYahooDaily(stockNo),
-                                        false,
-                                    );
+                                yahooLabel = await persistYahooEntries(
+                                    store,
+                                    stockNo,
+                                    await fetchYahooDaily(stockNo, startDate, endDate),
+                                    false,
+                                );
                                 } catch (yahooError) {
                                     console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
                                     return new Response(JSON.stringify({ error: '無法取得原始股價資料' }), { status: 502 });
