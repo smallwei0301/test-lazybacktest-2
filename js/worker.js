@@ -1,7 +1,7 @@
 
-// --- Worker Data Acquisition & Cache (v10.3) ---
-// Patch Tag: LB-PRICE-MODE-20240513A
-const WORKER_DATA_VERSION = "v10.3";
+// --- Worker Data Acquisition & Cache (v10.4) ---
+// Patch Tag: LB-ADJ-COMPOSER-20240525A
+const WORKER_DATA_VERSION = "v10.4";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -437,6 +437,73 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
       stockName: cachedEntry.stockName || stockNo,
     };
+  }
+
+  if (adjusted) {
+    self.postMessage({
+      type: "progress",
+      progress: 10,
+      message: "向雲端計算服務請求還原價...",
+    });
+    const params = new URLSearchParams({
+      stockNo,
+      startDate,
+      endDate,
+      market: marketKey,
+    });
+    const url = `/.netlify/functions/calculateAdjustedPrice?${params.toString()}`;
+    try {
+      const payload = await fetchWithAdaptiveRetry(url, {
+        headers: { Accept: "application/json" },
+      });
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+      const normalized = [];
+      rows.forEach((row) => {
+        const normalizedRow = normalizeProxyRow(
+          row,
+          marketKey === "TPEX",
+          startDateObj,
+          endDateObj,
+        );
+        if (normalizedRow) {
+          if (Number.isFinite(row?.adjustedFactor)) {
+            normalizedRow.adjustedFactor = row.adjustedFactor;
+          }
+          normalized.push(normalizedRow);
+        }
+      });
+      normalized.sort((a, b) => a.date.localeCompare(b.date));
+      const entry = {
+        data: normalized,
+        stockName: payload?.stockName || stockNo,
+        dataSource:
+          payload?.dataSource || "TWSE + FinMind (向後還原)",
+        timestamp: Date.now(),
+        meta: {
+          stockNo,
+          startDate,
+          endDate,
+          adjusted: true,
+          priceMode: "ADJ",
+          marketType: marketKey,
+          summary: payload?.summary || null,
+        },
+      };
+      setWorkerCacheEntry(marketKey, cacheKey, entry);
+      self.postMessage({
+        type: "progress",
+        progress: 45,
+        message: "已取得還原股價資料...",
+      });
+      return {
+        data: normalized,
+        dataSource: entry.dataSource,
+        stockName: entry.stockName,
+      };
+    } catch (error) {
+      console.error("[Worker] 還原價雲端計算失敗:", error);
+      throw error;
+    }
   }
 
   self.postMessage({
