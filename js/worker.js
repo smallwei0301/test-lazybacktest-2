@@ -463,14 +463,37 @@ function dedupeAndSortData(rows) {
   );
 }
 
-function summariseDataSourceFlags(flags, defaultLabel) {
-  if (!flags || flags.size === 0) return defaultLabel;
-  if (flags.size === 1) return Array.from(flags)[0];
-  const hasCache = Array.from(flags).some((src) => /快取|cache/i.test(src));
-  const hasRemote = Array.from(flags).some((src) => !/快取|cache/i.test(src));
-  if (hasRemote && hasCache) return `${defaultLabel} (部分快取)`;
-  if (hasCache) return `${defaultLabel} (快取)`;
-  return Array.from(flags).join(" / ");
+function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
+  const entries =
+    flags instanceof Set ? Array.from(flags) : Array.isArray(flags) ? flags : [];
+  const cacheLabels = entries.filter((src) => /快取|cache/i.test(src));
+  const remoteLabels = entries
+    .filter((src) => !/快取|cache/i.test(src))
+    .map((label) => label.replace(/\s*\((?:部份)?快取\)\s*$/i, '').trim())
+    .filter(Boolean);
+  const fallback =
+    options.fallbackRemote ||
+    (options.adjusted
+      ? 'Yahoo Finance (還原)'
+      : options.market === 'TPEX'
+        ? 'FinMind (主來源)'
+        : defaultLabel || 'TWSE (主來源)');
+  const uniqueRemote = Array.from(new Set(remoteLabels));
+  if (uniqueRemote.length === 0) {
+    if (cacheLabels.length > 0) {
+      const suffix = cacheLabels.length > 1 ? '部分快取' : '快取';
+      return `${fallback} (${suffix})`;
+    }
+    return fallback;
+  }
+  const primary = uniqueRemote[0];
+  if (cacheLabels.length > 0) {
+    return `${primary} (部分快取)`;
+  }
+  if (uniqueRemote.length === 1) {
+    return primary;
+  }
+  return uniqueRemote.join(' + ');
 }
 
 async function runWithConcurrency(items, limit, workerFn) {
@@ -774,9 +797,17 @@ async function fetchStockData(
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
+  const defaultRemoteLabel = isTpex
+    ? adjusted
+      ? "Yahoo Finance (還原)"
+      : "FinMind (主來源)"
+    : adjusted
+      ? "Yahoo Finance (還原)"
+      : "TWSE (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
-    isTpex ? "TPEX" : "TWSE",
+    defaultRemoteLabel,
+    { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
 
   setWorkerCacheEntry(marketKey, cacheKey, {

@@ -11,9 +11,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241123A
 // Patch Tag: LB-ADJ-COMPOSER-20241126A
 // Patch Tag: LB-ADJ-COMPOSER-20241209A
+// Patch Tag: LB-ADJ-COMPOSER-20241216A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241209A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241216A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -244,7 +245,7 @@ const FINMIND_MAX_SPAN_DAYS = 120;
 const FINMIND_MIN_PRICE_SPAN_DAYS = 30;
 const FINMIND_DIVIDEND_SPAN_DAYS = 365;
 const FINMIND_DIVIDEND_LOOKBACK_DAYS = 540;
-const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 120;
+const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 30;
 const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
@@ -547,6 +548,10 @@ function readField(raw, key) {
   if (Object.prototype.hasOwnProperty.call(raw, pascalKey)) return raw[pascalKey];
   const upperKey = key.toUpperCase();
   if (Object.prototype.hasOwnProperty.call(raw, upperKey)) return raw[upperKey];
+  const hyphenKey = key.replace(/_/g, '-');
+  if (Object.prototype.hasOwnProperty.call(raw, hyphenKey)) return raw[hyphenKey];
+  const upperHyphenKey = hyphenKey.toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(raw, upperHyphenKey)) return raw[upperHyphenKey];
   return undefined;
 }
 
