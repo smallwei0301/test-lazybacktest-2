@@ -7,14 +7,16 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241030A
 // Patch Tag: LB-ADJ-COMPOSER-20241105A
 // Patch Tag: LB-ADJ-COMPOSER-20241112A
+// Patch Tag: LB-ADJ-COMPOSER-20241119A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241112A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241119A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
 const FINMIND_MIN_PRICE_SPAN_DAYS = 30;
 const FINMIND_DIVIDEND_SPAN_DAYS = 365;
+const FINMIND_DIVIDEND_LOOKBACK_DAYS = 540;
 const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 120;
 const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
@@ -481,6 +483,27 @@ function computeAdjustmentRatio(baseClose, record) {
   return ratio;
 }
 
+function filterDividendRecordsByPriceRange(dividendRecords, rangeStartISO, rangeEndISO) {
+  if (!Array.isArray(dividendRecords) || dividendRecords.length === 0) {
+    return [];
+  }
+  const startISO = rangeStartISO ? toISODate(rangeStartISO) : null;
+  const endISO = rangeEndISO ? toISODate(rangeEndISO) : null;
+  return dividendRecords.filter((record) => {
+    const exInfo = resolveExDate(record);
+    if (!exInfo?.iso) {
+      return false;
+    }
+    if (startISO && exInfo.iso < startISO) {
+      return false;
+    }
+    if (endISO && exInfo.iso > endISO) {
+      return false;
+    }
+    return true;
+  });
+}
+
 function prepareDividendEvents(dividendRecords) {
   const eventMap = new Map();
   for (const rawRecord of dividendRecords || []) {
@@ -874,9 +897,23 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
   }
   const startDate = new Date(startISO);
   const endDate = new Date(endISO);
-  const spans = enumerateDateSpans(startDate, endDate, FINMIND_DIVIDEND_SPAN_DAYS);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return { rows: [], fetchStartISO: null, fetchEndISO: null };
+  }
+  const fetchStart = new Date(startDate.getTime());
+  if (Number.isFinite(FINMIND_DIVIDEND_LOOKBACK_DAYS) && FINMIND_DIVIDEND_LOOKBACK_DAYS > 0) {
+    fetchStart.setUTCDate(fetchStart.getUTCDate() - FINMIND_DIVIDEND_LOOKBACK_DAYS);
+  }
+  if (fetchStart > endDate) {
+    fetchStart.setTime(endDate.getTime());
+  }
+  const spans = enumerateDateSpans(fetchStart, endDate, FINMIND_DIVIDEND_SPAN_DAYS);
   if (spans.length === 0) {
-    return [];
+    return {
+      rows: [],
+      fetchStartISO: formatISODateFromDate(fetchStart),
+      fetchEndISO: formatISODateFromDate(endDate),
+    };
   }
   const combined = [];
   const queue = [...spans];
@@ -937,16 +974,31 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
       await delay(FINMIND_SEGMENT_COOLDOWN_MS);
     }
   }
-  return combined;
+  return {
+    rows: combined,
+    fetchStartISO: formatISODateFromDate(fetchStart),
+    fetchEndISO: formatISODateFromDate(endDate),
+  };
 }
 
-function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendCount) {
+function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendStats = {}) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
   const uniqueSources = new Set([basePriceSource, 'FinMind (除權息)']);
+  const {
+    filteredCount,
+    totalCount,
+    lookbackWindowDays,
+    fetchStartISO,
+    fetchEndISO,
+  } = dividendStats || {};
   return {
     priceRows: Array.isArray(priceData.rows) ? priceData.rows.length : 0,
-    dividendRows: Number.isFinite(dividendCount) ? dividendCount : undefined,
+    dividendRows: Number.isFinite(filteredCount) ? filteredCount : undefined,
+    dividendRowsTotal: Number.isFinite(totalCount) ? totalCount : undefined,
+    dividendFetchStart: fetchStartISO || undefined,
+    dividendFetchEnd: fetchEndISO || undefined,
+    dividendLookbackDays: Number.isFinite(lookbackWindowDays) ? lookbackWindowDays : undefined,
     adjustmentEvents: adjustments.filter((event) => !event.skipped).length,
     skippedEvents: adjustments.filter((event) => event.skipped).length,
     priceSource: basePriceSource,
@@ -998,11 +1050,29 @@ export const handler = async (event) => {
       }
     }
 
-    const dividendSeries = await fetchDividendSeries(stockNo, startISO, endISO);
+    const dividendPayload = await fetchDividendSeries(stockNo, startISO, endISO);
+    const dividendSeries = Array.isArray(dividendPayload?.rows) ? dividendPayload.rows : [];
+
+    const priceRows = Array.isArray(priceData.rows) ? priceData.rows : [];
+    let priceRangeStartISO = null;
+    let priceRangeEndISO = null;
+    if (priceRows.length > 0) {
+      const sortedForRange = [...priceRows].sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+      );
+      priceRangeStartISO = sortedForRange[0]?.date || null;
+      priceRangeEndISO = sortedForRange[sortedForRange.length - 1]?.date || null;
+    }
+
+    const filteredDividendSeries = filterDividendRecordsByPriceRange(
+      dividendSeries,
+      priceRangeStartISO || startISO,
+      priceRangeEndISO || endISO,
+    );
 
     const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(
-      priceData.rows,
-      dividendSeries,
+      priceRows,
+      filteredDividendSeries,
     );
 
     const combinedSourceLabel = `${
@@ -1021,7 +1091,13 @@ export const handler = async (event) => {
         adjustments,
         market,
         priceSourceLabel,
-        Array.isArray(dividendSeries) ? dividendSeries.length : undefined,
+        {
+          filteredCount: filteredDividendSeries.length,
+          totalCount: dividendSeries.length,
+          lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
+          fetchStartISO: dividendPayload?.fetchStartISO || null,
+          fetchEndISO: dividendPayload?.fetchEndISO || null,
+        },
       ),
       data: adjustedRows,
       adjustments,

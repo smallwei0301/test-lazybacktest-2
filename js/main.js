@@ -232,6 +232,11 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 ? payload.adjustments.filter((event) => event.skipped).length
                 : 0;
             const priceSource = payload?.priceSource || payload?.summary?.priceSource;
+            const dividendRows = payload?.summary?.dividendRows;
+            const dividendRowsTotal = payload?.summary?.dividendRowsTotal;
+            const dividendFetchStart = payload?.summary?.dividendFetchStart;
+            const dividendFetchEnd = payload?.summary?.dividendFetchEnd;
+            const lookbackDays = payload?.summary?.dividendLookbackDays;
             const lines = [
                 `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
                 `資料筆數: <span class="font-semibold">${total}</span>`,
@@ -244,6 +249,28 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             ];
             if (priceSource) {
                 lines.push(`原始價格來源: <span class="font-semibold">${priceSource}</span>`);
+            }
+            if (Number.isFinite(dividendRowsTotal)) {
+                const effectiveText = Number.isFinite(dividendRows)
+                    ? `，其中 <span class="font-semibold">${dividendRows}</span> 筆落在回測區間`
+                    : '';
+                lines.push(
+                    `FinMind 股利筆數: <span class="font-semibold">${dividendRowsTotal}</span> 筆${effectiveText}`,
+                );
+            } else if (Number.isFinite(dividendRows)) {
+                lines.push(
+                    `FinMind 股利筆數: <span class="font-semibold">${dividendRows}</span> 筆`,
+                );
+            }
+            if (dividendFetchStart || dividendFetchEnd) {
+                const rangeStart = dividendFetchStart || '—';
+                const rangeEnd = dividendFetchEnd || '—';
+                const suffix = Number.isFinite(lookbackDays)
+                    ? `，向前延伸 <span class="font-semibold">${lookbackDays}</span> 天`
+                    : '';
+                lines.push(
+                    `FinMind 股利查詢區間: <span class="font-semibold">${rangeStart} ~ ${rangeEnd}</span>${suffix}`,
+                );
             }
             detailHtml = lines.join('<br>');
         } else {
