@@ -358,13 +358,15 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
         if (!adjusted && !Number.isFinite(baseClose)) {
             continue;
         }
-        const referenceClose = Number.isFinite(baseClose)
-            ? baseClose
-            : Number.isFinite(adjCloseVal)
-                ? adjCloseVal
-                : Number.isFinite(baseOpen)
-                    ? baseOpen
-                    : null;
+        const referenceClose = adjusted
+            ? (Number.isFinite(baseClose)
+                ? baseClose
+                : Number.isFinite(adjCloseVal)
+                    ? adjCloseVal
+                    : Number.isFinite(baseOpen)
+                        ? baseOpen
+                        : null)
+            : baseClose;
         if (!Number.isFinite(referenceClose)) continue;
         const monthKey = isoDate.slice(0, 7).replace('-', '');
         if (!monthlyBuckets.has(monthKey)) monthlyBuckets.set(monthKey, []);
@@ -388,7 +390,7 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
                 prevRawClose = safeRound(referenceClose);
             }
         } else {
-            const rawClose = Number.isFinite(baseClose) ? baseClose : referenceClose;
+            const rawClose = referenceClose;
             finalClose = safeRound(rawClose);
             finalOpen = safeRound(Number.isFinite(baseOpen) ? baseOpen : rawClose);
             finalHigh = safeRound(Number.isFinite(baseHigh) ? baseHigh : Math.max(finalOpen ?? rawClose, rawClose));
@@ -396,9 +398,6 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
             const prev = Number.isFinite(prevRawClose) ? prevRawClose : null;
             change = prev !== null && finalClose !== null ? safeRound(finalClose - prev) : 0;
             prevRawClose = finalClose ?? prevRawClose;
-            if (Number.isFinite(adjCloseVal)) {
-                prevAdjClose = safeRound(adjCloseVal);
-            }
         }
 
         if (finalOpen === null || finalHigh === null || finalLow === null || finalClose === null) {
