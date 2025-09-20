@@ -231,6 +231,13 @@ function updateDataSourceDisplay(dataSource, stockName) {
         let sourceText = `數據來源: ${dataSource}`;
         displayEl.textContent = sourceText;
         displayEl.classList.remove('hidden');
+        if (typeof window.refreshDataSourceTester === 'function') {
+            try {
+                window.refreshDataSourceTester();
+            } catch (error) {
+                console.warn('[Main] 更新資料來源測試面板時發生例外:', error);
+            }
+        }
     } else {
         displayEl.classList.add('hidden');
     }

@@ -442,7 +442,6 @@ async function fetchStockData(
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
       stockName: cachedEntry.stockName || stockNo,
-      summary: cachedEntry.summary,
     };
   }
 
@@ -451,82 +450,6 @@ async function fetchStockData(
     progress: adjusted ? 8 : 5,
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
-
-  if (adjusted) {
-    const params = new URLSearchParams({
-      stockNo,
-      startDate,
-      endDate,
-      market: marketKey,
-    });
-    const url = `/.netlify/functions/calculateAdjustedPrice?${params.toString()}`;
-    const payload = await fetchWithAdaptiveRetry(url, {
-      headers: { Accept: "application/json" },
-    });
-    const rows = Array.isArray(payload?.data) ? payload.data : [];
-    const normalizedRows = [];
-    rows.forEach((row) => {
-      if (!row) return;
-      const isoDate = row.date || row.Date || row.tradeDate || row.trade_date;
-      if (!isoDate) return;
-      const volumeValue =
-        row.volume ??
-        row.Volume ??
-        row.Trading_Volume ??
-        row.turnover ??
-        0;
-      const normalizedRow = {
-        date: isoDate,
-        open: Number(row.open ?? row.Open ?? null),
-        high: Number(row.high ?? row.High ?? null),
-        low: Number(row.low ?? row.Low ?? null),
-        close: Number(row.close ?? row.Close ?? null),
-        volume: Number(volumeValue),
-      };
-      normalizedRows.push(normalizedRow);
-    });
-
-    self.postMessage({
-      type: "progress",
-      progress: 55,
-      message: "整理數據...",
-    });
-    const deduped = dedupeAndSortData(normalizedRows);
-    const dataSourceLabel =
-      payload?.dataSource || "TWSE + FinMind (向後還原)";
-    const stockName = payload?.stockName || stockNo;
-
-    setWorkerCacheEntry(marketKey, cacheKey, {
-      data: deduped,
-      stockName,
-      dataSource: dataSourceLabel,
-      timestamp: Date.now(),
-      meta: {
-        stockNo,
-        startDate,
-        endDate,
-        priceMode: getPriceModeKey(adjusted),
-      },
-      priceMode: getPriceModeKey(adjusted),
-      summary: payload?.summary,
-      adjustments: Array.isArray(payload?.adjustments)
-        ? payload.adjustments
-        : [],
-    });
-
-    if (deduped.length === 0) {
-      console.warn(
-        `[Worker] 指定範圍 (${startDate} ~ ${endDate}) 還原模式無 ${stockNo} 交易數據`,
-      );
-    }
-
-    return {
-      data: deduped,
-      dataSource: dataSourceLabel,
-      stockName,
-      summary: payload?.summary,
-    };
-  }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -608,11 +531,15 @@ async function fetchStockData(
               start: startISO,
               end: endISO,
             });
+            if (adjusted) params.set("adjusted", "1");
             const url = `${proxyPath}?${params.toString()}`;
             try {
               const payload = await fetchWithAdaptiveRetry(url, {
                 headers: { Accept: "application/json" },
               });
+              if (payload?.error) {
+                throw new Error(payload.error);
+              }
               const rows = Array.isArray(payload?.aaData)
                 ? payload.aaData
                 : Array.isArray(payload?.data)
@@ -657,6 +584,16 @@ async function fetchStockData(
             row.date >= monthInfo.rangeStartISO &&
             row.date <= monthInfo.rangeEndISO,
         );
+
+        if (payload?.source === "blob") {
+          const cacheLabel = isTpex ? "TPEX (快取)" : "TWSE (快取)";
+          monthSourceFlags.add(cacheLabel);
+          monthEntry.sources.add(cacheLabel);
+        } else if (payload?.source === "memory") {
+          const cacheLabel = isTpex ? "TPEX (記憶體快取)" : "TWSE (記憶體快取)";
+          monthSourceFlags.add(cacheLabel);
+          monthEntry.sources.add(cacheLabel);
+        }
 
         const usedCache =
           missingRanges.length === 0 || coveredLengthBefore > 0;

@@ -1,4 +1,5 @@
-// netlify/functions/tpex-proxy.js (v10.0 - Range-aware tiered cache for TPEX)
+// netlify/functions/tpex-proxy.js (v10.2 - FinMind primary with Yahoo fallback, Yahoo primary for adjusted)
+// Patch Tag: LB-DATASOURCE-20241005A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -76,6 +77,14 @@ function withinRange(rocDate, start, end) {
     return !(Number.isNaN(d.getTime()) || d < start || d > end);
 }
 
+function buildMonthCacheKey(stockNo, monthKey, adjusted) {
+    return `${stockNo}_${monthKey}${adjusted ? '_ADJ' : ''}`;
+}
+
+function safeRound(value) {
+    return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
 async function readCache(store, cacheKey) {
     const memoryHit = inMemoryCache.get(cacheKey);
     if (memoryHit && Date.now() - memoryHit.timestamp < TPEX_CACHE_TTL_MS) {
@@ -90,30 +99,109 @@ async function readCache(store, cacheKey) {
         }
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TPEX Proxy v10.0] Blobs 流量受限，改用記憶體快取。');
+            console.warn('[TPEX Proxy v10.2] Blobs 流量受限，改用記憶體快取。');
         } else {
-            console.error('[TPEX Proxy v10.0] 讀取 Blobs 時發生錯誤:', error);
+            console.error('[TPEX Proxy v10.2] 讀取 Blobs 時發生錯誤:', error);
         }
     }
     return null;
 }
 
 async function writeCache(store, cacheKey, payload) {
-    inMemoryCache.set(cacheKey, { timestamp: Date.now(), data: payload });
+    const record = { timestamp: Date.now(), data: payload };
+    inMemoryCache.set(cacheKey, record);
     try {
-        await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
+        await store.setJSON(cacheKey, record);
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TPEX Proxy v10.0] Blobs 流量受限，僅寫入記憶體快取。');
+            console.warn('[TPEX Proxy v10.2] Blobs 流量受限，僅寫入記憶體快取。');
         } else {
-            console.error('[TPEX Proxy v10.0] 寫入 Blobs 失敗:', error);
+            console.error('[TPEX Proxy v10.2] 寫入 Blobs 失敗:', error);
         }
     }
 }
 
-async function fetchFromYahoo(stockNo) {
+async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDateISO) {
+    const token = process.env.FINMIND_TOKEN;
+    if (!token) {
+        throw new Error('未設定 FinMind Token');
+    }
+    const dataset = adjusted ? 'TaiwanStockPriceAdj' : 'TaiwanStockPrice';
+    const url = new URL('https://api.finmindtrade.com/api/v4/data');
+    url.searchParams.set('dataset', dataset);
+    url.searchParams.set('data_id', stockNo);
+    url.searchParams.set('token', token);
+    if (startDateISO) url.searchParams.set('start_date', startDateISO);
+    if (endDateISO) url.searchParams.set('end_date', endDateISO);
+
+    console.log(`[TPEX Proxy v10.2] 呼叫 FinMind: ${dataset} ${stockNo}`);
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`FinMind HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+        throw new Error(`FinMind 回應錯誤: ${json?.msg || '未知錯誤'}`);
+    }
+
+    const rowsByMonth = new Map();
+    let stockName = '';
+    let prevClose = null;
+    for (const item of json.data) {
+        const isoDate = item.date;
+        if (!isoDate) continue;
+        const rocDate = isoToRoc(isoDate);
+        if (!rocDate) continue;
+        if (!stockName && item.stock_name) {
+            stockName = item.stock_name;
+        }
+        const open = safeRound(Number(item.open ?? item.Open ?? item.Opening));
+        const high = safeRound(Number(item.max ?? item.high ?? item.High));
+        const low = safeRound(Number(item.min ?? item.low ?? item.Low));
+        const closeValue = safeRound(Number(item.close ?? item.Close));
+        const volumeValue = Number(item.Trading_Volume ?? item.volume ?? item.Volume ?? 0);
+        const changeValue = Number(item.spread ?? item.change ?? item.Change ?? null);
+        const finalOpen = open ?? closeValue ?? 0;
+        const finalHigh = high ?? Math.max(finalOpen, closeValue ?? finalOpen);
+        const finalLow = low ?? Math.min(finalOpen, closeValue ?? finalOpen);
+        const finalClose = closeValue ?? finalOpen;
+        const finalChange = Number.isFinite(changeValue)
+            ? safeRound(changeValue)
+            : (prevClose !== null && finalClose !== null
+                ? safeRound(finalClose - prevClose)
+                : 0);
+        prevClose = finalClose ?? prevClose;
+        const volume = Number.isFinite(volumeValue) ? Math.round(volumeValue) : 0;
+        const monthKey = isoDate.slice(0, 7).replace('-', '');
+        if (!rowsByMonth.has(monthKey)) rowsByMonth.set(monthKey, []);
+        rowsByMonth.get(monthKey).push([
+            rocDate,
+            stockNo,
+            stockName || stockNo,
+            safeRound(finalOpen),
+            safeRound(finalHigh),
+            safeRound(finalLow),
+            safeRound(finalClose),
+            finalChange ?? 0,
+            volume,
+        ]);
+    }
+
+    const label = adjusted ? 'FinMind (還原備援)' : 'FinMind (主來源)';
+    for (const [monthKey, rows] of rowsByMonth.entries()) {
+        rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), {
+            stockName: stockName || stockNo,
+            aaData: rows,
+            dataSource: label,
+        });
+    }
+    return label;
+}
+
+async function fetchYahooDaily(stockNo) {
     const symbol = `${stockNo}.TWO`;
-    console.log(`[TPEX Proxy v10.0] 嘗試 Yahoo Finance: ${symbol}`);
+    console.log(`[TPEX Proxy v10.2] 嘗試 Yahoo Finance: ${symbol}`);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=20y&interval=1d`;
     const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!response.ok) {
@@ -127,121 +215,129 @@ async function fetchFromYahoo(stockNo) {
     if (!result || !Array.isArray(result.timestamp)) {
         throw new Error('Yahoo 回傳資料格式異常');
     }
+    return {
+        stockName: result.meta?.shortName || stockNo,
+        quote: result.indicators?.quote?.[0] || {},
+        adjclose: result.indicators?.adjclose?.[0]?.adjclose || [],
+        timestamps: result.timestamp,
+    };
+}
 
-    const adjclose = result?.indicators?.adjclose?.[0]?.adjclose || [];
-    const quotes = result?.indicators?.quote?.[0] || {};
-    const stockName = result?.meta?.shortName || symbol;
-    const entries = [];
-
-    for (let i = 0; i < result.timestamp.length; i++) {
-        const ts = result.timestamp[i];
-        const close = adjclose[i];
-        if (close == null) continue;
-        const open = quotes.open?.[i] ?? close;
-        const high = quotes.high?.[i] ?? Math.max(open, close);
-        const low = quotes.low?.[i] ?? Math.min(open, close);
-        const rawClose = quotes.close?.[i] ?? close;
-        const volume = quotes.volume?.[i] ?? 0;
-        const prevClose = i > 0 && adjclose[i - 1] != null ? adjclose[i - 1] : null;
-
-        const adjFactor = rawClose ? close / rawClose : 1;
+async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
+    const { stockName, quote, adjclose, timestamps } = yahooData;
+    const monthlyBuckets = new Map();
+    let prevRawClose = null;
+    let prevAdjClose = null;
+    for (let i = 0; i < timestamps.length; i += 1) {
+        const ts = timestamps[i];
+        if (!Number.isFinite(ts)) continue;
         const date = new Date(ts * 1000);
         if (Number.isNaN(date.getTime())) continue;
         const isoDate = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
         const rocDate = isoToRoc(isoDate);
         if (!rocDate) continue;
+        const baseClose = Number(quote.close?.[i]);
+        const baseOpen = Number(quote.open?.[i]);
+        const baseHigh = Number(quote.high?.[i]);
+        const baseLow = Number(quote.low?.[i]);
+        const adjCloseVal = Number(adjclose?.[i]);
+        const volumeVal = Number(quote.volume?.[i]) || 0;
+        if (!adjusted && !Number.isFinite(baseClose)) {
+            continue;
+        }
+        const referenceClose = Number.isFinite(baseClose)
+            ? baseClose
+            : Number.isFinite(adjCloseVal)
+                ? adjCloseVal
+                : Number.isFinite(baseOpen)
+                    ? baseOpen
+                    : null;
+        if (!Number.isFinite(referenceClose)) continue;
+        const monthKey = isoDate.slice(0, 7).replace('-', '');
+        if (!monthlyBuckets.has(monthKey)) monthlyBuckets.set(monthKey, []);
 
-        const adjOpen = Number((open * adjFactor).toFixed(4));
-        const adjHigh = Number((high * adjFactor).toFixed(4));
-        const adjLow = Number((low * adjFactor).toFixed(4));
-        const adjClose = Number(close.toFixed(4));
-        const change = prevClose != null ? Number((close - prevClose).toFixed(4)) : 0;
-        const vol = Number(volume) || 0;
+        let finalOpen;
+        let finalHigh;
+        let finalLow;
+        let finalClose;
+        let change;
+        if (adjusted) {
+            const finalAdjClose = Number.isFinite(adjCloseVal) ? adjCloseVal : referenceClose;
+            const scale = referenceClose ? finalAdjClose / referenceClose : 1;
+            finalClose = safeRound(finalAdjClose);
+            finalOpen = safeRound((Number.isFinite(baseOpen) ? baseOpen : referenceClose) * scale);
+            finalHigh = safeRound((Number.isFinite(baseHigh) ? baseHigh : Math.max(referenceClose, finalAdjClose)) * scale);
+            finalLow = safeRound((Number.isFinite(baseLow) ? baseLow : Math.min(referenceClose, finalAdjClose)) * scale);
+            const prev = Number.isFinite(prevAdjClose) ? prevAdjClose : null;
+            change = prev !== null && finalClose !== null ? safeRound(finalClose - prev) : 0;
+            prevAdjClose = finalClose ?? prevAdjClose;
+            if (Number.isFinite(referenceClose)) {
+                prevRawClose = safeRound(referenceClose);
+            }
+        } else {
+            const rawClose = Number.isFinite(baseClose) ? baseClose : referenceClose;
+            finalClose = safeRound(rawClose);
+            finalOpen = safeRound(Number.isFinite(baseOpen) ? baseOpen : rawClose);
+            finalHigh = safeRound(Number.isFinite(baseHigh) ? baseHigh : Math.max(finalOpen ?? rawClose, rawClose));
+            finalLow = safeRound(Number.isFinite(baseLow) ? baseLow : Math.min(finalOpen ?? rawClose, rawClose));
+            const prev = Number.isFinite(prevRawClose) ? prevRawClose : null;
+            change = prev !== null && finalClose !== null ? safeRound(finalClose - prev) : 0;
+            prevRawClose = finalClose ?? prevRawClose;
+            if (Number.isFinite(adjCloseVal)) {
+                prevAdjClose = safeRound(adjCloseVal);
+            }
+        }
 
-        entries.push({
-            isoDate,
-            aaRow: [rocDate, stockNo, stockName, adjOpen, adjHigh, adjLow, adjClose, change, vol]
-        });
+        if (finalOpen === null || finalHigh === null || finalLow === null || finalClose === null) {
+            continue;
+        }
+        const volume = Number.isFinite(volumeVal) ? Math.round(volumeVal) : 0;
+        monthlyBuckets.get(monthKey).push([
+            rocDate,
+            stockNo,
+            stockName || stockNo,
+            finalOpen,
+            finalHigh,
+            finalLow,
+            finalClose,
+            change || 0,
+            volume,
+        ]);
     }
 
-    return { stockName, entries, dataSource: 'Yahoo Finance' };
-}
-
-async function fetchFromFinMind(stockNo) {
-    console.warn('[TPEX Proxy v10.0] Yahoo 失敗，改用 FinMind 備援來源');
-    const token = process.env.FINMIND_TOKEN;
-    if (!token) {
-        throw new Error('未設定 FinMind Token');
-    }
-    const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPriceAdj&data_id=${stockNo}&token=${token}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`FinMind HTTP ${response.status}`);
-    }
-    const json = await response.json();
-    if (json.status !== 200) {
-        throw new Error(`FinMind 回應錯誤: ${json.msg}`);
-    }
-
-    const entries = [];
-    for (const item of json.data || []) {
-        const isoDate = item.date;
-        const rocDate = isoToRoc(isoDate);
-        if (!rocDate) continue;
-        const open = Number(item.open) || Number(item.Open) || Number(item.Opening) || 0;
-        const high = Number(item.max) || Number(item.high) || 0;
-        const low = Number(item.min) || Number(item.low) || 0;
-        const close = Number(item.close) || Number(item.Close) || 0;
-        const spread = Number(item.spread ?? item.change ?? 0) || 0;
-        const volume = Number(item.Trading_Volume ?? item.volume ?? 0) || 0;
-
-        entries.push({
-            isoDate,
-            aaRow: [rocDate, stockNo, stockNo, open, high, low, close, spread, volume]
-        });
-    }
-    return { stockName: stockNo, entries, dataSource: 'FinMind (備援)' };
-}
-
-async function persistEntries(store, stockNo, entries, stockName, dataSource) {
-    const buckets = new Map(); // Map<monthKey, aaData[]>
-    for (const entry of entries) {
-        const monthKey = entry.isoDate.slice(0, 7).replace('-', '');
-        if (!buckets.has(monthKey)) buckets.set(monthKey, []);
-        const row = entry.aaRow.slice();
-        row[2] = stockName;
-        buckets.get(monthKey).push(row);
-    }
-
-    for (const [monthKey, rows] of buckets.entries()) {
+    const label = adjusted ? 'Yahoo Finance (還原)' : 'Yahoo Finance (原始備援)';
+    for (const [monthKey, rows] of monthlyBuckets.entries()) {
         rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
-        const payload = { stockName, aaData: rows, dataSource };
-        await writeCache(store, `${stockNo}_${monthKey}`, payload);
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), {
+            stockName: stockName || stockNo,
+            aaData: rows,
+            dataSource: label,
+        });
     }
-    return buckets;
+    return label;
 }
 
-async function hydrateMissingMonths(store, stockNo) {
-    try {
-        const yahooResult = await fetchFromYahoo(stockNo);
-        await persistEntries(store, stockNo, yahooResult.entries, yahooResult.stockName, yahooResult.dataSource);
-        return yahooResult.dataSource;
-    } catch (yahooError) {
-        console.warn('[TPEX Proxy v10.0] Yahoo 來源失敗:', yahooError.message);
-        const finmindResult = await fetchFromFinMind(stockNo);
-        await persistEntries(store, stockNo, finmindResult.entries, finmindResult.stockName, finmindResult.dataSource);
-        return finmindResult.dataSource;
-    }
-}
-
-function summariseSources(flags) {
-    if (flags.size === 0) return 'TPEX';
+function summariseSources(flags, adjusted) {
+    if (flags.size === 0) return adjusted ? 'Yahoo Finance' : 'FinMind';
     if (flags.size === 1) return Array.from(flags)[0];
-    const hasRemote = Array.from(flags).some(src => /Yahoo|FinMind/i.test(src));
-    const hasCache = Array.from(flags).some(src => /快取|cache|記憶體/i.test(src));
-    if (hasRemote && hasCache) return 'TPEX (部分快取)';
-    if (hasCache && !hasRemote) return 'TPEX (快取)';
-    return Array.from(flags).join(' / ');
+    const labels = Array.from(flags);
+    const hasCache = labels.some(label => /快取|cache|記憶體/i.test(label));
+    const primaryYahoo = labels.find(label => /Yahoo Finance/i.test(label));
+    const primaryFinMind = labels.find(label => /FinMind/i.test(label));
+    const primary = primaryYahoo || primaryFinMind || (adjusted ? 'Yahoo Finance' : 'FinMind');
+    if (hasCache) return `${primary} (快取)`;
+    return primary;
+}
+
+function validateForceSource(adjusted, forceSource) {
+    if (!forceSource) return null;
+    const normalized = forceSource.toLowerCase();
+    if (adjusted) {
+        if (normalized === 'yahoo' || normalized === 'finmind') return normalized;
+        throw new Error('還原模式僅支援 Yahoo 或 FinMind 測試來源');
+    }
+    if (normalized === 'finmind' || normalized === 'yahoo') return normalized;
+    throw new Error('原始模式僅支援 FinMind 或 Yahoo 測試來源');
 }
 
 export default async (req) => {
@@ -256,6 +352,8 @@ export default async (req) => {
         const startParam = params.get('start');
         const endParam = params.get('end');
         const legacyDate = params.get('date');
+        const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
+        const forceSourceParam = params.get('forceSource');
 
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
@@ -276,37 +374,147 @@ export default async (req) => {
 
         const months = ensureMonthList(startDate, endDate);
         if (months.length === 0) {
-            return new Response(JSON.stringify({ stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: 'TPEX' }), {
+            return new Response(JSON.stringify({ stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: adjusted ? 'Yahoo Finance' : 'FinMind' }), {
                 headers: { 'Content-Type': 'application/json' }
             });
+        }
+
+        let forcedSource = null;
+        try {
+            forcedSource = validateForceSource(adjusted, forceSourceParam);
+        } catch (error) {
+            return new Response(JSON.stringify({ error: error.message }), { status: 400 });
         }
 
         const store = getStore('tpex_cache_store');
         const combinedRows = [];
         const sourceFlags = new Set();
         let stockName = '';
+        let yahooHydrated = false;
+        let yahooLabel = '';
+        let finmindHydrated = false;
+        let finmindLabel = '';
 
         for (const month of months) {
-            const cacheKey = `${stockNo}_${month}`;
+            const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
             const monthStart = new Date(Number(month.slice(0, 4)), Number(month.slice(4)) - 1, 1);
             const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
             const rangeStart = startDate > monthStart ? startDate : monthStart;
             const rangeEnd = endDate < monthEnd ? endDate : monthEnd;
 
-            let payload = await readCache(store, cacheKey);
-            if (!payload) {
-                const sourceLabel = await hydrateMissingMonths(store, stockNo);
-                payload = await readCache(store, cacheKey);
-                if (payload) {
-                    sourceFlags.add(sourceLabel);
+            let payload = null;
+            if (forcedSource) {
+                if (forcedSource === 'finmind') {
+                    try {
+                        finmindLabel = await hydrateFinMindDaily(
+                            store,
+                            stockNo,
+                            adjusted,
+                            startDate.toISOString().split('T')[0],
+                            endDate.toISOString().split('T')[0],
+                        );
+                        payload = await readCache(store, cacheKey);
+                        if (payload) sourceFlags.add(finmindLabel);
+                        finmindHydrated = true;
+                    } catch (error) {
+                        console.error('[TPEX Proxy v10.2] 強制 FinMind 失敗:', error);
+                        return new Response(JSON.stringify({ error: `FinMind 來源取得失敗: ${error.message}` }), { status: 502 });
+                    }
+                } else if (forcedSource === 'yahoo') {
+                    try {
+                        yahooLabel = await persistYahooEntries(
+                            store,
+                            stockNo,
+                            await fetchYahooDaily(stockNo),
+                            adjusted,
+                        );
+                        payload = await readCache(store, cacheKey);
+                        if (payload) sourceFlags.add(yahooLabel);
+                        yahooHydrated = true;
+                    } catch (error) {
+                        console.error('[TPEX Proxy v10.2] 強制 Yahoo 失敗:', error);
+                        return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });
+                    }
                 }
             } else {
-                if (payload.source === 'blob') {
-                    sourceFlags.add('TPEX (快取)');
-                } else if (payload.source === 'memory') {
-                    sourceFlags.add('TPEX (記憶體快取)');
+                payload = await readCache(store, cacheKey);
+                if (!payload) {
+                    if (adjusted) {
+                        if (!yahooHydrated) {
+                            try {
+                                yahooLabel = await persistYahooEntries(
+                                    store,
+                                    stockNo,
+                                    await fetchYahooDaily(stockNo),
+                                    true,
+                                );
+                            } catch (error) {
+                                console.warn('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error.message);
+                                try {
+                                    finmindLabel = await hydrateFinMindDaily(
+                                        store,
+                                        stockNo,
+                                        true,
+                                        startDate.toISOString().split('T')[0],
+                                        endDate.toISOString().split('T')[0],
+                                    );
+                                } catch (finmindError) {
+                                    console.error('[TPEX Proxy v10.2] FinMind 還原備援失敗:', finmindError);
+                                    return new Response(JSON.stringify({ error: '無法取得還原股價資料' }), { status: 502 });
+                                }
+                                finmindHydrated = true;
+                            }
+                            yahooHydrated = true;
+                        }
+                        payload = await readCache(store, cacheKey);
+                        if (payload) {
+                            if (payload.dataSource) sourceFlags.add(payload.dataSource);
+                            else if (yahooLabel) sourceFlags.add(yahooLabel);
+                            else if (finmindLabel) sourceFlags.add(finmindLabel);
+                        }
+                    } else {
+                        if (!finmindHydrated) {
+                            try {
+                                finmindLabel = await hydrateFinMindDaily(
+                                    store,
+                                    stockNo,
+                                    false,
+                                    startDate.toISOString().split('T')[0],
+                                    endDate.toISOString().split('T')[0],
+                                );
+                            } catch (error) {
+                                console.warn('[TPEX Proxy v10.2] FinMind 主來源失敗:', error.message);
+                                try {
+                                    yahooLabel = await persistYahooEntries(
+                                        store,
+                                        stockNo,
+                                        await fetchYahooDaily(stockNo),
+                                        false,
+                                    );
+                                } catch (yahooError) {
+                                    console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
+                                    return new Response(JSON.stringify({ error: '無法取得原始股價資料' }), { status: 502 });
+                                }
+                                yahooHydrated = true;
+                            }
+                            finmindHydrated = true;
+                        }
+                        payload = await readCache(store, cacheKey);
+                        if (payload && payload.dataSource) {
+                            sourceFlags.add(payload.dataSource);
+                        } else if (payload && finmindLabel) {
+                            sourceFlags.add(finmindLabel);
+                        }
+                    }
                 } else {
-                    sourceFlags.add('TPEX (快取)');
+                    if (payload.source === 'blob') {
+                        sourceFlags.add('TPEX (快取)');
+                    } else if (payload.source === 'memory') {
+                        sourceFlags.add('TPEX (記憶體快取)');
+                    }
+                    if (payload.dataSource) {
+                        sourceFlags.add(payload.dataSource);
+                    }
                 }
             }
 
@@ -314,10 +522,9 @@ export default async (req) => {
             if (!stockName && payload.stockName) {
                 stockName = payload.stockName;
             }
-            if (payload.dataSource && /Yahoo|FinMind/i.test(payload.dataSource)) {
+            if (payload.dataSource) {
                 sourceFlags.add(payload.dataSource);
             }
-
             const rows = Array.isArray(payload.aaData) ? payload.aaData : [];
             rows.forEach(row => {
                 if (withinRange(row[0], rangeStart, rangeEnd)) {
@@ -337,14 +544,14 @@ export default async (req) => {
             stockName: stockName || stockNo,
             iTotalRecords: aaData.length,
             aaData,
-            dataSource: summariseSources(sourceFlags)
+            dataSource: summariseSources(sourceFlags, adjusted),
         };
 
         return new Response(JSON.stringify(body), {
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
         });
     } catch (error) {
-        console.error('[TPEX Proxy v10.0] 發生未預期錯誤:', error);
+        console.error('[TPEX Proxy v10.2] 發生未預期錯誤:', error);
         return new Response(JSON.stringify({ error: error.message || 'TPEX Proxy error' }), { status: 500 });
     }
 };
