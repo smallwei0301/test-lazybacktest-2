@@ -1,14 +1,43 @@
-// netlify/functions/twse-proxy.js (v10.3 - TWSE primary with range-limited Yahoo/FinMind fallbacks)
+// netlify/functions/twse-proxy.js (v10.4 - TWSE primary with range-limited Yahoo/FinMind fallbacks)
 // Patch Tag: LB-DATASOURCE-20241007A
+// Patch Tag: LB-BLOBS-LOCAL-20241007B
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
 const TWSE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
+const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
+}
+
+function createMemoryBlobStore() {
+    const memory = new Map();
+    return {
+        async get(key) {
+            return memory.get(key) || null;
+        },
+        async setJSON(key, value) {
+            memory.set(key, value);
+        },
+    };
+}
+
+function obtainStore(name) {
+    try {
+        return getStore(name);
+    } catch (error) {
+        if (error?.name === 'MissingBlobsEnvironmentError') {
+            if (!inMemoryBlobStores.has(name)) {
+                console.warn('[TWSE Proxy v10.4] Netlify Blobs 未配置，使用記憶體快取模擬。');
+                inMemoryBlobStores.set(name, createMemoryBlobStore());
+            }
+            return inMemoryBlobStores.get(name);
+        }
+        throw error;
+    }
 }
 
 function pad2(value) {
@@ -487,7 +516,7 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: error.message }), { status: 400 });
         }
 
-        const store = getStore('twse_cache_store');
+        const store = obtainStore('twse_cache_store');
         const combinedRows = [];
         const sourceFlags = new Set();
         let stockName = '';
