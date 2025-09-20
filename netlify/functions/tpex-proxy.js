@@ -1,7 +1,8 @@
-// netlify/functions/tpex-proxy.js (v10.5 - FinMind primary with adaptive retries)
+// netlify/functions/tpex-proxy.js (v10.6 - FinMind primary with adaptive retries)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
+// Patch Tag: LB-TPEX-YAHOO-20241022A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -534,15 +535,29 @@ export default async (req) => {
                     }
                 } else if (forcedSource === 'yahoo') {
                     try {
-                        yahooLabel = await persistYahooEntries(
-                            store,
-                            stockNo,
-                            await fetchYahooDaily(stockNo, startDate, endDate),
-                            adjusted,
-                        );
                         payload = await readCache(store, cacheKey);
-                        if (payload) sourceFlags.add(yahooLabel);
-                        yahooHydrated = true;
+                        if (payload?.dataSource && !yahooLabel) {
+                            yahooLabel = payload.dataSource;
+                        }
+                        if (!payload && !yahooHydrated) {
+                            yahooLabel = await persistYahooEntries(
+                                store,
+                                stockNo,
+                                await fetchYahooDaily(stockNo, startDate, endDate),
+                                adjusted,
+                            );
+                            yahooHydrated = true;
+                            payload = await readCache(store, cacheKey);
+                        }
+                        if (payload) {
+                            if (payload.dataSource) {
+                                sourceFlags.add(payload.dataSource);
+                            } else if (yahooLabel) {
+                                sourceFlags.add(yahooLabel);
+                            }
+                        } else if (yahooLabel) {
+                            sourceFlags.add(yahooLabel);
+                        }
                     } catch (error) {
                         console.error('[TPEX Proxy v10.2] 強制 Yahoo 失敗:', error);
                         return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });

@@ -370,3 +370,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 - Data Source Tester v3.5.3 新增「備援還原 (TWSE + FinMind)」測試按鈕，支援直接驗證 adjusted-price 備援 API。
 - 測試結果面板會顯示備援 API 的調整事件筆數與版本代碼，方便追蹤部署版本。
 - 還原股價提示文案同步更新，提醒使用者在 Yahoo 缺漏時改測備援機制。
+
+### 2024-10-22 — LB-TWSE-YAHOO-20241022A / LB-TPEX-YAHOO-20241022A
+- TWSE Proxy v10.6 與 TPEX Proxy v10.6 在強制 Yahoo 還原來源時，改為共用單次抓取結果並優先讀取快取，避免跨月重複呼叫 Yahoo API 造成 504 超時。
+- Yahoo 強制測試若命中既有快取，會沿用快取來源標籤，確保資料來源摘要與回測結果一致。
