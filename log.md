@@ -365,3 +365,8 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 - 新增 AdjustedPriceProxy v1.1 除錯日誌（輸出請求參數、資料筆數、調整事件統計）。
 - Worker Data Acquisition v11.1 將 Yahoo Finance 作為主要還原來源，若偵測不足則自動啟用 adjusted-price 備援 API，並輸出備援啟動與結果紀錄。
 - Worker 快取項目記錄備援來源與版本資訊，以便後續排查 502 狀況。
+
+### 2024-10-20 — LB-DATASOURCE-20241020A
+- Data Source Tester v3.5.3 新增「備援還原 (TWSE + FinMind)」測試按鈕，支援直接驗證 adjusted-price 備援 API。
+- 測試結果面板會顯示備援 API 的調整事件筆數與版本代碼，方便追蹤部署版本。
+- 還原股價提示文案同步更新，提醒使用者在 Yahoo 缺漏時改測備援機制。
