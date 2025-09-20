@@ -1,8 +1,9 @@
 
-// --- Worker Data Acquisition & Cache (v10.2) ---
-const WORKER_DATA_VERSION = "v10.2";
+// --- Worker Data Acquisition & Cache (v10.9) ---
+// Patch Tag: LB-DATAPIPE-20241007A
+const WORKER_DATA_VERSION = "v10.9";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
-const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockNo, Map<monthKey, MonthCacheEntry>>>
+const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
@@ -13,8 +14,12 @@ function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
 }
 
-function buildCacheKey(stockNo, startDate, endDate) {
-  return `${stockNo}__${startDate}__${endDate}`;
+function getPriceModeKey(adjusted) {
+  return adjusted ? "ADJ" : "RAW";
+}
+
+function buildCacheKey(stockNo, startDate, endDate, adjusted = false) {
+  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}`;
 }
 
 function ensureMarketCache(marketKey) {
@@ -31,18 +36,23 @@ function ensureMonthlyMarketCache(marketKey) {
   return workerMonthlyCache.get(marketKey);
 }
 
-function ensureMonthlyStockCache(marketKey, stockNo) {
-  const marketCache = ensureMonthlyMarketCache(marketKey);
-  if (!marketCache.has(stockNo)) {
-    marketCache.set(stockNo, new Map());
-  }
-  return marketCache.get(stockNo);
+function getMonthlyStockKey(stockNo, adjusted = false) {
+  return `${stockNo}__${getPriceModeKey(adjusted)}`;
 }
 
-function getMonthlyCacheEntry(marketKey, stockNo, monthKey) {
+function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false) {
+  const marketCache = ensureMonthlyMarketCache(marketKey);
+  const stockKey = getMonthlyStockKey(stockNo, adjusted);
+  if (!marketCache.has(stockKey)) {
+    marketCache.set(stockKey, new Map());
+  }
+  return marketCache.get(stockKey);
+}
+
+function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
   const marketCache = workerMonthlyCache.get(marketKey);
   if (!marketCache) return null;
-  const stockCache = marketCache.get(stockNo);
+  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted));
   if (!stockCache) return null;
   const entry = stockCache.get(monthKey);
   if (!entry) return null;
@@ -58,8 +68,8 @@ function getMonthlyCacheEntry(marketKey, stockNo, monthKey) {
   return entry;
 }
 
-function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry) {
-  const stockCache = ensureMonthlyStockCache(marketKey, stockNo);
+function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false) {
+  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted);
   if (!(entry.sources instanceof Set)) {
     entry.sources = new Set(entry.sources || []);
   }
@@ -395,7 +405,13 @@ async function runWithConcurrency(items, limit, workerFn) {
   return results;
 }
 
-async function fetchStockData(stockNo, startDate, endDate, marketType) {
+async function fetchStockData(
+  stockNo,
+  startDate,
+  endDate,
+  marketType,
+  options = {},
+) {
   if (!marketType) {
     throw new Error(
       "fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。",
@@ -403,6 +419,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
   }
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
+  const adjusted = Boolean(options.adjusted || options.adjustedPrice);
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -413,7 +430,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
-  const cacheKey = buildCacheKey(stockNo, startDate, endDate);
+  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   if (cachedEntry) {
     self.postMessage({
@@ -430,9 +447,10 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
 
   self.postMessage({
     type: "progress",
-    progress: 5,
-    message: "準備抓取原始數據...",
+    progress: adjusted ? 8 : 5,
+    message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
+
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
     const entry = {
@@ -440,7 +458,13 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
       stockName: stockNo,
       dataSource: marketKey,
       timestamp: Date.now(),
-      meta: { stockNo, startDate, endDate },
+      meta: {
+        stockNo,
+        startDate,
+        endDate,
+        priceMode: getPriceModeKey(adjusted),
+      },
+      priceMode: getPriceModeKey(adjusted),
     };
     setWorkerCacheEntry(marketKey, cacheKey, entry);
     return { data: [], dataSource: marketKey, stockName };
@@ -455,116 +479,139 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     async (monthInfo) => {
       try {
         let monthEntry = getMonthlyCacheEntry(
-        marketKey,
-        stockNo,
-        monthInfo.monthKey,
-      );
-      if (!monthEntry) {
-        monthEntry = {
-          data: [],
-          coverage: [],
-          sources: new Set(),
-          stockName: "",
-          lastUpdated: 0,
-        };
-        setMonthlyCacheEntry(
           marketKey,
           stockNo,
           monthInfo.monthKey,
-          monthEntry,
+          adjusted,
         );
-      }
-
-      const existingCoverage = Array.isArray(monthEntry.coverage)
-        ? monthEntry.coverage.map((range) => ({ ...range }))
-        : [];
-      const missingRanges = computeMissingRanges(
-        existingCoverage,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-      );
-      const coveredLengthBefore = getCoveredLength(
-        existingCoverage,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-      );
-      const monthSourceFlags = new Set(
-        monthEntry.sources instanceof Set
-          ? Array.from(monthEntry.sources)
-          : monthEntry.sources || [],
-      );
-      let monthStockName = monthEntry.stockName || "";
-
-      if (missingRanges.length > 0) {
-        for (let i = 0; i < missingRanges.length; i += 1) {
-          const missingRange = missingRanges[i];
-          const { startISO, endISO } = rangeBoundsToISO(missingRange);
-          const params = new URLSearchParams({
+        if (!monthEntry) {
+          monthEntry = {
+            data: [],
+            coverage: [],
+            sources: new Set(),
+            stockName: "",
+            lastUpdated: 0,
+          };
+          setMonthlyCacheEntry(
+            marketKey,
             stockNo,
-            month: monthInfo.monthKey,
-            start: startISO,
-            end: endISO,
-          });
-          const url = `${proxyPath}?${params.toString()}`;
-          try {
-            const payload = await fetchWithAdaptiveRetry(url, {
-              headers: { Accept: "application/json" },
+            monthInfo.monthKey,
+            monthEntry,
+            adjusted,
+          );
+        }
+
+        const existingCoverage = Array.isArray(monthEntry.coverage)
+          ? monthEntry.coverage.map((range) => ({ ...range }))
+          : [];
+        const missingRanges = computeMissingRanges(
+          existingCoverage,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        const coveredLengthBefore = getCoveredLength(
+          existingCoverage,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        const monthSourceFlags = new Set(
+          monthEntry.sources instanceof Set
+            ? Array.from(monthEntry.sources)
+            : monthEntry.sources || [],
+        );
+        const monthCacheFlags = new Set();
+        let monthStockName = monthEntry.stockName || "";
+
+        if (missingRanges.length > 0) {
+          for (let i = 0; i < missingRanges.length; i += 1) {
+            const missingRange = missingRanges[i];
+            const { startISO, endISO } = rangeBoundsToISO(missingRange);
+            const params = new URLSearchParams({
+              stockNo,
+              month: monthInfo.monthKey,
+              start: startISO,
+              end: endISO,
             });
-            const rows = Array.isArray(payload?.aaData)
-              ? payload.aaData
-              : Array.isArray(payload?.data)
-                ? payload.data
-                : [];
-            const normalized = [];
-            rows.forEach((row) => {
-              const normalizedRow = normalizeProxyRow(
-                row,
-                isTpex,
-                startDateObj,
-                endDateObj,
-              );
-              if (normalizedRow) normalized.push(normalizedRow);
-            });
-            if (payload?.stockName) {
-              monthStockName = payload.stockName;
+            if (adjusted) params.set("adjusted", "1");
+            const url = `${proxyPath}?${params.toString()}`;
+            try {
+              const payload = await fetchWithAdaptiveRetry(url, {
+                headers: { Accept: "application/json" },
+              });
+              if (payload?.error) {
+                throw new Error(payload.error);
+              }
+              if (payload?.source === "blob") {
+                const cacheLabel = isTpex
+                  ? "TPEX (快取)"
+                  : "TWSE (快取)";
+                monthCacheFlags.add(cacheLabel);
+                monthEntry.sources.add(cacheLabel);
+              } else if (payload?.source === "memory") {
+                const cacheLabel = isTpex
+                  ? "TPEX (記憶體快取)"
+                  : "TWSE (記憶體快取)";
+                monthCacheFlags.add(cacheLabel);
+                monthEntry.sources.add(cacheLabel);
+              }
+              const rows = Array.isArray(payload?.aaData)
+                ? payload.aaData
+                : Array.isArray(payload?.data)
+                  ? payload.data
+                  : [];
+              const normalized = [];
+              rows.forEach((row) => {
+                const normalizedRow = normalizeProxyRow(
+                  row,
+                  isTpex,
+                  startDateObj,
+                  endDateObj,
+                );
+                if (normalizedRow) normalized.push(normalizedRow);
+              });
+              if (payload?.stockName) {
+                monthStockName = payload.stockName;
+              }
+              const sourceLabel =
+                payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+              if (sourceLabel) {
+                monthSourceFlags.add(sourceLabel);
+                monthEntry.sources.add(sourceLabel);
+              }
+              if (normalized.length > 0) {
+                mergeMonthlyData(monthEntry, normalized);
+              }
+              addCoverage(monthEntry, startISO, endISO);
+              monthEntry.lastUpdated = Date.now();
+              if (!monthEntry.stockName && monthStockName) {
+                monthEntry.stockName = monthStockName;
+              }
+            } catch (error) {
+              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
             }
-            const sourceLabel =
-              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-            if (sourceLabel) {
-              monthSourceFlags.add(sourceLabel);
-              monthEntry.sources.add(sourceLabel);
-            }
-            if (normalized.length > 0) {
-              mergeMonthlyData(monthEntry, normalized);
-            }
-            addCoverage(monthEntry, startISO, endISO);
-            monthEntry.lastUpdated = Date.now();
-            if (!monthEntry.stockName && monthStockName) {
-              monthEntry.stockName = monthStockName;
-            }
-          } catch (error) {
-            console.error(`[Worker] 抓取 ${url} 失敗:`, error);
           }
         }
-      }
 
-      const rowsForRange = (monthEntry.data || []).filter(
-        (row) =>
-          row &&
-          row.date >= monthInfo.rangeStartISO &&
-          row.date <= monthInfo.rangeEndISO,
-      );
+        const rowsForRange = (monthEntry.data || []).filter(
+          (row) =>
+            row &&
+            row.date >= monthInfo.rangeStartISO &&
+            row.date <= monthInfo.rangeEndISO,
+        );
 
-      const usedCache =
-        missingRanges.length === 0 || coveredLengthBefore > 0;
+        monthCacheFlags.forEach((label) => {
+          monthSourceFlags.add(label);
+        });
 
-      return {
-        rows: rowsForRange,
-        sourceFlags: Array.from(monthSourceFlags),
-        stockName: monthStockName,
-        usedCache,
-      };
+        const usedCache =
+          missingRanges.length === 0 || coveredLengthBefore > 0;
 
+        return {
+          rows: rowsForRange,
+          sourceFlags: Array.from(monthSourceFlags),
+          stockName: monthStockName,
+          usedCache,
+        };
       } finally {
         completed += 1;
         const progress = 10 + Math.round((completed / months.length) * 35);
@@ -614,7 +661,13 @@ async function fetchStockData(stockNo, startDate, endDate, marketType) {
     stockName: stockName || stockNo,
     dataSource: dataSourceLabel,
     timestamp: Date.now(),
-    meta: { stockNo, startDate, endDate },
+    meta: {
+      stockNo,
+      startDate,
+      endDate,
+      priceMode: getPriceModeKey(adjusted),
+    },
+    priceMode: getPriceModeKey(adjusted),
   });
 
   if (deduped.length === 0) {
@@ -3396,6 +3449,7 @@ async function runOptimization(
         baseParams.startDate,
         baseParams.endDate,
         baseParams.marketType || baseParams.market || "TWSE",
+        { adjusted: baseParams.adjustedPrice },
       );
       stockData = fetched?.data || [];
       dataFetched = true;
@@ -4052,6 +4106,7 @@ self.onmessage = async function (e) {
         params.stockNo,
         params.startDate,
         params.endDate,
+        params.adjustedPrice,
       );
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
@@ -4067,7 +4122,9 @@ self.onmessage = async function (e) {
               stockNo: params.stockNo,
               startDate: params.startDate,
               endDate: params.endDate,
+              priceMode: getPriceModeKey(params.adjustedPrice),
             },
+            priceMode: getPriceModeKey(params.adjustedPrice),
           });
         }
       } else {
@@ -4077,6 +4134,7 @@ self.onmessage = async function (e) {
           params.startDate,
           params.endDate,
           params.marketType,
+          { adjusted: params.adjustedPrice },
         );
         dataToUse = outcome.data;
         fetched = true;

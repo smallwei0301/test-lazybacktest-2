@@ -6,7 +6,7 @@ let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
-const cachedDataStore = new Map(); // Map<market|stockNo, CacheEntry>
+const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
 window.cachedDataStore = cachedDataStore;
@@ -25,6 +25,273 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+
+// --- Data Source Tester (LB-DATASOURCE-20241005A) ---
+const dataSourceTesterState = {
+    open: false,
+    busy: false,
+};
+
+function getStockNoValue() {
+    const input = document.getElementById('stockNo');
+    return (input?.value || '').trim().toUpperCase();
+}
+
+function getCurrentMarketFromUI() {
+    const switchEl = document.getElementById('marketSwitch');
+    return switchEl && switchEl.checked ? 'TPEX' : 'TWSE';
+}
+
+function getMarketLabel(market) {
+    return market === 'TPEX' ? '上櫃 (TPEX)' : '上市 (TWSE)';
+}
+
+function isAdjustedMode() {
+    const checkbox = document.getElementById('adjustedPriceCheckbox');
+    return Boolean(checkbox && checkbox.checked);
+}
+
+function getDateRangeFromUI() {
+    const start = document.getElementById('startDate')?.value || '';
+    const end = document.getElementById('endDate')?.value || '';
+    return { start, end };
+}
+
+function getTesterSourceConfigs(market, adjusted) {
+    if (adjusted) {
+        return [
+            { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
+        ];
+    }
+    if (market === 'TPEX') {
+        return [
+            { id: 'finmind', label: 'FinMind 主來源', description: '預設資料來源' },
+            { id: 'yahoo', label: 'Yahoo 備援', description: 'FinMind 失效時啟用' },
+        ];
+    }
+    return [
+        { id: 'twse', label: 'TWSE 主來源', description: '預設資料來源' },
+        { id: 'finmind', label: 'FinMind 備援', description: 'TWSE 失效時啟用' },
+    ];
+}
+
+function rocToIsoDate(rocDate) {
+    if (!rocDate) return null;
+    const parts = String(rocDate).split('/');
+    if (parts.length !== 3) return null;
+    const [rocYear, month, day] = parts.map((val) => parseInt(val, 10));
+    if (!Number.isFinite(rocYear) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    const year = rocYear + 1911;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function showTesterResult(status, message) {
+    const resultEl = document.getElementById('dataSourceTesterResult');
+    if (!resultEl) return;
+    resultEl.className = 'text-xs rounded-md px-3 py-2 border transition-colors';
+    if (status === 'success') {
+        resultEl.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
+    } else if (status === 'error') {
+        resultEl.classList.add('bg-rose-50', 'border-rose-200', 'text-rose-700');
+    } else {
+        resultEl.classList.add('bg-sky-50', 'border-sky-200', 'text-sky-700');
+    }
+    resultEl.innerHTML = message;
+    resultEl.classList.remove('hidden');
+}
+
+function clearTesterResult() {
+    const resultEl = document.getElementById('dataSourceTesterResult');
+    if (!resultEl) return;
+    resultEl.innerHTML = '';
+    resultEl.className = 'text-xs hidden';
+}
+
+function renderDataSourceTesterButtons(sources, disabled) {
+    const container = document.getElementById('dataSourceTesterButtons');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!Array.isArray(sources) || sources.length === 0) {
+        const placeholder = document.createElement('p');
+        placeholder.className = 'text-[11px] text-muted-foreground';
+        placeholder.style.color = 'var(--muted-foreground)';
+        placeholder.textContent = '目前沒有可測試的資料來源。';
+        container.appendChild(placeholder);
+        return;
+    }
+    sources.forEach((source) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'px-3 py-2 text-xs border rounded-md bg-white hover:bg-slate-50 transition-colors flex flex-col items-start gap-0.5 disabled:opacity-60 disabled:cursor-not-allowed';
+        btn.style.borderColor = 'var(--border)';
+        btn.disabled = disabled;
+        btn.dataset.source = source.id;
+        btn.dataset.label = source.label;
+        btn.innerHTML = `<span class="font-medium" style="color: var(--foreground);">${source.label}</span>`
+            + (source.description
+                ? `<span class="text-[10px]" style="color: var(--muted-foreground);">${source.description}</span>`
+                : '');
+        btn.addEventListener('click', () => runDataSourceTester(source.id, source.label));
+        container.appendChild(btn);
+    });
+}
+
+function setTesterButtonsDisabled(disabled) {
+    const container = document.getElementById('dataSourceTesterButtons');
+    if (!container) return;
+    container.querySelectorAll('button').forEach((btn) => {
+        btn.disabled = disabled;
+    });
+}
+
+async function runDataSourceTester(sourceId, sourceLabel) {
+    if (dataSourceTesterState.busy) return;
+    const stockNo = getStockNoValue();
+    const { start, end } = getDateRangeFromUI();
+    if (!stockNo || !start || !end) {
+        showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
+        return;
+    }
+    const market = getCurrentMarketFromUI();
+    const adjusted = isAdjustedMode();
+    if (adjusted && sourceId === 'finmind') {
+        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
+        return;
+    }
+    const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+    const params = new URLSearchParams({
+        stockNo,
+        start,
+        end,
+        forceSource: sourceId,
+    });
+    if (adjusted) params.set('adjusted', '1');
+
+    dataSourceTesterState.busy = true;
+    setTesterButtonsDisabled(true);
+    showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
+
+    try {
+        const response = await fetch(`${endpoint}?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+        });
+        const text = await response.text();
+        let payload = {};
+        try {
+            payload = text ? JSON.parse(text) : {};
+        } catch (error) {
+            payload = {};
+        }
+        if (!response.ok || payload?.error) {
+            const message = payload?.error || `HTTP ${response.status}`;
+            throw new Error(message);
+        }
+        const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+        const total = Number.isFinite(payload.iTotalRecords)
+            ? payload.iTotalRecords
+            : aaData.length;
+        const isoDates = aaData
+            .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
+            .filter((value) => Boolean(value));
+        const firstDate = isoDates.length > 0 ? isoDates[0] : start;
+        const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
+        const sourceSummary = payload?.dataSource || '未知資料來源';
+        const detailHtml = [
+            `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
+            `資料筆數: <span class="font-semibold">${total}</span>`,
+            `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
+        ].join('<br>');
+        showTesterResult(
+            'success',
+            `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
+        );
+    } catch (error) {
+        showTesterResult(
+            'error',
+            `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
+        );
+    } finally {
+        dataSourceTesterState.busy = false;
+        refreshDataSourceTester();
+    }
+}
+
+function refreshDataSourceTester() {
+    const modeEl = document.getElementById('dataSourceTesterMode');
+    const hintEl = document.getElementById('dataSourceTesterHint');
+    if (!modeEl || !hintEl) return;
+    const market = getCurrentMarketFromUI();
+    const adjusted = isAdjustedMode();
+    const { start, end } = getDateRangeFromUI();
+    const stockNo = getStockNoValue();
+    const sources = getTesterSourceConfigs(market, adjusted);
+    const missingInputs = !stockNo || !start || !end;
+    modeEl.textContent = `${getMarketLabel(market)} ・ ${adjusted ? '還原股價' : '原始股價'}`;
+    renderDataSourceTesterButtons(sources, missingInputs || dataSourceTesterState.busy);
+    if (missingInputs) {
+        hintEl.textContent = '請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。';
+        hintEl.style.color = 'var(--muted-foreground)';
+        clearTesterResult();
+    } else if (adjusted) {
+        hintEl.textContent = '還原股價目前由 Yahoo Finance 提供，如需使用 FinMind 還原資料請升級 Sponsor 等級。';
+        hintEl.style.color = 'var(--muted-foreground)';
+    } else if (market === 'TPEX') {
+        hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';
+        hintEl.style.color = 'var(--muted-foreground)';
+    } else {
+        hintEl.textContent = 'TWSE 為主來源，FinMind 為備援來源。建議主備來源都測試一次。';
+        hintEl.style.color = 'var(--muted-foreground)';
+    }
+    setTesterButtonsDisabled(dataSourceTesterState.busy || missingInputs);
+}
+
+function toggleDataSourceTester(forceOpen) {
+    const panel = document.getElementById('dataSourceTester');
+    const toggleBtn = document.getElementById('toggleDataSourceTester');
+    if (!panel || !toggleBtn) return;
+    const shouldOpen = typeof forceOpen === 'boolean'
+        ? forceOpen
+        : !dataSourceTesterState.open;
+    dataSourceTesterState.open = shouldOpen;
+    panel.classList.toggle('hidden', !shouldOpen);
+    if (shouldOpen) {
+        toggleBtn.classList.add('border-primary', 'text-primary', 'bg-primary/10');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        refreshDataSourceTester();
+    } else {
+        toggleBtn.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function initDataSourceTester() {
+    const toggleBtn = document.getElementById('toggleDataSourceTester');
+    const closeBtn = document.getElementById('closeDataSourceTester');
+    if (!toggleBtn || !closeBtn) return;
+    toggleBtn.addEventListener('click', () => toggleDataSourceTester());
+    closeBtn.addEventListener('click', () => toggleDataSourceTester(false));
+
+    const stockNoInput = document.getElementById('stockNo');
+    if (stockNoInput) {
+        stockNoInput.addEventListener('input', refreshDataSourceTester);
+    }
+    const startInput = document.getElementById('startDate');
+    const endInput = document.getElementById('endDate');
+    startInput?.addEventListener('change', refreshDataSourceTester);
+    endInput?.addEventListener('change', refreshDataSourceTester);
+    const marketSwitch = document.getElementById('marketSwitch');
+    marketSwitch?.addEventListener('change', refreshDataSourceTester);
+    const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
+    adjustedCheckbox?.addEventListener('change', refreshDataSourceTester);
+
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+
+    refreshDataSourceTester();
+    window.refreshDataSourceTester = refreshDataSourceTester;
+}
+
 function showLoading(m="⌛ 處理中...") {
     const el = document.getElementById("loading");
     const loadingText = document.getElementById('loadingText');
@@ -287,7 +554,7 @@ function createProgressAnimator() {
     };
 }
 function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
-function getBacktestParams() { const sN=document.getElementById("stockNo").value.trim().toUpperCase()||"2330"; const sD=document.getElementById("startDate").value; const eD=document.getElementById("endDate").value; const iC=parseFloat(document.getElementById("initialCapital").value)||100000; const pS=parseFloat(document.getElementById("positionSize").value)||100; const sL=parseFloat(document.getElementById("stopLoss").value)||0; const tP=parseFloat(document.getElementById("takeProfit").value)||0; const tT=document.querySelector('input[name="tradeTiming"]:checked')?.value||'close'; const adjP=document.getElementById("adjustedPriceCheckbox").checked; const eS=document.getElementById("entryStrategy").value; const xS=document.getElementById("exitStrategy").value; const eP=getStrategyParams('entry'); const xP=getStrategyParams('exit'); const enableShorting = document.getElementById("enableShortSelling").checked; let shortES = null, shortXS = null, shortEP = {}, shortXP = {}; if (enableShorting) { shortES = document.getElementById("shortEntryStrategy").value; shortXS = document.getElementById("shortExitStrategy").value; shortEP = getStrategyParams('shortEntry'); shortXP = getStrategyParams('shortExit'); } const buyFee = parseFloat(document.getElementById("buyFee").value) || 0; const sellFee = parseFloat(document.getElementById("sellFee").value) || 0;     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital'; const marketSwitch = document.getElementById("marketSwitch"); const market = (marketSwitch && marketSwitch.checked) ? 'TPEX' : 'TWSE'; return { stockNo: sN, startDate: sD, endDate: eD, initialCapital: iC, positionSize: pS, stopLoss: sL, takeProfit: tP, tradeTiming: tT, adjustedPrice: adjP, entryStrategy: eS, exitStrategy: xS, entryParams: eP, exitParams: xP, enableShorting: enableShorting, shortEntryStrategy: shortES, shortExitStrategy: shortXS, shortEntryParams: shortEP, shortExitParams: shortXP, buyFee: buyFee, sellFee: sellFee, positionBasis: positionBasis, market: market, marketType: currentMarket }; }
+function getBacktestParams() { const sN=document.getElementById("stockNo").value.trim().toUpperCase()||"2330"; const sD=document.getElementById("startDate").value; const eD=document.getElementById("endDate").value; const iC=parseFloat(document.getElementById("initialCapital").value)||100000; const pS=parseFloat(document.getElementById("positionSize").value)||100; const sL=parseFloat(document.getElementById("stopLoss").value)||0; const tP=parseFloat(document.getElementById("takeProfit").value)||0; const tT=document.querySelector('input[name="tradeTiming"]:checked')?.value||'close'; const adjP=document.getElementById("adjustedPriceCheckbox").checked; const eS=document.getElementById("entryStrategy").value; const xS=document.getElementById("exitStrategy").value; const eP=getStrategyParams('entry'); const xP=getStrategyParams('exit'); const enableShorting = document.getElementById("enableShortSelling").checked; let shortES = null, shortXS = null, shortEP = {}, shortXP = {}; if (enableShorting) { shortES = document.getElementById("shortEntryStrategy").value; shortXS = document.getElementById("shortExitStrategy").value; shortEP = getStrategyParams('shortEntry'); shortXP = getStrategyParams('shortExit'); } const buyFee = parseFloat(document.getElementById("buyFee").value) || 0; const sellFee = parseFloat(document.getElementById("sellFee").value) || 0;     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital'; const marketSwitch = document.getElementById("marketSwitch"); const market = (marketSwitch && marketSwitch.checked) ? 'TPEX' : 'TWSE'; const priceMode = adjP ? 'adjusted' : 'raw'; return { stockNo: sN, startDate: sD, endDate: eD, initialCapital: iC, positionSize: pS, stopLoss: sL, takeProfit: tP, tradeTiming: tT, adjustedPrice: adjP, priceMode: priceMode, entryStrategy: eS, exitStrategy: xS, entryParams: eP, exitParams: xP, enableShorting: enableShorting, shortEntryStrategy: shortES, shortExitStrategy: shortXS, shortEntryParams: shortEP, shortExitParams: shortXP, buyFee: buyFee, sellFee: sellFee, positionBasis: positionBasis, market: market, marketType: currentMarket }; }
 function validateBacktestParams(p) { if(!/^[0-9A-Z]{3,7}$/.test(p.stockNo)){showError("請輸入有效代碼");return false;} if(!p.startDate||!p.endDate){showError("請選擇日期");return false;} if(new Date(p.startDate)>=new Date(p.endDate)){showError("結束日期需晚於開始日期");return false;} if(p.initialCapital<=0){showError("本金需>0");return false;} if(p.positionSize<=0||p.positionSize>100){showError("部位大小1-100%");return false;} if(p.stopLoss<0||p.stopLoss>100){showError("停損0-100%");return false;} if(p.takeProfit<0){showError("停利>=0%");return false;} if (p.buyFee < 0) { showError("買入手續費不能小於 0%"); return false; } if (p.sellFee < 0) { showError("賣出手續費+稅不能小於 0%"); return false; } const chkP=(ps,t)=>{ if (!ps) return true; for(const k in ps){ if(typeof ps[k]!=='number'||isNaN(ps[k])){ if(Object.keys(ps).length > 0) { showError(`${t}策略的參數 ${k} 錯誤 (值: ${ps[k]})`); return false; } } } return true; }; if(!chkP(p.entryParams,'做多進場'))return false; if(!chkP(p.exitParams,'做多出場'))return false; if (p.enableShorting) { if(!chkP(p.shortEntryParams,'做空進場'))return false; if(!chkP(p.shortExitParams,'回補出場'))return false; } return true; }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
@@ -295,7 +562,9 @@ const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
 function buildCacheKey(cur) {
     if (!cur) return '';
     const market = (cur.market || cur.marketType || 'TWSE').toUpperCase();
-    return `${market}|${cur.stockNo}`;
+    const rawMode = (cur.priceMode || (cur.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const priceModeKey = rawMode === 'adjusted' ? 'ADJ' : 'RAW';
+    return `${market}|${cur.stockNo}|${priceModeKey}`;
 }
 
 function parseISOToUTC(iso) {
@@ -499,7 +768,10 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
-        
+
+        // 初始化資料來源測試面板
+        initDataSourceTester();
+
         // 初始化頁籤功能
         initTabs();
         

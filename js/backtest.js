@@ -17,7 +17,8 @@ function runBacktestInternal() {
         if(!isValid) return;
 
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey};
+        const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
+        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, priceMode: priceMode};
         let useCache=!needsDataFetch(curSettings);
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
@@ -93,7 +94,9 @@ function runBacktestInternal() {
                          dataSources: sourceArray,
                          dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                          coverage: mergedCoverage,
-                         fetchedAt: Date.now()
+                         fetchedAt: Date.now(),
+                         adjustedPrice: params.adjustedPrice,
+                         priceMode: priceMode
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
@@ -109,7 +112,9 @@ function runBacktestInternal() {
                          stockName: stockName || cachedEntry.stockName || params.stockNo,
                          dataSources: updatedArray,
                          dataSource: summariseSourceLabels(updatedArray),
-                         fetchedAt: cachedEntry.fetchedAt || Date.now()
+                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
+                         adjustedPrice: params.adjustedPrice,
+                         priceMode: priceMode
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
@@ -226,6 +231,13 @@ function updateDataSourceDisplay(dataSource, stockName) {
         let sourceText = `數據來源: ${dataSource}`;
         displayEl.textContent = sourceText;
         displayEl.classList.remove('hidden');
+        if (typeof window.refreshDataSourceTester === 'function') {
+            try {
+                window.refreshDataSourceTester();
+            } catch (error) {
+                console.warn('[Main] 更新資料來源測試面板時發生例外:', error);
+            }
+        }
     } else {
         displayEl.classList.add('hidden');
     }
