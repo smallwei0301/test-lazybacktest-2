@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.7 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v13.0 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -10,9 +10,234 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241119A
 // Patch Tag: LB-ADJ-COMPOSER-20241123A
 // Patch Tag: LB-ADJ-COMPOSER-20241126A
+// Patch Tag: LB-ADJ-COMPOSER-20241209A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241126A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241209A';
+
+const CASH_DIVIDEND_ALIAS_KEYS = [
+  'cash_dividend_total',
+  'cash_dividend_total_amount',
+  'cash_dividend_profit',
+  'cash_dividend_surplus',
+  'cash_dividend_carry',
+  'cash_dividend_regular',
+  'cash_dividend_special',
+  'cash_dividend_extra',
+  'cash_dividend_ordinary',
+  'cash_dividend_amount',
+  'cash_dividend_per_share',
+  'cash_dividend_cash',
+  'cash_distribution',
+  'cash_distribution_total',
+  'cash_distribution_amount',
+  'cash_dividend_from_earnings',
+  'cash_dividend_from_retain_earnings',
+  'cash_dividend_from_retained_earnings',
+  'cash_dividend_from_capital_reserve',
+  'cash_dividend_from_capital_surplus',
+  'cash_dividend_from_capital',
+];
+
+const CASH_DIVIDEND_ALIAS_PATTERNS = [
+  /現金(股利|股息|配息|紅利|配發)/i,
+  /(盈餘|現金).*(配息|股息|股利|紅利)/i,
+  /(配息|股利)金額/i,
+  /現金盈餘/i,
+];
+
+const STOCK_DIVIDEND_ALIAS_KEYS = [
+  'stock_dividend_total',
+  'stock_dividend_total_amount',
+  'stock_dividend_total_ratio',
+  'stock_dividend_profit',
+  'stock_dividend_surplus',
+  'stock_dividend_carry',
+  'stock_dividend_special',
+  'stock_dividend_extra',
+  'stock_dividend_ordinary',
+  'stock_dividend_from_earnings',
+  'stock_dividend_from_retain_earnings',
+  'stock_dividend_from_retained_earnings',
+  'stock_dividend_from_capital_reserve',
+  'stock_dividend_from_capital_surplus',
+  'stock_dividend_from_capital',
+  'employee_stock_dividend',
+];
+
+const STOCK_DIVIDEND_ALIAS_PATTERNS = [
+  /股票(股利|股息|配股|紅利)/i,
+  /(盈餘|公積).*(配股)/i,
+  /配股股數/i,
+  /股票紅利/i,
+];
+
+const CASH_INCREASE_ALIAS_KEYS = [
+  'cash_capital_increase_ratio',
+  'cash_capital_increase_total',
+  'cash_capital_increase_total_ratio',
+  'cash_capital_increase_subscription_ratio',
+  'cash_capital_increase_subscribe_ratio',
+  'cash_capital_increase_subscription_rate',
+  'cash_capital_increase_ratio_total',
+  'cash_capital_increase_ratio_percent',
+  'cash_capital_increase_percent',
+  'cash_capital_increase_percentage',
+  'cash_capital_increase_per_share',
+  'cash_capital_increase_share_ratio',
+  'cash_capital_increase_shares_ratio',
+  'cash_increase_ratio',
+  'cash_increase_total_ratio',
+  'cash_increase_percent',
+  'cash_increase_percentage',
+  'cash_subscription_ratio',
+  'subscription_ratio',
+  'subscription_rate',
+  'subscription_percent',
+  'subscription_percentage',
+  'rights_issue_ratio',
+  'rights_issue_percent',
+  'rights_issue_percentage',
+];
+
+const CASH_INCREASE_ALIAS_PATTERNS = [
+  /現金增資/i,
+  /現增/i,
+  /(認購|申購).*(比率|比例)/i,
+  /配售.*(比率|比例)/i,
+];
+
+const STOCK_INCREASE_ALIAS_KEYS = [
+  'stock_capital_increase_ratio',
+  'stock_capital_increase_total',
+  'stock_capital_increase_total_ratio',
+  'stock_capital_increase_percent',
+  'stock_capital_increase_percentage',
+  'stock_capital_increase_per_share',
+  'stock_capital_increase_share_ratio',
+  'stock_capital_increase_shares_ratio',
+  'stock_dividend_capital_increase',
+  'stock_dividend_capital_increase_ratio',
+  'stock_dividend_capital_increase_total',
+  'stock_dividend_capital_increase_total_ratio',
+];
+
+const STOCK_INCREASE_ALIAS_PATTERNS = [
+  /(盈餘|公積).*(轉增資|配股)/i,
+  /轉增資.*(比率|比例)/i,
+  /股票增資/i,
+];
+
+const SUBSCRIPTION_PRICE_ALIAS_KEYS = [
+  'cash_capital_increase_subscription_price',
+  'cash_capital_increase_subscribe_price',
+  'cash_capital_increase_subscription_price_per_share',
+  'cash_capital_increase_subscription_price_cash',
+  'cash_capital_increase_price',
+  'cash_capital_increase_price_cash',
+  'cash_capital_increase_issue_price',
+  'cash_capital_increase_offer_price',
+  'cash_capital_increase_cash_price',
+  'cash_increase_price',
+  'cash_increase_issue_price',
+  'cash_subscription_price',
+  'subscription_price',
+  'subscription_price_cash',
+  'subscription_price_per_share',
+];
+
+const SUBSCRIPTION_PRICE_ALIAS_PATTERNS = [
+  /(認購|申購|承銷).*(價格|價)/i,
+  /(增資|配售|現增).*(價格|價)/i,
+  /(發行|訂價).*(價格|價)/i,
+  /配股價格/i,
+];
+
+const DEFAULT_EXCLUDE_NORMALISED_TOKENS = [
+  'date',
+  'year',
+  'announcement',
+  'announce',
+  'declare',
+  'description',
+  'type',
+  'notes',
+  'note',
+  'remark',
+  'name',
+  'code',
+  'stock_id',
+  'stockcode',
+  'stock',
+  'company',
+  'industry',
+  'sector',
+  'board',
+  'market',
+  'symbol',
+  'category',
+  'status',
+  'summary',
+  'info',
+  'information',
+  'message',
+  'url',
+  'link',
+  'source',
+  'provider',
+  'update',
+  'fetch',
+  'record',
+  'book',
+  'payment',
+  'payable',
+  'deadline',
+  'stop',
+  'suspend',
+  'resume',
+  'listing',
+  'delisting',
+  'meeting',
+  'shareholder',
+  'director',
+];
+
+const DEFAULT_EXCLUDE_ORIGINAL_PATTERNS = [
+  /date/i,
+  /time/i,
+  /day/i,
+  /年/, // year
+  /月/, // month
+  /日/, // day
+  /日期/,
+  /公告/,
+  /說明/,
+  /備註/,
+  /備考/,
+  /描述/,
+  /摘要/,
+  /紀錄/,
+  /記錄/,
+  /登記/,
+  /股東會/,
+  /董事會/,
+  /決議/,
+  /支付/,
+  /派發/,
+  /派息/,
+  /發放/,
+  /除權/,
+  /除息/,
+  /交易/,
+  /Traning/i,
+  /Trading/i,
+  /Record/i,
+  /Book/i,
+  /Payment/i,
+  /Payable/i,
+  /Announcement/i,
+  /Declare/i,
+];
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -334,19 +559,83 @@ function normaliseKeyName(key) {
     .toLowerCase();
 }
 
+function matchesPattern(value, pattern) {
+  if (!value && value !== 0) return false;
+  const text = String(value);
+  if (pattern instanceof RegExp) {
+    return pattern.test(text);
+  }
+  if (!pattern && pattern !== 0) return false;
+  return text.toLowerCase().includes(String(pattern).toLowerCase());
+}
+
+function matchesAnyPattern(value, patterns = []) {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  return patterns.some((pattern) => matchesPattern(value, pattern));
+}
+
+function shouldSkipByPatterns(value, patterns = []) {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  return patterns.some((pattern) => matchesPattern(value, pattern));
+}
+
+function shouldSkipNormalisedKey(normalisedKey, tokens = []) {
+  if (!normalisedKey) return false;
+  if (!Array.isArray(tokens) || tokens.length === 0) return false;
+  return tokens.some((token) => token && normalisedKey.includes(token));
+}
+
 function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
   const parseOptions = options.treatAsRatio ? { treatAsRatio: true } : {};
+  const aliasKeys = Array.isArray(options.aliasKeys) ? options.aliasKeys : [];
+  const aliasPatterns = Array.isArray(options.aliasPatterns) ? options.aliasPatterns : [];
+  const excludeNormalisedTokens = [
+    ...DEFAULT_EXCLUDE_NORMALISED_TOKENS,
+    ...(Array.isArray(options.excludeNormalizedTokens)
+      ? options.excludeNormalizedTokens
+      : []),
+  ];
+  const excludeOriginalPatterns = [
+    ...DEFAULT_EXCLUDE_ORIGINAL_PATTERNS,
+    ...(Array.isArray(options.excludeOriginalPatterns)
+      ? options.excludeOriginalPatterns
+      : []),
+  ];
+
   const visited = new Set();
-  const addVisited = (key) => {
+  const prefixes = new Set();
+  const baseKeys = new Set();
+  const registerBaseKey = (key) => {
     if (!key && key !== 0) return;
-    visited.add(normaliseKeyName(key));
+    const normalised = normaliseKeyName(key);
+    if (normalised) {
+      baseKeys.add(normalised);
+      visited.add(normalised);
+      prefixes.add(normalised);
+    }
   };
-  addVisited(primaryKey);
+  registerBaseKey(primaryKey);
   for (const key of partKeys) {
-    addVisited(key);
+    registerBaseKey(key);
   }
 
   let total = 0;
+
+  for (const key of aliasKeys) {
+    if (!key && key !== 0) continue;
+    const normalised = normaliseKeyName(key);
+    if (!normalised) continue;
+    prefixes.add(normalised);
+    if (baseKeys.has(normalised)) {
+      visited.add(normalised);
+      continue;
+    }
+    const aliasValue = parseNumber(readField(raw, key), parseOptions);
+    if (Number.isFinite(aliasValue) && aliasValue > 0) {
+      total += aliasValue;
+      visited.add(normalised);
+    }
+  }
   const primaryValue = parseNumber(readField(raw, primaryKey), parseOptions);
   if (Number.isFinite(primaryValue) && primaryValue > 0) {
     total += primaryValue;
@@ -364,32 +653,21 @@ function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
   }
 
   if (options.allowFuzzy !== false && raw && typeof raw === 'object') {
-    const prefix = normaliseKeyName(options.fallbackPrefix || primaryKey);
-    const bannedTokens = new Set([
-      'date',
-      'year',
-      'announcement',
-      'announcement_date',
-      'declare',
-      'description',
-      'type',
-      'notes',
-      'remark',
-      'name',
-    ]);
+    const fallbackPrefix = normaliseKeyName(options.fallbackPrefix || primaryKey);
+    if (fallbackPrefix) {
+      prefixes.add(fallbackPrefix);
+    }
     for (const [rawKey, rawValue] of Object.entries(raw)) {
-      if (!rawKey) continue;
+      if (!rawKey && rawKey !== 0) continue;
       const normalisedKey = normaliseKeyName(rawKey);
       if (visited.has(normalisedKey)) continue;
-      if (!normalisedKey.includes(prefix)) continue;
-      let shouldSkip = false;
-      for (const token of bannedTokens) {
-        if (normalisedKey.includes(token)) {
-          shouldSkip = true;
-          break;
-        }
-      }
-      if (shouldSkip) continue;
+      if (shouldSkipNormalisedKey(normalisedKey, excludeNormalisedTokens)) continue;
+      if (shouldSkipByPatterns(rawKey, excludeOriginalPatterns)) continue;
+      const matchesKnownPrefix = Array.from(prefixes).some(
+        (token) => token && normalisedKey.includes(token),
+      );
+      const matchesAliasPattern = matchesAnyPattern(rawKey, aliasPatterns);
+      if (!matchesKnownPrefix && !matchesAliasPattern) continue;
       const candidate = parseNumber(rawValue, parseOptions);
       if (Number.isFinite(candidate) && candidate > 0) {
         total += candidate;
@@ -402,15 +680,8 @@ function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
 }
 
 function resolveSubscriptionPrice(raw) {
-  const candidateKeys = [
-    'cash_capital_increase_subscription_price',
-    'cash_capital_increase_subscribe_price',
-    'cash_capital_increase_subscription_price_per_share',
-    'cash_capital_increase_subscription_price_cash',
-    'subscription_price',
-  ];
   let best = null;
-  for (const key of candidateKeys) {
+  for (const key of SUBSCRIPTION_PRICE_ALIAS_KEYS) {
     const value = parseNumber(readField(raw, key));
     if (Number.isFinite(value) && value > 0) {
       if (!Number.isFinite(best) || value < best) {
@@ -418,6 +689,57 @@ function resolveSubscriptionPrice(raw) {
       }
     }
   }
+
+  if (Number.isFinite(best) && best > 0) {
+    return best;
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return 0;
+  }
+
+  const prefixes = new Set(
+    SUBSCRIPTION_PRICE_ALIAS_KEYS.map((key) => normaliseKeyName(key)).filter(Boolean),
+  );
+  prefixes.add('subscription_price');
+  prefixes.add('cash_capital_increase_price');
+
+  const excludeNormalisedTokens = [
+    ...DEFAULT_EXCLUDE_NORMALISED_TOKENS,
+    'ratio',
+    'rate',
+    'percent',
+    'percentage',
+    'yield',
+    'ratio_percent',
+    'ratio_percentage',
+  ];
+  const excludeOriginalPatterns = [
+    ...DEFAULT_EXCLUDE_ORIGINAL_PATTERNS,
+    /比率/,
+    /比例/,
+    /率/,
+    /百分/,
+    /殖利率/,
+  ];
+
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    if (!rawKey && rawKey !== 0) continue;
+    const normalisedKey = normaliseKeyName(rawKey);
+    if (shouldSkipNormalisedKey(normalisedKey, excludeNormalisedTokens)) continue;
+    if (shouldSkipByPatterns(rawKey, excludeOriginalPatterns)) continue;
+    const matchesPrefix = Array.from(prefixes).some(
+      (prefix) => prefix && normalisedKey.includes(prefix),
+    );
+    const matchesAliasPattern = matchesAnyPattern(rawKey, SUBSCRIPTION_PRICE_ALIAS_PATTERNS);
+    if (!matchesPrefix && !matchesAliasPattern) continue;
+    const numeric = parseNumber(rawValue);
+    if (!Number.isFinite(numeric) || numeric <= 0) continue;
+    if (!Number.isFinite(best) || numeric < best) {
+      best = numeric;
+    }
+  }
+
   return Number.isFinite(best) && best > 0 ? best : 0;
 }
 
@@ -483,16 +805,26 @@ function normaliseDividendRecord(raw) {
   const exDateInfo = resolveExDate(raw);
   if (!exDateInfo?.iso) return null;
 
-  const cashDividend = resolveDividendAmount(raw, 'cash_dividend', [
-    'cash_dividend_from_earnings',
-    'cash_dividend_from_retain_earnings',
-    'cash_dividend_from_retained_earnings',
-    'cash_dividend_from_capital_reserve',
-    'cash_dividend_from_capital_surplus',
-    'cash_dividend_from_capital',
-    'cash_dividend_total',
-    'cash_dividend_total_amount',
-  ]);
+  const cashDividend = resolveDividendAmount(
+    raw,
+    'cash_dividend',
+    [
+      'cash_dividend_from_earnings',
+      'cash_dividend_from_retain_earnings',
+      'cash_dividend_from_retained_earnings',
+      'cash_dividend_from_capital_reserve',
+      'cash_dividend_from_capital_surplus',
+      'cash_dividend_from_capital',
+      'cash_dividend_total',
+      'cash_dividend_total_amount',
+    ],
+    {
+      aliasKeys: CASH_DIVIDEND_ALIAS_KEYS,
+      aliasPatterns: CASH_DIVIDEND_ALIAS_PATTERNS,
+      excludeNormalizedTokens: ['ratio', 'rate', 'percent', 'percentage', 'yield', 'payout'],
+      excludeOriginalPatterns: [/比率/, /比例/, /率/, /百分/, /殖利率/, /配息率/, /收益率/],
+    },
+  );
   const stockDividend = resolveDividendAmount(
     raw,
     'stock_dividend',
@@ -506,7 +838,13 @@ function normaliseDividendRecord(raw) {
       'stock_dividend_total',
       'stock_dividend_total_amount',
     ],
-    { treatAsRatio: true },
+    {
+      treatAsRatio: true,
+      aliasKeys: STOCK_DIVIDEND_ALIAS_KEYS,
+      aliasPatterns: STOCK_DIVIDEND_ALIAS_PATTERNS,
+      excludeNormalizedTokens: ['yield'],
+      excludeOriginalPatterns: [/殖利率/, /轉增資/, /增資/],
+    },
   );
   const cashCapitalIncrease = resolveDividendAmount(
     raw,
@@ -516,7 +854,13 @@ function normaliseDividendRecord(raw) {
       'cash_capital_increase_total',
       'cash_capital_increase_total_ratio',
     ],
-    { treatAsRatio: true },
+    {
+      treatAsRatio: true,
+      aliasKeys: CASH_INCREASE_ALIAS_KEYS,
+      aliasPatterns: CASH_INCREASE_ALIAS_PATTERNS,
+      excludeNormalizedTokens: ['price', 'amount', 'value', 'cash_dividend'],
+      excludeOriginalPatterns: [/價格/, /價/, /金額/, /每股/, /股利/],
+    },
   );
   const stockCapitalIncrease = resolveDividendAmount(
     raw,
@@ -526,7 +870,13 @@ function normaliseDividendRecord(raw) {
       'stock_capital_increase_total',
       'stock_capital_increase_total_ratio',
     ],
-    { treatAsRatio: true },
+    {
+      treatAsRatio: true,
+      aliasKeys: STOCK_INCREASE_ALIAS_KEYS,
+      aliasPatterns: STOCK_INCREASE_ALIAS_PATTERNS,
+      excludeNormalizedTokens: ['price', 'amount', 'value'],
+      excludeOriginalPatterns: [/價格/, /價/, /金額/, /股利/],
+    },
   );
   const subscriptionPrice = resolveSubscriptionPrice(raw);
 
@@ -1127,6 +1477,16 @@ function buildSummary(priceData, adjustments, market, priceSourceLabel, dividend
     sources: Array.from(uniqueSources),
   };
 }
+
+export const __TESTING__ = {
+  resolveDividendAmount,
+  normaliseDividendRecord,
+  prepareDividendEvents,
+  parseNumber,
+  normaliseNumericText,
+  resolveSubscriptionPrice,
+  filterDividendRecordsByPriceRange,
+};
 
 export const handler = async (event) => {
   try {
