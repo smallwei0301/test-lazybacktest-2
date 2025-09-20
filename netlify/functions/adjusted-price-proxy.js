@@ -1,11 +1,11 @@
-// netlify/functions/adjusted-price-proxy.js (v1.6.1 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241109A
+// netlify/functions/adjusted-price-proxy.js (v1.6.2 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241110A
 import fetch from 'node-fetch';
-import twseProxy from './twse-proxy.js';
-import tpexProxy from './tpex-proxy.js';
+import * as twseProxyModule from './twse-proxy.js';
+import * as tpexProxyModule from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241109A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6.1]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241110A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6.2]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
 const FINMIND_MAX_RETRIES = 3;
@@ -16,8 +16,21 @@ const TEST_OVERRIDE_FLAG = '__ADJUSTED_PRICE_PROXY_TEST_CONFIG__';
 const runtimeOverrides =
   (typeof globalThis !== 'undefined' && globalThis?.[TEST_OVERRIDE_FLAG]) || null;
 const runtimeFetch = runtimeOverrides?.fetch || fetch;
-const runtimeTwseProxy = runtimeOverrides?.twseProxy || twseProxy;
-const runtimeTpexProxy = runtimeOverrides?.tpexProxy || tpexProxy;
+
+function resolveProxyHandler(candidate) {
+  if (!candidate) return null;
+  if (typeof candidate === 'function') return candidate;
+  if (typeof candidate?.handler === 'function') return candidate.handler;
+  if (typeof candidate?.default === 'function') return candidate.default;
+  return null;
+}
+
+const runtimeTwseProxy = resolveProxyHandler(
+  runtimeOverrides?.twseProxy ?? twseProxyModule,
+);
+const runtimeTpexProxy = resolveProxyHandler(
+  runtimeOverrides?.tpexProxy ?? tpexProxyModule,
+);
 const runtimeDelay = runtimeOverrides?.delay || delay;
 
 function logDebug(message, context = {}) {
@@ -647,6 +660,15 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   const proxyHandler = market === 'tpex' ? runtimeTpexProxy : runtimeTwseProxy;
   const url = `https://internal/${path}?${params.toString()}`;
   if (typeof proxyHandler !== 'function') {
+    logDebug('fetchRawSeries.invalidHandler', {
+      stockNo,
+      market,
+      handlerType: typeof proxyHandler,
+      availableKeys:
+        proxyHandler && typeof proxyHandler === 'object'
+          ? Object.keys(proxyHandler)
+          : undefined,
+    });
     throw new Error('原始資料服務處理函式無效');
   }
   const response = await proxyHandler(createProxyRequest(url));

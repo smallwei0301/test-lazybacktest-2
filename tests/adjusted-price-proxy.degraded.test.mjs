@@ -16,7 +16,7 @@ test('Adjusted price proxy returns degraded payload when FinMind fetch fails', a
     aaData: rawRows,
   };
 
-  const mockTwseProxy = async (request) => {
+  const mockTwseProxyHandler = async (request) => {
     assert.ok(request && request.url, '應該收到內部 proxy 的請求 URL');
     assert.match(String(request.url), /stockNo=2330/);
     return {
@@ -30,6 +30,8 @@ test('Adjusted price proxy returns degraded payload when FinMind fetch fails', a
       },
     };
   };
+
+  const mockTwseProxy = { handler: mockTwseProxyHandler };
 
   const mockFetch = async () => {
     const error = new Error('FinMind timeout');
@@ -73,5 +75,5 @@ test('Adjusted price proxy returns degraded payload when FinMind fetch fails', a
   );
   assert.equal(body.aaData.length, rawRows.length);
   assert.equal(body.adjustments.length, 0);
-  assert.equal(body.version, 'LB-ADJ-ENDPOINT-20241109A');
+  assert.equal(body.version, 'LB-ADJ-ENDPOINT-20241110A');
 });

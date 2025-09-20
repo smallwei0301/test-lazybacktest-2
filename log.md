@@ -399,3 +399,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-11-09 — LB-ADJ-ENDPOINT-20241109A
 - AdjustedPriceProxy v1.6.1 修正 Netlify 打包後的 handler 命名衝突，改以 proxyHandler 轉呼叫 TWSE/TPEX 代理，避免「handler2 is not a function」導致備援來源回傳 502。
 - 若偵測到代理函式非預期類型，立即回報結構化錯誤訊息並輸出除錯日誌，避免靜默失敗影響前端回測流程。
+
+### 2024-11-10 — LB-ADJ-ENDPOINT-20241110A
+- AdjustedPriceProxy v1.6.2 新增代理函式解析器，支援 Netlify 打包後以 `handler` 或 `default` 匯出的 TWSE/TPEX 模組，避免備援 API 因匯出型別差異回報「原始資料服務處理函式無效」。
+- 當檢測到代理函式不存在時，於除錯日誌輸出模組鍵值資訊，加速追蹤 Lambda 回傳 0 狀態碼的錯誤來源。
