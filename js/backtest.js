@@ -1,5 +1,5 @@
 
-// Patch Tag: LB-PRICE-MODE-20240513A
+// Patch Tag: LB-PRICE-MODE-20240513A / LB-PROXY-NAMING-20240603A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -72,6 +72,13 @@ function runBacktestInternal() {
                 if (window.showStockName) {
                     window.showStockName(e.data.stockName, e.data.stockNo, e.data.marketType);
                 }
+            } else if(type==='no_data'){
+                const noDataMessage = data?.message || '查無符合範圍的交易數據';
+                hideLoading();
+                showError(noDataMessage);
+                const suggestionArea = document.getElementById('today-suggestion-area');
+                if (suggestionArea) suggestionArea.classList.add('hidden');
+                if(backtestWorker){ backtestWorker.terminate(); backtestWorker = null; }
             } else if(type==='result'){
                 if(!useCache&&data?.rawData){
                      const existingEntry = cachedDataStore.get(cacheKey);
@@ -1780,7 +1787,7 @@ async function fetchStockName(stockCode) {
             result = await fetchStockNameFromTPEX(stockCode);
         }
 
-        // fetchStockNameFromTPEX 可能回傳 { name: '...', error: '...' } 或直接字串
+        // 代理函式預期回傳字串，為安全仍保留對舊格式的容錯處理
         let stockName = null;
         if (result) {
             if (typeof result === 'string') stockName = result;
@@ -1832,52 +1839,54 @@ async function fetchStockName(stockCode) {
     }
 }
 
-// 從 TWSE 取得股票名稱
+// 從 TWSE 取得股票名稱（透過代理，避免直接呼叫公開 API）
 async function fetchStockNameFromTWSE(stockCode) {
     try {
-        // 使用當月第一天作為查詢日期
         const now = new Date();
-        const queryDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}01`;
-        
-        const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockCode}&date=${queryDate}&_=${Date.now()}`;
-        const response = await fetch(url);
-        
-        if (!response.ok) return null;
-        
+        const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const end = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`;
+        const params = new URLSearchParams({ stockNo: stockCode, start, end });
+        const response = await fetch(`/api/twse/?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            console.warn(`[TWSE Proxy Name] HTTP ${response.status}`);
+            return null;
+        }
+
         const data = await response.json();
-        
-        if (data.stat === 'OK' && data.title) {
-            // 從 title 提取股票名稱，通常格式為："110年01月 2330 台積電 各日成交資訊"
-            const match = data.title.match(/\d+年\d+月\s+\d+\s+(.+?)\s+各日成交資訊/);
-            if (match && match[1]) {
-                return match[1].trim();
+
+        if (data?.stockName) {
+            return String(data.stockName).trim();
+        }
+
+        if (Array.isArray(data?.aaData) && data.aaData.length > 0) {
+            const nameField = data.aaData[0][2];
+            if (nameField) {
+                return String(nameField).trim();
             }
         }
-        
+
         return null;
     } catch (error) {
-        console.error('[TWSE API] 查詢股票名稱失敗:', error);
+        console.error('[TWSE Proxy Name] 查詢股票名稱失敗:', error);
         return null;
     }
 }
 
-// 從 TPEX 取得股票名稱 (使用代理伺服器解決CORS問題)
+// 從 TPEX 取得股票名稱 (透過代理避免直接呼叫公開 API)
 async function fetchStockNameFromTPEX(stockCode) {
     try {
         console.log(`[TPEX Name] 查詢股票代碼: ${stockCode}`);
-        
-        // 方法1: 使用代理伺服器 (如果可用)
-        const proxyResult = await fetchTPEXNameViaProxy(stockCode);
-        if (proxyResult) {
-            return proxyResult;
+
+        const proxyName = await fetchTPEXNameViaProxy(stockCode);
+        if (proxyName) {
+            return proxyName;
         }
-        
-        // 方法2: 使用JSONP方式嘗試舊API
-        const jsonpResult = await fetchTPEXNameViaJSONP(stockCode);
-        if (jsonpResult) {
-            return jsonpResult;
-        }
-        
+
         // 方法3: 使用本地股票名稱對照表 (常用上櫃股票)
         const stockNameMap = {
             '3260': '威剛',
@@ -1911,15 +1920,15 @@ async function fetchStockNameFromTPEX(stockCode) {
             '4160': '創源',
             '6472': '保瑞'
         };
-        
+
         if (stockNameMap[stockCode]) {
             console.log(`[TPEX Name] 從本地對照表取得: ${stockNameMap[stockCode]}`);
             return stockNameMap[stockCode];
         }
-        
+
         console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
         return null;
-        
+
     } catch (error) {
         console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
         return null;
@@ -1928,103 +1937,42 @@ async function fetchStockNameFromTPEX(stockCode) {
 
 // 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockNo) {
-    // **關鍵修正：使用一個固定的、格式完整的歷史日期**
-    const placeholderDate = '113/01/01'; 
+    const now = new Date();
+    const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const end = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`;
+    const params = new URLSearchParams({ stockNo, start, end });
 
-    const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
-    
-    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy: ${url}`);
-    
+    console.log(`[TPEX Proxy Name] Fetching name for ${stockNo} via proxy`);
+
     try {
-        const response = await fetch(url);
+        const response = await fetch(`/api/tpex/?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+        });
         if (!response.ok) {
             console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
-            return { error: `HTTP status ${response.status}` };
+            return null;
         }
         const data = await response.json();
 
-        if (data.error) {
-            console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
-            return data;
+        if (data?.stockName) {
+            return String(data.stockName).trim();
         }
 
-        if (data.iTotalRecords > 0 && data.stockName) {
-            return { name: data.stockName.trim() };
-        } else if (data.aaData && data.aaData.length > 0) {
-            const nameField = data.aaData[0][1] || '';
-            const name = nameField.replace(stockNo, '').trim();
-            return { name: name };
-        } else {
-             return { error: 'no_data' };
+        if (Array.isArray(data?.aaData) && data.aaData.length > 0) {
+            const nameField = data.aaData[0][2] || data.aaData[0][1] || '';
+            const normalized = String(nameField).replace(stockNo, '').trim();
+            if (normalized) {
+                return normalized;
+            }
         }
+
+        return null;
     } catch (error) {
         console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);
-        return { error: error.message };
+        return null;
     }
-}
-
-// 使用JSONP方式嘗試獲取TPEX股票名稱
-function fetchTPEXNameViaJSONP(stockCode) {
-    return new Promise((resolve) => {
-        try {
-            // 嘗試使用支援JSONP的舊API端點
-            const now = new Date();
-            const rocYear = now.getFullYear() - 1911;
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const queryDate = `${rocYear}/${month}`;
-            
-            const callbackName = `tpexCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const script = document.createElement('script');
-            
-            // 設置超時
-            const timeout = setTimeout(() => {
-                cleanup();
-                resolve(null);
-            }, 5000);
-            
-            const cleanup = () => {
-                clearTimeout(timeout);
-                if (script.parentNode) {
-                    script.parentNode.removeChild(script);
-                }
-                if (window[callbackName]) {
-                    delete window[callbackName];
-                }
-            };
-            
-            window[callbackName] = (data) => {
-                cleanup();
-                
-                try {
-                    if (data && data.stat === 'OK' && data.aaData) {
-                        for (const row of data.aaData) {
-                            if (row && row[0] === stockCode && row[1]) {
-                                resolve(row[1].trim());
-                                return;
-                            }
-                        }
-                    }
-                    resolve(null);
-                } catch (e) {
-                    console.warn(`[TPEX JSONP] 解析錯誤:`, e);
-                    resolve(null);
-                }
-            };
-            
-            // 嘗試JSONP格式的URL
-            script.src = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&callback=${callbackName}`;
-            script.onerror = () => {
-                cleanup();
-                resolve(null);
-            };
-            
-            document.head.appendChild(script);
-            
-        } catch (error) {
-            console.warn(`[TPEX JSONP] 設置錯誤:`, error);
-            resolve(null);
-        }
-    });
 }
 
 // 顯示市場切換建議
