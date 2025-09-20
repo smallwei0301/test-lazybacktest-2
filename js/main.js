@@ -61,6 +61,11 @@ function getTesterSourceConfigs(market, adjusted) {
     if (adjusted) {
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
+            {
+                id: 'netlifyAdjusted',
+                label: 'Netlify 還原備援',
+                description: 'TWSE/FinMind 原始 + FinMind 配息',
+            },
         ];
     }
     if (market === 'TPEX') {
@@ -154,25 +159,49 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
-    if (adjusted && sourceId === 'finmind') {
-        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
-        return;
+    let requestUrl = '';
+    let parseMode = 'proxy';
+    if (adjusted) {
+        if (sourceId === 'netlifyAdjusted') {
+            const params = new URLSearchParams({
+                stockNo,
+                startDate: start,
+                endDate: end,
+                market,
+            });
+            requestUrl = `/api/adjusted-price/?${params.toString()}`;
+            parseMode = 'adjustedComposer';
+        } else if (sourceId === 'yahoo') {
+            const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+            const params = new URLSearchParams({
+                stockNo,
+                start,
+                end,
+            });
+            params.set('adjusted', '1');
+            params.set('forceSource', 'yahoo');
+            requestUrl = `${endpoint}?${params.toString()}`;
+        } else {
+            showTesterResult('error', '還原股價目前僅支援 Yahoo 或 Netlify 備援測試。');
+            return;
+        }
+    } else {
+        const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+        const params = new URLSearchParams({
+            stockNo,
+            start,
+            end,
+        });
+        if (sourceId) params.set('forceSource', sourceId);
+        requestUrl = `${endpoint}?${params.toString()}`;
     }
-    const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
-    const params = new URLSearchParams({
-        stockNo,
-        start,
-        end,
-        forceSource: sourceId,
-    });
-    if (adjusted) params.set('adjusted', '1');
 
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
 
     try {
-        const response = await fetch(`${endpoint}?${params.toString()}`, {
+        const response = await fetch(requestUrl, {
             headers: { Accept: 'application/json' },
         });
         const text = await response.text();
@@ -186,21 +215,54 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const message = payload?.error || `HTTP ${response.status}`;
             throw new Error(message);
         }
-        const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
-        const total = Number.isFinite(payload.iTotalRecords)
-            ? payload.iTotalRecords
-            : aaData.length;
-        const isoDates = aaData
-            .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
-            .filter((value) => Boolean(value));
-        const firstDate = isoDates.length > 0 ? isoDates[0] : start;
-        const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
-        const sourceSummary = payload?.dataSource || '未知資料來源';
-        const detailHtml = [
-            `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
-            `資料筆數: <span class="font-semibold">${total}</span>`,
-            `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-        ].join('<br>');
+        let detailHtml = '';
+        if (parseMode === 'adjustedComposer') {
+            const rows = Array.isArray(payload.data) ? payload.data : [];
+            const total = rows.length;
+            const firstDate = rows.length > 0 ? rows[0]?.date || start : start;
+            const lastDate = rows.length > 0 ? rows[rows.length - 1]?.date || end : end;
+            const summarySources = Array.isArray(payload?.summary?.sources)
+                ? payload.summary.sources.join(' + ')
+                : null;
+            const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
+            const appliedAdjustments = Array.isArray(payload?.adjustments)
+                ? payload.adjustments.filter((event) => !event.skipped).length
+                : 0;
+            const skippedAdjustments = Array.isArray(payload?.adjustments)
+                ? payload.adjustments.filter((event) => event.skipped).length
+                : 0;
+            const priceSource = payload?.priceSource || payload?.summary?.priceSource;
+            const lines = [
+                `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
+                `資料筆數: <span class="font-semibold">${total}</span>`,
+                `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
+                `有效還原事件: <span class="font-semibold">${appliedAdjustments}</span> 件${
+                    skippedAdjustments > 0
+                        ? `，跳過 <span class="font-semibold">${skippedAdjustments}</span> 件`
+                        : ''
+                }`,
+            ];
+            if (priceSource) {
+                lines.push(`原始價格來源: <span class="font-semibold">${priceSource}</span>`);
+            }
+            detailHtml = lines.join('<br>');
+        } else {
+            const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+            const total = Number.isFinite(payload.iTotalRecords)
+                ? payload.iTotalRecords
+                : aaData.length;
+            const isoDates = aaData
+                .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
+                .filter((value) => Boolean(value));
+            const firstDate = isoDates.length > 0 ? isoDates[0] : start;
+            const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
+            const sourceSummary = payload?.dataSource || '未知資料來源';
+            detailHtml = [
+                `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
+                `資料筆數: <span class="font-semibold">${total}</span>`,
+                `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
+            ].join('<br>');
+        }
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
@@ -233,7 +295,7 @@ function refreshDataSourceTester() {
         hintEl.style.color = 'var(--muted-foreground)';
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = '還原股價目前由 Yahoo Finance 提供，如需使用 FinMind 還原資料請升級 Sponsor 等級。';
+        hintEl.textContent = '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';

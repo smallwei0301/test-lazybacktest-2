@@ -1,8 +1,9 @@
-// netlify/functions/calculateAdjustedPrice.js (v11.0 - TWSE/FinMind adjusted fallback)
+// netlify/functions/calculateAdjustedPrice.js (v12.0 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
+// Patch Tag: LB-ADJ-COMPOSER-20241020A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20240525A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241020A';
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -257,10 +258,10 @@ async function fetchTwseRange(stockNo, startDate, endDate) {
     }
   }
   combined.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  return { stockName, rows: combined };
+  return { stockName, rows: combined, priceSource: 'TWSE (原始)' };
 }
 
-async function fetchFinMindPrice(stockNo, startISO, endISO) {
+async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
   const token = process.env.FINMIND_TOKEN;
   if (!token) {
     throw new Error('未設定 FinMind Token');
@@ -299,7 +300,8 @@ async function fetchFinMindPrice(stockNo, startISO, endISO) {
     });
   }
   rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  return { stockName, rows };
+  const priceSource = label || 'FinMind (原始)';
+  return { stockName, rows, priceSource };
 }
 
 async function fetchDividendSeries(stockNo, startISO, endISO) {
@@ -324,15 +326,17 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
   return json.data;
 }
 
-function buildSummary(priceData, adjustments, market) {
-  const uniqueSources = new Set([
-    market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)',
-    'FinMind (除權息)',
-  ]);
+function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendCount) {
+  const basePriceSource =
+    priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
+  const uniqueSources = new Set([basePriceSource, 'FinMind (除權息)']);
   return {
-    priceRows: priceData.rows.length,
+    priceRows: Array.isArray(priceData.rows) ? priceData.rows.length : 0,
+    dividendRows: Number.isFinite(dividendCount) ? dividendCount : undefined,
     adjustmentEvents: adjustments.filter((event) => !event.skipped).length,
     skippedEvents: adjustments.filter((event) => event.skipped).length,
+    priceSource: basePriceSource,
+    dividendSource: 'FinMind (TaiwanStockDividend)',
     sources: Array.from(uniqueSources),
   };
 }
@@ -358,25 +362,53 @@ export const handler = async (event) => {
       return new Response(JSON.stringify({ error: '日期範圍不正確' }), { status: 400 });
     }
 
-    const [priceData, dividendSeries] = await Promise.all([
-      market === 'TPEX'
-        ? fetchFinMindPrice(stockNo, startISO, endISO)
-        : fetchTwseRange(stockNo, startDate, endDate),
-      fetchDividendSeries(stockNo, startISO, endISO),
-    ]);
+    let priceData;
+    let priceSourceLabel = '';
+    if (market === 'TPEX') {
+      priceData = await fetchFinMindPrice(stockNo, startISO, endISO);
+      priceSourceLabel = priceData.priceSource;
+    } else {
+      try {
+        priceData = await fetchTwseRange(stockNo, startDate, endDate);
+        priceSourceLabel = priceData.priceSource;
+      } catch (primaryError) {
+        console.warn(
+          '[calculateAdjustedPrice] TWSE 原始資料取得失敗，改用 FinMind 備援來源。',
+          primaryError,
+        );
+        const fallback = await fetchFinMindPrice(stockNo, startISO, endISO, {
+          label: 'FinMind (原始備援)',
+        });
+        priceData = fallback;
+        priceSourceLabel = fallback.priceSource;
+      }
+    }
+
+    const dividendSeries = await fetchDividendSeries(stockNo, startISO, endISO);
 
     const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(
       priceData.rows,
       dividendSeries,
     );
 
+    const combinedSourceLabel = `${
+      priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
+    } + FinMind (除權息還原)`;
+
     const responseBody = {
       version: FUNCTION_VERSION,
       stockNo,
       market,
       stockName: priceData.stockName || stockNo,
-      dataSource: 'TWSE + FinMind (向後還原)',
-      summary: buildSummary(priceData, adjustments, market),
+      dataSource: combinedSourceLabel,
+      priceSource: priceSourceLabel,
+      summary: buildSummary(
+        priceData,
+        adjustments,
+        market,
+        priceSourceLabel,
+        Array.isArray(dividendSeries) ? dividendSeries.length : undefined,
+      ),
       data: adjustedRows,
       adjustments,
     };

@@ -1,7 +1,8 @@
 
-// --- Worker Data Acquisition & Cache (v10.9) ---
+// --- Worker Data Acquisition & Cache (v11.0 - Adjusted fallback integration) ---
 // Patch Tag: LB-DATAPIPE-20241007A
-const WORKER_DATA_VERSION = "v10.9";
+// Patch Tag: LB-ADJ-PIPE-20241020A
+const WORKER_DATA_VERSION = "v11.0";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -296,6 +297,89 @@ async function fetchWithAdaptiveRetry(url, options = {}, attempt = 1) {
   return response.json();
 }
 
+async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    market: marketKey,
+  });
+  const response = await fetch(`/api/adjusted-price/?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const rawText = await response.text();
+  let payload = {};
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    throw new Error("還原股價服務回傳格式錯誤");
+  }
+  if (!response.ok || payload?.error) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const startDateObj = new Date(startDate);
+  const endDateObj = new Date(endDate);
+  const normalizedRows = [];
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  rows.forEach((row) => {
+    if (!row) return;
+    const isoDate = row.date || row.Date || null;
+    if (!isoDate) return;
+    const d = new Date(isoDate);
+    if (Number.isNaN(d.getTime()) || d < startDateObj || d > endDateObj) return;
+    const open = toNumber(row.open ?? row.Open ?? row.Opening);
+    const high = toNumber(row.high ?? row.High ?? row.max);
+    const low = toNumber(row.low ?? row.Low ?? row.min);
+    const close = toNumber(row.close ?? row.Close);
+    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+
+    const fallbackOpen = close ?? open ?? 0;
+    const normalizedOpen = open ?? fallbackOpen;
+    const normalizedClose = close ?? normalizedOpen;
+    const normalizedHigh =
+      high ?? Math.max(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
+    const normalizedLow =
+      low ?? Math.min(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
+
+    normalizedRows.push({
+      date: isoDate,
+      open: normalizedOpen,
+      high: normalizedHigh,
+      low: normalizedLow,
+      close: normalizedClose,
+      volume: Math.round(volumeRaw / 1000),
+    });
+  });
+
+  normalizedRows.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const summary = payload?.summary || null;
+  const adjustments = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+  const priceSource = payload?.priceSource || null;
+  const sourceLabel =
+    payload?.dataSource ||
+    (summary && Array.isArray(summary.sources) && summary.sources.length > 0
+      ? summary.sources.join(" + ")
+      : "Netlify 還原管線");
+
+  return {
+    data: normalizedRows,
+    dataSource: sourceLabel,
+    stockName: payload?.stockName || stockNo,
+    summary,
+    adjustments,
+    priceSource,
+  };
+}
+
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   try {
     let dateStr = null;
@@ -450,6 +534,45 @@ async function fetchStockData(
     progress: adjusted ? 8 : 5,
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
+
+  if (adjusted) {
+    self.postMessage({
+      type: "progress",
+      progress: 18,
+      message: "呼叫還原股價服務...",
+    });
+    const adjustedResult = await fetchAdjustedPriceRange(
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+    );
+    const adjustedEntry = {
+      data: adjustedResult.data,
+      stockName: adjustedResult.stockName || stockNo,
+      dataSource: adjustedResult.dataSource,
+      timestamp: Date.now(),
+      meta: {
+        stockNo,
+        startDate,
+        endDate,
+        priceMode: getPriceModeKey(adjusted),
+        summary: adjustedResult.summary || null,
+        adjustments: adjustedResult.adjustments || [],
+        priceSource: adjustedResult.priceSource || null,
+      },
+      priceMode: getPriceModeKey(adjusted),
+    };
+    setWorkerCacheEntry(marketKey, cacheKey, adjustedEntry);
+    return {
+      data: adjustedResult.data,
+      dataSource: adjustedResult.dataSource,
+      stockName: adjustedResult.stockName || stockNo,
+      summary: adjustedResult.summary || null,
+      adjustments: adjustedResult.adjustments || [],
+      priceSource: adjustedResult.priceSource || null,
+    };
+  }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {

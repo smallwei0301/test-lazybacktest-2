@@ -13,3 +13,9 @@
   to = "/.netlify/functions/twse-proxy"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/api/adjusted-price/*"
+  to = "/.netlify/functions/calculateAdjustedPrice"
+  status = 200
+  force = true
