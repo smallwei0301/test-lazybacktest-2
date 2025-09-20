@@ -1,4 +1,5 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.2 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
+// Patch Tag: LB-DATASOURCE-20241020A
 
 // 全局變量
 let stockChart = null;
@@ -26,7 +27,7 @@ function showError(m) { const el=document.getElementById("result"); el.innerHTML
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
 
-// --- Data Source Tester (LB-DATASOURCE-20241005A) ---
+// --- Data Source Tester (LB-DATASOURCE-20241020A) ---
 const dataSourceTesterState = {
     open: false,
     busy: false,
@@ -61,6 +62,11 @@ function getTesterSourceConfigs(market, adjusted) {
     if (adjusted) {
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
+            {
+                id: 'adjusted-proxy',
+                label: '備援還原 (TWSE + FinMind)',
+                description: 'Yahoo 缺漏時啟用的後端整合',
+            },
         ];
     }
     if (market === 'TPEX') {
@@ -154,18 +160,34 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
-    if (adjusted && sourceId === 'finmind') {
-        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
+    const supportedAdjustedSources = ['yahoo', 'adjusted-proxy'];
+    const isAdjustedFallback = adjusted && sourceId === 'adjusted-proxy';
+    if (adjusted && !supportedAdjustedSources.includes(sourceId)) {
+        showTesterResult('error', '還原股價目前僅支援 Yahoo 與備援還原 API 測試。');
         return;
     }
-    const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
-    const params = new URLSearchParams({
-        stockNo,
-        start,
-        end,
-        forceSource: sourceId,
-    });
-    if (adjusted) params.set('adjusted', '1');
+
+    const endpoint = isAdjustedFallback
+        ? '/api/adjusted-price'
+        : market === 'TPEX'
+            ? '/api/tpex/'
+            : '/api/twse/';
+    const params = new URLSearchParams(
+        isAdjustedFallback
+            ? {
+                stockNo,
+                marketType: market === 'TPEX' ? 'tpex' : 'twse',
+                startDate: start,
+                endDate: end,
+            }
+            : {
+                stockNo,
+                start,
+                end,
+                forceSource: sourceId,
+            },
+    );
+    if (adjusted && !isAdjustedFallback) params.set('adjusted', '1');
 
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
@@ -196,11 +218,25 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         const firstDate = isoDates.length > 0 ? isoDates[0] : start;
         const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
         const sourceSummary = payload?.dataSource || '未知資料來源';
-        const detailHtml = [
+        const detailParts = [
             `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
             `資料筆數: <span class="font-semibold">${total}</span>`,
             `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-        ].join('<br>');
+        ];
+        if (isAdjustedFallback) {
+            const adjustmentCount = Array.isArray(payload?.adjustments)
+                ? payload.adjustments.length
+                : 0;
+            detailParts.push(
+                `調整事件: <span class="font-semibold">${adjustmentCount}</span>`,
+            );
+            if (payload?.version) {
+                detailParts.push(
+                    `版本代碼: <span class="font-semibold">${payload.version}</span>`,
+                );
+            }
+        }
+        const detailHtml = detailParts.join('<br>');
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
@@ -233,7 +269,7 @@ function refreshDataSourceTester() {
         hintEl.style.color = 'var(--muted-foreground)';
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = '還原股價目前由 Yahoo Finance 提供，如需使用 FinMind 還原資料請升級 Sponsor 等級。';
+        hintEl.textContent = '還原股價預設採 Yahoo 主來源，亦可測試備援「TWSE + FinMind (Adjusted)」確保除權息 API 正常。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';

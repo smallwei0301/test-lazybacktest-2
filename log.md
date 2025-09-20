@@ -361,3 +361,50 @@ Sep 19, 02:31:14 PM: a7d15859 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blo
 Sep 19, 02:31:14 PM: a7d15859 Duration: 18.59 ms	Memory Usage: 132 MB
 Sep 19, 02:31:15 PM: 6a5f77bd INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250901
 Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
+### 2024-10-15 — LB-ADJ-ENDPOINT-20241015A / LB-ADJ-PIPE-20241015A
+- 新增 AdjustedPriceProxy v1.1 除錯日誌（輸出請求參數、資料筆數、調整事件統計）。
+- Worker Data Acquisition v11.1 將 Yahoo Finance 作為主要還原來源，若偵測不足則自動啟用 adjusted-price 備援 API，並輸出備援啟動與結果紀錄。
+- Worker 快取項目記錄備援來源與版本資訊，以便後續排查 502 狀況。
+
+### 2024-10-20 — LB-DATASOURCE-20241020A
+- Data Source Tester v3.5.3 新增「備援還原 (TWSE + FinMind)」測試按鈕，支援直接驗證 adjusted-price 備援 API。
+- 測試結果面板會顯示備援 API 的調整事件筆數與版本代碼，方便追蹤部署版本。
+- 還原股價提示文案同步更新，提醒使用者在 Yahoo 缺漏時改測備援機制。
+
+### 2024-10-22 — LB-TWSE-YAHOO-20241022A / LB-TPEX-YAHOO-20241022A
+- TWSE Proxy v10.6 與 TPEX Proxy v10.6 在強制 Yahoo 還原來源時，改為共用單次抓取結果並優先讀取快取，避免跨月重複呼叫 Yahoo API 造成 504 超時。
+- Yahoo 強制測試若命中既有快取，會沿用快取來源標籤，確保資料來源摘要與回測結果一致。
+
+### 2024-10-25 — LB-ADJ-ENDPOINT-20241025B
+- AdjustedPriceProxy v1.2 將 FinMind 股利抓取拆分為 5 年區間的序列請求，並加入逾時計時與段落間緩衝，避免一次抓取 40 年資料導致 Netlify Lambda 逾時 (HTTP 502)。
+- 新增 proxy Request 建構器，確保於 Netlify Functions 內部呼叫 TWSE/TPEX 代理時能附帶固定 User-Agent 並相容於 Node 18 的 Request 物件。
+- 除錯日誌輸出補充 start/end 區間與 FinMind 段落筆數，方便追蹤備援來源的實際載入耗時。
+
+### 2024-10-31 — LB-ADJ-ENDPOINT-20241031A
+- AdjustedPriceProxy v1.3 改採除權息日聚合演算法，先彙總 FinMind 股利紀錄並使用實際參考價/除權後收盤價計算單次調整因子，避免除息期間仍顯示 0 筆調整事件。
+- 調整還原流程改為對應除權息日索引批次套用累積因子，確保前一交易日之前的價格都會回溯更新並輸出對應的現金/股票股利資訊供除錯。
+
+### 2024-11-02 — LB-ADJ-ENDPOINT-20241102A
+- AdjustedPriceProxy v1.4 將單次調整因子改為以「前一交易日收盤價」與 FinMind 除息參考價計算，並同步考慮現金/股票股利複合事件，確保除息區間會正確產生還原事件。
+- 調整事件紀錄新增參考價、前一日收盤與現金/股票調整因子，方便備援 API 在 Netlify Console 中持續追蹤調整過程。
+
+### 2024-11-05 — LB-ADJ-ENDPOINT-20241105A
+- AdjustedPriceProxy v1.5 為 FinMind 股利抓取加入重試與指數回退機制，針對 5xx、逾時或網路錯誤自動補抓，降低備援端點出現 HTTP 502 的機率。
+- 若 FinMind 仍無法取得資料，會以 degraded 狀態回應原始行情並附帶 warnings，讓前端與營運能持續獲得 API 回應並保留除錯資訊。
+
+### 2024-11-08 — LB-ADJ-ENDPOINT-20241108A
+- AdjustedPriceProxy v1.6 加入測試覆寫注入機制，允許以模擬的 TWSE/TPEX/FinMind 回應執行自動化回歸測試。
+- 建立 node:test 驗證流程，確保 FinMind 失敗時會回傳 degraded warnings 與 diagnostics，方便持續追蹤備援 API 穩定度。
+
+### 2024-11-09 — LB-ADJ-ENDPOINT-20241109A
+- AdjustedPriceProxy v1.6.1 修正 Netlify 打包後的 handler 命名衝突，改以 proxyHandler 轉呼叫 TWSE/TPEX 代理，避免「handler2 is not a function」導致備援來源回傳 502。
+- 若偵測到代理函式非預期類型，立即回報結構化錯誤訊息並輸出除錯日誌，避免靜默失敗影響前端回測流程。
+
+### 2024-11-10 — LB-ADJ-ENDPOINT-20241110A
+- AdjustedPriceProxy v1.6.2 新增代理函式解析器，支援 Netlify 打包後以 `handler` 或 `default` 匯出的 TWSE/TPEX 模組，避免備援 API 因匯出型別差異回報「原始資料服務處理函式無效」。
+- 當檢測到代理函式不存在時，於除錯日誌輸出模組鍵值資訊，加速追蹤 Lambda 回傳 0 狀態碼的錯誤來源。
+
+### 2024-11-12 — LB-ADJ-ENDPOINT-20241112A / LB-TWSE-FINMIND-20241112A / LB-TPEX-FINMIND-20241112A
+- AdjustedPriceProxy v1.6.3 將代理解析改為遞迴掃描 `handler`、`default`、`handler2` 等屬性並回報原始模組鍵值，避免 Netlify 打包後再次出現「原始資料服務處理函式無效」。
+- TWSE Proxy v10.7 與 TPEX Proxy v10.7 對 FinMind 備援加入逾時控制、指數退避重試與詳細日誌，遇到 5xx/504 或網路逾時時會自動重試並記錄下一次嘗試時機。
+- FinMind 失敗後回傳的錯誤訊息統一透過 `normaliseFinMindErrorMessage` 正規化，確保 Data Source Tester 能取得具體診斷資訊持續追蹤備援來源狀態。
