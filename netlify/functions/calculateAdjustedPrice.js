@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.4 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.5 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -6,9 +6,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241027A
 // Patch Tag: LB-ADJ-COMPOSER-20241030A
 // Patch Tag: LB-ADJ-COMPOSER-20241105A
+// Patch Tag: LB-ADJ-COMPOSER-20241112A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241105A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241112A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -208,17 +209,63 @@ function rocToISO(rocDate) {
   return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
-function parseNumber(value) {
+function parseNumber(value, options = {}) {
+  const { treatAsRatio = false } = options;
   if (value === null || value === undefined) return null;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const cleaned = String(value)
-    .replace(/,/g, '')
-    .replace(/％/g, '%')
-    .replace(/%/g, '')
-    .trim();
-  if (!cleaned) return null;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    const numeric = Number(value);
+    if (treatAsRatio && numeric >= 10 && numeric <= 200) {
+      const scaled = numeric / 100;
+      return scaled > 0 ? scaled : numeric;
+    }
+    return numeric;
+  }
+
+  let text = String(value).trim();
+  if (!text) return null;
+
+  text = text.replace(/[＋﹢]/g, '+').replace(/[－﹣﹘]/g, '-');
+
+  const colonMatch = text.match(/(-?[0-9,，]+(?:\.[0-9]+)?)\s*:\s*(-?[0-9,，]+(?:\.[0-9]+)?)/);
+  if (colonMatch) {
+    const [segment, leftRaw, rightRaw] = colonMatch;
+    const left = Number(leftRaw.replace(/[,，]/g, ''));
+    const right = Number(rightRaw.replace(/[,，]/g, ''));
+    if (Number.isFinite(left) && Number.isFinite(right) && left !== 0) {
+      let ratio = right / left;
+      const percentInSegment = /[%％]/.test(segment);
+      if (percentInSegment) {
+        ratio /= 100;
+      }
+      if (treatAsRatio && ratio >= 10 && ratio <= 200 && !percentInSegment) {
+        ratio /= 100;
+      }
+      return ratio;
+    }
+  }
+
+  let match = text.match(/(-?(?:\d+[，,]?)*\d(?:\.\d+)?)\s*([%％]?)/);
+  if (!match) {
+    match = text.match(/(-?\d+(?:\.\d+)?)/);
+    if (!match) return null;
+    match[2] = '';
+  }
+
+  const numericPart = match[1] ? match[1].replace(/[,，]/g, '') : '';
+  if (!numericPart) return null;
+
+  let numeric = Number(numericPart);
+  if (!Number.isFinite(numeric)) return null;
+
+  const hasPercent = Boolean(match[2] && /[%％]/.test(match[2]));
+  if (hasPercent) {
+    numeric /= 100;
+  }
+  if (treatAsRatio && numeric >= 10 && numeric <= 200 && !hasPercent) {
+    numeric /= 100;
+  }
+  return numeric;
 }
 
 function safeRound(value) {
@@ -238,14 +285,15 @@ function readField(raw, key) {
   return undefined;
 }
 
-function resolveDividendAmount(raw, primaryKey, partKeys = []) {
-  const primaryValue = parseNumber(readField(raw, primaryKey));
+function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
+  const parseOptions = options.treatAsRatio ? { treatAsRatio: true } : {};
+  const primaryValue = parseNumber(readField(raw, primaryKey), parseOptions);
   if (Number.isFinite(primaryValue) && primaryValue > 0) {
     return primaryValue;
   }
   let total = 0;
   for (const partKey of partKeys) {
-    const partValue = parseNumber(readField(raw, partKey));
+    const partValue = parseNumber(readField(raw, partKey), parseOptions);
     if (Number.isFinite(partValue) && partValue > 0) {
       total += partValue;
     }
@@ -345,26 +393,41 @@ function normaliseDividendRecord(raw) {
     'cash_dividend_total',
     'cash_dividend_total_amount',
   ]);
-  const stockDividend = resolveDividendAmount(raw, 'stock_dividend', [
-    'stock_dividend_from_earnings',
-    'stock_dividend_from_retain_earnings',
-    'stock_dividend_from_retained_earnings',
-    'stock_dividend_from_capital_reserve',
-    'stock_dividend_from_capital_surplus',
-    'stock_dividend_from_capital',
-    'stock_dividend_total',
-    'stock_dividend_total_amount',
-  ]);
-  const cashCapitalIncrease = resolveDividendAmount(raw, 'cash_capital_increase', [
-    'cash_capital_increase_ratio',
-    'cash_capital_increase_total',
-    'cash_capital_increase_total_ratio',
-  ]);
-  const stockCapitalIncrease = resolveDividendAmount(raw, 'stock_capital_increase', [
-    'stock_capital_increase_ratio',
-    'stock_capital_increase_total',
-    'stock_capital_increase_total_ratio',
-  ]);
+  const stockDividend = resolveDividendAmount(
+    raw,
+    'stock_dividend',
+    [
+      'stock_dividend_from_earnings',
+      'stock_dividend_from_retain_earnings',
+      'stock_dividend_from_retained_earnings',
+      'stock_dividend_from_capital_reserve',
+      'stock_dividend_from_capital_surplus',
+      'stock_dividend_from_capital',
+      'stock_dividend_total',
+      'stock_dividend_total_amount',
+    ],
+    { treatAsRatio: true },
+  );
+  const cashCapitalIncrease = resolveDividendAmount(
+    raw,
+    'cash_capital_increase',
+    [
+      'cash_capital_increase_ratio',
+      'cash_capital_increase_total',
+      'cash_capital_increase_total_ratio',
+    ],
+    { treatAsRatio: true },
+  );
+  const stockCapitalIncrease = resolveDividendAmount(
+    raw,
+    'stock_capital_increase',
+    [
+      'stock_capital_increase_ratio',
+      'stock_capital_increase_total',
+      'stock_capital_increase_total_ratio',
+    ],
+    { treatAsRatio: true },
+  );
   const subscriptionPrice = resolveSubscriptionPrice(raw);
 
   if (
