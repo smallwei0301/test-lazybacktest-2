@@ -1,9 +1,8 @@
 
-// --- Worker Data Acquisition & Cache (v10.5) ---
-// Patch Tag: LB-YAHOO-ADJ-20240601A
-const WORKER_DATA_VERSION = "v10.5";
+// --- Worker Data Acquisition & Cache (v10.6) ---
+// Patch Tag: LB-DATA-RESTORE-20240920A
+const WORKER_DATA_VERSION = "v10.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
-const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
@@ -29,59 +28,6 @@ function ensureMarketCache(marketKey) {
   return workerCachedStockData.get(marketKey);
 }
 
-function ensureMonthlyMarketCache(marketKey) {
-  if (!workerMonthlyCache.has(marketKey)) {
-    workerMonthlyCache.set(marketKey, new Map());
-  }
-  return workerMonthlyCache.get(marketKey);
-}
-
-function getStockCacheKey(stockNo, adjusted = false) {
-  return `${stockNo}__${getPriceModeKey(adjusted)}`;
-}
-
-function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false) {
-  const marketCache = ensureMonthlyMarketCache(marketKey);
-  const stockKey = getStockCacheKey(stockNo, adjusted);
-  if (!marketCache.has(stockKey)) {
-    marketCache.set(stockKey, new Map());
-  }
-  return marketCache.get(stockKey);
-}
-
-function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
-  const marketCache = workerMonthlyCache.get(marketKey);
-  if (!marketCache) return null;
-  const stockCache = marketCache.get(getStockCacheKey(stockNo, adjusted));
-  if (!stockCache) return null;
-  const entry = stockCache.get(monthKey);
-  if (!entry) return null;
-  if (!(entry.sources instanceof Set)) {
-    entry.sources = new Set(entry.sources || []);
-  }
-  if (!Array.isArray(entry.coverage)) {
-    entry.coverage = [];
-  }
-  if (!Array.isArray(entry.data)) {
-    entry.data = [];
-  }
-  return entry;
-}
-
-function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false) {
-  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted);
-  if (!(entry.sources instanceof Set)) {
-    entry.sources = new Set(entry.sources || []);
-  }
-  if (!Array.isArray(entry.coverage)) {
-    entry.coverage = [];
-  }
-  if (!Array.isArray(entry.data)) {
-    entry.data = [];
-  }
-  stockCache.set(monthKey, entry);
-}
-
 function isoToUTC(iso) {
   if (!iso) return NaN;
   const [y, m, d] = iso.split("-").map((val) => parseInt(val, 10));
@@ -95,112 +41,6 @@ function utcToISO(ms) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
     date.getUTCDate(),
   )}`;
-}
-
-function mergeRangeBounds(ranges) {
-  if (!Array.isArray(ranges) || ranges.length === 0) return [];
-  const sorted = [...ranges].sort((a, b) => a.start - b.start);
-  const merged = [sorted[0]];
-  for (let i = 1; i < sorted.length; i += 1) {
-    const cur = sorted[i];
-    const last = merged[merged.length - 1];
-    if (cur.start <= last.end) {
-      last.end = Math.max(last.end, cur.end);
-    } else {
-      merged.push({ ...cur });
-    }
-  }
-  return merged;
-}
-
-function addCoverage(entry, startISO, endISO) {
-  if (!entry) return;
-  const start = isoToUTC(startISO);
-  const end = isoToUTC(endISO);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return;
-  const newRange = { start, end: end + DAY_MS };
-  const normalized = Array.isArray(entry.coverage)
-    ? entry.coverage.map((range) => ({ ...range }))
-    : [];
-  normalized.push(newRange);
-  entry.coverage = mergeRangeBounds(normalized);
-}
-
-function computeMissingRanges(existingCoverage, targetStartISO, targetEndISO) {
-  const targetStart = isoToUTC(targetStartISO);
-  const targetEnd = isoToUTC(targetEndISO);
-  if (
-    !Number.isFinite(targetStart) ||
-    !Number.isFinite(targetEnd) ||
-    targetEnd < targetStart
-  ) {
-    return [];
-  }
-  const coverage = mergeRangeBounds(
-    (existingCoverage || []).map((range) => ({ ...range })),
-  );
-  const targetEndExclusive = targetEnd + DAY_MS;
-  const missing = [];
-  let cursor = targetStart;
-  for (let i = 0; i < coverage.length; i += 1) {
-    const range = coverage[i];
-    if (range.end <= cursor) continue;
-    if (range.start >= targetEndExclusive) break;
-    if (range.start > cursor) {
-      missing.push({ start: cursor, end: Math.min(range.start, targetEndExclusive) });
-    }
-    cursor = Math.max(cursor, range.end);
-    if (cursor >= targetEndExclusive) break;
-  }
-  if (cursor < targetEndExclusive) {
-    missing.push({ start: cursor, end: targetEndExclusive });
-  }
-  return missing.filter((range) => range.end - range.start > 0);
-}
-
-function getCoveredLength(existingCoverage, targetStartISO, targetEndISO) {
-  const targetStart = isoToUTC(targetStartISO);
-  const targetEndExclusive = isoToUTC(targetEndISO) + DAY_MS;
-  if (
-    !Number.isFinite(targetStart) ||
-    !Number.isFinite(targetEndExclusive) ||
-    targetEndExclusive <= targetStart
-  ) {
-    return 0;
-  }
-  const coverage = mergeRangeBounds(
-    (existingCoverage || []).map((range) => ({ ...range })),
-  );
-  let total = 0;
-  for (let i = 0; i < coverage.length; i += 1) {
-    const seg = coverage[i];
-    const start = Math.max(seg.start, targetStart);
-    const end = Math.min(seg.end, targetEndExclusive);
-    if (end > start) total += end - start;
-  }
-  return total;
-}
-
-function rangeBoundsToISO(range) {
-  const startISO = utcToISO(range.start);
-  const endISO = utcToISO(range.end - DAY_MS);
-  return { startISO, endISO };
-}
-
-function mergeMonthlyData(entry, newRows) {
-  if (!entry || !Array.isArray(newRows)) return;
-  const map = new Map(
-    (entry.data || []).map((row) => [row.date, row]),
-  );
-  newRows.forEach((row) => {
-    if (row && row.date) {
-      map.set(row.date, row);
-    }
-  });
-  entry.data = Array.from(map.values()).sort((a, b) =>
-    a.date.localeCompare(b.date),
-  );
-
 }
 
 function getWorkerCacheEntry(marketKey, cacheKey) {
@@ -252,30 +92,6 @@ function formatTWDateWorker(twDate) {
     console.warn(`Worker Date Error: ${twDate}`, e);
     return null;
   }
-}
-
-function enumerateMonths(startDate, endDate) {
-  const months = [];
-  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-  const last = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-  while (cursor <= last) {
-    const monthKey = `${cursor.getFullYear()}${pad2(cursor.getMonth() + 1)}`;
-    const monthStart = new Date(cursor);
-    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-    const rangeStart =
-      startDate > monthStart ? new Date(startDate) : monthStart;
-    const rangeEnd = endDate < monthEnd ? new Date(endDate) : monthEnd;
-    months.push({
-      monthKey,
-      label: `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`,
-      rangeStart,
-      rangeEnd,
-      rangeStartISO: rangeStart.toISOString().split("T")[0],
-      rangeEndISO: rangeEnd.toISOString().split("T")[0],
-    });
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  return months;
 }
 
 function delay(ms) {
@@ -389,22 +205,6 @@ function summariseDataSourceFlags(flags, defaultLabel) {
   return Array.from(flags).join(" / ");
 }
 
-async function runWithConcurrency(items, limit, workerFn) {
-  const results = new Array(items.length);
-  let index = 0;
-  async function runner() {
-    while (index < items.length) {
-      const currentIndex = index++;
-      results[currentIndex] = await workerFn(items[currentIndex], currentIndex);
-    }
-  }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
-    runner(),
-  );
-  await Promise.all(workers);
-  return results;
-}
-
 async function fetchStockData(stockNo, startDate, endDate, marketType, options = {}) {
   if (!marketType) {
     throw new Error(
@@ -442,193 +242,66 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
   self.postMessage({
     type: "progress",
     progress: adjusted ? 8 : 5,
-    message: adjusted
-      ? "準備抓取還原股價..."
-      : "準備抓取原始數據...",
+    message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
-  const months = enumerateMonths(startDateObj, endDateObj);
-  if (months.length === 0) {
-    const entry = {
-      data: [],
-      stockName: stockNo,
-      dataSource: marketKey,
-      timestamp: Date.now(),
-      meta: { stockNo, startDate, endDate },
-    };
-    setWorkerCacheEntry(marketKey, cacheKey, entry);
-    return { data: [], dataSource: marketKey, stockName };
-  }
+
   const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
-  const isTpex = marketKey === "TPEX";
-  const concurrencyLimit = isTpex ? 3 : 4;
-  let completed = 0;
-  const monthResults = await runWithConcurrency(
-    months,
-    concurrencyLimit,
-    async (monthInfo) => {
-      try {
-        let monthEntry = getMonthlyCacheEntry(
-          marketKey,
-          stockNo,
-          monthInfo.monthKey,
-          adjusted,
-        );
-        if (!monthEntry) {
-          monthEntry = {
-            data: [],
-            coverage: [],
-            sources: new Set(),
-            stockName: "",
-            lastUpdated: 0,
-          };
-          setMonthlyCacheEntry(
-            marketKey,
-            stockNo,
-            monthInfo.monthKey,
-            monthEntry,
-            adjusted,
-          );
-        }
+  const params = new URLSearchParams({
+    stockNo,
+    start: startDate,
+    end: endDate,
+  });
+  if (adjusted) {
+    params.set("adjusted", "1");
+  }
+  const url = `${proxyPath}?${params.toString()}`;
 
-        const existingCoverage = Array.isArray(monthEntry.coverage)
-          ? monthEntry.coverage.map((range) => ({ ...range }))
-          : [];
-        const missingRanges = computeMissingRanges(
-          existingCoverage,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const coveredLengthBefore = getCoveredLength(
-          existingCoverage,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const monthSourceFlags = new Set(
-          monthEntry.sources instanceof Set
-            ? Array.from(monthEntry.sources)
-            : monthEntry.sources || [],
-        );
-        let monthStockName = monthEntry.stockName || "";
+  let payload;
+  try {
+    payload = await fetchWithAdaptiveRetry(url, {
+      headers: { Accept: "application/json" },
+    });
+  } catch (error) {
+    console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+    throw error;
+  }
 
-        if (missingRanges.length > 0) {
-          for (let i = 0; i < missingRanges.length; i += 1) {
-            const missingRange = missingRanges[i];
-            const { startISO, endISO } = rangeBoundsToISO(missingRange);
-            const params = new URLSearchParams({
-              stockNo,
-              month: monthInfo.monthKey,
-              start: startISO,
-              end: endISO,
-            });
-            if (adjusted) {
-              params.set("adjusted", "1");
-            }
-            const url = `${proxyPath}?${params.toString()}`;
-            try {
-              const payload = await fetchWithAdaptiveRetry(url, {
-                headers: { Accept: "application/json" },
-              });
-              const rows = Array.isArray(payload?.aaData)
-                ? payload.aaData
-                : Array.isArray(payload?.data)
-                  ? payload.data
-                  : [];
-              const normalized = [];
-              rows.forEach((row) => {
-                const normalizedRow = normalizeProxyRow(
-                  row,
-                  isTpex,
-                  startDateObj,
-                  endDateObj,
-                );
-                if (normalizedRow) normalized.push(normalizedRow);
-              });
-              if (payload?.stockName) {
-                monthStockName = payload.stockName;
-              }
-              const sourceLabel =
-                payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-              if (sourceLabel) {
-                monthSourceFlags.add(sourceLabel);
-                monthEntry.sources.add(sourceLabel);
-              }
-              if (normalized.length > 0) {
-                mergeMonthlyData(monthEntry, normalized);
-              }
-              addCoverage(monthEntry, startISO, endISO);
-              monthEntry.lastUpdated = Date.now();
-              if (!monthEntry.stockName && monthStockName) {
-                monthEntry.stockName = monthStockName;
-              }
-            } catch (error) {
-              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
-            }
-          }
-        }
-
-        const rowsForRange = (monthEntry.data || []).filter(
-          (row) =>
-            row &&
-            row.date >= monthInfo.rangeStartISO &&
-            row.date <= monthInfo.rangeEndISO,
-        );
-
-        const usedCache =
-          missingRanges.length === 0 || coveredLengthBefore > 0;
-
-        return {
-          rows: rowsForRange,
-          sourceFlags: Array.from(monthSourceFlags),
-          stockName: monthStockName,
-          usedCache,
-        };
-      } finally {
-        completed += 1;
-        const progress = 10 + Math.round((completed / months.length) * 35);
-        self.postMessage({
-          type: "progress",
-          progress,
-          message: `處理 ${monthInfo.label} 數據...`,
-        });
-      }
-    },
-  );
+  const rows = Array.isArray(payload?.aaData)
+    ? payload.aaData
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
 
   const normalizedRows = [];
-  const sourceFlags = new Set();
-  let stockName = "";
-  monthResults.forEach((res) => {
-    if (!res) return;
-    if (res.stockName && !stockName) stockName = res.stockName;
-    if (Array.isArray(res.sourceFlags)) {
-      res.sourceFlags.forEach((flag) => {
-        if (flag) sourceFlags.add(flag);
-      });
+  const isTpex = marketKey === "TPEX";
+  rows.forEach((row) => {
+    const normalizedRow = normalizeProxyRow(row, isTpex, startDateObj, endDateObj);
+    if (normalizedRow) {
+      normalizedRows.push(normalizedRow);
     }
-    if (res.usedCache) {
-      sourceFlags.add("Worker月度快取");
-    }
-    (res.rows || []).forEach((row) => {
-      const normalized = normalizeProxyRow(
-        row,
-        isTpex,
-        startDateObj,
-        endDateObj,
-      );
-      if (normalized) normalizedRows.push(normalized);
-    });
   });
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
+
+  const sourceFlags = new Set();
+  if (payload?.dataSource) {
+    sourceFlags.add(payload.dataSource);
+  }
+  if (Array.isArray(payload?.summary?.sources)) {
+    payload.summary.sources.forEach((flag) => {
+      if (flag) sourceFlags.add(flag);
+    });
+  }
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     isTpex ? "TPEX" : "TWSE",
   );
+  const stockName = payload?.stockName || stockNo;
 
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
-    stockName: stockName || stockNo,
+    stockName,
     dataSource: dataSourceLabel,
     timestamp: Date.now(),
     meta: { stockNo, startDate, endDate, priceMode: getPriceModeKey(adjusted) },
@@ -644,7 +317,7 @@ async function fetchStockData(stockNo, startDate, endDate, marketType, options =
   return {
     data: deduped,
     dataSource: dataSourceLabel,
-    stockName: stockName || stockNo,
+    stockName,
   };
 }
 
