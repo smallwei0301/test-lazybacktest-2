@@ -1,11 +1,11 @@
-// netlify/functions/adjusted-price-proxy.js (v1.6.2 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241110A
+// netlify/functions/adjusted-price-proxy.js (v1.6.3 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241112A
 import fetch from 'node-fetch';
 import * as twseProxyModule from './twse-proxy.js';
 import * as tpexProxyModule from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241110A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6.2]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241112A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6.3]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
 const FINMIND_MAX_RETRIES = 3;
@@ -17,20 +17,55 @@ const runtimeOverrides =
   (typeof globalThis !== 'undefined' && globalThis?.[TEST_OVERRIDE_FLAG]) || null;
 const runtimeFetch = runtimeOverrides?.fetch || fetch;
 
-function resolveProxyHandler(candidate) {
+function resolveProxyHandler(candidate, visited = new Set()) {
   if (!candidate) return null;
   if (typeof candidate === 'function') return candidate;
-  if (typeof candidate?.handler === 'function') return candidate.handler;
-  if (typeof candidate?.default === 'function') return candidate.default;
+  if (typeof candidate !== 'object') return null;
+  if (visited.has(candidate)) return null;
+  visited.add(candidate);
+
+  const prioritisedKeys = ['handler', 'default', 'handler2', 'proxyHandler'];
+  for (const key of prioritisedKeys) {
+    if (!(key in candidate)) continue;
+    const value = candidate[key];
+    if (typeof value === 'function') return value;
+    const nested = resolveProxyHandler(value, visited);
+    if (nested) return nested;
+  }
+
+  for (const [key, value] of Object.entries(candidate)) {
+    if (typeof value === 'function' && /^handler/i.test(key)) {
+      return value;
+    }
+  }
+
+  for (const value of Object.values(candidate)) {
+    if (typeof value === 'function') {
+      return value;
+    }
+  }
+
+  for (const value of Object.values(candidate)) {
+    const nested = resolveProxyHandler(value, visited);
+    if (nested) return nested;
+  }
+
   return null;
 }
 
-const runtimeTwseProxy = resolveProxyHandler(
-  runtimeOverrides?.twseProxy ?? twseProxyModule,
-);
-const runtimeTpexProxy = resolveProxyHandler(
-  runtimeOverrides?.tpexProxy ?? tpexProxyModule,
-);
+const twseProxyCandidate = runtimeOverrides?.twseProxy ?? twseProxyModule;
+const runtimeTwseProxy = resolveProxyHandler(twseProxyCandidate);
+const twseProxyKeys =
+  twseProxyCandidate && typeof twseProxyCandidate === 'object'
+    ? Object.keys(twseProxyCandidate)
+    : undefined;
+
+const tpexProxyCandidate = runtimeOverrides?.tpexProxy ?? tpexProxyModule;
+const runtimeTpexProxy = resolveProxyHandler(tpexProxyCandidate);
+const tpexProxyKeys =
+  tpexProxyCandidate && typeof tpexProxyCandidate === 'object'
+    ? Object.keys(tpexProxyCandidate)
+    : undefined;
 const runtimeDelay = runtimeOverrides?.delay || delay;
 
 function logDebug(message, context = {}) {
@@ -658,16 +693,14 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   const params = new URLSearchParams({ stockNo, start: startISO, end: endISO });
   const path = market === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
   const proxyHandler = market === 'tpex' ? runtimeTpexProxy : runtimeTwseProxy;
+  const proxyKeys = market === 'tpex' ? tpexProxyKeys : twseProxyKeys;
   const url = `https://internal/${path}?${params.toString()}`;
   if (typeof proxyHandler !== 'function') {
     logDebug('fetchRawSeries.invalidHandler', {
       stockNo,
       market,
       handlerType: typeof proxyHandler,
-      availableKeys:
-        proxyHandler && typeof proxyHandler === 'object'
-          ? Object.keys(proxyHandler)
-          : undefined,
+      availableKeys: proxyKeys,
     });
     throw new Error('原始資料服務處理函式無效');
   }

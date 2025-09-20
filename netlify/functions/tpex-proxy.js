@@ -1,8 +1,9 @@
-// netlify/functions/tpex-proxy.js (v10.6 - FinMind primary with adaptive retries)
+// netlify/functions/tpex-proxy.js (v10.7 - FinMind primary with adaptive retries)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TPEX-YAHOO-20241022A
+// Patch Tag: LB-TPEX-FINMIND-20241112A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -11,6 +12,10 @@ const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
+const FINMIND_TIMEOUT_MS = 9000;
+const FINMIND_MAX_RETRIES = 3;
+const FINMIND_RETRY_BASE_DELAY_MS = 400;
+const FINMIND_RETRY_BACKOFF = 2;
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -34,7 +39,7 @@ function obtainStore(name) {
     } catch (error) {
         if (error?.name === 'MissingBlobsEnvironmentError') {
             if (!inMemoryBlobStores.has(name)) {
-                console.warn('[TPEX Proxy v10.4] Netlify Blobs 未配置，使用記憶體快取模擬。');
+                console.warn('[TPEX Proxy v10.7] Netlify Blobs 未配置，使用記憶體快取模擬。');
                 inMemoryBlobStores.set(name, createMemoryBlobStore());
             }
             return inMemoryBlobStores.get(name);
@@ -135,6 +140,42 @@ function safeRound(value) {
     return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
 }
 
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryFinMindStatus(responseStatus, payloadStatus) {
+    const httpStatus = Number(responseStatus) || 0;
+    const apiStatus = Number(payloadStatus) || 0;
+    if ([408, 425, 429].includes(httpStatus) || [408, 425, 429].includes(apiStatus)) {
+        return true;
+    }
+    if (httpStatus >= 500) return true;
+    if (apiStatus >= 500) return true;
+    return false;
+}
+
+function shouldRetryFinMindError(error) {
+    if (!error) return false;
+    if (error.name === 'AbortError') return true;
+    const code = typeof error.code === 'string' ? error.code.toUpperCase() : '';
+    if (['ETIMEDOUT', 'ECONNRESET', 'ECONNABORTED', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) {
+        return true;
+    }
+    const message = String(error.message || error).toLowerCase();
+    return message.includes('timeout') || message.includes('逾時') || message.includes('network');
+}
+
+async function fetchWithTimeout(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function readCache(store, cacheKey) {
     const memoryHit = inMemoryCache.get(cacheKey);
     if (memoryHit && Date.now() - memoryHit.timestamp < TPEX_CACHE_TTL_MS) {
@@ -149,9 +190,9 @@ async function readCache(store, cacheKey) {
         }
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TPEX Proxy v10.2] Blobs 流量受限，改用記憶體快取。');
+            console.warn('[TPEX Proxy v10.7] Blobs 流量受限，改用記憶體快取。');
         } else {
-            console.error('[TPEX Proxy v10.2] 讀取 Blobs 時發生錯誤:', error);
+            console.error('[TPEX Proxy v10.7] 讀取 Blobs 時發生錯誤:', error);
         }
     }
     return null;
@@ -164,9 +205,9 @@ async function writeCache(store, cacheKey, payload) {
         await store.setJSON(cacheKey, record);
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TPEX Proxy v10.2] Blobs 流量受限，僅寫入記憶體快取。');
+            console.warn('[TPEX Proxy v10.7] Blobs 流量受限，僅寫入記憶體快取。');
         } else {
-            console.error('[TPEX Proxy v10.2] 寫入 Blobs 失敗:', error);
+            console.error('[TPEX Proxy v10.7] 寫入 Blobs 失敗:', error);
         }
     }
 }
@@ -186,7 +227,8 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
     if (startISO && endISO && startISO > endISO) {
         startISO = endISO;
     }
-    const requestFinMind = async (omitRange = false) => {
+
+    const requestFinMind = async (omitRange = false, attempt = 1) => {
         const url = new URL('https://api.finmindtrade.com/api/v4/data');
         url.searchParams.set('dataset', dataset);
         url.searchParams.set('data_id', stockNo);
@@ -197,29 +239,68 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
             if (endISO) url.searchParams.set('end_date', endISO);
         }
 
-        console.log(`[TPEX Proxy v10.5] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo}`);
-        const response = await fetch(url.toString());
-        const rawText = await response.text();
-        let payload = null;
+        console.log(
+            `[TPEX Proxy v10.7] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo} — 第 ${attempt} 次`,
+            omitRange
+                ? {}
+                : {
+                      startISO,
+                      endISO,
+                  },
+        );
+
+        let response;
+        let rawText = '';
         try {
-            payload = rawText ? JSON.parse(rawText) : null;
-        } catch (parseError) {
-            console.warn('[TPEX Proxy v10.5] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
+            response = await fetchWithTimeout(url.toString(), FINMIND_TIMEOUT_MS);
+            rawText = await response.text();
+        } catch (error) {
+            const baseMessage = error?.name === 'AbortError' ? 'FinMind 請求逾時' : error?.message || 'FinMind 請求失敗';
+            const formattedMessage = normaliseFinMindErrorMessage(baseMessage);
+            if (attempt < FINMIND_MAX_RETRIES && shouldRetryFinMindError(error)) {
+                const delayMs = FINMIND_RETRY_BASE_DELAY_MS * Math.pow(FINMIND_RETRY_BACKOFF, attempt - 1);
+                console.warn(
+                    `[TPEX Proxy v10.7] FinMind 請求失敗，${delayMs}ms 後第 ${attempt + 1} 次重試。原因: ${formattedMessage}`,
+                );
+                await delay(delayMs);
+                return requestFinMind(omitRange, attempt + 1);
+            }
+            throw new Error(formattedMessage);
         }
 
-        const responseStatus = response.status;
-        const payloadStatus = payload?.status;
+        let payload = null;
+        if (rawText) {
+            try {
+                payload = JSON.parse(rawText);
+            } catch (parseError) {
+                console.warn('[TPEX Proxy v10.7] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
+            }
+        }
+
+        const responseStatus = response?.status ?? 0;
+        const payloadStatus = payload?.status ?? 0;
         const payloadMessage = payload?.msg || '';
 
-        const isSuccessful = response.ok && payloadStatus === 200 && Array.isArray(payload?.data);
+        const isSuccessful = response?.ok && payloadStatus === 200 && Array.isArray(payload?.data);
         if (isSuccessful) {
             return payload.data;
         }
 
-        const combinedMessage = payloadMessage || `FinMind HTTP ${responseStatus}`;
+        const combinedMessage = payloadMessage || `FinMind HTTP ${responseStatus || '無回應'}`;
         if (!omitRange && (responseStatus === 400 || payloadStatus === 400)) {
-            console.warn(`[TPEX Proxy v10.5] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`);
-            return requestFinMind(true);
+            console.warn(
+                `[TPEX Proxy v10.7] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`,
+            );
+            return requestFinMind(true, attempt);
+        }
+
+        if (attempt < FINMIND_MAX_RETRIES && shouldRetryFinMindStatus(responseStatus, payloadStatus)) {
+            const delayMs = FINMIND_RETRY_BASE_DELAY_MS * Math.pow(FINMIND_RETRY_BACKOFF, attempt - 1);
+            console.warn(
+                `[TPEX Proxy v10.7] FinMind 回應 ${responseStatus || payloadStatus}，${delayMs}ms 後第 ${attempt + 1} 次重試。原因: ${combinedMessage}`,
+            );
+            await delay(delayMs);
+            return requestFinMind(omitRange, attempt + 1);
         }
 
         throw new Error(normaliseFinMindErrorMessage(combinedMessage));
@@ -310,7 +391,7 @@ function buildYahooPeriodRange(startDate, endDate) {
 
 async function fetchYahooDaily(stockNo, startDate, endDate) {
     const symbol = `${stockNo}.TWO`;
-    console.log(`[TPEX Proxy v10.2] 嘗試 Yahoo Finance: ${symbol}`);
+    console.log(`[TPEX Proxy v10.7] 嘗試 Yahoo Finance: ${symbol}`);
     const { period1, period2 } = buildYahooPeriodRange(startDate, endDate);
     const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
     url.searchParams.set('interval', '1d');
@@ -530,7 +611,7 @@ export default async (req) => {
                         if (payload) sourceFlags.add(finmindLabel);
                         finmindHydrated = true;
                     } catch (error) {
-                        console.error('[TPEX Proxy v10.2] 強制 FinMind 失敗:', error);
+                        console.error('[TPEX Proxy v10.7] 強制 FinMind 失敗:', error);
                         return new Response(JSON.stringify({ error: `FinMind 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 } else if (forcedSource === 'yahoo') {
@@ -559,7 +640,7 @@ export default async (req) => {
                             sourceFlags.add(yahooLabel);
                         }
                     } catch (error) {
-                        console.error('[TPEX Proxy v10.2] 強制 Yahoo 失敗:', error);
+                        console.error('[TPEX Proxy v10.7] 強制 Yahoo 失敗:', error);
                         return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 }
@@ -577,7 +658,7 @@ export default async (req) => {
                                 );
                                 yahooHydrated = true;
                             } catch (error) {
-                                console.error('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error);
+                                console.error('[TPEX Proxy v10.7] Yahoo 還原來源失敗:', error);
                                 return new Response(
                                     JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${error.message}` }),
                                     { status: 502 },
@@ -600,7 +681,7 @@ export default async (req) => {
                                     endDate.toISOString().split('T')[0],
                                 );
                             } catch (error) {
-                                console.warn('[TPEX Proxy v10.2] FinMind 主來源失敗:', error.message);
+                                console.warn('[TPEX Proxy v10.7] FinMind 主來源失敗:', error.message);
                                 try {
                                 yahooLabel = await persistYahooEntries(
                                     store,
@@ -609,7 +690,7 @@ export default async (req) => {
                                     false,
                                 );
                                 } catch (yahooError) {
-                                    console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
+                                    console.error('[TPEX Proxy v10.7] Yahoo 備援失敗:', yahooError);
                                     return new Response(
                                         JSON.stringify({ error: `Yahoo 備援來源取得失敗: ${yahooError.message}` }),
                                         { status: 502 },
@@ -671,7 +752,7 @@ export default async (req) => {
             headers: { 'Content-Type': 'application/json' },
         });
     } catch (error) {
-        console.error('[TPEX Proxy v10.2] 發生未預期錯誤:', error);
+        console.error('[TPEX Proxy v10.7] 發生未預期錯誤:', error);
         return new Response(JSON.stringify({ error: error.message || 'TPEX Proxy error' }), { status: 500 });
     }
 };

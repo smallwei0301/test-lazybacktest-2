@@ -403,3 +403,8 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-11-10 — LB-ADJ-ENDPOINT-20241110A
 - AdjustedPriceProxy v1.6.2 新增代理函式解析器，支援 Netlify 打包後以 `handler` 或 `default` 匯出的 TWSE/TPEX 模組，避免備援 API 因匯出型別差異回報「原始資料服務處理函式無效」。
 - 當檢測到代理函式不存在時，於除錯日誌輸出模組鍵值資訊，加速追蹤 Lambda 回傳 0 狀態碼的錯誤來源。
+
+### 2024-11-12 — LB-ADJ-ENDPOINT-20241112A / LB-TWSE-FINMIND-20241112A / LB-TPEX-FINMIND-20241112A
+- AdjustedPriceProxy v1.6.3 將代理解析改為遞迴掃描 `handler`、`default`、`handler2` 等屬性並回報原始模組鍵值，避免 Netlify 打包後再次出現「原始資料服務處理函式無效」。
+- TWSE Proxy v10.7 與 TPEX Proxy v10.7 對 FinMind 備援加入逾時控制、指數退避重試與詳細日誌，遇到 5xx/504 或網路逾時時會自動重試並記錄下一次嘗試時機。
+- FinMind 失敗後回傳的錯誤訊息統一透過 `normaliseFinMindErrorMessage` 正規化，確保 Data Source Tester 能取得具體診斷資訊持續追蹤備援來源狀態。

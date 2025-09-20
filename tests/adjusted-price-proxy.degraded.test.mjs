@@ -75,5 +75,5 @@ test('Adjusted price proxy returns degraded payload when FinMind fetch fails', a
   );
   assert.equal(body.aaData.length, rawRows.length);
   assert.equal(body.adjustments.length, 0);
-  assert.equal(body.version, 'LB-ADJ-ENDPOINT-20241110A');
+  assert.equal(body.version, 'LB-ADJ-ENDPOINT-20241112A');
 });
