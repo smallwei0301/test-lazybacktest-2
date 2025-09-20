@@ -1,10 +1,18 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.1 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.2 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
+// Patch Tag: LB-ADJ-COMPOSER-20241024A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241022A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241024A';
+
+const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
+const FINMIND_MAX_SPAN_DAYS = 120;
+const FINMIND_DIVIDEND_SPAN_DAYS = 365;
+const FINMIND_RETRY_ATTEMPTS = 3;
+const FINMIND_RETRY_BASE_DELAY_MS = 350;
+const FINMIND_SEGMENT_COOLDOWN_MS = 160;
 
 function jsonResponse(statusCode, payload, headers = {}) {
   return {
@@ -19,6 +27,50 @@ function jsonResponse(statusCode, payload, headers = {}) {
 
 function pad2(value) {
   return String(value).padStart(2, '0');
+}
+
+function delay(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function formatISODateFromDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const year = date.getUTCFullYear();
+  const month = pad2(date.getUTCMonth() + 1);
+  const day = pad2(date.getUTCDate());
+  return `${year}-${month}-${day}`;
+}
+
+function enumerateDateSpans(startDate, endDate, maxSpanDays) {
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return [];
+  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) return [];
+  if (startDate > endDate) return [];
+  const spanDays = Math.max(1, Math.floor(maxSpanDays));
+  const spans = [];
+  const cursor = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+  ));
+  const last = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate()));
+  while (cursor <= last) {
+    const spanStart = new Date(cursor.getTime());
+    const spanEnd = new Date(cursor.getTime());
+    spanEnd.setUTCDate(spanEnd.getUTCDate() + spanDays - 1);
+    if (spanEnd > last) {
+      spanEnd.setTime(last.getTime());
+    }
+    spans.push({
+      startISO: formatISODateFromDate(spanStart),
+      endISO: formatISODateFromDate(spanEnd),
+    });
+    cursor.setTime(spanEnd.getTime());
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return spans;
 }
 
 function toISODate(value) {
@@ -296,47 +348,97 @@ async function fetchTwseRange(stockNo, startDate, endDate) {
   return { stockName, rows: combined, priceSource: 'TWSE (原始)' };
 }
 
+async function executeFinMindQuery(params, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts ?? FINMIND_RETRY_ATTEMPTS));
+  const baseDelay = Math.max(0, Number(options.baseDelayMs ?? FINMIND_RETRY_BASE_DELAY_MS));
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const url = new URL(FINMIND_BASE_URL);
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          url.searchParams.set(key, String(value));
+        }
+      });
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        const error = new Error(`FinMind HTTP ${response.status}`);
+        error.statusCode = response.status;
+        throw error;
+      }
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) {
+        break;
+      }
+      const waitMs = Math.min(1800, baseDelay * (attempt + 1) + Math.random() * 400);
+      await delay(waitMs);
+    }
+  }
+  throw lastError || new Error('FinMind 查詢失敗');
+}
+
 async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
   const token = process.env.FINMIND_TOKEN;
   if (!token) {
     throw new Error('未設定 FinMind Token');
   }
-  const url = new URL('https://api.finmindtrade.com/api/v4/data');
-  url.searchParams.set('dataset', 'TaiwanStockPrice');
-  url.searchParams.set('data_id', stockNo);
-  url.searchParams.set('start_date', startISO);
-  url.searchParams.set('end_date', endISO);
-  url.searchParams.set('token', token);
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`FinMind HTTP ${response.status}`);
+  const startDate = new Date(startISO);
+  const endDate = new Date(endISO);
+  const spans = enumerateDateSpans(startDate, endDate, FINMIND_MAX_SPAN_DAYS);
+  if (spans.length === 0) {
+    return { stockName: stockNo, rows: [], priceSource: label || 'FinMind (原始)' };
   }
-  const json = await response.json();
-  if (json?.status !== 200 || !Array.isArray(json?.data)) {
-    throw new Error(`FinMind 回應錯誤: ${json?.msg || 'unknown error'}`);
-  }
-  const rows = [];
+  const rowsMap = new Map();
   let stockName = stockNo;
-  for (const item of json.data) {
-    const isoDate = toISODate(item.date);
-    if (!isoDate) continue;
-    if (item.stock_name && stockName === stockNo) {
-      stockName = item.stock_name;
+  for (const [index, span] of spans.entries()) {
+    const urlParams = {
+      dataset: 'TaiwanStockPrice',
+      data_id: stockNo,
+      start_date: span.startISO,
+      end_date: span.endISO,
+      token,
+    };
+    let json;
+    try {
+      json = await executeFinMindQuery(urlParams);
+    } catch (error) {
+      const enriched = new Error(
+        `[FinMind 價格段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
+      );
+      enriched.original = error;
+      throw enriched;
     }
-    rows.push({
-      date: isoDate,
-      open: parseNumber(item.open ?? item.Open ?? item.Opening),
-      high: parseNumber(item.max ?? item.high ?? item.High),
-      low: parseNumber(item.min ?? item.low ?? item.Low),
-      close: parseNumber(item.close ?? item.Close),
-      change: parseNumber(item.spread ?? item.change ?? item.Change) ?? 0,
-      volume: parseNumber(item.Trading_Volume ?? item.volume ?? item.Volume) ?? 0,
-      stockName,
-    });
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      throw new Error(`FinMind 回應錯誤: ${json?.msg || 'unknown error'}`);
+    }
+    for (const item of json.data) {
+      const isoDate = toISODate(item.date);
+      if (!isoDate) continue;
+      if (item.stock_name && stockName === stockNo) {
+        stockName = item.stock_name;
+      }
+      rowsMap.set(isoDate, {
+        date: isoDate,
+        open: parseNumber(item.open ?? item.Open ?? item.Opening),
+        high: parseNumber(item.max ?? item.high ?? item.High),
+        low: parseNumber(item.min ?? item.low ?? item.Low),
+        close: parseNumber(item.close ?? item.Close),
+        change: parseNumber(item.spread ?? item.change ?? item.Change) ?? 0,
+        volume: parseNumber(item.Trading_Volume ?? item.volume ?? item.Volume) ?? 0,
+      });
+    }
+    if (spans.length > 1 && index < spans.length - 1) {
+      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+    }
   }
-  rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const finalStockName = stockName || stockNo;
+  const rows = Array.from(rowsMap.values())
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .map((row) => ({ ...row, stockName: finalStockName }));
   const priceSource = label || 'FinMind (原始)';
-  return { stockName, rows, priceSource };
+  return { stockName: finalStockName, rows, priceSource };
 }
 
 async function fetchDividendSeries(stockNo, startISO, endISO) {
@@ -344,21 +446,40 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
   if (!token) {
     throw new Error('未設定 FinMind Token');
   }
-  const url = new URL('https://api.finmindtrade.com/api/v4/data');
-  url.searchParams.set('dataset', 'TaiwanStockDividend');
-  url.searchParams.set('data_id', stockNo);
-  url.searchParams.set('start_date', startISO);
-  url.searchParams.set('end_date', endISO);
-  url.searchParams.set('token', token);
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`FinMind Dividend HTTP ${response.status}`);
+  const startDate = new Date(startISO);
+  const endDate = new Date(endISO);
+  const spans = enumerateDateSpans(startDate, endDate, FINMIND_DIVIDEND_SPAN_DAYS);
+  if (spans.length === 0) {
+    return [];
   }
-  const json = await response.json();
-  if (json?.status !== 200 || !Array.isArray(json?.data)) {
-    throw new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+  const combined = [];
+  for (const [index, span] of spans.entries()) {
+    const urlParams = {
+      dataset: 'TaiwanStockDividend',
+      data_id: stockNo,
+      start_date: span.startISO,
+      end_date: span.endISO,
+      token,
+    };
+    let json;
+    try {
+      json = await executeFinMindQuery(urlParams);
+    } catch (error) {
+      const enriched = new Error(
+        `[FinMind 股利段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
+      );
+      enriched.original = error;
+      throw enriched;
+    }
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      throw new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+    }
+    combined.push(...json.data);
+    if (spans.length > 1 && index < spans.length - 1) {
+      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+    }
   }
-  return json.data;
+  return combined;
 }
 
 function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendCount) {
