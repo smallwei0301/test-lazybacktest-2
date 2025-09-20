@@ -1,18 +1,22 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.2 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.3 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
 // Patch Tag: LB-ADJ-COMPOSER-20241024A
+// Patch Tag: LB-ADJ-COMPOSER-20241027A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241024A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241027A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
+const FINMIND_MIN_PRICE_SPAN_DAYS = 30;
 const FINMIND_DIVIDEND_SPAN_DAYS = 365;
+const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 120;
 const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
+const FINMIND_SPLITTABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
 
 function jsonResponse(statusCode, payload, headers = {}) {
   return {
@@ -71,6 +75,74 @@ function enumerateDateSpans(startDate, endDate, maxSpanDays) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return spans;
+}
+
+function countSpanDays(span) {
+  if (!span?.startISO || !span?.endISO) return 0;
+  const start = new Date(`${span.startISO}T00:00:00Z`);
+  const end = new Date(`${span.endISO}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return 0;
+  }
+  const diffMs = end.getTime() - start.getTime();
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function splitSpan(span) {
+  const totalDays = countSpanDays(span);
+  if (totalDays <= 1) return null;
+  const start = new Date(`${span.startISO}T00:00:00Z`);
+  const midOffset = Math.floor(totalDays / 2);
+  if (midOffset <= 0) return null;
+  const firstEnd = new Date(start.getTime());
+  firstEnd.setUTCDate(firstEnd.getUTCDate() + midOffset - 1);
+  const secondStart = new Date(firstEnd.getTime());
+  secondStart.setUTCDate(secondStart.getUTCDate() + 1);
+  const end = new Date(`${span.endISO}T00:00:00Z`);
+  if (secondStart > end) return null;
+  return [
+    {
+      startISO: formatISODateFromDate(start),
+      endISO: formatISODateFromDate(firstEnd),
+    },
+    {
+      startISO: formatISODateFromDate(secondStart),
+      endISO: formatISODateFromDate(end),
+    },
+  ];
+}
+
+function extractStatusCode(error) {
+  if (!error) return undefined;
+  const statusLike = error.statusCode ?? error.status ?? error.code;
+  if (statusLike !== undefined && statusLike !== null) {
+    const numeric = Number(statusLike);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  if (error.original) {
+    const originalStatus = extractStatusCode(error.original);
+    if (Number.isFinite(originalStatus)) {
+      return originalStatus;
+    }
+  }
+  return undefined;
+}
+
+function shouldSplitSpan(error, spanDays, minSpanDays) {
+  if (!Number.isFinite(spanDays) || spanDays <= minSpanDays) return false;
+  const statusCode = extractStatusCode(error);
+  if (statusCode && FINMIND_SPLITTABLE_STATUS.has(statusCode)) {
+    return true;
+  }
+  const message = String(error?.message || '').toLowerCase();
+  if (!statusCode && message) {
+    if (message.includes('timeout') || message.includes('timed out')) return true;
+    if (message.includes('network') || message.includes('fetch failed')) return true;
+    if (message.includes('socket hang up') || message.includes('aborted')) return true;
+  }
+  return false;
 }
 
 function toISODate(value) {
@@ -392,7 +464,10 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
   }
   const rowsMap = new Map();
   let stockName = stockNo;
-  for (const [index, span] of spans.entries()) {
+  const queue = [...spans];
+  while (queue.length > 0) {
+    const span = queue.shift();
+    const spanDays = countSpanDays(span);
     const urlParams = {
       dataset: 'TaiwanStockPrice',
       data_id: stockNo,
@@ -404,14 +479,43 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
     try {
       json = await executeFinMindQuery(urlParams);
     } catch (error) {
+      if (shouldSplitSpan(error, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              error.message || error
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
       const enriched = new Error(
         `[FinMind 價格段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
       );
       enriched.original = error;
+      enriched.statusCode = extractStatusCode(error);
       throw enriched;
     }
     if (json?.status !== 200 || !Array.isArray(json?.data)) {
-      throw new Error(`FinMind 回應錯誤: ${json?.msg || 'unknown error'}`);
+      const payloadError = new Error(`FinMind 回應錯誤: ${json?.msg || 'unknown error'}`);
+      payloadError.statusCode = json?.status;
+      if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              payloadError.message || payloadError
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      throw payloadError;
     }
     for (const item of json.data) {
       const isoDate = toISODate(item.date);
@@ -429,7 +533,7 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
         volume: parseNumber(item.Trading_Volume ?? item.volume ?? item.Volume) ?? 0,
       });
     }
-    if (spans.length > 1 && index < spans.length - 1) {
+    if (queue.length > 0) {
       await delay(FINMIND_SEGMENT_COOLDOWN_MS);
     }
   }
@@ -453,7 +557,10 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
     return [];
   }
   const combined = [];
-  for (const [index, span] of spans.entries()) {
+  const queue = [...spans];
+  while (queue.length > 0) {
+    const span = queue.shift();
+    const spanDays = countSpanDays(span);
     const urlParams = {
       dataset: 'TaiwanStockDividend',
       data_id: stockNo,
@@ -465,17 +572,46 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
     try {
       json = await executeFinMindQuery(urlParams);
     } catch (error) {
+      if (shouldSplitSpan(error, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 股利段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              error.message || error
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
       const enriched = new Error(
         `[FinMind 股利段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
       );
       enriched.original = error;
+      enriched.statusCode = extractStatusCode(error);
       throw enriched;
     }
     if (json?.status !== 200 || !Array.isArray(json?.data)) {
-      throw new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+      const payloadError = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+      payloadError.statusCode = json?.status;
+      if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 股利段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              payloadError.message || payloadError
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      throw payloadError;
     }
     combined.push(...json.data);
-    if (spans.length > 1 && index < spans.length - 1) {
+    if (queue.length > 0) {
       await delay(FINMIND_SEGMENT_COOLDOWN_MS);
     }
   }
