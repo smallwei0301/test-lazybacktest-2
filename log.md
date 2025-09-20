@@ -374,3 +374,8 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-10-22 — LB-TWSE-YAHOO-20241022A / LB-TPEX-YAHOO-20241022A
 - TWSE Proxy v10.6 與 TPEX Proxy v10.6 在強制 Yahoo 還原來源時，改為共用單次抓取結果並優先讀取快取，避免跨月重複呼叫 Yahoo API 造成 504 超時。
 - Yahoo 強制測試若命中既有快取，會沿用快取來源標籤，確保資料來源摘要與回測結果一致。
+
+### 2024-10-25 — LB-ADJ-ENDPOINT-20241025B
+- AdjustedPriceProxy v1.2 將 FinMind 股利抓取拆分為 5 年區間的序列請求，並加入逾時計時與段落間緩衝，避免一次抓取 40 年資料導致 Netlify Lambda 逾時 (HTTP 502)。
+- 新增 proxy Request 建構器，確保於 Netlify Functions 內部呼叫 TWSE/TPEX 代理時能附帶固定 User-Agent 並相容於 Node 18 的 Request 物件。
+- 除錯日誌輸出補充 start/end 區間與 FinMind 段落筆數，方便追蹤備援來源的實際載入耗時。

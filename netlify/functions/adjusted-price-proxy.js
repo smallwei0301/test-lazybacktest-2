@@ -1,11 +1,13 @@
-// netlify/functions/adjusted-price-proxy.js (v1.1 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241015A
+// netlify/functions/adjusted-price-proxy.js (v1.2 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241025B
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241015A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.1]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241025B';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.2]';
+const FINMIND_SEGMENT_YEARS = 5;
+const FINMIND_TIMEOUT_MS = 9000;
 
 function logDebug(message, context = {}) {
   try {
@@ -32,6 +34,21 @@ function jsonResponse(statusCode, payload) {
 
 function pad2(value) {
   return String(value).padStart(2, '0');
+}
+
+function isoToUTCDate(value) {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const [year, month, day] = trimmed.split('-').map((part) => Number(part));
+  if (![year, month, day].every((num) => Number.isFinite(num))) return null;
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return Number.isNaN(utc.getTime()) ? null : utc;
+}
+
+function utcDateToISO(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
 function toISODate(value) {
@@ -86,6 +103,17 @@ function parseNumber(value) {
 function safeRound(value) {
   if (!Number.isFinite(value)) return null;
   return Number(Math.round(value * 10000) / 10000);
+}
+
+function createProxyRequest(url) {
+  try {
+    if (typeof Request === 'function') {
+      return new Request(url, { headers: { 'User-Agent': 'AdjustedPriceProxy/1.2' } });
+    }
+  } catch (error) {
+    // ignore and fallback to plain object
+  }
+  return { url };
 }
 
 function applyFactor(value, factor) {
@@ -300,32 +328,114 @@ function buildAdjustedAaData(adjustedRows) {
   });
 }
 
-async function fetchDividendSeries(stockNo, endISO) {
-  logDebug('fetchDividendSeries.start', { stockNo, endISO });
-  const url = new URL('https://api.finmindtrade.com/api/v4/data');
-  url.searchParams.set('dataset', 'TaiwanStockDividend');
-  url.searchParams.set('data_id', stockNo);
-  url.searchParams.set('start_date', '1980-01-01');
-  url.searchParams.set('end_date', endISO);
+function buildDividendSegments(startISO, endISO) {
+  const startDate = isoToUTCDate(startISO);
+  const endDate = isoToUTCDate(endISO);
+  if (!startDate || !endDate || endDate < startDate) {
+    return [
+      {
+        start: startISO,
+        end: endISO,
+      },
+    ];
+  }
+
+  const segments = [];
+  let cursor = new Date(startDate.getTime());
+  while (cursor <= endDate) {
+    const segStart = new Date(cursor.getTime());
+    const segEnd = new Date(cursor.getTime());
+    segEnd.setUTCFullYear(segEnd.getUTCFullYear() + FINMIND_SEGMENT_YEARS);
+    segEnd.setUTCDate(segEnd.getUTCDate() - 1);
+    if (segEnd > endDate) {
+      segEnd.setTime(endDate.getTime());
+    }
+
+    const startLabel = utcDateToISO(segStart) || startISO;
+    const endLabel = utcDateToISO(segEnd) || endISO;
+    segments.push({ start: startLabel, end: endLabel });
+
+    segEnd.setUTCDate(segEnd.getUTCDate() + 1);
+    cursor = new Date(segEnd.getTime());
+  }
+
+  return segments;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = FINMIND_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('FinMind Dividend 來源逾時，請稍後再試');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchDividendSeries(stockNo, startISO, endISO) {
+  const normalizedStart = toISODate(startISO) || '1980-01-01';
+  const normalizedEnd = toISODate(endISO) || normalizedStart;
+  const segments = buildDividendSegments(normalizedStart, normalizedEnd);
+  logDebug('fetchDividendSeries.start', {
+    stockNo,
+    startISO: normalizedStart,
+    endISO: normalizedEnd,
+    segments: segments.length,
+  });
   const token = process.env.FINMIND_TOKEN;
-  if (token) {
-    url.searchParams.set('token', token);
+  const aggregated = [];
+
+  for (let i = 0; i < segments.length; i += 1) {
+    const segment = segments[i];
+    const url = new URL('https://api.finmindtrade.com/api/v4/data');
+    url.searchParams.set('dataset', 'TaiwanStockDividend');
+    url.searchParams.set('data_id', stockNo);
+    url.searchParams.set('start_date', segment.start);
+    url.searchParams.set('end_date', segment.end);
+    if (token) {
+      url.searchParams.set('token', token);
+    }
+    logDebug('fetchDividendSegment.request', {
+      stockNo,
+      segmentIndex: i + 1,
+      segments: segments.length,
+      start: segment.start,
+      end: segment.end,
+    });
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    const response = await fetchWithTimeout(url.toString());
+    if (!response.ok) {
+      const body = await response.text();
+      const error = new Error(
+        `FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`,
+      );
+      logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
+      throw error;
+    }
+    const json = await response.json();
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      const error = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+      logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
+      throw error;
+    }
+    aggregated.push(...json.data);
   }
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    const body = await response.text();
-    const error = new Error(`FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`);
-    logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
-    throw error;
-  }
-  const json = await response.json();
-  if (json?.status !== 200 || !Array.isArray(json?.data)) {
-    const error = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
-    logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
-    throw error;
-  }
-  logDebug('fetchDividendSeries.success', { stockNo, records: json.data.length });
-  return json.data;
+
+  logDebug('fetchDividendSeries.success', {
+    stockNo,
+    startISO: normalizedStart,
+    endISO: normalizedEnd,
+    segments: segments.length,
+    records: aggregated.length,
+  });
+  return aggregated;
 }
 
 async function fetchRawSeries(stockNo, startISO, endISO, market) {
@@ -334,7 +444,7 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   const path = market === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
   const handler = market === 'tpex' ? tpexProxy : twseProxy;
   const url = `https://internal/${path}?${params.toString()}`;
-  const response = await handler({ url });
+  const response = await handler(createProxyRequest(url));
   if (!response || typeof response.json !== 'function') {
     throw new Error('無法呼叫原始資料服務');
   }
@@ -390,7 +500,7 @@ export const handler = async (event) => {
 
     const [rawPayload, dividendRecords] = await Promise.all([
       fetchRawSeries(stockNo, startISO, endISO, normalizedMarket),
-      fetchDividendSeries(stockNo, endISO),
+      fetchDividendSeries(stockNo, startISO, endISO),
     ]);
 
     logDebug('handler.payload.ready', {
