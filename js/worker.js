@@ -1,7 +1,8 @@
 
-// --- Worker Data Acquisition & Cache (v10.9) ---
+// --- Worker Data Acquisition & Cache (v11.0) ---
 // Patch Tag: LB-DATAPIPE-20241007A
-const WORKER_DATA_VERSION = "v10.9";
+// Patch Tag: LB-ADJ-PIPE-20241013A
+const WORKER_DATA_VERSION = "v11.0";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -430,6 +431,7 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
+  const isTpex = marketKey === "TPEX";
   const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   if (cachedEntry) {
@@ -451,6 +453,58 @@ async function fetchStockData(
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
 
+  if (adjusted) {
+    const params = new URLSearchParams({
+      stockNo,
+      marketType: isTpex ? "tpex" : "twse",
+      startDate,
+      endDate,
+    });
+    self.postMessage({
+      type: "progress",
+      progress: 18,
+      message: "串接還原股價資料...",
+    });
+    const payload = await fetchWithAdaptiveRetry(`/api/adjusted-price?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (payload?.error) {
+      throw new Error(payload.error);
+    }
+    const rows = Array.isArray(payload?.aaData)
+      ? payload.aaData
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+    const normalizedRows = rows
+      .map((row) => normalizeProxyRow(row, isTpex, startDateObj, endDateObj))
+      .filter(Boolean);
+    self.postMessage({ type: "progress", progress: 52, message: "整理還原股價..." });
+    const deduped = dedupeAndSortData(normalizedRows);
+    const dataSourceLabel =
+      payload?.dataSource || `${isTpex ? "TPEX" : "TWSE"} + FinMind (Adjusted)`;
+    const resolvedStockName = payload?.stockName || stockNo;
+    setWorkerCacheEntry(marketKey, cacheKey, {
+      data: deduped,
+      stockName: resolvedStockName,
+      dataSource: dataSourceLabel,
+      timestamp: Date.now(),
+      meta: {
+        stockNo,
+        startDate,
+        endDate,
+        priceMode: getPriceModeKey(true),
+      },
+      priceMode: getPriceModeKey(true),
+    });
+    self.postMessage({ type: "progress", progress: 85, message: "還原股價準備完成..." });
+    return {
+      data: deduped,
+      dataSource: dataSourceLabel,
+      stockName: resolvedStockName,
+    };
+  }
+
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
     const entry = {
@@ -469,8 +523,7 @@ async function fetchStockData(
     setWorkerCacheEntry(marketKey, cacheKey, entry);
     return { data: [], dataSource: marketKey, stockName };
   }
-  const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
-  const isTpex = marketKey === "TPEX";
+  const proxyPath = isTpex ? "/api/tpex/" : "/api/twse/";
   const concurrencyLimit = isTpex ? 3 : 4;
   let completed = 0;
   const monthResults = await runWithConcurrency(
