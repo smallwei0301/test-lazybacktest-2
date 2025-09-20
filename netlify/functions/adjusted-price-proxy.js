@@ -1,16 +1,24 @@
-// netlify/functions/adjusted-price-proxy.js (v1.5 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241105A
+// netlify/functions/adjusted-price-proxy.js (v1.6 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241108A
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241105A';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.5]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241108A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.6]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
 const FINMIND_MAX_RETRIES = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 400;
 const FINMIND_RETRY_BACKOFF = 2;
+
+const TEST_OVERRIDE_FLAG = '__ADJUSTED_PRICE_PROXY_TEST_CONFIG__';
+const runtimeOverrides =
+  (typeof globalThis !== 'undefined' && globalThis?.[TEST_OVERRIDE_FLAG]) || null;
+const runtimeFetch = runtimeOverrides?.fetch || fetch;
+const runtimeTwseProxy = runtimeOverrides?.twseProxy || twseProxy;
+const runtimeTpexProxy = runtimeOverrides?.tpexProxy || tpexProxy;
+const runtimeDelay = runtimeOverrides?.delay || delay;
 
 function logDebug(message, context = {}) {
   try {
@@ -119,7 +127,7 @@ function normaliseStockRatio(value) {
 function createProxyRequest(url) {
   try {
     if (typeof Request === 'function') {
-      return new Request(url, { headers: { 'User-Agent': 'AdjustedPriceProxy/1.2' } });
+      return new Request(url, { headers: { 'User-Agent': 'AdjustedPriceProxy/1.6' } });
     }
   } catch (error) {
     // ignore and fallback to plain object
@@ -534,7 +542,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FINMIND_TIMEOUT_M
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await runtimeFetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error.name === 'AbortError') {
       const timeoutError = new Error('FinMind Dividend 來源逾時，請稍後再試');
@@ -616,7 +624,7 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
           throw error;
         }
         const delayMs = FINMIND_RETRY_BASE_DELAY_MS * (FINMIND_RETRY_BACKOFF ** (attempt - 1));
-        await delay(delayMs);
+        await runtimeDelay(delayMs);
       }
     }
     aggregated.push(...(segmentData || []));
@@ -636,7 +644,7 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   logDebug('fetchRawSeries.start', { stockNo, startISO, endISO, market });
   const params = new URLSearchParams({ stockNo, start: startISO, end: endISO });
   const path = market === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
-  const handler = market === 'tpex' ? tpexProxy : twseProxy;
+  const handler = market === 'tpex' ? runtimeTpexProxy : runtimeTwseProxy;
   const url = `https://internal/${path}?${params.toString()}`;
   const response = await handler(createProxyRequest(url));
   if (!response || typeof response.json !== 'function') {

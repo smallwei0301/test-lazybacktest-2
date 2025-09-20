@@ -391,3 +391,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 ### 2024-11-05 — LB-ADJ-ENDPOINT-20241105A
 - AdjustedPriceProxy v1.5 為 FinMind 股利抓取加入重試與指數回退機制，針對 5xx、逾時或網路錯誤自動補抓，降低備援端點出現 HTTP 502 的機率。
 - 若 FinMind 仍無法取得資料，會以 degraded 狀態回應原始行情並附帶 warnings，讓前端與營運能持續獲得 API 回應並保留除錯資訊。
+
+### 2024-11-08 — LB-ADJ-ENDPOINT-20241108A
+- AdjustedPriceProxy v1.6 加入測試覆寫注入機制，允許以模擬的 TWSE/TPEX/FinMind 回應執行自動化回歸測試。
+- 建立 node:test 驗證流程，確保 FinMind 失敗時會回傳 degraded warnings 與 diagnostics，方便持續追蹤備援 API 穩定度。
