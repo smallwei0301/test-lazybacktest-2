@@ -1,5 +1,6 @@
-// netlify/functions/tpex-proxy.js (v10.4 - FinMind primary with range-limited Yahoo fallback)
+// netlify/functions/tpex-proxy.js (v10.5 - FinMind primary with adaptive retries)
 // Patch Tag: LB-DATASOURCE-20241007A
+// Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
@@ -168,35 +169,59 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
     }
     const dataset = adjusted ? 'TaiwanStockPriceAdj' : 'TaiwanStockPrice';
     const todayISO = new Date().toISOString().split('T')[0];
-    let startISO = startDateISO || '';
-    let endISO = endDateISO || '';
+    let startISO = (startDateISO || '').trim();
+    let endISO = (endDateISO || '').trim();
     if (endISO && endISO > todayISO) {
         endISO = todayISO;
     }
     if (startISO && endISO && startISO > endISO) {
         startISO = endISO;
     }
-    const url = new URL('https://api.finmindtrade.com/api/v4/data');
-    url.searchParams.set('dataset', dataset);
-    url.searchParams.set('data_id', stockNo);
-    url.searchParams.set('token', token);
-    if (startISO) url.searchParams.set('start_date', startISO);
-    if (endISO) url.searchParams.set('end_date', endISO);
+    const requestFinMind = async (omitRange = false) => {
+        const url = new URL('https://api.finmindtrade.com/api/v4/data');
+        url.searchParams.set('dataset', dataset);
+        url.searchParams.set('data_id', stockNo);
+        url.searchParams.set('stock_id', stockNo);
+        url.searchParams.set('token', token);
+        if (!omitRange) {
+            if (startISO) url.searchParams.set('start_date', startISO);
+            if (endISO) url.searchParams.set('end_date', endISO);
+        }
 
-    console.log(`[TPEX Proxy v10.2] 呼叫 FinMind: ${dataset} ${stockNo}`);
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-        throw new Error(`FinMind HTTP ${response.status}`);
-    }
-    const json = await response.json();
-    if (json?.status !== 200 || !Array.isArray(json?.data)) {
-        throw new Error(`FinMind 回應錯誤: ${json?.msg || '未知錯誤'}`);
-    }
+        console.log(`[TPEX Proxy v10.5] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo}`);
+        const response = await fetch(url.toString());
+        const rawText = await response.text();
+        let payload = null;
+        try {
+            payload = rawText ? JSON.parse(rawText) : null;
+        } catch (parseError) {
+            console.warn('[TPEX Proxy v10.5] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
+        }
+
+        const responseStatus = response.status;
+        const payloadStatus = payload?.status;
+        const payloadMessage = payload?.msg || '';
+
+        const isSuccessful = response.ok && payloadStatus === 200 && Array.isArray(payload?.data);
+        if (isSuccessful) {
+            return payload.data;
+        }
+
+        const combinedMessage = payloadMessage || `FinMind HTTP ${responseStatus}`;
+        if (!omitRange && (responseStatus === 400 || payloadStatus === 400)) {
+            console.warn(`[TPEX Proxy v10.5] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`);
+            return requestFinMind(true);
+        }
+
+        throw new Error(combinedMessage || 'FinMind 未預期錯誤');
+    };
+
+    const finmindRows = await requestFinMind(false);
 
     const rowsByMonth = new Map();
     let stockName = '';
     let prevClose = null;
-    for (const item of json.data) {
+    for (const item of finmindRows) {
         const isoDate = item.date;
         if (!isoDate) continue;
         const rocDate = isoToRoc(isoDate);
