@@ -1,13 +1,14 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.3 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.4 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
 // Patch Tag: LB-ADJ-COMPOSER-20241024A
 // Patch Tag: LB-ADJ-COMPOSER-20241027A
 // Patch Tag: LB-ADJ-COMPOSER-20241030A
+// Patch Tag: LB-ADJ-COMPOSER-20241105A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241030A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241105A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -149,28 +150,51 @@ function shouldSplitSpan(error, spanDays, minSpanDays) {
 function toISODate(value) {
   if (!value) return null;
   const trimmed = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    const isoCandidate = new Date(trimmed);
-    return Number.isNaN(isoCandidate.getTime()) ? null : trimmed;
+  if (!trimmed) return null;
+
+  const [datePartRaw] = trimmed.replace('T', ' ').split(/\s+/);
+  if (!datePartRaw) return null;
+  const datePart = datePartRaw.replace(/\./g, '-');
+
+  const exactIsoMatch = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (exactIsoMatch) {
+    const isoCandidate = new Date(`${exactIsoMatch[1]}-${exactIsoMatch[2]}-${exactIsoMatch[3]}`);
+    return Number.isNaN(isoCandidate.getTime()) ? null : `${exactIsoMatch[1]}-${exactIsoMatch[2]}-${exactIsoMatch[3]}`;
   }
-  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(trimmed)) {
-    const [y, m, d] = trimmed.split('/').map((part) => Number(part));
+
+  const isoMatch = datePart.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    if (!year || !month || !day) return null;
+    return `${year}-${pad2(month)}-${pad2(day)}`;
+  }
+
+  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(datePart)) {
+    const [y, m, d] = datePart.split('/').map((part) => Number(part));
     if (!y || !m || !d) return null;
     return `${y}-${pad2(m)}-${pad2(d)}`;
   }
-  if (/^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(trimmed)) {
-    const [rocYear, month, day] = trimmed.split('/').map((part) => Number(part));
+  if (/^\d{2,3}\/\d{1,2}\/\d{1,2}$/.test(datePart)) {
+    const [rocYear, month, day] = datePart.split('/').map((part) => Number(part));
     if (!rocYear || !month || !day) return null;
     const year = rocYear + 1911;
     return `${year}-${pad2(month)}-${pad2(day)}`;
   }
-  if (/^\d{8}$/.test(trimmed)) {
-    const year = Number(trimmed.slice(0, 4));
-    const month = Number(trimmed.slice(4, 6));
-    const day = Number(trimmed.slice(6));
+  if (/^\d{8}$/.test(datePart)) {
+    const year = Number(datePart.slice(0, 4));
+    const month = Number(datePart.slice(4, 6));
+    const day = Number(datePart.slice(6));
     if (!year || !month || !day) return null;
     return `${year}-${pad2(month)}-${pad2(day)}`;
   }
+
+  const parsed = new Date(datePart);
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatISODateFromDate(parsed);
+  }
+
   return null;
 }
 
@@ -187,7 +211,13 @@ function rocToISO(rocDate) {
 function parseNumber(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const parsed = Number(String(value).replace(/,/g, ''));
+  const cleaned = String(value)
+    .replace(/,/g, '')
+    .replace(/％/g, '%')
+    .replace(/%/g, '')
+    .trim();
+  if (!cleaned) return null;
+  const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -227,6 +257,8 @@ function resolveSubscriptionPrice(raw) {
   const candidateKeys = [
     'cash_capital_increase_subscription_price',
     'cash_capital_increase_subscribe_price',
+    'cash_capital_increase_subscription_price_per_share',
+    'cash_capital_increase_subscription_price_cash',
     'subscription_price',
   ];
   let best = null;
@@ -258,34 +290,81 @@ function enumerateMonths(startDate, endDate) {
   return months;
 }
 
+function resolveExDate(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidateKeys = [
+    'cash_dividend_ex_rights_trading_date',
+    'cash_dividend_ex_dividend_trading_date',
+    'cash_dividend_ex_dividend_date',
+    'cash_dividend_ex_rights_date',
+    'cash_dividend_trading_date',
+    'cash_dividend_record_date',
+    'stock_dividend_ex_rights_trading_date',
+    'stock_dividend_ex_dividend_trading_date',
+    'stock_dividend_ex_date',
+    'stock_dividend_trading_date',
+    'stock_dividend_record_date',
+    'dividend_ex_rights_trading_date',
+    'dividend_ex_dividend_trading_date',
+    'dividend_ex_date',
+    'ex_dividend_trading_date',
+    'ex_dividend_record_date',
+    'ex_rights_trading_date',
+    'ex_rights_record_date',
+    'ex_dividend_rights_trading_date',
+    'ex_dividend_rights_record_date',
+    'cash_dividend_ex_date',
+    'stock_dividend_ex_date',
+    'ex_dividend_date',
+    'ex_rights_date',
+    'ex_date',
+    'date',
+  ];
+  for (const key of candidateKeys) {
+    const candidate = readField(raw, key);
+    const iso = toISODate(candidate);
+    if (iso) {
+      return { iso, sourceKey: key, rawValue: candidate };
+    }
+  }
+  return null;
+}
+
 function normaliseDividendRecord(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  const dateCandidate =
-    readField(raw, 'cash_dividend_ex_date') ||
-    readField(raw, 'stock_dividend_ex_date') ||
-    readField(raw, 'ex_dividend_date') ||
-    readField(raw, 'ex_rights_date') ||
-    readField(raw, 'ex_dividend_rights_date') ||
-    readField(raw, 'date');
-  const isoDate = toISODate(dateCandidate);
-  if (!isoDate) return null;
+  const exDateInfo = resolveExDate(raw);
+  if (!exDateInfo?.iso) return null;
 
   const cashDividend = resolveDividendAmount(raw, 'cash_dividend', [
     'cash_dividend_from_earnings',
     'cash_dividend_from_retain_earnings',
+    'cash_dividend_from_retained_earnings',
     'cash_dividend_from_capital_reserve',
     'cash_dividend_from_capital_surplus',
     'cash_dividend_from_capital',
+    'cash_dividend_total',
+    'cash_dividend_total_amount',
   ]);
   const stockDividend = resolveDividendAmount(raw, 'stock_dividend', [
     'stock_dividend_from_earnings',
     'stock_dividend_from_retain_earnings',
+    'stock_dividend_from_retained_earnings',
     'stock_dividend_from_capital_reserve',
     'stock_dividend_from_capital_surplus',
     'stock_dividend_from_capital',
+    'stock_dividend_total',
+    'stock_dividend_total_amount',
   ]);
-  const cashCapitalIncrease = Math.max(0, parseNumber(readField(raw, 'cash_capital_increase')) ?? 0);
-  const stockCapitalIncrease = Math.max(0, parseNumber(readField(raw, 'stock_capital_increase')) ?? 0);
+  const cashCapitalIncrease = resolveDividendAmount(raw, 'cash_capital_increase', [
+    'cash_capital_increase_ratio',
+    'cash_capital_increase_total',
+    'cash_capital_increase_total_ratio',
+  ]);
+  const stockCapitalIncrease = resolveDividendAmount(raw, 'stock_capital_increase', [
+    'stock_capital_increase_ratio',
+    'stock_capital_increase_total',
+    'stock_capital_increase_total_ratio',
+  ]);
   const subscriptionPrice = resolveSubscriptionPrice(raw);
 
   if (
@@ -298,13 +377,15 @@ function normaliseDividendRecord(raw) {
   }
 
   return {
-    date: isoDate,
+    date: exDateInfo.iso,
     cashDividend,
     stockDividend,
     cashCapitalIncrease,
     stockCapitalIncrease,
     subscriptionPrice,
     raw,
+    dateSource: exDateInfo.sourceKey || null,
+    dateValue: exDateInfo.rawValue ?? null,
   };
 }
 
@@ -354,6 +435,24 @@ function prepareDividendEvents(dividendRecords) {
       existing.stockDividend += normalised.stockDividend;
       existing.cashCapitalIncrease += normalised.cashCapitalIncrease;
       existing.stockCapitalIncrease += normalised.stockCapitalIncrease;
+      if (normalised.dateSource) {
+        if (!existing.dateSource) {
+          existing.dateSource = normalised.dateSource;
+          existing.dateValue = normalised.dateValue ?? existing.dateValue ?? null;
+        }
+        if (!Array.isArray(existing.dateSources)) {
+          existing.dateSources = [];
+        }
+        const duplicateSource = existing.dateSources.find(
+          (item) => item.key === normalised.dateSource && item.value === (normalised.dateValue ?? null),
+        );
+        if (!duplicateSource) {
+          existing.dateSources.push({
+            key: normalised.dateSource,
+            value: normalised.dateValue ?? null,
+          });
+        }
+      }
       if (
         Number.isFinite(normalised.subscriptionPrice) &&
         normalised.subscriptionPrice > 0 &&
@@ -375,6 +474,16 @@ function prepareDividendEvents(dividendRecords) {
         stockCapitalIncrease: normalised.stockCapitalIncrease,
         subscriptionPrice: normalised.subscriptionPrice,
         rawRecords: normalised.raw ? [normalised.raw] : [],
+        dateSource: normalised.dateSource || null,
+        dateValue: normalised.dateValue ?? null,
+        dateSources: normalised.dateSource
+          ? [
+              {
+                key: normalised.dateSource,
+                value: normalised.dateValue ?? null,
+              },
+            ]
+          : [],
         signatures: new Set(),
       };
       if (signature) {
@@ -397,6 +506,9 @@ function prepareDividendEvents(dividendRecords) {
       }
       event.raw = event.rawRecords.length > 0 ? event.rawRecords[0] : null;
       delete event.signatures;
+      if (!event.dateSources || event.dateSources.length === 0) {
+        delete event.dateSources;
+      }
       return event;
     })
     .filter(
@@ -452,7 +564,13 @@ function applyBackwardAdjustments(priceRows, dividendRecords) {
     for (let i = 0; i < baseIndex; i += 1) {
       multipliers[i] *= ratio;
     }
-    adjustments.push({ ...event, ratio, appliedDate: sortedRows[baseIndex]?.date || event.date });
+    adjustments.push({
+      ...event,
+      ratio,
+      appliedDate: sortedRows[baseIndex]?.date || event.date,
+      baseClose,
+      baseRowIndex: baseIndex,
+    });
   }
 
   const adjustedRows = sortedRows.map((row, index) => {
