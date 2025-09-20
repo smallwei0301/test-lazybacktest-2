@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v12.6 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v12.7 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -9,9 +9,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241112A
 // Patch Tag: LB-ADJ-COMPOSER-20241119A
 // Patch Tag: LB-ADJ-COMPOSER-20241123A
+// Patch Tag: LB-ADJ-COMPOSER-20241126A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241123A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241126A';
 
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
@@ -212,6 +213,44 @@ function rocToISO(rocDate) {
   return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
+function normaliseNumericText(value) {
+  if (value === null || value === undefined) return '';
+  let text = String(value).trim();
+  if (!text) return '';
+
+  text = text.replace(/\u3000/g, ' ');
+
+  text = text.replace(/[０-９Ａ-Ｚａ-ｚ]/g, (char) => {
+    const code = char.charCodeAt(0);
+    if (code >= 0xff10 && code <= 0xff19) {
+      return String.fromCharCode(code - 0xff10 + 0x30);
+    }
+    if (code >= 0xff21 && code <= 0xff3a) {
+      return String.fromCharCode(code - 0xff21 + 0x41);
+    }
+    if (code >= 0xff41 && code <= 0xff5a) {
+      return String.fromCharCode(code - 0xff41 + 0x61);
+    }
+    return char;
+  });
+
+  const replacementRules = [
+    { pattern: /[．｡。﹒]/g, value: '.' },
+    { pattern: /[，﹐､﹑、]/g, value: ',' },
+    { pattern: /[：﹕︰꞉]/g, value: ':' },
+    { pattern: /[／∕⁄]/g, value: '/' },
+    { pattern: /[％﹪]/g, value: '%' },
+    { pattern: /[＋﹢]/g, value: '+' },
+    { pattern: /[－﹣﹘–—‒]/g, value: '-' },
+  ];
+
+  for (const rule of replacementRules) {
+    text = text.replace(rule.pattern, rule.value);
+  }
+
+  return text.trim();
+}
+
 function parseNumber(value, options = {}) {
   const { treatAsRatio = false } = options;
   if (value === null || value === undefined) return null;
@@ -225,10 +264,8 @@ function parseNumber(value, options = {}) {
     return numeric;
   }
 
-  let text = String(value).trim();
+  let text = normaliseNumericText(value);
   if (!text) return null;
-
-  text = text.replace(/[＋﹢]/g, '+').replace(/[－﹣﹘]/g, '-');
 
   const colonMatch = text.match(/(-?[0-9,，]+(?:\.[0-9]+)?)\s*:\s*(-?[0-9,，]+(?:\.[0-9]+)?)/);
   if (colonMatch) {
