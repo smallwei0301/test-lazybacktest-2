@@ -1,10 +1,34 @@
-// netlify/functions/adjusted-price-proxy.js (v1.0 - Unified adjusted price orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241013A
+// netlify/functions/adjusted-price-proxy.js (v1.1 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241015A
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241013A';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241015A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.1]';
+
+function logDebug(message, context = {}) {
+  try {
+    if (context && Object.keys(context).length > 0) {
+      console.info(`${DEBUG_NAMESPACE} ${message}`, context);
+    } else {
+      console.info(`${DEBUG_NAMESPACE} ${message}`);
+    }
+  } catch (error) {
+    console.info(`${DEBUG_NAMESPACE} ${message}`);
+  }
+}
+
+function jsonResponse(statusCode, payload) {
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+    body: JSON.stringify(payload),
+  };
+}
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -277,6 +301,7 @@ function buildAdjustedAaData(adjustedRows) {
 }
 
 async function fetchDividendSeries(stockNo, endISO) {
+  logDebug('fetchDividendSeries.start', { stockNo, endISO });
   const url = new URL('https://api.finmindtrade.com/api/v4/data');
   url.searchParams.set('dataset', 'TaiwanStockDividend');
   url.searchParams.set('data_id', stockNo);
@@ -289,16 +314,22 @@ async function fetchDividendSeries(stockNo, endISO) {
   const response = await fetch(url.toString());
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`);
+    const error = new Error(`FinMind Dividend HTTP ${response.status}: ${body?.slice(0, 200)}`);
+    logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
+    throw error;
   }
   const json = await response.json();
   if (json?.status !== 200 || !Array.isArray(json?.data)) {
-    throw new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+    const error = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
+    logDebug('fetchDividendSeries.error', { stockNo, error: error.message });
+    throw error;
   }
+  logDebug('fetchDividendSeries.success', { stockNo, records: json.data.length });
   return json.data;
 }
 
 async function fetchRawSeries(stockNo, startISO, endISO, market) {
+  logDebug('fetchRawSeries.start', { stockNo, startISO, endISO, market });
   const params = new URLSearchParams({ stockNo, start: startISO, end: endISO });
   const path = market === 'tpex' ? 'tpex-proxy' : 'twse-proxy';
   const handler = market === 'tpex' ? tpexProxy : twseProxy;
@@ -309,12 +340,18 @@ async function fetchRawSeries(stockNo, startISO, endISO, market) {
   }
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`原始資料服務錯誤 ${response.status}: ${text?.slice(0, 200)}`);
+    const error = new Error(`原始資料服務錯誤 ${response.status}: ${text?.slice(0, 200)}`);
+    logDebug('fetchRawSeries.error', { stockNo, market, error: error.message });
+    throw error;
   }
   const json = await response.json();
   if (json?.error) {
-    throw new Error(json.error);
+    const error = new Error(json.error);
+    logDebug('fetchRawSeries.error', { stockNo, market, error: error.message });
+    throw error;
   }
+  const records = Array.isArray(json?.aaData) ? json.aaData.length : 0;
+  logDebug('fetchRawSeries.success', { stockNo, market, records });
   return json;
 }
 
@@ -326,11 +363,18 @@ export const handler = async (event) => {
     const startISO = toISODate(params.startDate || params.start);
     const endISO = toISODate(params.endDate || params.end);
 
+    logDebug('handler.start', {
+      stockNo,
+      marketType,
+      startISO,
+      endISO,
+    });
+
     if (!stockNo) {
-      return new Response(JSON.stringify({ error: '缺少股票代碼' }), { status: 400 });
+      return jsonResponse(400, { error: '缺少股票代碼' });
     }
     if (!startISO || !endISO) {
-      return new Response(JSON.stringify({ error: '日期格式無效' }), { status: 400 });
+      return jsonResponse(400, { error: '日期格式無效' });
     }
     const startDate = new Date(startISO);
     const endDate = new Date(endISO);
@@ -339,7 +383,7 @@ export const handler = async (event) => {
       Number.isNaN(endDate.getTime()) ||
       startDate > endDate
     ) {
-      return new Response(JSON.stringify({ error: '日期範圍不正確' }), { status: 400 });
+      return jsonResponse(400, { error: '日期範圍不正確' });
     }
 
     const normalizedMarket = marketType === 'tpex' ? 'tpex' : 'twse';
@@ -349,10 +393,26 @@ export const handler = async (event) => {
       fetchDividendSeries(stockNo, endISO),
     ]);
 
+    logDebug('handler.payload.ready', {
+      stockNo,
+      rawRecords: Array.isArray(rawPayload?.aaData)
+        ? rawPayload.aaData.length
+        : Array.isArray(rawPayload?.data)
+          ? rawPayload.data.length
+          : 0,
+      dividendRecords: dividendRecords.length,
+    });
+
     const priceRows = normalisePriceRows(rawPayload?.aaData || rawPayload?.data);
     const dividendMap = buildDividendMap(dividendRecords);
     const { rows: adjustedRows, adjustments } = applyAdjustments(priceRows, dividendMap);
     const aaData = buildAdjustedAaData(adjustedRows);
+
+    logDebug('handler.adjustments.complete', {
+      stockNo,
+      adjustedRows: adjustedRows.length,
+      adjustments: adjustments.length,
+    });
 
     const responseBody = {
       version: FUNCTION_VERSION,
@@ -365,18 +425,13 @@ export const handler = async (event) => {
       adjustments,
     };
 
-    return new Response(JSON.stringify(responseBody), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(200, responseBody);
   } catch (error) {
-    console.error('[adjusted-price-proxy] 執行錯誤:', error);
-    return new Response(
-      JSON.stringify({
-        error: error?.message || 'adjusted-price-proxy failed',
-        version: FUNCTION_VERSION,
-      }),
-      { status: 500 },
-    );
+    console.error(`${DEBUG_NAMESPACE} 執行錯誤:`, error);
+    return jsonResponse(500, {
+      error: error?.message || 'adjusted-price-proxy failed',
+      version: FUNCTION_VERSION,
+    });
   }
 };
 

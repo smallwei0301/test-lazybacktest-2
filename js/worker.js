@@ -1,8 +1,8 @@
 
-// --- Worker Data Acquisition & Cache (v11.0) ---
+// --- Worker Data Acquisition & Cache (v11.1) ---
 // Patch Tag: LB-DATAPIPE-20241007A
-// Patch Tag: LB-ADJ-PIPE-20241013A
-const WORKER_DATA_VERSION = "v11.0";
+// Patch Tag: LB-ADJ-PIPE-20241015A
+const WORKER_DATA_VERSION = "v11.1";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -390,6 +390,77 @@ function summariseDataSourceFlags(flags, defaultLabel) {
   return Array.from(flags).join(" / ");
 }
 
+function containsYahooSource(flags) {
+  if (!flags) return false;
+  let items = [];
+  if (Array.isArray(flags)) {
+    items = flags;
+  } else if (flags instanceof Set) {
+    items = Array.from(flags);
+  } else if (typeof flags?.values === "function") {
+    items = Array.from(flags.values());
+  } else if (typeof flags === "object") {
+    items = Object.values(flags);
+  }
+  return items.some((label) => /Yahoo\s*Finance/i.test(label || ""));
+}
+
+async function fetchAdjustedPriceFallback({
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  startDateObj,
+  endDateObj,
+}) {
+  const isTpex = marketKey === "TPEX";
+  const params = new URLSearchParams({
+    stockNo,
+    marketType: isTpex ? "tpex" : "twse",
+    startDate,
+    endDate,
+  });
+  console.warn(
+    `[Worker ${WORKER_DATA_VERSION}] Yahoo 主來源不足，啟用還原備援 API: ${stockNo} (${marketKey}) ${startDate}~${endDate}`,
+  );
+  self.postMessage({
+    type: "progress",
+    progress: 48,
+    message: "啟用還原備援資料...",
+  });
+  const payload = await fetchWithAdaptiveRetry(`/api/adjusted-price?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (payload?.error) {
+    throw new Error(payload.error);
+  }
+  const rows = Array.isArray(payload?.aaData)
+    ? payload.aaData
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
+  const normalizedRows = rows
+    .map((row) => normalizeProxyRow(row, isTpex, startDateObj, endDateObj))
+    .filter(Boolean);
+  const deduped = dedupeAndSortData(normalizedRows);
+  const baseLabel =
+    payload?.dataSource || `${isTpex ? "TPEX" : "TWSE"} + FinMind (Adjusted)`;
+  const dataSourceLabel = `${baseLabel} (備援)`;
+  const resolvedStockName = payload?.stockName || stockNo;
+  const adjustments = Array.isArray(payload?.adjustments) ? payload.adjustments.length : 0;
+  console.info(
+    `[Worker ${WORKER_DATA_VERSION}] 備援還原資料取得完成: ${deduped.length} 筆, 調整事件 ${adjustments} 筆`,
+  );
+  self.postMessage({ type: "progress", progress: 82, message: "備援還原資料完成..." });
+  return {
+    data: deduped,
+    dataSource: dataSourceLabel,
+    stockName: resolvedStockName,
+    adjustments: Array.isArray(payload?.adjustments) ? payload.adjustments : [],
+    version: payload?.version || null,
+  };
+}
+
 async function runWithConcurrency(items, limit, workerFn) {
   const results = new Array(items.length);
   let index = 0;
@@ -452,58 +523,6 @@ async function fetchStockData(
     progress: adjusted ? 8 : 5,
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
-
-  if (adjusted) {
-    const params = new URLSearchParams({
-      stockNo,
-      marketType: isTpex ? "tpex" : "twse",
-      startDate,
-      endDate,
-    });
-    self.postMessage({
-      type: "progress",
-      progress: 18,
-      message: "串接還原股價資料...",
-    });
-    const payload = await fetchWithAdaptiveRetry(`/api/adjusted-price?${params.toString()}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (payload?.error) {
-      throw new Error(payload.error);
-    }
-    const rows = Array.isArray(payload?.aaData)
-      ? payload.aaData
-      : Array.isArray(payload?.data)
-        ? payload.data
-        : [];
-    const normalizedRows = rows
-      .map((row) => normalizeProxyRow(row, isTpex, startDateObj, endDateObj))
-      .filter(Boolean);
-    self.postMessage({ type: "progress", progress: 52, message: "整理還原股價..." });
-    const deduped = dedupeAndSortData(normalizedRows);
-    const dataSourceLabel =
-      payload?.dataSource || `${isTpex ? "TPEX" : "TWSE"} + FinMind (Adjusted)`;
-    const resolvedStockName = payload?.stockName || stockNo;
-    setWorkerCacheEntry(marketKey, cacheKey, {
-      data: deduped,
-      stockName: resolvedStockName,
-      dataSource: dataSourceLabel,
-      timestamp: Date.now(),
-      meta: {
-        stockNo,
-        startDate,
-        endDate,
-        priceMode: getPriceModeKey(true),
-      },
-      priceMode: getPriceModeKey(true),
-    });
-    self.postMessage({ type: "progress", progress: 85, message: "還原股價準備完成..." });
-    return {
-      data: deduped,
-      dataSource: dataSourceLabel,
-      stockName: resolvedStockName,
-    };
-  }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -703,36 +722,87 @@ async function fetchStockData(
   });
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
-  const deduped = dedupeAndSortData(normalizedRows);
-  const dataSourceLabel = summariseDataSourceFlags(
+  const baseSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     isTpex ? "TPEX" : "TWSE",
   );
+  let finalData = dedupeAndSortData(normalizedRows);
+  let finalDataSource = baseSourceLabel;
+  let finalStockName = stockName || stockNo;
+  let fallbackMeta = null;
+  let fallbackUsed = false;
+
+  if (adjusted) {
+    const hasYahoo = containsYahooSource(sourceFlags);
+    if (!hasYahoo || finalData.length === 0) {
+      try {
+        const fallback = await fetchAdjustedPriceFallback({
+          stockNo,
+          startDate,
+          endDate,
+          marketKey,
+          startDateObj,
+          endDateObj,
+        });
+        finalData = fallback.data;
+        finalDataSource = fallback.dataSource;
+        finalStockName = fallback.stockName || finalStockName;
+        fallbackMeta = {
+          adjustments: Array.isArray(fallback.adjustments)
+            ? fallback.adjustments.length
+            : 0,
+          version: fallback.version || null,
+          source: 'adjusted-price-proxy',
+        };
+        fallbackUsed = true;
+      } catch (fallbackError) {
+        console.error(
+          `[Worker ${WORKER_DATA_VERSION}] 備援還原 API 失敗:`,
+          fallbackError,
+        );
+        if (finalData.length === 0) {
+          throw new Error(
+            `Yahoo Finance 還原資料失敗，備援 API 亦無法取得資料: ${fallbackError.message}`,
+          );
+        }
+      }
+    }
+    if (fallbackUsed) {
+      console.warn(
+        `[Worker ${WORKER_DATA_VERSION}] 已使用還原備援資料: ${finalDataSource}`,
+      );
+    } else {
+      console.info(
+        `[Worker ${WORKER_DATA_VERSION}] Yahoo 主來源還原資料就緒: ${finalData.length} 筆`,
+      );
+    }
+  }
 
   setWorkerCacheEntry(marketKey, cacheKey, {
-    data: deduped,
-    stockName: stockName || stockNo,
-    dataSource: dataSourceLabel,
+    data: finalData,
+    stockName: finalStockName,
+    dataSource: finalDataSource,
     timestamp: Date.now(),
     meta: {
       stockNo,
       startDate,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      fallback: fallbackUsed ? fallbackMeta : null,
     },
     priceMode: getPriceModeKey(adjusted),
   });
 
-  if (deduped.length === 0) {
+  if (finalData.length === 0) {
     console.warn(
       `[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`,
     );
   }
 
   return {
-    data: deduped,
-    dataSource: dataSourceLabel,
-    stockName: stockName || stockNo,
+    data: finalData,
+    dataSource: finalDataSource,
+    stockName: finalStockName,
   };
 }
 

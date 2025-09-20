@@ -361,3 +361,7 @@ Sep 19, 02:31:14 PM: a7d15859 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blo
 Sep 19, 02:31:14 PM: a7d15859 Duration: 18.59 ms	Memory Usage: 132 MB
 Sep 19, 02:31:15 PM: 6a5f77bd INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250901
 Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
+### 2024-10-15 — LB-ADJ-ENDPOINT-20241015A / LB-ADJ-PIPE-20241015A
+- 新增 AdjustedPriceProxy v1.1 除錯日誌（輸出請求參數、資料筆數、調整事件統計）。
+- Worker Data Acquisition v11.1 將 Yahoo Finance 作為主要還原來源，若偵測不足則自動啟用 adjusted-price 備援 API，並輸出備援啟動與結果紀錄。
+- Worker 快取項目記錄備援來源與版本資訊，以便後續排查 502 狀況。
