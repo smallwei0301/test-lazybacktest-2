@@ -61,7 +61,6 @@ function getTesterSourceConfigs(market, adjusted) {
     if (adjusted) {
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
-            { id: 'finmind', label: 'FinMind 還原備援', description: 'Yahoo 失效時啟用' },
         ];
     }
     if (market === 'TPEX') {
@@ -155,6 +154,10 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
+    if (adjusted && sourceId === 'finmind') {
+        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
+        return;
+    }
     const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
     const params = new URLSearchParams({
         stockNo,
@@ -230,7 +233,7 @@ function refreshDataSourceTester() {
         hintEl.style.color = 'var(--muted-foreground)';
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = 'Yahoo 為主來源，FinMind 為備援來源。建議在佈署前確認兩者皆可回應。';
+        hintEl.textContent = '還原股價目前由 Yahoo Finance 提供，如需使用 FinMind 還原資料請升級 Sponsor 等級。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';

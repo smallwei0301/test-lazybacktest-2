@@ -9,6 +9,7 @@ const TPEX_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
+const FINMIND_LEVEL_PATTERN = /your level is register/i;
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -41,6 +42,13 @@ function obtainStore(name) {
     }
 }
 
+function normaliseFinMindErrorMessage(message) {
+    if (!message) return 'FinMind 未預期錯誤';
+    if (FINMIND_LEVEL_PATTERN.test(message)) {
+        return 'FinMind 帳號等級為註冊 (Register)，請升級 Sponsor 方案後再使用此資料來源。';
+    }
+    return message;
+}
 function pad2(value) {
     return String(value).padStart(2, '0');
 }
@@ -213,7 +221,7 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
             return requestFinMind(true);
         }
 
-        throw new Error(combinedMessage || 'FinMind 未預期錯誤');
+        throw new Error(normaliseFinMindErrorMessage(combinedMessage));
     };
 
     const finmindRows = await requestFinMind(false);
@@ -438,8 +446,8 @@ function validateForceSource(adjusted, forceSource) {
     if (!forceSource) return null;
     const normalized = forceSource.toLowerCase();
     if (adjusted) {
-        if (normalized === 'yahoo' || normalized === 'finmind') return normalized;
-        throw new Error('還原模式僅支援 Yahoo 或 FinMind 測試來源');
+        if (normalized === 'yahoo') return normalized;
+        throw new Error('還原模式目前僅支援 Yahoo Finance 測試來源');
     }
     if (normalized === 'finmind' || normalized === 'yahoo') return normalized;
     throw new Error('原始模式僅支援 FinMind 或 Yahoo 測試來源');
@@ -553,29 +561,19 @@ export default async (req) => {
                                     await fetchYahooDaily(stockNo, startDate, endDate),
                                     true,
                                 );
+                                yahooHydrated = true;
                             } catch (error) {
-                                console.warn('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error.message);
-                                try {
-                                    finmindLabel = await hydrateFinMindDaily(
-                                        store,
-                                        stockNo,
-                                        true,
-                                        startDate.toISOString().split('T')[0],
-                                        endDate.toISOString().split('T')[0],
-                                    );
-                                } catch (finmindError) {
-                                    console.error('[TPEX Proxy v10.2] FinMind 還原備援失敗:', finmindError);
-                                    return new Response(JSON.stringify({ error: '無法取得還原股價資料' }), { status: 502 });
-                                }
-                                finmindHydrated = true;
+                                console.error('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error);
+                                return new Response(
+                                    JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${error.message}` }),
+                                    { status: 502 },
+                                );
                             }
-                            yahooHydrated = true;
                         }
                         payload = await readCache(store, cacheKey);
                         if (payload) {
                             if (payload.dataSource) sourceFlags.add(payload.dataSource);
                             else if (yahooLabel) sourceFlags.add(yahooLabel);
-                            else if (finmindLabel) sourceFlags.add(finmindLabel);
                         }
                     } else {
                         if (!finmindHydrated) {
@@ -598,7 +596,10 @@ export default async (req) => {
                                 );
                                 } catch (yahooError) {
                                     console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
-                                    return new Response(JSON.stringify({ error: '無法取得原始股價資料' }), { status: 502 });
+                                    return new Response(
+                                        JSON.stringify({ error: `Yahoo 備援來源取得失敗: ${yahooError.message}` }),
+                                        { status: 502 },
+                                    );
                                 }
                                 yahooHydrated = true;
                             }
