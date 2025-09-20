@@ -1,11 +1,11 @@
-// netlify/functions/adjusted-price-proxy.js (v1.2 - Adjusted price fallback orchestrator)
-// Patch Tag: LB-ADJ-ENDPOINT-20241025B
+// netlify/functions/adjusted-price-proxy.js (v1.3 - Adjusted price fallback orchestrator)
+// Patch Tag: LB-ADJ-ENDPOINT-20241031A
 import fetch from 'node-fetch';
 import twseProxy from './twse-proxy.js';
 import tpexProxy from './tpex-proxy.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241025B';
-const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.2]';
+const FUNCTION_VERSION = 'LB-ADJ-ENDPOINT-20241031A';
+const DEBUG_NAMESPACE = '[AdjustedPriceProxy v1.3]';
 const FINMIND_SEGMENT_YEARS = 5;
 const FINMIND_TIMEOUT_MS = 9000;
 
@@ -103,6 +103,14 @@ function parseNumber(value) {
 function safeRound(value) {
   if (!Number.isFinite(value)) return null;
   return Number(Math.round(value * 10000) / 10000);
+}
+
+function normaliseStockRatio(value) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value >= 10) {
+    return value / 10;
+  }
+  return value;
 }
 
 function createProxyRequest(url) {
@@ -226,79 +234,132 @@ function normalisePriceRows(rawRows) {
   return result;
 }
 
+function aggregateDividendEvents(dividendMap) {
+  const events = [];
+  if (!dividendMap || typeof dividendMap.forEach !== 'function') {
+    return events;
+  }
+
+  dividendMap.forEach((records, date) => {
+    if (!Array.isArray(records) || records.length === 0) {
+      return;
+    }
+    let cash = 0;
+    let stock = 0;
+    let referencePrice = null;
+    records.forEach((record) => {
+      const cashDividend = Number.isFinite(record?.cashDividend)
+        ? Math.max(0, record.cashDividend)
+        : 0;
+      const stockDividend = Number.isFinite(record?.stockDividend)
+        ? Math.max(0, record.stockDividend)
+        : 0;
+      cash += cashDividend;
+      stock += stockDividend;
+      if (!Number.isFinite(referencePrice) && Number.isFinite(record?.referencePrice)) {
+        if (record.referencePrice > 0) {
+          referencePrice = record.referencePrice;
+        }
+      }
+    });
+    if (cash > 0 || stock > 0) {
+      events.push({
+        date,
+        cashDividend: cash,
+        stockDividend: stock,
+        referencePrice: Number.isFinite(referencePrice) ? referencePrice : null,
+      });
+    }
+  });
+
+  events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return events;
+}
+
+function computeEventFactor(afterPrice, event) {
+  if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
+    return 1;
+  }
+  const stockRatio = normaliseStockRatio(event?.stockDividend || 0);
+  const cashDividend = Number.isFinite(event?.cashDividend) ? Math.max(0, event.cashDividend) : 0;
+  const denominator = afterPrice * (1 + stockRatio) + cashDividend;
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 1;
+  }
+  const factor = afterPrice / denominator;
+  if (!Number.isFinite(factor) || factor <= 0 || factor >= 1) {
+    return 1;
+  }
+  return factor;
+}
+
 function applyAdjustments(priceRows, dividendMap) {
   if (!Array.isArray(priceRows) || priceRows.length === 0) {
     return { rows: [], adjustments: [] };
   }
+
   const sorted = [...priceRows].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
-  const adjusted = new Array(sorted.length);
-  let cumulativeFactor = 1;
+  const multipliers = new Array(sorted.length).fill(1);
   const adjustments = [];
+  const events = aggregateDividendEvents(dividendMap);
 
-  for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    const current = sorted[i];
-    const nextDate = i < sorted.length - 1 ? sorted[i + 1].date : null;
-    if (nextDate && dividendMap.has(nextDate)) {
-      const events = dividendMap.get(nextDate);
-      let singleFactor = 1;
-      events.forEach((event) => {
-        let eventFactor = 1;
-        const prevClose = Number.isFinite(current.close) ? current.close : null;
-        if (event.cashDividend > 0 && Number.isFinite(prevClose) && prevClose > 0) {
-          let referencePrice = event.referencePrice;
-          if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
-            referencePrice = prevClose - event.cashDividend;
-          }
-          if (Number.isFinite(referencePrice) && referencePrice > 0) {
-            const cashFactor = referencePrice / prevClose;
-            if (Number.isFinite(cashFactor) && cashFactor > 0) {
-              eventFactor *= cashFactor;
-            }
-          }
-        }
-        if (event.stockDividend > 0) {
-          const stockFactor = 1 / (1 + event.stockDividend / 10);
-          if (Number.isFinite(stockFactor) && stockFactor > 0) {
-            eventFactor *= stockFactor;
-          }
-        }
-        if (Number.isFinite(eventFactor) && eventFactor > 0) {
-          singleFactor *= eventFactor;
-        }
-      });
-      if (Number.isFinite(singleFactor) && singleFactor > 0) {
-        const normalizedFactor = singleFactor > 1 ? 1 : singleFactor;
-        if (normalizedFactor > 0 && normalizedFactor < 1) {
-          cumulativeFactor *= normalizedFactor;
-          adjustments.push({
-            date: nextDate,
-            factor: safeRound(normalizedFactor),
-            events: events.length,
-          });
-        }
-      }
+  events.forEach((event) => {
+    const exIndex = sorted.findIndex((row) => row.date >= event.date);
+    if (exIndex <= 0) {
+      return;
+    }
+    const baseRow = sorted[exIndex];
+    const baseClose = Number.isFinite(baseRow?.close)
+      ? baseRow.close
+      : Number.isFinite(baseRow?.open)
+        ? baseRow.open
+        : null;
+    const afterPrice = Number.isFinite(event.referencePrice) && event.referencePrice > 0
+      ? event.referencePrice
+      : baseClose;
+    if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
+      return;
     }
 
-    const adjustedOpen = applyFactor(current.open, cumulativeFactor);
-    const adjustedHigh = applyFactor(current.high, cumulativeFactor);
-    const adjustedLow = applyFactor(current.low, cumulativeFactor);
-    const adjustedClose = applyFactor(current.close, cumulativeFactor);
+    const factor = computeEventFactor(afterPrice, event);
+    if (!Number.isFinite(factor) || factor <= 0 || factor >= 1) {
+      return;
+    }
 
-    adjusted[i] = {
-      ...current,
+    for (let i = 0; i < exIndex; i += 1) {
+      multipliers[i] *= factor;
+    }
+
+    adjustments.push({
+      date: event.date,
+      factor: safeRound(factor),
+      cashDividend: safeRound(event.cashDividend),
+      stockDividend: safeRound(normaliseStockRatio(event.stockDividend)),
+    });
+  });
+
+  const adjusted = sorted.map((row, index) => {
+    const factor = multipliers[index];
+    const effectiveFactor = Number.isFinite(factor) && factor > 0 ? factor : 1;
+    const adjustedOpen = applyFactor(row.open, effectiveFactor);
+    const adjustedHigh = applyFactor(row.high, effectiveFactor);
+    const adjustedLow = applyFactor(row.low, effectiveFactor);
+    const adjustedClose = applyFactor(row.close, effectiveFactor);
+
+    return {
+      ...row,
       open: adjustedOpen,
       high: adjustedHigh,
       low: adjustedLow,
       close: adjustedClose,
-      factor: cumulativeFactor,
+      factor: effectiveFactor,
     };
-  }
+  });
 
   let previousClose = null;
-  for (let i = 0; i < adjusted.length; i += 1) {
-    const row = adjusted[i];
+  adjusted.forEach((row) => {
     if (Number.isFinite(row.close)) {
       row.change = Number.isFinite(previousClose)
         ? safeRound(row.close - previousClose)
@@ -307,7 +368,7 @@ function applyAdjustments(priceRows, dividendMap) {
     } else {
       row.change = 0;
     }
-  }
+  });
 
   return { rows: adjusted, adjustments };
 }

@@ -379,3 +379,7 @@ Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
 - AdjustedPriceProxy v1.2 將 FinMind 股利抓取拆分為 5 年區間的序列請求，並加入逾時計時與段落間緩衝，避免一次抓取 40 年資料導致 Netlify Lambda 逾時 (HTTP 502)。
 - 新增 proxy Request 建構器，確保於 Netlify Functions 內部呼叫 TWSE/TPEX 代理時能附帶固定 User-Agent 並相容於 Node 18 的 Request 物件。
 - 除錯日誌輸出補充 start/end 區間與 FinMind 段落筆數，方便追蹤備援來源的實際載入耗時。
+
+### 2024-10-31 — LB-ADJ-ENDPOINT-20241031A
+- AdjustedPriceProxy v1.3 改採除權息日聚合演算法，先彙總 FinMind 股利紀錄並使用實際參考價/除權後收盤價計算單次調整因子，避免除息期間仍顯示 0 筆調整事件。
+- 調整還原流程改為對應除權息日索引批次套用累積因子，確保前一交易日之前的價格都會回溯更新並輸出對應的現金/股票股利資訊供除錯。
