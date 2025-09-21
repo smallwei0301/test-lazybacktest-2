@@ -6,6 +6,7 @@ const {
   prepareDividendEvents,
   computeAdjustmentRatio,
   buildAdjustedRowsFromFactorMap,
+  classifyFinMindOutcome,
 } = __TESTING__;
 
 function approxEqual(actual, expected, epsilon = 1e-6) {
@@ -193,5 +194,42 @@ approxEqual(descendingResult.adjustments[1].ratio, 0.968421, 1e-6);
 approxEqual(descendingResult.adjustments[0].factorBefore, 1, 1e-6);
 approxEqual(descendingResult.adjustments[0].factorAfter, 0.95, 1e-6);
 assert.equal(descendingResult.adjustments[0].factorDirection, 'down');
+
+const permissionStatus = classifyFinMindOutcome({
+  tokenPresent: true,
+  dataset: 'TaiwanStockDividend',
+  statusCode: 403,
+  message: 'Your level is Register, subscribe plan to download data',
+  dataCount: 0,
+});
+assert.equal(permissionStatus.status, 'permissionDenied');
+assert.equal(permissionStatus.label, 'API 權限不足');
+
+const parameterStatus = classifyFinMindOutcome({
+  tokenPresent: true,
+  dataset: 'TaiwanStockDividend',
+  statusCode: 422,
+  message: 'parameter start_date format error',
+  dataCount: 0,
+});
+assert.equal(parameterStatus.status, 'parameterError');
+
+const noDataStatus = classifyFinMindOutcome({
+  tokenPresent: true,
+  dataset: 'TaiwanStockDividend',
+  statusCode: 200,
+  message: 'No data found',
+  dataCount: 0,
+});
+assert.equal(noDataStatus.status, 'noData');
+
+const successStatus = classifyFinMindOutcome({
+  tokenPresent: true,
+  dataset: 'TaiwanStockDividend',
+  statusCode: 200,
+  message: '',
+  dataCount: 10,
+});
+assert.equal(successStatus.status, 'success');
 
 console.log('Dividend normalisation tests passed');

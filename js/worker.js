@@ -1,12 +1,13 @@
 
-// --- Worker Data Acquisition & Cache (v11.3 - Dividend diagnostics fallback) ---
+// --- Worker Data Acquisition & Cache (v11.4 - FinMind diagnostics propagation) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
 // Patch Tag: LB-ADJ-PIPE-20250305A
 // Patch Tag: LB-ADJ-PIPE-20250312A
 // Patch Tag: LB-ADJ-PIPE-20250320A
-const WORKER_DATA_VERSION = "v11.3";
+// Patch Tag: LB-ADJ-PIPE-20250410A
+const WORKER_DATA_VERSION = "v11.4";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -711,6 +712,10 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === "object"
       ? payload.dividendDiagnostics
       : null;
+  const finmindStatus =
+    payload?.finmindStatus && typeof payload.finmindStatus === "object"
+      ? payload.finmindStatus
+      : null;
 
   const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
     normalizedRows,
@@ -732,6 +737,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     debugSteps,
     dividendEvents,
     dividendDiagnostics,
+    finmindStatus,
   };
 }
 

@@ -1,4 +1,4 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.2 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
 
 // 全局變量
 let stockChart = null;
@@ -34,6 +34,7 @@ const dataSourceTesterState = {
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
+// Patch Tag: LB-DATASOURCE-20250410A
 const testerAdjustmentReasonLabels = {
     missingPriceRow: '缺少對應價格',
     invalidBaseClose: '無效基準價',
@@ -264,6 +265,64 @@ function buildDividendEventPreviewHtml(events) {
         ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆彙整事件，總計 ${testerEscapeHtml(events.length)} 筆。</div>`
         : '';
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind 彙整事件</div><div class="mt-1 space-y-1">${blocks}</div>${note}</div>`;
+}
+
+function resolveFinMindStatusColor(status) {
+    switch (status) {
+        case 'success':
+            return 'text-emerald-600';
+        case 'noData':
+        case 'parameterError':
+        case 'networkError':
+            return 'text-amber-600';
+        case 'permissionDenied':
+        case 'tokenInvalid':
+        case 'missingToken':
+        case 'serverError':
+            return 'text-rose-600';
+        default:
+            return 'text-slate-600';
+    }
+}
+
+function buildFinMindApiStatusHtml(finmindStatus) {
+    if (!finmindStatus || typeof finmindStatus !== 'object') return '';
+    const items = [];
+    if (finmindStatus.tokenPresent === false) {
+        items.push(
+            `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+                <div class="text-[11px] font-medium text-rose-600">未設定 FINMIND_TOKEN，無法呼叫 FinMind API。</div>
+                <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請於 Netlify 或環境變數中設定 FINMIND_TOKEN 後重新測試。</div>
+            </div>`,
+        );
+    }
+    const dividendStatus = finmindStatus.dividend && typeof finmindStatus.dividend === 'object'
+        ? finmindStatus.dividend
+        : null;
+    if (dividendStatus) {
+        const tone = resolveFinMindStatusColor(dividendStatus.status);
+        const hint = dividendStatus.hint ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(dividendStatus.hint)}</div>` : '';
+        const statusCode = Number.isFinite(dividendStatus.statusCode)
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">狀態碼：${testerEscapeHtml(dividendStatus.statusCode)}</div>`
+            : '';
+        const message = dividendStatus.message
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">訊息：${testerEscapeHtml(dividendStatus.message)}</div>`
+            : '';
+        const spanText = dividendStatus.spanStart || dividendStatus.spanEnd
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請求區間：${testerEscapeHtml(dividendStatus.spanStart || '—')} ~ ${testerEscapeHtml(dividendStatus.spanEnd || '—')}</div>`
+            : '';
+        items.push(
+            `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+                <div class="text-[11px] font-medium" style="color: var(--foreground);">FinMind 股利 API 狀態：<span class="${tone}">${testerEscapeHtml(dividendStatus.label || dividendStatus.status || '未知狀態')}</span></div>
+                ${statusCode}
+                ${message}
+                ${spanText}
+                ${hint}
+            </div>`,
+        );
+    }
+    if (items.length === 0) return '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind API 診斷</div><div class="mt-2 space-y-2">${items.join('')}</div></div>`;
 }
 
 function getStockNoValue() {
@@ -621,6 +680,12 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const adjustmentHtml = buildAdjustmentDiagnosticsHtml(adjustmentsList);
             if (adjustmentHtml) {
                 detailHtml += adjustmentHtml;
+            }
+            const finmindStatusHtml = buildFinMindApiStatusHtml(
+                payload?.finmindStatus || dividendDiagnostics?.finmindStatus || null,
+            );
+            if (finmindStatusHtml) {
+                detailHtml += finmindStatusHtml;
             }
         } else {
             const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
