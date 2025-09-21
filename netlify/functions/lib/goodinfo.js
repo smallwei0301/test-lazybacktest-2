@@ -1,9 +1,9 @@
 // netlify/functions/lib/goodinfo.js
-// Patch Tag: LB-GOODINFO-ADJ-20241022A
+// Patch Tag: LB-GOODINFO-ADJ-20241025A
 
 import { TextDecoder } from 'util';
 
-const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241022A';
+const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241025A';
 
 const GOODINFO_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -124,9 +124,10 @@ function extractStringLiterals(expression) {
     return literals;
 }
 
-function decodeDocumentWriteExpression(expression) {
-    if (!expression) return '';
+function decodeLiteralExpression(expression, depth = 0) {
+    if (!expression || depth > 5) return '';
     const trimmed = expression.trim();
+    if (!trimmed) return '';
     const wrappers = [
         {
             pattern: /^(?:window\.)?(?:unescape|decodeURIComponent)\((.*)\)$/i,
@@ -140,19 +141,129 @@ function decodeDocumentWriteExpression(expression) {
     for (const { pattern, decoder } of wrappers) {
         const match = trimmed.match(pattern);
         if (match && match[1]) {
-            const literals = extractStringLiterals(match[1]);
-            if (literals.length === 0) {
-                return '';
+            const inner = decodeLiteralExpression(match[1], depth + 1);
+            if (inner) {
+                return decoder(inner);
             }
-            const joined = literals.map((literal) => unescapeJsStringLiteral(literal)).join('');
-            return decoder(joined);
         }
     }
     const literals = extractStringLiterals(trimmed);
     if (literals.length === 0) {
         return '';
     }
+    const remainder = trimmed
+        .replace(/(['"])(?:\\.|(?!\1).)*?\1/g, '')
+        .replace(/[+\s]/g, '');
+    if (remainder.length > 0) {
+        return '';
+    }
     return literals.map((literal) => unescapeJsStringLiteral(literal)).join('');
+}
+
+function splitExpressionParts(expression) {
+    const parts = [];
+    if (!expression) return parts;
+    let current = '';
+    let quote = null;
+    let escape = false;
+    let depth = 0;
+    for (const char of expression) {
+        if (quote) {
+            current += char;
+            if (escape) {
+                escape = false;
+                continue;
+            }
+            if (char === '\\') {
+                escape = true;
+                continue;
+            }
+            if (char === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (char === '"' || char === "'") {
+            quote = char;
+            current += char;
+            continue;
+        }
+        if (char === '(' || char === '[' || char === '{') {
+            depth += 1;
+            current += char;
+            continue;
+        }
+        if (char === ')' || char === ']' || char === '}') {
+            if (depth > 0) depth -= 1;
+            current += char;
+            continue;
+        }
+        if (char === '+' && depth === 0) {
+            if (current.trim().length > 0) {
+                parts.push(current.trim());
+            }
+            current = '';
+            continue;
+        }
+        current += char;
+    }
+    if (current.trim().length > 0) {
+        parts.push(current.trim());
+    }
+    return parts;
+}
+
+function resolveScriptExpression(expression, context, depth = 0) {
+    if (!expression || depth > 10) return '';
+    const trimmed = expression.trim();
+    if (!trimmed) return '';
+
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        const inner = resolveScriptExpression(trimmed.slice(1, -1), context, depth + 1);
+        if (inner) return inner;
+    }
+
+    const literal = decodeLiteralExpression(trimmed);
+    if (literal) {
+        return literal;
+    }
+
+    const wrapperMatch = trimmed.match(/^(?:window\.)?(unescape|decodeURIComponent|atob)\((.*)\)$/i);
+    if (wrapperMatch && wrapperMatch[2]) {
+        const inner = resolveScriptExpression(wrapperMatch[2], context, depth + 1);
+        if (inner) {
+            const method = wrapperMatch[1].toLowerCase();
+            if (method === 'atob') {
+                return decodeBase64String(inner);
+            }
+            return decodePercentEncodedString(inner);
+        }
+    }
+
+    if (trimmed.includes('+')) {
+        const parts = splitExpressionParts(trimmed);
+        if (parts.length > 1) {
+            const resolvedParts = parts.map((part) => resolveScriptExpression(part, context, depth + 1));
+            if (resolvedParts.some((value) => value)) {
+                return resolvedParts.join('');
+            }
+        }
+    }
+
+    const varMatch = trimmed.match(/^(?:window\.)?([A-Za-z_$][\w$]*)$/);
+    if (varMatch && varMatch[1]) {
+        const key = varMatch[1];
+        if (context instanceof Map) {
+            if (context.has(key)) {
+                return context.get(key);
+            }
+        } else if (context && typeof context === 'object' && key in context) {
+            return context[key];
+        }
+        return '';
+    }
+
+    return '';
 }
 
 function stripTags(html) {
@@ -233,46 +344,148 @@ function extractStockName(html, fallback) {
     return fallback;
 }
 
-function collectDocumentWriteTables(html) {
+function buildScriptStringMap(html, diagnostics) {
+    const assignments = new Map();
+    if (!html) return assignments;
+    const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+    let scriptMatch;
+    let candidateCount = 0;
+    let resolvedCount = 0;
+    while ((scriptMatch = scriptRegex.exec(html))) {
+        const scriptContent = scriptMatch[1];
+        const declRegex = /(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(?![=])([^;]+);/g;
+        let assignmentMatch;
+        while ((assignmentMatch = declRegex.exec(scriptContent))) {
+            candidateCount += 1;
+            const name = assignmentMatch[1];
+            const expr = assignmentMatch[2];
+            const value = resolveScriptExpression(expr, assignments);
+            if (value) {
+                assignments.set(name, value);
+                resolvedCount += 1;
+            }
+        }
+        const windowRegex = /window\.([A-Za-z_$][\w$]*)\s*=\s*(?![=])([^;]+);/g;
+        while ((assignmentMatch = windowRegex.exec(scriptContent))) {
+            candidateCount += 1;
+            const name = assignmentMatch[1];
+            const expr = assignmentMatch[2];
+            const value = resolveScriptExpression(expr, assignments);
+            if (value) {
+                assignments.set(name, value);
+                resolvedCount += 1;
+            }
+        }
+        const simpleRegex = /(?<![\w$])([A-Za-z_$][\w$]*)\s*=\s*(?![=])([^;]+);/g;
+        while ((assignmentMatch = simpleRegex.exec(scriptContent))) {
+            const snippet = scriptContent.slice(Math.max(0, assignmentMatch.index - 6), assignmentMatch.index).trimEnd();
+            if (/^(?:var|let|const|window\.)$/i.test(snippet)) {
+                continue;
+            }
+            candidateCount += 1;
+            const name = assignmentMatch[1];
+            const expr = assignmentMatch[2];
+            const value = resolveScriptExpression(expr, assignments);
+            if (value) {
+                assignments.set(name, value);
+                resolvedCount += 1;
+            }
+        }
+    }
+    if (diagnostics) {
+        diagnostics.scriptAssignmentCandidates = (diagnostics.scriptAssignmentCandidates || 0) + candidateCount;
+        diagnostics.scriptAssignments = assignments.size;
+        diagnostics.scriptResolved = (diagnostics.scriptResolved || 0) + resolvedCount;
+    }
+    return assignments;
+}
+
+function collectDocumentWriteTables(html, context, diagnostics) {
     const tables = [];
     if (!html) return tables;
     const docWritePattern = /document\.write(?:ln)?\(([^;]*?)\);/gi;
     let match;
+    let attempts = 0;
+    let hits = 0;
+    const missSamples = [];
     while ((match = docWritePattern.exec(html))) {
-        const decoded = decodeDocumentWriteExpression(match[1]);
-        if (!decoded) continue;
+        attempts += 1;
+        const decoded = resolveScriptExpression(match[1], context);
+        if (!decoded) {
+            if (missSamples.length < 3) {
+                missSamples.push(match[1].slice(0, 120).trim());
+            }
+            continue;
+        }
         const snippet = decodeEntities(decoded);
         const innerTables = snippet.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
         if (innerTables) {
+            hits += innerTables.length;
             tables.push(...innerTables.map((item) => decodeEntities(item)));
+        }
+    }
+    if (diagnostics) {
+        diagnostics.documentWriteExpressions = (diagnostics.documentWriteExpressions || 0) + attempts;
+        diagnostics.documentWriteHits = (diagnostics.documentWriteHits || 0) + hits;
+        if (missSamples.length > 0 && !diagnostics.documentWriteSamples) {
+            diagnostics.documentWriteSamples = missSamples;
         }
     }
     return tables;
 }
 
-function locateAdjustedTable(html) {
+function locateAdjustedTable(html, diagnostics = {}) {
     if (!html) return null;
 
+    const context = buildScriptStringMap(html, diagnostics);
     const candidates = [];
-    const decodedHtml = decodeEntities(html);
-    const pools = [html, decodedHtml];
+    const seen = new Set();
 
+    const addCandidate = (table, origin) => {
+        if (!table) return;
+        const decoded = decodeEntities(table);
+        if (!decoded) return;
+        if (seen.has(decoded)) return;
+        seen.add(decoded);
+        candidates.push({ html: decoded, origin });
+    };
+
+    const pools = [html, decodeEntities(html)];
     for (const pool of pools) {
+        if (!pool) continue;
         const directTables = pool.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
         if (directTables) {
-            candidates.push(...directTables.map((item) => decodeEntities(item)));
+            diagnostics.directTables = (diagnostics.directTables || 0) + directTables.length;
+            directTables.forEach((table) => addCandidate(table, 'markup'));
         }
-        const docTables = collectDocumentWriteTables(pool);
-        if (docTables.length > 0) {
-            candidates.push(...docTables);
+        const docTables = collectDocumentWriteTables(pool, context, diagnostics);
+        if (docTables && docTables.length > 0) {
+            docTables.forEach((table) => addCandidate(table, 'document.write'));
         }
     }
 
-    const markerRegexes = GOODINFO_MARKERS.map((marker) => new RegExp(marker));
+    if (context.size > 0) {
+        let assignmentCount = 0;
+        for (const value of context.values()) {
+            if (value && /<table/i.test(value)) {
+                assignmentCount += 1;
+                addCandidate(value, 'assignment');
+            }
+        }
+        diagnostics.assignmentTables = (diagnostics.assignmentTables || 0) + assignmentCount;
+    }
 
-    for (const table of candidates) {
+    diagnostics.candidateCount = candidates.length;
+    const markerRegexes = GOODINFO_MARKERS.map((marker) => new RegExp(marker));
+    let markerHits = 0;
+
+    for (const candidate of candidates) {
+        const table = candidate.html;
         if (!table) continue;
         if (markerRegexes.some((regex) => regex.test(table))) {
+            markerHits += 1;
+            diagnostics.markerHits = markerHits;
+            diagnostics.matchedBy = `${candidate.origin}-marker`;
             return table;
         }
         const headerMatches = table.match(/<t[hd][^>]*>[\s\S]*?<\/t[hd]>/gi);
@@ -282,14 +495,18 @@ function locateAdjustedTable(html) {
             return /還原/.test(text) && (/收盤/.test(text) || /權值/.test(text));
         });
         if (hasAdjustedColumn) {
+            diagnostics.markerHits = markerHits;
+            diagnostics.matchedBy = `${candidate.origin}-header`;
             return table;
         }
     }
 
+    diagnostics.markerHits = markerHits;
+    diagnostics.matchedBy = diagnostics.matchedBy || null;
     return null;
 }
 
-function parseAdjustedRows(tableHtml) {
+function parseAdjustedRows(tableHtml, diagnostics = {}) {
     const rows = [];
     const rowMatches = tableHtml ? tableHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) : null;
     if (!rowMatches || rowMatches.length === 0) return rows;
@@ -312,7 +529,13 @@ function parseAdjustedRows(tableHtml) {
         }
         rows.push(cells);
     }
-    if (!headers) return [];
+    if (!headers) {
+        if (diagnostics) diagnostics.headers = [];
+        return [];
+    }
+    if (diagnostics) {
+        diagnostics.headers = headers;
+    }
     const indexOfHeader = (predicate) => {
         return headers.findIndex((header) => predicate(header));
     };
@@ -357,6 +580,11 @@ function parseAdjustedRows(tableHtml) {
         });
     }
     parsed.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (diagnostics) {
+        diagnostics.rowCount = parsed.length;
+        diagnostics.firstDate = parsed[0]?.date || null;
+        diagnostics.lastDate = parsed[parsed.length - 1]?.date || null;
+    }
     let prevAdjClose = null;
     for (const item of parsed) {
         if (item.adjClose !== null && item.adjClose !== undefined) {
@@ -436,21 +664,42 @@ async function fetchHtml(fetchImpl, url) {
     return decodeBuffer(buffer, charset);
 }
 
-async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder) {
+async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder, attemptLog = {}) {
     const url = endpointBuilder(stockNo);
+    attemptLog.url = url;
     console.log(`[Goodinfo ${GOODINFO_VERSION}] 嘗試抓取 ${url}`);
-    const html = await fetchHtml(fetchImpl, url);
-    const tableHtml = locateAdjustedTable(html);
+    let html;
+    try {
+        html = await fetchHtml(fetchImpl, url);
+    } catch (error) {
+        attemptLog.status = 'http-error';
+        attemptLog.error = error.message;
+        throw error;
+    }
+    attemptLog.contentLength = html ? html.length : 0;
+    const diagnostics = {};
+    const tableHtml = locateAdjustedTable(html, diagnostics);
     if (!tableHtml) {
+        attemptLog.status = 'no-table';
+        attemptLog.diagnostics = { ...diagnostics };
         throw new Error('找不到還原權值股價表格');
     }
-    const rows = parseAdjustedRows(tableHtml);
+    const rows = parseAdjustedRows(tableHtml, diagnostics);
     if (!rows || rows.length === 0) {
+        attemptLog.status = 'parse-error';
+        attemptLog.diagnostics = { ...diagnostics };
         throw new Error('解析還原權值股價表格失敗');
     }
     const stockName = extractStockName(html, stockNo);
     console.log(`[Goodinfo ${GOODINFO_VERSION}] 成功解析 ${rows.length} 筆資料 (${url})`);
-    return { stockName, rows };
+    attemptLog.status = 'success';
+    attemptLog.stockName = stockName;
+    attemptLog.rowCount = rows.length;
+    attemptLog.firstDate = diagnostics.firstDate || (rows[0]?.date ?? null);
+    attemptLog.lastDate = diagnostics.lastDate || (rows[rows.length - 1]?.date ?? null);
+    attemptLog.matchedBy = diagnostics.matchedBy || null;
+    attemptLog.diagnostics = { ...diagnostics };
+    return { stockName, rows, diagnostics: attemptLog.diagnostics };
 }
 
 export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = {}) {
@@ -470,9 +719,28 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
         (id) => `https://goodinfo.tw/StockInfo/StockPriceHistory.asp?STOCK_ID=${encodeURIComponent(id)}`,
     ];
     const errors = [];
+    const attemptRecords = [];
+    const normaliseAttempt = (log) => {
+        if (!log) return null;
+        const record = {
+            url: log.url,
+            status: log.status || 'error',
+        };
+        if (log.error) record.error = log.error;
+        if (typeof log.contentLength === 'number') record.contentLength = log.contentLength;
+        if (typeof log.rowCount === 'number') record.rowCount = log.rowCount;
+        if (log.firstDate) record.firstDate = log.firstDate;
+        if (log.lastDate) record.lastDate = log.lastDate;
+        if (log.matchedBy) record.matchedBy = log.matchedBy;
+        if (log.stockName) record.stockName = log.stockName;
+        if (log.diagnostics) record.diagnostics = log.diagnostics;
+        return record;
+    };
     for (const builder of builders) {
+        const attemptLog = {};
         try {
-            const result = await tryFetchAdjusted(fetchImpl, stockNo, builder);
+            const result = await tryFetchAdjusted(fetchImpl, stockNo, builder, attemptLog);
+            attemptRecords.push(normaliseAttempt(attemptLog));
             const { startISO, endISO } = options;
             if (startISO || endISO) {
                 const start = startISO ? new Date(startISO) : null;
@@ -485,14 +753,23 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
                     return true;
                 });
             }
-            return { ...result, version: GOODINFO_VERSION };
+            return { ...result, version: GOODINFO_VERSION, debug: { attempts: attemptRecords.filter(Boolean) } };
         } catch (error) {
-            console.warn(`[Goodinfo ${GOODINFO_VERSION}] ${builder(stockNo)} 失敗: ${error.message}`);
-            errors.push(`${builder(stockNo)} => ${error.message}`);
+            if (!attemptLog.url) {
+                attemptLog.url = builder(stockNo);
+            }
+            attemptLog.status = attemptLog.status || 'error';
+            attemptLog.error = attemptLog.error || error.message;
+            attemptLog.diagnostics = attemptLog.diagnostics || null;
+            attemptRecords.push(normaliseAttempt(attemptLog));
+            console.warn(`[Goodinfo ${GOODINFO_VERSION}] ${attemptLog.url} 失敗: ${error.message}`);
+            errors.push(`${attemptLog.url} => ${error.message}`);
         }
     }
     const err = new Error(`無法自 Goodinfo 取得還原股價 (${errors.join('; ')})`);
     err.version = GOODINFO_VERSION;
+    err.attempts = attemptRecords.filter(Boolean);
+    err.debug = { attempts: err.attempts };
     throw err;
 }
 

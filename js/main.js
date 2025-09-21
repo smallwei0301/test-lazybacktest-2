@@ -31,6 +31,26 @@ function showError(m) { const el=document.getElementById("result"); el.innerHTML
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
 
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/[&<>"']/g, (match) => {
+        switch (match) {
+            case '&':
+                return '&amp;';
+            case '<':
+                return '&lt;';
+            case '>':
+                return '&gt;';
+            case '"':
+                return '&quot;';
+            case "'":
+                return '&#39;';
+            default:
+                return match;
+        }
+    });
+}
+
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
     open: false,
@@ -111,6 +131,125 @@ function clearTesterResult() {
     if (!resultEl) return;
     resultEl.innerHTML = '';
     resultEl.className = 'text-xs hidden';
+    clearDataSourceTesterLog();
+}
+
+function clearDataSourceTesterLog() {
+    const logEl = document.getElementById('dataSourceTesterLog');
+    if (!logEl) return;
+    logEl.innerHTML = '';
+    logEl.classList.add('hidden');
+}
+
+function extractGoodinfoDebug(meta) {
+    if (!meta || typeof meta !== 'object') return null;
+    if (meta.goodinfo && typeof meta.goodinfo === 'object') {
+        return {
+            version: meta.goodinfo.version || '',
+            attempts: Array.isArray(meta.goodinfo.attempts) ? meta.goodinfo.attempts : [],
+        };
+    }
+    if (Array.isArray(meta.goodinfoDebug)) {
+        return {
+            version: meta.goodinfoVersion || '',
+            attempts: meta.goodinfoDebug,
+        };
+    }
+    if (Array.isArray(meta.goodinfoAttempts)) {
+        return {
+            version: meta.goodinfoVersion || '',
+            attempts: meta.goodinfoAttempts,
+        };
+    }
+    return null;
+}
+
+function renderDataSourceTesterLog(meta) {
+    const logEl = document.getElementById('dataSourceTesterLog');
+    if (!logEl) return;
+    const debug = extractGoodinfoDebug(meta);
+    if (!debug) {
+        clearDataSourceTesterLog();
+        return;
+    }
+    const { version, attempts } = debug;
+    const parts = [];
+    parts.push(
+        `<div class="mb-1 text-[10px] font-medium" style="color: var(--foreground);">Goodinfo 模組版本：<span class="font-semibold">${escapeHtml(version || '未知')}</span></div>`,
+    );
+    if (!Array.isArray(attempts) || attempts.length === 0) {
+        parts.push('<div class="text-[10px]">尚未提供 Goodinfo 偵錯資訊。</div>');
+    } else {
+        attempts.forEach((attempt, index) => {
+            const status = (attempt?.status || 'unknown').toLowerCase();
+            let statusLabel = '未知';
+            let statusClass = 'text-sky-600';
+            if (status === 'success') {
+                statusLabel = '成功';
+                statusClass = 'text-emerald-600';
+            } else if (status === 'http-error') {
+                statusLabel = 'HTTP 錯誤';
+                statusClass = 'text-amber-600';
+            } else if (status === 'no-table') {
+                statusLabel = '未找到表格';
+                statusClass = 'text-rose-600';
+            } else if (status === 'parse-error') {
+                statusLabel = '解析失敗';
+                statusClass = 'text-rose-600';
+            } else if (status === 'error') {
+                statusLabel = '錯誤';
+                statusClass = 'text-rose-600';
+            }
+            const diagnostics = attempt?.diagnostics || {};
+            const detailPieces = [];
+            const rowCount = Number.isFinite(attempt?.rowCount) ? attempt.rowCount : diagnostics.rowCount;
+            if (Number.isFinite(rowCount)) detailPieces.push(`筆數: ${rowCount}`);
+            const firstDate = attempt?.firstDate || diagnostics.firstDate;
+            const lastDate = attempt?.lastDate || diagnostics.lastDate;
+            if (firstDate) detailPieces.push(`首日: ${escapeHtml(firstDate)}`);
+            if (lastDate) detailPieces.push(`末日: ${escapeHtml(lastDate)}`);
+            if (diagnostics.matchedBy) detailPieces.push(`定位: ${escapeHtml(diagnostics.matchedBy)}`);
+            if (Number.isFinite(diagnostics.documentWriteExpressions)) {
+                detailPieces.push(`document.write: ${(diagnostics.documentWriteHits || 0)}/${diagnostics.documentWriteExpressions}`);
+            }
+            if (Number.isFinite(diagnostics.scriptAssignments)) {
+                const total = Number.isFinite(diagnostics.scriptAssignmentCandidates)
+                    ? diagnostics.scriptAssignmentCandidates
+                    : diagnostics.scriptAssignments;
+                detailPieces.push(`腳本賦值: ${diagnostics.scriptAssignments}/${total}`);
+            }
+            if (Number.isFinite(diagnostics.candidateCount)) {
+                detailPieces.push(`候選表格: ${diagnostics.candidateCount}`);
+            }
+            if (Number.isFinite(diagnostics.directTables)) {
+                detailPieces.push(`直接表格: ${diagnostics.directTables}`);
+            }
+            if (Number.isFinite(diagnostics.assignmentTables)) {
+                detailPieces.push(`變數表格: ${diagnostics.assignmentTables}`);
+            }
+            if (Number.isFinite(diagnostics.markerHits)) {
+                detailPieces.push(`標記命中: ${diagnostics.markerHits}`);
+            }
+            const urlLabel = attempt?.url ? escapeHtml(attempt.url) : '未知 URL';
+            const detailLine = detailPieces.length > 0 ? `<div class="mt-1">${detailPieces.join(' ・ ')}</div>` : '';
+            const errorLine = attempt?.error
+                ? `<div class="mt-1 text-rose-600">錯誤：${escapeHtml(attempt.error)}</div>`
+                : '';
+            parts.push(`
+                <div class="pt-2 mt-2 border-t first:border-t-0 first:pt-0 first:mt-1" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between text-[10px]">
+                        <span class="font-semibold">嘗試 #${index + 1}</span>
+                        <span class="${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="text-[10px] break-words">URL：${urlLabel}</div>
+                    ${detailLine}
+                    ${errorLine}
+                </div>
+            `);
+        });
+    }
+    logEl.innerHTML = parts.join('');
+    logEl.classList.remove('hidden');
 }
 
 function renderDataSourceTesterButtons(sources, disabled) {
@@ -176,6 +315,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
+    clearDataSourceTesterLog();
 
     try {
         const response = await fetch(`${endpoint}?${params.toString()}`, {
@@ -190,7 +330,9 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         }
         if (!response.ok || payload?.error) {
             const message = payload?.error || `HTTP ${response.status}`;
-            throw new Error(message);
+            const errorObj = new Error(message);
+            if (payload?.meta) errorObj.meta = payload.meta;
+            throw errorObj;
         }
         const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
         const total = Number.isFinite(payload.iTotalRecords)
@@ -211,11 +353,13 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
+        renderDataSourceTesterLog(payload?.meta || null);
     } catch (error) {
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
         );
+        renderDataSourceTesterLog(error?.meta || null);
     } finally {
         dataSourceTesterState.busy = false;
         refreshDataSourceTester();

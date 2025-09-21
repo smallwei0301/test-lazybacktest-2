@@ -2,6 +2,7 @@
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
+// Patch Tag: LB-GOODINFO-LOG-20241025A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 import { fetchGoodinfoAdjustedSeries, GOODINFO_VERSION } from './lib/goodinfo.js';
@@ -49,6 +50,37 @@ function normaliseFinMindErrorMessage(message) {
         return 'FinMind 帳號等級為註冊 (Register)，請升級 Sponsor 方案後再使用此資料來源。';
     }
     return message;
+}
+
+function normaliseGoodinfoAttempts(debug) {
+    if (!debug) return [];
+    if (Array.isArray(debug)) return debug;
+    if (Array.isArray(debug.attempts)) return debug.attempts;
+    return [];
+}
+
+function buildGoodinfoMeta(debug) {
+    return {
+        goodinfo: {
+            version: GOODINFO_VERSION,
+            attempts: normaliseGoodinfoAttempts(debug),
+        },
+    };
+}
+
+function mergeMetaRecords(target, source) {
+    if (!source || typeof source !== 'object') return;
+    Object.entries(source).forEach(([key, value]) => {
+        target[key] = value;
+    });
+}
+
+async function readCacheWithMeta(store, cacheKey, metaCollector) {
+    const payload = await readCache(store, cacheKey);
+    if (payload && payload.meta) {
+        mergeMetaRecords(metaCollector, payload.meta);
+    }
+    return payload;
 }
 function pad2(value) {
     return String(value).padStart(2, '0');
@@ -439,6 +471,7 @@ async function hydrateGoodinfoAdjusted(store, stockNo, startDateISO, endDateISO)
     if (!result || !Array.isArray(result.rows) || result.rows.length === 0) {
         throw new Error('Goodinfo 未回傳還原股價資料');
     }
+    const goodinfoAttempts = normaliseGoodinfoAttempts(result.debug);
     const buckets = new Map();
     const stockName = result.stockName || stockNo;
     for (const row of result.rows) {
@@ -502,11 +535,11 @@ async function hydrateGoodinfoAdjusted(store, stockNo, startDateISO, endDateISO)
             stockName,
             aaData: rows,
             dataSource: 'Goodinfo (還原備援)',
-            meta: { goodinfoVersion: GOODINFO_VERSION },
+            meta: buildGoodinfoMeta({ attempts: goodinfoAttempts }),
         });
     }
 
-    return 'Goodinfo (還原備援)';
+    return { label: 'Goodinfo (還原備援)', debug: goodinfoAttempts };
 }
 
 function summariseSources(flags, adjusted) {
@@ -582,6 +615,7 @@ export default async (req) => {
         const store = obtainStore('tpex_cache_store');
         const combinedRows = [];
         const sourceFlags = new Set();
+        const metaAggregator = {};
         let stockName = '';
         let yahooHydrated = false;
         let yahooLabel = '';
@@ -608,7 +642,7 @@ export default async (req) => {
                             startDate.toISOString().split('T')[0],
                             endDate.toISOString().split('T')[0],
                         );
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload) sourceFlags.add(finmindLabel);
                         finmindHydrated = true;
                     } catch (error) {
@@ -623,7 +657,7 @@ export default async (req) => {
                             await fetchYahooDaily(stockNo, startDate, endDate),
                             adjusted,
                         );
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload) sourceFlags.add(yahooLabel);
                         yahooHydrated = true;
                     } catch (error) {
@@ -632,22 +666,31 @@ export default async (req) => {
                     }
                 } else if (forcedSource === 'goodinfo') {
                     try {
-                        goodinfoLabel = await hydrateGoodinfoAdjusted(
+                        const goodinfoResult = await hydrateGoodinfoAdjusted(
                             store,
                             stockNo,
                             startDate.toISOString().split('T')[0],
                             endDate.toISOString().split('T')[0],
                         );
-                        payload = await readCache(store, cacheKey);
+                        goodinfoLabel = goodinfoResult.label;
+                        const attempts = normaliseGoodinfoAttempts(goodinfoResult.debug);
+                        metaAggregator.goodinfo = buildGoodinfoMeta(attempts).goodinfo;
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload) sourceFlags.add(goodinfoLabel);
                         goodinfoHydrated = true;
                     } catch (error) {
                         console.error('[TPEX Proxy v10.2] 強制 Goodinfo 失敗:', error);
-                        return new Response(JSON.stringify({ error: `Goodinfo 來源取得失敗: ${error.message}` }), { status: 502 });
+                        return new Response(
+                            JSON.stringify({
+                                error: `Goodinfo 來源取得失敗: ${error.message}`,
+                                meta: buildGoodinfoMeta(error),
+                            }),
+                            { status: 502 },
+                        );
                     }
                 }
             } else {
-                payload = await readCache(store, cacheKey);
+                payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                 if (!payload) {
                     if (adjusted) {
                         let yahooError = null;
@@ -665,16 +708,19 @@ export default async (req) => {
                                 console.error('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error);
                             }
                         }
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (!payload) {
                             if (!goodinfoHydrated) {
                                 try {
-                                    goodinfoLabel = await hydrateGoodinfoAdjusted(
+                                    const goodinfoResult = await hydrateGoodinfoAdjusted(
                                         store,
                                         stockNo,
                                         startDate.toISOString().split('T')[0],
                                         endDate.toISOString().split('T')[0],
                                     );
+                                    goodinfoLabel = goodinfoResult.label;
+                                    const attempts = normaliseGoodinfoAttempts(goodinfoResult.debug);
+                                    metaAggregator.goodinfo = buildGoodinfoMeta(attempts).goodinfo;
                                     goodinfoHydrated = true;
                                 } catch (error) {
                                     console.error('[TPEX Proxy v10.2] Goodinfo 還原來源失敗:', error);
@@ -682,17 +728,21 @@ export default async (req) => {
                                         return new Response(
                                             JSON.stringify({
                                                 error: `Yahoo 還原來源取得失敗: ${yahooError.message}; Goodinfo 備援亦失敗: ${error.message}`,
+                                                meta: buildGoodinfoMeta(error),
                                             }),
                                             { status: 502 },
                                         );
                                     }
                                     return new Response(
-                                        JSON.stringify({ error: `Goodinfo 還原來源取得失敗: ${error.message}` }),
+                                        JSON.stringify({
+                                            error: `Goodinfo 還原來源取得失敗: ${error.message}`,
+                                            meta: buildGoodinfoMeta(error),
+                                        }),
                                         { status: 502 },
                                     );
                                 }
                             }
-                            payload = await readCache(store, cacheKey);
+                            payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                             if (payload) {
                                 if (payload.dataSource) sourceFlags.add(payload.dataSource);
                                 else if (goodinfoLabel) sourceFlags.add(goodinfoLabel);
@@ -703,7 +753,10 @@ export default async (req) => {
                                 );
                             } else {
                                 return new Response(
-                                    JSON.stringify({ error: 'Goodinfo 還原來源取得失敗: 未取得任何資料' }),
+                                    JSON.stringify({
+                                        error: 'Goodinfo 還原來源取得失敗: 未取得任何資料',
+                                        meta: buildGoodinfoMeta([]),
+                                    }),
                                     { status: 502 },
                                 );
                             }
@@ -741,7 +794,7 @@ export default async (req) => {
                             }
                             finmindHydrated = true;
                         }
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload && payload.dataSource) {
                             sourceFlags.add(payload.dataSource);
                         } else if (payload && finmindLabel) {
@@ -788,6 +841,10 @@ export default async (req) => {
             aaData,
             dataSource: summariseSources(sourceFlags, adjusted),
         };
+
+        if (Object.keys(metaAggregator).length > 0) {
+            body.meta = metaAggregator;
+        }
 
         return new Response(JSON.stringify(body), {
             headers: { 'Content-Type': 'application/json' },
