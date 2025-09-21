@@ -1,7 +1,9 @@
 // netlify/functions/lib/goodinfo.js
-// Patch Tag: LB-GOODINFO-ADJ-20241020B
+// Patch Tag: LB-GOODINFO-ADJ-20241021A
 
-const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241020B';
+import { TextDecoder } from 'util';
+
+const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241021A';
 
 const GOODINFO_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -237,13 +239,65 @@ function parseAdjustedRows(tableHtml) {
     return parsed;
 }
 
+function extractCharsetFromContentType(contentType) {
+    if (!contentType) return null;
+    const match = contentType.match(/charset\s*=\s*([^;]+)/i);
+    if (!match || !match[1]) return null;
+    return match[1].trim().replace(/^['"]|['"]$/g, '');
+}
+
+function extractCharsetFromHtml(buffer) {
+    if (!buffer || buffer.length === 0) return null;
+    const asciiSnippet = buffer.slice(0, 1024).toString('latin1');
+    const metaMatch = asciiSnippet.match(/charset\s*=\s*(["']?)([\w\-]+)\1/i);
+    if (metaMatch && metaMatch[2]) {
+        return metaMatch[2].trim();
+    }
+    return null;
+}
+
+function normaliseEncodingName(name) {
+    if (!name) return null;
+    const lower = name.toLowerCase();
+    if (['big5', 'big-5', 'big5-hkscs', 'big5hkscs', 'x-windows-950', 'windows-950', 'ms950', 'cp950'].includes(lower)) {
+        return 'big5';
+    }
+    if (['utf8', 'utf-8'].includes(lower)) {
+        return 'utf-8';
+    }
+    if (['utf16le', 'utf-16le'].includes(lower)) {
+        return 'utf-16le';
+    }
+    if (['latin1', 'iso-8859-1'].includes(lower)) {
+        return 'latin1';
+    }
+    return lower;
+}
+
+function decodeBuffer(buffer, encodingHint) {
+    let encoding = normaliseEncodingName(encodingHint) || 'utf-8';
+    try {
+        const decoder = new TextDecoder(encoding, { fatal: false });
+        return decoder.decode(buffer);
+    } catch (error) {
+        if (encoding !== 'utf-8') {
+            const fallbackDecoder = new TextDecoder('utf-8', { fatal: false });
+            return fallbackDecoder.decode(buffer);
+        }
+        throw error;
+    }
+}
+
 async function fetchHtml(fetchImpl, url) {
     const response = await fetchImpl(url, { headers: GOODINFO_HEADERS });
     if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
     }
-    const buffer = await response.arrayBuffer();
-    return Buffer.from(buffer).toString('utf8');
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const headerCharset = extractCharsetFromContentType(response.headers.get('content-type'));
+    const charset = headerCharset || extractCharsetFromHtml(buffer) || 'utf-8';
+    return decodeBuffer(buffer, charset);
 }
 
 async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder) {
