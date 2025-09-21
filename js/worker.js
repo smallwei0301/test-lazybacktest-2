@@ -698,6 +698,12 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       ? summary.sources.join(" + ")
       : "Netlify 還原管線");
 
+  const serverFallbackInfo =
+    payload?.adjustmentFallback && typeof payload.adjustmentFallback === "object"
+      ? payload.adjustmentFallback
+      : null;
+  const serverFallbackApplied = Boolean(payload?.adjustmentFallbackApplied);
+
   const dividendEvents = Array.isArray(payload?.dividendEvents)
     ? payload.dividendEvents
     : [];
@@ -712,6 +718,8 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     dividendEvents,
   );
 
+  const finalFallbackApplied = serverFallbackApplied || fallbackApplied;
+
   return {
     data: adjustedRows,
     dataSource: sourceLabel,
@@ -719,7 +727,8 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     summary,
     adjustments,
     priceSource,
-    adjustmentFallbackApplied: fallbackApplied,
+    adjustmentFallbackApplied: finalFallbackApplied,
+    adjustmentFallbackInfo: serverFallbackInfo,
     debugSteps,
     dividendEvents,
     dividendDiagnostics,
@@ -898,6 +907,7 @@ async function fetchStockData(
       adjustmentFallbackApplied: Boolean(
         cachedEntry?.meta?.adjustmentFallbackApplied,
       ),
+      adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
     };
   }
 
@@ -934,6 +944,11 @@ async function fetchStockData(
         priceSource: adjustedResult.priceSource || null,
         adjustmentFallbackApplied:
           Boolean(adjustedResult.adjustmentFallbackApplied),
+        adjustmentFallbackInfo:
+          adjustedResult.adjustmentFallbackInfo &&
+          typeof adjustedResult.adjustmentFallbackInfo === "object"
+            ? adjustedResult.adjustmentFallbackInfo
+            : null,
         debugSteps: Array.isArray(adjustedResult.debugSteps)
           ? adjustedResult.debugSteps
           : [],
@@ -959,6 +974,11 @@ async function fetchStockData(
       adjustmentFallbackApplied: Boolean(
         adjustedResult.adjustmentFallbackApplied,
       ),
+      adjustmentFallbackInfo:
+        adjustedResult.adjustmentFallbackInfo &&
+        typeof adjustedResult.adjustmentFallbackInfo === "object"
+          ? adjustedResult.adjustmentFallbackInfo
+          : null,
       dividendDiagnostics:
         adjustedResult.dividendDiagnostics &&
         typeof adjustedResult.dividendDiagnostics === "object"
@@ -4657,6 +4677,11 @@ self.onmessage = async function (e) {
                 : [],
               priceSource: cachedMeta?.priceSource || null,
               adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+              adjustmentFallbackInfo:
+                cachedMeta?.adjustmentFallbackInfo &&
+                typeof cachedMeta.adjustmentFallbackInfo === "object"
+                  ? cachedMeta.adjustmentFallbackInfo
+                  : null,
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
                 ? cachedMeta.debugSteps
                 : [],
@@ -4677,6 +4702,11 @@ self.onmessage = async function (e) {
               : [],
             priceSource: cachedMeta.priceSource || null,
             adjustmentFallbackApplied: Boolean(cachedMeta.adjustmentFallbackApplied),
+            adjustmentFallbackInfo:
+              cachedMeta?.adjustmentFallbackInfo &&
+              typeof cachedMeta.adjustmentFallbackInfo === "object"
+                ? cachedMeta.adjustmentFallbackInfo
+                : null,
             debugSteps: Array.isArray(cachedMeta.debugSteps)
               ? cachedMeta.debugSteps
               : [],
@@ -4740,6 +4770,8 @@ self.onmessage = async function (e) {
         priceSource: outcome?.priceSource || workerLastMeta?.priceSource || null,
         dataSource: outcome?.dataSource || workerLastMeta?.dataSource || null,
         adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        adjustmentFallbackInfo:
+          outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
         dividendDiagnostics:
           outcome?.dividendDiagnostics || workerLastMeta?.dividendDiagnostics || null,
         dividendEvents: Array.isArray(outcome?.dividendEvents)
@@ -4757,6 +4789,7 @@ self.onmessage = async function (e) {
           priceSource: outcome?.priceSource || null,
           dataSource: outcome?.dataSource || null,
           adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+          adjustmentFallbackInfo: outcome?.adjustmentFallbackInfo || null,
           dividendDiagnostics: outcome?.dividendDiagnostics || null,
           dividendEvents: Array.isArray(outcome?.dividendEvents)
             ? outcome.dividendEvents
@@ -4778,6 +4811,8 @@ self.onmessage = async function (e) {
         stockName: metaInfo?.stockName || "",
         dataSource: metaInfo?.dataSource || "未知",
         adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        adjustmentFallbackInfo:
+          outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
       });
     } else if (type === "runOptimization") {
       if (!optimizeTargetStrategy || !optimizeParamName || !optimizeRange)

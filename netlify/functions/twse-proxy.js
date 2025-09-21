@@ -120,6 +120,14 @@ function rocToISO(rocDate) {
     return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
+function formatISODateFromDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const year = date.getUTCFullYear();
+    const month = pad2(date.getUTCMonth() + 1);
+    const day = pad2(date.getUTCDate());
+    return `${year}-${month}-${day}`;
+}
+
 function withinRange(rocDate, start, end) {
     const iso = rocToISO(rocDate);
     if (!iso) return false;

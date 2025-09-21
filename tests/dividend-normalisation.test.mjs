@@ -5,6 +5,7 @@ const {
   normaliseDividendRecord,
   prepareDividendEvents,
   computeAdjustmentRatio,
+  buildAdjustedRowsFromFactorMap,
 } = __TESTING__;
 
 function approxEqual(actual, expected, epsilon = 1e-6) {
@@ -153,5 +154,44 @@ approxEqual(mixedRatio, baseClose / expectedDenominator);
 
 const cashOnlyRatio = computeAdjustmentRatio(97, { cashDividend: 3 });
 approxEqual(cashOnlyRatio, 97 / (97 + 3));
+
+const rawSeries = [
+  { date: '2024-07-10', open: 100, high: 102, low: 99, close: 100, volume: 5000 },
+  { date: '2024-07-11', open: 98, high: 99, low: 96, close: 97, volume: 4200 },
+  { date: '2024-07-12', open: 95, high: 96, low: 94, close: 95, volume: 3900 },
+];
+const factorMap = new Map([
+  ['2024-07-10', 0.95],
+  ['2024-07-11', 0.97],
+  ['2024-07-12', 1],
+]);
+const fallbackResult = buildAdjustedRowsFromFactorMap(rawSeries, factorMap, { label: 'FinMind 還原序列' });
+assert.equal(fallbackResult.rows.length, 3);
+approxEqual(fallbackResult.rows[0].close, 95);
+approxEqual(fallbackResult.rows[1].close, 94.09, 1e-2);
+approxEqual(fallbackResult.rows[2].close, 95);
+assert.equal(fallbackResult.adjustments.length, 2);
+approxEqual(fallbackResult.adjustments[0].ratio, 0.97938, 1e-4);
+approxEqual(fallbackResult.adjustments[1].ratio, 0.97, 1e-4);
+assert.equal(fallbackResult.adjustments[0].source, 'FinMind 還原序列');
+approxEqual(fallbackResult.adjustments[0].factorBefore, 0.95, 1e-6);
+approxEqual(fallbackResult.adjustments[0].factorAfter, 0.97, 1e-6);
+approxEqual(fallbackResult.adjustments[0].factorDelta, 0.02, 1e-6);
+assert.equal(fallbackResult.adjustments[0].factorDirection, 'up');
+
+const descendingFactorMap = new Map([
+  ['2024-07-10', 1],
+  ['2024-07-11', 0.95],
+  ['2024-07-12', 0.92],
+]);
+const descendingResult = buildAdjustedRowsFromFactorMap(rawSeries, descendingFactorMap, {
+  label: 'FinMind 還原序列',
+});
+assert.equal(descendingResult.adjustments.length, 2);
+approxEqual(descendingResult.adjustments[0].ratio, 0.95, 1e-6);
+approxEqual(descendingResult.adjustments[1].ratio, 0.968421, 1e-6);
+approxEqual(descendingResult.adjustments[0].factorBefore, 1, 1e-6);
+approxEqual(descendingResult.adjustments[0].factorAfter, 0.95, 1e-6);
+assert.equal(descendingResult.adjustments[0].factorDirection, 'down');
 
 console.log('Dividend normalisation tests passed');

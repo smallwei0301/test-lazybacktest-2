@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.3 - TWSE/FinMind dividend diagnostics + zero-amount tracing)
+// netlify/functions/calculateAdjustedPrice.js (v13.4 - FinMind adjusted-series fallback diagnostics)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -15,9 +15,11 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250220A
 // Patch Tag: LB-ADJ-COMPOSER-20250320A
 // Patch Tag: LB-ADJ-COMPOSER-20250328A
+// Patch Tag: LB-ADJ-COMPOSER-20250331A
+// Patch Tag: LB-ADJ-COMPOSER-20250402A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250328A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250402A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -324,6 +326,8 @@ const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
 const FINMIND_SPLITTABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
+const FINMIND_ADJUSTED_LABEL = 'FinMind 還原序列';
+const ADJUSTED_SERIES_RATIO_EPSILON = 1e-5;
 
 function jsonResponse(statusCode, payload, headers = {}) {
   return {
@@ -1591,6 +1595,327 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
   return { stockName: finalStockName, rows, priceSource };
 }
 
+function resolveAdjustedCloseValue(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidateKeys = [
+    'adj_close',
+    'adjClose',
+    'Adj_Close',
+    'close_adjusted',
+    'close_adj',
+    'close',
+    'Close',
+    'closing_price',
+  ];
+  for (const key of candidateKeys) {
+    const value = parseNumber(readField(raw, key));
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function buildAdjustedRowsFromFactorMap(priceRows, factorMap, options = {}) {
+  if (!Array.isArray(priceRows) || priceRows.length === 0) {
+    return { rows: [], adjustments: [], matchedCount: 0 };
+  }
+
+  const label = options.label || FINMIND_ADJUSTED_LABEL;
+  const sortedRows = [...priceRows].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+
+  const adjustedRows = [];
+  const derivedAdjustments = [];
+  let matchedCount = 0;
+  let previousFactor = null;
+
+  const scaleValue = (value, factor) => {
+    if (value === null || value === undefined) return value;
+    if (!Number.isFinite(value)) return value;
+    return safeRound(value * factor) ?? value;
+  };
+
+  sortedRows.forEach((row) => {
+    const iso = row.date;
+    const mappedFactor = factorMap instanceof Map ? factorMap.get(iso) : null;
+    let factor = mappedFactor;
+    if (Number.isFinite(mappedFactor) && mappedFactor > 0) {
+      matchedCount += 1;
+    } else if (Number.isFinite(previousFactor) && previousFactor > 0) {
+      factor = previousFactor;
+    } else {
+      factor = 1;
+    }
+
+    if (!Number.isFinite(factor) || factor <= 0) {
+      factor = 1;
+    }
+
+    const adjustedRow = {
+      ...row,
+      open: scaleValue(row.open, factor),
+      high: scaleValue(row.high, factor),
+      low: scaleValue(row.low, factor),
+      close: scaleValue(row.close, factor),
+      adjustedFactor: factor,
+    };
+    adjustedRows.push(adjustedRow);
+
+    if (
+      Number.isFinite(previousFactor) &&
+      previousFactor > 0 &&
+      Number.isFinite(factor) &&
+      factor > 0
+    ) {
+      const maxFactor = Math.max(previousFactor, factor);
+      const minFactor = Math.min(previousFactor, factor);
+      const ratio = minFactor / maxFactor;
+      if (
+        Number.isFinite(ratio) &&
+        ratio > 0 &&
+        ratio < 1 &&
+        Math.abs(1 - ratio) > ADJUSTED_SERIES_RATIO_EPSILON
+      ) {
+        const roundedRatio = Number(Math.round(ratio * 1e6) / 1e6);
+        const factorBefore = Number.isFinite(previousFactor)
+          ? Number(Math.round(previousFactor * 1e6) / 1e6)
+          : null;
+        const factorAfter = Number.isFinite(factor)
+          ? Number(Math.round(factor * 1e6) / 1e6)
+          : null;
+        const factorDelta =
+          Number.isFinite(factorBefore) && Number.isFinite(factorAfter)
+            ? Number(Math.round((factorAfter - factorBefore) * 1e6) / 1e6)
+            : null;
+        let factorDirection = null;
+        if (Number.isFinite(factorDelta)) {
+          if (factorDelta > 0) {
+            factorDirection = 'up';
+          } else if (factorDelta < 0) {
+            factorDirection = 'down';
+          } else {
+            factorDirection = 'flat';
+          }
+        }
+
+        derivedAdjustments.push({
+          date: iso,
+          appliedDate: iso,
+          ratio: roundedRatio,
+          baseClose: adjustedRow.close ?? null,
+          source: label,
+          derivedFrom: 'finmindAdjustedSeries',
+          factorBefore,
+          factorAfter,
+          factorDelta,
+          factorDirection,
+        });
+      }
+    }
+
+    previousFactor = factor;
+  });
+
+  for (let i = 0; i < adjustedRows.length; i += 1) {
+    const current = adjustedRows[i];
+    if (!Number.isFinite(current?.close)) {
+      current.change = 0;
+      continue;
+    }
+    const prevClose = i > 0 ? adjustedRows[i - 1]?.close : null;
+    current.change = Number.isFinite(prevClose) ? safeRound(current.close - prevClose) ?? 0 : 0;
+  }
+
+  return { rows: adjustedRows, adjustments: derivedAdjustments, matchedCount };
+}
+
+async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
+  const token = process.env.FINMIND_TOKEN;
+  if (!token) {
+    throw new Error('未設定 FinMind Token');
+  }
+  const startDate = new Date(startISO);
+  const endDate = new Date(endISO);
+  const spans = enumerateDateSpans(startDate, endDate, FINMIND_MAX_SPAN_DAYS);
+  if (spans.length === 0) {
+    return { rows: [], matched: 0 };
+  }
+
+  const rowsMap = new Map();
+  const queue = [...spans];
+  while (queue.length > 0) {
+    const span = queue.shift();
+    const spanDays = countSpanDays(span);
+    const params = {
+      dataset: 'TaiwanStockPriceAdj',
+      data_id: stockNo,
+      start_date: span.startISO,
+      end_date: span.endISO,
+      token,
+    };
+    let json;
+    try {
+      json = await executeFinMindQuery(params);
+    } catch (error) {
+      if (shouldSplitSpan(error, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              error.message || error
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      const enriched = new Error(
+        `[FinMind 還原序列錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
+      );
+      enriched.original = error;
+      enriched.statusCode = extractStatusCode(error);
+      throw enriched;
+    }
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      const payloadError = new Error(`FinMind 還原序列回應錯誤: ${json?.msg || 'unknown error'}`);
+      payloadError.statusCode = json?.status;
+      if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              payloadError.message || payloadError
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      throw payloadError;
+    }
+
+    for (const rawRow of json.data) {
+      const iso = toISODate(readField(rawRow, 'date'));
+      if (!iso) continue;
+      const adjustedClose = resolveAdjustedCloseValue(rawRow);
+      if (!Number.isFinite(adjustedClose) || adjustedClose <= 0) continue;
+      rowsMap.set(iso, { date: iso, close: adjustedClose });
+    }
+
+    if (queue.length > 0) {
+      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+    }
+  }
+
+  const rows = Array.from(rowsMap.values()).sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+  return { rows, matched: rows.length };
+}
+
+async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRows }) {
+  if (!Array.isArray(priceRows) || priceRows.length === 0) {
+    return null;
+  }
+
+  let adjustedSeries;
+  try {
+    adjustedSeries = await fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO);
+  } catch (error) {
+    return {
+      applied: false,
+      error: error.message || error,
+      rows: priceRows,
+      adjustments: [],
+      info: {
+        applied: false,
+        status: 'error',
+        detail: error.message || 'FinMind 還原序列失敗',
+        label: FINMIND_ADJUSTED_LABEL,
+      },
+    };
+  }
+
+  if (!adjustedSeries || adjustedSeries.rows.length === 0) {
+    return {
+      applied: false,
+      rows: priceRows,
+      adjustments: [],
+      info: {
+        applied: false,
+        status: 'warning',
+        detail: 'FinMind 還原序列無資料',
+        label: FINMIND_ADJUSTED_LABEL,
+      },
+    };
+  }
+
+  const priceMap = new Map();
+  priceRows.forEach((row) => {
+    if (row?.date) {
+      priceMap.set(row.date, row);
+    }
+  });
+
+  const factorMap = new Map();
+  let ratioSamples = 0;
+  for (const adjustedRow of adjustedSeries.rows) {
+    const rawRow = priceMap.get(adjustedRow.date);
+    if (!rawRow || !Number.isFinite(rawRow.close) || rawRow.close <= 0) continue;
+    if (!Number.isFinite(adjustedRow.close) || adjustedRow.close <= 0) continue;
+    const factor = adjustedRow.close / rawRow.close;
+    if (!Number.isFinite(factor) || factor <= 0) continue;
+    factorMap.set(adjustedRow.date, factor);
+    ratioSamples += 1;
+  }
+
+  if (factorMap.size === 0) {
+    return {
+      applied: false,
+      rows: priceRows,
+      adjustments: [],
+      info: {
+        applied: false,
+        status: 'warning',
+        detail: 'FinMind 還原序列與原始價無重疊日期',
+        label: FINMIND_ADJUSTED_LABEL,
+      },
+    };
+  }
+
+  const { rows: adjustedRows, adjustments, matchedCount } = buildAdjustedRowsFromFactorMap(
+    priceRows,
+    factorMap,
+    { label: FINMIND_ADJUSTED_LABEL },
+  );
+
+  const applied = matchedCount > 0;
+
+  const detailParts = [`對齊 ${matchedCount} 筆`, `產生 ${adjustments.length} 件`];
+  if (Number.isFinite(ratioSamples) && ratioSamples !== matchedCount) {
+    detailParts.push(`係數樣本 ${ratioSamples}`);
+  }
+
+  return {
+    applied,
+    rows: adjustedRows,
+    adjustments,
+    info: {
+      applied,
+      status: applied ? 'success' : 'warning',
+      detail: detailParts.join(' ・ '),
+      label: FINMIND_ADJUSTED_LABEL,
+      matchedCount,
+      adjustmentCount: adjustments.length,
+      ratioSamples,
+    },
+  };
+}
+
 async function fetchDividendSeries(stockNo, startISO, endISO) {
   const token = process.env.FINMIND_TOKEN;
   if (!token) {
@@ -1700,6 +2025,7 @@ function buildDebugSteps({
   filteredDividendSeries,
   preparedEvents,
   adjustments,
+  fallbackInfo,
 }) {
   const priceRows = Array.isArray(priceData?.rows) ? priceData.rows.length : 0;
   const totalDividendRows = Array.isArray(dividendSeries) ? dividendSeries.length : 0;
@@ -1743,13 +2069,32 @@ function buildDebugSteps({
     },
   ];
 
+  if (fallbackInfo) {
+    steps.push({
+      key: 'adjustedSeriesFallback',
+      label: fallbackInfo.label || FINMIND_ADJUSTED_LABEL,
+      status: fallbackInfo.status || (fallbackInfo.applied ? 'success' : 'warning'),
+      detail: fallbackInfo.detail || '',
+    });
+  }
+
   return steps;
 }
 
-function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendStats = {}) {
+function buildSummary(
+  priceData,
+  adjustments,
+  market,
+  priceSourceLabel,
+  dividendStats = {},
+  fallbackInfo = null,
+) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
   const uniqueSources = new Set([basePriceSource, 'FinMind (除權息還原)']);
+  if (fallbackInfo?.applied) {
+    uniqueSources.add(fallbackInfo.label || FINMIND_ADJUSTED_LABEL);
+  }
   const {
     filteredCount,
     totalCount,
@@ -1793,6 +2138,7 @@ export const __TESTING__ = {
   resolveSubscriptionPrice,
   filterDividendRecordsByPriceRange,
   computeAdjustmentRatio,
+  buildAdjustedRowsFromFactorMap,
 };
 
 export const handler = async (event) => {
@@ -1877,18 +2223,47 @@ export const handler = async (event) => {
       { preparedEvents: preparedDividendEvents },
     );
 
+    const appliedAdjustments = adjustments.filter((event) => !event?.skipped);
+    let fallbackInfo = null;
+    let effectiveRows = adjustedRows;
+    let effectiveAdjustments = adjustments;
+
+    if (appliedAdjustments.length === 0 && priceRows.length > 0) {
+      const fallbackResult = await deriveAdjustedSeriesFallback({
+        stockNo,
+        startISO,
+        endISO,
+        priceRows,
+      });
+      if (fallbackResult) {
+        fallbackInfo = fallbackResult.info || null;
+        if (Array.isArray(fallbackResult.rows) && fallbackResult.rows.length > 0) {
+          effectiveRows = fallbackResult.rows;
+        }
+        if (Array.isArray(fallbackResult.adjustments) && fallbackResult.adjustments.length > 0) {
+          effectiveAdjustments = [...adjustments, ...fallbackResult.adjustments];
+        }
+      }
+    }
+
     const debugSteps = buildDebugSteps({
       priceData,
       priceSourceLabel,
       dividendSeries,
       filteredDividendSeries,
       preparedEvents: preparedDividendEvents,
-      adjustments,
+      adjustments: effectiveAdjustments,
+      fallbackInfo,
     });
 
-    const combinedSourceLabel = `${
+    const baseSourceLabel =
       priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
-    } + FinMind (除權息還原)`;
+    ;
+    const combinedSourceParts = [baseSourceLabel, 'FinMind (除權息還原)'];
+    if (fallbackInfo?.applied) {
+      combinedSourceParts.push(FINMIND_ADJUSTED_LABEL);
+    }
+    const combinedSourceLabel = combinedSourceParts.join(' + ');
 
     const responseBody = {
       version: FUNCTION_VERSION,
@@ -1899,7 +2274,7 @@ export const handler = async (event) => {
       priceSource: priceSourceLabel,
       summary: buildSummary(
         priceData,
-        adjustments,
+        effectiveAdjustments,
         market,
         priceSourceLabel,
         {
@@ -1910,12 +2285,15 @@ export const handler = async (event) => {
           fetchStartISO: dividendPayload?.fetchStartISO || null,
           fetchEndISO: dividendPayload?.fetchEndISO || null,
         },
+        fallbackInfo,
       ),
-      data: adjustedRows,
-      adjustments,
+      data: effectiveRows,
+      adjustments: effectiveAdjustments,
       dividendEvents: events,
       dividendDiagnostics,
       debugSteps,
+      adjustmentFallback: fallbackInfo || null,
+      adjustmentFallbackApplied: Boolean(fallbackInfo?.applied),
     };
 
     return jsonResponse(200, responseBody);

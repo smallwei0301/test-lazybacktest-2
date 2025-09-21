@@ -33,6 +33,7 @@ const dataSourceTesterState = {
 };
 
 // Patch Tag: LB-DATASOURCE-20250328A
+// Patch Tag: LB-DATASOURCE-20250402A
 const testerAdjustmentReasonLabels = {
     missingPriceRow: '缺少對應價格',
     invalidBaseClose: '無效基準價',
@@ -175,9 +176,40 @@ function buildAdjustmentDiagnosticsHtml(adjustments) {
             if (!event.skipped && Number.isFinite(event.ratio)) {
                 metaLines.push(`調整係數 ${formatTesterNumber(event.ratio, 6)}`);
             }
+            const factorBefore = Number(event.factorBefore);
+            const factorAfter = Number(event.factorAfter);
+            if (Number.isFinite(factorBefore) || Number.isFinite(factorAfter)) {
+                const beforeText = Number.isFinite(factorBefore)
+                    ? formatTesterNumber(factorBefore, 6)
+                    : '—';
+                const afterText = Number.isFinite(factorAfter)
+                    ? formatTesterNumber(factorAfter, 6)
+                    : '—';
+                metaLines.push(`FinMind 係數 ${beforeText} → ${afterText}`);
+            }
+            if (Number.isFinite(event.factorDelta) && event.factorDelta !== 0) {
+                metaLines.push(`係數差 ${formatTesterNumber(event.factorDelta, 6)}`);
+            }
+            if (event.factorDirection) {
+                const directionLabel =
+                    event.factorDirection === 'up'
+                        ? '向上'
+                        : event.factorDirection === 'down'
+                            ? '向下'
+                            : '持平';
+                metaLines.push(`係數趨勢 ${directionLabel}`);
+            }
             if (event.skipped) {
                 const reasonLabel = testerAdjustmentReasonLabels[event.reason] || event.reason || '未知原因';
                 metaLines.push(`原因 ${testerEscapeHtml(reasonLabel)}`);
+            }
+            const originLabel = event.source
+                ? testerEscapeHtml(event.source)
+                : event.derivedFrom === 'finmindAdjustedSeries'
+                    ? 'FinMind 還原序列'
+                    : '股利計算';
+            if (originLabel) {
+                metaLines.push(`來源 ${originLabel}`);
             }
             const metaHtml = metaLines.map((line) => `<div>${line}</div>`).join('');
             return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="flex items-center gap-2"><span class="${statusClass}">●</span><span class="font-medium" style="color: var(--foreground);">${statusLabel}</span></div><div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${metaHtml}</div></div>`;
@@ -187,6 +219,51 @@ function buildAdjustmentDiagnosticsHtml(adjustments) {
         ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆事件，總計 ${testerEscapeHtml(adjustments.length)} 筆。</div>`
         : '';
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 space-y-1">${items}</div>${remainderNote}</div>`;
+}
+
+function buildDividendEventPreviewHtml(events) {
+    if (!Array.isArray(events) || events.length === 0) return '';
+    const blocks = events.slice(0, 3).map((event) => {
+        const lines = [];
+        if (event.date) {
+            lines.push(`除權息日 ${testerEscapeHtml(event.date)}`);
+        }
+        const compositions = [];
+        if (Number.isFinite(event.cashDividend) && event.cashDividend > 0) {
+            compositions.push(`現金 ${formatTesterNumber(event.cashDividend, 4)}`);
+        }
+        if (Number.isFinite(event.stockDividend) && event.stockDividend > 0) {
+            compositions.push(`股票 ${formatTesterNumber(event.stockDividend, 4)}`);
+        }
+        if (Number.isFinite(event.cashCapitalIncrease) && event.cashCapitalIncrease > 0) {
+            compositions.push(`現增 ${formatTesterNumber(event.cashCapitalIncrease, 4)}`);
+        }
+        if (Number.isFinite(event.stockCapitalIncrease) && event.stockCapitalIncrease > 0) {
+            compositions.push(`轉增 ${formatTesterNumber(event.stockCapitalIncrease, 4)}`);
+        }
+        if (compositions.length > 0) {
+            lines.push(`成分 ${compositions.join('、')}`);
+        }
+        if (Number.isFinite(event.subscriptionPrice) && event.subscriptionPrice > 0) {
+            lines.push(`申購價 ${formatTesterNumber(event.subscriptionPrice, 4)}`);
+        }
+        if (event.dateSources && Array.isArray(event.dateSources) && event.dateSources.length > 0) {
+            const sources = event.dateSources
+                .map((src) => (src.key ? testerEscapeHtml(src.key) : null))
+                .filter(Boolean);
+            if (sources.length > 0) {
+                lines.push(`日期欄位 ${sources.join('、')}`);
+            }
+        } else if (event.dateSource) {
+            lines.push(`日期欄位 ${testerEscapeHtml(event.dateSource)}`);
+        }
+        const body = lines.map((line) => `<div>${line}</div>`).join('');
+        return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="text-[10px]" style="color: var(--muted-foreground);">${body}</div></div>`;
+    }).join('');
+    const note = events.length > 3
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆彙整事件，總計 ${testerEscapeHtml(events.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind 彙整事件</div><div class="mt-1 space-y-1">${blocks}</div>${note}</div>`;
 }
 
 function getStockNoValue() {
@@ -378,22 +455,34 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const total = rows.length;
             const firstDate = rows.length > 0 ? rows[0]?.date || start : start;
             const lastDate = rows.length > 0 ? rows[rows.length - 1]?.date || end : end;
-            const summarySources = Array.isArray(payload?.summary?.sources)
-                ? payload.summary.sources.join(' + ')
+            const summary = payload && typeof payload.summary === 'object' ? payload.summary : {};
+            const summarySources = Array.isArray(summary?.sources)
+                ? summary.sources.join(' + ')
                 : null;
             const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
             const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
             const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+            const aggregatedEvents = Array.isArray(payload?.dividendEvents) ? payload.dividendEvents : [];
+            const fallbackInfo =
+                payload?.adjustmentFallback && typeof payload.adjustmentFallback === 'object'
+                    ? payload.adjustmentFallback
+                    : null;
+            const fallbackAppliedFlag = Boolean(payload?.adjustmentFallbackApplied);
             const appliedAdjustments = adjustmentsList.filter((event) => !event.skipped).length;
             const skippedAdjustments = adjustmentsList.filter((event) => event.skipped).length;
-            const priceSource = payload?.priceSource || payload?.summary?.priceSource;
-            const dividendRows = payload?.summary?.dividendRows;
-            const dividendRowsTotal = payload?.summary?.dividendRowsTotal;
-            const dividendEvents = payload?.summary?.dividendEvents;
-            const adjustmentSkipReasons = payload?.summary?.adjustmentSkipReasons;
-            const dividendFetchStart = payload?.summary?.dividendFetchStart;
-            const dividendFetchEnd = payload?.summary?.dividendFetchEnd;
-            const lookbackDays = payload?.summary?.dividendLookbackDays;
+            const {
+                priceSource,
+                priceRows,
+                dividendRows,
+                dividendRowsTotal,
+                dividendEvents,
+                dividendFetchStart,
+                dividendFetchEnd,
+                dividendLookbackDays: lookbackDays,
+                adjustmentEvents,
+                skippedEvents,
+                adjustmentSkipReasons,
+            } = summary;
             const dividendDiagnostics =
                 payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
                     ? payload.dividendDiagnostics
@@ -412,8 +501,19 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                         : ''
                 }`,
             ];
+            if (Number.isFinite(priceRows)) {
+                lines.push(`價格筆數: <span class="font-semibold">${testerEscapeHtml(priceRows)}</span>`);
+            }
             if (priceSource) {
                 lines.push(`原始價格來源: <span class="font-semibold">${testerEscapeHtml(priceSource)}</span>`);
+            }
+            if (Number.isFinite(adjustmentEvents)) {
+                lines.push(
+                    `成功還原事件: <span class="font-semibold">${testerEscapeHtml(adjustmentEvents)}</span> 件`,
+                );
+            }
+            if (Number.isFinite(skippedEvents) && skippedEvents > 0) {
+                lines.push(`略過事件: <span class="font-semibold">${testerEscapeHtml(skippedEvents)}</span> 件`);
             }
             if (Number.isFinite(dividendRowsTotal)) {
                 const effectiveText = Number.isFinite(dividendRows)
@@ -468,6 +568,32 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     lines.push(`FinMind 事件診斷：<span class="font-semibold">${diagParts.join(' / ')}</span>`);
                 }
             }
+            if (fallbackInfo) {
+                const fallbackLabel = testerEscapeHtml(fallbackInfo.label || 'FinMind 還原序列');
+                const statusText = fallbackInfo.applied ? '已啟用' : '未啟用';
+                const detailText = fallbackInfo.detail ? ` ・ ${testerEscapeHtml(fallbackInfo.detail)}` : '';
+                lines.push(`備援還原: <span class="font-semibold">${fallbackLabel}</span> ${statusText}${detailText}`);
+                if (Number.isFinite(fallbackInfo.matchedCount) || Number.isFinite(fallbackInfo.adjustmentCount)) {
+                    const matchedText = Number.isFinite(fallbackInfo.matchedCount)
+                        ? `對齊 ${testerEscapeHtml(fallbackInfo.matchedCount)} 筆`
+                        : '';
+                    const adjustmentText = Number.isFinite(fallbackInfo.adjustmentCount)
+                        ? `事件 ${testerEscapeHtml(fallbackInfo.adjustmentCount)} 件`
+                        : '';
+                    const ratioSampleText = Number.isFinite(fallbackInfo.ratioSamples)
+                        ? `係數樣本 ${testerEscapeHtml(fallbackInfo.ratioSamples)}`
+                        : '';
+                    const metaParts = [matchedText, adjustmentText, ratioSampleText].filter(Boolean);
+                    if (metaParts.length > 0) {
+                        lines.push(`備援統計: <span class="font-semibold">${metaParts.join(' ・ ')}</span>`);
+                    }
+                }
+                if (fallbackInfo.error) {
+                    lines.push(`備援錯誤: <span class="font-semibold">${testerEscapeHtml(fallbackInfo.error)}</span>`);
+                }
+            } else if (fallbackAppliedFlag) {
+                lines.push('備援還原: <span class="font-semibold">已啟用</span>');
+            }
             if (
                 adjustmentSkipReasons &&
                 typeof adjustmentSkipReasons === 'object' &&
@@ -479,7 +605,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 }
             }
 
-            let detailHtml = lines.join('<br>');
+            detailHtml = lines.join('<br>');
             const debugStepsHtml = buildTesterDebugStepsHtml(debugSteps);
             if (debugStepsHtml) {
                 detailHtml += debugStepsHtml;
@@ -487,6 +613,10 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const zeroAmountHtml = buildZeroAmountSampleHtml(zeroAmountSamples);
             if (zeroAmountHtml) {
                 detailHtml += zeroAmountHtml;
+            }
+            const dividendPreviewHtml = buildDividendEventPreviewHtml(aggregatedEvents);
+            if (dividendPreviewHtml) {
+                detailHtml += dividendPreviewHtml;
             }
             const adjustmentHtml = buildAdjustmentDiagnosticsHtml(adjustmentsList);
             if (adjustmentHtml) {
