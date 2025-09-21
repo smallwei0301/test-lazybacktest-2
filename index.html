@@ -1680,7 +1680,7 @@
                         class="px-4 py-3 border-b hidden"
                         style="border-color: var(--border); color: var(--muted-foreground);"
                     ></div>
-                    <div class="overflow-y-auto max-h-[60vh]" tabindex="0">
+                    <div class="overflow-auto max-h-[60vh]" tabindex="0">
                         <table class="min-w-full text-xs">
                             <thead style="background-color: var(--muted); color: var(--foreground);">
                                 <tr>
@@ -1688,9 +1688,12 @@
                                     <th class="px-3 py-2 text-right font-medium">開盤</th>
                                     <th class="px-3 py-2 text-right font-medium">最高</th>
                                     <th class="px-3 py-2 text-right font-medium">最低</th>
-                                    <th class="px-3 py-2 text-right font-medium">收盤</th>
+                                    <th class="px-3 py-2 text-right font-medium">原始收盤</th>
+                                    <th class="px-3 py-2 text-right font-medium">還原收盤</th>
+                                    <th class="px-3 py-2 text-right font-medium">還原因子</th>
+                                    <th class="px-3 py-2 text-left font-medium">計算公式</th>
                                     <th class="px-3 py-2 text-right font-medium">(千股)量</th>
-                                    <th class="px-3 py-2 text-right font-medium">調整係數</th>
+                                    <th class="px-3 py-2 text-left font-medium">價格來源</th>
                                 </tr>
                             </thead>
                             <tbody id="priceInspectorTableBody" class="divide-y" style="border-color: var(--border);"></tbody>
@@ -1698,7 +1701,7 @@
                     </div>
                 </div>
                 <div class="px-4 py-2 text-[11px]" style="color: var(--muted-foreground);">
-                    若數據已套用還原因子，調整係數將顯示小於 1 的數值；原始價格則為 1。
+                    計算公式以「原始收盤價 × 還原因子 = 還原收盤價」呈現；若顯示「未調整」或還原因子為空值，代表該筆價格沿用原始資料。
                 </div>
             </div>
         </div>

@@ -10,6 +10,10 @@ let lastPriceDebug = {
     summary: null,
     adjustments: [],
     fallbackApplied: false,
+    priceSource: null,
+    dataSource: null,
+    dataSources: [],
+    priceMode: null,
 };
 
 // --- 主回測函數 ---
@@ -316,11 +320,19 @@ function updatePriceDebug(meta = {}) {
     const fallbackApplied = typeof meta.adjustmentFallbackApplied === 'boolean'
         ? meta.adjustmentFallbackApplied
         : Boolean(meta.fallbackApplied);
+    const priceSourceLabel = meta.priceSource || (summary && summary.priceSource) || null;
+    const aggregateSource = meta.dataSource || null;
+    const sourceList = Array.isArray(meta.dataSources) ? meta.dataSources : [];
+    const priceMode = meta.priceMode || (typeof meta.adjustedPrice === 'boolean' ? (meta.adjustedPrice ? 'adjusted' : 'raw') : null);
     lastPriceDebug = {
         steps,
         summary,
         adjustments,
         fallbackApplied,
+        priceSource: priceSourceLabel,
+        dataSource: aggregateSource,
+        dataSources: sourceList,
+        priceMode,
     };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -461,27 +473,74 @@ function openPriceInspectorModal() {
     }
     renderPriceInspectorDebug();
 
+    // Patch Tag: LB-PRICE-INSPECTOR-20250512A
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
-    const formatFactor = (value) => (Number.isFinite(value) ? Number(value).toFixed(6) : '1.000000');
+    const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
+    const resolveSourceLabel = () => {
+        const summarySources = Array.isArray(lastPriceDebug?.summary?.sources)
+            ? lastPriceDebug.summary.sources.filter((item) => typeof item === 'string' && item.trim().length > 0)
+            : [];
+        const candidates = [
+            lastPriceDebug?.priceSource,
+            lastPriceDebug?.summary?.priceSource,
+            lastPriceDebug?.dataSource,
+            summarySources.length > 0 ? summarySources.join(' + ') : null,
+            Array.isArray(lastPriceDebug?.dataSources) && lastPriceDebug.dataSources.length > 0
+                ? lastPriceDebug.dataSources.join(' + ')
+                : null,
+        ];
+        const resolved = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+        return resolved || '—';
+    };
+    const sourceLabel = resolveSourceLabel();
+    const computeRawClose = (row) => {
+        if (!row || !Number.isFinite(row.close)) return null;
+        const factor = Number(row.adjustedFactor);
+        if (!Number.isFinite(factor) || Math.abs(factor) < 1e-8) {
+            return Number(row.close);
+        }
+        const raw = Number(row.close) / factor;
+        return Number.isFinite(raw) ? raw : Number(row.close);
+    };
     const rowsHtml = cachedStockData
         .map((row) => {
             const volumeLabel = Number.isFinite(row?.volume)
                 ? Number(row.volume).toLocaleString('zh-TW')
                 : '—';
+            const factor = Number(row?.adjustedFactor);
+            const closeValue = Number(row?.close);
+            const rawCloseValue = computeRawClose(row);
+            const rawCloseText = formatNumber(rawCloseValue);
+            const closeText = formatNumber(closeValue);
+            const factorText = formatFactor(factor);
+            const hasFactor = Number.isFinite(factor) && Math.abs(factor) > 0;
+            let formulaText = '—';
+            if (closeText !== '—') {
+                if (hasFactor && rawCloseText !== '—' && factorText !== '—') {
+                    formulaText = `${rawCloseText} × ${factorText} = ${closeText}`;
+                } else {
+                    formulaText = `${closeText}（未調整）`;
+                }
+            }
             return `
                 <tr>
                     <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.high)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.low)}</td>
-                    <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${formatNumber(row?.close)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
+                    <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${formatFactor(row?.adjustedFactor)}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(sourceLabel)}</td>
                 </tr>`;
         })
         .join('');
 
-    tbody.innerHTML = rowsHtml || '<tr><td class="px-3 py-4 text-center" colspan="7" style="color: var(--muted-foreground);">無資料</td></tr>';
+    tbody.innerHTML =
+        rowsHtml ||
+        '<tr><td class="px-3 py-4 text-center" colspan="10" style="color: var(--muted-foreground);">無資料</td></tr>';
 
     const scroller = modal.querySelector('.overflow-auto');
     if (scroller) scroller.scrollTop = 0;
