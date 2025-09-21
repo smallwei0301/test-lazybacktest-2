@@ -15,7 +15,7 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250220A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250220A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250305A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',

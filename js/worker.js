@@ -395,6 +395,10 @@ function normaliseAdjustmentEvent(event) {
   };
 }
 
+// Patch Tag: LB-ADJ-PIPE-20250305A
+// 調整判斷邏輯：若前一交易日缺少有效的 adjustedFactor（或近似 1），
+// 但事件比例顯示應存在除權息調整，則直接啟用備援縮放，
+// 同時保留與原始 raw 價格的 1% 內差異判斷以避免重複調整。
 function shouldUseFallbackAdjustments(rows, events) {
   for (const event of events) {
     let baseIndex = rows.findIndex((row) => row?.date >= event.date);
@@ -419,18 +423,14 @@ function shouldUseFallbackAdjustments(rows, events) {
     if (!Number.isFinite(prevClose) || prevClose <= 0) continue;
 
     let ratio = event.ratio;
-    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
       ratio = computeFallbackRatio(baseClose, event);
     }
-    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) continue;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) continue;
 
     const factor = Number(prevRow?.adjustedFactor);
-    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
-      const relativeGap = Math.abs(prevClose - baseClose) / Math.max(baseClose, 1);
-      if (relativeGap >= 0.01) {
-        return true;
-      }
-      continue;
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) <= 0.001) {
+      return true;
     }
 
     const expectedRawPrev = baseClose / ratio;
@@ -439,7 +439,7 @@ function shouldUseFallbackAdjustments(rows, events) {
     }
     const approxRawPrev = prevClose / factor;
     const relativeDiff = Math.abs(approxRawPrev - expectedRawPrev) / Math.max(expectedRawPrev, 1);
-    if (relativeDiff >= 0.02) {
+    if (relativeDiff >= 0.01) {
       return true;
     }
   }
@@ -468,7 +468,7 @@ function applyFallbackAdjustments(rows, events) {
     if (!Number.isFinite(baseClose) || baseClose <= 0 || cursor <= 0) return;
 
     let ratio = event.ratio;
-    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
       ratio = computeFallbackRatio(baseClose, event);
     }
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
@@ -527,7 +527,7 @@ function applyFallbackAdjustments(rows, events) {
   return { rows: mutated ? adjustedRows : rows, mutated };
 }
 
-// Patch Tag: LB-ADJ-PIPE-20250302A
+// Patch Tag: LB-ADJ-PIPE-20250305A
 function maybeApplyAdjustments(rows, adjustments) {
   const result = { rows, fallbackApplied: false };
   if (!Array.isArray(rows) || rows.length === 0) return result;
