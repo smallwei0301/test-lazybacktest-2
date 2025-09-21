@@ -1,4 +1,5 @@
 // --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
+// Patch Tag: LB-ADJ-SPLIT-20250518A
 
 // 全局變量
 let stockChart = null;
@@ -288,6 +289,7 @@ function buildFinMindApiStatusHtml(finmindStatus) {
     }
     const statusConfigs = [
         { key: 'dividendResult', title: 'FinMind 配息結果 API 狀態' },
+        { key: 'splitPrice', title: 'FinMind 股票拆分 API 狀態' },
     ];
     statusConfigs.forEach((config) => {
         const statusObj = finmindStatus[config.key];
@@ -342,20 +344,41 @@ function isAdjustedMode() {
     return Boolean(checkbox && checkbox.checked);
 }
 
+function isSplitAdjustmentEnabled() {
+    const checkbox = document.getElementById('splitAdjustmentCheckbox');
+    if (!checkbox) return false;
+    if (!isAdjustedMode()) return false;
+    return Boolean(checkbox.checked);
+}
+
+function syncSplitAdjustmentState() {
+    const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
+    if (!splitCheckbox) return;
+    if (!isAdjustedMode()) {
+        splitCheckbox.checked = false;
+        splitCheckbox.disabled = true;
+    } else {
+        splitCheckbox.disabled = false;
+    }
+}
+
 function getDateRangeFromUI() {
     const start = document.getElementById('startDate')?.value || '';
     const end = document.getElementById('endDate')?.value || '';
     return { start, end };
 }
 
-function getTesterSourceConfigs(market, adjusted) {
+function getTesterSourceConfigs(market, adjusted, splitEnabled) {
     if (adjusted) {
+        const netlifyDescription = splitEnabled
+            ? 'TWSE/FinMind 原始 + FinMind 配息 + 股票拆分'
+            : 'TWSE/FinMind 原始 + FinMind 配息';
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
             {
                 id: 'netlifyAdjusted',
                 label: 'Netlify 還原備援',
-                description: 'TWSE/FinMind 原始 + FinMind 配息',
+                description: netlifyDescription,
             },
         ];
     }
@@ -450,6 +473,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
+    const splitEnabled = isSplitAdjustmentEnabled();
     let requestUrl = '';
     let parseMode = 'proxy';
     if (adjusted) {
@@ -460,6 +484,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 endDate: end,
                 market,
             });
+            if (splitEnabled) params.set('split', '1');
             requestUrl = `/api/adjusted-price/?${params.toString()}`;
             parseMode = 'adjustedComposer';
         } else if (sourceId === 'yahoo') {
@@ -540,10 +565,23 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 adjustmentEvents,
                 skippedEvents,
                 adjustmentSkipReasons,
+                splitRows,
+                splitRowsTotal,
+                splitEvents,
+                splitFetchStart,
+                splitFetchEnd,
             } = summary;
             const dividendDiagnostics =
                 payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
                     ? payload.dividendDiagnostics
+                    : null;
+            const splitDiagnostics =
+                payload?.splitDiagnostics && typeof payload.splitDiagnostics === 'object'
+                    ? payload.splitDiagnostics
+                    : null;
+            const splitResult =
+                splitDiagnostics?.splitResult && typeof splitDiagnostics.splitResult === 'object'
+                    ? splitDiagnostics.splitResult
                     : null;
             const lines = [
                 `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourceSummary)}</span>`,
@@ -586,6 +624,23 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     `FinMind 有效配息事件: <span class="font-semibold">${testerEscapeHtml(dividendEvents)}</span> 件`,
                 );
             }
+            if (Number.isFinite(splitRowsTotal)) {
+                const effectiveSplitText = Number.isFinite(splitRows)
+                    ? `，其中 <span class="font-semibold">${testerEscapeHtml(splitRows)}</span> 筆落在回測區間`
+                    : '';
+                lines.push(
+                    `FinMind 股票拆分筆數: <span class="font-semibold">${testerEscapeHtml(splitRowsTotal)}</span> 筆${effectiveSplitText}`,
+                );
+            } else if (Number.isFinite(splitRows)) {
+                lines.push(
+                    `FinMind 股票拆分筆數: <span class="font-semibold">${testerEscapeHtml(splitRows)}</span> 筆`,
+                );
+            }
+            if (Number.isFinite(splitEvents)) {
+                lines.push(
+                    `FinMind 有效拆分事件: <span class="font-semibold">${testerEscapeHtml(splitEvents)}</span> 件`,
+                );
+            }
             if (dividendFetchStart || dividendFetchEnd) {
                 const rangeStart = dividendFetchStart || '—';
                 const rangeEnd = dividendFetchEnd || '—';
@@ -594,6 +649,13 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     : '';
                 lines.push(
                     `FinMind 配息查詢區間: <span class="font-semibold">${testerEscapeHtml(rangeStart)} ~ ${testerEscapeHtml(rangeEnd)}</span>${suffix}`,
+                );
+            }
+            if (splitFetchStart || splitFetchEnd) {
+                const splitRangeStart = splitFetchStart || '—';
+                const splitRangeEnd = splitFetchEnd || '—';
+                lines.push(
+                    `FinMind 拆分查詢區間: <span class="font-semibold">${testerEscapeHtml(splitRangeStart)} ~ ${testerEscapeHtml(splitRangeEnd)}</span>`,
                 );
             }
             if (dividendDiagnostics && dividendDiagnostics.dividendResult && typeof dividendDiagnostics.dividendResult === 'object') {
@@ -620,6 +682,27 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 );
                 if (resultLogHtml) {
                     extraSections.push(resultLogHtml);
+                }
+            }
+            if (splitResult) {
+                const splitParts = [];
+                if (Number.isFinite(splitResult.totalRecords)) {
+                    splitParts.push(`原始 ${testerEscapeHtml(splitResult.totalRecords)} 筆`);
+                }
+                if (Number.isFinite(splitResult.filteredRecords)) {
+                    splitParts.push(`區間 ${testerEscapeHtml(splitResult.filteredRecords)} 筆`);
+                }
+                if (Number.isFinite(splitResult.eventCount)) {
+                    splitParts.push(`事件 ${testerEscapeHtml(splitResult.eventCount)} 件`);
+                }
+                if (Number.isFinite(splitResult.appliedAdjustments)) {
+                    splitParts.push(`成功 ${testerEscapeHtml(splitResult.appliedAdjustments)} 件`);
+                }
+                if (splitParts.length > 0) {
+                    lines.push(`FinMind 股票拆分：<span class="font-semibold">${splitParts.join(' / ')}</span>`);
+                }
+                if (splitResult.resultInfo?.detail) {
+                    lines.push(`拆分資料摘要：<span class="font-semibold">${testerEscapeHtml(splitResult.resultInfo.detail)}</span>`);
                 }
             }
             if (Array.isArray(dividendDiagnostics?.eventPreview) && dividendDiagnostics.eventPreview.length > 0) {
@@ -672,6 +755,60 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     : '';
                 const formulaHint = `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料來源：FinMind TaiwanStockDividendResult ・ 計算方式：after_price ÷ before_price = 手動還原係數</div>`;
                 lines.push(`<div class="mt-2"><div class="font-semibold text-[11px]">FinMind 配息推算</div>${formulaHint}<div class="mt-1 space-y-1">${previewItems}</div>${moreNote}</div>`);
+            }
+            if (Array.isArray(splitDiagnostics?.eventPreview) && splitDiagnostics.eventPreview.length > 0) {
+                const previewLimit = Number.isFinite(splitDiagnostics?.eventPreviewLimit)
+                    ? splitDiagnostics.eventPreviewLimit
+                    : splitDiagnostics.eventPreview.length;
+                const previewItems = splitDiagnostics.eventPreview
+                    .slice(0, previewLimit)
+                    .map((item) => {
+                        const ratioValue = Number.isFinite(item.manualRatio) ? item.manualRatio : null;
+                        const ratioPercent = ratioValue !== null
+                            ? `${formatTesterNumber(ratioValue * 100, 3)}%`
+                            : '—';
+                        const beforeText = Number.isFinite(item.beforePrice)
+                            ? formatTesterNumber(item.beforePrice, 4)
+                            : '—';
+                        const afterText = Number.isFinite(item.afterPrice)
+                            ? formatTesterNumber(item.afterPrice, 4)
+                            : '—';
+                        const ratioEquation = ratioValue !== null && beforeText !== '—' && afterText !== '—'
+                            ? `${afterText} ÷ ${beforeText} ≈ ${formatTesterNumber(ratioValue, 6)}`
+                            : '';
+                        const ratioLine = `<div>手動還原比率：<span class="font-semibold">${testerEscapeHtml(ratioPercent)}</span></div>`;
+                        const equationLine = ratioEquation
+                            ? `<div>計算：<span class="font-semibold">${testerEscapeHtml(ratioEquation)}</span></div>`
+                            : '';
+                        return `<div class="rounded-md border px-3 py-2 text-[10px]" style="border-color: var(--border);">`
+                            + `<div>拆分基準日：<span class="font-semibold">${testerEscapeHtml(item.date || '—')}</span></div>`
+                            + `${ratioLine}`
+                            + `<div>前收盤：<span class="font-semibold">${testerEscapeHtml(beforeText)}</span> ・ 後參考：<span class="font-semibold">${testerEscapeHtml(afterText)}</span></div>`
+                            + `${equationLine}`
+                            + `</div>`;
+                    })
+                    .join('');
+                const moreCount = Number.isFinite(splitDiagnostics?.eventPreviewMore)
+                    ? splitDiagnostics.eventPreviewMore
+                    : Math.max(
+                        0,
+                        (Number.isFinite(splitDiagnostics?.eventPreviewTotal)
+                            ? splitDiagnostics.eventPreviewTotal
+                            : splitDiagnostics.eventPreview.length)
+                            - Math.min(previewLimit, splitDiagnostics.eventPreview.length),
+                    );
+                const moreNote = moreCount > 0
+                    ? `<div class="text-[10px]" style="color: var(--muted-foreground);">尚有 ${testerEscapeHtml(moreCount)} 筆拆分事件未顯示，請於 JSON 回應內查看完整列表。</div>`
+                    : '';
+                const formulaHintSplit = `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料來源：FinMind TaiwanStockSplitPrice ・ 計算方式：after_price ÷ before_price = 手動還原係數</div>`;
+                lines.push(`<div class="mt-2"><div class="font-semibold text-[11px]">FinMind 拆分推算</div>${formulaHintSplit}<div class="mt-1 space-y-1">${previewItems}</div>${moreNote}</div>`);
+            }
+            const splitResponseHtml = buildFinMindResponseLogHtml(
+                Array.isArray(splitDiagnostics?.responseLog) ? splitDiagnostics.responseLog : [],
+                { title: 'FinMind 股票拆分請求紀錄' },
+            );
+            if (splitResponseHtml) {
+                extraSections.push(splitResponseHtml);
             }
             if (dividendDiagnostics?.resultInfo?.detail) {
                 lines.push(`配息資料摘要：<span class="font-semibold">${testerEscapeHtml(dividendDiagnostics.resultInfo.detail)}</span>`);
@@ -785,20 +922,29 @@ function refreshDataSourceTester() {
     const modeEl = document.getElementById('dataSourceTesterMode');
     const hintEl = document.getElementById('dataSourceTesterHint');
     if (!modeEl || !hintEl) return;
+    syncSplitAdjustmentState();
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
+    const splitEnabled = isSplitAdjustmentEnabled();
     const { start, end } = getDateRangeFromUI();
     const stockNo = getStockNoValue();
-    const sources = getTesterSourceConfigs(market, adjusted);
+    const sources = getTesterSourceConfigs(market, adjusted, splitEnabled);
     const missingInputs = !stockNo || !start || !end;
-    modeEl.textContent = `${getMarketLabel(market)} ・ ${adjusted ? '還原股價' : '原始股價'}`;
+    const modeText = adjusted
+        ? splitEnabled
+            ? '還原股價（含拆分）'
+            : '還原股價'
+        : '原始股價';
+    modeEl.textContent = `${getMarketLabel(market)} ・ ${modeText}`;
     renderDataSourceTesterButtons(sources, missingInputs || dataSourceTesterState.busy);
     if (missingInputs) {
         hintEl.textContent = '請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。';
         hintEl.style.color = 'var(--muted-foreground)';
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
+        hintEl.textContent = splitEnabled
+            ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
+            : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';
@@ -847,12 +993,18 @@ function initDataSourceTester() {
     const marketSwitch = document.getElementById('marketSwitch');
     marketSwitch?.addEventListener('change', refreshDataSourceTester);
     const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
-    adjustedCheckbox?.addEventListener('change', refreshDataSourceTester);
+    adjustedCheckbox?.addEventListener('change', () => {
+        syncSplitAdjustmentState();
+        refreshDataSourceTester();
+    });
+    const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
+    splitCheckbox?.addEventListener('change', refreshDataSourceTester);
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
         lucide.createIcons();
     }
 
+    syncSplitAdjustmentState();
     refreshDataSourceTester();
     window.refreshDataSourceTester = refreshDataSourceTester;
 }
@@ -1119,7 +1271,7 @@ function createProgressAnimator() {
     };
 }
 function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
-function getBacktestParams() { const sN=document.getElementById("stockNo").value.trim().toUpperCase()||"2330"; const sD=document.getElementById("startDate").value; const eD=document.getElementById("endDate").value; const iC=parseFloat(document.getElementById("initialCapital").value)||100000; const pS=parseFloat(document.getElementById("positionSize").value)||100; const sL=parseFloat(document.getElementById("stopLoss").value)||0; const tP=parseFloat(document.getElementById("takeProfit").value)||0; const tT=document.querySelector('input[name="tradeTiming"]:checked')?.value||'close'; const adjP=document.getElementById("adjustedPriceCheckbox").checked; const eS=document.getElementById("entryStrategy").value; const xS=document.getElementById("exitStrategy").value; const eP=getStrategyParams('entry'); const xP=getStrategyParams('exit'); const enableShorting = document.getElementById("enableShortSelling").checked; let shortES = null, shortXS = null, shortEP = {}, shortXP = {}; if (enableShorting) { shortES = document.getElementById("shortEntryStrategy").value; shortXS = document.getElementById("shortExitStrategy").value; shortEP = getStrategyParams('shortEntry'); shortXP = getStrategyParams('shortExit'); } const buyFee = parseFloat(document.getElementById("buyFee").value) || 0; const sellFee = parseFloat(document.getElementById("sellFee").value) || 0;     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital'; const marketSwitch = document.getElementById("marketSwitch"); const market = (marketSwitch && marketSwitch.checked) ? 'TPEX' : 'TWSE'; const priceMode = adjP ? 'adjusted' : 'raw'; return { stockNo: sN, startDate: sD, endDate: eD, initialCapital: iC, positionSize: pS, stopLoss: sL, takeProfit: tP, tradeTiming: tT, adjustedPrice: adjP, priceMode: priceMode, entryStrategy: eS, exitStrategy: xS, entryParams: eP, exitParams: xP, enableShorting: enableShorting, shortEntryStrategy: shortES, shortExitStrategy: shortXS, shortEntryParams: shortEP, shortExitParams: shortXP, buyFee: buyFee, sellFee: sellFee, positionBasis: positionBasis, market: market, marketType: currentMarket }; }
+function getBacktestParams() { const sN=document.getElementById("stockNo").value.trim().toUpperCase()||"2330"; const sD=document.getElementById("startDate").value; const eD=document.getElementById("endDate").value; const iC=parseFloat(document.getElementById("initialCapital").value)||100000; const pS=parseFloat(document.getElementById("positionSize").value)||100; const sL=parseFloat(document.getElementById("stopLoss").value)||0; const tP=parseFloat(document.getElementById("takeProfit").value)||0; const tT=document.querySelector('input[name="tradeTiming"]:checked')?.value||'close'; const adjP=document.getElementById("adjustedPriceCheckbox").checked; const splitAdj=adjP&&document.getElementById("splitAdjustmentCheckbox")?.checked; const eS=document.getElementById("entryStrategy").value; const xS=document.getElementById("exitStrategy").value; const eP=getStrategyParams('entry'); const xP=getStrategyParams('exit'); const enableShorting = document.getElementById("enableShortSelling").checked; let shortES = null, shortXS = null, shortEP = {}, shortXP = {}; if (enableShorting) { shortES = document.getElementById("shortEntryStrategy").value; shortXS = document.getElementById("shortExitStrategy").value; shortEP = getStrategyParams('shortEntry'); shortXP = getStrategyParams('shortExit'); } const buyFee = parseFloat(document.getElementById("buyFee").value) || 0; const sellFee = parseFloat(document.getElementById("sellFee").value) || 0;     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital'; const marketSwitch = document.getElementById("marketSwitch"); const market = (marketSwitch && marketSwitch.checked) ? 'TPEX' : 'TWSE'; const priceMode = adjP ? 'adjusted' : 'raw'; return { stockNo: sN, startDate: sD, endDate: eD, initialCapital: iC, positionSize: pS, stopLoss: sL, takeProfit: tP, tradeTiming: tT, adjustedPrice: adjP, splitAdjustment: Boolean(splitAdj), priceMode: priceMode, entryStrategy: eS, exitStrategy: xS, entryParams: eP, exitParams: xP, enableShorting: enableShorting, shortEntryStrategy: shortES, shortExitStrategy: shortXS, shortEntryParams: shortEP, shortExitParams: shortXP, buyFee: buyFee, sellFee: sellFee, positionBasis: positionBasis, market: market, marketType: currentMarket }; }
 function validateBacktestParams(p) { if(!/^[0-9A-Z]{3,7}$/.test(p.stockNo)){showError("請輸入有效代碼");return false;} if(!p.startDate||!p.endDate){showError("請選擇日期");return false;} if(new Date(p.startDate)>=new Date(p.endDate)){showError("結束日期需晚於開始日期");return false;} if(p.initialCapital<=0){showError("本金需>0");return false;} if(p.positionSize<=0||p.positionSize>100){showError("部位大小1-100%");return false;} if(p.stopLoss<0||p.stopLoss>100){showError("停損0-100%");return false;} if(p.takeProfit<0){showError("停利>=0%");return false;} if (p.buyFee < 0) { showError("買入手續費不能小於 0%"); return false; } if (p.sellFee < 0) { showError("賣出手續費+稅不能小於 0%"); return false; } const chkP=(ps,t)=>{ if (!ps) return true; for(const k in ps){ if(typeof ps[k]!=='number'||isNaN(ps[k])){ if(Object.keys(ps).length > 0) { showError(`${t}策略的參數 ${k} 錯誤 (值: ${ps[k]})`); return false; } } } return true; }; if(!chkP(p.entryParams,'做多進場'))return false; if(!chkP(p.exitParams,'做多出場'))return false; if (p.enableShorting) { if(!chkP(p.shortEntryParams,'做空進場'))return false; if(!chkP(p.shortExitParams,'回補出場'))return false; } return true; }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
@@ -1129,7 +1281,8 @@ function buildCacheKey(cur) {
     const market = (cur.market || cur.marketType || 'TWSE').toUpperCase();
     const rawMode = (cur.priceMode || (cur.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const priceModeKey = rawMode === 'adjusted' ? 'ADJ' : 'RAW';
-    return `${market}|${cur.stockNo}|${priceModeKey}`;
+    const splitFlag = cur.splitAdjustment ? 'SPLIT' : 'NOSPLIT';
+    return `${market}|${cur.stockNo}|${priceModeKey}|${splitFlag}`;
 }
 
 function parseISOToUTC(iso) {

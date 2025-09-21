@@ -8,6 +8,8 @@ const {
   applyBackwardAdjustments,
   normaliseDividendResultRecord,
   buildDividendResultEvents,
+  normaliseSplitRecord,
+  buildSplitEvents,
   setFetchImplementation,
   resetFetchImplementation,
 } = __TESTING__;
@@ -82,6 +84,42 @@ approxEqual(primaryAdjustment.ratio, 0.965, 1e-6);
 approxEqual(adjusted.rows[0].close, 96.5, 1e-6);
 approxEqual(adjusted.rows[1].close, 97, 1e-6);
 approxEqual(adjusted.rows[1].adjustedFactor, 1, 1e-6);
+
+const splitPrimaryRecord = {
+  date: '2024-07-11',
+  before_price: '100',
+  after_price: '50',
+};
+
+const splitSecondaryRecord = {
+  split_date: '113/07/11',
+  split_ratio: '1/2',
+};
+
+const splitNormalized = normaliseSplitRecord(splitPrimaryRecord);
+assert.ok(splitNormalized, 'Split primary record should normalise');
+assert.equal(splitNormalized.date, '2024-07-11');
+approxEqual(splitNormalized.beforePrice, 100);
+approxEqual(splitNormalized.afterPrice, 50);
+approxEqual(splitNormalized.ratio, 0.5, 1e-6);
+
+const splitNormalizedSecondary = normaliseSplitRecord(splitSecondaryRecord);
+assert.ok(splitNormalizedSecondary, 'Split secondary ratio should normalise');
+assert.equal(splitNormalizedSecondary.date, '2024-07-11');
+approxEqual(splitNormalizedSecondary.ratio, 1, 1e-6);
+
+const splitEvents = buildSplitEvents([
+  splitPrimaryRecord,
+  splitSecondaryRecord,
+  { split_day: '2024/09/18', before_split_price: '80', after_split_price: '40' },
+]);
+assert.equal(splitEvents.length, 2, 'Split events should merge by date');
+const mergedSplit = splitEvents.find((event) => event.date === '2024-07-11');
+assert.ok(mergedSplit, 'Merged split event should exist');
+approxEqual(mergedSplit.manualRatio, 0.5, 1e-6);
+approxEqual(mergedSplit.beforePrice, 100);
+approxEqual(mergedSplit.afterPrice, 50);
+assert.equal(Array.isArray(mergedSplit.rawRecords) ? mergedSplit.rawRecords.length : 0, 2);
 
 const factorMap = new Map([
   ['2024-07-10', 0.95],
@@ -171,6 +209,19 @@ const finmindDividendPayload = {
   ],
 };
 
+const finmindSplitPayload = {
+  msg: 'success',
+  status: 200,
+  data: [
+    {
+      date: '2024-07-11',
+      before_price: '100',
+      after_price: '50',
+      split_ratio: '1/2',
+    },
+  ],
+};
+
 function createJsonResponse(body, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -181,6 +232,8 @@ function createJsonResponse(body, status = 200) {
   };
 }
 
+process.env.FINMIND_TOKEN = 'test-token';
+
 setFetchImplementation(async (url) => {
   if (url.includes('twse.com.tw')) {
     return createJsonResponse(twsePayload);
@@ -190,6 +243,9 @@ setFetchImplementation(async (url) => {
     const dataset = parsed.searchParams.get('dataset');
     if (dataset === 'TaiwanStockDividendResult') {
       return createJsonResponse(finmindDividendPayload);
+    }
+    if (dataset === 'TaiwanStockSplitPrice') {
+      return createJsonResponse(finmindSplitPayload);
     }
   }
   throw new Error(`Unexpected fetch URL in test: ${url}`);
@@ -220,6 +276,46 @@ try {
   assert.ok(payload.dividendDiagnostics.responseLog.length >= 1);
 } finally {
   resetFetchImplementation();
+}
+
+setFetchImplementation(async (url) => {
+  if (url.includes('twse.com.tw')) {
+    return createJsonResponse(twsePayload);
+  }
+  if (url.includes('finmindtrade')) {
+    const parsed = new URL(url);
+    const dataset = parsed.searchParams.get('dataset');
+    if (dataset === 'TaiwanStockDividendResult') {
+      return createJsonResponse(finmindDividendPayload);
+    }
+    if (dataset === 'TaiwanStockSplitPrice') {
+      return createJsonResponse(finmindSplitPayload);
+    }
+  }
+  throw new Error(`Unexpected fetch URL in test: ${url}`);
+});
+
+try {
+  const response = await handler({
+    queryStringParameters: {
+      stockNo: '2330',
+      startDate: '2024-07-10',
+      endDate: '2024-07-12',
+      market: 'TWSE',
+      split: '1',
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.ok(Array.isArray(payload.data));
+  assert.equal(payload.summary?.splitEvents, 1);
+  assert.equal(payload.splitDiagnostics?.splitResult?.totalRecords, 3);
+  assert.equal(payload.finmindStatus?.splitPrice?.dataset, 'TaiwanStockSplitPrice');
+  const splitAdjustment = payload.adjustments.find((event) => event?.source === 'FinMind 股票拆分');
+  assert.ok(splitAdjustment, 'Split adjustment should be applied when enabled');
+  approxEqual(splitAdjustment.ratio, 1, 1e-6);
+} finally {
+  resetFetchImplementation();
   if (originalToken === undefined) {
     delete process.env.FINMIND_TOKEN;
   } else {
@@ -227,4 +323,4 @@ try {
   }
 }
 
-console.log('Dividend result normalisation tests passed');
+console.log('Dividend & split normalisation tests passed');

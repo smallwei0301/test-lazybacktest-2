@@ -14,6 +14,8 @@ let lastPriceDebug = {
     dataSource: null,
     dataSources: [],
     priceMode: null,
+    splitDiagnostics: null,
+    finmindStatus: null,
 };
 
 // --- 主回測函數 ---
@@ -29,7 +31,7 @@ function runBacktestInternal() {
 
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
         const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, priceMode: priceMode};
+        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, splitAdjustment: params.splitAdjustment, priceMode: priceMode};
         let useCache=!needsDataFetch(curSettings);
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
@@ -112,22 +114,33 @@ function runBacktestInternal() {
                      const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
                          ? rawMeta.adjustmentFallbackApplied
                          : Boolean(data?.dataDebug?.adjustmentFallbackApplied);
-                     const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
-                     const cacheEntry = {
-                         data: mergedData,
-                         stockName: stockName || existingEntry?.stockName || params.stockNo,
+                    const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
+                    const splitDiagnosticsMeta = rawMeta.splitDiagnostics
+                        || data?.dataDebug?.splitDiagnostics
+                        || existingEntry?.splitDiagnostics
+                        || null;
+                    const finmindStatusMeta = rawMeta.finmindStatus
+                        || data?.dataDebug?.finmindStatus
+                        || existingEntry?.finmindStatus
+                        || null;
+                    const cacheEntry = {
+                        data: mergedData,
+                        stockName: stockName || existingEntry?.stockName || params.stockNo,
                          dataSources: sourceArray,
                          dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                          coverage: mergedCoverage,
                          fetchedAt: Date.now(),
-                         adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode,
+                        adjustedPrice: params.adjustedPrice,
+                        splitAdjustment: params.splitAdjustment,
+                        priceMode: priceMode,
                          adjustmentFallbackApplied: fallbackFlag,
-                         summary: summaryMeta,
-                         adjustments: adjustmentsMeta,
-                         debugSteps,
-                         priceSource: priceSourceMeta,
-                     };
+                        summary: summaryMeta,
+                        adjustments: adjustmentsMeta,
+                        debugSteps,
+                        priceSource: priceSourceMeta,
+                        splitDiagnostics: splitDiagnosticsMeta,
+                        finmindStatus: finmindStatusMeta,
+                    };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
@@ -149,21 +162,30 @@ function runBacktestInternal() {
                      const fallbackFlag = typeof data?.dataDebug?.adjustmentFallbackApplied === 'boolean'
                          ? data.dataDebug.adjustmentFallbackApplied
                          : Boolean(cachedEntry.adjustmentFallbackApplied);
-                     const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
-                     const updatedEntry = {
-                         ...cachedEntry,
-                         stockName: stockName || cachedEntry.stockName || params.stockNo,
+                    const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
+                    const splitDiagnosticsMeta = data?.dataDebug?.splitDiagnostics
+                        || cachedEntry.splitDiagnostics
+                        || null;
+                    const finmindStatusMeta = data?.dataDebug?.finmindStatus
+                        || cachedEntry.finmindStatus
+                        || null;
+                    const updatedEntry = {
+                        ...cachedEntry,
+                        stockName: stockName || cachedEntry.stockName || params.stockNo,
                          dataSources: updatedArray,
                          dataSource: summariseSourceLabels(updatedArray),
                          fetchedAt: cachedEntry.fetchedAt || Date.now(),
-                         adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode,
+                        adjustedPrice: params.adjustedPrice,
+                        splitAdjustment: params.splitAdjustment,
+                        priceMode: priceMode,
                          adjustmentFallbackApplied: fallbackFlag,
-                         summary: summaryMeta,
-                         adjustments: adjustmentsMeta,
-                         debugSteps,
-                         priceSource: priceSourceMeta,
-                     };
+                        summary: summaryMeta,
+                        adjustments: adjustmentsMeta,
+                        debugSteps,
+                        priceSource: priceSourceMeta,
+                        splitDiagnostics: splitDiagnosticsMeta,
+                        finmindStatus: finmindStatusMeta,
+                    };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
@@ -235,6 +257,7 @@ function runBacktestInternal() {
                     adjustmentFallbackApplied: Boolean(cachedEntry.adjustmentFallbackApplied),
                     priceSource: cachedEntry.priceSource || null,
                     dataSource: cachedEntry.dataSource || null,
+                    splitAdjustment: Boolean(cachedEntry.splitAdjustment),
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
@@ -324,6 +347,8 @@ function updatePriceDebug(meta = {}) {
     const aggregateSource = meta.dataSource || null;
     const sourceList = Array.isArray(meta.dataSources) ? meta.dataSources : [];
     const priceMode = meta.priceMode || (typeof meta.adjustedPrice === 'boolean' ? (meta.adjustedPrice ? 'adjusted' : 'raw') : null);
+    const splitDiagnostics = meta.splitDiagnostics || null;
+    const finmindStatus = meta.finmindStatus || null;
     lastPriceDebug = {
         steps,
         summary,
@@ -333,6 +358,8 @@ function updatePriceDebug(meta = {}) {
         dataSource: aggregateSource,
         dataSources: sourceList,
         priceMode,
+        splitDiagnostics,
+        finmindStatus,
     };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -1509,16 +1536,19 @@ function runOptimizationInternal(optimizeType) {
         if(useCache && cachedStockData) {
             workerMsg.cachedData=cachedStockData;
             const cacheEntry = cachedDataStore.get(buildCacheKey(curSettings));
-            if (cacheEntry) {
-                workerMsg.cachedMeta = {
-                    summary: cacheEntry.summary || null,
-                    adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                    debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                    adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                    priceSource: cacheEntry.priceSource || null,
-                    dataSource: cacheEntry.dataSource || null,
-                };
-            }
+                if (cacheEntry) {
+                    workerMsg.cachedMeta = {
+                        summary: cacheEntry.summary || null,
+                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
+                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
+                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
+                        priceSource: cacheEntry.priceSource || null,
+                        dataSource: cacheEntry.dataSource || null,
+                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
+                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
+                        finmindStatus: cacheEntry.finmindStatus || null,
+                    };
+                }
         } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
         
         optimizationWorker.postMessage(workerMsg); 

@@ -24,8 +24,9 @@ function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
 }
 
-function buildCacheKey(stockNo, startDate, endDate, adjusted = false) {
-  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}`;
+function buildCacheKey(stockNo, startDate, endDate, adjusted = false, split = false) {
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}__${splitFlag}`;
 }
 
 function ensureMarketCache(marketKey) {
@@ -42,23 +43,24 @@ function ensureMonthlyMarketCache(marketKey) {
   return workerMonthlyCache.get(marketKey);
 }
 
-function getMonthlyStockKey(stockNo, adjusted = false) {
-  return `${stockNo}__${getPriceModeKey(adjusted)}`;
+function getMonthlyStockKey(stockNo, adjusted = false, split = false) {
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockNo}__${getPriceModeKey(adjusted)}__${splitFlag}`;
 }
 
-function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false) {
+function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = false) {
   const marketCache = ensureMonthlyMarketCache(marketKey);
-  const stockKey = getMonthlyStockKey(stockNo, adjusted);
+  const stockKey = getMonthlyStockKey(stockNo, adjusted, split);
   if (!marketCache.has(stockKey)) {
     marketCache.set(stockKey, new Map());
   }
   return marketCache.get(stockKey);
 }
 
-function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
+function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, split = false) {
   const marketCache = workerMonthlyCache.get(marketKey);
   if (!marketCache) return null;
-  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted));
+  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted, split));
   if (!stockCache) return null;
   const entry = stockCache.get(monthKey);
   if (!entry) return null;
@@ -74,8 +76,8 @@ function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
   return entry;
 }
 
-function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false) {
-  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted);
+function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false, split = false) {
+  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted, split);
   if (!(entry.sources instanceof Set)) {
     entry.sources = new Set(entry.sources || []);
   }
@@ -660,13 +662,23 @@ function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
   return { rows: adjustedRows, fallbackApplied: true };
 }
 
-async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
+async function fetchAdjustedPriceRange(
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  options = {},
+) {
   const params = new URLSearchParams({
     stockNo,
     startDate,
     endDate,
     market: marketKey,
   });
+  const splitEnabled = Boolean(options && options.splitAdjustment);
+  if (splitEnabled) {
+    params.set("split", "1");
+  }
   const response = await fetch(`/api/adjusted-price/?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
@@ -777,6 +789,10 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === "object"
       ? payload.dividendDiagnostics
       : null;
+  const splitDiagnostics =
+    payload?.splitDiagnostics && typeof payload.splitDiagnostics === "object"
+      ? payload.splitDiagnostics
+      : null;
   const finmindStatus =
     payload?.finmindStatus && typeof payload.finmindStatus === "object"
       ? payload.finmindStatus
@@ -802,6 +818,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     debugSteps,
     dividendEvents,
     dividendDiagnostics,
+    splitDiagnostics,
     finmindStatus,
   };
 }
@@ -953,6 +970,7 @@ async function fetchStockData(
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
   const adjusted = Boolean(options.adjusted || options.adjustedPrice);
+  const split = Boolean(options.splitAdjustment);
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -963,7 +981,7 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
-  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted);
+  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   if (cachedEntry) {
     self.postMessage({
@@ -979,6 +997,36 @@ async function fetchStockData(
         cachedEntry?.meta?.adjustmentFallbackApplied,
       ),
       adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
+      summary:
+        cachedEntry?.meta?.summary &&
+        typeof cachedEntry.meta.summary === "object"
+          ? cachedEntry.meta.summary
+          : null,
+      adjustments: Array.isArray(cachedEntry?.meta?.adjustments)
+        ? cachedEntry.meta.adjustments
+        : [],
+      priceSource: cachedEntry?.meta?.priceSource || null,
+      debugSteps: Array.isArray(cachedEntry?.meta?.debugSteps)
+        ? cachedEntry.meta.debugSteps
+        : [],
+      dividendDiagnostics:
+        cachedEntry?.meta?.dividendDiagnostics &&
+        typeof cachedEntry.meta.dividendDiagnostics === "object"
+          ? cachedEntry.meta.dividendDiagnostics
+          : null,
+      dividendEvents: Array.isArray(cachedEntry?.meta?.dividendEvents)
+        ? cachedEntry.meta.dividendEvents
+        : [],
+      splitDiagnostics:
+        cachedEntry?.meta?.splitDiagnostics &&
+        typeof cachedEntry.meta.splitDiagnostics === "object"
+          ? cachedEntry.meta.splitDiagnostics
+          : null,
+      finmindStatus:
+        cachedEntry?.meta?.finmindStatus &&
+        typeof cachedEntry.meta.finmindStatus === "object"
+          ? cachedEntry.meta.finmindStatus
+          : null,
     };
   }
 
@@ -999,17 +1047,20 @@ async function fetchStockData(
       startDate,
       endDate,
       marketKey,
+      { splitAdjustment: split },
     );
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
       dataSource: adjustedResult.dataSource,
       timestamp: Date.now(),
+      splitAdjustment: split,
       meta: {
         stockNo,
         startDate,
         endDate,
         priceMode: getPriceModeKey(adjusted),
+        splitAdjustment: split,
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
@@ -1031,6 +1082,16 @@ async function fetchStockData(
         dividendEvents: Array.isArray(adjustedResult.dividendEvents)
           ? adjustedResult.dividendEvents
           : [],
+        splitDiagnostics:
+          adjustedResult.splitDiagnostics &&
+          typeof adjustedResult.splitDiagnostics === "object"
+            ? adjustedResult.splitDiagnostics
+            : null,
+        finmindStatus:
+          adjustedResult.finmindStatus &&
+          typeof adjustedResult.finmindStatus === "object"
+            ? adjustedResult.finmindStatus
+            : null,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1058,6 +1119,16 @@ async function fetchStockData(
       dividendEvents: Array.isArray(adjustedResult.dividendEvents)
         ? adjustedResult.dividendEvents
         : [],
+      splitDiagnostics:
+        adjustedResult.splitDiagnostics &&
+        typeof adjustedResult.splitDiagnostics === "object"
+          ? adjustedResult.splitDiagnostics
+          : null,
+      finmindStatus:
+        adjustedResult.finmindStatus &&
+        typeof adjustedResult.finmindStatus === "object"
+          ? adjustedResult.finmindStatus
+          : null,
     };
   }
 
@@ -1093,6 +1164,7 @@ async function fetchStockData(
           stockNo,
           monthInfo.monthKey,
           adjusted,
+          split,
         );
         if (!monthEntry) {
           monthEntry = {
@@ -1108,6 +1180,7 @@ async function fetchStockData(
             monthInfo.monthKey,
             monthEntry,
             adjusted,
+            split,
           );
         }
 
@@ -4784,6 +4857,14 @@ self.onmessage = async function (e) {
             marketKey,
             dataSource: "主執行緒快取",
             stockName: params.stockNo,
+            splitDiagnostics:
+              cachedMeta.splitDiagnostics && typeof cachedMeta.splitDiagnostics === "object"
+                ? cachedMeta.splitDiagnostics
+                : null,
+            finmindStatus:
+              cachedMeta.finmindStatus && typeof cachedMeta.finmindStatus === "object"
+                ? cachedMeta.finmindStatus
+                : null,
           };
         }
       } else {
@@ -4850,6 +4931,10 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.dividendEvents)
             ? workerLastMeta.dividendEvents
             : [],
+        splitDiagnostics:
+          outcome?.splitDiagnostics || workerLastMeta?.splitDiagnostics || null,
+        finmindStatus:
+          outcome?.finmindStatus || workerLastMeta?.finmindStatus || null,
       };
 
       if (!useCachedData && fetched) {
@@ -4865,6 +4950,14 @@ self.onmessage = async function (e) {
           dividendEvents: Array.isArray(outcome?.dividendEvents)
             ? outcome.dividendEvents
             : [],
+          splitDiagnostics:
+            outcome?.splitDiagnostics && typeof outcome.splitDiagnostics === "object"
+              ? outcome.splitDiagnostics
+              : null,
+          finmindStatus:
+            outcome?.finmindStatus && typeof outcome.finmindStatus === "object"
+              ? outcome.finmindStatus
+              : null,
         };
       }
 
