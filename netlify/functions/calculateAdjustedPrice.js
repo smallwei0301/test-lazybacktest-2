@@ -22,9 +22,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250421A
 // Patch Tag: LB-ADJ-COMPOSER-20250426A
 // Patch Tag: LB-ADJ-COMPOSER-20250509A
+// Patch Tag: LB-ADJ-COMPOSER-20250518A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250509A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250518A';
 
 let fetchImpl = fetch;
 
@@ -932,13 +933,41 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
     });
   }
 
+  const resolveBaseValue = (row, key) => {
+    if (!row || typeof row !== 'object') return null;
+    const camelKey = `raw${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const snakeKey = `raw_${key}`;
+    const directRaw = row[camelKey];
+    const direct = Number(directRaw);
+    if (directRaw !== null && directRaw !== undefined && Number.isFinite(direct)) {
+      return direct;
+    }
+    const snakeRaw = row[snakeKey];
+    const snake = Number(snakeRaw);
+    if (snakeRaw !== null && snakeRaw !== undefined && Number.isFinite(snake)) {
+      return snake;
+    }
+    const baseRaw = row[key];
+    const base = Number(baseRaw);
+    if (baseRaw !== null && baseRaw !== undefined && Number.isFinite(base)) {
+      return base;
+    }
+    return null;
+  };
+
   const adjustedRows = sortedRows.map((row, index) => {
     const factor = multipliers[index];
     const finalFactor = Number.isFinite(factor) && factor > 0 ? factor : 1;
-    const open = row.open !== null ? safeRound(row.open * finalFactor) : null;
-    const high = row.high !== null ? safeRound(row.high * finalFactor) : null;
-    const low = row.low !== null ? safeRound(row.low * finalFactor) : null;
-    const close = row.close !== null ? safeRound(row.close * finalFactor) : null;
+    const baseOpen = resolveBaseValue(row, 'open');
+    const baseHigh = resolveBaseValue(row, 'high');
+    const baseLow = resolveBaseValue(row, 'low');
+    const baseClose = resolveBaseValue(row, 'close');
+    const scaleValue = (value) =>
+      Number.isFinite(value) ? safeRound(value * finalFactor) : value ?? null;
+    const open = scaleValue(baseOpen);
+    const high = scaleValue(baseHigh);
+    const low = scaleValue(baseLow);
+    const close = scaleValue(baseClose);
     const change = 0;
     return {
       ...row,
@@ -947,6 +976,10 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
       low,
       close,
       change,
+      rawOpen: Number.isFinite(baseOpen) ? baseOpen : row.rawOpen ?? null,
+      rawHigh: Number.isFinite(baseHigh) ? baseHigh : row.rawHigh ?? null,
+      rawLow: Number.isFinite(baseLow) ? baseLow : row.rawLow ?? null,
+      rawClose: Number.isFinite(baseClose) ? baseClose : row.rawClose ?? null,
       adjustedFactor: finalFactor,
     };
   });
@@ -1029,7 +1062,7 @@ async function fetchTwseRange(stockNo, startDate, endDate) {
         const date = new Date(row.date);
         if (Number.isNaN(date.getTime())) continue;
         if (date < startDate || date > endDate) continue;
-        combined.push({ ...row, stockName });
+        combined.push({ ...row, stockName, priceSource: 'TWSE (原始)' });
       }
     }
   }
@@ -1158,7 +1191,7 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
   const finalStockName = stockName || stockNo;
   const rows = Array.from(rowsMap.values())
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map((row) => ({ ...row, stockName: finalStockName }));
+    .map((row) => ({ ...row, stockName: finalStockName, priceSource: label || 'FinMind (原始)' }));
   const priceSource = label || 'FinMind (原始)';
   return { stockName: finalStockName, rows, priceSource };
 }
@@ -1199,6 +1232,28 @@ function buildAdjustedRowsFromFactorMap(priceRows, factorMap, options = {}) {
   let matchedCount = 0;
   let previousFactor = null;
 
+  const resolveBaseValue = (row, key) => {
+    if (!row || typeof row !== 'object') return null;
+    const camelKey = `raw${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const snakeKey = `raw_${key}`;
+    const directRaw = row[camelKey];
+    const direct = Number(directRaw);
+    if (directRaw !== null && directRaw !== undefined && Number.isFinite(direct)) {
+      return direct;
+    }
+    const snakeRaw = row[snakeKey];
+    const snake = Number(snakeRaw);
+    if (snakeRaw !== null && snakeRaw !== undefined && Number.isFinite(snake)) {
+      return snake;
+    }
+    const baseRaw = row[key];
+    const base = Number(baseRaw);
+    if (baseRaw !== null && baseRaw !== undefined && Number.isFinite(base)) {
+      return base;
+    }
+    return null;
+  };
+
   const scaleValue = (value, factor) => {
     if (value === null || value === undefined) return value;
     if (!Number.isFinite(value)) return value;
@@ -1221,12 +1276,20 @@ function buildAdjustedRowsFromFactorMap(priceRows, factorMap, options = {}) {
       factor = 1;
     }
 
+    const baseOpen = resolveBaseValue(row, 'open');
+    const baseHigh = resolveBaseValue(row, 'high');
+    const baseLow = resolveBaseValue(row, 'low');
+    const baseClose = resolveBaseValue(row, 'close');
     const adjustedRow = {
       ...row,
-      open: scaleValue(row.open, factor),
-      high: scaleValue(row.high, factor),
-      low: scaleValue(row.low, factor),
-      close: scaleValue(row.close, factor),
+      open: scaleValue(baseOpen, factor),
+      high: scaleValue(baseHigh, factor),
+      low: scaleValue(baseLow, factor),
+      close: scaleValue(baseClose, factor),
+      rawOpen: Number.isFinite(baseOpen) ? baseOpen : row.rawOpen ?? null,
+      rawHigh: Number.isFinite(baseHigh) ? baseHigh : row.rawHigh ?? null,
+      rawLow: Number.isFinite(baseLow) ? baseLow : row.rawLow ?? null,
+      rawClose: Number.isFinite(baseClose) ? baseClose : row.rawClose ?? null,
       adjustedFactor: factor,
     };
     adjustedRows.push(adjustedRow);

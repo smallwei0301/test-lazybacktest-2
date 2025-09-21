@@ -427,6 +427,24 @@ function updateDataSourceDisplay(dataSource, stockName) {
     }
 }
 
+// Patch Tag: LB-PRICE-INSPECTOR-20250518A
+function resolvePriceInspectorSourceLabel() {
+    const summarySources = Array.isArray(lastPriceDebug?.summary?.sources)
+        ? lastPriceDebug.summary.sources.filter((item) => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    const candidates = [
+        lastPriceDebug?.priceSource,
+        lastPriceDebug?.summary?.priceSource,
+        lastPriceDebug?.dataSource,
+        summarySources.length > 0 ? summarySources.join(' + ') : null,
+        Array.isArray(lastPriceDebug?.dataSources) && lastPriceDebug.dataSources.length > 0
+            ? lastPriceDebug.dataSources.join(' + ')
+            : null,
+    ];
+    const resolved = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+    return resolved || '';
+}
+
 // Patch Tag: LB-PRICE-INSPECTOR-20250302A
 function refreshPriceInspectorControls() {
     const controls = document.getElementById('priceInspectorControls');
@@ -444,13 +462,18 @@ function refreshPriceInspectorControls() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
+    const sourceLabel = resolvePriceInspectorSourceLabel();
     const firstDate = cachedStockData[0]?.date || lastFetchSettings?.startDate || '';
     const lastDate = cachedStockData[cachedStockData.length - 1]?.date || lastFetchSettings?.endDate || '';
 
     controls.classList.remove('hidden');
     openBtn.disabled = false;
     if (summaryEl) {
-        summaryEl.textContent = `${firstDate} ~ ${lastDate} ・ ${cachedStockData.length} 筆 (${modeLabel})`;
+        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${cachedStockData.length} 筆 (${modeLabel})`];
+        if (sourceLabel) {
+            summaryParts.push(sourceLabel);
+        }
+        summaryEl.textContent = summaryParts.join(' ・ ');
     }
     renderPricePipelineSteps();
 }
@@ -467,34 +490,34 @@ function openPriceInspectorModal() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
+    const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
-        subtitle.textContent = `${modeLabel} ・ ${marketLabel} ・ ${cachedStockData.length} 筆`;
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${cachedStockData.length} 筆`];
+        if (sourceLabel) {
+            subtitleParts.push(sourceLabel);
+        }
+        subtitle.textContent = subtitleParts.join(' ・ ');
     }
     renderPriceInspectorDebug();
 
     // Patch Tag: LB-PRICE-INSPECTOR-20250512A
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
     const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
-    const resolveSourceLabel = () => {
-        const summarySources = Array.isArray(lastPriceDebug?.summary?.sources)
-            ? lastPriceDebug.summary.sources.filter((item) => typeof item === 'string' && item.trim().length > 0)
-            : [];
-        const candidates = [
-            lastPriceDebug?.priceSource,
-            lastPriceDebug?.summary?.priceSource,
-            lastPriceDebug?.dataSource,
-            summarySources.length > 0 ? summarySources.join(' + ') : null,
-            Array.isArray(lastPriceDebug?.dataSources) && lastPriceDebug.dataSources.length > 0
-                ? lastPriceDebug.dataSources.join(' + ')
-                : null,
-        ];
-        const resolved = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
-        return resolved || '—';
-    };
-    const sourceLabel = resolveSourceLabel();
     const computeRawClose = (row) => {
-        if (!row || !Number.isFinite(row.close)) return null;
+        if (!row) return null;
+        const rawCandidates = [
+            row.rawClose,
+            row.raw_close,
+            row.baseClose,
+            row.base_close,
+        ]
+            .map((candidate) => (candidate !== null && candidate !== undefined ? Number(candidate) : null))
+            .filter((candidate) => Number.isFinite(candidate));
+        if (rawCandidates.length > 0) {
+            return rawCandidates[0];
+        }
+        if (!Number.isFinite(row.close)) return null;
         const factor = Number(row.adjustedFactor);
         if (!Number.isFinite(factor) || Math.abs(factor) < 1e-8) {
             return Number(row.close);
@@ -522,6 +545,10 @@ function openPriceInspectorModal() {
                     formulaText = `${closeText}（未調整）`;
                 }
             }
+            const rowSource =
+                typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
+                    ? row.priceSource.trim()
+                    : sourceLabel || '—';
             return `
                 <tr>
                     <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
@@ -533,7 +560,7 @@ function openPriceInspectorModal() {
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
-                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(sourceLabel)}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
                 </tr>`;
         })
         .join('');

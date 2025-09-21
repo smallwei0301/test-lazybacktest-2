@@ -455,6 +455,28 @@ function applyFallbackAdjustments(rows, events) {
   const factors = rows.map(() => 1);
   let applied = false;
 
+  const resolveBaseValue = (row, key) => {
+    if (!row || typeof row !== "object") return null;
+    const camelKey = `raw${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const snakeKey = `raw_${key}`;
+    const directRaw = row[camelKey];
+    const direct = Number(directRaw);
+    if (directRaw !== null && directRaw !== undefined && Number.isFinite(direct)) {
+      return direct;
+    }
+    const snakeRaw = row[snakeKey];
+    const snake = Number(snakeRaw);
+    if (snakeRaw !== null && snakeRaw !== undefined && Number.isFinite(snake)) {
+      return snake;
+    }
+    const baseRaw = row[key];
+    const base = Number(baseRaw);
+    if (baseRaw !== null && baseRaw !== undefined && Number.isFinite(base)) {
+      return base;
+    }
+    return null;
+  };
+
   events.forEach((event) => {
     let baseIndex = rows.findIndex((row) => row?.date >= event.date);
     if (baseIndex < 0) return;
@@ -502,16 +524,31 @@ function applyFallbackAdjustments(rows, events) {
         : Number.isFinite(factor)
           ? factor
           : 1;
-      return { ...row, adjustedFactor: preservedFactor };
+      return {
+        ...row,
+        rawOpen: resolveBaseValue(row, "open"),
+        rawHigh: resolveBaseValue(row, "high"),
+        rawLow: resolveBaseValue(row, "low"),
+        rawClose: resolveBaseValue(row, "close"),
+        adjustedFactor: preservedFactor,
+      };
     }
+    const baseOpen = resolveBaseValue(row, "open");
+    const baseHigh = resolveBaseValue(row, "high");
+    const baseLow = resolveBaseValue(row, "low");
+    const baseClose = resolveBaseValue(row, "close");
     const scale = (value) =>
       value === null || value === undefined || !Number.isFinite(value) ? value : roundTo(value * factor, 4);
     return {
       ...row,
-      open: scale(row.open),
-      high: scale(row.high),
-      low: scale(row.low),
-      close: scale(row.close),
+      open: scale(baseOpen),
+      high: scale(baseHigh),
+      low: scale(baseLow),
+      close: scale(baseClose),
+      rawOpen: Number.isFinite(baseOpen) ? baseOpen : row.rawOpen ?? null,
+      rawHigh: Number.isFinite(baseHigh) ? baseHigh : row.rawHigh ?? null,
+      rawLow: Number.isFinite(baseLow) ? baseLow : row.rawLow ?? null,
+      rawClose: Number.isFinite(baseClose) ? baseClose : row.rawClose ?? null,
       adjustedFactor: factor,
     };
   });
@@ -667,14 +704,37 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     const close = toNumber(row.close ?? row.Close);
     const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
+    const rawOpen = toNumber(
+      row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
+    );
+    const rawHigh = toNumber(
+      row.rawHigh ?? row.raw_high ?? row.baseHigh ?? row.base_high ?? row.referenceHigh,
+    );
+    const rawLow = toNumber(
+      row.rawLow ?? row.raw_low ?? row.baseLow ?? row.base_low ?? row.referenceLow,
+    );
+    const rawClose = toNumber(
+      row.rawClose ?? row.raw_close ?? row.baseClose ?? row.base_close ?? row.referenceClose,
+    );
 
-    const fallbackOpen = close ?? open ?? 0;
+    const fallbackOpen = close ?? open ?? rawOpen ?? 0;
     const normalizedOpen = open ?? fallbackOpen;
     const normalizedClose = close ?? normalizedOpen;
     const normalizedHigh =
       high ?? Math.max(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
     const normalizedLow =
       low ?? Math.min(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
+
+    const resolvedRawOpen = Number.isFinite(rawOpen) ? rawOpen : normalizedOpen;
+    const resolvedRawHigh = Number.isFinite(rawHigh) ? rawHigh : normalizedHigh;
+    const resolvedRawLow = Number.isFinite(rawLow) ? rawLow : normalizedLow;
+    const resolvedRawClose = Number.isFinite(rawClose) ? rawClose : normalizedClose;
+    const rowPriceSource =
+      typeof row.priceSource === "string" && row.priceSource.trim().length > 0
+        ? row.priceSource
+        : typeof row.price_source === "string" && row.price_source.trim().length > 0
+          ? row.price_source
+          : null;
 
     normalizedRows.push({
       date: isoDate,
@@ -684,6 +744,11 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       close: normalizedClose,
       volume: Math.round(volumeRaw / 1000),
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
+      rawOpen: resolvedRawOpen,
+      rawHigh: resolvedRawHigh,
+      rawLow: resolvedRawLow,
+      rawClose: resolvedRawClose,
+      priceSource: rowPriceSource || payload?.priceSource || undefined,
     });
   });
 
