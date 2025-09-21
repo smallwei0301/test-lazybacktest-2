@@ -7,6 +7,9 @@ const {
   computeAdjustmentRatio,
   buildAdjustedRowsFromFactorMap,
   classifyFinMindOutcome,
+  applyBackwardAdjustments,
+  normaliseDividendResultRecord,
+  buildDividendResultEvents,
 } = __TESTING__;
 
 function approxEqual(actual, expected, epsilon = 1e-6) {
@@ -161,6 +164,37 @@ const rawSeries = [
   { date: '2024-07-11', open: 98, high: 99, low: 96, close: 97, volume: 4200 },
   { date: '2024-07-12', open: 95, high: 96, low: 94, close: 95, volume: 3900 },
 ];
+
+const dividendResultRecord = {
+  date: '2024-07-11',
+  before_price: '100',
+  after_price: '97',
+  stock_and_cache_dividend: '3',
+};
+
+const normalisedDividendResult = normaliseDividendResultRecord(dividendResultRecord);
+assert.ok(normalisedDividendResult, 'Dividend result record should be normalised');
+assert.equal(normalisedDividendResult.date, '2024-07-11');
+approxEqual(normalisedDividendResult.ratio, 0.97, 1e-6);
+approxEqual(normalisedDividendResult.beforePrice, 100);
+approxEqual(normalisedDividendResult.afterPrice, 97);
+approxEqual(normalisedDividendResult.dividendTotal, 3);
+
+const dividendResultEvents = buildDividendResultEvents([dividendResultRecord]);
+assert.equal(dividendResultEvents.length, 1);
+const dividendResultEvent = dividendResultEvents[0];
+approxEqual(dividendResultEvent.manualRatio, 0.97, 1e-6);
+assert.equal(dividendResultEvent.label, 'FinMind (TaiwanStockDividendResult)');
+
+const manualAdjusted = applyBackwardAdjustments(rawSeries, [], {
+  preparedEvents: dividendResultEvents,
+});
+assert.equal(manualAdjusted.adjustments.length, 1);
+approxEqual(manualAdjusted.adjustments[0].ratio, 0.97, 1e-6);
+assert.equal(manualAdjusted.adjustments[0].ratioSource, 'FinMindDividendResult');
+approxEqual(manualAdjusted.rows[0].close, 97, 1e-6);
+approxEqual(manualAdjusted.rows[1].close, 97, 1e-6);
+approxEqual(manualAdjusted.rows[2].close, 95, 1e-6);
 const factorMap = new Map([
   ['2024-07-10', 0.95],
   ['2024-07-11', 0.97],

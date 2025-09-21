@@ -337,31 +337,40 @@ function buildFinMindApiStatusHtml(finmindStatus) {
             </div>`,
         );
     }
-    const dividendStatus = finmindStatus.dividend && typeof finmindStatus.dividend === 'object'
-        ? finmindStatus.dividend
-        : null;
-    if (dividendStatus) {
-        const tone = resolveFinMindStatusColor(dividendStatus.status);
-        const hint = dividendStatus.hint ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(dividendStatus.hint)}</div>` : '';
-        const statusCode = Number.isFinite(dividendStatus.statusCode)
-            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">狀態碼：${testerEscapeHtml(dividendStatus.statusCode)}</div>`
+    const statusConfigs = [
+        { key: 'dividend', title: 'FinMind 股利 API 狀態' },
+        { key: 'dividendResult', title: 'FinMind 還原結果 API 狀態' },
+    ];
+    statusConfigs.forEach((config) => {
+        const statusObj = finmindStatus[config.key];
+        if (!statusObj || typeof statusObj !== 'object') return;
+        const tone = resolveFinMindStatusColor(statusObj.status);
+        const hint = statusObj.hint
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(statusObj.hint)}</div>`
             : '';
-        const message = dividendStatus.message
-            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">訊息：${testerEscapeHtml(dividendStatus.message)}</div>`
+        const statusCode = Number.isFinite(statusObj.statusCode)
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">狀態碼：${testerEscapeHtml(statusObj.statusCode)}</div>`
             : '';
-        const spanText = dividendStatus.spanStart || dividendStatus.spanEnd
-            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請求區間：${testerEscapeHtml(dividendStatus.spanStart || '—')} ~ ${testerEscapeHtml(dividendStatus.spanEnd || '—')}</div>`
+        const message = statusObj.message
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">訊息：${testerEscapeHtml(statusObj.message)}</div>`
+            : '';
+        const spanText = statusObj.spanStart || statusObj.spanEnd
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請求區間：${testerEscapeHtml(statusObj.spanStart || '—')} ~ ${testerEscapeHtml(statusObj.spanEnd || '—')}</div>`
+            : '';
+        const dataset = statusObj.dataset
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料集：${testerEscapeHtml(statusObj.dataset)}</div>`
             : '';
         items.push(
             `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">
-                <div class="text-[11px] font-medium" style="color: var(--foreground);">FinMind 股利 API 狀態：<span class="${tone}">${testerEscapeHtml(dividendStatus.label || dividendStatus.status || '未知狀態')}</span></div>
+                <div class="text-[11px] font-medium" style="color: var(--foreground);">${testerEscapeHtml(config.title)}：<span class="${tone}">${testerEscapeHtml(statusObj.label || statusObj.status || '未知狀態')}</span></div>
+                ${dataset}
                 ${statusCode}
                 ${message}
                 ${spanText}
                 ${hint}
             </div>`,
         );
-    }
+    });
     if (items.length === 0) return '';
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind API 診斷</div><div class="mt-2 space-y-2">${items.join('')}</div></div>`;
 }
@@ -667,6 +676,32 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 }
                 if (diagParts.length > 0) {
                     lines.push(`FinMind 事件診斷：<span class="font-semibold">${diagParts.join(' / ')}</span>`);
+                }
+                if (dividendDiagnostics.dividendResult && typeof dividendDiagnostics.dividendResult === 'object') {
+                    const resultDiag = dividendDiagnostics.dividendResult;
+                    const resultParts = [];
+                    if (Number.isFinite(resultDiag.totalRecords)) {
+                        resultParts.push(`原始 ${testerEscapeHtml(resultDiag.totalRecords)} 筆`);
+                    }
+                    if (Number.isFinite(resultDiag.filteredRecords)) {
+                        resultParts.push(`區間 ${testerEscapeHtml(resultDiag.filteredRecords)} 筆`);
+                    }
+                    if (Number.isFinite(resultDiag.eventCount)) {
+                        resultParts.push(`事件 ${testerEscapeHtml(resultDiag.eventCount)} 件`);
+                    }
+                    if (Number.isFinite(resultDiag.appliedAdjustments)) {
+                        resultParts.push(`成功 ${testerEscapeHtml(resultDiag.appliedAdjustments)} 件`);
+                    }
+                    if (resultParts.length > 0) {
+                        lines.push(`FinMind 配息結果：<span class="font-semibold">${resultParts.join(' / ')}</span>`);
+                    }
+                    const resultLogHtml = buildFinMindResponseLogHtml(
+                        Array.isArray(resultDiag.responseLog) ? resultDiag.responseLog : [],
+                        { title: 'FinMind 配息結果紀錄' },
+                    );
+                    if (resultLogHtml) {
+                        extraSections.push(resultLogHtml);
+                    }
                 }
             }
             const dividendResponseHtml = buildFinMindResponseLogHtml(

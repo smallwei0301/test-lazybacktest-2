@@ -19,9 +19,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250402A
 // Patch Tag: LB-ADJ-COMPOSER-20250410A
 // Patch Tag: LB-ADJ-COMPOSER-20250414A
+// Patch Tag: LB-ADJ-COMPOSER-20250421A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250414A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250421A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -330,6 +331,10 @@ const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
 const FINMIND_SPLITTABLE_STATUS = new Set([400, 408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
 const FINMIND_ADJUSTED_LABEL = 'FinMind 還原序列';
+const FINMIND_DIVIDEND_DATASET = 'TaiwanStockDividend';
+const FINMIND_DIVIDEND_RESULT_DATASET = 'TaiwanStockDividendResult';
+const FINMIND_DIVIDEND_LABEL = 'FinMind (TaiwanStockDividend)';
+const FINMIND_DIVIDEND_RESULT_LABEL = 'FinMind (TaiwanStockDividendResult)';
 const ADJUSTED_SERIES_RATIO_EPSILON = 1e-5;
 
 const FINMIND_PERMISSION_PATTERNS = [
@@ -380,6 +385,24 @@ function normaliseFinMindMessage(message) {
   return String(message).trim();
 }
 
+function resolveFinMindDatasetLabel(dataset) {
+  if (!dataset) return 'FinMind 資料';
+  const token = String(dataset);
+  if (token === FINMIND_DIVIDEND_DATASET) {
+    return 'TaiwanStockDividend';
+  }
+  if (token === FINMIND_DIVIDEND_RESULT_DATASET) {
+    return 'TaiwanStockDividendResult';
+  }
+  if (token === 'TaiwanStockPriceAdj') {
+    return 'TaiwanStockPriceAdj';
+  }
+  if (token === 'TaiwanStockPrice') {
+    return 'TaiwanStockPrice';
+  }
+  return token;
+}
+
 function classifyFinMindOutcome({
   tokenPresent,
   dataset,
@@ -412,8 +435,14 @@ function classifyFinMindOutcome({
     return buildResult('missingToken', '缺少 API Token', '請於 Netlify / 環境變數設定 FINMIND_TOKEN 後重試。');
   }
 
+  const datasetLabel = resolveFinMindDatasetLabel(dataset);
+
   if (resolvedStatus === 401 || resolvedStatus === 403) {
-    return buildResult('permissionDenied', 'API 權限不足', '請確認方案等級是否允許下載 TaiwanStockDividend 資料。');
+    return buildResult(
+      'permissionDenied',
+      'API 權限不足',
+      `請確認方案等級是否允許下載 ${datasetLabel} 資料。`,
+    );
   }
 
   if (resolvedMessage) {
@@ -1307,6 +1336,112 @@ function filterDividendRecordsByPriceRange(dividendRecords, rangeStartISO, range
   });
 }
 
+function normaliseDividendResultRecord(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const isoDate = toISODate(readField(raw, 'date'));
+  if (!isoDate) return null;
+
+  const beforePrice = parseNumber(
+    readField(raw, 'before_price') ?? readField(raw, 'beforePrice') ?? readField(raw, 'reference_price_before'),
+  );
+  if (!Number.isFinite(beforePrice) || beforePrice <= 0) {
+    return null;
+  }
+
+  let afterPrice = parseNumber(
+    readField(raw, 'after_price') ?? readField(raw, 'afterPrice') ?? readField(raw, 'reference_price'),
+  );
+  const dividendTotal = parseNumber(
+    readField(raw, 'stock_and_cache_dividend') ??
+      readField(raw, 'stock_and_cash_dividend') ??
+      readField(raw, 'dividend_total'),
+  );
+
+  if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
+    if (Number.isFinite(dividendTotal)) {
+      afterPrice = beforePrice - dividendTotal;
+    }
+  }
+
+  if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
+    return null;
+  }
+
+  let ratio = afterPrice / beforePrice;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return null;
+  }
+
+  if (ratio >= 1) {
+    // 若結果無需調整則忽略，避免被視為有效事件
+    return null;
+  }
+
+  const roundedRatio = Number(Math.round(ratio * 1e8) / 1e8);
+
+  return {
+    date: isoDate,
+    ratio: roundedRatio,
+    beforePrice: safeRound(beforePrice) ?? beforePrice,
+    afterPrice: safeRound(afterPrice) ?? afterPrice,
+    dividendTotal: Number.isFinite(dividendTotal) ? safeRound(dividendTotal) ?? dividendTotal : null,
+    raw,
+  };
+}
+
+function buildDividendResultEvents(records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return [];
+  }
+  const eventMap = new Map();
+  for (const raw of records) {
+    const normalised = normaliseDividendResultRecord(raw);
+    if (!normalised) continue;
+    const existing = eventMap.get(normalised.date);
+    if (existing) {
+      if (normalised.ratio < existing.manualRatio) {
+        existing.manualRatio = normalised.ratio;
+      }
+      if (Number.isFinite(normalised.beforePrice) && normalised.beforePrice > 0) {
+        existing.beforePrice = normalised.beforePrice;
+      }
+      if (Number.isFinite(normalised.afterPrice) && normalised.afterPrice > 0) {
+        existing.afterPrice = normalised.afterPrice;
+      }
+      if (Number.isFinite(normalised.dividendTotal) && normalised.dividendTotal > 0) {
+        existing.dividendTotal = normalised.dividendTotal;
+      }
+      if (!existing.rawRecords) {
+        existing.rawRecords = [];
+      }
+      existing.rawRecords.push(normalised.raw);
+    } else {
+      eventMap.set(normalised.date, {
+        date: normalised.date,
+        manualRatio: normalised.ratio,
+        manualRatioSource: FINMIND_DIVIDEND_RESULT_DATASET,
+        ratioSource: 'FinMindDividendResult',
+        label: FINMIND_DIVIDEND_RESULT_LABEL,
+        source: FINMIND_DIVIDEND_RESULT_LABEL,
+        dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        beforePrice: normalised.beforePrice,
+        afterPrice: normalised.afterPrice,
+        dividendTotal: normalised.dividendTotal,
+        stockAndCashDividend: normalised.dividendTotal,
+        cashDividend: 0,
+        stockDividend: 0,
+        cashCapitalIncrease: 0,
+        stockCapitalIncrease: 0,
+        rawRecords: [normalised.raw],
+      });
+    }
+  }
+
+  return Array.from(eventMap.values()).sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+}
+
 function incrementDiagnosticCounter(diagnostics, key) {
   if (!diagnostics || !key) return;
   const current = Number.isFinite(diagnostics[key]) ? diagnostics[key] : Number(diagnostics[key]);
@@ -1477,9 +1612,26 @@ function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
       adjustments.push({ ...event, ratio: 1, skipped: true, reason: 'invalidBaseClose' });
       continue;
     }
-    const ratio = computeAdjustmentRatio(baseClose, event);
+    let ratioSource = 'formula';
+    let ratio = null;
+    if (
+      Number.isFinite(event.manualRatio) &&
+      event.manualRatio > 0 &&
+      event.manualRatio < 1.5
+    ) {
+      ratio = Number(Math.round(event.manualRatio * 1e8) / 1e8);
+      ratioSource = event.ratioSource || event.manualRatioSource || 'manual';
+    } else {
+      ratio = computeAdjustmentRatio(baseClose, event);
+    }
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
-      adjustments.push({ ...event, ratio: 1, skipped: true, reason: 'ratioOutOfRange' });
+      adjustments.push({
+        ...event,
+        ratio: 1,
+        skipped: true,
+        reason: 'ratioOutOfRange',
+        ratioSource: event.ratioSource || ratioSource,
+      });
       continue;
     }
     for (let i = 0; i < baseIndex; i += 1) {
@@ -1491,6 +1643,7 @@ function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
       appliedDate: sortedRows[baseIndex]?.date || event.date,
       baseClose,
       baseRowIndex: baseIndex,
+      ratioSource: event.ratioSource || ratioSource,
     });
   }
 
@@ -2082,6 +2235,125 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
   };
 }
 
+async function deriveAdjustedSeriesFromDividendResult({
+  stockNo,
+  startISO,
+  endISO,
+  priceRows,
+  priceRangeStartISO,
+  priceRangeEndISO,
+}) {
+  if (!Array.isArray(priceRows) || priceRows.length === 0) {
+    return null;
+  }
+
+  let payload;
+  let fetchError = null;
+  try {
+    payload = await fetchDividendResultSeries(stockNo, startISO, endISO);
+  } catch (error) {
+    fetchError = error;
+  }
+
+  if (fetchError) {
+    const responses = Array.isArray(fetchError?.finmindMeta?.responses)
+      ? fetchError.finmindMeta.responses.slice(0, 10)
+      : [];
+    const info = {
+      applied: false,
+      status: 'error',
+      label: FINMIND_DIVIDEND_RESULT_LABEL,
+      detail: fetchError.message || 'FinMind 配息結果失敗',
+      responseLog: responses,
+    };
+    return {
+      applied: false,
+      rows: priceRows,
+      adjustments: [],
+      events: [],
+      info,
+      diagnostics: {
+        totalRecords: 0,
+        filteredRecords: 0,
+        eventCount: 0,
+        appliedAdjustments: 0,
+        responseLog: responses,
+      },
+      statusMeta: {
+        statusCode:
+          fetchError?.finmindMeta?.statusCode ??
+          fetchError?.statusCode ??
+          extractStatusCode(fetchError) ??
+          null,
+        message: fetchError?.finmindMeta?.message || fetchError.message || null,
+        spanStart: fetchError?.finmindMeta?.spanStart || null,
+        spanEnd: fetchError?.finmindMeta?.spanEnd || null,
+        dataCount: 0,
+      },
+      error: fetchError,
+    };
+  }
+
+  const allRows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const filteredRows = filterDividendRecordsByPriceRange(
+    allRows,
+    priceRangeStartISO || startISO,
+    priceRangeEndISO || endISO,
+  );
+  const events = buildDividendResultEvents(filteredRows);
+
+  const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(priceRows, [], {
+    preparedEvents: events,
+  });
+
+  const appliedAdjustments = adjustments.filter((item) => !item?.skipped);
+  const applied = appliedAdjustments.length > 0;
+
+  const infoDetailParts = [
+    `原始 ${allRows.length} 筆`,
+    `區間 ${filteredRows.length} 筆`,
+    `事件 ${events.length} 件`,
+    `成功 ${appliedAdjustments.length} 件`,
+  ];
+
+  const diagnostics = {
+    totalRecords: allRows.length,
+    filteredRecords: filteredRows.length,
+    eventCount: events.length,
+    appliedAdjustments: appliedAdjustments.length,
+    responseLog: Array.isArray(payload?.responseLog)
+      ? payload.responseLog.slice(0, 10)
+      : [],
+  };
+
+  const info = {
+    applied,
+    status: applied ? 'success' : 'warning',
+    label: FINMIND_DIVIDEND_RESULT_LABEL,
+    detail: infoDetailParts.join(' ・ '),
+    responseLog: diagnostics.responseLog,
+  };
+
+  const statusMeta = {
+    statusCode: payload?.lastStatus ?? null,
+    message: payload?.lastMessage || null,
+    spanStart: payload?.fetchStartISO || null,
+    spanEnd: payload?.fetchEndISO || null,
+    dataCount: filteredRows.length,
+  };
+
+  return {
+    applied,
+    rows: applied ? adjustedRows : priceRows,
+    adjustments,
+    events,
+    info,
+    diagnostics,
+    statusMeta,
+    payload,
+  };
+}
+
 async function fetchDividendSeries(stockNo, startISO, endISO) {
   const token = process.env.FINMIND_TOKEN;
   if (!token) {
@@ -2114,7 +2386,7 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
     const span = queue.shift();
     const spanDays = countSpanDays(span);
     const urlParams = {
-      dataset: 'TaiwanStockDividend',
+      dataset: FINMIND_DIVIDEND_DATASET,
       data_id: stockNo,
       start_date: span.startISO,
       end_date: span.endISO,
@@ -2143,7 +2415,7 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
       enriched.original = error;
       enriched.statusCode = extractStatusCode(error);
       enriched.finmindMeta = {
-        dataset: 'TaiwanStockDividend',
+        dataset: FINMIND_DIVIDEND_DATASET,
         spanStart: span.startISO,
         spanEnd: span.endISO,
         statusCode: enriched.statusCode,
@@ -2170,7 +2442,7 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
         }
       }
       payloadError.finmindMeta = {
-        dataset: 'TaiwanStockDividend',
+        dataset: FINMIND_DIVIDEND_DATASET,
         spanStart: span.startISO,
         spanEnd: span.endISO,
         statusCode: payloadError.statusCode,
@@ -2207,6 +2479,153 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
     fetchStartISO: formatISODateFromDate(fetchStart),
     fetchEndISO: formatISODateFromDate(endDate),
     responseLog,
+  };
+}
+
+async function fetchDividendResultSeries(stockNo, startISO, endISO) {
+  const token = process.env.FINMIND_TOKEN;
+  if (!token) {
+    throw new Error('未設定 FinMind Token');
+  }
+  const startDate = new Date(startISO);
+  const endDate = new Date(endISO);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return {
+      rows: [],
+      fetchStartISO: null,
+      fetchEndISO: null,
+      responseLog: [],
+      lastStatus: null,
+      lastMessage: null,
+    };
+  }
+  const fetchStart = new Date(startDate.getTime());
+  if (Number.isFinite(FINMIND_DIVIDEND_LOOKBACK_DAYS) && FINMIND_DIVIDEND_LOOKBACK_DAYS > 0) {
+    fetchStart.setUTCDate(fetchStart.getUTCDate() - FINMIND_DIVIDEND_LOOKBACK_DAYS);
+  }
+  if (fetchStart > endDate) {
+    fetchStart.setTime(endDate.getTime());
+  }
+  const spans = enumerateDateSpans(fetchStart, endDate, FINMIND_DIVIDEND_SPAN_DAYS);
+  if (spans.length === 0) {
+    return {
+      rows: [],
+      fetchStartISO: formatISODateFromDate(fetchStart),
+      fetchEndISO: formatISODateFromDate(endDate),
+      responseLog: [],
+      lastStatus: null,
+      lastMessage: null,
+    };
+  }
+
+  const combined = [];
+  const queue = [...spans];
+  const responseLog = [];
+
+  while (queue.length > 0) {
+    const span = queue.shift();
+    const spanDays = countSpanDays(span);
+    const urlParams = {
+      dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+      data_id: stockNo,
+      start_date: span.startISO,
+      end_date: span.endISO,
+      token,
+    };
+    let json;
+    try {
+      json = await executeFinMindQuery(urlParams);
+    } catch (error) {
+      if (shouldSplitSpan(error, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              error.message || error
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      const enriched = new Error(
+        `[FinMind 配息結果段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
+      );
+      enriched.original = error;
+      enriched.statusCode = extractStatusCode(error);
+      enriched.finmindMeta = {
+        dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        statusCode: enriched.statusCode,
+        message: error?.message || '',
+        responses: responseLog.slice(),
+        type: 'network',
+      };
+      throw enriched;
+    }
+
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      const payloadError = new Error(`FinMind 配息結果回應錯誤: ${json?.msg || 'unknown error'}`);
+      payloadError.statusCode = json?.status;
+      if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              payloadError.message || payloadError
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      payloadError.finmindMeta = {
+        dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        statusCode: payloadError.statusCode,
+        message: json?.msg || payloadError.message,
+        responses: [
+          ...responseLog,
+          {
+            spanStart: span.startISO,
+            spanEnd: span.endISO,
+            status: json?.status ?? null,
+            message: json?.msg || '',
+            rowCount: Array.isArray(json?.data) ? json.data.length : 0,
+          },
+        ],
+        type: 'payload',
+      };
+      throw payloadError;
+    }
+
+    const rowCount = Array.isArray(json?.data) ? json.data.length : 0;
+    responseLog.push({
+      spanStart: span.startISO,
+      spanEnd: span.endISO,
+      status: json?.status ?? null,
+      message: json?.msg || '',
+      rowCount,
+    });
+    combined.push(...json.data);
+    if (queue.length > 0) {
+      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+    }
+  }
+
+  const lastEntry = responseLog.length > 0 ? responseLog[responseLog.length - 1] : null;
+
+  return {
+    rows: combined,
+    fetchStartISO: formatISODateFromDate(fetchStart),
+    fetchEndISO: formatISODateFromDate(endDate),
+    responseLog,
+    lastStatus: lastEntry?.status ?? null,
+    lastMessage: lastEntry?.message || null,
   };
 }
 
@@ -2305,6 +2724,7 @@ function buildSummary(
     lookbackWindowDays,
     fetchStartISO,
     fetchEndISO,
+    dividendSourceLabel,
   } = dividendStats || {};
   const appliedEvents = Array.isArray(adjustments)
     ? adjustments.filter((event) => !event?.skipped)
@@ -2327,7 +2747,7 @@ function buildSummary(
     adjustmentSkipReasons:
       skipReasons && Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
     priceSource: basePriceSource,
-    dividendSource: 'FinMind (TaiwanStockDividend)',
+    dividendSource: dividendSourceLabel || FINMIND_DIVIDEND_LABEL,
     sources: Array.from(uniqueSources),
   };
 }
@@ -2343,12 +2763,16 @@ export const __TESTING__ = {
   computeAdjustmentRatio,
   buildAdjustedRowsFromFactorMap,
   classifyFinMindOutcome,
+  applyBackwardAdjustments,
+  normaliseDividendResultRecord,
+  buildDividendResultEvents,
 };
 
 export const handler = async (event) => {
   const finmindStatus = {
     tokenPresent: Boolean(process.env.FINMIND_TOKEN),
     dividend: null,
+    dividendResult: null,
     price: null,
   };
   try {
@@ -2419,7 +2843,7 @@ export const handler = async (event) => {
     const lastAttempt = responseLog.length > 0 ? responseLog[responseLog.length - 1] : null;
     const classification = classifyFinMindOutcome({
       tokenPresent: finmindStatus.tokenPresent,
-      dataset: 'TaiwanStockDividend',
+      dataset: FINMIND_DIVIDEND_DATASET,
       statusCode:
         (Number.isFinite(dividendFetchError?.statusCode)
           ? dividendFetchError.statusCode
@@ -2486,8 +2910,88 @@ export const handler = async (event) => {
     let fallbackInfo = null;
     let effectiveRows = adjustedRows;
     let effectiveAdjustments = adjustments;
+    let effectiveEvents = events;
+    const fallbackHistory = [];
 
-    if (appliedAdjustments.length === 0 && priceRows.length > 0) {
+    const appendFallbackHistory = (info, extras = {}) => {
+      if (!info) return;
+      const payload = { ...info, ...extras };
+      delete payload.history;
+      fallbackHistory.push(payload);
+    };
+
+    const recomputeAppliedFlag = (collection) =>
+      Array.isArray(collection) && collection.some((item) => !item?.skipped);
+
+    let hasAppliedAdjustments = appliedAdjustments.length > 0;
+
+    if (!hasAppliedAdjustments && priceRows.length > 0) {
+      const dividendResultFallback = await deriveAdjustedSeriesFromDividendResult({
+        stockNo,
+        startISO,
+        endISO,
+        priceRows,
+        priceRangeStartISO,
+        priceRangeEndISO,
+      });
+      if (dividendResultFallback) {
+        appendFallbackHistory(dividendResultFallback.info, {
+          attempt: 'finmindDividendResult',
+          diagnostics: dividendResultFallback.diagnostics || undefined,
+        });
+        if (dividendResultFallback.diagnostics) {
+          dividendDiagnostics.dividendResult = dividendResultFallback.diagnostics;
+        }
+        const classificationResult = classifyFinMindOutcome({
+          tokenPresent: finmindStatus.tokenPresent,
+          dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+          statusCode: dividendResultFallback.statusMeta?.statusCode,
+          message: dividendResultFallback.statusMeta?.message || null,
+          rawMessage: dividendResultFallback.error?.message || null,
+          dataCount:
+            dividendResultFallback.statusMeta?.dataCount ??
+            dividendResultFallback.diagnostics?.eventCount ??
+            0,
+          spanStart:
+            dividendResultFallback.statusMeta?.spanStart ??
+            dividendResultFallback.payload?.fetchStartISO ??
+            priceRangeStartISO ??
+            startISO,
+          spanEnd:
+            dividendResultFallback.statusMeta?.spanEnd ??
+            dividendResultFallback.payload?.fetchEndISO ??
+            priceRangeEndISO ??
+            endISO,
+          error: dividendResultFallback.error || null,
+        });
+        finmindStatus.dividendResult = classificationResult;
+
+        if (
+          dividendResultFallback.applied &&
+          Array.isArray(dividendResultFallback.rows) &&
+          dividendResultFallback.rows.length > 0
+        ) {
+          effectiveRows = dividendResultFallback.rows;
+          effectiveAdjustments = Array.isArray(dividendResultFallback.adjustments)
+            ? dividendResultFallback.adjustments
+            : adjustments;
+          effectiveEvents = Array.isArray(dividendResultFallback.events)
+            ? dividendResultFallback.events
+            : effectiveEvents;
+        } else if (
+          Array.isArray(dividendResultFallback.adjustments) &&
+          dividendResultFallback.adjustments.length > 0
+        ) {
+          effectiveAdjustments = [
+            ...effectiveAdjustments,
+            ...dividendResultFallback.adjustments,
+          ];
+        }
+        hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
+      }
+    }
+
+    if (!hasAppliedAdjustments && priceRows.length > 0) {
       const fallbackResult = await deriveAdjustedSeriesFallback({
         stockNo,
         startISO,
@@ -2495,14 +2999,20 @@ export const handler = async (event) => {
         priceRows,
       });
       if (fallbackResult) {
-        fallbackInfo = fallbackResult.info || null;
+        appendFallbackHistory(fallbackResult.info, { attempt: 'finmindAdjustedSeries' });
         if (Array.isArray(fallbackResult.rows) && fallbackResult.rows.length > 0) {
           effectiveRows = fallbackResult.rows;
         }
         if (Array.isArray(fallbackResult.adjustments) && fallbackResult.adjustments.length > 0) {
-          effectiveAdjustments = [...adjustments, ...fallbackResult.adjustments];
+          effectiveAdjustments = [...effectiveAdjustments, ...fallbackResult.adjustments];
         }
+        hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
       }
+    }
+
+    if (fallbackHistory.length > 0) {
+      const latest = fallbackHistory[fallbackHistory.length - 1];
+      fallbackInfo = { ...latest, history: fallbackHistory };
     }
 
     const debugSteps = buildDebugSteps({
@@ -2520,9 +3030,14 @@ export const handler = async (event) => {
     ;
     const combinedSourceParts = [baseSourceLabel, 'FinMind (除權息還原)'];
     if (fallbackInfo?.applied) {
-      combinedSourceParts.push(FINMIND_ADJUSTED_LABEL);
+      combinedSourceParts.push(fallbackInfo.label || FINMIND_ADJUSTED_LABEL);
     }
     const combinedSourceLabel = combinedSourceParts.join(' + ');
+
+    const dividendSourceLabelForSummary =
+      fallbackInfo?.applied && fallbackInfo?.label
+        ? fallbackInfo.label
+        : FINMIND_DIVIDEND_LABEL;
 
     const responseBody = {
       version: FUNCTION_VERSION,
@@ -2543,12 +3058,13 @@ export const handler = async (event) => {
           lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
           fetchStartISO: dividendPayload?.fetchStartISO || null,
           fetchEndISO: dividendPayload?.fetchEndISO || null,
+          dividendSourceLabel: dividendSourceLabelForSummary,
         },
         fallbackInfo,
       ),
       data: effectiveRows,
       adjustments: effectiveAdjustments,
-      dividendEvents: events,
+      dividendEvents: effectiveEvents,
       dividendDiagnostics,
       debugSteps,
       adjustmentFallback: fallbackInfo || null,
@@ -2560,11 +3076,29 @@ export const handler = async (event) => {
   } catch (error) {
     console.error('[calculateAdjustedPrice] 執行錯誤:', error);
     const statusCode = error?.statusCode && Number.isFinite(error.statusCode) ? error.statusCode : 500;
-    if (!finmindStatus.dividend && error?.finmindMeta?.dataset === 'TaiwanStockDividend') {
+    if (!finmindStatus.dividend && error?.finmindMeta?.dataset === FINMIND_DIVIDEND_DATASET) {
       finmindStatus.dividend = classifyFinMindOutcome({
         tokenPresent: finmindStatus.tokenPresent,
-        dataset: 'TaiwanStockDividend',
+        dataset: FINMIND_DIVIDEND_DATASET,
         statusCode: Number.isFinite(error.statusCode) ? error.statusCode : error?.finmindMeta?.statusCode,
+        message: error?.finmindMeta?.message || null,
+        rawMessage: error?.message || null,
+        dataCount: 0,
+        spanStart: error?.finmindMeta?.spanStart || null,
+        spanEnd: error?.finmindMeta?.spanEnd || null,
+        error,
+      });
+    }
+    if (
+      !finmindStatus.dividendResult &&
+      error?.finmindMeta?.dataset === FINMIND_DIVIDEND_RESULT_DATASET
+    ) {
+      finmindStatus.dividendResult = classifyFinMindOutcome({
+        tokenPresent: finmindStatus.tokenPresent,
+        dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        statusCode: Number.isFinite(error.statusCode)
+          ? error.statusCode
+          : error?.finmindMeta?.statusCode,
         message: error?.finmindMeta?.message || null,
         rawMessage: error?.message || null,
         dataCount: 0,
