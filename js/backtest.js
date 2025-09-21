@@ -30,7 +30,7 @@ function runBacktestInternal() {
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
                 const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
                 cachedStockData = sliced;
-                lastFetchSettings = curSettings;
+                lastFetchSettings = { ...curSettings };
                 refreshPriceInspectorControls();
                 console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
@@ -102,7 +102,7 @@ function runBacktestInternal() {
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings=curSettings;
+                     lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
                      cachedEntry = cacheEntry;
@@ -122,7 +122,7 @@ function runBacktestInternal() {
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings = curSettings;
+                     lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
@@ -1211,7 +1211,14 @@ function runOptimizationInternal(optimizeType) {
     optRange = config.range; 
     console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
     
-    const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate}; 
+    const curSettings={
+        stockNo: params.stockNo,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
+        adjustedPrice: Boolean(params.adjustedPrice),
+        priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+    };
     const useCache=!needsDataFetch(curSettings); 
     const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
     
@@ -1257,8 +1264,8 @@ function runOptimizationInternal(optimizeType) {
                 updateOptimizationProgress(progress, message);
             } else if(type==='result'){ 
                 if(!useCache&&data?.rawDataUsed){
-                    cachedStockData=data.rawDataUsed; 
-                    lastFetchSettings=curSettings; 
+                    cachedStockData=data.rawDataUsed;
+                    lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
                 } else if(!useCache&&data&&!data.rawDataUsed) {
                     console.warn("[Main] Opt worker no rawData returned.");

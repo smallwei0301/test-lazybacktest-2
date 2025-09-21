@@ -1,9 +1,10 @@
 
-// --- Worker Data Acquisition & Cache (v11.1 - Adjusted fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.2 - Adjusted fallback integration) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
-const WORKER_DATA_VERSION = "v11.1";
+// Patch Tag: LB-ADJ-PIPE-20250305A
+const WORKER_DATA_VERSION = "v11.2";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -352,71 +353,124 @@ function computeFallbackRatio(baseClose, components) {
   return ratio;
 }
 
-// Patch Tag: LB-ADJ-PIPE-20250302A
-function maybeApplyAdjustments(rows, adjustments) {
-  const result = { rows, fallbackApplied: false };
-  if (!Array.isArray(rows) || rows.length === 0) return result;
-  if (!Array.isArray(adjustments) || adjustments.length === 0) return result;
-
-  const hasMeaningfulFactor = rows.some(
-    (row) => Number.isFinite(row?.adjustedFactor) && row.adjustedFactor > 0 && row.adjustedFactor < 0.9999,
-  );
-  if (hasMeaningfulFactor) {
-    return result;
+function findPreviousValidCloseIndex(rows, startIndex) {
+  for (let i = startIndex - 1; i >= 0; i -= 1) {
+    const candidate = rows[i]?.close;
+    if (Number.isFinite(candidate) && candidate > 0) {
+      return i;
+    }
   }
+  return -1;
+}
 
-  const preparedEvents = adjustments
-    .filter((event) => event && !event.skipped)
-    .map((event) => {
-      const cashDividend = readEventNumber(event, ["cashDividend", "cash_dividend"]);
-      const stockDividend = readEventNumber(event, ["stockDividend", "stock_dividend"]);
-      const cashCapitalIncrease = readEventNumber(event, ["cashCapitalIncrease", "cash_capital_increase"]);
-      const stockCapitalIncrease = readEventNumber(event, ["stockCapitalIncrease", "stock_capital_increase"]);
-      const subscriptionPrice = readEventNumber(event, ["subscriptionPrice", "subscription_price"]);
-      const hasPositiveComponent = [
-        cashDividend,
-        stockDividend,
-        cashCapitalIncrease,
-        stockCapitalIncrease,
-      ].some((value) => Number.isFinite(value) && value > 0);
-      if (!hasPositiveComponent) {
-        return null;
+function normaliseAdjustmentEvent(event) {
+  if (!event || event.skipped) return null;
+  const date = event.appliedDate || event.date || event.exDate || event.ex_date || null;
+  if (!date) return null;
+  const ratio = Number(event.ratio);
+  const cashDividend = readEventNumber(event, ["cashDividend", "cash_dividend"]);
+  const stockDividend = readEventNumber(event, ["stockDividend", "stock_dividend"]);
+  const cashCapitalIncrease = readEventNumber(event, ["cashCapitalIncrease", "cash_capital_increase"]);
+  const stockCapitalIncrease = readEventNumber(event, ["stockCapitalIncrease", "stock_capital_increase"]);
+  const subscriptionPrice = readEventNumber(event, ["subscriptionPrice", "subscription_price"]);
+  const hasComponent = [
+    cashDividend,
+    stockDividend,
+    cashCapitalIncrease,
+    stockCapitalIncrease,
+  ].some((value) => Number.isFinite(value) && value > 0);
+  if (!hasComponent && (!Number.isFinite(ratio) || ratio >= 0.999999)) {
+    return null;
+  }
+  return {
+    date,
+    ratio: Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : null,
+    cashDividend: Math.max(0, cashDividend || 0),
+    stockDividend: Math.max(0, stockDividend || 0),
+    cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
+    stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
+    subscriptionPrice:
+      Number.isFinite(subscriptionPrice) && subscriptionPrice > 0 ? subscriptionPrice : null,
+    baseClose: Number(event.baseClose ?? event.base_close),
+  };
+}
+
+function shouldUseFallbackAdjustments(rows, events) {
+  for (const event of events) {
+    let baseIndex = rows.findIndex((row) => row?.date >= event.date);
+    if (baseIndex < 0) continue;
+    let cursor = baseIndex;
+    let baseClose = Number(event.baseClose);
+    if (!Number.isFinite(baseClose) || baseClose <= 0) {
+      while (cursor < rows.length) {
+        const candidate = rows[cursor]?.close;
+        if (Number.isFinite(candidate) && candidate > 0) {
+          baseClose = candidate;
+          break;
+        }
+        cursor += 1;
       }
-      return {
-        date: event.appliedDate || event.date || event.exDate || null,
-        cashDividend: Math.max(0, cashDividend || 0),
-        stockDividend: Math.max(0, stockDividend || 0),
-        cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
-        stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
-        subscriptionPrice:
-          Number.isFinite(subscriptionPrice) && subscriptionPrice > 0 ? subscriptionPrice : null,
-      };
-    })
-    .filter((event) => event && event.date);
+    }
+    if (!Number.isFinite(baseClose) || baseClose <= 0 || cursor <= 0) continue;
+    const prevIndex = findPreviousValidCloseIndex(rows, cursor);
+    if (prevIndex < 0) continue;
+    const prevRow = rows[prevIndex];
+    const prevClose = prevRow?.close;
+    if (!Number.isFinite(prevClose) || prevClose <= 0) continue;
 
-  if (preparedEvents.length === 0) {
-    return result;
+    let ratio = event.ratio;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
+      ratio = computeFallbackRatio(baseClose, event);
+    }
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) continue;
+
+    const factor = Number(prevRow?.adjustedFactor);
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
+      const relativeGap = Math.abs(prevClose - baseClose) / Math.max(baseClose, 1);
+      if (relativeGap >= 0.01) {
+        return true;
+      }
+      continue;
+    }
+
+    const expectedRawPrev = baseClose / ratio;
+    if (!Number.isFinite(expectedRawPrev) || expectedRawPrev <= 0) {
+      continue;
+    }
+    const approxRawPrev = prevClose / factor;
+    const relativeDiff = Math.abs(approxRawPrev - expectedRawPrev) / Math.max(expectedRawPrev, 1);
+    if (relativeDiff >= 0.02) {
+      return true;
+    }
   }
+  return false;
+}
 
+function applyFallbackAdjustments(rows, events) {
   const factors = rows.map(() => 1);
   let applied = false;
 
-  preparedEvents.forEach((event) => {
+  events.forEach((event) => {
     let baseIndex = rows.findIndex((row) => row?.date >= event.date);
     if (baseIndex < 0) return;
     let cursor = baseIndex;
-    while (
-      cursor < rows.length &&
-      (!Number.isFinite(rows[cursor]?.close) || rows[cursor].close === null || rows[cursor].close <= 0)
-    ) {
-      cursor += 1;
+    let baseClose = Number(event.baseClose);
+    if (!Number.isFinite(baseClose) || baseClose <= 0) {
+      while (cursor < rows.length) {
+        const candidate = rows[cursor]?.close;
+        if (Number.isFinite(candidate) && candidate > 0) {
+          baseClose = candidate;
+          break;
+        }
+        cursor += 1;
+      }
     }
-    if (cursor >= rows.length || cursor <= 0) return;
+    if (!Number.isFinite(baseClose) || baseClose <= 0 || cursor <= 0) return;
 
-    const baseClose = rows[cursor].close;
-    if (!Number.isFinite(baseClose) || baseClose <= 0) return;
-
-    const ratio = computeFallbackRatio(baseClose, event);
+    let ratio = event.ratio;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
+      ratio = computeFallbackRatio(baseClose, event);
+    }
     if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
       return;
     }
@@ -432,13 +486,17 @@ function maybeApplyAdjustments(rows, adjustments) {
   });
 
   if (!applied) {
-    return result;
+    return { rows, mutated: false };
   }
 
   const adjustedRows = rows.map((row, index) => {
     const factor = factors[index];
     if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
-      const preservedFactor = Number.isFinite(factor) ? factor : row.adjustedFactor ?? 1;
+      const preservedFactor = Number.isFinite(row?.adjustedFactor)
+        ? row.adjustedFactor
+        : Number.isFinite(factor)
+          ? factor
+          : 1;
       return { ...row, adjustedFactor: preservedFactor };
     }
     const scale = (value) =>
@@ -466,6 +524,30 @@ function maybeApplyAdjustments(rows, adjustments) {
     return compare("open") || compare("high") || compare("low") || compare("close");
   });
 
+  return { rows: mutated ? adjustedRows : rows, mutated };
+}
+
+// Patch Tag: LB-ADJ-PIPE-20250302A
+function maybeApplyAdjustments(rows, adjustments) {
+  const result = { rows, fallbackApplied: false };
+  if (!Array.isArray(rows) || rows.length === 0) return result;
+  if (!Array.isArray(adjustments) || adjustments.length === 0) return result;
+
+  const preparedEvents = adjustments
+    .map(normaliseAdjustmentEvent)
+    .filter((event) => event && event.date)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (preparedEvents.length === 0) {
+    return result;
+  }
+
+  const fallbackNeeded = shouldUseFallbackAdjustments(rows, preparedEvents);
+  if (!fallbackNeeded) {
+    return result;
+  }
+
+  const { rows: adjustedRows, mutated } = applyFallbackAdjustments(rows, preparedEvents);
   if (!mutated) {
     return result;
   }
