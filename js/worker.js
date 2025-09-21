@@ -4,6 +4,7 @@
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
 // Patch Tag: LB-ADJ-PIPE-20250305A
+// Patch Tag: LB-ADJ-PIPE-20250312A
 const WORKER_DATA_VERSION = "v11.2";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -329,27 +330,29 @@ function readEventNumber(event, candidates = []) {
 
 function computeFallbackRatio(baseClose, components) {
   if (!Number.isFinite(baseClose) || baseClose <= 0) return 1;
+
   const cashDividend = Math.max(0, components.cashDividend || 0);
-  const stockComponent = Math.max(
-    0,
-    (components.stockDividend || 0) + (components.stockCapitalIncrease || 0),
-  );
-  let ratio = 1;
-  const denominator = baseClose * (1 + stockComponent) + cashDividend;
-  if (Number.isFinite(denominator) && denominator > 0) {
-    ratio = baseClose / denominator;
+  const stockDividend = Math.max(0, components.stockDividend || 0);
+  const stockCapitalIncrease = Math.max(0, components.stockCapitalIncrease || 0);
+  const cashCapitalIncrease = Math.max(0, components.cashCapitalIncrease || 0);
+  const subscriptionPrice =
+    Number.isFinite(components.subscriptionPrice) && components.subscriptionPrice > 0
+      ? components.subscriptionPrice
+      : 0;
+
+  const totalStockComponent = stockDividend + stockCapitalIncrease + cashCapitalIncrease;
+  const denominator =
+    baseClose * (1 + totalStockComponent) + cashDividend - cashCapitalIncrease * subscriptionPrice;
+
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 1;
   }
-  const rightsRatio = Math.max(0, components.cashCapitalIncrease || 0);
-  const subscriptionPrice = components.subscriptionPrice;
-  if (rightsRatio > 0 && Number.isFinite(subscriptionPrice) && subscriptionPrice > 0) {
-    const theoreticalDenominator = baseClose * (1 + rightsRatio) - rightsRatio * subscriptionPrice;
-    if (Number.isFinite(theoreticalDenominator) && theoreticalDenominator > 0) {
-      ratio *= baseClose / theoreticalDenominator;
-    }
-  }
+
+  const ratio = baseClose / denominator;
   if (!Number.isFinite(ratio) || ratio <= 0) {
     return 1;
   }
+
   return ratio;
 }
 
@@ -624,6 +627,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
   const summary = payload?.summary || null;
   const adjustments = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
   const priceSource = payload?.priceSource || null;
+  const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
   const sourceLabel =
     payload?.dataSource ||
     (summary && Array.isArray(summary.sources) && summary.sources.length > 0
@@ -643,6 +647,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     adjustments,
     priceSource,
     adjustmentFallbackApplied: fallbackApplied,
+    debugSteps,
   };
 }
 
@@ -854,6 +859,9 @@ async function fetchStockData(
         priceSource: adjustedResult.priceSource || null,
         adjustmentFallbackApplied:
           Boolean(adjustedResult.adjustmentFallbackApplied),
+        debugSteps: Array.isArray(adjustedResult.debugSteps)
+          ? adjustedResult.debugSteps
+          : [],
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -4517,6 +4525,7 @@ self.onmessage = async function (e) {
     params,
     useCachedData,
     cachedData,
+    cachedMeta,
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
@@ -4551,9 +4560,39 @@ self.onmessage = async function (e) {
               startDate: params.startDate,
               endDate: params.endDate,
               priceMode: getPriceModeKey(params.adjustedPrice),
+              summary: cachedMeta?.summary || null,
+              adjustments: Array.isArray(cachedMeta?.adjustments)
+                ? cachedMeta.adjustments
+                : [],
+              priceSource: cachedMeta?.priceSource || null,
+              adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+              debugSteps: Array.isArray(cachedMeta?.debugSteps)
+                ? cachedMeta.debugSteps
+                : [],
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
+        }
+        if (cachedMeta) {
+          workerLastMeta = {
+            ...(workerLastMeta || {}),
+            stockNo: params.stockNo,
+            startDate: params.startDate,
+            endDate: params.endDate,
+            priceMode: getPriceModeKey(params.adjustedPrice),
+            summary: cachedMeta.summary || null,
+            adjustments: Array.isArray(cachedMeta.adjustments)
+              ? cachedMeta.adjustments
+              : [],
+            priceSource: cachedMeta.priceSource || null,
+            adjustmentFallbackApplied: Boolean(cachedMeta.adjustmentFallbackApplied),
+            debugSteps: Array.isArray(cachedMeta.debugSteps)
+              ? cachedMeta.debugSteps
+              : [],
+            marketKey,
+            dataSource: "主執行緒快取",
+            stockName: params.stockNo,
+          };
         }
       } else {
         console.log("[Worker] Fetching new data for backtest.");
@@ -4592,6 +4631,36 @@ self.onmessage = async function (e) {
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
       );
+
+      const debugSteps = Array.isArray(outcome?.debugSteps)
+        ? outcome.debugSteps
+        : Array.isArray(workerLastMeta?.debugSteps)
+          ? workerLastMeta.debugSteps
+          : [];
+
+      backtestResult.dataDebug = {
+        summary: outcome?.summary || workerLastMeta?.summary || null,
+        adjustments: Array.isArray(outcome?.adjustments)
+          ? outcome.adjustments
+          : Array.isArray(workerLastMeta?.adjustments)
+            ? workerLastMeta.adjustments
+            : [],
+        debugSteps,
+        priceSource: outcome?.priceSource || workerLastMeta?.priceSource || null,
+        dataSource: outcome?.dataSource || workerLastMeta?.dataSource || null,
+        adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+      };
+
+      if (!useCachedData && fetched) {
+        backtestResult.rawMeta = {
+          summary: outcome?.summary || null,
+          adjustments: Array.isArray(outcome?.adjustments) ? outcome.adjustments : [],
+          debugSteps: Array.isArray(outcome?.debugSteps) ? outcome.debugSteps : [],
+          priceSource: outcome?.priceSource || null,
+          dataSource: outcome?.dataSource || null,
+          adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        };
+      }
 
       // 將結果與資料來源一起回傳
       const metaInfo = outcome ||

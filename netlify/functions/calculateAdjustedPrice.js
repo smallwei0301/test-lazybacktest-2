@@ -15,7 +15,7 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250220A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250305A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250312A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -910,30 +910,29 @@ function normaliseDividendRecord(raw) {
 
 function computeAdjustmentRatio(baseClose, record) {
   if (!Number.isFinite(baseClose) || baseClose <= 0) return 1;
-  const cashComponent = Math.max(0, record.cashDividend || 0);
-  const stockComponent = Math.max(0, (record.stockDividend || 0) + (record.stockCapitalIncrease || 0));
 
-  let ratio = 1;
-  const denominator = baseClose * (1 + stockComponent) + cashComponent;
-  if (Number.isFinite(denominator) && denominator > 0) {
-    ratio = baseClose / denominator;
-  }
+  const cashDividend = Math.max(0, record.cashDividend || 0);
+  const stockDividend = Math.max(0, record.stockDividend || 0);
+  const stockCapitalIncrease = Math.max(0, record.stockCapitalIncrease || 0);
+  const cashCapitalIncrease = Math.max(0, record.cashCapitalIncrease || 0);
+  const subscriptionPrice =
+    Number.isFinite(record.subscriptionPrice) && record.subscriptionPrice > 0
+      ? record.subscriptionPrice
+      : 0;
 
-  if (record.cashCapitalIncrease && record.subscriptionPrice) {
-    const rightsRatio = record.cashCapitalIncrease;
-    const subscriptionPrice = record.subscriptionPrice;
-    const theoreticalDenominator = baseClose * (1 + rightsRatio) - rightsRatio * subscriptionPrice;
-    if (Number.isFinite(theoreticalDenominator) && theoreticalDenominator > 0) {
-      const rightsFactor = baseClose / theoreticalDenominator;
-      if (Number.isFinite(rightsFactor) && rightsFactor > 0) {
-        ratio *= rightsFactor;
-      }
-    }
-  }
+  const totalStockComponent = stockDividend + stockCapitalIncrease + cashCapitalIncrease;
+  const denominator =
+    baseClose * (1 + totalStockComponent) + cashDividend - cashCapitalIncrease * subscriptionPrice;
 
-  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+  if (!Number.isFinite(denominator) || denominator <= 0) {
     return 1;
   }
+
+  const ratio = baseClose / denominator;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return 1;
+  }
+
   return ratio;
 }
 
@@ -1442,6 +1441,70 @@ async function fetchDividendSeries(stockNo, startISO, endISO) {
   };
 }
 
+function summariseAdjustmentSkipReasons(adjustments = []) {
+  if (!Array.isArray(adjustments) || adjustments.length === 0) return null;
+  const counts = adjustments.reduce((acc, event) => {
+    if (!event?.skipped) return acc;
+    const key = event.reason ? String(event.reason) : 'unknown';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.keys(counts).length > 0 ? counts : null;
+}
+
+function buildDebugSteps({
+  priceData,
+  priceSourceLabel,
+  dividendSeries,
+  filteredDividendSeries,
+  preparedEvents,
+  adjustments,
+}) {
+  const priceRows = Array.isArray(priceData?.rows) ? priceData.rows.length : 0;
+  const totalDividendRows = Array.isArray(dividendSeries) ? dividendSeries.length : 0;
+  const filteredDividendRows = Array.isArray(filteredDividendSeries)
+    ? filteredDividendSeries.length
+    : 0;
+  const normalisedEvents = Array.isArray(preparedEvents) ? preparedEvents.length : 0;
+  const appliedAdjustments = Array.isArray(adjustments)
+    ? adjustments.filter((event) => !event?.skipped).length
+    : 0;
+  const skippedAdjustments = Array.isArray(adjustments)
+    ? adjustments.filter((event) => event?.skipped).length
+    : 0;
+  const skipReasons = summariseAdjustmentSkipReasons(adjustments);
+
+  const steps = [
+    {
+      key: 'priceFetch',
+      label: '價格資料',
+      status: priceRows > 0 ? 'success' : 'error',
+      detail: `${priceRows} 筆 ・ ${priceSourceLabel || priceData?.priceSource || ''}`.trim(),
+    },
+    {
+      key: 'dividendFetch',
+      label: '股利抓取',
+      status: totalDividendRows > 0 ? 'success' : 'warning',
+      detail: `原始 ${totalDividendRows} 筆 ・ 區間 ${filteredDividendRows} 筆`,
+    },
+    {
+      key: 'eventNormalisation',
+      label: '事件整理',
+      status: normalisedEvents > 0 ? 'success' : 'warning',
+      detail: `${normalisedEvents} 件`,
+    },
+    {
+      key: 'adjustmentApply',
+      label: '還原套用',
+      status: appliedAdjustments > 0 ? 'success' : 'warning',
+      detail: `成功 ${appliedAdjustments} 件 ・ 略過 ${skippedAdjustments} 件`,
+      skipReasons,
+    },
+  ];
+
+  return steps;
+}
+
 function buildSummary(priceData, adjustments, market, priceSourceLabel, dividendStats = {}) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
@@ -1460,13 +1523,8 @@ function buildSummary(priceData, adjustments, market, priceSourceLabel, dividend
   const skippedEvents = Array.isArray(adjustments)
     ? adjustments.filter((event) => event?.skipped)
     : [];
-  const skipReasonCounts = skippedEvents.reduce((acc, event) => {
-    const reasonKey = event?.reason ? String(event.reason) : null;
-    if (!reasonKey) return acc;
-    const current = acc[reasonKey] || 0;
-    acc[reasonKey] = current + 1;
-    return acc;
-  }, {});
+  const skipReasons = summariseAdjustmentSkipReasons(adjustments);
+
   return {
     priceRows: Array.isArray(priceData.rows) ? priceData.rows.length : 0,
     dividendRows: Number.isFinite(filteredCount) ? filteredCount : undefined,
@@ -1477,7 +1535,8 @@ function buildSummary(priceData, adjustments, market, priceSourceLabel, dividend
     dividendLookbackDays: Number.isFinite(lookbackWindowDays) ? lookbackWindowDays : undefined,
     adjustmentEvents: appliedEvents.length,
     skippedEvents: skippedEvents.length,
-    adjustmentSkipReasons: Object.keys(skipReasonCounts).length > 0 ? skipReasonCounts : undefined,
+    adjustmentSkipReasons:
+      skipReasons && Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
     priceSource: basePriceSource,
     dividendSource: 'FinMind (TaiwanStockDividend)',
     sources: Array.from(uniqueSources),
@@ -1492,6 +1551,7 @@ export const __TESTING__ = {
   normaliseNumericText,
   resolveSubscriptionPrice,
   filterDividendRecordsByPriceRange,
+  computeAdjustmentRatio,
 };
 
 export const handler = async (event) => {
@@ -1565,6 +1625,15 @@ export const handler = async (event) => {
       { preparedEvents: preparedDividendEvents },
     );
 
+    const debugSteps = buildDebugSteps({
+      priceData,
+      priceSourceLabel,
+      dividendSeries,
+      filteredDividendSeries,
+      preparedEvents: preparedDividendEvents,
+      adjustments,
+    });
+
     const combinedSourceLabel = `${
       priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
     } + FinMind (除權息還原)`;
@@ -1593,6 +1662,7 @@ export const handler = async (event) => {
       data: adjustedRows,
       adjustments,
       dividendEvents: events,
+      debugSteps,
     };
 
     return jsonResponse(200, responseBody);

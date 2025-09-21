@@ -4,6 +4,7 @@ import { __TESTING__ } from '../netlify/functions/calculateAdjustedPrice.js';
 const {
   normaliseDividendRecord,
   prepareDividendEvents,
+  computeAdjustmentRatio,
 } = __TESTING__;
 
 function approxEqual(actual, expected, epsilon = 1e-6) {
@@ -80,5 +81,20 @@ approxEqual(secondEvent.stockDividend, 0.2);
 approxEqual(secondEvent.cashCapitalIncrease, 0.15);
 approxEqual(secondEvent.stockCapitalIncrease, 0.1);
 approxEqual(secondEvent.subscriptionPrice, 35);
+
+// Mixed adjustment ratio sanity check
+const baseClose = 50;
+const mixedRatio = computeAdjustmentRatio(baseClose, {
+  cashDividend: 2,
+  stockDividend: 0.1,
+  stockCapitalIncrease: 0.05,
+  cashCapitalIncrease: 0.15,
+  subscriptionPrice: 45,
+});
+const expectedDenominator = baseClose * (1 + 0.1 + 0.05 + 0.15) + 2 - 0.15 * 45;
+approxEqual(mixedRatio, baseClose / expectedDenominator);
+
+const cashOnlyRatio = computeAdjustmentRatio(97, { cashDividend: 3 });
+approxEqual(cashOnlyRatio, 97 / (97 + 3));
 
 console.log('Dividend normalisation tests passed');

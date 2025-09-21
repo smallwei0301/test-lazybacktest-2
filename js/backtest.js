@@ -5,6 +5,13 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
 });
 
+let lastPriceDebug = {
+    steps: [],
+    summary: null,
+    adjustments: [],
+    fallbackApplied: false,
+};
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -32,6 +39,7 @@ function runBacktestInternal() {
                 cachedStockData = sliced;
                 lastFetchSettings = { ...curSettings };
                 refreshPriceInspectorControls();
+                updatePriceDebug(cachedEntry);
                 console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
@@ -89,6 +97,18 @@ function runBacktestInternal() {
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
+                     const rawMeta = data.rawMeta || {};
+                     const debugSteps = Array.isArray(rawMeta.debugSteps)
+                         ? rawMeta.debugSteps
+                         : (Array.isArray(data?.dataDebug?.debugSteps) ? data.dataDebug.debugSteps : []);
+                     const summaryMeta = rawMeta.summary || data?.dataDebug?.summary || null;
+                     const adjustmentsMeta = Array.isArray(rawMeta.adjustments)
+                         ? rawMeta.adjustments
+                         : (Array.isArray(data?.dataDebug?.adjustments) ? data.dataDebug.adjustments : []);
+                     const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
+                         ? rawMeta.adjustmentFallbackApplied
+                         : Boolean(data?.dataDebug?.adjustmentFallbackApplied);
+                     const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
                      const cacheEntry = {
                          data: mergedData,
                          stockName: stockName || existingEntry?.stockName || params.stockNo,
@@ -98,18 +118,34 @@ function runBacktestInternal() {
                          fetchedAt: Date.now(),
                          adjustedPrice: params.adjustedPrice,
                          priceMode: priceMode,
-                         adjustmentFallbackApplied: Boolean(data?.adjustmentFallbackApplied),
+                         adjustmentFallbackApplied: fallbackFlag,
+                         summary: summaryMeta,
+                         adjustments: adjustmentsMeta,
+                         debugSteps,
+                         priceSource: priceSourceMeta,
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
+                     updatePriceDebug(cacheEntry);
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
                      cachedEntry = cacheEntry;
                 } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
                      const updatedSources = new Set(Array.isArray(cachedEntry.dataSources) ? cachedEntry.dataSources : []);
                      if (dataSource) updatedSources.add(dataSource);
                      const updatedArray = Array.from(updatedSources);
+                     const debugSteps = Array.isArray(data?.dataDebug?.debugSteps)
+                         ? data.dataDebug.debugSteps
+                         : Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [];
+                     const summaryMeta = data?.dataDebug?.summary || cachedEntry.summary || null;
+                     const adjustmentsMeta = Array.isArray(data?.dataDebug?.adjustments)
+                         ? data.dataDebug.adjustments
+                         : Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [];
+                     const fallbackFlag = typeof data?.dataDebug?.adjustmentFallbackApplied === 'boolean'
+                         ? data.dataDebug.adjustmentFallbackApplied
+                         : Boolean(cachedEntry.adjustmentFallbackApplied);
+                     const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
                      const updatedEntry = {
                          ...cachedEntry,
                          stockName: stockName || cachedEntry.stockName || params.stockNo,
@@ -118,12 +154,17 @@ function runBacktestInternal() {
                          fetchedAt: cachedEntry.fetchedAt || Date.now(),
                          adjustedPrice: params.adjustedPrice,
                          priceMode: priceMode,
-                         adjustmentFallbackApplied: Boolean(data?.adjustmentFallbackApplied ?? cachedEntry.adjustmentFallbackApplied),
+                         adjustmentFallbackApplied: fallbackFlag,
+                         summary: summaryMeta,
+                         adjustments: adjustmentsMeta,
+                         debugSteps,
+                         priceSource: priceSourceMeta,
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
+                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
 
@@ -182,6 +223,16 @@ function runBacktestInternal() {
         const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
         if(useCache && cachedStockData) {
             workerMsg.cachedData = cachedStockData; // Send main thread cache to worker
+            if (cachedEntry) {
+                workerMsg.cachedMeta = {
+                    summary: cachedEntry.summary || null,
+                    adjustments: Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [],
+                    debugSteps: Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(cachedEntry.adjustmentFallbackApplied),
+                    priceSource: cachedEntry.priceSource || null,
+                    dataSource: cachedEntry.dataSource || null,
+                };
+            }
             console.log("[Main] Sending cached data to worker for backtest.");
         } else {
             console.log("[Main] Fetching new data for backtest.");
@@ -226,6 +277,122 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    renderPricePipelineSteps();
+    renderPriceInspectorDebug();
+}
+
+const adjustmentReasonLabels = {
+    missingPriceRow: '缺少對應價格',
+    invalidBaseClose: '無效基準價',
+    ratioOutOfRange: '調整比例異常',
+};
+
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatSkipReasons(skipReasons) {
+    if (!skipReasons || typeof skipReasons !== 'object') return '';
+    const entries = Object.entries(skipReasons);
+    if (entries.length === 0) return '';
+    return entries
+        .map(([reason, count]) => {
+            const label = adjustmentReasonLabels[reason] || reason;
+            return `${label}: ${count}`;
+        })
+        .join('、');
+}
+
+function updatePriceDebug(meta = {}) {
+    const steps = Array.isArray(meta.debugSteps) ? meta.debugSteps : Array.isArray(meta.steps) ? meta.steps : [];
+    const summary = meta.summary || null;
+    const adjustments = Array.isArray(meta.adjustments) ? meta.adjustments : [];
+    const fallbackApplied = typeof meta.adjustmentFallbackApplied === 'boolean'
+        ? meta.adjustmentFallbackApplied
+        : Boolean(meta.fallbackApplied);
+    lastPriceDebug = {
+        steps,
+        summary,
+        adjustments,
+        fallbackApplied,
+    };
+    renderPricePipelineSteps();
+    renderPriceInspectorDebug();
+}
+
+function renderPricePipelineSteps() {
+    const container = document.getElementById('pricePipelineSteps');
+    if (!container) return;
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
+    if (!hasData || !hasSteps) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+    }
+    const rows = lastPriceDebug.steps.map((step) => {
+        const status = step.status === 'success' ? 'text-emerald-600'
+            : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
+        if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
+            detailText += ' ・ 已啟用備援縮放';
+        }
+        const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
+        return `<div class="flex items-center gap-2 text-[11px]">
+            <span class="${status}">●</span>
+            <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
+        </div>`;
+    }).join('');
+    container.innerHTML = rows;
+    container.classList.remove('hidden');
+}
+
+function renderPriceInspectorDebug() {
+    const panel = document.getElementById('priceInspectorDebugPanel');
+    if (!panel) return;
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
+    if (!hasData || !hasSteps) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+    const summaryItems = [];
+    if (lastPriceDebug.summary && typeof lastPriceDebug.summary === 'object') {
+        const applied = Number(lastPriceDebug.summary.adjustmentEvents || 0);
+        const skipped = Number(lastPriceDebug.summary.skippedEvents || 0);
+        summaryItems.push(`成功 ${applied} 件`);
+        summaryItems.push(`略過 ${skipped} 件`);
+    }
+    if (lastPriceDebug.fallbackApplied) {
+        summaryItems.push('備援縮放已啟用');
+    }
+    const summaryLine = summaryItems.length > 0
+        ? `<div class="text-[11px] font-medium" style="color: var(--foreground);">${escapeHtml(summaryItems.join(' ・ '))}</div>`
+        : '';
+    const stepsHtml = lastPriceDebug.steps.map((step) => {
+        const status = step.status === 'success' ? 'text-emerald-600'
+            : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
+        if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
+            detailText += ' ・ 已啟用備援縮放';
+        }
+        const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
+        return `<div class="flex items-start gap-2 text-[11px]">
+            <span class="${status}">●</span>
+            <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
+        </div>`;
+    }).join('');
+    panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
+    panel.classList.remove('hidden');
 }
 
 function updateDataSourceDisplay(dataSource, stockName) {
@@ -273,6 +440,7 @@ function refreshPriceInspectorControls() {
     if (summaryEl) {
         summaryEl.textContent = `${firstDate} ~ ${lastDate} ・ ${cachedStockData.length} 筆 (${modeLabel})`;
     }
+    renderPricePipelineSteps();
 }
 
 function openPriceInspectorModal() {
@@ -291,6 +459,7 @@ function openPriceInspectorModal() {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
         subtitle.textContent = `${modeLabel} ・ ${marketLabel} ・ ${cachedStockData.length} 筆`;
     }
+    renderPriceInspectorDebug();
 
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
     const formatFactor = (value) => (Number.isFinite(value) ? Number(value).toFixed(6) : '1.000000');
@@ -1251,8 +1420,20 @@ function runOptimizationInternal(optimizeType) {
             useCachedData:useCache 
         }; 
         
-        if(useCache && cachedStockData) workerMsg.cachedData=cachedStockData; 
-        else console.log(`[Main] Fetching data for ${optimizeType} opt.`); 
+        if(useCache && cachedStockData) {
+            workerMsg.cachedData=cachedStockData;
+            const cacheEntry = cachedDataStore.get(buildCacheKey(curSettings));
+            if (cacheEntry) {
+                workerMsg.cachedMeta = {
+                    summary: cacheEntry.summary || null,
+                    adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
+                    debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
+                    priceSource: cacheEntry.priceSource || null,
+                    dataSource: cacheEntry.dataSource || null,
+                };
+            }
+        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
         
         optimizationWorker.postMessage(workerMsg); 
         
