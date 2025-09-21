@@ -1,9 +1,9 @@
 // netlify/functions/lib/goodinfo.js
-// Patch Tag: LB-GOODINFO-ADJ-20241025A
+// Patch Tag: LB-GOODINFO-ADJ-20241028A
 
 import { TextDecoder } from 'util';
 
-const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241025A';
+const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241028A';
 
 const GOODINFO_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -20,6 +20,66 @@ const GOODINFO_HEADERS = {
 };
 
 const GOODINFO_MARKERS = ['還原權值股價', '還原股價', '還原收盤'];
+
+function createCookieJar() {
+    return new Map();
+}
+
+function serialiseCookies(jar) {
+    if (!jar || jar.size === 0) return '';
+    return Array.from(jar.entries())
+        .map(([name, value]) => `${name}=${value}`)
+        .join('; ');
+}
+
+function splitSetCookieHeader(value) {
+    if (!value) return [];
+    return value.split(/,(?=[^;,]+=[^;,]+)/).map((item) => item.trim()).filter(Boolean);
+}
+
+function extractSetCookieHeaders(headers) {
+    if (!headers) return [];
+    if (typeof headers.raw === 'function') {
+        const raw = headers.raw();
+        if (raw && raw['set-cookie']) {
+            return raw['set-cookie'];
+        }
+    }
+    const single = headers.get('set-cookie');
+    if (!single) return [];
+    return splitSetCookieHeader(single).map((item) => item.trim()).filter(Boolean);
+}
+
+function parseSetCookie(value) {
+    if (!value) return null;
+    const parts = value.split(';');
+    if (parts.length === 0) return null;
+    const [namePart] = parts;
+    if (!namePart || !namePart.includes('=')) return null;
+    const [name, ...valueParts] = namePart.split('=');
+    const cookieName = name ? name.trim() : '';
+    if (!cookieName) return null;
+    const cookieValue = valueParts.join('=').trim();
+    return { name: cookieName, value: cookieValue };
+}
+
+function updateCookieJarFromResponse(response, jar) {
+    if (!jar) return 0;
+    const setCookies = extractSetCookieHeaders(response.headers);
+    if (!setCookies || setCookies.length === 0) return 0;
+    let updates = 0;
+    setCookies.forEach((raw) => {
+        const parsed = parseSetCookie(raw);
+        if (parsed && parsed.name) {
+            const prev = jar.get(parsed.name);
+            if (prev !== parsed.value) {
+                updates += 1;
+            }
+            jar.set(parsed.name, parsed.value);
+        }
+    });
+    return updates;
+}
 
 function unescapeJsStringLiteral(value) {
     if (!value) return '';
@@ -652,8 +712,32 @@ function decodeBuffer(buffer, encodingHint) {
     }
 }
 
-async function fetchHtml(fetchImpl, url) {
-    const response = await fetchImpl(url, { headers: GOODINFO_HEADERS });
+async function fetchHtml(fetchImpl, url, cookieJar, attemptLog) {
+    const headers = { ...GOODINFO_HEADERS };
+    if (attemptLog && cookieJar && typeof attemptLog.cookieJarBefore !== 'number') {
+        attemptLog.cookieJarBefore = cookieJar.size;
+    }
+    const cookieHeader = serialiseCookies(cookieJar);
+    if (cookieHeader) {
+        headers.Cookie = cookieHeader;
+        if (attemptLog && typeof attemptLog.sentCookies !== 'number') {
+            attemptLog.sentCookies = cookieJar.size;
+        }
+    } else if (attemptLog && typeof attemptLog.sentCookies !== 'number') {
+        attemptLog.sentCookies = 0;
+    }
+    const response = await fetchImpl(url, { headers, redirect: 'follow' });
+    if (attemptLog) {
+        attemptLog.httpStatus = response.status;
+        if (response.redirected && response.url && response.url !== url) {
+            attemptLog.redirectedTo = response.url;
+        }
+    }
+    const cookieUpdates = updateCookieJarFromResponse(response, cookieJar);
+    if (attemptLog && cookieJar) {
+        attemptLog.cookieJarAfter = cookieJar.size;
+        attemptLog.receivedCookies = cookieUpdates;
+    }
     if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
     }
@@ -661,19 +745,37 @@ async function fetchHtml(fetchImpl, url) {
     const buffer = Buffer.from(arrayBuffer);
     const headerCharset = extractCharsetFromContentType(response.headers.get('content-type'));
     const charset = headerCharset || extractCharsetFromHtml(buffer) || 'utf-8';
+    if (attemptLog) {
+        attemptLog.detectedCharset = charset;
+        const encodingHeader = response.headers.get('content-encoding');
+        if (encodingHeader) {
+            attemptLog.contentEncoding = encodingHeader;
+        }
+    }
     return decodeBuffer(buffer, charset);
 }
 
-async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder, attemptLog = {}) {
+async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder, attemptLog = {}, cookieJar) {
     const url = endpointBuilder(stockNo);
     attemptLog.url = url;
+    if (cookieJar && typeof attemptLog.cookieJarBefore !== 'number') {
+        attemptLog.cookieJarBefore = cookieJar.size;
+    }
     console.log(`[Goodinfo ${GOODINFO_VERSION}] 嘗試抓取 ${url}`);
     let html;
     try {
-        html = await fetchHtml(fetchImpl, url);
+        html = await fetchHtml(fetchImpl, url, cookieJar, attemptLog);
     } catch (error) {
         attemptLog.status = 'http-error';
         attemptLog.error = error.message;
+        if (cookieJar) {
+            if (typeof attemptLog.cookieJarAfter !== 'number') {
+                attemptLog.cookieJarAfter = cookieJar.size;
+            }
+            if (typeof attemptLog.receivedCookies !== 'number') {
+                attemptLog.receivedCookies = 0;
+            }
+        }
         throw error;
     }
     attemptLog.contentLength = html ? html.length : 0;
@@ -709,6 +811,7 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
     if (!stockNo) {
         throw new Error('缺少股票代號');
     }
+    const cookieJar = createCookieJar();
     const builders = [
         (id) => `https://goodinfo.tw/tw/index.asp?STOCK_ID=${encodeURIComponent(id)}`,
         (id) => `https://goodinfo.tw/StockInfo/index.asp?STOCK_ID=${encodeURIComponent(id)}`,
@@ -727,7 +830,15 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
             status: log.status || 'error',
         };
         if (log.error) record.error = log.error;
+        if (typeof log.httpStatus === 'number') record.httpStatus = log.httpStatus;
+        if (log.redirectedTo) record.redirectedTo = log.redirectedTo;
         if (typeof log.contentLength === 'number') record.contentLength = log.contentLength;
+        if (typeof log.sentCookies === 'number') record.sentCookies = log.sentCookies;
+        if (typeof log.receivedCookies === 'number') record.receivedCookies = log.receivedCookies;
+        if (typeof log.cookieJarBefore === 'number') record.cookieJarBefore = log.cookieJarBefore;
+        if (typeof log.cookieJarAfter === 'number') record.cookieJarAfter = log.cookieJarAfter;
+        if (log.detectedCharset) record.detectedCharset = log.detectedCharset;
+        if (log.contentEncoding) record.contentEncoding = log.contentEncoding;
         if (typeof log.rowCount === 'number') record.rowCount = log.rowCount;
         if (log.firstDate) record.firstDate = log.firstDate;
         if (log.lastDate) record.lastDate = log.lastDate;
@@ -739,7 +850,7 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
     for (const builder of builders) {
         const attemptLog = {};
         try {
-            const result = await tryFetchAdjusted(fetchImpl, stockNo, builder, attemptLog);
+            const result = await tryFetchAdjusted(fetchImpl, stockNo, builder, attemptLog, cookieJar);
             attemptRecords.push(normaliseAttempt(attemptLog));
             const { startISO, endISO } = options;
             if (startISO || endISO) {
