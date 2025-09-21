@@ -454,6 +454,12 @@
                                                         <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
                                                         <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
                                                         <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                        <!-- Patch Tag: LB-DATASOURCE-LOG-20241025A -->
+                                                        <div
+                                                            id="dataSourceTesterLog"
+                                                            class="hidden text-[10px] leading-4 border rounded-md p-2 bg-slate-50/80 max-h-48 overflow-y-auto font-mono whitespace-pre-wrap"
+                                                            style="border-color: var(--border); color: var(--muted-foreground);"
+                                                        ></div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -779,6 +785,20 @@
                                     >
                                         執行回測後將顯示結果摘要
                                     </div>
+                                </div>
+                            </div>
+
+                            <!-- Adjusted vs Raw Comparison -->
+                            <div class="card hidden" id="adjustedComparisonCard">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="scale" class="lucide text-primary" style="color: var(--primary);"></i>
+                                        還原股價對比
+                                    </h3>
+                                    <p class="card-description">對比原始收盤與還原收盤，確認除權息調整成果</p>
+                                </div>
+                                <div class="card-content" id="adjustedComparisonContent">
+                                    <p class="text-xs text-muted-foreground">啟用「除權息還原股價」後將顯示原始與還原股價的對比摘要。</p>
                                 </div>
                             </div>
 

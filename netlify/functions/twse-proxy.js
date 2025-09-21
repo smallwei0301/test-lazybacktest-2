@@ -2,8 +2,10 @@
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
+// Patch Tag: LB-GOODINFO-LOG-20241025A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { fetchGoodinfoAdjustedSeries, GOODINFO_VERSION } from './lib/goodinfo.js';
 
 const TWSE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
@@ -48,6 +50,37 @@ function normaliseFinMindErrorMessage(message) {
         return 'FinMind 帳號等級為註冊 (Register)，請升級 Sponsor 方案後再使用此資料來源。';
     }
     return message;
+}
+
+function normaliseGoodinfoAttempts(debug) {
+    if (!debug) return [];
+    if (Array.isArray(debug)) return debug;
+    if (Array.isArray(debug.attempts)) return debug.attempts;
+    return [];
+}
+
+function buildGoodinfoMeta(debug) {
+    return {
+        goodinfo: {
+            version: GOODINFO_VERSION,
+            attempts: normaliseGoodinfoAttempts(debug),
+        },
+    };
+}
+
+function mergeMetaRecords(target, source) {
+    if (!source || typeof source !== 'object') return;
+    Object.entries(source).forEach(([key, value]) => {
+        target[key] = value;
+    });
+}
+
+async function readCacheWithMeta(store, cacheKey, metaCollector) {
+    const payload = await readCache(store, cacheKey);
+    if (payload && payload.meta) {
+        mergeMetaRecords(metaCollector, payload.meta);
+    }
+    return payload;
 }
 function pad2(value) {
     return String(value).padStart(2, '0');
@@ -475,6 +508,86 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
     return label;
 }
 
+async function hydrateGoodinfoAdjusted(store, stockNo, startDateISO, endDateISO) {
+    console.log(`[TWSE Proxy ${GOODINFO_VERSION}] 嘗試 Goodinfo 還原資料: ${stockNo} (${startDateISO} ~ ${endDateISO})`);
+    const result = await fetchGoodinfoAdjustedSeries(fetch, stockNo, {
+        startISO: startDateISO,
+        endISO: endDateISO,
+    });
+    if (!result || !Array.isArray(result.rows) || result.rows.length === 0) {
+        throw new Error('Goodinfo 未回傳還原股價資料');
+    }
+    const goodinfoAttempts = normaliseGoodinfoAttempts(result.debug);
+    const buckets = new Map();
+    const stockName = result.stockName || stockNo;
+    for (const row of result.rows) {
+        const isoDate = row.date;
+        if (!isoDate) continue;
+        const rocDate = isoToRoc(isoDate);
+        if (!rocDate) continue;
+        const monthKey = isoDate.slice(0, 7).replace('-', '');
+        if (!buckets.has(monthKey)) buckets.set(monthKey, []);
+
+        const adjClose = Number.isFinite(row.adjClose) ? row.adjClose : null;
+        const adjOpen = Number.isFinite(row.adjOpen) ? row.adjOpen : null;
+        const adjHigh = Number.isFinite(row.adjHigh) ? row.adjHigh : null;
+        const adjLow = Number.isFinite(row.adjLow) ? row.adjLow : null;
+        const rawClose = Number.isFinite(row.rawClose) ? row.rawClose : null;
+        const rawOpen = Number.isFinite(row.rawOpen) ? row.rawOpen : null;
+        const rawHigh = Number.isFinite(row.rawHigh) ? row.rawHigh : null;
+        const rawLow = Number.isFinite(row.rawLow) ? row.rawLow : null;
+
+        const baseClose = adjClose ?? rawClose;
+        if (!Number.isFinite(baseClose)) {
+            continue;
+        }
+
+        const open = safeRound(adjOpen ?? rawOpen ?? baseClose);
+        const close = safeRound(adjClose ?? baseClose);
+        const high = safeRound(
+            adjHigh ?? rawHigh ?? Math.max(open ?? baseClose, close ?? baseClose),
+        );
+        const low = safeRound(
+            adjLow ?? rawLow ?? Math.min(open ?? baseClose, close ?? baseClose),
+        );
+        const change = safeRound(row.change ?? 0) ?? 0;
+        const volume = Number.isFinite(row.volume) ? Math.round(row.volume) : 0;
+
+        if (close === null || close === undefined) continue;
+        const finalOpen = open ?? close;
+        const finalHigh = high ?? Math.max(finalOpen, close);
+        const finalLow = low ?? Math.min(finalOpen, close);
+
+        buckets.get(monthKey).push([
+            rocDate,
+            stockNo,
+            stockName,
+            finalOpen,
+            finalHigh,
+            finalLow,
+            close,
+            change,
+            volume,
+        ]);
+    }
+
+    if (buckets.size === 0) {
+        throw new Error('Goodinfo 資料解析後無有效筆數');
+    }
+
+    for (const [monthKey, rows] of buckets.entries()) {
+        rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, true), {
+            stockName,
+            aaData: rows,
+            dataSource: 'Goodinfo (還原備援)',
+            meta: buildGoodinfoMeta({ attempts: goodinfoAttempts }),
+        });
+    }
+
+    return { label: 'Goodinfo (還原備援)', debug: goodinfoAttempts };
+}
+
 function summariseSources(flags) {
     if (flags.size === 0) return 'TWSE';
     if (flags.size === 1) return Array.from(flags)[0];
@@ -494,8 +607,8 @@ function validateForceSource(adjusted, forceSource) {
     if (!forceSource) return null;
     const normalized = forceSource.toLowerCase();
     if (adjusted) {
-        if (normalized === 'yahoo') return normalized;
-        throw new Error('還原模式目前僅支援 Yahoo Finance 測試來源');
+        if (normalized === 'yahoo' || normalized === 'goodinfo') return normalized;
+        throw new Error('還原模式僅支援 Yahoo 或 Goodinfo 測試來源');
     }
     if (normalized === 'twse' || normalized === 'finmind') return normalized;
     throw new Error('原始模式僅支援 TWSE 或 FinMind 測試來源');
@@ -551,11 +664,14 @@ export default async (req) => {
         const store = obtainStore('twse_cache_store');
         const combinedRows = [];
         const sourceFlags = new Set();
+        const metaAggregator = {};
         let stockName = '';
         let yahooHydrated = false;
         let yahooLabel = '';
         let finmindHydrated = false;
         let finmindLabel = '';
+        let goodinfoHydrated = false;
+        let goodinfoLabel = '';
 
         for (const month of months) {
             const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
@@ -570,7 +686,7 @@ export default async (req) => {
                     try {
                         const fresh = await fetchTwseMonth(stockNo, month);
                         await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE (強制)' });
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         sourceFlags.add('TWSE (強制)');
                     } catch (error) {
                         console.error('[TWSE Proxy v10.2] 強制 TWSE 失敗:', error);
@@ -585,7 +701,7 @@ export default async (req) => {
                             startDate.toISOString().split('T')[0],
                             endDate.toISOString().split('T')[0],
                         );
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload) sourceFlags.add(finmindLabel);
                         finmindHydrated = true;
                     } catch (error) {
@@ -600,18 +716,43 @@ export default async (req) => {
                             await fetchYahooDaily(stockNo, startDate, endDate),
                             true,
                         );
-                        payload = await readCache(store, cacheKey);
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                         if (payload) sourceFlags.add(yahooLabel);
                         yahooHydrated = true;
                     } catch (error) {
                         console.error('[TWSE Proxy v10.2] 強制 Yahoo 失敗:', error);
                         return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
+                } else if (forcedSource === 'goodinfo') {
+                    try {
+                        const goodinfoResult = await hydrateGoodinfoAdjusted(
+                            store,
+                            stockNo,
+                            startDate.toISOString().split('T')[0],
+                            endDate.toISOString().split('T')[0],
+                        );
+                        goodinfoLabel = goodinfoResult.label;
+                        const attempts = normaliseGoodinfoAttempts(goodinfoResult.debug);
+                        metaAggregator.goodinfo = buildGoodinfoMeta(attempts).goodinfo;
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
+                        if (payload) sourceFlags.add(goodinfoLabel);
+                        goodinfoHydrated = true;
+                    } catch (error) {
+                        console.error('[TWSE Proxy v10.2] 強制 Goodinfo 失敗:', error);
+                        return new Response(
+                            JSON.stringify({
+                                error: `Goodinfo 來源取得失敗: ${error.message}`,
+                                meta: buildGoodinfoMeta(error),
+                            }),
+                            { status: 502 },
+                        );
+                    }
                 }
             } else {
-                payload = await readCache(store, cacheKey);
+                payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                 if (!payload) {
                     if (adjusted) {
+                        let yahooError = null;
                         if (!yahooHydrated) {
                             try {
                                 yahooLabel = await persistYahooEntries(
@@ -622,15 +763,63 @@ export default async (req) => {
                                 );
                                 yahooHydrated = true;
                             } catch (error) {
+                                yahooError = error;
                                 console.error('[TWSE Proxy v10.2] Yahoo 還原來源失敗:', error);
+                            }
+                        }
+                        payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
+                        if (!payload) {
+                            if (!goodinfoHydrated) {
+                                try {
+                                    const goodinfoResult = await hydrateGoodinfoAdjusted(
+                                        store,
+                                        stockNo,
+                                        startDate.toISOString().split('T')[0],
+                                        endDate.toISOString().split('T')[0],
+                                    );
+                                    goodinfoLabel = goodinfoResult.label;
+                                    const attempts = normaliseGoodinfoAttempts(goodinfoResult.debug);
+                                    metaAggregator.goodinfo = buildGoodinfoMeta(attempts).goodinfo;
+                                    goodinfoHydrated = true;
+                                } catch (error) {
+                                    console.error('[TWSE Proxy v10.2] Goodinfo 還原來源失敗:', error);
+                                    if (yahooError) {
+                                        return new Response(
+                                            JSON.stringify({
+                                                error: `Yahoo 還原來源取得失敗: ${yahooError.message}; Goodinfo 備援亦失敗: ${error.message}`,
+                                                meta: buildGoodinfoMeta(error),
+                                            }),
+                                            { status: 502 },
+                                        );
+                                    }
+                                    return new Response(
+                                        JSON.stringify({
+                                            error: `Goodinfo 還原來源取得失敗: ${error.message}`,
+                                            meta: buildGoodinfoMeta(error),
+                                        }),
+                                        { status: 502 },
+                                    );
+                                }
+                            }
+                            payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
+                            if (payload) {
+                                if (payload.dataSource) sourceFlags.add(payload.dataSource);
+                                else if (goodinfoLabel) sourceFlags.add(goodinfoLabel);
+                            } else if (yahooError) {
                                 return new Response(
-                                    JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${error.message}` }),
+                                    JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${yahooError.message}` }),
+                                    { status: 502 },
+                                );
+                            } else {
+                                return new Response(
+                                    JSON.stringify({
+                                        error: 'Goodinfo 還原來源取得失敗: 未取得任何資料',
+                                        meta: buildGoodinfoMeta([]),
+                                    }),
                                     { status: 502 },
                                 );
                             }
-                        }
-                        payload = await readCache(store, cacheKey);
-                        if (payload) {
+                        } else {
                             if (payload.dataSource) sourceFlags.add(payload.dataSource);
                             else if (yahooLabel) sourceFlags.add(yahooLabel);
                         }
@@ -638,7 +827,7 @@ export default async (req) => {
                         try {
                             const fresh = await fetchTwseMonth(stockNo, month);
                             await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE' });
-                            payload = await readCache(store, cacheKey);
+                            payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                             sourceFlags.add('TWSE');
                         } catch (error) {
                             console.warn(`[TWSE Proxy v10.2] TWSE 主來源失敗 (${month}):`, error.message);
@@ -660,7 +849,7 @@ export default async (req) => {
                                 }
                                 finmindHydrated = true;
                             }
-                            payload = await readCache(store, cacheKey);
+                            payload = await readCacheWithMeta(store, cacheKey, metaAggregator);
                             if (payload && finmindLabel) sourceFlags.add(finmindLabel);
                         }
                     }
@@ -704,6 +893,10 @@ export default async (req) => {
             aaData,
             dataSource: summariseSources(sourceFlags),
         };
+
+        if (Object.keys(metaAggregator).length > 0) {
+            body.meta = metaAggregator;
+        }
 
         return new Response(JSON.stringify(body), {
             headers: { 'Content-Type': 'application/json' },

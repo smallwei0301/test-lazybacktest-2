@@ -8,6 +8,11 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
+const adjustedComparisonState = {
+    version: 'LB-ADJ-CARD-20241015A',
+    lastContextKey: null,
+    busy: false,
+};
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -25,6 +30,26 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/[&<>"']/g, (match) => {
+        switch (match) {
+            case '&':
+                return '&amp;';
+            case '<':
+                return '&lt;';
+            case '>':
+                return '&gt;';
+            case '"':
+                return '&quot;';
+            case "'":
+                return '&#39;';
+            default:
+                return match;
+        }
+    });
+}
 
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
@@ -61,6 +86,7 @@ function getTesterSourceConfigs(market, adjusted) {
     if (adjusted) {
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
+            { id: 'goodinfo', label: 'Goodinfo 還原備援', description: 'Yahoo 失效時啟用' },
         ];
     }
     if (market === 'TPEX') {
@@ -105,6 +131,125 @@ function clearTesterResult() {
     if (!resultEl) return;
     resultEl.innerHTML = '';
     resultEl.className = 'text-xs hidden';
+    clearDataSourceTesterLog();
+}
+
+function clearDataSourceTesterLog() {
+    const logEl = document.getElementById('dataSourceTesterLog');
+    if (!logEl) return;
+    logEl.innerHTML = '';
+    logEl.classList.add('hidden');
+}
+
+function extractGoodinfoDebug(meta) {
+    if (!meta || typeof meta !== 'object') return null;
+    if (meta.goodinfo && typeof meta.goodinfo === 'object') {
+        return {
+            version: meta.goodinfo.version || '',
+            attempts: Array.isArray(meta.goodinfo.attempts) ? meta.goodinfo.attempts : [],
+        };
+    }
+    if (Array.isArray(meta.goodinfoDebug)) {
+        return {
+            version: meta.goodinfoVersion || '',
+            attempts: meta.goodinfoDebug,
+        };
+    }
+    if (Array.isArray(meta.goodinfoAttempts)) {
+        return {
+            version: meta.goodinfoVersion || '',
+            attempts: meta.goodinfoAttempts,
+        };
+    }
+    return null;
+}
+
+function renderDataSourceTesterLog(meta) {
+    const logEl = document.getElementById('dataSourceTesterLog');
+    if (!logEl) return;
+    const debug = extractGoodinfoDebug(meta);
+    if (!debug) {
+        clearDataSourceTesterLog();
+        return;
+    }
+    const { version, attempts } = debug;
+    const parts = [];
+    parts.push(
+        `<div class="mb-1 text-[10px] font-medium" style="color: var(--foreground);">Goodinfo 模組版本：<span class="font-semibold">${escapeHtml(version || '未知')}</span></div>`,
+    );
+    if (!Array.isArray(attempts) || attempts.length === 0) {
+        parts.push('<div class="text-[10px]">尚未提供 Goodinfo 偵錯資訊。</div>');
+    } else {
+        attempts.forEach((attempt, index) => {
+            const status = (attempt?.status || 'unknown').toLowerCase();
+            let statusLabel = '未知';
+            let statusClass = 'text-sky-600';
+            if (status === 'success') {
+                statusLabel = '成功';
+                statusClass = 'text-emerald-600';
+            } else if (status === 'http-error') {
+                statusLabel = 'HTTP 錯誤';
+                statusClass = 'text-amber-600';
+            } else if (status === 'no-table') {
+                statusLabel = '未找到表格';
+                statusClass = 'text-rose-600';
+            } else if (status === 'parse-error') {
+                statusLabel = '解析失敗';
+                statusClass = 'text-rose-600';
+            } else if (status === 'error') {
+                statusLabel = '錯誤';
+                statusClass = 'text-rose-600';
+            }
+            const diagnostics = attempt?.diagnostics || {};
+            const detailPieces = [];
+            const rowCount = Number.isFinite(attempt?.rowCount) ? attempt.rowCount : diagnostics.rowCount;
+            if (Number.isFinite(rowCount)) detailPieces.push(`筆數: ${rowCount}`);
+            const firstDate = attempt?.firstDate || diagnostics.firstDate;
+            const lastDate = attempt?.lastDate || diagnostics.lastDate;
+            if (firstDate) detailPieces.push(`首日: ${escapeHtml(firstDate)}`);
+            if (lastDate) detailPieces.push(`末日: ${escapeHtml(lastDate)}`);
+            if (diagnostics.matchedBy) detailPieces.push(`定位: ${escapeHtml(diagnostics.matchedBy)}`);
+            if (Number.isFinite(diagnostics.documentWriteExpressions)) {
+                detailPieces.push(`document.write: ${(diagnostics.documentWriteHits || 0)}/${diagnostics.documentWriteExpressions}`);
+            }
+            if (Number.isFinite(diagnostics.scriptAssignments)) {
+                const total = Number.isFinite(diagnostics.scriptAssignmentCandidates)
+                    ? diagnostics.scriptAssignmentCandidates
+                    : diagnostics.scriptAssignments;
+                detailPieces.push(`腳本賦值: ${diagnostics.scriptAssignments}/${total}`);
+            }
+            if (Number.isFinite(diagnostics.candidateCount)) {
+                detailPieces.push(`候選表格: ${diagnostics.candidateCount}`);
+            }
+            if (Number.isFinite(diagnostics.directTables)) {
+                detailPieces.push(`直接表格: ${diagnostics.directTables}`);
+            }
+            if (Number.isFinite(diagnostics.assignmentTables)) {
+                detailPieces.push(`變數表格: ${diagnostics.assignmentTables}`);
+            }
+            if (Number.isFinite(diagnostics.markerHits)) {
+                detailPieces.push(`標記命中: ${diagnostics.markerHits}`);
+            }
+            const urlLabel = attempt?.url ? escapeHtml(attempt.url) : '未知 URL';
+            const detailLine = detailPieces.length > 0 ? `<div class="mt-1">${detailPieces.join(' ・ ')}</div>` : '';
+            const errorLine = attempt?.error
+                ? `<div class="mt-1 text-rose-600">錯誤：${escapeHtml(attempt.error)}</div>`
+                : '';
+            parts.push(`
+                <div class="pt-2 mt-2 border-t first:border-t-0 first:pt-0 first:mt-1" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between text-[10px]">
+                        <span class="font-semibold">嘗試 #${index + 1}</span>
+                        <span class="${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="text-[10px] break-words">URL：${urlLabel}</div>
+                    ${detailLine}
+                    ${errorLine}
+                </div>
+            `);
+        });
+    }
+    logEl.innerHTML = parts.join('');
+    logEl.classList.remove('hidden');
 }
 
 function renderDataSourceTesterButtons(sources, disabled) {
@@ -154,8 +299,8 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
-    if (adjusted && sourceId === 'finmind') {
-        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
+    if (adjusted && !['yahoo', 'goodinfo'].includes(sourceId)) {
+        showTesterResult('error', '還原股價目前僅支援 Yahoo 或 Goodinfo 測試來源。');
         return;
     }
     const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
@@ -170,6 +315,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
+    clearDataSourceTesterLog();
 
     try {
         const response = await fetch(`${endpoint}?${params.toString()}`, {
@@ -184,7 +330,9 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         }
         if (!response.ok || payload?.error) {
             const message = payload?.error || `HTTP ${response.status}`;
-            throw new Error(message);
+            const errorObj = new Error(message);
+            if (payload?.meta) errorObj.meta = payload.meta;
+            throw errorObj;
         }
         const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
         const total = Number.isFinite(payload.iTotalRecords)
@@ -205,11 +353,13 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
+        renderDataSourceTesterLog(payload?.meta || null);
     } catch (error) {
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
         );
+        renderDataSourceTesterLog(error?.meta || null);
     } finally {
         dataSourceTesterState.busy = false;
         refreshDataSourceTester();
@@ -663,6 +813,117 @@ function summariseSourceLabels(labels) {
 
 }
 
+function buildUiCacheKey(stockNo, startDate, endDate, adjusted) {
+    const mode = adjusted ? 'ADJ' : 'RAW';
+    return `${stockNo}__${startDate}__${endDate}__${mode}`;
+}
+
+function parsePriceValue(value) {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function parseVolumeValue(value) {
+    if (value === null || value === undefined) return 0;
+    const num = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(num) ? num : 0;
+}
+
+function normalizePriceSeries(rows) {
+    if (!Array.isArray(rows)) return [];
+    return rows
+        .map((row) => {
+            if (!row) return null;
+            const date = row.date;
+            if (!date) return null;
+            const close = parsePriceValue(row.close);
+            const open = parsePriceValue(row.open ?? close);
+            const base = close ?? open ?? 0;
+            const highCandidate = parsePriceValue(row.high);
+            const lowCandidate = parsePriceValue(row.low);
+            const high = highCandidate !== null ? highCandidate : Math.max(open ?? base, close ?? base);
+            const low = lowCandidate !== null ? lowCandidate : Math.min(open ?? base, close ?? base);
+            const change = parsePriceValue(row.change);
+            const volume = parseVolumeValue(row.volume);
+            return {
+                date,
+                open,
+                high,
+                low,
+                close,
+                change: Number.isFinite(change) ? change : null,
+                volume,
+            };
+        })
+        .filter((entry) => entry && entry.close !== null)
+        .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function getCachedSeriesForComparison(stockNo, startDate, endDate, adjusted) {
+    if (!stockNo || !startDate || !endDate) return null;
+    const key = buildUiCacheKey(stockNo, startDate, endDate, adjusted);
+    const entry = cachedDataStore.get(key);
+    if (!entry || !Array.isArray(entry.data)) return null;
+    const rows = normalizePriceSeries(extractRangeData(entry.data, startDate, endDate));
+    return {
+        rows,
+        dataSource: entry.dataSource || summariseSourceLabels(entry.dataSources || []),
+        stockName: entry.stockName || stockNo,
+    };
+}
+
+async function fetchPricePreviewSeries(stockNo, market, startISO, endISO, adjusted) {
+    const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+    const params = new URLSearchParams({ stockNo });
+    if (startISO) params.set('start', startISO);
+    if (endISO) params.set('end', endISO);
+    if (adjusted) params.set('adjusted', '1');
+    params.set('preview', '1');
+    const response = await fetch(`${endpoint}?${params.toString()}`, { headers: { Accept: 'application/json' } });
+    const rawText = await response.text();
+    let payload = {};
+    try {
+        payload = rawText ? JSON.parse(rawText) : {};
+    } catch (error) {
+        console.warn('[AdjustedComparison] 無法解析預覽回應 JSON:', error);
+        payload = {};
+    }
+    if (!response.ok || payload?.error) {
+        const message = payload?.error || `HTTP ${response.status}`;
+        throw new Error(message);
+    }
+    const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+    const converted = aaData
+        .map((row) => {
+            if (!Array.isArray(row) || row.length < 7) return null;
+            const isoDate = rocToIsoDate(row[0]);
+            if (!isoDate) return null;
+            return {
+                date: isoDate,
+                open: parsePriceValue(row[3]),
+                high: parsePriceValue(row[4]),
+                low: parsePriceValue(row[5]),
+                close: parsePriceValue(row[6]),
+                change: parsePriceValue(row[7]),
+                volume: parseVolumeValue(row[8]),
+                stockName: row[2] || payload.stockName || stockNo,
+            };
+        })
+        .filter(Boolean);
+    const rows = normalizePriceSeries(converted);
+    return {
+        rows,
+        dataSource: payload.dataSource || '',
+        stockName: payload.stockName || (converted[0]?.stockName) || stockNo,
+    };
+}
+
+function formatNumber(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return Number(value).toFixed(digits);
+}
+
 function needsDataFetch(cur) {
     if (!cur || !cur.stockNo || !cur.startDate || !cur.endDate) return true;
     const key = buildCacheKey(cur);
@@ -737,6 +998,214 @@ function getSuggestion() {
         if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
+
+window.hideAdjustedComparisonCard = function hideAdjustedComparisonCard() {
+    const card = document.getElementById('adjustedComparisonCard');
+    const contentEl = document.getElementById('adjustedComparisonContent');
+    adjustedComparisonState.lastContextKey = null;
+    adjustedComparisonState.busy = false;
+    if (card) card.classList.add('hidden');
+    if (contentEl) {
+        contentEl.innerHTML = '<p class="text-xs text-muted-foreground">啟用「除權息還原股價」後將顯示原始與還原股價的對比摘要。</p>';
+    }
+};
+
+window.updateAdjustedComparisonCard = async function updateAdjustedComparisonCard(result, context = {}) {
+    const card = document.getElementById('adjustedComparisonCard');
+    const contentEl = document.getElementById('adjustedComparisonContent');
+    if (!card || !contentEl) return;
+
+    const settings = context.settings || lastFetchSettings;
+    if (!settings || !settings.adjustedPrice) {
+        window.hideAdjustedComparisonCard();
+        return;
+    }
+
+    const stockNo = settings.stockNo;
+    const startISO = settings.startDate;
+    const endISO = settings.endDate;
+    if (!stockNo || !startISO || !endISO) {
+        window.hideAdjustedComparisonCard();
+        return;
+    }
+
+    const marketValue = settings.market || settings.marketType || getCurrentMarketFromUI() || 'TWSE';
+    const market = typeof marketValue === 'string' ? marketValue.toUpperCase() : 'TWSE';
+    const contextKey = JSON.stringify([stockNo, startISO, endISO, market, settings.adjustedPrice]);
+    adjustedComparisonState.lastContextKey = contextKey;
+    adjustedComparisonState.busy = true;
+
+    card.classList.remove('hidden');
+    contentEl.innerHTML = '<p class="text-xs text-muted-foreground">正在準備還原股價對比...</p>';
+
+    try {
+        let stockName = context.stockName || stockNo;
+        let adjustedSource = context.dataSource || '';
+        let adjustedSeries = [];
+
+        if (Array.isArray(result?.rawData) && result.rawData.length > 0) {
+            adjustedSeries = normalizePriceSeries(result.rawData);
+        } else if (Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+            adjustedSeries = normalizePriceSeries(extractRangeData(cachedStockData, startISO, endISO));
+        } else {
+            const cachedAdjusted = getCachedSeriesForComparison(stockNo, startISO, endISO, true);
+            if (cachedAdjusted) {
+                adjustedSeries = cachedAdjusted.rows;
+                adjustedSource = cachedAdjusted.dataSource || adjustedSource;
+                stockName = cachedAdjusted.stockName || stockName;
+            } else {
+                const fetchedAdjusted = await fetchPricePreviewSeries(stockNo, market, startISO, endISO, true);
+                adjustedSeries = fetchedAdjusted.rows;
+                adjustedSource = fetchedAdjusted.dataSource || adjustedSource;
+                stockName = fetchedAdjusted.stockName || stockName;
+            }
+        }
+
+        if (adjustedComparisonState.lastContextKey !== contextKey) {
+            return;
+        }
+
+        if (!Array.isArray(adjustedSeries) || adjustedSeries.length === 0) {
+            contentEl.innerHTML = '<p class="text-xs text-rose-600">未能取得還原股價資料供對比。</p>';
+            return;
+        }
+
+        let rawSeries = [];
+        let rawSource = '';
+        let rawError = null;
+        const cachedRaw = getCachedSeriesForComparison(stockNo, startISO, endISO, false);
+        if (cachedRaw) {
+            rawSeries = cachedRaw.rows;
+            rawSource = cachedRaw.dataSource || rawSource;
+        } else {
+            try {
+                const fetchedRaw = await fetchPricePreviewSeries(stockNo, market, startISO, endISO, false);
+                rawSeries = fetchedRaw.rows;
+                rawSource = fetchedRaw.dataSource || rawSource;
+            } catch (error) {
+                rawError = error;
+                console.warn('[AdjustedComparison] 原始價格預覽取得失敗:', error);
+            }
+        }
+
+        if (adjustedComparisonState.lastContextKey !== contextKey) {
+            return;
+        }
+
+        if (!Array.isArray(rawSeries) || rawSeries.length === 0) {
+            const reason = rawError ? ` (${rawError.message})` : '。請先關閉「除權息還原股價」執行一次回測建立原始資料快取。';
+            contentEl.innerHTML = `<p class="text-xs text-amber-600">尚未取得原始股價對照${reason}</p>`;
+            return;
+        }
+
+        const adjustedMap = new Map(adjustedSeries.map((item) => [item.date, item]));
+        const rawMap = new Map(rawSeries.map((item) => [item.date, item]));
+        const commonDates = Array.from(adjustedMap.keys())
+            .filter((date) => rawMap.has(date))
+            .sort((a, b) => a.localeCompare(b));
+
+        if (commonDates.length === 0) {
+            contentEl.innerHTML = '<p class="text-xs text-amber-600">還原資料與原始資料無共同交易日，請確認查詢日期區間。</p>';
+            return;
+        }
+
+        const latestDate = commonDates[commonDates.length - 1];
+        const latestAdjusted = adjustedMap.get(latestDate);
+        const latestRaw = rawMap.get(latestDate);
+        const diff = latestAdjusted && latestRaw && latestAdjusted.close !== null && latestRaw.close !== null
+            ? latestAdjusted.close - latestRaw.close
+            : null;
+        const diffRatio = diff !== null && latestRaw && latestRaw.close
+            ? ((latestAdjusted.close / latestRaw.close) - 1) * 100
+            : null;
+
+        const recentRows = commonDates.slice(-3).map((date) => {
+            const adj = adjustedMap.get(date);
+            const raw = rawMap.get(date);
+            return {
+                date,
+                rawClose: raw?.close ?? null,
+                adjClose: adj?.close ?? null,
+                diff: raw && adj && raw.close !== null && adj.close !== null ? adj.close - raw.close : null,
+            };
+        }).reverse();
+
+        const diffLabel = diff !== null ? `${diff >= 0 ? '+' : ''}${formatNumber(diff)}` : '—';
+        const ratioLabel = diffRatio !== null ? `${diffRatio >= 0 ? '+' : ''}${formatNumber(diffRatio, 2)}%` : '—';
+        const statusClass = diff !== null && Math.abs(diff) < 0.0001 ? 'bg-emerald-600' : 'bg-sky-600';
+        const statusText = diff !== null && Math.abs(diff) < 0.0001 ? '已對齊' : '已還原';
+
+        const rowsHtml = recentRows
+            .map((row) => {
+                const diffText = row.diff !== null ? `${row.diff >= 0 ? '+' : ''}${formatNumber(row.diff)}` : '—';
+                const diffClass = row.diff === null ? 'text-muted-foreground' : row.diff >= 0 ? 'text-emerald-600' : 'text-rose-600';
+                return `<tr>
+                        <td class="py-1 pr-2 text-left text-muted-foreground">${row.date}</td>
+                        <td class="py-1 pr-2 text-right">${formatNumber(row.rawClose)}</td>
+                        <td class="py-1 pr-2 text-right">${formatNumber(row.adjClose)}</td>
+                        <td class="py-1 text-right ${diffClass}">${diffText}</td>
+                    </tr>`;
+            })
+            .join('');
+
+        contentEl.innerHTML = `
+            <div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                <span>最近交易日</span>
+                <span>${latestDate}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="p-3 border rounded-md bg-white/70">
+                    <p class="text-[11px] text-muted-foreground">原始收盤</p>
+                    <p class="text-lg font-semibold" style="color: var(--foreground);">${formatNumber(latestRaw?.close)}</p>
+                    <p class="text-[11px] text-muted-foreground truncate">來源: ${rawSource || '未知'}</p>
+                </div>
+                <div class="p-3 border rounded-md ${diff !== null ? (diff >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200') : 'bg-white/70'}">
+                    <div class="flex items-center justify-between mb-1">
+                        <p class="text-[11px] text-muted-foreground">還原收盤</p>
+                        <span class="px-2 py-0.5 text-[10px] text-white rounded-full ${statusClass}">${statusText}</span>
+                    </div>
+                    <p class="text-lg font-semibold" style="color: var(--foreground);">${formatNumber(latestAdjusted?.close)}</p>
+                    <p class="text-[11px] text-muted-foreground truncate">來源: ${adjustedSource || '未知'}</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-2">
+                <div class="p-3 rounded-md border bg-muted/20">
+                    <p class="text-[11px] text-muted-foreground">價差</p>
+                    <p class="text-sm font-semibold">${diffLabel}</p>
+                </div>
+                <div class="p-3 rounded-md border bg-muted/20">
+                    <p class="text-[11px] text-muted-foreground">還原倍率</p>
+                    <p class="text-sm font-semibold">${ratioLabel}</p>
+                </div>
+            </div>
+            <div class="mt-3">
+                <p class="text-[11px] text-muted-foreground mb-1">最近三筆對比</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-xs">
+                        <thead>
+                            <tr class="text-muted-foreground">
+                                <th class="text-left py-1 pr-2">日期</th>
+                                <th class="text-right py-1 pr-2">原始收盤</th>
+                                <th class="text-right py-1 pr-2">還原收盤</th>
+                                <th class="text-right py-1">差值</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('[AdjustedComparison] 更新還原對比卡片失敗:', error);
+        contentEl.innerHTML = `<p class="text-xs text-rose-600">還原股價對比更新失敗：${error.message}</p>`;
+    } finally {
+        if (adjustedComparisonState.lastContextKey === contextKey) {
+            adjustedComparisonState.busy = false;
+        }
+    }
+};
 
 // --- 新增：頁籤切換功能 ---
 function initTabs() {
