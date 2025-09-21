@@ -1,9 +1,9 @@
 // netlify/functions/lib/goodinfo.js
-// Patch Tag: LB-GOODINFO-ADJ-20241021A
+// Patch Tag: LB-GOODINFO-ADJ-20241022A
 
 import { TextDecoder } from 'util';
 
-const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241021A';
+const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241022A';
 
 const GOODINFO_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -20,6 +20,140 @@ const GOODINFO_HEADERS = {
 };
 
 const GOODINFO_MARKERS = ['還原權值股價', '還原股價', '還原收盤'];
+
+function unescapeJsStringLiteral(value) {
+    if (!value) return '';
+    return value.replace(/\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([0-7]{1,3})|(.))/g, (match, uni, hex, oct, other) => {
+        if (uni) {
+            const code = parseInt(uni, 16);
+            return Number.isFinite(code) ? String.fromCharCode(code) : '';
+        }
+        if (hex) {
+            const code = parseInt(hex, 16);
+            return Number.isFinite(code) ? String.fromCharCode(code) : '';
+        }
+        if (oct) {
+            const code = parseInt(oct, 8);
+            return Number.isFinite(code) ? String.fromCharCode(code) : '';
+        }
+        switch (other) {
+            case 'n':
+                return '\n';
+            case 'r':
+                return '\r';
+            case 't':
+                return '\t';
+            case 'f':
+                return '\f';
+            case 'b':
+                return '\b';
+            case 'v':
+                return '\v';
+            case '\\':
+                return '\\';
+            case '\'':
+                return "'";
+            case '"':
+                return '"';
+            case '/':
+                return '/';
+            default:
+                return other;
+        }
+    });
+}
+
+function decodePercentEncodedString(value) {
+    if (!value) return '';
+    const normalised = value
+        .replace(/\+/g, ' ')
+        .replace(/%u([0-9a-fA-F]{4})/g, (match, hex) => {
+            const code = parseInt(hex, 16);
+            return Number.isFinite(code) ? String.fromCharCode(code) : '';
+        });
+    try {
+        return decodeURIComponent(normalised);
+    } catch (error) {
+        return normalised.replace(/%([0-9a-fA-F]{2})/g, (match, hex) => {
+            const code = parseInt(hex, 16);
+            return Number.isFinite(code) ? String.fromCharCode(code) : match;
+        });
+    }
+}
+
+function decodeBase64String(value) {
+    if (!value) return '';
+    try {
+        return Buffer.from(value, 'base64').toString('utf-8');
+    } catch (error) {
+        return '';
+    }
+}
+
+function extractStringLiterals(expression) {
+    const literals = [];
+    if (!expression) return literals;
+    let quote = null;
+    let buffer = '';
+    let escape = false;
+    for (const char of expression) {
+        if (quote) {
+            if (escape) {
+                buffer += char;
+                escape = false;
+                continue;
+            }
+            if (char === '\\') {
+                buffer += '\\';
+                escape = true;
+                continue;
+            }
+            if (char === quote) {
+                literals.push(buffer);
+                quote = null;
+                buffer = '';
+                continue;
+            }
+            buffer += char;
+        } else if (char === '"' || char === "'") {
+            quote = char;
+            buffer = '';
+            escape = false;
+        }
+    }
+    return literals;
+}
+
+function decodeDocumentWriteExpression(expression) {
+    if (!expression) return '';
+    const trimmed = expression.trim();
+    const wrappers = [
+        {
+            pattern: /^(?:window\.)?(?:unescape|decodeURIComponent)\((.*)\)$/i,
+            decoder: decodePercentEncodedString,
+        },
+        {
+            pattern: /^(?:window\.)?atob\((.*)\)$/i,
+            decoder: decodeBase64String,
+        },
+    ];
+    for (const { pattern, decoder } of wrappers) {
+        const match = trimmed.match(pattern);
+        if (match && match[1]) {
+            const literals = extractStringLiterals(match[1]);
+            if (literals.length === 0) {
+                return '';
+            }
+            const joined = literals.map((literal) => unescapeJsStringLiteral(literal)).join('');
+            return decoder(joined);
+        }
+    }
+    const literals = extractStringLiterals(trimmed);
+    if (literals.length === 0) {
+        return '';
+    }
+    return literals.map((literal) => unescapeJsStringLiteral(literal)).join('');
+}
 
 function stripTags(html) {
     if (!html) return '';
@@ -102,10 +236,12 @@ function extractStockName(html, fallback) {
 function collectDocumentWriteTables(html) {
     const tables = [];
     if (!html) return tables;
-    const docWritePattern = /document\.write\((['"])\s*([\s\S]*?)\s*\1\)/gi;
+    const docWritePattern = /document\.write(?:ln)?\(([^;]*?)\);/gi;
     let match;
     while ((match = docWritePattern.exec(html))) {
-        const snippet = decodeEntities(match[2]);
+        const decoded = decodeDocumentWriteExpression(match[1]);
+        if (!decoded) continue;
+        const snippet = decodeEntities(decoded);
         const innerTables = snippet.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
         if (innerTables) {
             tables.push(...innerTables.map((item) => decodeEntities(item)));
@@ -302,6 +438,7 @@ async function fetchHtml(fetchImpl, url) {
 
 async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder) {
     const url = endpointBuilder(stockNo);
+    console.log(`[Goodinfo ${GOODINFO_VERSION}] 嘗試抓取 ${url}`);
     const html = await fetchHtml(fetchImpl, url);
     const tableHtml = locateAdjustedTable(html);
     if (!tableHtml) {
@@ -312,6 +449,7 @@ async function tryFetchAdjusted(fetchImpl, stockNo, endpointBuilder) {
         throw new Error('解析還原權值股價表格失敗');
     }
     const stockName = extractStockName(html, stockNo);
+    console.log(`[Goodinfo ${GOODINFO_VERSION}] 成功解析 ${rows.length} 筆資料 (${url})`);
     return { stockName, rows };
 }
 
@@ -323,6 +461,8 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
         throw new Error('缺少股票代號');
     }
     const builders = [
+        (id) => `https://goodinfo.tw/tw/index.asp?STOCK_ID=${encodeURIComponent(id)}`,
+        (id) => `https://goodinfo.tw/StockInfo/index.asp?STOCK_ID=${encodeURIComponent(id)}`,
         (id) => `https://goodinfo.tw/tw/StockDividendSchedule.asp?STOCK_ID=${encodeURIComponent(id)}`,
         (id) => `https://goodinfo.tw/StockInfo/StockDividendSchedule.asp?STOCK_ID=${encodeURIComponent(id)}`,
         (id) => `https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=${encodeURIComponent(id)}`,
@@ -347,6 +487,7 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
             }
             return { ...result, version: GOODINFO_VERSION };
         } catch (error) {
+            console.warn(`[Goodinfo ${GOODINFO_VERSION}] ${builder(stockNo)} 失敗: ${error.message}`);
             errors.push(`${builder(stockNo)} => ${error.message}`);
         }
     }
