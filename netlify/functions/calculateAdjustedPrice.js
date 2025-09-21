@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.5 - FinMind API diagnostics surface)
+// netlify/functions/calculateAdjustedPrice.js (v13.6 - FinMind adjusted series resilience)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -18,9 +18,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250331A
 // Patch Tag: LB-ADJ-COMPOSER-20250402A
 // Patch Tag: LB-ADJ-COMPOSER-20250410A
+// Patch Tag: LB-ADJ-COMPOSER-20250414A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250410A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250414A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -230,6 +231,7 @@ const STOCK_INCREASE_PART_KEYS = [
 ];
 
 const ZERO_AMOUNT_SAMPLE_LIMIT = 4;
+const ZERO_AMOUNT_RAW_PREVIEW_LIMIT = 8;
 
 const DEFAULT_EXCLUDE_NORMALISED_TOKENS = [
   'date',
@@ -326,7 +328,7 @@ const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 30;
 const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
-const FINMIND_SPLITTABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
+const FINMIND_SPLITTABLE_STATUS = new Set([400, 408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
 const FINMIND_ADJUSTED_LABEL = 'FinMind 還原序列';
 const ADJUSTED_SERIES_RATIO_EPSILON = 1e-5;
 
@@ -906,6 +908,28 @@ function collectZeroAmountSample(diagnostics, raw, context = {}) {
     (!sample.stockIncreaseFields || sample.stockIncreaseFields.length === 0)
   ) {
     return;
+  }
+
+  const previewLimit = Number.isFinite(context.rawPreviewLimit) && context.rawPreviewLimit > 0
+    ? context.rawPreviewLimit
+    : ZERO_AMOUNT_RAW_PREVIEW_LIMIT;
+  if (previewLimit > 0) {
+    const preview = [];
+    for (const [rawKey, rawValue] of Object.entries(raw)) {
+      if (preview.length >= previewLimit) break;
+      if (!rawKey && rawKey !== 0) continue;
+      if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+      if (typeof rawValue === 'object') continue;
+      const numericCandidate = parseNumber(rawValue);
+      preview.push({
+        key: rawKey,
+        raw: typeof rawValue === 'string' ? rawValue : String(rawValue),
+        numeric: Number.isFinite(numericCandidate) ? Number(numericCandidate) : undefined,
+      });
+    }
+    if (preview.length > 0) {
+      sample.rawPreview = preview;
+    }
   }
 
   diagnostics.zeroAmountSamples.push(sample);
@@ -1846,10 +1870,11 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
   const endDate = new Date(endISO);
   const spans = enumerateDateSpans(startDate, endDate, FINMIND_MAX_SPAN_DAYS);
   if (spans.length === 0) {
-    return { rows: [], matched: 0 };
+    return { rows: [], matched: 0, responseLog: [] };
   }
 
   const rowsMap = new Map();
+  const responseLog = [];
   const queue = [...spans];
   while (queue.length > 0) {
     const span = queue.shift();
@@ -1865,6 +1890,13 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
     try {
       json = await executeFinMindQuery(params);
     } catch (error) {
+      responseLog.push({
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        status: extractStatusCode(error) ?? null,
+        message: error?.message || '',
+        rowCount: null,
+      });
       if (shouldSplitSpan(error, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
@@ -1883,11 +1915,19 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
       );
       enriched.original = error;
       enriched.statusCode = extractStatusCode(error);
+      enriched.responseLog = responseLog.slice();
       throw enriched;
     }
     if (json?.status !== 200 || !Array.isArray(json?.data)) {
       const payloadError = new Error(`FinMind 還原序列回應錯誤: ${json?.msg || 'unknown error'}`);
       payloadError.statusCode = json?.status;
+      responseLog.push({
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        status: json?.status ?? null,
+        message: json?.msg || payloadError.message || '',
+        rowCount: Array.isArray(json?.data) ? json.data.length : 0,
+      });
       if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_PRICE_SPAN_DAYS)) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
@@ -1901,8 +1941,18 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
           continue;
         }
       }
+      payloadError.responseLog = responseLog.slice();
       throw payloadError;
     }
+
+    const rowCount = Array.isArray(json?.data) ? json.data.length : 0;
+    responseLog.push({
+      spanStart: span.startISO,
+      spanEnd: span.endISO,
+      status: json?.status ?? null,
+      message: json?.msg || '',
+      rowCount,
+    });
 
     for (const rawRow of json.data) {
       const iso = toISODate(readField(rawRow, 'date'));
@@ -1920,8 +1970,9 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
   const rows = Array.from(rowsMap.values()).sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
-  return { rows, matched: rows.length };
+  return { rows, matched: rows.length, responseLog };
 }
+
 
 async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRows }) {
   if (!Array.isArray(priceRows) || priceRows.length === 0) {
@@ -1932,6 +1983,7 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
   try {
     adjustedSeries = await fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO);
   } catch (error) {
+    const responseLog = Array.isArray(error?.responseLog) ? error.responseLog : undefined;
     return {
       applied: false,
       error: error.message || error,
@@ -1942,9 +1994,14 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
         status: 'error',
         detail: error.message || 'FinMind 還原序列失敗',
         label: FINMIND_ADJUSTED_LABEL,
+        responseLog,
       },
     };
   }
+
+  const responseLog = Array.isArray(adjustedSeries?.responseLog)
+    ? adjustedSeries.responseLog
+    : [];
 
   if (!adjustedSeries || adjustedSeries.rows.length === 0) {
     return {
@@ -1956,6 +2013,7 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
         status: 'warning',
         detail: 'FinMind 還原序列無資料',
         label: FINMIND_ADJUSTED_LABEL,
+        responseLog: responseLog.length > 0 ? responseLog : undefined,
       },
     };
   }
@@ -1989,6 +2047,7 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
         status: 'warning',
         detail: 'FinMind 還原序列與原始價無重疊日期',
         label: FINMIND_ADJUSTED_LABEL,
+        responseLog: responseLog.length > 0 ? responseLog : undefined,
       },
     };
   }
@@ -2018,6 +2077,7 @@ async function deriveAdjustedSeriesFallback({ stockNo, startISO, endISO, priceRo
       matchedCount,
       adjustmentCount: adjustments.length,
       ratioSamples,
+      responseLog: responseLog.length > 0 ? responseLog : undefined,
     },
   };
 }
@@ -2408,6 +2468,7 @@ export const handler = async (event) => {
       normalisedRecords: 0,
       aggregatedEvents: 0,
       zeroAmountSamples: [],
+      responseLog: responseLog.slice(0, 10),
     };
     dividendDiagnostics.finmindStatus = classification;
 

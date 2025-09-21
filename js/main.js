@@ -129,13 +129,54 @@ function buildZeroAmountSampleHtml(samples) {
                     return `<div class="mt-1"><span class="font-medium" style="color: var(--foreground);">${testerEscapeHtml(group.label)}</span><div class="mt-0.5 text-[10px]" style="color: var(--muted-foreground);">${content}</div></div>`;
                 })
                 .join('');
-            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">${header}${groups}</div>`;
+            let rawPreviewHtml = '';
+            if (Array.isArray(sample.rawPreview) && sample.rawPreview.length > 0) {
+                const previewRows = sample.rawPreview
+                    .map((field) => {
+                        const key = testerEscapeHtml(field.key ?? '');
+                        const raw = testerEscapeHtml(field.raw ?? '');
+                        const numeric = Number.isFinite(field.numeric)
+                            ? formatTesterNumber(field.numeric, 4)
+                            : '';
+                        const numericText = numeric ? `（解析後 ${numeric}）` : '';
+                        return `<div class="flex flex-wrap gap-x-2"><span class="font-medium" style="color: var(--foreground);">${key}</span><span style="color: var(--muted-foreground);">=${raw}${numericText}</span></div>`;
+                    })
+                    .join('');
+                rawPreviewHtml = `<div class="mt-1"><span class="font-medium" style="color: var(--foreground);">原始欄位預覽</span><div class="mt-0.5 space-y-0.5 text-[10px]" style="color: var(--muted-foreground);">${previewRows}</div></div>`;
+            }
+            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">${header}${groups}${rawPreviewHtml}</div>`;
         })
         .join('');
     const remainderNote = samples.length > limited.length
         ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${limited.length} 筆金額為零的配息紀錄，總計 ${testerEscapeHtml(samples.length)} 筆。</div>`
         : '';
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">零金額欄位追蹤</div><div class="mt-2 space-y-2">${blocks}</div>${remainderNote}</div>`;
+}
+
+function buildFinMindResponseLogHtml(log, options = {}) {
+    if (!Array.isArray(log) || log.length === 0) return '';
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 6;
+    const limited = log.slice(0, limit);
+    const title = testerEscapeHtml(options.title || 'FinMind 請求紀錄');
+    const rows = limited
+        .map((entry) => {
+            const spanStart = entry?.spanStart ? testerEscapeHtml(entry.spanStart) : '—';
+            const spanEnd = entry?.spanEnd ? testerEscapeHtml(entry.spanEnd) : '—';
+            const status = Number.isFinite(entry?.status) ? Number(entry.status) : entry?.status;
+            const statusLabel = status === null || status === undefined ? '—' : testerEscapeHtml(status);
+            const statusClass = Number.isFinite(status) && Number(status) >= 400 ? 'text-rose-600' : 'text-slate-600';
+            const rowCount = Number.isFinite(entry?.rowCount) ? testerEscapeHtml(entry.rowCount) : '—';
+            const message = entry?.message ? testerEscapeHtml(entry.message) : '';
+            const messageLine = message
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">訊息：${message}</div>`
+                : '';
+            return `<div class="rounded border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="flex flex-wrap items-center gap-x-3 text-[10px]" style="color: var(--foreground);"><span>區間：${spanStart} ~ ${spanEnd}</span><span class="${statusClass}">狀態：${statusLabel}</span><span style="color: var(--muted-foreground);">筆數：${rowCount}</span></div>${messageLine}</div>`;
+        })
+        .join('');
+    const note = log.length > limited.length
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${limited.length} 筆記錄，總計 ${testerEscapeHtml(log.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">${title}</div><div class="mt-2 space-y-2">${rows}</div>${note}</div>`;
 }
 
 function buildAdjustmentDiagnosticsHtml(adjustments) {
@@ -509,6 +550,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             throw new Error(message);
         }
         let detailHtml = '';
+        const extraSections = [];
         if (parseMode === 'adjustedComposer') {
             const rows = Array.isArray(payload.data) ? payload.data : [];
             const total = rows.length;
@@ -627,6 +669,13 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     lines.push(`FinMind 事件診斷：<span class="font-semibold">${diagParts.join(' / ')}</span>`);
                 }
             }
+            const dividendResponseHtml = buildFinMindResponseLogHtml(
+                Array.isArray(dividendDiagnostics?.responseLog) ? dividendDiagnostics.responseLog : [],
+                { title: 'FinMind 股利請求紀錄' },
+            );
+            if (dividendResponseHtml) {
+                extraSections.push(dividendResponseHtml);
+            }
             if (fallbackInfo) {
                 const fallbackLabel = testerEscapeHtml(fallbackInfo.label || 'FinMind 還原序列');
                 const statusText = fallbackInfo.applied ? '已啟用' : '未啟用';
@@ -650,6 +699,13 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 if (fallbackInfo.error) {
                     lines.push(`備援錯誤: <span class="font-semibold">${testerEscapeHtml(fallbackInfo.error)}</span>`);
                 }
+                const fallbackLogHtml = buildFinMindResponseLogHtml(
+                    Array.isArray(fallbackInfo.responseLog) ? fallbackInfo.responseLog : [],
+                    { title: `${fallbackInfo.label || 'FinMind 還原序列'} 請求紀錄` },
+                );
+                if (fallbackLogHtml) {
+                    extraSections.push(fallbackLogHtml);
+                }
             } else if (fallbackAppliedFlag) {
                 lines.push('備援還原: <span class="font-semibold">已啟用</span>');
             }
@@ -670,6 +726,9 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 detailHtml += debugStepsHtml;
             }
             const zeroAmountHtml = buildZeroAmountSampleHtml(zeroAmountSamples);
+            if (extraSections.length > 0) {
+                detailHtml += extraSections.join('');
+            }
             if (zeroAmountHtml) {
                 detailHtml += zeroAmountHtml;
             }
