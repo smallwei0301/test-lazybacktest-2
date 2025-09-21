@@ -221,6 +221,13 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    if (typeof window.hideAdjustedComparisonCard === 'function') {
+        try {
+            window.hideAdjustedComparisonCard();
+        } catch (error) {
+            console.warn('[Main] 重置還原對比卡片時發生例外:', error);
+        }
+    }
 }
 
 function updateDataSourceDisplay(dataSource, stockName) {
@@ -261,6 +268,17 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
+        if (typeof window.updateAdjustedComparisonCard === 'function') {
+            try {
+                window.updateAdjustedComparisonCard(result, {
+                    settings: lastFetchSettings,
+                    stockName,
+                    dataSource,
+                });
+            } catch (error) {
+                console.warn('[Main] 更新還原對比卡片失敗:', error);
+            }
+        }
         activateTab('summary');
 
         setTimeout(() => {
