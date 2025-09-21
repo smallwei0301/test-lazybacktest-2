@@ -1,363 +1,69 @@
-?plugins=forms,container-queries:64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
-(anonymous) @ ?plugins=forms,container-queries:64
-main.js:135 [Main] DOM loaded, initializing...
-main.js:149 [Main] Initialization completed
-backtest.js:4 Chart object: function
-backtest.js:5 Available Chart plugins: Array(8)
-loader.js:3 [Loader] DOMContentLoaded event fired.
-loader.js:6 [Loader] Set workerUrl to: js/worker.js
-backtest.js:1454 [Fees] Set default fees for 2330 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
-loader.js:130 [Main] Initial setup complete.
-loader.js:138 [Loader] Loader script finished.
-batch-optimization.js:106 [Batch Optimization] Initializing...
-batch-optimization.js:210 [Batch Optimization] Strategy options generated successfully
-batch-optimization.js:280 [Batch Optimization] Events bound successfully
-batch-optimization.js:143 [Batch Optimization] Initialized successfully
-backtest.js:2080 [Market Switch] 市場切換功能已初始化
-backtest.js:10 [Main] runBacktestInternal called
-backtest.js:14 [Main] Params: Object
-backtest.js:16 [Main] Validation: true
-backtest.js:30 [Main] WorkerUrl: js/worker.js
-backtest.js:31 [Main] Creating worker...
-backtest.js:120 [Main] Fetching new data for backtest.
-worker.js:961 [Worker] Fetching new data for backtest.
-worker.js:108 [Worker] fetchStockData 啟動 for 2330 (TWSE) from 2024-09-19 to 2025-09-19
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-worker.js:268 [Worker] 原始數據 256 筆，最終整理後 244 筆
-backtest.js:37 [Main] Received message from worker: stockNameInfo undefined
-worker.js:514 [Worker] Starting simulation loop from index 27 to 243
-worker.js:595 [Worker LONG] Sell Executed: 91@1035 on 2024-11-15, Profit: -5563, Cap After: 94437
-worker.js:595 [Worker LONG] Sell Executed: 87@1060 on 2025-02-14, Profit: -1846, Cap After: 92591
-worker.js:595 [Worker LONG] Sell Executed: 102@946 on 2025-06-02, Profit: 3930, Cap After: 96520
-worker.js:595 [Worker LONG] Sell Executed: 95@1135 on 2025-08-22, Profit: 11737, Cap After: 108257
-worker.js:595 [Worker LONG] Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 107674
-worker.js:713 [Worker LONG] Final Sell Executed: 83@1285 on 2025-09-18
-worker.js:730 [Worker] Strategy date range: 2024-09-19 to 2025-09-19 (startIdx: 27, lastIdx: 243)
-worker.js:731 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-09-19 to 2025-09-19)
-worker.js:754 [Worker] B&H date range: 2024-09-19 to 2025-09-18 (firstValidPriceIdxBH: 0, lastValidPriceIdxBH: 243)
-worker.js:755 [Worker] Annualization Years (B&H): 0.9966 (from 2024-09-19 to 2025-09-18)
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: result {stockNo: '2330', initialCapital: 100000, finalValue: 114114.804325, totalProfit: 14114.804325000005, returnRate: 14.114804325000005, …}
-backtest.js:60 [Main] Data cached for 2330.
-backtest.js:178 [Main] Executing latest version of handleBacktestResult (v2).
-backtest.js:213 [Main] displayBacktestResult called.
-backtest.js:478 [Main] displayBacktestResult finished.
-backtest.js:543 [Main] displayTradeResults called
-backtest.js:747 Creating chart with plugins: {colors: {…}, decimation: {…}, filler: {…}, legend: {…}, subtitle: {…}, …}
-main.js:49 [Main] getSuggestion called
-main.js:45 [getMaxPeriod] Found max period: 20
-main.js:77 [Main] Max Period: 20, Lookback Days for Suggestion: 40
-worker.js:1002 [Worker] Received getSuggestion request.
-worker.js:899 [Worker Suggestion] Starting simulation for suggestion...
-worker.js:946 [Worker Suggestion] Last Point Analysis: buy=false, sell=false, short=false, cover=false. Suggestion: 等待
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: suggestionResult {suggestion: '等待'}
-backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TWSE)
-backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
-backtest.js:1997 [Market Switch] 切換到 TPEX 查詢 3260
-backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
-backtest.js:1454 [Fees] Set default fees for 3260 (isETF: false) -> Buy: 0.1425%, Sell+Tax: 0.4425%
-backtest.js:10 [Main] runBacktestInternal called
-backtest.js:14 [Main] Params: {stockNo: '3260', startDate: '2024-09-19', endDate: '2025-09-19', initialCapital: 100000, positionSize: 100, …}
-backtest.js:16 [Main] Validation: true
-backtest.js:30 [Main] WorkerUrl: js/worker.js
-backtest.js:31 [Main] Creating worker...
-backtest.js:120 [Main] Fetching new data for backtest.
-worker.js:961 [Worker] Fetching new data for backtest.
-worker.js:108 [Worker] fetchStockData 啟動 for 3260 (TPEX) from 2024-09-19 to 2025-09-19
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:1708 [Stock Name v9.3] 查詢股票名稱: 3260 (市場: TPEX)
-backtest.js:1805 [TPEX Name] 查詢股票代碼: 3260
-backtest.js:1874 [TPEX Proxy Name] Fetching name for 3260 via proxy: /.netlify/functions/tpex-proxy?stockNo=3260&date=113/01/01
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-worker.js:268 [Worker] 原始數據 56472 筆，最終整理後 243 筆
-backtest.js:37 [Main] Received message from worker: stockNameInfo undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-/js/worker.js:514 [Worker] Starting simulation loop from index 27 to 242
-/js/worker.js:595 [Worker LONG] Sell Executed: 1172@82.48320007324219 on 2024-11-29, Profit: -3674, Cap After: 96326
-/js/worker.js:595 [Worker LONG] Sell Executed: 1305@83.14533996582031 on 2025-03-28, Profit: 11727, Cap After: 108053
-/js/worker.js:595 [Worker LONG] Sell Executed: 1290@88.5370101928711 on 2025-06-30, Profit: 13751, Cap After: 121804
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-/js/worker.js:713 [Worker LONG] Final Sell Executed: 1100@137 on 2025-09-18
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-/js/worker.js:730 [Worker] Strategy date range: 2024-09-19 to 2025-09-19 (startIdx: 27, lastIdx: 242)
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: progress undefined
-/js/worker.js:731 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-09-19 to 2025-09-19)
-backtest.js:37 [Main] Received message from worker: progress undefined
-/js/worker.js:754 [Worker] B&H date range: 2024-09-19 to 2025-09-18 (firstValidPriceIdxBH: 0, lastValidPriceIdxBH: 242)
-/js/worker.js:755 [Worker] Annualization Years (B&H): 0.9966 (from 2024-09-19 to 2025-09-18)
-backtest.js:37 [Main] Received message from worker: progress undefined
-backtest.js:37 [Main] Received message from worker: result {stockNo: '3260', initialCapital: 100000, finalValue: 171924.86989191076, totalProfit: 71924.86989191076, returnRate: 71.92486989191076, …}
-backtest.js:60 [Main] Data cached for 3260.
-backtest.js:178 [Main] Executing latest version of handleBacktestResult (v2).
-backtest.js:213 [Main] displayBacktestResult called.
-backtest.js:478 [Main] displayBacktestResult finished.
- [Main] displayTradeResults called
- Creating chart with plugins: {colors: {…}, decimation: {…}, filler: {…}, legend: {…}, subtitle: {…}, …}
- [Main] getSuggestion called
- [getMaxPeriod] Found max period: 20
- [Main] Max Period: 20, Lookback Days for Suggestion: 40
-/js/worker.js:1002 [Worker] Received getSuggestion request.
-/js/worker.js:899 [Worker Suggestion] Starting simulation for suggestion...
-/js/worker.js:946 [Worker Suggestion] Last Point Analysis: buy=false, sell=false, short=false, cover=false. Suggestion: 等待
- [Main] Received message from worker: progress undefined
- [Main] Received message from worker: progress undefined
- [Main] Received message from worker: suggestionResult {suggestion: '等待'}
+# Lazybacktest Debug Log
 
-Function tpex-proxy
-Sep 19, 02:27:27 PM: 8686b697 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:27 PM: 8686b697 Duration: 94.59 ms	Memory Usage: 153 MB
-Sep 19, 02:27:28 PM: da231fe5 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:28 PM: da231fe5 Duration: 68.56 ms	Memory Usage: 153 MB
-Sep 19, 02:27:29 PM: 91493df5 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:29 PM: 91493df5 Duration: 48.53 ms	Memory Usage: 153 MB
-Sep 19, 02:27:30 PM: bf8b8c2f INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:30 PM: bf8b8c2f Duration: 45.74 ms	Memory Usage: 153 MB
-Sep 19, 02:27:31 PM: 8a9584a3 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:31 PM: 8a9584a3 Duration: 42.38 ms	Memory Usage: 153 MB
-Sep 19, 02:27:32 PM: 5b537962 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:32 PM: 5b537962 Duration: 86.98 ms	Memory Usage: 153 MB
-Sep 19, 02:27:33 PM: 8a904501 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:33 PM: 8a904501 Duration: 44.8 ms	Memory Usage: 153 MB
-Sep 19, 02:27:34 PM: 17d74831 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:34 PM: 17d74831 Duration: 35.6 ms	Memory Usage: 153 MB
-Sep 19, 02:27:34 PM: c3f77e7a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:34 PM: c3f77e7a Duration: 36.76 ms	Memory Usage: 153 MB
-Sep 19, 02:27:35 PM: 955dfc74 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:35 PM: 955dfc74 Duration: 50.69 ms	Memory Usage: 153 MB
-Sep 19, 02:27:36 PM: 4b0eb522 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:36 PM: 4b0eb522 Duration: 36.74 ms	Memory Usage: 153 MB
-Sep 19, 02:27:37 PM: 8f2a133a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:37 PM: 8f2a133a Duration: 40.02 ms	Memory Usage: 153 MB
-Sep 19, 02:27:38 PM: 0a174ac0 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:38 PM: 0a174ac0 Duration: 39.88 ms	Memory Usage: 153 MB
-Sep 19, 02:27:39 PM: b435e706 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:39 PM: b435e706 Duration: 44.64 ms	Memory Usage: 153 MB
-Sep 19, 02:27:40 PM: ce51993c INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:40 PM: ce51993c Duration: 32.59 ms	Memory Usage: 153 MB
-Sep 19, 02:27:40 PM: 2d5edfa7 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:41 PM: 2d5edfa7 Duration: 74.65 ms	Memory Usage: 153 MB
-Sep 19, 02:27:41 PM: 0fcf457a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:41 PM: 0fcf457a Duration: 37.55 ms	Memory Usage: 153 MB
-Sep 19, 02:27:42 PM: ccd6c7f4 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:42 PM: ccd6c7f4 Duration: 40.44 ms	Memory Usage: 153 MB
-Sep 19, 02:27:43 PM: 778a3503 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:43 PM: 778a3503 Duration: 32.35 ms	Memory Usage: 153 MB
-Sep 19, 02:27:44 PM: 1ee31bc9 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:44 PM: 1ee31bc9 Duration: 50.81 ms	Memory Usage: 154 MB
-Sep 19, 02:27:45 PM: 72a95f6e INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:45 PM: 72a95f6e Duration: 53.3 ms	Memory Usage: 158 MB
-Sep 19, 02:27:46 PM: 83b5f9d5 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:46 PM: 83b5f9d5 Duration: 69.55 ms	Memory Usage: 158 MB
-Sep 19, 02:27:46 PM: e8465666 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:46 PM: e8465666 Duration: 38.66 ms	Memory Usage: 158 MB
-Sep 19, 02:27:47 PM: 2ff40d30 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:47 PM: 2ff40d30 Duration: 45.21 ms	Memory Usage: 158 MB
-Sep 19, 02:27:48 PM: 81802d78 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:48 PM: 81802d78 Duration: 42.8 ms	Memory Usage: 158 MB
-Sep 19, 02:27:49 PM: eed357cd INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:49 PM: eed357cd Duration: 56.6 ms	Memory Usage: 159 MB
-Sep 19, 02:27:50 PM: 891a78b0 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:50 PM: 891a78b0 Duration: 75.3 ms	Memory Usage: 159 MB
-Sep 19, 02:27:51 PM: d676bf63 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:51 PM: d676bf63 Duration: 36.52 ms	Memory Usage: 159 MB
-Sep 19, 02:27:51 PM: c6015911 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:51 PM: c6015911 Duration: 32.38 ms	Memory Usage: 159 MB
-Sep 19, 02:27:52 PM: 7b8636d7 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:52 PM: 7b8636d7 Duration: 37.66 ms	Memory Usage: 159 MB
-Sep 19, 02:27:53 PM: f2d12a1d INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:53 PM: f2d12a1d Duration: 76.65 ms	Memory Usage: 159 MB
-Sep 19, 02:27:54 PM: 1798ad1e INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:54 PM: 1798ad1e Duration: 36.59 ms	Memory Usage: 159 MB
-Sep 19, 02:27:55 PM: 0448c104 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:55 PM: 0448c104 Duration: 31.84 ms	Memory Usage: 159 MB
-Sep 19, 02:27:56 PM: 3c9c4134 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:56 PM: 3c9c4134 Duration: 36 ms	Memory Usage: 159 MB
-Sep 19, 02:27:57 PM: f4baee01 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:57 PM: f4baee01 Duration: 53.07 ms	Memory Usage: 159 MB
-Sep 19, 02:27:57 PM: de6a2581 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:57 PM: de6a2581 Duration: 74.33 ms	Memory Usage: 159 MB
-Sep 19, 02:27:58 PM: d672bd3d INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:58 PM: d672bd3d Duration: 43.16 ms	Memory Usage: 159 MB
-Sep 19, 02:27:59 PM: 65205140 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:27:59 PM: 65205140 Duration: 41.03 ms	Memory Usage: 159 MB
-Sep 19, 02:28:00 PM: 8790227f INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:00 PM: 8790227f Duration: 37.83 ms	Memory Usage: 159 MB
-Sep 19, 02:28:01 PM: a215ec41 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:01 PM: a215ec41 Duration: 80.38 ms	Memory Usage: 160 MB
-Sep 19, 02:28:02 PM: 1585368a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:02 PM: 1585368a Duration: 45.49 ms	Memory Usage: 160 MB
-Sep 19, 02:28:02 PM: 333a2452 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:02 PM: 333a2452 Duration: 37.29 ms	Memory Usage: 160 MB
-Sep 19, 02:28:03 PM: d8b77a9d INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:03 PM: d8b77a9d Duration: 31.88 ms	Memory Usage: 160 MB
-Sep 19, 02:28:04 PM: 9c3322f5 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:04 PM: 9c3322f5 Duration: 37.56 ms	Memory Usage: 160 MB
-Sep 19, 02:28:05 PM: bad58edd INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:05 PM: bad58edd Duration: 47.6 ms	Memory Usage: 160 MB
-Sep 19, 02:28:06 PM: e01a453e INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:06 PM: e01a453e Duration: 83.12 ms	Memory Usage: 160 MB
-Sep 19, 02:28:07 PM: 8354815a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:07 PM: 8354815a Duration: 39.22 ms	Memory Usage: 160 MB
-Sep 19, 02:28:07 PM: 84b6b149 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:08 PM: 84b6b149 Duration: 34.23 ms	Memory Usage: 160 MB
-Sep 19, 02:28:08 PM: 336d8f7d INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:08 PM: 336d8f7d Duration: 38.32 ms	Memory Usage: 160 MB
-Sep 19, 02:28:09 PM: 178935f0 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:09 PM: 178935f0 Duration: 41.06 ms	Memory Usage: 160 MB
-Sep 19, 02:28:10 PM: 1ce31970 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:10 PM: 1ce31970 Duration: 84.59 ms	Memory Usage: 160 MB
-Sep 19, 02:28:11 PM: 846748dd INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:11 PM: 846748dd Duration: 43.33 ms	Memory Usage: 160 MB
-Sep 19, 02:28:12 PM: 0479387e INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:12 PM: 0479387e Duration: 30.92 ms	Memory Usage: 160 MB
-Sep 19, 02:28:12 PM: 61d01c38 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:12 PM: 61d01c38 Duration: 32.04 ms	Memory Usage: 160 MB
-Sep 19, 02:28:13 PM: 703a2ad4 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:13 PM: 703a2ad4 Duration: 34.78 ms	Memory Usage: 160 MB
-Sep 19, 02:28:14 PM: 56d753c2 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:14 PM: 56d753c2 Duration: 42.97 ms	Memory Usage: 164 MB
-Sep 19, 02:28:15 PM: 54ed5804 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:15 PM: 54ed5804 Duration: 40.95 ms	Memory Usage: 168 MB
-Sep 19, 02:28:16 PM: 88a6473e INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:16 PM: 88a6473e Duration: 45.37 ms	Memory Usage: 172 MB
-Sep 19, 02:28:17 PM: 88f44490 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:17 PM: 88f44490 Duration: 49.54 ms	Memory Usage: 177 MB
-Sep 19, 02:28:17 PM: 01242bec INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:18 PM: 01242bec Duration: 50.28 ms	Memory Usage: 182 MB
-Sep 19, 02:28:18 PM: c91a72e2 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:28:18 PM: c91a72e2 Duration: 80.14 ms	Memory Usage: 187 MB
-Sep 19, 02:31:34 PM: 9214e421 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:34 PM: 9214e421 Duration: 86.12 ms	Memory Usage: 187 MB
-Sep 19, 02:31:35 PM: e6fba51d INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:35 PM: e6fba51d Duration: 37.21 ms	Memory Usage: 187 MB
-Sep 19, 02:31:38 PM: 4e7c3d4a INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:38 PM: 4e7c3d4a Duration: 34.67 ms	Memory Usage: 187 MB
-Sep 19, 02:31:39 PM: 47cab956 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:39 PM: 47cab956 Duration: 34.88 ms	Memory Usage: 187 MB
-Sep 19, 02:31:39 PM: 705a9bff INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:39 PM: 705a9bff Duration: 78.69 ms	Memory Usage: 187 MB
-Sep 19, 02:31:40 PM: af8fb8c2 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:40 PM: af8fb8c2 Duration: 32.54 ms	Memory Usage: 187 MB
-Sep 19, 02:31:41 PM: 7a99fbac INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:41 PM: 7a99fbac Duration: 31.48 ms	Memory Usage: 187 MB
-Sep 19, 02:31:42 PM: 662ecb93 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:42 PM: 662ecb93 Duration: 57.21 ms	Memory Usage: 187 MB
-Sep 19, 02:31:42 PM: 928db546 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:42 PM: 928db546 Duration: 35.14 ms	Memory Usage: 187 MB
-Sep 19, 02:31:43 PM: df8b64ae INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:43 PM: df8b64ae Duration: 87.05 ms	Memory Usage: 187 MB
-Sep 19, 02:31:44 PM: 186bca38 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:44 PM: 186bca38 Duration: 69.46 ms	Memory Usage: 187 MB
-Sep 19, 02:31:45 PM: fa22f426 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:45 PM: fa22f426 Duration: 32.42 ms	Memory Usage: 187 MB
-Sep 19, 02:31:46 PM: 69b376d3 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:46 PM: 69b376d3 Duration: 37.89 ms	Memory Usage: 187 MB
-Sep 19, 02:31:47 PM: b5fea46b INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:47 PM: b5fea46b Duration: 36.75 ms	Memory Usage: 187 MB
-Sep 19, 02:31:48 PM: 147ae371 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:48 PM: 147ae371 Duration: 34.4 ms	Memory Usage: 187 MB
-Sep 19, 02:31:49 PM: 2333a0c0 INFO   [TPEX Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 3260.TWO
-Sep 19, 02:31:49 PM: 2333a0c0 Duration: 34.49 ms	Memory Usage: 187 MB
-Function twse-proxy
-Sep 19, 02:31:07 PM: 5d2b4128 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20240901
-Sep 19, 02:31:07 PM: 5d2b4128 Duration: 210.08 ms	Memory Usage: 108 MB
-Sep 19, 02:31:07 PM: 2cdde9e4 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20241001
-Sep 19, 02:31:07 PM: 2cdde9e4 Duration: 23.98 ms	Memory Usage: 110 MB
-Sep 19, 02:31:08 PM: 5492c264 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20241101
-Sep 19, 02:31:08 PM: 5492c264 Duration: 358.29 ms	Memory Usage: 132 MB
-Sep 19, 02:31:09 PM: 9cf085ec INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20241201
-Sep 19, 02:31:09 PM: 9cf085ec Duration: 33.21 ms	Memory Usage: 132 MB
-Sep 19, 02:31:09 PM: dd30524a INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250101
-Sep 19, 02:31:09 PM: dd30524a Duration: 23.9 ms	Memory Usage: 132 MB
-Sep 19, 02:31:10 PM: 023a8fd8 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250201
-Sep 19, 02:31:10 PM: 023a8fd8 Duration: 32.74 ms	Memory Usage: 132 MB
-Sep 19, 02:31:11 PM: 93d130ac INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250301
-Sep 19, 02:31:11 PM: 93d130ac Duration: 37.47 ms	Memory Usage: 132 MB
-Sep 19, 02:31:11 PM: 756c09f6 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250401
-Sep 19, 02:31:11 PM: 756c09f6 Duration: 22.59 ms	Memory Usage: 132 MB
-Sep 19, 02:31:12 PM: 7cf8f6d6 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250501
-Sep 19, 02:31:12 PM: 7cf8f6d6 Duration: 24.89 ms	Memory Usage: 132 MB
-Sep 19, 02:31:13 PM: 5b914e58 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250601
-Sep 19, 02:31:13 PM: 5b914e58 Duration: 22.78 ms	Memory Usage: 132 MB
-Sep 19, 02:31:13 PM: e4d2d92c INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250701
-Sep 19, 02:31:13 PM: e4d2d92c Duration: 21.42 ms	Memory Usage: 132 MB
-Sep 19, 02:31:14 PM: a7d15859 INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250801
-Sep 19, 02:31:14 PM: a7d15859 Duration: 18.59 ms	Memory Usage: 132 MB
-Sep 19, 02:31:15 PM: 6a5f77bd INFO   [TWSE Proxy v9.4] 命中 Tier 1 快取 (Blobs) for 2330_20250901
-Sep 19, 02:31:15 PM: 6a5f77bd Duration: 30.57 ms	Memory Usage: 132 MB
+# 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A
+- **Issue recap**: 備援還原流程仍以「已還原股價 × 還原因子」進行縮放，導致雙重折算；前端區間價格缺乏原始價格來源標籤，難以分辨 TWSE 與 FinMind 來源。
+- **Fix**: Netlify 還原函式在調整時保留 `rawOpen`/`rawClose` 等基準數據並標示 `priceSource`，Worker 備援計算改以原始價格乘上係數；價格檢視器摘要與表格同步顯示 TWSE、FinMind 來源。
+- **Diagnostics**: 區間價格表可直接看到原始收盤價、還原因子與實際採用的來源標籤，協助確認備援是否套用正確資料。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+# 2025-05-09 — Patch LB-ADJ-COMPOSER-20250509A / LB-DATASOURCE-20250509A
+- **Issue recap**: FinMind `TaiwanStockDividendResult` 事件在缺少 `after_price` 時，會改以「前價減股利」推估，導致實際還原流程等同於「股價乘上還原因子後再扣股利」，造成重複折減。
+- **Fix**: 要求 `after_price` 必須存在且為正值才建立事件，移除 `before - dividend` 的回退邏輯，確保還原比率只來自 FinMind 提供的前後股價；同步更新函式版號為 `LB-ADJ-COMPOSER-20250509A`。
+- **Diagnostics**: 單元測試新增「缺少 after_price 應略過」案例，避免後續回歸；同時保留股利總額於診斷供比對。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+# 2025-04-26 — Patch LB-ADJ-COMPOSER-20250426A / LB-DATASOURCE-20250426A
+- **Issue recap**: 僅改用 `TaiwanStockDividendResult` 後，還原流程缺乏完整測試覆蓋，測試卡也無法看出事件截斷或計算方式，導致仍難以追蹤係數為何未被套用。
+- **Fix**: Netlify 還原函式改為可注入 mock fetch 並輸出事件預覽總數，依 `before_price`、`after_price` 計算的手動比率同時在 UI 顯示計算式，並保留超過預覽上限的剩餘筆數說明。
+- **Diagnostics**: 測試卡新增「TaiwanStockDividendResult」公式提示與「尚有 X 筆」說明，讓開發者了解係數來源與被截斷的事件；診斷回傳也保證附帶 FinMind response log，便於排查 API 失敗時的請求歷程。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+# 2025-04-21 — Patch LB-ADJ-COMPOSER-20250421A / LB-DATASOURCE-20250421A
+- **Issue recap**: FinMind 備援僅能依賴 `TaiwanStockDividend` 欄位推導現金／股票配息，若資料全為 0 或欄位缺漏，仍無法計算出還原股價，營運端也難以分辨配息查詢與還原序列的差異。
+- **Fix**: Netlify 還原函式接入 `TaiwanStockDividendResult`，以 `before_price`、`after_price` 與 `stock_and_cache_dividend` 產生手動調整比率，並在主流程將該結果納入備援鏈；同時暴露 `normaliseDividendResultRecord`、`buildDividendResultEvents` 供單元測試覆蓋。
+- **Diagnostics**: `finmindStatus` 增列 `dividendResult` 狀態，前端測試卡顯示配息結果 API 狀態、資料集與請求區間；`dividendDiagnostics` 新增配息結果統計，便於快速檢視備援觸發原因。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+# 2025-04-14 — Patch LB-ADJ-COMPOSER-20250414A / LB-DATASOURCE-20250414A
+- **Issue recap**: FinMind 備援仍出現 HTTP 400 導致還原序列無法落地，UI 無法掌握請求分段紀錄，零金額診斷也缺少原始欄位對照，難以判讀金額為 0 的實際欄位內容。
+- **Fix**: Netlify 還原函式將 400 視為可拆分狀態並記錄請求 `responseLog`，於 fallback 摘要中傳回；同時擴充零金額快照的原始欄位預覽，前端測試卡新增 FinMind 請求紀錄區塊與欄位預覽。
+- **Diagnostics**: 資料來源測試卡可直接查看 FinMind 股利與備援序列的請求狀態與訊息，零金額快照提供原始欄位值與解析後數值，利於營運端比對。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-04-10 — Patch LB-ADJ-COMPOSER-20250410A / LB-DATASOURCE-20250410A / LB-ADJ-PIPE-20250410A
+- **Issue recap**: FinMind 備援成功回應仍難以判讀是 API 權限不足、Token 設定錯誤還是查詢參數造成無資料，使得營運端無法釐清除息事件未被還原的根本原因。
+- **Fix**: Netlify 還原函式記錄 FinMind 呼叫回應與狀態碼，分類權限不足、Token 異常、參數錯誤與查無資料等情境，並於摘要 `finmindStatus` 帶回 UI 與 Worker。
+- **Diagnostics**: 資料來源測試卡新增「FinMind API 診斷」區塊，若未設定 Token、權限不足或 API 回傳錯誤可即時看到建議處置；Worker 亦同步快取該狀態供後續流程使用。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-04-02 — Patch LB-ADJ-COMPOSER-20250402A / LB-DATASOURCE-20250402A
+- **Issue recap**: Netlify 還原備援雖已回傳 FinMind 還原序列，但調整事件比率可能大於 1，Worker 端因此忽略備援並維持原始股價；測試卡僅顯示整體筆數，難以判讀係數對齊與備援樣本量。
+- **Fix**: 重新計算 FinMind 還原係數差，產生小於 1 的調整比率並保留前後係數、變動方向與樣本統計，同時在 API 摘要揭露備援對齊筆數與係數樣本。
+- **Diagnostics**: 測試卡新增價格筆數、成功/略過事件統計、備援統計與 FinMind 係數變化說明，協助快速鎖定係數停留在 1 的原因。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-03-31 — Patch LB-ADJ-COMPOSER-20250331A / LB-DATASOURCE-20250331A
+- **Issue recap**: Yahoo 測試源回傳 `formatISODateFromDate is not defined`，FinMind 備援仍回傳 0 件有效還原事件，導致回測區間係數維持 1，缺乏進一步診斷資訊。
+- **Fix**: TWSE proxy 補齊 `formatISODateFromDate`，Netlify 還原函式在調整失敗時改以 FinMind 還原股價序列推導係數並回傳備援摘要，前端測試卡顯示備援狀態、彙整事件與來源標籤。
+- **Diagnostics**: 測試卡新增 FinMind 彙整事件區塊、備援還原狀態與詳細步驟；單元測試覆蓋備援序列的縮放結果，確保回傳係數與來源標記正確。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-03-28 — Patch LB-ADJ-COMPOSER-20250328A / LB-DATASOURCE-20250328A
+- **Issue recap**: FinMind 備援常回傳金額為零的除權息紀錄，導致 `dividendEvents` 為空且回測交易價維持未還原值，測試面板亦缺乏顯示 pipeline 各階段狀態與問題線索。
+- **Fix**: Netlify 還原函式在所有成分均為零時保留原始欄位快照並附帶於 `dividendDiagnostics.zeroAmountSamples`，回傳 `debugSteps` 與調整事件供前端檢視。
+- **Diagnostics**: 資料來源測試卡新增還原流程狀態、零金額欄位快照與前三筆調整事件摘要，可快速確認係數略過的原因與對應欄位。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-03-20 — Patch LB-ADJ-COMPOSER-20250320A / LB-ADJ-PIPE-20250320A
+- **Issue recap**: Netlify 備援回傳的 `dividendEvents` 雖然帶出有效配息資料，但 Worker 僅依賴 `adjustments`，一旦全數被標記為 `skipped`（如僅剩除權息事件、缺少基準價或權利比率偏高），就無法啟動備援縮放，前端仍顯示原始價位且摘要看不出個別紀錄的落差。
+- **Fix**: Worker 端若未取得可用 `adjustments`，會回退使用 `dividendEvents` 重新計算係數；同時在 Netlify 函式中蒐集缺少除權息日、金額為零等診斷統計，並回傳給 UI 與快取以便追蹤。
+- **Diagnostics**: 資料來源測試面板新增「FinMind 事件診斷」說明，各 proxy 也輸出請求參數與月份分段資訊，遇到 502/504 時可快速比對參數是否落在預期範圍。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-03-12 — Patch LB-ADJ-COMPOSER-20250312A / LB-ADJ-PIPE-20250312A
+- **Issue recap**: 還原股價長期顯示 0 件有效事件，回測成交價格維持原始價。追蹤 Netlify 回傳資料後確認 `cashCapitalIncrease` 與其他成分的比值公式錯誤，造成調整係數被判定為無效並全部跳過。
+- **Fix**: 重新依照證交所參考價公式計算調整係數，統一 Netlify 與 Worker 的 `computeAdjustmentRatio` / `computeFallbackRatio`，並在單元測試加入混合配息、增資場景驗證。
+- **Diagnostics**: Netlify 還原服務回傳 `debugSteps`，Worker 與主執行緒同步快取 `summary`、`adjustments` 與備援標記，前端新增「還原流程」步驟提示與彈窗內的除權息摘要，利於快速檢視每個階段狀態與略過原因。
+- **Testing**: `node tests/dividend-normalisation.test.mjs`（新增調整係數驗證）。
+
+> 後續若再出現無法調整的案例，先在前台檢視「還原套用」步驟的略過原因與備援標記，再對照 `log.md` 上次修復時的調整內容。

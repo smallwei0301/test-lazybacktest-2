@@ -1,4 +1,4 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.2 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
 
 // 全局變量
 let stockChart = null;
@@ -32,6 +32,297 @@ const dataSourceTesterState = {
     busy: false,
 };
 
+// Patch Tag: LB-DATASOURCE-20250328A
+// Patch Tag: LB-DATASOURCE-20250402A
+// Patch Tag: LB-DATASOURCE-20250410A
+const testerAdjustmentReasonLabels = {
+    missingPriceRow: '缺少對應價格',
+    invalidBaseClose: '無效基準價',
+    ratioOutOfRange: '調整比例異常',
+};
+
+function testerEscapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatTesterSkipReasons(skipReasons) {
+    if (!skipReasons || typeof skipReasons !== 'object') return '';
+    const entries = Object.entries(skipReasons);
+    if (entries.length === 0) return '';
+    return entries
+        .map(([reason, count]) => {
+            const label = testerAdjustmentReasonLabels[reason] || reason;
+            return `${testerEscapeHtml(label)}×${testerEscapeHtml(count)}`;
+        })
+        .join('、');
+}
+
+function formatTesterNumber(value, digits = 4) {
+    if (!Number.isFinite(value)) return '—';
+    const formatted = Number(value).toFixed(digits);
+    return testerEscapeHtml(formatted.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1'));
+}
+
+function formatTesterFieldHints(fields) {
+    if (!Array.isArray(fields) || fields.length === 0) return '';
+    return fields
+        .map((field) => {
+            const key = testerEscapeHtml(field.key ?? '');
+            const raw = testerEscapeHtml(field.raw ?? '');
+            const numeric = Number.isFinite(field.numeric) ? formatTesterNumber(field.numeric, 4) : '';
+            return numeric ? `${key}=${raw}（解析後 ${numeric}）` : `${key}=${raw}`;
+        })
+        .join('、');
+}
+
+function buildTesterDebugStepsHtml(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return '';
+    const items = steps
+        .map((step) => {
+            const statusClass = step.status === 'success'
+                ? 'text-emerald-600'
+                : step.status === 'warning'
+                    ? 'text-amber-600'
+                    : 'text-rose-600';
+            const label = testerEscapeHtml(step.label || step.key || '未命名步驟');
+            const details = [];
+            if (step.detail) details.push(testerEscapeHtml(step.detail));
+            const skipText = formatTesterSkipReasons(step.skipReasons);
+            if (skipText) details.push(skipText);
+            const suffix = details.length > 0 ? ` ・ ${details.join(' ・ ')}` : '';
+            return `<div class="flex items-start gap-2"><span class="${statusClass}">●</span><span class="text-[11px]" style="color: var(--foreground);">${label}${suffix}</span></div>`;
+        })
+        .join('');
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原流程檢查</div><div class="mt-1 space-y-1">${items}</div></div>`;
+}
+
+function buildFinMindResponseLogHtml(log, options = {}) {
+    if (!Array.isArray(log) || log.length === 0) return '';
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 6;
+    const limited = log.slice(0, limit);
+    const title = testerEscapeHtml(options.title || 'FinMind 請求紀錄');
+    const rows = limited
+        .map((entry) => {
+            const spanStart = entry?.spanStart ? testerEscapeHtml(entry.spanStart) : '—';
+            const spanEnd = entry?.spanEnd ? testerEscapeHtml(entry.spanEnd) : '—';
+            const status = Number.isFinite(entry?.status) ? Number(entry.status) : entry?.status;
+            const statusLabel = status === null || status === undefined ? '—' : testerEscapeHtml(status);
+            const statusClass = Number.isFinite(status) && Number(status) >= 400 ? 'text-rose-600' : 'text-slate-600';
+            const rowCount = Number.isFinite(entry?.rowCount) ? testerEscapeHtml(entry.rowCount) : '—';
+            const message = entry?.message ? testerEscapeHtml(entry.message) : '';
+            const messageLine = message
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">訊息：${message}</div>`
+                : '';
+            return `<div class="rounded border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="flex flex-wrap items-center gap-x-3 text-[10px]" style="color: var(--foreground);"><span>區間：${spanStart} ~ ${spanEnd}</span><span class="${statusClass}">狀態：${statusLabel}</span><span style="color: var(--muted-foreground);">筆數：${rowCount}</span></div>${messageLine}</div>`;
+        })
+        .join('');
+    const note = log.length > limited.length
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${limited.length} 筆記錄，總計 ${testerEscapeHtml(log.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">${title}</div><div class="mt-2 space-y-2">${rows}</div>${note}</div>`;
+}
+
+function buildAdjustmentDiagnosticsHtml(adjustments) {
+    if (!Array.isArray(adjustments)) return '';
+    if (adjustments.length === 0) {
+        return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 rounded-md border border-dashed px-3 py-2 text-[11px]" style="border-color: var(--border); color: var(--muted-foreground);">尚未產生任何還原事件，請檢查配息結果或略過原因統計。</div></div>`;
+    }
+    const items = adjustments
+        .slice(0, 3)
+        .map((event) => {
+            const statusClass = event.skipped ? 'text-amber-600' : 'text-emerald-600';
+            const statusLabel = testerEscapeHtml(event.skipped ? '略過' : '已套用');
+            const metaLines = [];
+            if (event.date) {
+                metaLines.push(`除權息日 ${testerEscapeHtml(event.date)}`);
+            }
+            if (event.appliedDate && event.appliedDate !== event.date) {
+                metaLines.push(`基準價日 ${testerEscapeHtml(event.appliedDate)}`);
+            }
+            if (Number.isFinite(event.baseClose)) {
+                metaLines.push(`基準價 ${formatTesterNumber(event.baseClose, 3)}`);
+            }
+            const composition = [];
+            if (Number.isFinite(event.cashDividend) && event.cashDividend > 0) {
+                composition.push(`現金 ${formatTesterNumber(event.cashDividend, 4)}`);
+            }
+            if (Number.isFinite(event.stockDividend) && event.stockDividend > 0) {
+                composition.push(`股票 ${formatTesterNumber(event.stockDividend, 4)}`);
+            }
+            if (Number.isFinite(event.cashCapitalIncrease) && event.cashCapitalIncrease > 0) {
+                composition.push(`現增 ${formatTesterNumber(event.cashCapitalIncrease, 4)}`);
+            }
+            if (Number.isFinite(event.stockCapitalIncrease) && event.stockCapitalIncrease > 0) {
+                composition.push(`轉增 ${formatTesterNumber(event.stockCapitalIncrease, 4)}`);
+            }
+            if (composition.length > 0) {
+                metaLines.push(`成分 ${composition.join('、')}`);
+            }
+            if (!event.skipped && Number.isFinite(event.ratio)) {
+                metaLines.push(`調整係數 ${formatTesterNumber(event.ratio, 6)}`);
+            }
+            const factorBefore = Number(event.factorBefore);
+            const factorAfter = Number(event.factorAfter);
+            if (Number.isFinite(factorBefore) || Number.isFinite(factorAfter)) {
+                const beforeText = Number.isFinite(factorBefore)
+                    ? formatTesterNumber(factorBefore, 6)
+                    : '—';
+                const afterText = Number.isFinite(factorAfter)
+                    ? formatTesterNumber(factorAfter, 6)
+                    : '—';
+                metaLines.push(`FinMind 係數 ${beforeText} → ${afterText}`);
+            }
+            if (Number.isFinite(event.factorDelta) && event.factorDelta !== 0) {
+                metaLines.push(`係數差 ${formatTesterNumber(event.factorDelta, 6)}`);
+            }
+            if (event.factorDirection) {
+                const directionLabel =
+                    event.factorDirection === 'up'
+                        ? '向上'
+                        : event.factorDirection === 'down'
+                            ? '向下'
+                            : '持平';
+                metaLines.push(`係數趨勢 ${directionLabel}`);
+            }
+            if (event.skipped) {
+                const reasonLabel = testerAdjustmentReasonLabels[event.reason] || event.reason || '未知原因';
+                metaLines.push(`原因 ${testerEscapeHtml(reasonLabel)}`);
+            }
+            const originLabel = event.source
+                ? testerEscapeHtml(event.source)
+                : event.derivedFrom === 'finmindAdjustedSeries'
+                    ? 'FinMind 還原序列'
+                    : '股利計算';
+            if (originLabel) {
+                metaLines.push(`來源 ${originLabel}`);
+            }
+            const metaHtml = metaLines.map((line) => `<div>${line}</div>`).join('');
+            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="flex items-center gap-2"><span class="${statusClass}">●</span><span class="font-medium" style="color: var(--foreground);">${statusLabel}</span></div><div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${metaHtml}</div></div>`;
+        })
+        .join('');
+    const remainderNote = adjustments.length > 3
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆事件，總計 ${testerEscapeHtml(adjustments.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 space-y-1">${items}</div>${remainderNote}</div>`;
+}
+
+function buildDividendEventPreviewHtml(events) {
+    if (!Array.isArray(events) || events.length === 0) return '';
+    const blocks = events.slice(0, 3).map((event) => {
+        const lines = [];
+        if (event.date) {
+            lines.push(`除權息日 ${testerEscapeHtml(event.date)}`);
+        }
+        const compositions = [];
+        if (Number.isFinite(event.cashDividend) && event.cashDividend > 0) {
+            compositions.push(`現金 ${formatTesterNumber(event.cashDividend, 4)}`);
+        }
+        if (Number.isFinite(event.stockDividend) && event.stockDividend > 0) {
+            compositions.push(`股票 ${formatTesterNumber(event.stockDividend, 4)}`);
+        }
+        if (Number.isFinite(event.cashCapitalIncrease) && event.cashCapitalIncrease > 0) {
+            compositions.push(`現增 ${formatTesterNumber(event.cashCapitalIncrease, 4)}`);
+        }
+        if (Number.isFinite(event.stockCapitalIncrease) && event.stockCapitalIncrease > 0) {
+            compositions.push(`轉增 ${formatTesterNumber(event.stockCapitalIncrease, 4)}`);
+        }
+        if (compositions.length > 0) {
+            lines.push(`成分 ${compositions.join('、')}`);
+        }
+        if (Number.isFinite(event.subscriptionPrice) && event.subscriptionPrice > 0) {
+            lines.push(`申購價 ${formatTesterNumber(event.subscriptionPrice, 4)}`);
+        }
+        if (event.dateSources && Array.isArray(event.dateSources) && event.dateSources.length > 0) {
+            const sources = event.dateSources
+                .map((src) => (src.key ? testerEscapeHtml(src.key) : null))
+                .filter(Boolean);
+            if (sources.length > 0) {
+                lines.push(`日期欄位 ${sources.join('、')}`);
+            }
+        } else if (event.dateSource) {
+            lines.push(`日期欄位 ${testerEscapeHtml(event.dateSource)}`);
+        }
+        const body = lines.map((line) => `<div>${line}</div>`).join('');
+        return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="text-[10px]" style="color: var(--muted-foreground);">${body}</div></div>`;
+    }).join('');
+    const note = events.length > 3
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆彙整事件，總計 ${testerEscapeHtml(events.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind 彙整事件</div><div class="mt-1 space-y-1">${blocks}</div>${note}</div>`;
+}
+
+function resolveFinMindStatusColor(status) {
+    switch (status) {
+        case 'success':
+            return 'text-emerald-600';
+        case 'noData':
+        case 'parameterError':
+        case 'networkError':
+            return 'text-amber-600';
+        case 'permissionDenied':
+        case 'tokenInvalid':
+        case 'missingToken':
+        case 'serverError':
+            return 'text-rose-600';
+        default:
+            return 'text-slate-600';
+    }
+}
+
+function buildFinMindApiStatusHtml(finmindStatus) {
+    if (!finmindStatus || typeof finmindStatus !== 'object') return '';
+    const items = [];
+    if (finmindStatus.tokenPresent === false) {
+        items.push(
+            `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+                <div class="text-[11px] font-medium text-rose-600">未設定 FINMIND_TOKEN，無法呼叫 FinMind API。</div>
+                <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請於 Netlify 或環境變數中設定 FINMIND_TOKEN 後重新測試。</div>
+            </div>`,
+        );
+    }
+    const statusConfigs = [
+        { key: 'dividendResult', title: 'FinMind 配息結果 API 狀態' },
+    ];
+    statusConfigs.forEach((config) => {
+        const statusObj = finmindStatus[config.key];
+        if (!statusObj || typeof statusObj !== 'object') return;
+        const tone = resolveFinMindStatusColor(statusObj.status);
+        const hint = statusObj.hint
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(statusObj.hint)}</div>`
+            : '';
+        const statusCode = Number.isFinite(statusObj.statusCode)
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">狀態碼：${testerEscapeHtml(statusObj.statusCode)}</div>`
+            : '';
+        const message = statusObj.message
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">訊息：${testerEscapeHtml(statusObj.message)}</div>`
+            : '';
+        const spanText = statusObj.spanStart || statusObj.spanEnd
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">請求區間：${testerEscapeHtml(statusObj.spanStart || '—')} ~ ${testerEscapeHtml(statusObj.spanEnd || '—')}</div>`
+            : '';
+        const dataset = statusObj.dataset
+            ? `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料集：${testerEscapeHtml(statusObj.dataset)}</div>`
+            : '';
+        items.push(
+            `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+                <div class="text-[11px] font-medium" style="color: var(--foreground);">${testerEscapeHtml(config.title)}：<span class="${tone}">${testerEscapeHtml(statusObj.label || statusObj.status || '未知狀態')}</span></div>
+                ${dataset}
+                ${statusCode}
+                ${message}
+                ${spanText}
+                ${hint}
+            </div>`,
+        );
+    });
+    if (items.length === 0) return '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">FinMind API 診斷</div><div class="mt-2 space-y-2">${items.join('')}</div></div>`;
+}
+
 function getStockNoValue() {
     const input = document.getElementById('stockNo');
     return (input?.value || '').trim().toUpperCase();
@@ -61,6 +352,11 @@ function getTesterSourceConfigs(market, adjusted) {
     if (adjusted) {
         return [
             { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
+            {
+                id: 'netlifyAdjusted',
+                label: 'Netlify 還原備援',
+                description: 'TWSE/FinMind 原始 + FinMind 配息',
+            },
         ];
     }
     if (market === 'TPEX') {
@@ -154,25 +450,49 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
     const market = getCurrentMarketFromUI();
     const adjusted = isAdjustedMode();
-    if (adjusted && sourceId === 'finmind') {
-        showTesterResult('error', '還原股價目前僅提供 Yahoo Finance 測試來源。');
-        return;
+    let requestUrl = '';
+    let parseMode = 'proxy';
+    if (adjusted) {
+        if (sourceId === 'netlifyAdjusted') {
+            const params = new URLSearchParams({
+                stockNo,
+                startDate: start,
+                endDate: end,
+                market,
+            });
+            requestUrl = `/api/adjusted-price/?${params.toString()}`;
+            parseMode = 'adjustedComposer';
+        } else if (sourceId === 'yahoo') {
+            const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+            const params = new URLSearchParams({
+                stockNo,
+                start,
+                end,
+            });
+            params.set('adjusted', '1');
+            params.set('forceSource', 'yahoo');
+            requestUrl = `${endpoint}?${params.toString()}`;
+        } else {
+            showTesterResult('error', '還原股價目前僅支援 Yahoo 或 Netlify 備援測試。');
+            return;
+        }
+    } else {
+        const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+        const params = new URLSearchParams({
+            stockNo,
+            start,
+            end,
+        });
+        if (sourceId) params.set('forceSource', sourceId);
+        requestUrl = `${endpoint}?${params.toString()}`;
     }
-    const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
-    const params = new URLSearchParams({
-        stockNo,
-        start,
-        end,
-        forceSource: sourceId,
-    });
-    if (adjusted) params.set('adjusted', '1');
 
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
 
     try {
-        const response = await fetch(`${endpoint}?${params.toString()}`, {
+        const response = await fetch(requestUrl, {
             headers: { Accept: 'application/json' },
         });
         const text = await response.text();
@@ -186,21 +506,266 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const message = payload?.error || `HTTP ${response.status}`;
             throw new Error(message);
         }
-        const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
-        const total = Number.isFinite(payload.iTotalRecords)
-            ? payload.iTotalRecords
-            : aaData.length;
-        const isoDates = aaData
-            .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
-            .filter((value) => Boolean(value));
-        const firstDate = isoDates.length > 0 ? isoDates[0] : start;
-        const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
-        const sourceSummary = payload?.dataSource || '未知資料來源';
-        const detailHtml = [
-            `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
-            `資料筆數: <span class="font-semibold">${total}</span>`,
-            `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-        ].join('<br>');
+        let detailHtml = '';
+        const extraSections = [];
+        if (parseMode === 'adjustedComposer') {
+            const rows = Array.isArray(payload.data) ? payload.data : [];
+            const total = rows.length;
+            const firstDate = rows.length > 0 ? rows[0]?.date || start : start;
+            const lastDate = rows.length > 0 ? rows[rows.length - 1]?.date || end : end;
+            const summary = payload && typeof payload.summary === 'object' ? payload.summary : {};
+            const summarySources = Array.isArray(summary?.sources)
+                ? summary.sources.join(' + ')
+                : null;
+            const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
+            const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
+            const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+            const aggregatedEvents = Array.isArray(payload?.dividendEvents) ? payload.dividendEvents : [];
+            const fallbackInfo =
+                payload?.adjustmentFallback && typeof payload.adjustmentFallback === 'object'
+                    ? payload.adjustmentFallback
+                    : null;
+            const fallbackAppliedFlag = Boolean(payload?.adjustmentFallbackApplied);
+            const appliedAdjustments = adjustmentsList.filter((event) => !event.skipped).length;
+            const skippedAdjustments = adjustmentsList.filter((event) => event.skipped).length;
+            const {
+                priceSource,
+                priceRows,
+                dividendRows,
+                dividendRowsTotal,
+                dividendEvents,
+                dividendFetchStart,
+                dividendFetchEnd,
+                dividendLookbackDays: lookbackDays,
+                adjustmentEvents,
+                skippedEvents,
+                adjustmentSkipReasons,
+            } = summary;
+            const dividendDiagnostics =
+                payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
+                    ? payload.dividendDiagnostics
+                    : null;
+            const lines = [
+                `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourceSummary)}</span>`,
+                `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
+                `涵蓋區間: <span class="font-semibold">${testerEscapeHtml(firstDate)} ~ ${testerEscapeHtml(lastDate)}</span>`,
+                `有效還原事件: <span class="font-semibold">${testerEscapeHtml(appliedAdjustments)}</span> 件${
+                    skippedAdjustments > 0
+                        ? `，跳過 <span class="font-semibold">${testerEscapeHtml(skippedAdjustments)}</span> 件`
+                        : ''
+                }`,
+            ];
+            if (Number.isFinite(priceRows)) {
+                lines.push(`價格筆數: <span class="font-semibold">${testerEscapeHtml(priceRows)}</span>`);
+            }
+            if (priceSource) {
+                lines.push(`原始價格來源: <span class="font-semibold">${testerEscapeHtml(priceSource)}</span>`);
+            }
+            if (Number.isFinite(adjustmentEvents)) {
+                lines.push(
+                    `成功還原事件: <span class="font-semibold">${testerEscapeHtml(adjustmentEvents)}</span> 件`,
+                );
+            }
+            if (Number.isFinite(skippedEvents) && skippedEvents > 0) {
+                lines.push(`略過事件: <span class="font-semibold">${testerEscapeHtml(skippedEvents)}</span> 件`);
+            }
+            if (Number.isFinite(dividendRowsTotal)) {
+                const effectiveText = Number.isFinite(dividendRows)
+                    ? `，其中 <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆落在回測區間`
+                    : '';
+                lines.push(
+                    `FinMind 配息結果筆數: <span class="font-semibold">${testerEscapeHtml(dividendRowsTotal)}</span> 筆${effectiveText}`,
+                );
+            } else if (Number.isFinite(dividendRows)) {
+                lines.push(
+                    `FinMind 配息結果筆數: <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆`,
+                );
+            }
+            if (Number.isFinite(dividendEvents)) {
+                lines.push(
+                    `FinMind 有效配息事件: <span class="font-semibold">${testerEscapeHtml(dividendEvents)}</span> 件`,
+                );
+            }
+            if (dividendFetchStart || dividendFetchEnd) {
+                const rangeStart = dividendFetchStart || '—';
+                const rangeEnd = dividendFetchEnd || '—';
+                const suffix = Number.isFinite(lookbackDays)
+                    ? `，向前延伸 <span class="font-semibold">${testerEscapeHtml(lookbackDays)}</span> 天`
+                    : '';
+                lines.push(
+                    `FinMind 配息查詢區間: <span class="font-semibold">${testerEscapeHtml(rangeStart)} ~ ${testerEscapeHtml(rangeEnd)}</span>${suffix}`,
+                );
+            }
+            if (dividendDiagnostics && dividendDiagnostics.dividendResult && typeof dividendDiagnostics.dividendResult === 'object') {
+                const resultDiag = dividendDiagnostics.dividendResult;
+                const resultParts = [];
+                if (Number.isFinite(resultDiag.totalRecords)) {
+                    resultParts.push(`原始 ${testerEscapeHtml(resultDiag.totalRecords)} 筆`);
+                }
+                if (Number.isFinite(resultDiag.filteredRecords)) {
+                    resultParts.push(`區間 ${testerEscapeHtml(resultDiag.filteredRecords)} 筆`);
+                }
+                if (Number.isFinite(resultDiag.eventCount)) {
+                    resultParts.push(`事件 ${testerEscapeHtml(resultDiag.eventCount)} 件`);
+                }
+                if (Number.isFinite(resultDiag.appliedAdjustments)) {
+                    resultParts.push(`成功 ${testerEscapeHtml(resultDiag.appliedAdjustments)} 件`);
+                }
+                if (resultParts.length > 0) {
+                    lines.push(`FinMind 配息結果：<span class="font-semibold">${resultParts.join(' / ')}</span>`);
+                }
+                const resultLogHtml = buildFinMindResponseLogHtml(
+                    Array.isArray(resultDiag.responseLog) ? resultDiag.responseLog : [],
+                    { title: 'FinMind 配息結果紀錄' },
+                );
+                if (resultLogHtml) {
+                    extraSections.push(resultLogHtml);
+                }
+            }
+            if (Array.isArray(dividendDiagnostics?.eventPreview) && dividendDiagnostics.eventPreview.length > 0) {
+                const previewLimit = Number.isFinite(dividendDiagnostics?.eventPreviewLimit)
+                    ? dividendDiagnostics.eventPreviewLimit
+                    : dividendDiagnostics.eventPreview.length;
+                const previewItems = dividendDiagnostics.eventPreview
+                    .slice(0, previewLimit)
+                    .map((item) => {
+                        const ratioValue = Number.isFinite(item.manualRatio) ? item.manualRatio : null;
+                        const ratioPercent = ratioValue !== null
+                            ? `${formatTesterNumber(ratioValue * 100, 3)}%`
+                            : '—';
+                        const beforeText = Number.isFinite(item.beforePrice)
+                            ? formatTesterNumber(item.beforePrice, 4)
+                            : '—';
+                        const afterText = Number.isFinite(item.afterPrice)
+                            ? formatTesterNumber(item.afterPrice, 4)
+                            : '—';
+                        const ratioEquation = ratioValue !== null && beforeText !== '—' && afterText !== '—'
+                            ? `${afterText} ÷ ${beforeText} ≈ ${formatTesterNumber(ratioValue, 6)}`
+                            : '';
+                        const dividendTotalText = Number.isFinite(item.dividendTotal)
+                            ? formatTesterNumber(item.dividendTotal, 4)
+                            : '—';
+                        const ratioLine = `<div>手動還原比率：<span class="font-semibold">${testerEscapeHtml(ratioPercent)}</span></div>`;
+                        const equationLine = ratioEquation
+                            ? `<div>計算：<span class="font-semibold">${testerEscapeHtml(ratioEquation)}</span></div>`
+                            : '';
+                        return `<div class="rounded-md border px-3 py-2 text-[10px]" style="border-color: var(--border);">`
+                            + `<div>除權息日：<span class="font-semibold">${testerEscapeHtml(item.date || '—')}</span></div>`
+                            + `${ratioLine}`
+                            + `<div>前收盤：<span class="font-semibold">${testerEscapeHtml(beforeText)}</span> ・ 後參考：<span class="font-semibold">${testerEscapeHtml(afterText)}</span></div>`
+                            + `${equationLine}`
+                            + `<div>股利總額（stock_and_cache_dividend）：<span class="font-semibold">${testerEscapeHtml(dividendTotalText)}</span></div>`
+                            + `</div>`;
+                    })
+                    .join('');
+                const moreCount = Number.isFinite(dividendDiagnostics?.eventPreviewMore)
+                    ? dividendDiagnostics.eventPreviewMore
+                    : Math.max(
+                        0,
+                        (Number.isFinite(dividendDiagnostics?.eventPreviewTotal)
+                            ? dividendDiagnostics.eventPreviewTotal
+                            : dividendDiagnostics.eventPreview.length)
+                            - Math.min(previewLimit, dividendDiagnostics.eventPreview.length),
+                    );
+                const moreNote = moreCount > 0
+                    ? `<div class="text-[10px]" style="color: var(--muted-foreground);">尚有 ${testerEscapeHtml(moreCount)} 筆配息結果未顯示，請於 JSON 回應內查看完整列表。</div>`
+                    : '';
+                const formulaHint = `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料來源：FinMind TaiwanStockDividendResult ・ 計算方式：after_price ÷ before_price = 手動還原係數</div>`;
+                lines.push(`<div class="mt-2"><div class="font-semibold text-[11px]">FinMind 配息推算</div>${formulaHint}<div class="mt-1 space-y-1">${previewItems}</div>${moreNote}</div>`);
+            }
+            if (dividendDiagnostics?.resultInfo?.detail) {
+                lines.push(`配息資料摘要：<span class="font-semibold">${testerEscapeHtml(dividendDiagnostics.resultInfo.detail)}</span>`);
+            }
+            const dividendResponseHtml = buildFinMindResponseLogHtml(
+                Array.isArray(dividendDiagnostics?.responseLog) ? dividendDiagnostics.responseLog : [],
+                { title: 'FinMind 配息結果請求紀錄' },
+            );
+            if (dividendResponseHtml) {
+                extraSections.push(dividendResponseHtml);
+            }
+            if (fallbackInfo) {
+                const fallbackLabel = testerEscapeHtml(fallbackInfo.label || 'FinMind 還原序列');
+                const statusText = fallbackInfo.applied ? '已啟用' : '未啟用';
+                const detailText = fallbackInfo.detail ? ` ・ ${testerEscapeHtml(fallbackInfo.detail)}` : '';
+                lines.push(`備援還原: <span class="font-semibold">${fallbackLabel}</span> ${statusText}${detailText}`);
+                if (Number.isFinite(fallbackInfo.matchedCount) || Number.isFinite(fallbackInfo.adjustmentCount)) {
+                    const matchedText = Number.isFinite(fallbackInfo.matchedCount)
+                        ? `對齊 ${testerEscapeHtml(fallbackInfo.matchedCount)} 筆`
+                        : '';
+                    const adjustmentText = Number.isFinite(fallbackInfo.adjustmentCount)
+                        ? `事件 ${testerEscapeHtml(fallbackInfo.adjustmentCount)} 件`
+                        : '';
+                    const ratioSampleText = Number.isFinite(fallbackInfo.ratioSamples)
+                        ? `係數樣本 ${testerEscapeHtml(fallbackInfo.ratioSamples)}`
+                        : '';
+                    const metaParts = [matchedText, adjustmentText, ratioSampleText].filter(Boolean);
+                    if (metaParts.length > 0) {
+                        lines.push(`備援統計: <span class="font-semibold">${metaParts.join(' ・ ')}</span>`);
+                    }
+                }
+                if (fallbackInfo.error) {
+                    lines.push(`備援錯誤: <span class="font-semibold">${testerEscapeHtml(fallbackInfo.error)}</span>`);
+                }
+                const fallbackLogHtml = buildFinMindResponseLogHtml(
+                    Array.isArray(fallbackInfo.responseLog) ? fallbackInfo.responseLog : [],
+                    { title: `${fallbackInfo.label || 'FinMind 還原序列'} 請求紀錄` },
+                );
+                if (fallbackLogHtml) {
+                    extraSections.push(fallbackLogHtml);
+                }
+            } else if (fallbackAppliedFlag) {
+                lines.push('備援還原: <span class="font-semibold">已啟用</span>');
+            }
+            if (
+                adjustmentSkipReasons &&
+                typeof adjustmentSkipReasons === 'object' &&
+                Object.keys(adjustmentSkipReasons).length > 0
+            ) {
+                const skipDetailsText = formatTesterSkipReasons(adjustmentSkipReasons);
+                if (skipDetailsText) {
+                    lines.push(`跳過原因統計: <span class="font-semibold">${skipDetailsText}</span>`);
+                }
+            }
+
+            detailHtml = lines.join('<br>');
+            const debugStepsHtml = buildTesterDebugStepsHtml(debugSteps);
+            if (debugStepsHtml) {
+                detailHtml += debugStepsHtml;
+            }
+            if (extraSections.length > 0) {
+                detailHtml += extraSections.join('');
+            }
+            const dividendPreviewHtml = buildDividendEventPreviewHtml(aggregatedEvents);
+            if (dividendPreviewHtml) {
+                detailHtml += dividendPreviewHtml;
+            }
+            const adjustmentHtml = buildAdjustmentDiagnosticsHtml(adjustmentsList);
+            if (adjustmentHtml) {
+                detailHtml += adjustmentHtml;
+            }
+            const finmindStatusHtml = buildFinMindApiStatusHtml(
+                payload?.finmindStatus || dividendDiagnostics?.finmindStatus || null,
+            );
+            if (finmindStatusHtml) {
+                detailHtml += finmindStatusHtml;
+            }
+        } else {
+            const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+            const total = Number.isFinite(payload.iTotalRecords)
+                ? payload.iTotalRecords
+                : aaData.length;
+            const isoDates = aaData
+                .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
+                .filter((value) => Boolean(value));
+            const firstDate = isoDates.length > 0 ? isoDates[0] : start;
+            const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
+            const sourceSummary = payload?.dataSource || '未知資料來源';
+            detailHtml = [
+                `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
+                `資料筆數: <span class="font-semibold">${total}</span>`,
+                `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
+            ].join('<br>');
+        }
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
@@ -233,7 +798,7 @@ function refreshDataSourceTester() {
         hintEl.style.color = 'var(--muted-foreground)';
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = '還原股價目前由 Yahoo Finance 提供，如需使用 FinMind 還原資料請升級 Sponsor 等級。';
+        hintEl.textContent = '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';

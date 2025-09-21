@@ -1,7 +1,13 @@
 
-// --- Worker Data Acquisition & Cache (v10.9) ---
+// --- Worker Data Acquisition & Cache (v11.4 - FinMind diagnostics propagation) ---
 // Patch Tag: LB-DATAPIPE-20241007A
-const WORKER_DATA_VERSION = "v10.9";
+// Patch Tag: LB-ADJ-PIPE-20241020A
+// Patch Tag: LB-ADJ-PIPE-20250220A
+// Patch Tag: LB-ADJ-PIPE-20250305A
+// Patch Tag: LB-ADJ-PIPE-20250312A
+// Patch Tag: LB-ADJ-PIPE-20250320A
+// Patch Tag: LB-ADJ-PIPE-20250410A
+const WORKER_DATA_VERSION = "v11.4";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -296,6 +302,510 @@ async function fetchWithAdaptiveRetry(url, options = {}, attempt = 1) {
   return response.json();
 }
 
+function roundTo(value, decimals = 4) {
+  if (!Number.isFinite(value)) return value;
+  const power = 10 ** decimals;
+  return Math.round(value * power) / power;
+}
+
+function readEventNumber(event, candidates = []) {
+  if (!event || typeof event !== "object") return null;
+  for (const key of candidates) {
+    if (key === null || key === undefined) continue;
+    if (Object.prototype.hasOwnProperty.call(event, key)) {
+      const raw = event[key];
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num;
+    }
+    const snakeKey = String(key)
+      .replace(/([A-Z])/g, "_$1")
+      .replace(/__+/g, "_")
+      .toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(event, snakeKey)) {
+      const raw = event[snakeKey];
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num;
+    }
+  }
+  return null;
+}
+
+function computeFallbackRatio(baseClose, components) {
+  if (!Number.isFinite(baseClose) || baseClose <= 0) return 1;
+
+  const cashDividend = Math.max(0, components.cashDividend || 0);
+  const stockDividend = Math.max(0, components.stockDividend || 0);
+  const stockCapitalIncrease = Math.max(0, components.stockCapitalIncrease || 0);
+  const cashCapitalIncrease = Math.max(0, components.cashCapitalIncrease || 0);
+  const subscriptionPrice =
+    Number.isFinite(components.subscriptionPrice) && components.subscriptionPrice > 0
+      ? components.subscriptionPrice
+      : 0;
+
+  const totalStockComponent = stockDividend + stockCapitalIncrease + cashCapitalIncrease;
+  const denominator =
+    baseClose * (1 + totalStockComponent) + cashDividend - cashCapitalIncrease * subscriptionPrice;
+
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 1;
+  }
+
+  const ratio = baseClose / denominator;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return 1;
+  }
+
+  return ratio;
+}
+
+function findPreviousValidCloseIndex(rows, startIndex) {
+  for (let i = startIndex - 1; i >= 0; i -= 1) {
+    const candidate = rows[i]?.close;
+    if (Number.isFinite(candidate) && candidate > 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function normaliseAdjustmentEvent(event) {
+  if (!event || event.skipped) return null;
+  const date = event.appliedDate || event.date || event.exDate || event.ex_date || null;
+  if (!date) return null;
+  const ratio = Number(event.ratio);
+  const cashDividend = readEventNumber(event, ["cashDividend", "cash_dividend"]);
+  const stockDividend = readEventNumber(event, ["stockDividend", "stock_dividend"]);
+  const cashCapitalIncrease = readEventNumber(event, ["cashCapitalIncrease", "cash_capital_increase"]);
+  const stockCapitalIncrease = readEventNumber(event, ["stockCapitalIncrease", "stock_capital_increase"]);
+  const subscriptionPrice = readEventNumber(event, ["subscriptionPrice", "subscription_price"]);
+  const hasComponent = [
+    cashDividend,
+    stockDividend,
+    cashCapitalIncrease,
+    stockCapitalIncrease,
+  ].some((value) => Number.isFinite(value) && value > 0);
+  if (!hasComponent && (!Number.isFinite(ratio) || ratio >= 0.999999)) {
+    return null;
+  }
+  return {
+    date,
+    ratio: Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : null,
+    cashDividend: Math.max(0, cashDividend || 0),
+    stockDividend: Math.max(0, stockDividend || 0),
+    cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
+    stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
+    subscriptionPrice:
+      Number.isFinite(subscriptionPrice) && subscriptionPrice > 0 ? subscriptionPrice : null,
+    baseClose: Number(event.baseClose ?? event.base_close),
+  };
+}
+
+// Patch Tag: LB-ADJ-PIPE-20250305A
+// 調整判斷邏輯：若前一交易日缺少有效的 adjustedFactor（或近似 1），
+// 但事件比例顯示應存在除權息調整，則直接啟用備援縮放，
+// 同時保留與原始 raw 價格的 1% 內差異判斷以避免重複調整。
+function shouldUseFallbackAdjustments(rows, events) {
+  for (const event of events) {
+    let baseIndex = rows.findIndex((row) => row?.date >= event.date);
+    if (baseIndex < 0) continue;
+    let cursor = baseIndex;
+    let baseClose = Number(event.baseClose);
+    if (!Number.isFinite(baseClose) || baseClose <= 0) {
+      while (cursor < rows.length) {
+        const candidate = rows[cursor]?.close;
+        if (Number.isFinite(candidate) && candidate > 0) {
+          baseClose = candidate;
+          break;
+        }
+        cursor += 1;
+      }
+    }
+    if (!Number.isFinite(baseClose) || baseClose <= 0 || cursor <= 0) continue;
+    const prevIndex = findPreviousValidCloseIndex(rows, cursor);
+    if (prevIndex < 0) continue;
+    const prevRow = rows[prevIndex];
+    const prevClose = prevRow?.close;
+    if (!Number.isFinite(prevClose) || prevClose <= 0) continue;
+
+    let ratio = event.ratio;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
+      ratio = computeFallbackRatio(baseClose, event);
+    }
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) continue;
+
+    const factor = Number(prevRow?.adjustedFactor);
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) <= 0.001) {
+      return true;
+    }
+
+    const expectedRawPrev = baseClose / ratio;
+    if (!Number.isFinite(expectedRawPrev) || expectedRawPrev <= 0) {
+      continue;
+    }
+    const approxRawPrev = prevClose / factor;
+    const relativeDiff = Math.abs(approxRawPrev - expectedRawPrev) / Math.max(expectedRawPrev, 1);
+    if (relativeDiff >= 0.01) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyFallbackAdjustments(rows, events) {
+  const factors = rows.map(() => 1);
+  let applied = false;
+
+  const resolveBaseValue = (row, key) => {
+    if (!row || typeof row !== "object") return null;
+    const camelKey = `raw${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const snakeKey = `raw_${key}`;
+    const directRaw = row[camelKey];
+    const direct = Number(directRaw);
+    if (directRaw !== null && directRaw !== undefined && Number.isFinite(direct)) {
+      return direct;
+    }
+    const snakeRaw = row[snakeKey];
+    const snake = Number(snakeRaw);
+    if (snakeRaw !== null && snakeRaw !== undefined && Number.isFinite(snake)) {
+      return snake;
+    }
+    const baseRaw = row[key];
+    const base = Number(baseRaw);
+    if (baseRaw !== null && baseRaw !== undefined && Number.isFinite(base)) {
+      return base;
+    }
+    return null;
+  };
+
+  events.forEach((event) => {
+    let baseIndex = rows.findIndex((row) => row?.date >= event.date);
+    if (baseIndex < 0) return;
+    let cursor = baseIndex;
+    let baseClose = Number(event.baseClose);
+    if (!Number.isFinite(baseClose) || baseClose <= 0) {
+      while (cursor < rows.length) {
+        const candidate = rows[cursor]?.close;
+        if (Number.isFinite(candidate) && candidate > 0) {
+          baseClose = candidate;
+          break;
+        }
+        cursor += 1;
+      }
+    }
+    if (!Number.isFinite(baseClose) || baseClose <= 0 || cursor <= 0) return;
+
+    let ratio = event.ratio;
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
+      ratio = computeFallbackRatio(baseClose, event);
+    }
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
+      return;
+    }
+
+    for (let i = 0; i < cursor; i += 1) {
+      if (!Number.isFinite(factors[i]) || factors[i] <= 0) {
+        factors[i] = ratio;
+      } else {
+        factors[i] *= ratio;
+      }
+    }
+    applied = true;
+  });
+
+  if (!applied) {
+    return { rows, mutated: false };
+  }
+
+  const adjustedRows = rows.map((row, index) => {
+    const factor = factors[index];
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
+      const preservedFactor = Number.isFinite(row?.adjustedFactor)
+        ? row.adjustedFactor
+        : Number.isFinite(factor)
+          ? factor
+          : 1;
+      return {
+        ...row,
+        rawOpen: resolveBaseValue(row, "open"),
+        rawHigh: resolveBaseValue(row, "high"),
+        rawLow: resolveBaseValue(row, "low"),
+        rawClose: resolveBaseValue(row, "close"),
+        adjustedFactor: preservedFactor,
+      };
+    }
+    const baseOpen = resolveBaseValue(row, "open");
+    const baseHigh = resolveBaseValue(row, "high");
+    const baseLow = resolveBaseValue(row, "low");
+    const baseClose = resolveBaseValue(row, "close");
+    const scale = (value) =>
+      value === null || value === undefined || !Number.isFinite(value) ? value : roundTo(value * factor, 4);
+    return {
+      ...row,
+      open: scale(baseOpen),
+      high: scale(baseHigh),
+      low: scale(baseLow),
+      close: scale(baseClose),
+      rawOpen: Number.isFinite(baseOpen) ? baseOpen : row.rawOpen ?? null,
+      rawHigh: Number.isFinite(baseHigh) ? baseHigh : row.rawHigh ?? null,
+      rawLow: Number.isFinite(baseLow) ? baseLow : row.rawLow ?? null,
+      rawClose: Number.isFinite(baseClose) ? baseClose : row.rawClose ?? null,
+      adjustedFactor: factor,
+    };
+  });
+
+  const mutated = adjustedRows.some((row, index) => {
+    const original = rows[index];
+    if (!original) return true;
+    const compare = (prop) => {
+      const a = row[prop];
+      const b = original[prop];
+      if (!Number.isFinite(a) && !Number.isFinite(b)) return false;
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+      return Math.abs(a - b) > 1e-6;
+    };
+    return compare("open") || compare("high") || compare("low") || compare("close");
+  });
+
+  return { rows: mutated ? adjustedRows : rows, mutated };
+}
+
+// Patch Tag: LB-ADJ-PIPE-20250305A
+function normaliseDividendEvent(event) {
+  if (!event) return null;
+  const date = event.date || event.exDate || event.ex_date || null;
+  if (!date) return null;
+  const cashDividend = readEventNumber(event, [
+    "cashDividend",
+    "cash_dividend",
+  ]);
+  const stockDividend = readEventNumber(event, [
+    "stockDividend",
+    "stock_dividend",
+  ]);
+  const cashCapitalIncrease = readEventNumber(event, [
+    "cashCapitalIncrease",
+    "cash_capital_increase",
+  ]);
+  const stockCapitalIncrease = readEventNumber(event, [
+    "stockCapitalIncrease",
+    "stock_capital_increase",
+  ]);
+  const subscriptionPrice = readEventNumber(event, [
+    "subscriptionPrice",
+    "subscription_price",
+  ]);
+  const hasComponent = [
+    cashDividend,
+    stockDividend,
+    cashCapitalIncrease,
+    stockCapitalIncrease,
+  ].some((value) => Number.isFinite(value) && value > 0);
+  if (!hasComponent) {
+    return null;
+  }
+  return {
+    date,
+    ratio: null,
+    cashDividend: Math.max(0, cashDividend || 0),
+    stockDividend: Math.max(0, stockDividend || 0),
+    cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
+    stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
+    subscriptionPrice:
+      Number.isFinite(subscriptionPrice) && subscriptionPrice > 0
+        ? subscriptionPrice
+        : null,
+    baseClose: Number(event.baseClose ?? event.base_close ?? null),
+  };
+}
+
+function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
+  const result = { rows, fallbackApplied: false };
+  if (!Array.isArray(rows) || rows.length === 0) return result;
+
+  const preparedEvents = [];
+  if (Array.isArray(adjustments)) {
+    adjustments
+      .map(normaliseAdjustmentEvent)
+      .filter((event) => event && event.date)
+      .forEach((event) => {
+        preparedEvents.push(event);
+      });
+  }
+
+  if (preparedEvents.length === 0 && Array.isArray(dividendEvents)) {
+    dividendEvents
+      .map(normaliseDividendEvent)
+      .filter((event) => event && event.date)
+      .forEach((event) => {
+        preparedEvents.push(event);
+      });
+  }
+
+  preparedEvents.sort((a, b) => a.date.localeCompare(b.date));
+
+  if (preparedEvents.length === 0) {
+    return result;
+  }
+
+  const fallbackNeeded = shouldUseFallbackAdjustments(rows, preparedEvents);
+  if (!fallbackNeeded) {
+    return result;
+  }
+
+  const { rows: adjustedRows, mutated } = applyFallbackAdjustments(rows, preparedEvents);
+  if (!mutated) {
+    return result;
+  }
+
+  return { rows: adjustedRows, fallbackApplied: true };
+}
+
+async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    market: marketKey,
+  });
+  const response = await fetch(`/api/adjusted-price/?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const rawText = await response.text();
+  let payload = {};
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    throw new Error("還原股價服務回傳格式錯誤");
+  }
+  if (!response.ok || payload?.error) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const startDateObj = new Date(startDate);
+  const endDateObj = new Date(endDate);
+  const normalizedRows = [];
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  rows.forEach((row) => {
+    if (!row) return;
+    const isoDate = row.date || row.Date || null;
+    if (!isoDate) return;
+    const d = new Date(isoDate);
+    if (Number.isNaN(d.getTime()) || d < startDateObj || d > endDateObj) return;
+    const open = toNumber(row.open ?? row.Open ?? row.Opening);
+    const high = toNumber(row.high ?? row.High ?? row.max);
+    const low = toNumber(row.low ?? row.Low ?? row.min);
+    const close = toNumber(row.close ?? row.Close);
+    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
+    const rawOpen = toNumber(
+      row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
+    );
+    const rawHigh = toNumber(
+      row.rawHigh ?? row.raw_high ?? row.baseHigh ?? row.base_high ?? row.referenceHigh,
+    );
+    const rawLow = toNumber(
+      row.rawLow ?? row.raw_low ?? row.baseLow ?? row.base_low ?? row.referenceLow,
+    );
+    const rawClose = toNumber(
+      row.rawClose ?? row.raw_close ?? row.baseClose ?? row.base_close ?? row.referenceClose,
+    );
+
+    const fallbackOpen = close ?? open ?? rawOpen ?? 0;
+    const normalizedOpen = open ?? fallbackOpen;
+    const normalizedClose = close ?? normalizedOpen;
+    const normalizedHigh =
+      high ?? Math.max(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
+    const normalizedLow =
+      low ?? Math.min(normalizedOpen ?? normalizedClose, normalizedClose ?? normalizedOpen);
+
+    const resolvedRawOpen = Number.isFinite(rawOpen) ? rawOpen : normalizedOpen;
+    const resolvedRawHigh = Number.isFinite(rawHigh) ? rawHigh : normalizedHigh;
+    const resolvedRawLow = Number.isFinite(rawLow) ? rawLow : normalizedLow;
+    const resolvedRawClose = Number.isFinite(rawClose) ? rawClose : normalizedClose;
+    const rowPriceSource =
+      typeof row.priceSource === "string" && row.priceSource.trim().length > 0
+        ? row.priceSource
+        : typeof row.price_source === "string" && row.price_source.trim().length > 0
+          ? row.price_source
+          : null;
+
+    normalizedRows.push({
+      date: isoDate,
+      open: normalizedOpen,
+      high: normalizedHigh,
+      low: normalizedLow,
+      close: normalizedClose,
+      volume: Math.round(volumeRaw / 1000),
+      adjustedFactor: Number.isFinite(factor) ? factor : undefined,
+      rawOpen: resolvedRawOpen,
+      rawHigh: resolvedRawHigh,
+      rawLow: resolvedRawLow,
+      rawClose: resolvedRawClose,
+      priceSource: rowPriceSource || payload?.priceSource || undefined,
+    });
+  });
+
+  normalizedRows.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const summary = payload?.summary || null;
+  const adjustments = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+  const priceSource = payload?.priceSource || null;
+  const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
+  const sourceLabel =
+    payload?.dataSource ||
+    (summary && Array.isArray(summary.sources) && summary.sources.length > 0
+      ? summary.sources.join(" + ")
+      : "Netlify 還原管線");
+
+  const serverFallbackInfo =
+    payload?.adjustmentFallback && typeof payload.adjustmentFallback === "object"
+      ? payload.adjustmentFallback
+      : null;
+  const serverFallbackApplied = Boolean(payload?.adjustmentFallbackApplied);
+
+  const dividendEvents = Array.isArray(payload?.dividendEvents)
+    ? payload.dividendEvents
+    : [];
+  const dividendDiagnostics =
+    payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === "object"
+      ? payload.dividendDiagnostics
+      : null;
+  const finmindStatus =
+    payload?.finmindStatus && typeof payload.finmindStatus === "object"
+      ? payload.finmindStatus
+      : null;
+
+  const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
+    normalizedRows,
+    adjustments,
+    dividendEvents,
+  );
+
+  const finalFallbackApplied = serverFallbackApplied || fallbackApplied;
+
+  return {
+    data: adjustedRows,
+    dataSource: sourceLabel,
+    stockName: payload?.stockName || stockNo,
+    summary,
+    adjustments,
+    priceSource,
+    adjustmentFallbackApplied: finalFallbackApplied,
+    adjustmentFallbackInfo: serverFallbackInfo,
+    debugSteps,
+    dividendEvents,
+    dividendDiagnostics,
+    finmindStatus,
+  };
+}
+
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   try {
     let dateStr = null;
@@ -379,14 +889,37 @@ function dedupeAndSortData(rows) {
   );
 }
 
-function summariseDataSourceFlags(flags, defaultLabel) {
-  if (!flags || flags.size === 0) return defaultLabel;
-  if (flags.size === 1) return Array.from(flags)[0];
-  const hasCache = Array.from(flags).some((src) => /快取|cache/i.test(src));
-  const hasRemote = Array.from(flags).some((src) => !/快取|cache/i.test(src));
-  if (hasRemote && hasCache) return `${defaultLabel} (部分快取)`;
-  if (hasCache) return `${defaultLabel} (快取)`;
-  return Array.from(flags).join(" / ");
+function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
+  const entries =
+    flags instanceof Set ? Array.from(flags) : Array.isArray(flags) ? flags : [];
+  const cacheLabels = entries.filter((src) => /快取|cache/i.test(src));
+  const remoteLabels = entries
+    .filter((src) => !/快取|cache/i.test(src))
+    .map((label) => label.replace(/\s*\((?:部份)?快取\)\s*$/i, '').trim())
+    .filter(Boolean);
+  const fallback =
+    options.fallbackRemote ||
+    (options.adjusted
+      ? 'Yahoo Finance (還原)'
+      : options.market === 'TPEX'
+        ? 'FinMind (主來源)'
+        : defaultLabel || 'TWSE (主來源)');
+  const uniqueRemote = Array.from(new Set(remoteLabels));
+  if (uniqueRemote.length === 0) {
+    if (cacheLabels.length > 0) {
+      const suffix = cacheLabels.length > 1 ? '部分快取' : '快取';
+      return `${fallback} (${suffix})`;
+    }
+    return fallback;
+  }
+  const primary = uniqueRemote[0];
+  if (cacheLabels.length > 0) {
+    return `${primary} (部分快取)`;
+  }
+  if (uniqueRemote.length === 1) {
+    return primary;
+  }
+  return uniqueRemote.join(' + ');
 }
 
 async function runWithConcurrency(items, limit, workerFn) {
@@ -442,6 +975,10 @@ async function fetchStockData(
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
       stockName: cachedEntry.stockName || stockNo,
+      adjustmentFallbackApplied: Boolean(
+        cachedEntry?.meta?.adjustmentFallbackApplied,
+      ),
+      adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
     };
   }
 
@@ -450,6 +987,79 @@ async function fetchStockData(
     progress: adjusted ? 8 : 5,
     message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
   });
+
+  if (adjusted) {
+    self.postMessage({
+      type: "progress",
+      progress: 18,
+      message: "呼叫還原股價服務...",
+    });
+    const adjustedResult = await fetchAdjustedPriceRange(
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+    );
+    const adjustedEntry = {
+      data: adjustedResult.data,
+      stockName: adjustedResult.stockName || stockNo,
+      dataSource: adjustedResult.dataSource,
+      timestamp: Date.now(),
+      meta: {
+        stockNo,
+        startDate,
+        endDate,
+        priceMode: getPriceModeKey(adjusted),
+        summary: adjustedResult.summary || null,
+        adjustments: adjustedResult.adjustments || [],
+        priceSource: adjustedResult.priceSource || null,
+        adjustmentFallbackApplied:
+          Boolean(adjustedResult.adjustmentFallbackApplied),
+        adjustmentFallbackInfo:
+          adjustedResult.adjustmentFallbackInfo &&
+          typeof adjustedResult.adjustmentFallbackInfo === "object"
+            ? adjustedResult.adjustmentFallbackInfo
+            : null,
+        debugSteps: Array.isArray(adjustedResult.debugSteps)
+          ? adjustedResult.debugSteps
+          : [],
+        dividendDiagnostics:
+          adjustedResult.dividendDiagnostics &&
+          typeof adjustedResult.dividendDiagnostics === "object"
+            ? adjustedResult.dividendDiagnostics
+            : null,
+        dividendEvents: Array.isArray(adjustedResult.dividendEvents)
+          ? adjustedResult.dividendEvents
+          : [],
+      },
+      priceMode: getPriceModeKey(adjusted),
+    };
+    setWorkerCacheEntry(marketKey, cacheKey, adjustedEntry);
+    return {
+      data: adjustedResult.data,
+      dataSource: adjustedResult.dataSource,
+      stockName: adjustedResult.stockName || stockNo,
+      summary: adjustedResult.summary || null,
+      adjustments: adjustedResult.adjustments || [],
+      priceSource: adjustedResult.priceSource || null,
+      adjustmentFallbackApplied: Boolean(
+        adjustedResult.adjustmentFallbackApplied,
+      ),
+      adjustmentFallbackInfo:
+        adjustedResult.adjustmentFallbackInfo &&
+        typeof adjustedResult.adjustmentFallbackInfo === "object"
+          ? adjustedResult.adjustmentFallbackInfo
+          : null,
+      dividendDiagnostics:
+        adjustedResult.dividendDiagnostics &&
+        typeof adjustedResult.dividendDiagnostics === "object"
+          ? adjustedResult.dividendDiagnostics
+          : null,
+      dividendEvents: Array.isArray(adjustedResult.dividendEvents)
+        ? adjustedResult.dividendEvents
+        : [],
+    };
+  }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -651,9 +1261,17 @@ async function fetchStockData(
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
+  const defaultRemoteLabel = isTpex
+    ? adjusted
+      ? "Yahoo Finance (還原)"
+      : "FinMind (主來源)"
+    : adjusted
+      ? "Yahoo Finance (還原)"
+      : "TWSE (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
-    isTpex ? "TPEX" : "TWSE",
+    defaultRemoteLabel,
+    { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
 
   setWorkerCacheEntry(marketKey, cacheKey, {
@@ -4089,6 +4707,7 @@ self.onmessage = async function (e) {
     params,
     useCachedData,
     cachedData,
+    cachedMeta,
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
@@ -4123,9 +4742,49 @@ self.onmessage = async function (e) {
               startDate: params.startDate,
               endDate: params.endDate,
               priceMode: getPriceModeKey(params.adjustedPrice),
+              summary: cachedMeta?.summary || null,
+              adjustments: Array.isArray(cachedMeta?.adjustments)
+                ? cachedMeta.adjustments
+                : [],
+              priceSource: cachedMeta?.priceSource || null,
+              adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+              adjustmentFallbackInfo:
+                cachedMeta?.adjustmentFallbackInfo &&
+                typeof cachedMeta.adjustmentFallbackInfo === "object"
+                  ? cachedMeta.adjustmentFallbackInfo
+                  : null,
+              debugSteps: Array.isArray(cachedMeta?.debugSteps)
+                ? cachedMeta.debugSteps
+                : [],
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
+        }
+        if (cachedMeta) {
+          workerLastMeta = {
+            ...(workerLastMeta || {}),
+            stockNo: params.stockNo,
+            startDate: params.startDate,
+            endDate: params.endDate,
+            priceMode: getPriceModeKey(params.adjustedPrice),
+            summary: cachedMeta.summary || null,
+            adjustments: Array.isArray(cachedMeta.adjustments)
+              ? cachedMeta.adjustments
+              : [],
+            priceSource: cachedMeta.priceSource || null,
+            adjustmentFallbackApplied: Boolean(cachedMeta.adjustmentFallbackApplied),
+            adjustmentFallbackInfo:
+              cachedMeta?.adjustmentFallbackInfo &&
+              typeof cachedMeta.adjustmentFallbackInfo === "object"
+                ? cachedMeta.adjustmentFallbackInfo
+                : null,
+            debugSteps: Array.isArray(cachedMeta.debugSteps)
+              ? cachedMeta.debugSteps
+              : [],
+            marketKey,
+            dataSource: "主執行緒快取",
+            stockName: params.stockNo,
+          };
         }
       } else {
         console.log("[Worker] Fetching new data for backtest.");
@@ -4161,6 +4820,53 @@ self.onmessage = async function (e) {
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call
+      backtestResult.adjustmentFallbackApplied = Boolean(
+        outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
+      );
+
+      const debugSteps = Array.isArray(outcome?.debugSteps)
+        ? outcome.debugSteps
+        : Array.isArray(workerLastMeta?.debugSteps)
+          ? workerLastMeta.debugSteps
+          : [];
+
+      backtestResult.dataDebug = {
+        summary: outcome?.summary || workerLastMeta?.summary || null,
+        adjustments: Array.isArray(outcome?.adjustments)
+          ? outcome.adjustments
+          : Array.isArray(workerLastMeta?.adjustments)
+            ? workerLastMeta.adjustments
+            : [],
+        debugSteps,
+        priceSource: outcome?.priceSource || workerLastMeta?.priceSource || null,
+        dataSource: outcome?.dataSource || workerLastMeta?.dataSource || null,
+        adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        adjustmentFallbackInfo:
+          outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
+        dividendDiagnostics:
+          outcome?.dividendDiagnostics || workerLastMeta?.dividendDiagnostics || null,
+        dividendEvents: Array.isArray(outcome?.dividendEvents)
+          ? outcome.dividendEvents
+          : Array.isArray(workerLastMeta?.dividendEvents)
+            ? workerLastMeta.dividendEvents
+            : [],
+      };
+
+      if (!useCachedData && fetched) {
+        backtestResult.rawMeta = {
+          summary: outcome?.summary || null,
+          adjustments: Array.isArray(outcome?.adjustments) ? outcome.adjustments : [],
+          debugSteps: Array.isArray(outcome?.debugSteps) ? outcome.debugSteps : [],
+          priceSource: outcome?.priceSource || null,
+          dataSource: outcome?.dataSource || null,
+          adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+          adjustmentFallbackInfo: outcome?.adjustmentFallbackInfo || null,
+          dividendDiagnostics: outcome?.dividendDiagnostics || null,
+          dividendEvents: Array.isArray(outcome?.dividendEvents)
+            ? outcome.dividendEvents
+            : [],
+        };
+      }
 
       // 將結果與資料來源一起回傳
       const metaInfo = outcome ||
@@ -4175,6 +4881,9 @@ self.onmessage = async function (e) {
         data: backtestResult,
         stockName: metaInfo?.stockName || "",
         dataSource: metaInfo?.dataSource || "未知",
+        adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        adjustmentFallbackInfo:
+          outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
       });
     } else if (type === "runOptimization") {
       if (!optimizeTargetStrategy || !optimizeParamName || !optimizeRange)

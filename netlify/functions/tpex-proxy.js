@@ -1,7 +1,9 @@
-// netlify/functions/tpex-proxy.js (v10.5 - FinMind primary with adaptive retries)
+// netlify/functions/tpex-proxy.js (v11.1 - segmented FinMind fetch + request diagnostics)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
+// Patch Tag: LB-TPEX-PROXY-20241216A
+// Patch Tag: LB-TPEX-PROXY-20250320A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -10,6 +12,13 @@ const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
+const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
+const FINMIND_PRICE_SPAN_DAYS = 120;
+const FINMIND_MIN_SPAN_DAYS = 30;
+const FINMIND_RETRY_ATTEMPTS = 3;
+const FINMIND_RETRY_BASE_DELAY_MS = 350;
+const FINMIND_SEGMENT_COOLDOWN_MS = 160;
+const FINMIND_SPLITTABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -119,6 +128,147 @@ function rocToISO(rocDate) {
     return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
+function formatISODateFromDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const year = date.getUTCFullYear();
+    const month = pad2(date.getUTCMonth() + 1);
+    const day = pad2(date.getUTCDate());
+    return `${year}-${month}-${day}`;
+}
+
+function enumerateDateSpans(startDate, endDate, maxSpanDays) {
+    if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) return [];
+    if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) return [];
+    if (startDate > endDate) return [];
+    const spanDays = Math.max(1, Math.floor(maxSpanDays));
+    const spans = [];
+    const cursor = new Date(Date.UTC(
+        startDate.getUTCFullYear(),
+        startDate.getUTCMonth(),
+        startDate.getUTCDate(),
+    ));
+    const last = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate()));
+    while (cursor <= last) {
+        const spanStart = new Date(cursor.getTime());
+        const spanEnd = new Date(cursor.getTime());
+        spanEnd.setUTCDate(spanEnd.getUTCDate() + spanDays - 1);
+        if (spanEnd > last) {
+            spanEnd.setTime(last.getTime());
+        }
+        spans.push({
+            startISO: formatISODateFromDate(spanStart),
+            endISO: formatISODateFromDate(spanEnd),
+        });
+        cursor.setTime(spanEnd.getTime());
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return spans;
+}
+
+function countSpanDays(span) {
+    if (!span?.startISO || !span?.endISO) return 0;
+    const start = new Date(`${span.startISO}T00:00:00Z`);
+    const end = new Date(`${span.endISO}T00:00:00Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+        return 0;
+    }
+    const diffMs = end.getTime() - start.getTime();
+    return Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function splitSpan(span) {
+    if (!span?.startISO || !span?.endISO) return null;
+    const start = new Date(`${span.startISO}T00:00:00Z`);
+    const end = new Date(`${span.endISO}T00:00:00Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+        return null;
+    }
+    const midTime = start.getTime() + Math.floor((end.getTime() - start.getTime()) / 2);
+    const firstEnd = new Date(midTime);
+    const secondStart = new Date(midTime + 24 * 60 * 60 * 1000);
+    return [
+        {
+            startISO: formatISODateFromDate(start),
+            endISO: formatISODateFromDate(firstEnd),
+        },
+        {
+            startISO: formatISODateFromDate(secondStart),
+            endISO: formatISODateFromDate(end),
+        },
+    ];
+}
+
+function extractStatusCode(error) {
+    if (!error) return undefined;
+    const statusLike = error.statusCode ?? error.status ?? error.code;
+    if (statusLike !== undefined && statusLike !== null) {
+        const numeric = Number(statusLike);
+        if (Number.isFinite(numeric)) {
+            return numeric;
+        }
+    }
+    if (error.original) {
+        const originalStatus = extractStatusCode(error.original);
+        if (Number.isFinite(originalStatus)) {
+            return originalStatus;
+        }
+    }
+    return undefined;
+}
+
+function shouldSplitSpan(error, spanDays, minSpanDays) {
+    if (!Number.isFinite(spanDays) || spanDays <= minSpanDays) return false;
+    const statusCode = extractStatusCode(error);
+    if (statusCode && FINMIND_SPLITTABLE_STATUS.has(statusCode)) {
+        return true;
+    }
+    const message = String(error?.message || '').toLowerCase();
+    if (!statusCode && message) {
+        if (message.includes('timeout') || message.includes('timed out')) return true;
+        if (message.includes('network') || message.includes('fetch failed')) return true;
+        if (message.includes('socket hang up') || message.includes('aborted')) return true;
+    }
+    return false;
+}
+
+function delay(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function executeFinMindQuery(params, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts ?? FINMIND_RETRY_ATTEMPTS));
+    const baseDelay = Math.max(0, Number(options.baseDelayMs ?? FINMIND_RETRY_BASE_DELAY_MS));
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            const url = new URL(FINMIND_BASE_URL);
+            Object.entries(params || {}).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) {
+                    url.searchParams.set(key, String(value));
+                }
+            });
+            const response = await fetch(url.toString());
+            if (!response.ok) {
+                const error = new Error(`FinMind HTTP ${response.status}`);
+                error.statusCode = response.status;
+                throw error;
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+            if (attempt >= attempts) {
+                break;
+            }
+            const waitMs = Math.min(1800, baseDelay * (attempt + 1) + Math.random() * 400);
+            await delay(waitMs);
+        }
+    }
+    throw lastError || new Error('FinMind 查詢失敗');
+}
+
 function withinRange(rocDate, start, end) {
     const iso = rocToISO(rocDate);
     if (!iso) return false;
@@ -185,92 +335,167 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
     if (startISO && endISO && startISO > endISO) {
         startISO = endISO;
     }
-    const requestFinMind = async (omitRange = false) => {
-        const url = new URL('https://api.finmindtrade.com/api/v4/data');
-        url.searchParams.set('dataset', dataset);
-        url.searchParams.set('data_id', stockNo);
-        url.searchParams.set('stock_id', stockNo);
-        url.searchParams.set('token', token);
-        if (!omitRange) {
-            if (startISO) url.searchParams.set('start_date', startISO);
-            if (endISO) url.searchParams.set('end_date', endISO);
-        }
 
-        console.log(`[TPEX Proxy v10.5] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo}`);
-        const response = await fetch(url.toString());
-        const rawText = await response.text();
-        let payload = null;
-        try {
-            payload = rawText ? JSON.parse(rawText) : null;
-        } catch (parseError) {
-            console.warn('[TPEX Proxy v10.5] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
-        }
-
-        const responseStatus = response.status;
-        const payloadStatus = payload?.status;
-        const payloadMessage = payload?.msg || '';
-
-        const isSuccessful = response.ok && payloadStatus === 200 && Array.isArray(payload?.data);
-        if (isSuccessful) {
-            return payload.data;
-        }
-
-        const combinedMessage = payloadMessage || `FinMind HTTP ${responseStatus}`;
-        if (!omitRange && (responseStatus === 400 || payloadStatus === 400)) {
-            console.warn(`[TPEX Proxy v10.5] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`);
-            return requestFinMind(true);
-        }
-
-        throw new Error(normaliseFinMindErrorMessage(combinedMessage));
+    const toUtcDate = (iso) => {
+        if (!iso) return null;
+        const parsed = new Date(`${iso}T00:00:00Z`);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
 
-    const finmindRows = await requestFinMind(false);
+    const startDate = toUtcDate(startISO);
+    const endDate = toUtcDate(endISO);
+    const spans = startDate && endDate ? enumerateDateSpans(startDate, endDate, FINMIND_PRICE_SPAN_DAYS) : [];
 
-    const rowsByMonth = new Map();
+    const rowsMap = new Map(); // Map<isoDate, Row>
     let stockName = '';
-    let prevClose = null;
-    for (const item of finmindRows) {
-        const isoDate = item.date;
-        if (!isoDate) continue;
-        const rocDate = isoToRoc(isoDate);
-        if (!rocDate) continue;
-        if (!stockName && item.stock_name) {
-            stockName = item.stock_name;
+
+    if (spans.length === 0) {
+        const params = {
+            dataset,
+            data_id: stockNo,
+            stock_id: stockNo,
+            token,
+        };
+        const json = await executeFinMindQuery(params);
+        if (json?.status !== 200 || !Array.isArray(json?.data)) {
+            throw new Error(
+                normaliseFinMindErrorMessage(json?.msg || 'FinMind 回應異常'),
+            );
         }
-        const open = safeRound(Number(item.open ?? item.Open ?? item.Opening));
-        const high = safeRound(Number(item.max ?? item.high ?? item.High));
-        const low = safeRound(Number(item.min ?? item.low ?? item.Low));
-        const closeValue = safeRound(Number(item.close ?? item.Close));
-        const volumeValue = Number(item.Trading_Volume ?? item.volume ?? item.Volume ?? 0);
-        const changeValue = Number(item.spread ?? item.change ?? item.Change ?? null);
-        const finalOpen = open ?? closeValue ?? 0;
-        const finalHigh = high ?? Math.max(finalOpen, closeValue ?? finalOpen);
-        const finalLow = low ?? Math.min(finalOpen, closeValue ?? finalOpen);
-        const finalClose = closeValue ?? finalOpen;
-        const finalChange = Number.isFinite(changeValue)
-            ? safeRound(changeValue)
-            : (prevClose !== null && finalClose !== null
-                ? safeRound(finalClose - prevClose)
-                : 0);
-        prevClose = finalClose ?? prevClose;
-        const volume = Number.isFinite(volumeValue) ? Math.round(volumeValue) : 0;
-        const monthKey = isoDate.slice(0, 7).replace('-', '');
-        if (!rowsByMonth.has(monthKey)) rowsByMonth.set(monthKey, []);
-        rowsByMonth.get(monthKey).push([
-            rocDate,
-            stockNo,
-            stockName || stockNo,
-            safeRound(finalOpen),
-            safeRound(finalHigh),
-            safeRound(finalLow),
-            safeRound(finalClose),
-            finalChange ?? 0,
-            volume,
-        ]);
+        json.data.forEach((item) => {
+            const isoDate = item.date;
+            if (!isoDate) return;
+            const rocDate = isoToRoc(isoDate);
+            if (!rocDate) return;
+            if (!stockName && item.stock_name) {
+                stockName = item.stock_name;
+            }
+            rowsMap.set(isoDate, {
+                isoDate,
+                rocDate,
+                open: safeRound(Number(item.open ?? item.Open ?? item.Opening)),
+                high: safeRound(Number(item.max ?? item.high ?? item.High)),
+                low: safeRound(Number(item.min ?? item.low ?? item.Low)),
+                close: safeRound(Number(item.close ?? item.Close)),
+                volume: Number(item.Trading_Volume ?? item.volume ?? item.Volume ?? 0),
+                change: Number(item.spread ?? item.change ?? item.Change ?? null),
+            });
+        });
+    } else {
+        const queue = [...spans];
+        while (queue.length > 0) {
+            const span = queue.shift();
+            const spanDays = countSpanDays(span);
+            const params = {
+                dataset,
+                data_id: stockNo,
+                stock_id: stockNo,
+                start_date: span.startISO,
+                end_date: span.endISO,
+                token,
+            };
+            let json;
+            try {
+                json = await executeFinMindQuery(params);
+            } catch (error) {
+                if (shouldSplitSpan(error, spanDays, FINMIND_MIN_SPAN_DAYS)) {
+                    const split = splitSpan(span);
+                    if (split && split.length === 2) {
+                        console.warn(
+                            `[TPEX Proxy v11.0] FinMind 段拆分 ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d): ${error.message || error}`,
+                        );
+                        queue.unshift(...split);
+                        await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+                        continue;
+                    }
+                }
+                const enriched = new Error(
+                    `[TPEX Proxy v11.0] FinMind 段錯誤 ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
+                );
+                enriched.original = error;
+                throw enriched;
+            }
+            if (json?.status !== 200 || !Array.isArray(json?.data)) {
+                const payloadError = new Error(
+                    normaliseFinMindErrorMessage(json?.msg || 'FinMind 回應異常'),
+                );
+                payloadError.statusCode = json?.status;
+                if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_SPAN_DAYS)) {
+                    const split = splitSpan(span);
+                    if (split && split.length === 2) {
+                        console.warn(
+                            `[TPEX Proxy v11.0] FinMind 段拆分 ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d): ${payloadError.message}`,
+                        );
+                        queue.unshift(...split);
+                        await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+                        continue;
+                    }
+                }
+                throw payloadError;
+            }
+            json.data.forEach((item) => {
+                const isoDate = item.date;
+                if (!isoDate) return;
+                const rocDate = isoToRoc(isoDate);
+                if (!rocDate) return;
+                if (!stockName && item.stock_name) {
+                    stockName = item.stock_name;
+                }
+                rowsMap.set(isoDate, {
+                    isoDate,
+                    rocDate,
+                    open: safeRound(Number(item.open ?? item.Open ?? item.Opening)),
+                    high: safeRound(Number(item.max ?? item.high ?? item.High)),
+                    low: safeRound(Number(item.min ?? item.low ?? item.Low)),
+                    close: safeRound(Number(item.close ?? item.Close)),
+                    volume: Number(item.Trading_Volume ?? item.volume ?? item.Volume ?? 0),
+                    change: Number(item.spread ?? item.change ?? item.Change ?? null),
+                });
+            });
+            if (queue.length > 0) {
+                await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+            }
+        }
     }
 
+    const sortedRows = Array.from(rowsMap.values()).sort(
+        (a, b) => new Date(a.isoDate) - new Date(b.isoDate),
+    );
+
+    const monthlyBuckets = new Map();
+    let prevClose = null;
+    sortedRows.forEach((row) => {
+        const monthKey = row.isoDate.slice(0, 7).replace('-', '');
+        if (!monthlyBuckets.has(monthKey)) monthlyBuckets.set(monthKey, []);
+        const open = row.open ?? row.close ?? null;
+        const close = row.close ?? open;
+        const high = row.high ?? Math.max(open ?? close ?? 0, close ?? open ?? 0);
+        const low = row.low ?? Math.min(open ?? close ?? 0, close ?? open ?? 0);
+        let change = 0;
+        if (Number.isFinite(row.change)) {
+            change = safeRound(row.change) ?? 0;
+        } else if (prevClose !== null && Number.isFinite(close)) {
+            change = safeRound(close - prevClose) ?? 0;
+        }
+        if (Number.isFinite(close)) {
+            prevClose = close;
+        }
+        const volume = Number.isFinite(row.volume) ? Math.round(row.volume) : 0;
+        monthlyBuckets.get(monthKey).push([
+            row.rocDate,
+            stockNo,
+            stockName || stockNo,
+            safeRound(open ?? close ?? 0),
+            safeRound(high ?? close ?? open ?? 0),
+            safeRound(low ?? open ?? close ?? 0),
+            safeRound(close ?? open ?? 0),
+            change,
+            volume,
+        ]);
+    });
+
     const label = adjusted ? 'FinMind (還原備援)' : 'FinMind (主來源)';
-    for (const [monthKey, rows] of rowsByMonth.entries()) {
+    for (const [monthKey, rows] of monthlyBuckets.entries()) {
         rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
         await writeCache(store, buildMonthCacheKey(stockNo, monthKey, adjusted), {
             stockName: stockName || stockNo,
@@ -430,15 +655,37 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
 }
 
 function summariseSources(flags, adjusted) {
-    if (flags.size === 0) return adjusted ? 'Yahoo Finance' : 'FinMind';
-    if (flags.size === 1) return Array.from(flags)[0];
-    const labels = Array.from(flags);
-    const hasCache = labels.some(label => /快取|cache|記憶體/i.test(label));
-    const primaryYahoo = labels.find(label => /Yahoo Finance/i.test(label));
-    const primaryFinMind = labels.find(label => /FinMind/i.test(label));
-    const primary = primaryYahoo || primaryFinMind || (adjusted ? 'Yahoo Finance' : 'FinMind');
-    if (hasCache) return `${primary} (快取)`;
-    return primary;
+    const entries =
+        flags instanceof Set
+            ? Array.from(flags)
+            : Array.isArray(flags)
+                ? flags
+                : [];
+    if (entries.length === 0) {
+        return adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
+    }
+    const cacheLabels = entries.filter((label) => /快取|cache|記憶體/i.test(label));
+    const remoteLabels = entries
+        .filter((label) => !/快取|cache|記憶體/i.test(label))
+        .map((label) => label.replace(/\s*\((?:部份)?快取\)\s*$/i, '').trim())
+        .filter(Boolean);
+    const fallback = adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
+    const uniqueRemote = Array.from(new Set(remoteLabels));
+    if (uniqueRemote.length === 0) {
+        if (cacheLabels.length > 0) {
+            const suffix = cacheLabels.length > 1 ? '部分快取' : '快取';
+            return `${fallback} (${suffix})`;
+        }
+        return fallback;
+    }
+    const primary = uniqueRemote[0];
+    if (cacheLabels.length > 0) {
+        return `${primary} (部分快取)`;
+    }
+    if (uniqueRemote.length === 1) {
+        return primary;
+    }
+    return uniqueRemote.join(' + ');
 }
 
 function validateForceSource(adjusted, forceSource) {
@@ -467,6 +714,15 @@ export default async (req) => {
         const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
         const forceSourceParam = params.get('forceSource');
 
+        console.log('[TPEX Proxy v11.1] 入口參數', {
+            stockNo,
+            month: monthParam || null,
+            start: startParam || legacyDate || null,
+            end: endParam || legacyDate || null,
+            adjusted,
+            forceSource: forceSourceParam || null,
+        });
+
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
         if (!startDate || !endDate) {
@@ -485,6 +741,12 @@ export default async (req) => {
         }
 
         const months = ensureMonthList(startDate, endDate);
+        console.log('[TPEX Proxy v11.1] 月份分段', {
+            stockNo,
+            segmentCount: months.length,
+            startISO: formatISODateFromDate(startDate),
+            endISO: formatISODateFromDate(endDate),
+        });
         if (months.length === 0) {
             return new Response(JSON.stringify({ stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: adjusted ? 'Yahoo Finance' : 'FinMind' }), {
                 headers: { 'Content-Type': 'application/json' }

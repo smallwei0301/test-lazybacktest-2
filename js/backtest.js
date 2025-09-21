@@ -5,6 +5,17 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
 });
 
+let lastPriceDebug = {
+    steps: [],
+    summary: null,
+    adjustments: [],
+    fallbackApplied: false,
+    priceSource: null,
+    dataSource: null,
+    dataSources: [],
+    priceMode: null,
+};
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -30,7 +41,9 @@ function runBacktestInternal() {
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
                 const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
                 cachedStockData = sliced;
-                lastFetchSettings = curSettings;
+                lastFetchSettings = { ...curSettings };
+                refreshPriceInspectorControls();
+                updatePriceDebug(cachedEntry);
                 console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
@@ -88,6 +101,18 @@ function runBacktestInternal() {
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
+                     const rawMeta = data.rawMeta || {};
+                     const debugSteps = Array.isArray(rawMeta.debugSteps)
+                         ? rawMeta.debugSteps
+                         : (Array.isArray(data?.dataDebug?.debugSteps) ? data.dataDebug.debugSteps : []);
+                     const summaryMeta = rawMeta.summary || data?.dataDebug?.summary || null;
+                     const adjustmentsMeta = Array.isArray(rawMeta.adjustments)
+                         ? rawMeta.adjustments
+                         : (Array.isArray(data?.dataDebug?.adjustments) ? data.dataDebug.adjustments : []);
+                     const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
+                         ? rawMeta.adjustmentFallbackApplied
+                         : Boolean(data?.dataDebug?.adjustmentFallbackApplied);
+                     const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
                      const cacheEntry = {
                          data: mergedData,
                          stockName: stockName || existingEntry?.stockName || params.stockNo,
@@ -96,17 +121,35 @@ function runBacktestInternal() {
                          coverage: mergedCoverage,
                          fetchedAt: Date.now(),
                          adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode
+                         priceMode: priceMode,
+                         adjustmentFallbackApplied: fallbackFlag,
+                         summary: summaryMeta,
+                         adjustments: adjustmentsMeta,
+                         debugSteps,
+                         priceSource: priceSourceMeta,
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings=curSettings;
+                     lastFetchSettings = { ...curSettings };
+                     refreshPriceInspectorControls();
+                     updatePriceDebug(cacheEntry);
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
                      cachedEntry = cacheEntry;
                 } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
                      const updatedSources = new Set(Array.isArray(cachedEntry.dataSources) ? cachedEntry.dataSources : []);
                      if (dataSource) updatedSources.add(dataSource);
                      const updatedArray = Array.from(updatedSources);
+                     const debugSteps = Array.isArray(data?.dataDebug?.debugSteps)
+                         ? data.dataDebug.debugSteps
+                         : Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [];
+                     const summaryMeta = data?.dataDebug?.summary || cachedEntry.summary || null;
+                     const adjustmentsMeta = Array.isArray(data?.dataDebug?.adjustments)
+                         ? data.dataDebug.adjustments
+                         : Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [];
+                     const fallbackFlag = typeof data?.dataDebug?.adjustmentFallbackApplied === 'boolean'
+                         ? data.dataDebug.adjustmentFallbackApplied
+                         : Boolean(cachedEntry.adjustmentFallbackApplied);
+                     const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
                      const updatedEntry = {
                          ...cachedEntry,
                          stockName: stockName || cachedEntry.stockName || params.stockNo,
@@ -114,11 +157,18 @@ function runBacktestInternal() {
                          dataSource: summariseSourceLabels(updatedArray),
                          fetchedAt: cachedEntry.fetchedAt || Date.now(),
                          adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode
+                         priceMode: priceMode,
+                         adjustmentFallbackApplied: fallbackFlag,
+                         summary: summaryMeta,
+                         adjustments: adjustmentsMeta,
+                         debugSteps,
+                         priceSource: priceSourceMeta,
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings = curSettings;
+                     lastFetchSettings = { ...curSettings };
+                     refreshPriceInspectorControls();
+                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
 
@@ -177,6 +227,16 @@ function runBacktestInternal() {
         const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
         if(useCache && cachedStockData) {
             workerMsg.cachedData = cachedStockData; // Send main thread cache to worker
+            if (cachedEntry) {
+                workerMsg.cachedMeta = {
+                    summary: cachedEntry.summary || null,
+                    adjustments: Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [],
+                    debugSteps: Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(cachedEntry.adjustmentFallbackApplied),
+                    priceSource: cachedEntry.priceSource || null,
+                    dataSource: cachedEntry.dataSource || null,
+                };
+            }
             console.log("[Main] Sending cached data to worker for backtest.");
         } else {
             console.log("[Main] Fetching new data for backtest.");
@@ -221,6 +281,130 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    renderPricePipelineSteps();
+    renderPriceInspectorDebug();
+}
+
+const adjustmentReasonLabels = {
+    missingPriceRow: '缺少對應價格',
+    invalidBaseClose: '無效基準價',
+    ratioOutOfRange: '調整比例異常',
+};
+
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatSkipReasons(skipReasons) {
+    if (!skipReasons || typeof skipReasons !== 'object') return '';
+    const entries = Object.entries(skipReasons);
+    if (entries.length === 0) return '';
+    return entries
+        .map(([reason, count]) => {
+            const label = adjustmentReasonLabels[reason] || reason;
+            return `${label}: ${count}`;
+        })
+        .join('、');
+}
+
+function updatePriceDebug(meta = {}) {
+    const steps = Array.isArray(meta.debugSteps) ? meta.debugSteps : Array.isArray(meta.steps) ? meta.steps : [];
+    const summary = meta.summary || null;
+    const adjustments = Array.isArray(meta.adjustments) ? meta.adjustments : [];
+    const fallbackApplied = typeof meta.adjustmentFallbackApplied === 'boolean'
+        ? meta.adjustmentFallbackApplied
+        : Boolean(meta.fallbackApplied);
+    const priceSourceLabel = meta.priceSource || (summary && summary.priceSource) || null;
+    const aggregateSource = meta.dataSource || null;
+    const sourceList = Array.isArray(meta.dataSources) ? meta.dataSources : [];
+    const priceMode = meta.priceMode || (typeof meta.adjustedPrice === 'boolean' ? (meta.adjustedPrice ? 'adjusted' : 'raw') : null);
+    lastPriceDebug = {
+        steps,
+        summary,
+        adjustments,
+        fallbackApplied,
+        priceSource: priceSourceLabel,
+        dataSource: aggregateSource,
+        dataSources: sourceList,
+        priceMode,
+    };
+    renderPricePipelineSteps();
+    renderPriceInspectorDebug();
+}
+
+function renderPricePipelineSteps() {
+    const container = document.getElementById('pricePipelineSteps');
+    if (!container) return;
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
+    if (!hasData || !hasSteps) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+    }
+    const rows = lastPriceDebug.steps.map((step) => {
+        const status = step.status === 'success' ? 'text-emerald-600'
+            : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
+        if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
+            detailText += ' ・ 已啟用備援縮放';
+        }
+        const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
+        return `<div class="flex items-center gap-2 text-[11px]">
+            <span class="${status}">●</span>
+            <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
+        </div>`;
+    }).join('');
+    container.innerHTML = rows;
+    container.classList.remove('hidden');
+}
+
+function renderPriceInspectorDebug() {
+    const panel = document.getElementById('priceInspectorDebugPanel');
+    if (!panel) return;
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
+    if (!hasData || !hasSteps) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+    const summaryItems = [];
+    if (lastPriceDebug.summary && typeof lastPriceDebug.summary === 'object') {
+        const applied = Number(lastPriceDebug.summary.adjustmentEvents || 0);
+        const skipped = Number(lastPriceDebug.summary.skippedEvents || 0);
+        summaryItems.push(`成功 ${applied} 件`);
+        summaryItems.push(`略過 ${skipped} 件`);
+    }
+    if (lastPriceDebug.fallbackApplied) {
+        summaryItems.push('備援縮放已啟用');
+    }
+    const summaryLine = summaryItems.length > 0
+        ? `<div class="text-[11px] font-medium" style="color: var(--foreground);">${escapeHtml(summaryItems.join(' ・ '))}</div>`
+        : '';
+    const stepsHtml = lastPriceDebug.steps.map((step) => {
+        const status = step.status === 'success' ? 'text-emerald-600'
+            : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
+        if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
+            detailText += ' ・ 已啟用備援縮放';
+        }
+        const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
+        return `<div class="flex items-start gap-2 text-[11px]">
+            <span class="${status}">●</span>
+            <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
+        </div>`;
+    }).join('');
+    panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
+    panel.classList.remove('hidden');
 }
 
 function updateDataSourceDisplay(dataSource, stockName) {
@@ -242,6 +426,183 @@ function updateDataSourceDisplay(dataSource, stockName) {
         displayEl.classList.add('hidden');
     }
 }
+
+// Patch Tag: LB-PRICE-INSPECTOR-20250518A
+function resolvePriceInspectorSourceLabel() {
+    const summarySources = Array.isArray(lastPriceDebug?.summary?.sources)
+        ? lastPriceDebug.summary.sources.filter((item) => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    const candidates = [
+        lastPriceDebug?.priceSource,
+        lastPriceDebug?.summary?.priceSource,
+        lastPriceDebug?.dataSource,
+        summarySources.length > 0 ? summarySources.join(' + ') : null,
+        Array.isArray(lastPriceDebug?.dataSources) && lastPriceDebug.dataSources.length > 0
+            ? lastPriceDebug.dataSources.join(' + ')
+            : null,
+    ];
+    const resolved = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+    return resolved || '';
+}
+
+// Patch Tag: LB-PRICE-INSPECTOR-20250302A
+function refreshPriceInspectorControls() {
+    const controls = document.getElementById('priceInspectorControls');
+    const openBtn = document.getElementById('openPriceInspector');
+    const summaryEl = document.getElementById('priceInspectorSummary');
+    if (!controls || !openBtn) return;
+
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    if (!hasData) {
+        controls.classList.add('hidden');
+        openBtn.disabled = true;
+        if (summaryEl) summaryEl.textContent = '';
+        return;
+    }
+
+    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
+    const sourceLabel = resolvePriceInspectorSourceLabel();
+    const firstDate = cachedStockData[0]?.date || lastFetchSettings?.startDate || '';
+    const lastDate = cachedStockData[cachedStockData.length - 1]?.date || lastFetchSettings?.endDate || '';
+
+    controls.classList.remove('hidden');
+    openBtn.disabled = false;
+    if (summaryEl) {
+        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${cachedStockData.length} 筆 (${modeLabel})`];
+        if (sourceLabel) {
+            summaryParts.push(sourceLabel);
+        }
+        summaryEl.textContent = summaryParts.join(' ・ ');
+    }
+    renderPricePipelineSteps();
+}
+
+function openPriceInspectorModal() {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        showError('尚未取得價格資料，請先執行回測。');
+        return;
+    }
+    const modal = document.getElementById('priceInspectorModal');
+    const tbody = document.getElementById('priceInspectorTableBody');
+    const subtitle = document.getElementById('priceInspectorSubtitle');
+    if (!modal || !tbody) return;
+
+    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
+    const sourceLabel = resolvePriceInspectorSourceLabel();
+    if (subtitle) {
+        const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${cachedStockData.length} 筆`];
+        if (sourceLabel) {
+            subtitleParts.push(sourceLabel);
+        }
+        subtitle.textContent = subtitleParts.join(' ・ ');
+    }
+    renderPriceInspectorDebug();
+
+    // Patch Tag: LB-PRICE-INSPECTOR-20250512A
+    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
+    const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
+    const computeRawClose = (row) => {
+        if (!row) return null;
+        const rawCandidates = [
+            row.rawClose,
+            row.raw_close,
+            row.baseClose,
+            row.base_close,
+        ]
+            .map((candidate) => (candidate !== null && candidate !== undefined ? Number(candidate) : null))
+            .filter((candidate) => Number.isFinite(candidate));
+        if (rawCandidates.length > 0) {
+            return rawCandidates[0];
+        }
+        if (!Number.isFinite(row.close)) return null;
+        const factor = Number(row.adjustedFactor);
+        if (!Number.isFinite(factor) || Math.abs(factor) < 1e-8) {
+            return Number(row.close);
+        }
+        const raw = Number(row.close) / factor;
+        return Number.isFinite(raw) ? raw : Number(row.close);
+    };
+    const rowsHtml = cachedStockData
+        .map((row) => {
+            const volumeLabel = Number.isFinite(row?.volume)
+                ? Number(row.volume).toLocaleString('zh-TW')
+                : '—';
+            const factor = Number(row?.adjustedFactor);
+            const closeValue = Number(row?.close);
+            const rawCloseValue = computeRawClose(row);
+            const rawCloseText = formatNumber(rawCloseValue);
+            const closeText = formatNumber(closeValue);
+            const factorText = formatFactor(factor);
+            const hasFactor = Number.isFinite(factor) && Math.abs(factor) > 0;
+            let formulaText = '—';
+            if (closeText !== '—') {
+                if (hasFactor && rawCloseText !== '—' && factorText !== '—') {
+                    formulaText = `${rawCloseText} × ${factorText} = ${closeText}`;
+                } else {
+                    formulaText = `${closeText}（未調整）`;
+                }
+            }
+            const rowSource =
+                typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
+                    ? row.priceSource.trim()
+                    : sourceLabel || '—';
+            return `
+                <tr>
+                    <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.high)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.low)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
+                    <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
+                </tr>`;
+        })
+        .join('');
+
+    tbody.innerHTML =
+        rowsHtml ||
+        '<tr><td class="px-3 py-4 text-center" colspan="10" style="color: var(--muted-foreground);">無資料</td></tr>';
+
+    const scroller = modal.querySelector('.overflow-auto');
+    if (scroller) scroller.scrollTop = 0;
+
+    modal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+}
+
+function closePriceInspectorModal() {
+    const modal = document.getElementById('priceInspectorModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const openBtn = document.getElementById('openPriceInspector');
+    const closeBtn = document.getElementById('closePriceInspector');
+    const modal = document.getElementById('priceInspectorModal');
+
+    openBtn?.addEventListener('click', openPriceInspectorModal);
+    closeBtn?.addEventListener('click', closePriceInspectorModal);
+    modal?.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closePriceInspectorModal();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closePriceInspectorModal();
+        }
+    });
+
+    refreshPriceInspectorControls();
+});
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
@@ -1105,7 +1466,14 @@ function runOptimizationInternal(optimizeType) {
     optRange = config.range; 
     console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
     
-    const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate}; 
+    const curSettings={
+        stockNo: params.stockNo,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
+        adjustedPrice: Boolean(params.adjustedPrice),
+        priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+    };
     const useCache=!needsDataFetch(curSettings); 
     const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
     
@@ -1138,8 +1506,20 @@ function runOptimizationInternal(optimizeType) {
             useCachedData:useCache 
         }; 
         
-        if(useCache && cachedStockData) workerMsg.cachedData=cachedStockData; 
-        else console.log(`[Main] Fetching data for ${optimizeType} opt.`); 
+        if(useCache && cachedStockData) {
+            workerMsg.cachedData=cachedStockData;
+            const cacheEntry = cachedDataStore.get(buildCacheKey(curSettings));
+            if (cacheEntry) {
+                workerMsg.cachedMeta = {
+                    summary: cacheEntry.summary || null,
+                    adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
+                    debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
+                    priceSource: cacheEntry.priceSource || null,
+                    dataSource: cacheEntry.dataSource || null,
+                };
+            }
+        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
         
         optimizationWorker.postMessage(workerMsg); 
         
@@ -1151,8 +1531,8 @@ function runOptimizationInternal(optimizeType) {
                 updateOptimizationProgress(progress, message);
             } else if(type==='result'){ 
                 if(!useCache&&data?.rawDataUsed){
-                    cachedStockData=data.rawDataUsed; 
-                    lastFetchSettings=curSettings; 
+                    cachedStockData=data.rawDataUsed;
+                    lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
                 } else if(!useCache&&data&&!data.rawDataUsed) {
                     console.warn("[Main] Opt worker no rawData returned.");
@@ -1483,7 +1863,7 @@ function updateStrategyParams(type) {
         }
     }
 }
-function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; clearPreviousResults(); showSuccess("設定已重置"); }
+ function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 
