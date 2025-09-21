@@ -102,57 +102,6 @@ function buildTesterDebugStepsHtml(steps) {
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原流程檢查</div><div class="mt-1 space-y-1">${items}</div></div>`;
 }
 
-function buildZeroAmountSampleHtml(samples) {
-    if (!Array.isArray(samples) || samples.length === 0) return '';
-    const limited = samples.slice(0, 2);
-    const blocks = limited
-        .map((sample, index) => {
-            const headerParts = [];
-            if (sample.date) {
-                headerParts.push(`除權息日 ${testerEscapeHtml(sample.date)}`);
-            }
-            if (sample.dateSource && sample.dateSource.key) {
-                headerParts.push(`來源欄位 ${testerEscapeHtml(sample.dateSource.key)}`);
-            }
-            const header = headerParts.length > 0
-                ? `<div class="text-[10px] font-medium" style="color: var(--foreground);">${headerParts.join(' ・ ')}</div>`
-                : '';
-            const groups = [
-                { label: '現金股利欄位', fields: sample.cashDividendFields },
-                { label: '股票股利欄位', fields: sample.stockDividendFields },
-                { label: '現金增資欄位', fields: sample.cashIncreaseFields },
-                { label: '股票增資欄位', fields: sample.stockIncreaseFields },
-            ]
-                .filter((group) => Array.isArray(group.fields) && group.fields.length > 0)
-                .map((group) => {
-                    const content = formatTesterFieldHints(group.fields);
-                    return `<div class="mt-1"><span class="font-medium" style="color: var(--foreground);">${testerEscapeHtml(group.label)}</span><div class="mt-0.5 text-[10px]" style="color: var(--muted-foreground);">${content}</div></div>`;
-                })
-                .join('');
-            let rawPreviewHtml = '';
-            if (Array.isArray(sample.rawPreview) && sample.rawPreview.length > 0) {
-                const previewRows = sample.rawPreview
-                    .map((field) => {
-                        const key = testerEscapeHtml(field.key ?? '');
-                        const raw = testerEscapeHtml(field.raw ?? '');
-                        const numeric = Number.isFinite(field.numeric)
-                            ? formatTesterNumber(field.numeric, 4)
-                            : '';
-                        const numericText = numeric ? `（解析後 ${numeric}）` : '';
-                        return `<div class="flex flex-wrap gap-x-2"><span class="font-medium" style="color: var(--foreground);">${key}</span><span style="color: var(--muted-foreground);">=${raw}${numericText}</span></div>`;
-                    })
-                    .join('');
-                rawPreviewHtml = `<div class="mt-1"><span class="font-medium" style="color: var(--foreground);">原始欄位預覽</span><div class="mt-0.5 space-y-0.5 text-[10px]" style="color: var(--muted-foreground);">${previewRows}</div></div>`;
-            }
-            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">${header}${groups}${rawPreviewHtml}</div>`;
-        })
-        .join('');
-    const remainderNote = samples.length > limited.length
-        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${limited.length} 筆金額為零的配息紀錄，總計 ${testerEscapeHtml(samples.length)} 筆。</div>`
-        : '';
-    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">零金額欄位追蹤</div><div class="mt-2 space-y-2">${blocks}</div>${remainderNote}</div>`;
-}
-
 function buildFinMindResponseLogHtml(log, options = {}) {
     if (!Array.isArray(log) || log.length === 0) return '';
     const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 6;
@@ -182,7 +131,7 @@ function buildFinMindResponseLogHtml(log, options = {}) {
 function buildAdjustmentDiagnosticsHtml(adjustments) {
     if (!Array.isArray(adjustments)) return '';
     if (adjustments.length === 0) {
-        return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 rounded-md border border-dashed px-3 py-2 text-[11px]" style="border-color: var(--border); color: var(--muted-foreground);">尚未產生任何還原事件，請檢查股利資料或略過原因統計。</div></div>`;
+        return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 rounded-md border border-dashed px-3 py-2 text-[11px]" style="border-color: var(--border); color: var(--muted-foreground);">尚未產生任何還原事件，請檢查配息結果或略過原因統計。</div></div>`;
     }
     const items = adjustments
         .slice(0, 3)
@@ -338,8 +287,7 @@ function buildFinMindApiStatusHtml(finmindStatus) {
         );
     }
     const statusConfigs = [
-        { key: 'dividend', title: 'FinMind 股利 API 狀態' },
-        { key: 'dividendResult', title: 'FinMind 還原結果 API 狀態' },
+        { key: 'dividendResult', title: 'FinMind 配息結果 API 狀態' },
     ];
     statusConfigs.forEach((config) => {
         const statusObj = finmindStatus[config.key];
@@ -597,10 +545,6 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
                     ? payload.dividendDiagnostics
                     : null;
-            const zeroAmountSamples = Array.isArray(dividendDiagnostics?.zeroAmountSamples)
-                ? dividendDiagnostics.zeroAmountSamples
-                : [];
-
             const lines = [
                 `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourceSummary)}</span>`,
                 `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
@@ -630,16 +574,16 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     ? `，其中 <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆落在回測區間`
                     : '';
                 lines.push(
-                    `FinMind 股利筆數: <span class="font-semibold">${testerEscapeHtml(dividendRowsTotal)}</span> 筆${effectiveText}`,
+                    `FinMind 配息結果筆數: <span class="font-semibold">${testerEscapeHtml(dividendRowsTotal)}</span> 筆${effectiveText}`,
                 );
             } else if (Number.isFinite(dividendRows)) {
                 lines.push(
-                    `FinMind 股利筆數: <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆`,
+                    `FinMind 配息結果筆數: <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆`,
                 );
             }
             if (Number.isFinite(dividendEvents)) {
                 lines.push(
-                    `FinMind 有效股利事件: <span class="font-semibold">${testerEscapeHtml(dividendEvents)}</span> 件`,
+                    `FinMind 有效配息事件: <span class="font-semibold">${testerEscapeHtml(dividendEvents)}</span> 件`,
                 );
             }
             if (dividendFetchStart || dividendFetchEnd) {
@@ -649,64 +593,92 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                     ? `，向前延伸 <span class="font-semibold">${testerEscapeHtml(lookbackDays)}</span> 天`
                     : '';
                 lines.push(
-                    `FinMind 股利查詢區間: <span class="font-semibold">${testerEscapeHtml(rangeStart)} ~ ${testerEscapeHtml(rangeEnd)}</span>${suffix}`,
+                    `FinMind 配息查詢區間: <span class="font-semibold">${testerEscapeHtml(rangeStart)} ~ ${testerEscapeHtml(rangeEnd)}</span>${suffix}`,
                 );
             }
-            if (dividendDiagnostics) {
-                const diagParts = [];
-                if (Number.isFinite(dividendDiagnostics.totalRecords)) {
-                    diagParts.push(`總筆數 ${testerEscapeHtml(dividendDiagnostics.totalRecords)}`);
+            if (dividendDiagnostics && dividendDiagnostics.dividendResult && typeof dividendDiagnostics.dividendResult === 'object') {
+                const resultDiag = dividendDiagnostics.dividendResult;
+                const resultParts = [];
+                if (Number.isFinite(resultDiag.totalRecords)) {
+                    resultParts.push(`原始 ${testerEscapeHtml(resultDiag.totalRecords)} 筆`);
                 }
-                if (Number.isFinite(dividendDiagnostics.normalisedRecords)) {
-                    diagParts.push(`成功正規化 ${testerEscapeHtml(dividendDiagnostics.normalisedRecords)}`);
+                if (Number.isFinite(resultDiag.filteredRecords)) {
+                    resultParts.push(`區間 ${testerEscapeHtml(resultDiag.filteredRecords)} 筆`);
                 }
-                if (Number.isFinite(dividendDiagnostics.aggregatedEvents)) {
-                    diagParts.push(`彙整事件 ${testerEscapeHtml(dividendDiagnostics.aggregatedEvents)}`);
+                if (Number.isFinite(resultDiag.eventCount)) {
+                    resultParts.push(`事件 ${testerEscapeHtml(resultDiag.eventCount)} 件`);
                 }
-                const skipDetails = [];
-                if (Number.isFinite(dividendDiagnostics.missingExDate) && dividendDiagnostics.missingExDate > 0) {
-                    skipDetails.push(`缺少除權息日 ×${testerEscapeHtml(dividendDiagnostics.missingExDate)}`);
+                if (Number.isFinite(resultDiag.appliedAdjustments)) {
+                    resultParts.push(`成功 ${testerEscapeHtml(resultDiag.appliedAdjustments)} 件`);
                 }
-                if (Number.isFinite(dividendDiagnostics.zeroAmountRecords) && dividendDiagnostics.zeroAmountRecords > 0) {
-                    const zeroSuffix = zeroAmountSamples.length > 0 ? '（已擷取欄位快照）' : '';
-                    skipDetails.push(`金額為 0 ×${testerEscapeHtml(dividendDiagnostics.zeroAmountRecords)}${zeroSuffix}`);
+                if (resultParts.length > 0) {
+                    lines.push(`FinMind 配息結果：<span class="font-semibold">${resultParts.join(' / ')}</span>`);
                 }
-                if (skipDetails.length > 0) {
-                    diagParts.push(`略過原因：${skipDetails.join('、')}`);
+                const resultLogHtml = buildFinMindResponseLogHtml(
+                    Array.isArray(resultDiag.responseLog) ? resultDiag.responseLog : [],
+                    { title: 'FinMind 配息結果紀錄' },
+                );
+                if (resultLogHtml) {
+                    extraSections.push(resultLogHtml);
                 }
-                if (diagParts.length > 0) {
-                    lines.push(`FinMind 事件診斷：<span class="font-semibold">${diagParts.join(' / ')}</span>`);
-                }
-                if (dividendDiagnostics.dividendResult && typeof dividendDiagnostics.dividendResult === 'object') {
-                    const resultDiag = dividendDiagnostics.dividendResult;
-                    const resultParts = [];
-                    if (Number.isFinite(resultDiag.totalRecords)) {
-                        resultParts.push(`原始 ${testerEscapeHtml(resultDiag.totalRecords)} 筆`);
-                    }
-                    if (Number.isFinite(resultDiag.filteredRecords)) {
-                        resultParts.push(`區間 ${testerEscapeHtml(resultDiag.filteredRecords)} 筆`);
-                    }
-                    if (Number.isFinite(resultDiag.eventCount)) {
-                        resultParts.push(`事件 ${testerEscapeHtml(resultDiag.eventCount)} 件`);
-                    }
-                    if (Number.isFinite(resultDiag.appliedAdjustments)) {
-                        resultParts.push(`成功 ${testerEscapeHtml(resultDiag.appliedAdjustments)} 件`);
-                    }
-                    if (resultParts.length > 0) {
-                        lines.push(`FinMind 配息結果：<span class="font-semibold">${resultParts.join(' / ')}</span>`);
-                    }
-                    const resultLogHtml = buildFinMindResponseLogHtml(
-                        Array.isArray(resultDiag.responseLog) ? resultDiag.responseLog : [],
-                        { title: 'FinMind 配息結果紀錄' },
+            }
+            if (Array.isArray(dividendDiagnostics?.eventPreview) && dividendDiagnostics.eventPreview.length > 0) {
+                const previewLimit = Number.isFinite(dividendDiagnostics?.eventPreviewLimit)
+                    ? dividendDiagnostics.eventPreviewLimit
+                    : dividendDiagnostics.eventPreview.length;
+                const previewItems = dividendDiagnostics.eventPreview
+                    .slice(0, previewLimit)
+                    .map((item) => {
+                        const ratioValue = Number.isFinite(item.manualRatio) ? item.manualRatio : null;
+                        const ratioPercent = ratioValue !== null
+                            ? `${formatTesterNumber(ratioValue * 100, 3)}%`
+                            : '—';
+                        const beforeText = Number.isFinite(item.beforePrice)
+                            ? formatTesterNumber(item.beforePrice, 4)
+                            : '—';
+                        const afterText = Number.isFinite(item.afterPrice)
+                            ? formatTesterNumber(item.afterPrice, 4)
+                            : '—';
+                        const ratioEquation = ratioValue !== null && beforeText !== '—' && afterText !== '—'
+                            ? `${afterText} ÷ ${beforeText} ≈ ${formatTesterNumber(ratioValue, 6)}`
+                            : '';
+                        const dividendTotalText = Number.isFinite(item.dividendTotal)
+                            ? formatTesterNumber(item.dividendTotal, 4)
+                            : '—';
+                        const ratioLine = `<div>手動還原比率：<span class="font-semibold">${testerEscapeHtml(ratioPercent)}</span></div>`;
+                        const equationLine = ratioEquation
+                            ? `<div>計算：<span class="font-semibold">${testerEscapeHtml(ratioEquation)}</span></div>`
+                            : '';
+                        return `<div class="rounded-md border px-3 py-2 text-[10px]" style="border-color: var(--border);">`
+                            + `<div>除權息日：<span class="font-semibold">${testerEscapeHtml(item.date || '—')}</span></div>`
+                            + `${ratioLine}`
+                            + `<div>前收盤：<span class="font-semibold">${testerEscapeHtml(beforeText)}</span> ・ 後參考：<span class="font-semibold">${testerEscapeHtml(afterText)}</span></div>`
+                            + `${equationLine}`
+                            + `<div>股利總額（stock_and_cache_dividend）：<span class="font-semibold">${testerEscapeHtml(dividendTotalText)}</span></div>`
+                            + `</div>`;
+                    })
+                    .join('');
+                const moreCount = Number.isFinite(dividendDiagnostics?.eventPreviewMore)
+                    ? dividendDiagnostics.eventPreviewMore
+                    : Math.max(
+                        0,
+                        (Number.isFinite(dividendDiagnostics?.eventPreviewTotal)
+                            ? dividendDiagnostics.eventPreviewTotal
+                            : dividendDiagnostics.eventPreview.length)
+                            - Math.min(previewLimit, dividendDiagnostics.eventPreview.length),
                     );
-                    if (resultLogHtml) {
-                        extraSections.push(resultLogHtml);
-                    }
-                }
+                const moreNote = moreCount > 0
+                    ? `<div class="text-[10px]" style="color: var(--muted-foreground);">尚有 ${testerEscapeHtml(moreCount)} 筆配息結果未顯示，請於 JSON 回應內查看完整列表。</div>`
+                    : '';
+                const formulaHint = `<div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">資料來源：FinMind TaiwanStockDividendResult ・ 計算方式：after_price ÷ before_price = 手動還原係數</div>`;
+                lines.push(`<div class="mt-2"><div class="font-semibold text-[11px]">FinMind 配息推算</div>${formulaHint}<div class="mt-1 space-y-1">${previewItems}</div>${moreNote}</div>`);
+            }
+            if (dividendDiagnostics?.resultInfo?.detail) {
+                lines.push(`配息資料摘要：<span class="font-semibold">${testerEscapeHtml(dividendDiagnostics.resultInfo.detail)}</span>`);
             }
             const dividendResponseHtml = buildFinMindResponseLogHtml(
                 Array.isArray(dividendDiagnostics?.responseLog) ? dividendDiagnostics.responseLog : [],
-                { title: 'FinMind 股利請求紀錄' },
+                { title: 'FinMind 配息結果請求紀錄' },
             );
             if (dividendResponseHtml) {
                 extraSections.push(dividendResponseHtml);
@@ -760,12 +732,8 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             if (debugStepsHtml) {
                 detailHtml += debugStepsHtml;
             }
-            const zeroAmountHtml = buildZeroAmountSampleHtml(zeroAmountSamples);
             if (extraSections.length > 0) {
                 detailHtml += extraSections.join('');
-            }
-            if (zeroAmountHtml) {
-                detailHtml += zeroAmountHtml;
             }
             const dividendPreviewHtml = buildDividendEventPreviewHtml(aggregatedEvents);
             if (dividendPreviewHtml) {

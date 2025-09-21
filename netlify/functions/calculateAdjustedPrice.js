@@ -20,122 +20,26 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250410A
 // Patch Tag: LB-ADJ-COMPOSER-20250414A
 // Patch Tag: LB-ADJ-COMPOSER-20250421A
+// Patch Tag: LB-ADJ-COMPOSER-20250426A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250421A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250426A';
 
-const CASH_DIVIDEND_ALIAS_KEYS = [
-  'cash_dividend_total',
-  'cash_dividend_total_amount',
-  'cash_dividend_profit',
-  'cash_dividend_surplus',
-  'cash_dividend_carry',
-  'cash_dividend_regular',
-  'cash_dividend_special',
-  'cash_dividend_extra',
-  'cash_dividend_ordinary',
-  'cash_dividend_amount',
-  'cash_dividend_per_share',
-  'cash_dividend_cash',
-  'cash_distribution',
-  'cash_distribution_total',
-  'cash_distribution_amount',
-  'cash_dividend_from_earnings',
-  'cash_dividend_from_retain_earnings',
-  'cash_dividend_from_retained_earnings',
-  'cash_dividend_from_capital_reserve',
-  'cash_dividend_from_capital_surplus',
-  'cash_dividend_from_capital',
-];
+let fetchImpl = fetch;
 
-const CASH_DIVIDEND_ALIAS_PATTERNS = [
-  /現金(股利|股息|配息|紅利|配發)/i,
-  /(盈餘|現金).*(配息|股息|股利|紅利)/i,
-  /(配息|股利)金額/i,
-  /現金盈餘/i,
-];
+const DIVIDEND_RESULT_PREVIEW_LIMIT = 3;
 
-const STOCK_DIVIDEND_ALIAS_KEYS = [
-  'stock_dividend_total',
-  'stock_dividend_total_amount',
-  'stock_dividend_total_ratio',
-  'stock_dividend_profit',
-  'stock_dividend_surplus',
-  'stock_dividend_carry',
-  'stock_dividend_special',
-  'stock_dividend_extra',
-  'stock_dividend_ordinary',
-  'stock_dividend_from_earnings',
-  'stock_dividend_from_retain_earnings',
-  'stock_dividend_from_retained_earnings',
-  'stock_dividend_from_capital_reserve',
-  'stock_dividend_from_capital_surplus',
-  'stock_dividend_from_capital',
-  'employee_stock_dividend',
-];
+function setFetchImplementation(fn) {
+  if (typeof fn === 'function') {
+    fetchImpl = fn;
+    return;
+  }
+  fetchImpl = fetch;
+}
 
-const STOCK_DIVIDEND_ALIAS_PATTERNS = [
-  /股票(股利|股息|配股|紅利)/i,
-  /(盈餘|公積).*(配股)/i,
-  /配股股數/i,
-  /股票紅利/i,
-];
-
-const CASH_INCREASE_ALIAS_KEYS = [
-  'cash_capital_increase_ratio',
-  'cash_capital_increase_total',
-  'cash_capital_increase_total_ratio',
-  'cash_capital_increase_subscription_ratio',
-  'cash_capital_increase_subscribe_ratio',
-  'cash_capital_increase_subscription_rate',
-  'cash_capital_increase_ratio_total',
-  'cash_capital_increase_ratio_percent',
-  'cash_capital_increase_percent',
-  'cash_capital_increase_percentage',
-  'cash_capital_increase_per_share',
-  'cash_capital_increase_share_ratio',
-  'cash_capital_increase_shares_ratio',
-  'cash_increase_ratio',
-  'cash_increase_total_ratio',
-  'cash_increase_percent',
-  'cash_increase_percentage',
-  'cash_subscription_ratio',
-  'subscription_ratio',
-  'subscription_rate',
-  'subscription_percent',
-  'subscription_percentage',
-  'rights_issue_ratio',
-  'rights_issue_percent',
-  'rights_issue_percentage',
-];
-
-const CASH_INCREASE_ALIAS_PATTERNS = [
-  /現金增資/i,
-  /現增/i,
-  /(認購|申購).*(比率|比例)/i,
-  /配售.*(比率|比例)/i,
-];
-
-const STOCK_INCREASE_ALIAS_KEYS = [
-  'stock_capital_increase_ratio',
-  'stock_capital_increase_total',
-  'stock_capital_increase_total_ratio',
-  'stock_capital_increase_percent',
-  'stock_capital_increase_percentage',
-  'stock_capital_increase_per_share',
-  'stock_capital_increase_share_ratio',
-  'stock_capital_increase_shares_ratio',
-  'stock_dividend_capital_increase',
-  'stock_dividend_capital_increase_ratio',
-  'stock_dividend_capital_increase_total',
-  'stock_dividend_capital_increase_total_ratio',
-];
-
-const STOCK_INCREASE_ALIAS_PATTERNS = [
-  /(盈餘|公積).*(轉增資|配股)/i,
-  /轉增資.*(比率|比例)/i,
-  /股票增資/i,
-];
+function resetFetchImplementation() {
+  fetchImpl = fetch;
+}
 
 const SUBSCRIPTION_PRICE_ALIAS_KEYS = [
   'cash_capital_increase_subscription_price',
@@ -161,78 +65,6 @@ const SUBSCRIPTION_PRICE_ALIAS_PATTERNS = [
   /(發行|訂價).*(價格|價)/i,
   /配股價格/i,
 ];
-
-const CASH_DIVIDEND_PRIMARY_KEY = 'cash_dividend';
-const CASH_DIVIDEND_PART_KEYS = [
-  'cash_dividend_from_earnings',
-  'cash_dividend_from_retain_earnings',
-  'cash_dividend_from_retained_earnings',
-  'cash_dividend_from_capital_reserve',
-  'cash_dividend_from_capital_surplus',
-  'cash_dividend_from_capital',
-  'cash_dividend_total',
-  'cash_dividend_total_amount',
-];
-
-const STOCK_DIVIDEND_PRIMARY_KEY = 'stock_dividend';
-const STOCK_DIVIDEND_PART_KEYS = [
-  'stock_dividend_from_earnings',
-  'stock_dividend_from_retain_earnings',
-  'stock_dividend_from_retained_earnings',
-  'stock_dividend_from_capital_reserve',
-  'stock_dividend_from_capital_surplus',
-  'stock_dividend_from_capital',
-  'stock_dividend_total',
-  'stock_dividend_total_amount',
-];
-
-const CASH_INCREASE_PRIMARY_KEY = 'cash_capital_increase';
-const CASH_INCREASE_PART_KEYS = [
-  'cash_capital_increase_ratio',
-  'cash_capital_increase_total',
-  'cash_capital_increase_total_ratio',
-  'cash_capital_increase_subscription_ratio',
-  'cash_capital_increase_subscribe_ratio',
-  'cash_capital_increase_subscription_rate',
-  'cash_capital_increase_ratio_total',
-  'cash_capital_increase_ratio_percent',
-  'cash_capital_increase_percent',
-  'cash_capital_increase_percentage',
-  'cash_capital_increase_per_share',
-  'cash_capital_increase_share_ratio',
-  'cash_capital_increase_shares_ratio',
-  'cash_increase_ratio',
-  'cash_increase_total_ratio',
-  'cash_increase_percent',
-  'cash_increase_percentage',
-  'cash_subscription_ratio',
-  'subscription_ratio',
-  'subscription_rate',
-  'subscription_percent',
-  'subscription_percentage',
-  'rights_issue_ratio',
-  'rights_issue_percent',
-  'rights_issue_percentage',
-];
-
-const STOCK_INCREASE_PRIMARY_KEY = 'stock_capital_increase';
-const STOCK_INCREASE_PART_KEYS = [
-  'stock_capital_increase_ratio',
-  'stock_capital_increase_total',
-  'stock_capital_increase_total_ratio',
-  'stock_capital_increase_percent',
-  'stock_capital_increase_percentage',
-  'stock_capital_increase_per_share',
-  'stock_capital_increase_share_ratio',
-  'stock_capital_increase_shares_ratio',
-  'stock_dividend_capital_increase',
-  'stock_dividend_capital_increase_ratio',
-  'stock_dividend_capital_increase_total',
-  'stock_dividend_capital_increase_total_ratio',
-];
-
-const ZERO_AMOUNT_SAMPLE_LIMIT = 4;
-const ZERO_AMOUNT_RAW_PREVIEW_LIMIT = 8;
 
 const DEFAULT_EXCLUDE_NORMALISED_TOKENS = [
   'date',
@@ -331,9 +163,7 @@ const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
 const FINMIND_SPLITTABLE_STATUS = new Set([400, 408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
 const FINMIND_ADJUSTED_LABEL = 'FinMind 還原序列';
-const FINMIND_DIVIDEND_DATASET = 'TaiwanStockDividend';
 const FINMIND_DIVIDEND_RESULT_DATASET = 'TaiwanStockDividendResult';
-const FINMIND_DIVIDEND_LABEL = 'FinMind (TaiwanStockDividend)';
 const FINMIND_DIVIDEND_RESULT_LABEL = 'FinMind (TaiwanStockDividendResult)';
 const ADJUSTED_SERIES_RATIO_EPSILON = 1e-5;
 
@@ -388,9 +218,6 @@ function normaliseFinMindMessage(message) {
 function resolveFinMindDatasetLabel(dataset) {
   if (!dataset) return 'FinMind 資料';
   const token = String(dataset);
-  if (token === FINMIND_DIVIDEND_DATASET) {
-    return 'TaiwanStockDividend';
-  }
   if (token === FINMIND_DIVIDEND_RESULT_DATASET) {
     return 'TaiwanStockDividendResult';
   }
@@ -805,259 +632,6 @@ function shouldSkipNormalisedKey(normalisedKey, tokens = []) {
   return tokens.some((token) => token && normalisedKey.includes(token));
 }
 
-function gatherDividendFieldHints(raw, options = {}) {
-  if (!raw || typeof raw !== 'object') return [];
-  const {
-    keys = [],
-    aliasPatterns = [],
-    prefixTokens = [],
-    parseOptions = {},
-    limit = 4,
-  } = options;
-
-  const resolvedLimit = Number.isFinite(limit) && limit > 0 ? limit : 4;
-  const activeKeys = Array.isArray(keys) ? keys : [];
-  const activePatterns = Array.isArray(aliasPatterns) ? aliasPatterns : [];
-  const activePrefixes = Array.isArray(prefixTokens) ? prefixTokens : [];
-  if (activeKeys.length === 0 && activePatterns.length === 0 && activePrefixes.length === 0) {
-    return [];
-  }
-
-  const hints = [];
-  const seen = new Set();
-  for (const [rawKey, rawValue] of Object.entries(raw)) {
-    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
-    const normalisedKey = normaliseKeyName(rawKey);
-    if (seen.has(normalisedKey)) continue;
-
-    const matchesKeyList = activeKeys.some((key) => normaliseKeyName(key) === normalisedKey);
-    const matchesAlias = matchesAnyPattern(rawKey, activePatterns);
-    const matchesPrefix = activePrefixes.some((token) => token && normalisedKey.includes(token));
-    if (!matchesKeyList && !matchesAlias && !matchesPrefix) continue;
-
-    const hint = {
-      key: rawKey,
-      raw: typeof rawValue === 'string' ? rawValue : String(rawValue),
-    };
-    const numeric = parseNumber(rawValue, parseOptions);
-    if (Number.isFinite(numeric)) {
-      hint.numeric = Number(numeric);
-    }
-    hints.push(hint);
-    seen.add(normalisedKey);
-
-    if (hints.length >= resolvedLimit) {
-      break;
-    }
-  }
-
-  return hints;
-}
-
-function collectZeroAmountSample(diagnostics, raw, context = {}) {
-  if (!diagnostics || !raw || typeof raw !== 'object') return;
-  if (!Array.isArray(diagnostics.zeroAmountSamples)) {
-    diagnostics.zeroAmountSamples = [];
-  }
-
-  const limit = Number.isFinite(context.limit) && context.limit > 0 ? context.limit : ZERO_AMOUNT_SAMPLE_LIMIT;
-  if (diagnostics.zeroAmountSamples.length >= limit) return;
-
-  const exInfo = context.exDateInfo || resolveExDate(raw);
-
-  const buildPrefixes = (keys = [], fallback) => {
-    const tokens = new Set();
-    if (fallback) {
-      const fallbackToken = normaliseKeyName(fallback);
-      if (fallbackToken) tokens.add(fallbackToken);
-    }
-    if (Array.isArray(keys)) {
-      for (const key of keys) {
-        const token = normaliseKeyName(key);
-        if (token) tokens.add(token);
-      }
-    }
-    return Array.from(tokens);
-  };
-
-  const sample = {
-    date: exInfo?.iso || null,
-  };
-  if (exInfo?.sourceKey) {
-    sample.dateSource = {
-      key: exInfo.sourceKey,
-      value: exInfo.rawValue ?? null,
-    };
-  }
-
-  const cashFields = gatherDividendFieldHints(raw, {
-    keys: context.cashKeys || [],
-    aliasPatterns: context.cashAliasPatterns || [],
-    prefixTokens: buildPrefixes(context.cashKeys, context.cashFallback),
-    parseOptions: { treatAsRatio: false },
-  });
-  if (cashFields.length > 0) {
-    sample.cashDividendFields = cashFields;
-  }
-
-  const stockFields = gatherDividendFieldHints(raw, {
-    keys: context.stockKeys || [],
-    aliasPatterns: context.stockAliasPatterns || [],
-    prefixTokens: buildPrefixes(context.stockKeys, context.stockFallback),
-    parseOptions: { treatAsRatio: true },
-  });
-  if (stockFields.length > 0) {
-    sample.stockDividendFields = stockFields;
-  }
-
-  const cashIncreaseFields = gatherDividendFieldHints(raw, {
-    keys: context.cashIncreaseKeys || [],
-    aliasPatterns: context.cashIncreaseAliasPatterns || [],
-    prefixTokens: buildPrefixes(context.cashIncreaseKeys, context.cashIncreaseFallback),
-    parseOptions: { treatAsRatio: true },
-  });
-  if (cashIncreaseFields.length > 0) {
-    sample.cashIncreaseFields = cashIncreaseFields;
-  }
-
-  const stockIncreaseFields = gatherDividendFieldHints(raw, {
-    keys: context.stockIncreaseKeys || [],
-    aliasPatterns: context.stockIncreaseAliasPatterns || [],
-    prefixTokens: buildPrefixes(context.stockIncreaseKeys, context.stockIncreaseFallback),
-    parseOptions: { treatAsRatio: true },
-  });
-  if (stockIncreaseFields.length > 0) {
-    sample.stockIncreaseFields = stockIncreaseFields;
-  }
-
-  if (
-    (!sample.cashDividendFields || sample.cashDividendFields.length === 0) &&
-    (!sample.stockDividendFields || sample.stockDividendFields.length === 0) &&
-    (!sample.cashIncreaseFields || sample.cashIncreaseFields.length === 0) &&
-    (!sample.stockIncreaseFields || sample.stockIncreaseFields.length === 0)
-  ) {
-    return;
-  }
-
-  const previewLimit = Number.isFinite(context.rawPreviewLimit) && context.rawPreviewLimit > 0
-    ? context.rawPreviewLimit
-    : ZERO_AMOUNT_RAW_PREVIEW_LIMIT;
-  if (previewLimit > 0) {
-    const preview = [];
-    for (const [rawKey, rawValue] of Object.entries(raw)) {
-      if (preview.length >= previewLimit) break;
-      if (!rawKey && rawKey !== 0) continue;
-      if (rawValue === undefined || rawValue === null || rawValue === '') continue;
-      if (typeof rawValue === 'object') continue;
-      const numericCandidate = parseNumber(rawValue);
-      preview.push({
-        key: rawKey,
-        raw: typeof rawValue === 'string' ? rawValue : String(rawValue),
-        numeric: Number.isFinite(numericCandidate) ? Number(numericCandidate) : undefined,
-      });
-    }
-    if (preview.length > 0) {
-      sample.rawPreview = preview;
-    }
-  }
-
-  diagnostics.zeroAmountSamples.push(sample);
-}
-
-function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
-  const parseOptions = options.treatAsRatio ? { treatAsRatio: true } : {};
-  const aliasKeys = Array.isArray(options.aliasKeys) ? options.aliasKeys : [];
-  const aliasPatterns = Array.isArray(options.aliasPatterns) ? options.aliasPatterns : [];
-  const excludeNormalisedTokens = [
-    ...DEFAULT_EXCLUDE_NORMALISED_TOKENS,
-    ...(Array.isArray(options.excludeNormalizedTokens)
-      ? options.excludeNormalizedTokens
-      : []),
-  ];
-  const excludeOriginalPatterns = [
-    ...DEFAULT_EXCLUDE_ORIGINAL_PATTERNS,
-    ...(Array.isArray(options.excludeOriginalPatterns)
-      ? options.excludeOriginalPatterns
-      : []),
-  ];
-
-  const visited = new Set();
-  const prefixes = new Set();
-  const baseKeys = new Set();
-  const registerBaseKey = (key) => {
-    if (!key && key !== 0) return;
-    const normalised = normaliseKeyName(key);
-    if (normalised) {
-      baseKeys.add(normalised);
-      visited.add(normalised);
-      prefixes.add(normalised);
-    }
-  };
-  registerBaseKey(primaryKey);
-  for (const key of partKeys) {
-    registerBaseKey(key);
-  }
-
-  let total = 0;
-
-  for (const key of aliasKeys) {
-    if (!key && key !== 0) continue;
-    const normalised = normaliseKeyName(key);
-    if (!normalised) continue;
-    prefixes.add(normalised);
-    if (baseKeys.has(normalised)) {
-      visited.add(normalised);
-      continue;
-    }
-    const aliasValue = parseNumber(readField(raw, key), parseOptions);
-    if (Number.isFinite(aliasValue) && aliasValue > 0) {
-      total += aliasValue;
-      visited.add(normalised);
-    }
-  }
-  const primaryValue = parseNumber(readField(raw, primaryKey), parseOptions);
-  if (Number.isFinite(primaryValue) && primaryValue > 0) {
-    total += primaryValue;
-  }
-
-  for (const partKey of partKeys) {
-    const partValue = parseNumber(readField(raw, partKey), parseOptions);
-    if (Number.isFinite(partValue) && partValue > 0) {
-      total += partValue;
-    }
-  }
-
-  if (total > 0) {
-    return total;
-  }
-
-  if (options.allowFuzzy !== false && raw && typeof raw === 'object') {
-    const fallbackPrefix = normaliseKeyName(options.fallbackPrefix || primaryKey);
-    if (fallbackPrefix) {
-      prefixes.add(fallbackPrefix);
-    }
-    for (const [rawKey, rawValue] of Object.entries(raw)) {
-      if (!rawKey && rawKey !== 0) continue;
-      const normalisedKey = normaliseKeyName(rawKey);
-      if (visited.has(normalisedKey)) continue;
-      if (shouldSkipNormalisedKey(normalisedKey, excludeNormalisedTokens)) continue;
-      if (shouldSkipByPatterns(rawKey, excludeOriginalPatterns)) continue;
-      const matchesKnownPrefix = Array.from(prefixes).some(
-        (token) => token && normalisedKey.includes(token),
-      );
-      const matchesAliasPattern = matchesAnyPattern(rawKey, aliasPatterns);
-      if (!matchesKnownPrefix && !matchesAliasPattern) continue;
-      const candidate = parseNumber(rawValue, parseOptions);
-      if (Number.isFinite(candidate) && candidate > 0) {
-        total += candidate;
-        visited.add(normalisedKey);
-      }
-    }
-  }
-
-  return total > 0 ? total : 0;
-}
-
 function resolveSubscriptionPrice(raw) {
   let best = null;
   for (const key of SUBSCRIPTION_PRICE_ALIAS_KEYS) {
@@ -1139,154 +713,6 @@ function enumerateMonths(startDate, endDate) {
   return months;
 }
 
-function resolveExDate(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const candidateKeys = [
-    'cash_dividend_ex_rights_trading_date',
-    'cash_dividend_ex_dividend_trading_date',
-    'cash_dividend_ex_dividend_date',
-    'cash_dividend_ex_rights_date',
-    'cash_dividend_trading_date',
-    'cash_dividend_record_date',
-    'stock_dividend_ex_rights_trading_date',
-    'stock_dividend_ex_dividend_trading_date',
-    'stock_dividend_ex_date',
-    'stock_dividend_trading_date',
-    'stock_dividend_record_date',
-    'dividend_ex_rights_trading_date',
-    'dividend_ex_dividend_trading_date',
-    'dividend_ex_date',
-    'ex_dividend_trading_date',
-    'ex_dividend_record_date',
-    'ex_rights_trading_date',
-    'ex_rights_record_date',
-    'ex_dividend_rights_trading_date',
-    'ex_dividend_rights_record_date',
-    'cash_dividend_ex_date',
-    'stock_dividend_ex_date',
-    'ex_dividend_date',
-    'ex_rights_date',
-    'ex_date',
-    'date',
-  ];
-  for (const key of candidateKeys) {
-    const candidate = readField(raw, key);
-    const iso = toISODate(candidate);
-    if (iso) {
-      return { iso, sourceKey: key, rawValue: candidate };
-    }
-  }
-  return null;
-}
-
-function normaliseDividendRecord(raw, context = {}) {
-  if (!raw || typeof raw !== 'object') return null;
-  const exDateInfo = resolveExDate(raw);
-  if (!exDateInfo?.iso) return null;
-
-  const collectKeys = (...groups) => {
-    const seen = new Set();
-    const result = [];
-    for (const group of groups) {
-      if (!Array.isArray(group)) continue;
-      for (const key of group) {
-        const token = key || key === 0 ? String(key) : null;
-        if (!token || seen.has(token)) continue;
-        seen.add(token);
-        result.push(key);
-      }
-    }
-    return result;
-  };
-
-  const cashDividend = resolveDividendAmount(
-    raw,
-    CASH_DIVIDEND_PRIMARY_KEY,
-    CASH_DIVIDEND_PART_KEYS,
-    {
-      aliasKeys: CASH_DIVIDEND_ALIAS_KEYS,
-      aliasPatterns: CASH_DIVIDEND_ALIAS_PATTERNS,
-      excludeNormalizedTokens: ['ratio', 'rate', 'percent', 'percentage', 'yield', 'payout'],
-      excludeOriginalPatterns: [/比率/, /比例/, /率/, /百分/, /殖利率/, /配息率/, /收益率/],
-    },
-  );
-  const stockDividend = resolveDividendAmount(
-    raw,
-    STOCK_DIVIDEND_PRIMARY_KEY,
-    STOCK_DIVIDEND_PART_KEYS,
-    {
-      treatAsRatio: true,
-      aliasKeys: STOCK_DIVIDEND_ALIAS_KEYS,
-      aliasPatterns: STOCK_DIVIDEND_ALIAS_PATTERNS,
-      excludeNormalizedTokens: ['yield'],
-      excludeOriginalPatterns: [/殖利率/, /轉增資/, /增資/],
-    },
-  );
-  const cashCapitalIncrease = resolveDividendAmount(
-    raw,
-    CASH_INCREASE_PRIMARY_KEY,
-    CASH_INCREASE_PART_KEYS,
-    {
-      treatAsRatio: true,
-      aliasKeys: CASH_INCREASE_ALIAS_KEYS,
-      aliasPatterns: CASH_INCREASE_ALIAS_PATTERNS,
-      excludeNormalizedTokens: ['price', 'amount', 'value', 'cash_dividend'],
-      excludeOriginalPatterns: [/價格/, /價/, /金額/, /每股/, /股利/],
-    },
-  );
-  const stockCapitalIncrease = resolveDividendAmount(
-    raw,
-    STOCK_INCREASE_PRIMARY_KEY,
-    STOCK_INCREASE_PART_KEYS,
-    {
-      treatAsRatio: true,
-      aliasKeys: STOCK_INCREASE_ALIAS_KEYS,
-      aliasPatterns: STOCK_INCREASE_ALIAS_PATTERNS,
-      excludeNormalizedTokens: ['price', 'amount', 'value'],
-      excludeOriginalPatterns: [/價格/, /價/, /金額/, /股利/],
-    },
-  );
-  const subscriptionPrice = resolveSubscriptionPrice(raw);
-
-  const hasComponent = [
-    cashDividend,
-    stockDividend,
-    cashCapitalIncrease,
-    stockCapitalIncrease,
-  ].some((value) => Number.isFinite(value) && value > 0);
-
-  if (!hasComponent) {
-    collectZeroAmountSample(context?.diagnostics, raw, {
-      exDateInfo,
-      cashKeys: collectKeys([CASH_DIVIDEND_PRIMARY_KEY], CASH_DIVIDEND_PART_KEYS, CASH_DIVIDEND_ALIAS_KEYS),
-      cashAliasPatterns: CASH_DIVIDEND_ALIAS_PATTERNS,
-      cashFallback: CASH_DIVIDEND_PRIMARY_KEY,
-      stockKeys: collectKeys([STOCK_DIVIDEND_PRIMARY_KEY], STOCK_DIVIDEND_PART_KEYS, STOCK_DIVIDEND_ALIAS_KEYS),
-      stockAliasPatterns: STOCK_DIVIDEND_ALIAS_PATTERNS,
-      stockFallback: STOCK_DIVIDEND_PRIMARY_KEY,
-      cashIncreaseKeys: collectKeys([CASH_INCREASE_PRIMARY_KEY], CASH_INCREASE_PART_KEYS, CASH_INCREASE_ALIAS_KEYS),
-      cashIncreaseAliasPatterns: CASH_INCREASE_ALIAS_PATTERNS,
-      cashIncreaseFallback: CASH_INCREASE_PRIMARY_KEY,
-      stockIncreaseKeys: collectKeys([STOCK_INCREASE_PRIMARY_KEY], STOCK_INCREASE_PART_KEYS, STOCK_INCREASE_ALIAS_KEYS),
-      stockIncreaseAliasPatterns: STOCK_INCREASE_ALIAS_PATTERNS,
-      stockIncreaseFallback: STOCK_INCREASE_PRIMARY_KEY,
-    });
-    return null;
-  }
-
-  return {
-    date: exDateInfo.iso,
-    cashDividend,
-    stockDividend,
-    cashCapitalIncrease,
-    stockCapitalIncrease,
-    subscriptionPrice,
-    raw,
-    dateSource: exDateInfo.sourceKey || null,
-    dateValue: exDateInfo.rawValue ?? null,
-  };
-}
-
 function computeAdjustmentRatio(baseClose, record) {
   if (!Number.isFinite(baseClose) || baseClose <= 0) return 1;
 
@@ -1322,16 +748,10 @@ function filterDividendRecordsByPriceRange(dividendRecords, rangeStartISO, range
   const startISO = rangeStartISO ? toISODate(rangeStartISO) : null;
   const endISO = rangeEndISO ? toISODate(rangeEndISO) : null;
   return dividendRecords.filter((record) => {
-    const exInfo = resolveExDate(record);
-    if (!exInfo?.iso) {
-      return false;
-    }
-    if (startISO && exInfo.iso < startISO) {
-      return false;
-    }
-    if (endISO && exInfo.iso > endISO) {
-      return false;
-    }
+    const iso = toISODate(readField(record, 'date'));
+    if (!iso) return false;
+    if (startISO && iso < startISO) return false;
+    if (endISO && iso > endISO) return false;
     return true;
   });
 }
@@ -1442,137 +862,7 @@ function buildDividendResultEvents(records) {
   );
 }
 
-function incrementDiagnosticCounter(diagnostics, key) {
-  if (!diagnostics || !key) return;
-  const current = Number.isFinite(diagnostics[key]) ? diagnostics[key] : Number(diagnostics[key]);
-  if (Number.isFinite(current)) {
-    diagnostics[key] = current + 1;
-  } else {
-    diagnostics[key] = 1;
-  }
-}
-
-function prepareDividendEvents(dividendRecords, context = {}) {
-  const diagnostics = context?.diagnostics;
-  const eventMap = new Map();
-  for (const rawRecord of dividendRecords || []) {
-    incrementDiagnosticCounter(diagnostics, 'totalRecords');
-    const exInfo = resolveExDate(rawRecord);
-    if (!exInfo?.iso) {
-      incrementDiagnosticCounter(diagnostics, 'missingExDate');
-      continue;
-    }
-    const normalised = normaliseDividendRecord(rawRecord, { diagnostics });
-    if (!normalised) {
-      incrementDiagnosticCounter(diagnostics, 'zeroAmountRecords');
-      continue;
-    }
-    incrementDiagnosticCounter(diagnostics, 'normalisedRecords');
-    const key = normalised.date;
-    const signature = normalised.raw ? JSON.stringify(normalised.raw) : null;
-    const existing = eventMap.get(key);
-    if (existing) {
-      if (signature && existing.signatures.has(signature)) {
-        continue;
-      }
-      if (signature) existing.signatures.add(signature);
-      existing.cashDividend += normalised.cashDividend;
-      existing.stockDividend += normalised.stockDividend;
-      existing.cashCapitalIncrease += normalised.cashCapitalIncrease;
-      existing.stockCapitalIncrease += normalised.stockCapitalIncrease;
-      if (normalised.dateSource) {
-        if (!existing.dateSource) {
-          existing.dateSource = normalised.dateSource;
-          existing.dateValue = normalised.dateValue ?? existing.dateValue ?? null;
-        }
-        if (!Array.isArray(existing.dateSources)) {
-          existing.dateSources = [];
-        }
-        const duplicateSource = existing.dateSources.find(
-          (item) => item.key === normalised.dateSource && item.value === (normalised.dateValue ?? null),
-        );
-        if (!duplicateSource) {
-          existing.dateSources.push({
-            key: normalised.dateSource,
-            value: normalised.dateValue ?? null,
-          });
-        }
-      }
-      if (
-        Number.isFinite(normalised.subscriptionPrice) &&
-        normalised.subscriptionPrice > 0 &&
-        (!Number.isFinite(existing.subscriptionPrice) ||
-          existing.subscriptionPrice <= 0 ||
-          normalised.subscriptionPrice < existing.subscriptionPrice)
-      ) {
-        existing.subscriptionPrice = normalised.subscriptionPrice;
-      }
-      if (normalised.raw) {
-        existing.rawRecords.push(normalised.raw);
-      }
-    } else {
-      const payload = {
-        date: normalised.date,
-        cashDividend: normalised.cashDividend,
-        stockDividend: normalised.stockDividend,
-        cashCapitalIncrease: normalised.cashCapitalIncrease,
-        stockCapitalIncrease: normalised.stockCapitalIncrease,
-        subscriptionPrice: normalised.subscriptionPrice,
-        rawRecords: normalised.raw ? [normalised.raw] : [],
-        dateSource: normalised.dateSource || null,
-        dateValue: normalised.dateValue ?? null,
-        dateSources: normalised.dateSource
-          ? [
-              {
-                key: normalised.dateSource,
-                value: normalised.dateValue ?? null,
-              },
-            ]
-          : [],
-        signatures: new Set(),
-      };
-      if (signature) {
-        payload.signatures.add(signature);
-      }
-      eventMap.set(key, payload);
-    }
-  }
-
-  const events = Array.from(eventMap.values())
-    .map((event) => {
-      event.cashDividend = Math.max(0, safeRound(event.cashDividend) ?? 0);
-      event.stockDividend = Math.max(0, safeRound(event.stockDividend) ?? 0);
-      event.cashCapitalIncrease = Math.max(0, safeRound(event.cashCapitalIncrease) ?? 0);
-      event.stockCapitalIncrease = Math.max(0, safeRound(event.stockCapitalIncrease) ?? 0);
-      if (!Number.isFinite(event.subscriptionPrice) || event.subscriptionPrice <= 0) {
-        event.subscriptionPrice = null;
-      } else {
-        event.subscriptionPrice = safeRound(event.subscriptionPrice) ?? event.subscriptionPrice;
-      }
-      event.raw = event.rawRecords.length > 0 ? event.rawRecords[0] : null;
-      delete event.signatures;
-      if (!event.dateSources || event.dateSources.length === 0) {
-        delete event.dateSources;
-      }
-      return event;
-    })
-    .filter(
-      (event) =>
-        event.cashDividend > 0 ||
-        event.stockDividend > 0 ||
-        event.cashCapitalIncrease > 0 ||
-        event.stockCapitalIncrease > 0,
-    )
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  if (diagnostics) {
-    diagnostics.aggregatedEvents = events.length;
-  }
-
-  return events;
-}
-
-function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
+function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
   const preparedEvents = Array.isArray(options.preparedEvents)
     ? options.preparedEvents
     : null;
@@ -1590,7 +880,7 @@ function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
   const multipliers = new Array(sortedRows.length).fill(1);
   const adjustments = [];
 
-  const events = preparedEvents || prepareDividendEvents(dividendRecords);
+  const events = preparedEvents || [];
 
   for (const event of events) {
     const exIndex = sortedRows.findIndex((row) => row.date >= event.date);
@@ -1685,7 +975,7 @@ function applyBackwardAdjustments(priceRows, dividendRecords, options = {}) {
 
 async function fetchTwseMonth(stockNo, monthQuery) {
   const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${monthQuery}01&stockNo=${stockNo}`;
-  const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const response = await fetchImpl(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!response.ok) {
     throw new Error(`TWSE HTTP ${response.status}`);
   }
@@ -1765,7 +1055,7 @@ async function executeFinMindQuery(params, options = {}) {
           url.searchParams.set(key, String(value));
         }
       });
-      const response = await fetch(url.toString());
+      const response = await fetchImpl(url.toString());
       if (!response.ok) {
         const error = new Error(`FinMind HTTP ${response.status}`);
         error.statusCode = response.status;
@@ -2354,134 +1644,6 @@ async function deriveAdjustedSeriesFromDividendResult({
   };
 }
 
-async function fetchDividendSeries(stockNo, startISO, endISO) {
-  const token = process.env.FINMIND_TOKEN;
-  if (!token) {
-    throw new Error('未設定 FinMind Token');
-  }
-  const startDate = new Date(startISO);
-  const endDate = new Date(endISO);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return { rows: [], fetchStartISO: null, fetchEndISO: null };
-  }
-  const fetchStart = new Date(startDate.getTime());
-  if (Number.isFinite(FINMIND_DIVIDEND_LOOKBACK_DAYS) && FINMIND_DIVIDEND_LOOKBACK_DAYS > 0) {
-    fetchStart.setUTCDate(fetchStart.getUTCDate() - FINMIND_DIVIDEND_LOOKBACK_DAYS);
-  }
-  if (fetchStart > endDate) {
-    fetchStart.setTime(endDate.getTime());
-  }
-  const spans = enumerateDateSpans(fetchStart, endDate, FINMIND_DIVIDEND_SPAN_DAYS);
-  if (spans.length === 0) {
-    return {
-      rows: [],
-      fetchStartISO: formatISODateFromDate(fetchStart),
-      fetchEndISO: formatISODateFromDate(endDate),
-    };
-  }
-  const combined = [];
-  const queue = [...spans];
-  const responseLog = [];
-  while (queue.length > 0) {
-    const span = queue.shift();
-    const spanDays = countSpanDays(span);
-    const urlParams = {
-      dataset: FINMIND_DIVIDEND_DATASET,
-      data_id: stockNo,
-      start_date: span.startISO,
-      end_date: span.endISO,
-      token,
-    };
-    let json;
-    try {
-      json = await executeFinMindQuery(urlParams);
-    } catch (error) {
-      if (shouldSplitSpan(error, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
-        const split = splitSpan(span);
-        if (split && split.length === 2) {
-          console.warn(
-            `[FinMind 股利段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              error.message || error
-            }`,
-          );
-          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
-          queue.unshift(...split);
-          continue;
-        }
-      }
-      const enriched = new Error(
-        `[FinMind 股利段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error}`,
-      );
-      enriched.original = error;
-      enriched.statusCode = extractStatusCode(error);
-      enriched.finmindMeta = {
-        dataset: FINMIND_DIVIDEND_DATASET,
-        spanStart: span.startISO,
-        spanEnd: span.endISO,
-        statusCode: enriched.statusCode,
-        message: error?.message || '',
-        responses: responseLog.slice(),
-        type: 'network',
-      };
-      throw enriched;
-    }
-    if (json?.status !== 200 || !Array.isArray(json?.data)) {
-      const payloadError = new Error(`FinMind Dividend 回應錯誤: ${json?.msg || 'unknown error'}`);
-      payloadError.statusCode = json?.status;
-      if (shouldSplitSpan(payloadError, spanDays, FINMIND_MIN_DIVIDEND_SPAN_DAYS)) {
-        const split = splitSpan(span);
-        if (split && split.length === 2) {
-          console.warn(
-            `[FinMind 股利段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              payloadError.message || payloadError
-            }`,
-          );
-          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
-          queue.unshift(...split);
-          continue;
-        }
-      }
-      payloadError.finmindMeta = {
-        dataset: FINMIND_DIVIDEND_DATASET,
-        spanStart: span.startISO,
-        spanEnd: span.endISO,
-        statusCode: payloadError.statusCode,
-        message: json?.msg || payloadError.message,
-        responses: [
-          ...responseLog,
-          {
-            spanStart: span.startISO,
-            spanEnd: span.endISO,
-            status: json?.status ?? null,
-            message: json?.msg || '',
-            rowCount: Array.isArray(json?.data) ? json.data.length : 0,
-          },
-        ],
-        type: 'payload',
-      };
-      throw payloadError;
-    }
-    const rowCount = Array.isArray(json?.data) ? json.data.length : 0;
-    responseLog.push({
-      spanStart: span.startISO,
-      spanEnd: span.endISO,
-      status: json?.status ?? null,
-      message: json?.msg || '',
-      rowCount,
-    });
-    combined.push(...json.data);
-    if (queue.length > 0) {
-      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
-    }
-  }
-  return {
-    rows: combined,
-    fetchStartISO: formatISODateFromDate(fetchStart),
-    fetchEndISO: formatISODateFromDate(endDate),
-    responseLog,
-  };
-}
-
 async function fetchDividendResultSeries(stockNo, startISO, endISO) {
   const token = process.env.FINMIND_TOKEN;
   if (!token) {
@@ -2643,18 +1805,21 @@ function summariseAdjustmentSkipReasons(adjustments = []) {
 function buildDebugSteps({
   priceData,
   priceSourceLabel,
-  dividendSeries,
-  filteredDividendSeries,
-  preparedEvents,
+  dividendResultStats,
+  resultEvents,
   adjustments,
   fallbackInfo,
 }) {
   const priceRows = Array.isArray(priceData?.rows) ? priceData.rows.length : 0;
-  const totalDividendRows = Array.isArray(dividendSeries) ? dividendSeries.length : 0;
-  const filteredDividendRows = Array.isArray(filteredDividendSeries)
-    ? filteredDividendSeries.length
+  const totalDividendRows = Number.isFinite(dividendResultStats?.totalRecords)
+    ? dividendResultStats.totalRecords
+    : Array.isArray(dividendResultStats?.rawRecords)
+      ? dividendResultStats.rawRecords.length
+      : 0;
+  const filteredDividendRows = Number.isFinite(dividendResultStats?.filteredRecords)
+    ? dividendResultStats.filteredRecords
     : 0;
-  const normalisedEvents = Array.isArray(preparedEvents) ? preparedEvents.length : 0;
+  const normalisedEvents = Array.isArray(resultEvents) ? resultEvents.length : 0;
   const appliedAdjustments = Array.isArray(adjustments)
     ? adjustments.filter((event) => !event?.skipped).length
     : 0;
@@ -2671,14 +1836,14 @@ function buildDebugSteps({
       detail: `${priceRows} 筆 ・ ${priceSourceLabel || priceData?.priceSource || ''}`.trim(),
     },
     {
-      key: 'dividendFetch',
-      label: '股利抓取',
+      key: 'dividendResultFetch',
+      label: '配息結果',
       status: totalDividendRows > 0 ? 'success' : 'warning',
       detail: `原始 ${totalDividendRows} 筆 ・ 區間 ${filteredDividendRows} 筆`,
     },
     {
-      key: 'eventNormalisation',
-      label: '事件整理',
+      key: 'dividendResultEvents',
+      label: '還原事件',
       status: normalisedEvents > 0 ? 'success' : 'warning',
       detail: `${normalisedEvents} 件`,
     },
@@ -2718,9 +1883,9 @@ function buildSummary(
     uniqueSources.add(fallbackInfo.label || FINMIND_ADJUSTED_LABEL);
   }
   const {
-    filteredCount,
-    totalCount,
-    normalizedCount,
+    resultFilteredCount,
+    resultTotalCount,
+    eventCount,
     lookbackWindowDays,
     fetchStartISO,
     fetchEndISO,
@@ -2736,9 +1901,9 @@ function buildSummary(
 
   return {
     priceRows: Array.isArray(priceData.rows) ? priceData.rows.length : 0,
-    dividendRows: Number.isFinite(filteredCount) ? filteredCount : undefined,
-    dividendRowsTotal: Number.isFinite(totalCount) ? totalCount : undefined,
-    dividendEvents: Number.isFinite(normalizedCount) ? normalizedCount : undefined,
+    dividendRows: Number.isFinite(resultFilteredCount) ? resultFilteredCount : undefined,
+    dividendRowsTotal: Number.isFinite(resultTotalCount) ? resultTotalCount : undefined,
+    dividendEvents: Number.isFinite(eventCount) ? eventCount : undefined,
     dividendFetchStart: fetchStartISO || undefined,
     dividendFetchEnd: fetchEndISO || undefined,
     dividendLookbackDays: Number.isFinite(lookbackWindowDays) ? lookbackWindowDays : undefined,
@@ -2747,15 +1912,12 @@ function buildSummary(
     adjustmentSkipReasons:
       skipReasons && Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
     priceSource: basePriceSource,
-    dividendSource: dividendSourceLabel || FINMIND_DIVIDEND_LABEL,
+    dividendSource: dividendSourceLabel || FINMIND_DIVIDEND_RESULT_LABEL,
     sources: Array.from(uniqueSources),
   };
 }
 
 export const __TESTING__ = {
-  resolveDividendAmount,
-  normaliseDividendRecord,
-  prepareDividendEvents,
   parseNumber,
   normaliseNumericText,
   resolveSubscriptionPrice,
@@ -2766,12 +1928,13 @@ export const __TESTING__ = {
   applyBackwardAdjustments,
   normaliseDividendResultRecord,
   buildDividendResultEvents,
+  setFetchImplementation,
+  resetFetchImplementation,
 };
 
 export const handler = async (event) => {
   const finmindStatus = {
     tokenPresent: Boolean(process.env.FINMIND_TOKEN),
-    dividend: null,
     dividendResult: null,
     price: null,
   };
@@ -2817,57 +1980,6 @@ export const handler = async (event) => {
       }
     }
 
-    let dividendPayload;
-    let dividendFetchError = null;
-    try {
-      dividendPayload = await fetchDividendSeries(stockNo, startISO, endISO);
-    } catch (error) {
-      dividendFetchError = error;
-      console.warn('[calculateAdjustedPrice] FinMind 股利抓取失敗，將回傳空集合。', error);
-      const responses =
-        (error?.finmindMeta && Array.isArray(error.finmindMeta.responses)
-          ? error.finmindMeta.responses
-          : []) || [];
-      dividendPayload = {
-        rows: [],
-        fetchStartISO: null,
-        fetchEndISO: null,
-        responseLog: responses,
-      };
-    }
-    const dividendSeries = Array.isArray(dividendPayload?.rows) ? dividendPayload.rows : [];
-
-    const responseLog = Array.isArray(dividendPayload?.responseLog)
-      ? dividendPayload.responseLog
-      : [];
-    const lastAttempt = responseLog.length > 0 ? responseLog[responseLog.length - 1] : null;
-    const classification = classifyFinMindOutcome({
-      tokenPresent: finmindStatus.tokenPresent,
-      dataset: FINMIND_DIVIDEND_DATASET,
-      statusCode:
-        (Number.isFinite(dividendFetchError?.statusCode)
-          ? dividendFetchError.statusCode
-          : null) ?? (Number.isFinite(lastAttempt?.status) ? lastAttempt.status : null),
-      message: lastAttempt?.message || null,
-      rawMessage:
-        (dividendFetchError?.finmindMeta && dividendFetchError.finmindMeta.message) ||
-        dividendFetchError?.message ||
-        null,
-      dataCount: dividendSeries.length,
-      spanStart:
-        (dividendFetchError?.finmindMeta && dividendFetchError.finmindMeta.spanStart) ||
-        lastAttempt?.spanStart ||
-        dividendPayload?.fetchStartISO ||
-        startISO,
-      spanEnd:
-        (dividendFetchError?.finmindMeta && dividendFetchError.finmindMeta.spanEnd) ||
-        lastAttempt?.spanEnd ||
-        dividendPayload?.fetchEndISO ||
-        endISO,
-      error: dividendFetchError,
-    });
-    finmindStatus.dividend = classification;
-
     const priceRows = Array.isArray(priceData.rows) ? priceData.rows : [];
     let priceRangeStartISO = null;
     let priceRangeEndISO = null;
@@ -2879,38 +1991,18 @@ export const handler = async (event) => {
       priceRangeEndISO = sortedForRange[sortedForRange.length - 1]?.date || null;
     }
 
-    const filteredDividendSeries = filterDividendRecordsByPriceRange(
-      dividendSeries,
-      priceRangeStartISO || startISO,
-      priceRangeEndISO || endISO,
-    );
-
     const dividendDiagnostics = {
-      totalRecords: 0,
-      missingExDate: 0,
-      zeroAmountRecords: 0,
-      normalisedRecords: 0,
-      aggregatedEvents: 0,
-      zeroAmountSamples: [],
-      responseLog: responseLog.slice(0, 10),
+      dividendResult: null,
+      responseLog: [],
+      eventPreview: [],
+      eventPreviewTotal: 0,
+      eventPreviewMore: 0,
+      eventPreviewLimit: DIVIDEND_RESULT_PREVIEW_LIMIT,
     };
-    dividendDiagnostics.finmindStatus = classification;
-
-    const preparedDividendEvents = prepareDividendEvents(filteredDividendSeries, {
-      diagnostics: dividendDiagnostics,
-    });
-
-    const { rows: adjustedRows, adjustments, events } = applyBackwardAdjustments(
-      priceRows,
-      filteredDividendSeries,
-      { preparedEvents: preparedDividendEvents },
-    );
-
-    const appliedAdjustments = adjustments.filter((event) => !event?.skipped);
     let fallbackInfo = null;
-    let effectiveRows = adjustedRows;
-    let effectiveAdjustments = adjustments;
-    let effectiveEvents = events;
+    let effectiveRows = priceRows;
+    let effectiveAdjustments = [];
+    let effectiveEvents = [];
     const fallbackHistory = [];
 
     const appendFallbackHistory = (info, extras = {}) => {
@@ -2923,72 +2015,105 @@ export const handler = async (event) => {
     const recomputeAppliedFlag = (collection) =>
       Array.isArray(collection) && collection.some((item) => !item?.skipped);
 
+    const dividendResultOutcome = priceRows.length
+      ? await deriveAdjustedSeriesFromDividendResult({
+          stockNo,
+          startISO,
+          endISO,
+          priceRows,
+          priceRangeStartISO,
+          priceRangeEndISO,
+        })
+      : null;
+
+    if (dividendResultOutcome) {
+      const diag = dividendResultOutcome.diagnostics || null;
+      if (diag) {
+        dividendDiagnostics.dividendResult = diag;
+        if (Array.isArray(diag.responseLog)) {
+          dividendDiagnostics.responseLog = diag.responseLog.slice(0, 10);
+        }
+      }
+      if (dividendDiagnostics.responseLog.length === 0) {
+        const fallbackLog = Array.isArray(dividendResultOutcome.payload?.responseLog)
+          ? dividendResultOutcome.payload.responseLog.slice(0, 10)
+          : [];
+        dividendDiagnostics.responseLog = fallbackLog;
+      }
+      dividendDiagnostics.resultInfo = dividendResultOutcome.info || null;
+
+      effectiveAdjustments = Array.isArray(dividendResultOutcome.adjustments)
+        ? dividendResultOutcome.adjustments
+        : [];
+      effectiveEvents = Array.isArray(dividendResultOutcome.events)
+        ? dividendResultOutcome.events
+        : [];
+      if (
+        dividendResultOutcome.applied &&
+        Array.isArray(dividendResultOutcome.rows) &&
+        dividendResultOutcome.rows.length > 0
+      ) {
+        effectiveRows = dividendResultOutcome.rows;
+      }
+
+      const classificationResult = classifyFinMindOutcome({
+        tokenPresent: finmindStatus.tokenPresent,
+        dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        statusCode: dividendResultOutcome.statusMeta?.statusCode,
+        message: dividendResultOutcome.statusMeta?.message || null,
+        rawMessage: dividendResultOutcome.error?.message || null,
+        dataCount:
+          dividendResultOutcome.statusMeta?.dataCount ??
+          dividendResultOutcome.diagnostics?.eventCount ??
+          effectiveEvents.length,
+        spanStart:
+          dividendResultOutcome.statusMeta?.spanStart ??
+          dividendResultOutcome.payload?.fetchStartISO ??
+          priceRangeStartISO ??
+          startISO,
+        spanEnd:
+          dividendResultOutcome.statusMeta?.spanEnd ??
+          dividendResultOutcome.payload?.fetchEndISO ??
+          priceRangeEndISO ??
+          endISO,
+        error: dividendResultOutcome.error || null,
+      });
+      finmindStatus.dividendResult = classificationResult;
+    }
+
+    if (!Array.isArray(dividendDiagnostics.responseLog)) {
+      dividendDiagnostics.responseLog = [];
+    }
+
+    const appliedAdjustments = effectiveAdjustments.filter((event) => !event?.skipped);
     let hasAppliedAdjustments = appliedAdjustments.length > 0;
 
-    if (!hasAppliedAdjustments && priceRows.length > 0) {
-      const dividendResultFallback = await deriveAdjustedSeriesFromDividendResult({
-        stockNo,
-        startISO,
-        endISO,
-        priceRows,
-        priceRangeStartISO,
-        priceRangeEndISO,
-      });
-      if (dividendResultFallback) {
-        appendFallbackHistory(dividendResultFallback.info, {
-          attempt: 'finmindDividendResult',
-          diagnostics: dividendResultFallback.diagnostics || undefined,
-        });
-        if (dividendResultFallback.diagnostics) {
-          dividendDiagnostics.dividendResult = dividendResultFallback.diagnostics;
-        }
-        const classificationResult = classifyFinMindOutcome({
-          tokenPresent: finmindStatus.tokenPresent,
-          dataset: FINMIND_DIVIDEND_RESULT_DATASET,
-          statusCode: dividendResultFallback.statusMeta?.statusCode,
-          message: dividendResultFallback.statusMeta?.message || null,
-          rawMessage: dividendResultFallback.error?.message || null,
-          dataCount:
-            dividendResultFallback.statusMeta?.dataCount ??
-            dividendResultFallback.diagnostics?.eventCount ??
-            0,
-          spanStart:
-            dividendResultFallback.statusMeta?.spanStart ??
-            dividendResultFallback.payload?.fetchStartISO ??
-            priceRangeStartISO ??
-            startISO,
-          spanEnd:
-            dividendResultFallback.statusMeta?.spanEnd ??
-            dividendResultFallback.payload?.fetchEndISO ??
-            priceRangeEndISO ??
-            endISO,
-          error: dividendResultFallback.error || null,
-        });
-        finmindStatus.dividendResult = classificationResult;
-
-        if (
-          dividendResultFallback.applied &&
-          Array.isArray(dividendResultFallback.rows) &&
-          dividendResultFallback.rows.length > 0
-        ) {
-          effectiveRows = dividendResultFallback.rows;
-          effectiveAdjustments = Array.isArray(dividendResultFallback.adjustments)
-            ? dividendResultFallback.adjustments
-            : adjustments;
-          effectiveEvents = Array.isArray(dividendResultFallback.events)
-            ? dividendResultFallback.events
-            : effectiveEvents;
-        } else if (
-          Array.isArray(dividendResultFallback.adjustments) &&
-          dividendResultFallback.adjustments.length > 0
-        ) {
-          effectiveAdjustments = [
-            ...effectiveAdjustments,
-            ...dividendResultFallback.adjustments,
-          ];
-        }
-        hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
-      }
+    if (effectiveEvents.length > 0) {
+      const previewItems = effectiveEvents
+        .slice(0, DIVIDEND_RESULT_PREVIEW_LIMIT)
+        .map((event) => ({
+          date: event.date || null,
+          manualRatio: Number.isFinite(event.manualRatio) ? event.manualRatio : null,
+          beforePrice: Number.isFinite(event.beforePrice) ? event.beforePrice : null,
+          afterPrice: Number.isFinite(event.afterPrice) ? event.afterPrice : null,
+          dividendTotal: Number.isFinite(event.dividendTotal) ? event.dividendTotal : null,
+        }));
+      dividendDiagnostics.eventPreview = previewItems;
+      dividendDiagnostics.eventPreviewTotal = effectiveEvents.length;
+      dividendDiagnostics.eventPreviewMore = Math.max(
+        0,
+        effectiveEvents.length - previewItems.length,
+      );
+    }
+    if (dividendDiagnostics.dividendResult) {
+      dividendDiagnostics.dividendResult.appliedAdjustments = appliedAdjustments.length;
+    } else {
+      dividendDiagnostics.dividendResult = {
+        totalRecords: 0,
+        filteredRecords: 0,
+        eventCount: effectiveEvents.length,
+        appliedAdjustments: appliedAdjustments.length,
+      };
     }
 
     if (!hasAppliedAdjustments && priceRows.length > 0) {
@@ -3018,9 +2143,8 @@ export const handler = async (event) => {
     const debugSteps = buildDebugSteps({
       priceData,
       priceSourceLabel,
-      dividendSeries,
-      filteredDividendSeries,
-      preparedEvents: preparedDividendEvents,
+      dividendResultStats: dividendDiagnostics.dividendResult,
+      resultEvents: effectiveEvents,
       adjustments: effectiveAdjustments,
       fallbackInfo,
     });
@@ -3037,7 +2161,23 @@ export const handler = async (event) => {
     const dividendSourceLabelForSummary =
       fallbackInfo?.applied && fallbackInfo?.label
         ? fallbackInfo.label
-        : FINMIND_DIVIDEND_LABEL;
+        : FINMIND_DIVIDEND_RESULT_LABEL;
+
+    const dividendSummaryStats = {
+      resultFilteredCount: Number.isFinite(dividendDiagnostics.dividendResult?.filteredRecords)
+        ? dividendDiagnostics.dividendResult.filteredRecords
+        : undefined,
+      resultTotalCount: Number.isFinite(dividendDiagnostics.dividendResult?.totalRecords)
+        ? dividendDiagnostics.dividendResult.totalRecords
+        : undefined,
+      eventCount: Number.isFinite(dividendDiagnostics.dividendResult?.eventCount)
+        ? dividendDiagnostics.dividendResult.eventCount
+        : effectiveEvents.length,
+      lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
+      fetchStartISO: dividendResultOutcome?.payload?.fetchStartISO || null,
+      fetchEndISO: dividendResultOutcome?.payload?.fetchEndISO || null,
+      dividendSourceLabel: dividendSourceLabelForSummary,
+    };
 
     const responseBody = {
       version: FUNCTION_VERSION,
@@ -3051,15 +2191,7 @@ export const handler = async (event) => {
         effectiveAdjustments,
         market,
         priceSourceLabel,
-        {
-          filteredCount: filteredDividendSeries.length,
-          totalCount: dividendSeries.length,
-          normalizedCount: preparedDividendEvents.length,
-          lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
-          fetchStartISO: dividendPayload?.fetchStartISO || null,
-          fetchEndISO: dividendPayload?.fetchEndISO || null,
-          dividendSourceLabel: dividendSourceLabelForSummary,
-        },
+        dividendSummaryStats,
         fallbackInfo,
       ),
       data: effectiveRows,
@@ -3076,19 +2208,6 @@ export const handler = async (event) => {
   } catch (error) {
     console.error('[calculateAdjustedPrice] 執行錯誤:', error);
     const statusCode = error?.statusCode && Number.isFinite(error.statusCode) ? error.statusCode : 500;
-    if (!finmindStatus.dividend && error?.finmindMeta?.dataset === FINMIND_DIVIDEND_DATASET) {
-      finmindStatus.dividend = classifyFinMindOutcome({
-        tokenPresent: finmindStatus.tokenPresent,
-        dataset: FINMIND_DIVIDEND_DATASET,
-        statusCode: Number.isFinite(error.statusCode) ? error.statusCode : error?.finmindMeta?.statusCode,
-        message: error?.finmindMeta?.message || null,
-        rawMessage: error?.message || null,
-        dataCount: 0,
-        spanStart: error?.finmindMeta?.spanStart || null,
-        spanEnd: error?.finmindMeta?.spanEnd || null,
-        error,
-      });
-    }
     if (
       !finmindStatus.dividendResult &&
       error?.finmindMeta?.dataset === FINMIND_DIVIDEND_RESULT_DATASET
