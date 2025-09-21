@@ -32,6 +32,163 @@ const dataSourceTesterState = {
     busy: false,
 };
 
+// Patch Tag: LB-DATASOURCE-20250328A
+const testerAdjustmentReasonLabels = {
+    missingPriceRow: '缺少對應價格',
+    invalidBaseClose: '無效基準價',
+    ratioOutOfRange: '調整比例異常',
+};
+
+function testerEscapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatTesterSkipReasons(skipReasons) {
+    if (!skipReasons || typeof skipReasons !== 'object') return '';
+    const entries = Object.entries(skipReasons);
+    if (entries.length === 0) return '';
+    return entries
+        .map(([reason, count]) => {
+            const label = testerAdjustmentReasonLabels[reason] || reason;
+            return `${testerEscapeHtml(label)}×${testerEscapeHtml(count)}`;
+        })
+        .join('、');
+}
+
+function formatTesterNumber(value, digits = 4) {
+    if (!Number.isFinite(value)) return '—';
+    const formatted = Number(value).toFixed(digits);
+    return testerEscapeHtml(formatted.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1'));
+}
+
+function formatTesterFieldHints(fields) {
+    if (!Array.isArray(fields) || fields.length === 0) return '';
+    return fields
+        .map((field) => {
+            const key = testerEscapeHtml(field.key ?? '');
+            const raw = testerEscapeHtml(field.raw ?? '');
+            const numeric = Number.isFinite(field.numeric) ? formatTesterNumber(field.numeric, 4) : '';
+            return numeric ? `${key}=${raw}（解析後 ${numeric}）` : `${key}=${raw}`;
+        })
+        .join('、');
+}
+
+function buildTesterDebugStepsHtml(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return '';
+    const items = steps
+        .map((step) => {
+            const statusClass = step.status === 'success'
+                ? 'text-emerald-600'
+                : step.status === 'warning'
+                    ? 'text-amber-600'
+                    : 'text-rose-600';
+            const label = testerEscapeHtml(step.label || step.key || '未命名步驟');
+            const details = [];
+            if (step.detail) details.push(testerEscapeHtml(step.detail));
+            const skipText = formatTesterSkipReasons(step.skipReasons);
+            if (skipText) details.push(skipText);
+            const suffix = details.length > 0 ? ` ・ ${details.join(' ・ ')}` : '';
+            return `<div class="flex items-start gap-2"><span class="${statusClass}">●</span><span class="text-[11px]" style="color: var(--foreground);">${label}${suffix}</span></div>`;
+        })
+        .join('');
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原流程檢查</div><div class="mt-1 space-y-1">${items}</div></div>`;
+}
+
+function buildZeroAmountSampleHtml(samples) {
+    if (!Array.isArray(samples) || samples.length === 0) return '';
+    const limited = samples.slice(0, 2);
+    const blocks = limited
+        .map((sample, index) => {
+            const headerParts = [];
+            if (sample.date) {
+                headerParts.push(`除權息日 ${testerEscapeHtml(sample.date)}`);
+            }
+            if (sample.dateSource && sample.dateSource.key) {
+                headerParts.push(`來源欄位 ${testerEscapeHtml(sample.dateSource.key)}`);
+            }
+            const header = headerParts.length > 0
+                ? `<div class="text-[10px] font-medium" style="color: var(--foreground);">${headerParts.join(' ・ ')}</div>`
+                : '';
+            const groups = [
+                { label: '現金股利欄位', fields: sample.cashDividendFields },
+                { label: '股票股利欄位', fields: sample.stockDividendFields },
+                { label: '現金增資欄位', fields: sample.cashIncreaseFields },
+                { label: '股票增資欄位', fields: sample.stockIncreaseFields },
+            ]
+                .filter((group) => Array.isArray(group.fields) && group.fields.length > 0)
+                .map((group) => {
+                    const content = formatTesterFieldHints(group.fields);
+                    return `<div class="mt-1"><span class="font-medium" style="color: var(--foreground);">${testerEscapeHtml(group.label)}</span><div class="mt-0.5 text-[10px]" style="color: var(--muted-foreground);">${content}</div></div>`;
+                })
+                .join('');
+            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);">${header}${groups}</div>`;
+        })
+        .join('');
+    const remainderNote = samples.length > limited.length
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${limited.length} 筆金額為零的配息紀錄，總計 ${testerEscapeHtml(samples.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">零金額欄位追蹤</div><div class="mt-2 space-y-2">${blocks}</div>${remainderNote}</div>`;
+}
+
+function buildAdjustmentDiagnosticsHtml(adjustments) {
+    if (!Array.isArray(adjustments)) return '';
+    if (adjustments.length === 0) {
+        return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 rounded-md border border-dashed px-3 py-2 text-[11px]" style="border-color: var(--border); color: var(--muted-foreground);">尚未產生任何還原事件，請檢查股利資料或略過原因統計。</div></div>`;
+    }
+    const items = adjustments
+        .slice(0, 3)
+        .map((event) => {
+            const statusClass = event.skipped ? 'text-amber-600' : 'text-emerald-600';
+            const statusLabel = testerEscapeHtml(event.skipped ? '略過' : '已套用');
+            const metaLines = [];
+            if (event.date) {
+                metaLines.push(`除權息日 ${testerEscapeHtml(event.date)}`);
+            }
+            if (event.appliedDate && event.appliedDate !== event.date) {
+                metaLines.push(`基準價日 ${testerEscapeHtml(event.appliedDate)}`);
+            }
+            if (Number.isFinite(event.baseClose)) {
+                metaLines.push(`基準價 ${formatTesterNumber(event.baseClose, 3)}`);
+            }
+            const composition = [];
+            if (Number.isFinite(event.cashDividend) && event.cashDividend > 0) {
+                composition.push(`現金 ${formatTesterNumber(event.cashDividend, 4)}`);
+            }
+            if (Number.isFinite(event.stockDividend) && event.stockDividend > 0) {
+                composition.push(`股票 ${formatTesterNumber(event.stockDividend, 4)}`);
+            }
+            if (Number.isFinite(event.cashCapitalIncrease) && event.cashCapitalIncrease > 0) {
+                composition.push(`現增 ${formatTesterNumber(event.cashCapitalIncrease, 4)}`);
+            }
+            if (Number.isFinite(event.stockCapitalIncrease) && event.stockCapitalIncrease > 0) {
+                composition.push(`轉增 ${formatTesterNumber(event.stockCapitalIncrease, 4)}`);
+            }
+            if (composition.length > 0) {
+                metaLines.push(`成分 ${composition.join('、')}`);
+            }
+            if (!event.skipped && Number.isFinite(event.ratio)) {
+                metaLines.push(`調整係數 ${formatTesterNumber(event.ratio, 6)}`);
+            }
+            if (event.skipped) {
+                const reasonLabel = testerAdjustmentReasonLabels[event.reason] || event.reason || '未知原因';
+                metaLines.push(`原因 ${testerEscapeHtml(reasonLabel)}`);
+            }
+            const metaHtml = metaLines.map((line) => `<div>${line}</div>`).join('');
+            return `<div class="rounded-md border px-3 py-2 bg-white/70" style="border-color: var(--border);"><div class="flex items-center gap-2"><span class="${statusClass}">●</span><span class="font-medium" style="color: var(--foreground);">${statusLabel}</span></div><div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${metaHtml}</div></div>`;
+        })
+        .join('');
+    const remainderNote = adjustments.length > 3
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆事件，總計 ${testerEscapeHtml(adjustments.length)} 筆。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 space-y-1">${items}</div>${remainderNote}</div>`;
+}
+
 function getStockNoValue() {
     const input = document.getElementById('stockNo');
     return (input?.value || '').trim().toUpperCase();
@@ -225,12 +382,10 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 ? payload.summary.sources.join(' + ')
                 : null;
             const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
-            const appliedAdjustments = Array.isArray(payload?.adjustments)
-                ? payload.adjustments.filter((event) => !event.skipped).length
-                : 0;
-            const skippedAdjustments = Array.isArray(payload?.adjustments)
-                ? payload.adjustments.filter((event) => event.skipped).length
-                : 0;
+            const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
+            const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
+            const appliedAdjustments = adjustmentsList.filter((event) => !event.skipped).length;
+            const skippedAdjustments = adjustmentsList.filter((event) => event.skipped).length;
             const priceSource = payload?.priceSource || payload?.summary?.priceSource;
             const dividendRows = payload?.summary?.dividendRows;
             const dividendRowsTotal = payload?.summary?.dividendRowsTotal;
@@ -243,63 +398,68 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
                     ? payload.dividendDiagnostics
                     : null;
+            const zeroAmountSamples = Array.isArray(dividendDiagnostics?.zeroAmountSamples)
+                ? dividendDiagnostics.zeroAmountSamples
+                : [];
+
             const lines = [
-                `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
-                `資料筆數: <span class="font-semibold">${total}</span>`,
-                `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-                `有效還原事件: <span class="font-semibold">${appliedAdjustments}</span> 件${
+                `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourceSummary)}</span>`,
+                `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
+                `涵蓋區間: <span class="font-semibold">${testerEscapeHtml(firstDate)} ~ ${testerEscapeHtml(lastDate)}</span>`,
+                `有效還原事件: <span class="font-semibold">${testerEscapeHtml(appliedAdjustments)}</span> 件${
                     skippedAdjustments > 0
-                        ? `，跳過 <span class="font-semibold">${skippedAdjustments}</span> 件`
+                        ? `，跳過 <span class="font-semibold">${testerEscapeHtml(skippedAdjustments)}</span> 件`
                         : ''
                 }`,
             ];
             if (priceSource) {
-                lines.push(`原始價格來源: <span class="font-semibold">${priceSource}</span>`);
+                lines.push(`原始價格來源: <span class="font-semibold">${testerEscapeHtml(priceSource)}</span>`);
             }
             if (Number.isFinite(dividendRowsTotal)) {
                 const effectiveText = Number.isFinite(dividendRows)
-                    ? `，其中 <span class="font-semibold">${dividendRows}</span> 筆落在回測區間`
+                    ? `，其中 <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆落在回測區間`
                     : '';
                 lines.push(
-                    `FinMind 股利筆數: <span class="font-semibold">${dividendRowsTotal}</span> 筆${effectiveText}`,
+                    `FinMind 股利筆數: <span class="font-semibold">${testerEscapeHtml(dividendRowsTotal)}</span> 筆${effectiveText}`,
                 );
             } else if (Number.isFinite(dividendRows)) {
                 lines.push(
-                    `FinMind 股利筆數: <span class="font-semibold">${dividendRows}</span> 筆`,
+                    `FinMind 股利筆數: <span class="font-semibold">${testerEscapeHtml(dividendRows)}</span> 筆`,
                 );
             }
             if (Number.isFinite(dividendEvents)) {
                 lines.push(
-                    `FinMind 有效股利事件: <span class="font-semibold">${dividendEvents}</span> 件`,
+                    `FinMind 有效股利事件: <span class="font-semibold">${testerEscapeHtml(dividendEvents)}</span> 件`,
                 );
             }
             if (dividendFetchStart || dividendFetchEnd) {
                 const rangeStart = dividendFetchStart || '—';
                 const rangeEnd = dividendFetchEnd || '—';
                 const suffix = Number.isFinite(lookbackDays)
-                    ? `，向前延伸 <span class="font-semibold">${lookbackDays}</span> 天`
+                    ? `，向前延伸 <span class="font-semibold">${testerEscapeHtml(lookbackDays)}</span> 天`
                     : '';
                 lines.push(
-                    `FinMind 股利查詢區間: <span class="font-semibold">${rangeStart} ~ ${rangeEnd}</span>${suffix}`,
+                    `FinMind 股利查詢區間: <span class="font-semibold">${testerEscapeHtml(rangeStart)} ~ ${testerEscapeHtml(rangeEnd)}</span>${suffix}`,
                 );
             }
             if (dividendDiagnostics) {
                 const diagParts = [];
                 if (Number.isFinite(dividendDiagnostics.totalRecords)) {
-                    diagParts.push(`總筆數 ${dividendDiagnostics.totalRecords}`);
+                    diagParts.push(`總筆數 ${testerEscapeHtml(dividendDiagnostics.totalRecords)}`);
                 }
                 if (Number.isFinite(dividendDiagnostics.normalisedRecords)) {
-                    diagParts.push(`成功正規化 ${dividendDiagnostics.normalisedRecords}`);
+                    diagParts.push(`成功正規化 ${testerEscapeHtml(dividendDiagnostics.normalisedRecords)}`);
                 }
                 if (Number.isFinite(dividendDiagnostics.aggregatedEvents)) {
-                    diagParts.push(`彙整事件 ${dividendDiagnostics.aggregatedEvents}`);
+                    diagParts.push(`彙整事件 ${testerEscapeHtml(dividendDiagnostics.aggregatedEvents)}`);
                 }
                 const skipDetails = [];
                 if (Number.isFinite(dividendDiagnostics.missingExDate) && dividendDiagnostics.missingExDate > 0) {
-                    skipDetails.push(`缺少除權息日 ×${dividendDiagnostics.missingExDate}`);
+                    skipDetails.push(`缺少除權息日 ×${testerEscapeHtml(dividendDiagnostics.missingExDate)}`);
                 }
                 if (Number.isFinite(dividendDiagnostics.zeroAmountRecords) && dividendDiagnostics.zeroAmountRecords > 0) {
-                    skipDetails.push(`金額為 0 ×${dividendDiagnostics.zeroAmountRecords}`);
+                    const zeroSuffix = zeroAmountSamples.length > 0 ? '（已擷取欄位快照）' : '';
+                    skipDetails.push(`金額為 0 ×${testerEscapeHtml(dividendDiagnostics.zeroAmountRecords)}${zeroSuffix}`);
                 }
                 if (skipDetails.length > 0) {
                     diagParts.push(`略過原因：${skipDetails.join('、')}`);
@@ -313,16 +473,25 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 typeof adjustmentSkipReasons === 'object' &&
                 Object.keys(adjustmentSkipReasons).length > 0
             ) {
-                const skipDetails = Object.entries(adjustmentSkipReasons)
-                    .map(([reason, count]) => `${reason}×${count}`)
-                    .join('、');
-                if (skipDetails) {
-                    lines.push(
-                        `跳過原因統計: <span class="font-semibold">${skipDetails}</span>`,
-                    );
+                const skipDetailsText = formatTesterSkipReasons(adjustmentSkipReasons);
+                if (skipDetailsText) {
+                    lines.push(`跳過原因統計: <span class="font-semibold">${skipDetailsText}</span>`);
                 }
             }
-            detailHtml = lines.join('<br>');
+
+            let detailHtml = lines.join('<br>');
+            const debugStepsHtml = buildTesterDebugStepsHtml(debugSteps);
+            if (debugStepsHtml) {
+                detailHtml += debugStepsHtml;
+            }
+            const zeroAmountHtml = buildZeroAmountSampleHtml(zeroAmountSamples);
+            if (zeroAmountHtml) {
+                detailHtml += zeroAmountHtml;
+            }
+            const adjustmentHtml = buildAdjustmentDiagnosticsHtml(adjustmentsList);
+            if (adjustmentHtml) {
+                detailHtml += adjustmentHtml;
+            }
         } else {
             const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
             const total = Number.isFinite(payload.iTotalRecords)

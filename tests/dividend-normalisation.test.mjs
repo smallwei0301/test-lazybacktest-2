@@ -88,6 +88,7 @@ const diagnostics = {
   zeroAmountRecords: 0,
   normalisedRecords: 0,
   aggregatedEvents: 0,
+  zeroAmountSamples: [],
 };
 
 const diagEvents = prepareDividendEvents(
@@ -105,6 +106,38 @@ assert.equal(diagnostics.missingExDate, 1);
 assert.equal(diagnostics.zeroAmountRecords, 1);
 assert.equal(diagnostics.aggregatedEvents, 1);
 assert.equal(diagEvents.length, 1);
+
+const zeroAmountDiagnostics = {
+  totalRecords: 0,
+  missingExDate: 0,
+  zeroAmountRecords: 0,
+  normalisedRecords: 0,
+  aggregatedEvents: 0,
+  zeroAmountSamples: [],
+};
+
+prepareDividendEvents(
+  [
+    {
+      cash_dividend_ex_dividend_date: '2024-09-15',
+      cash_dividend: '0',
+      cash_dividend_total_amount: '0',
+      cash_dividend_from_earnings: '0',
+      stock_dividend_total: '0',
+      stock_capital_increase_ratio: '0',
+      現金股利金額: '0.0',
+    },
+  ],
+  { diagnostics: zeroAmountDiagnostics },
+);
+
+assert.equal(zeroAmountDiagnostics.zeroAmountRecords, 1);
+assert.ok(Array.isArray(zeroAmountDiagnostics.zeroAmountSamples));
+assert.equal(zeroAmountDiagnostics.zeroAmountSamples.length, 1);
+const zeroSnapshot = zeroAmountDiagnostics.zeroAmountSamples[0];
+assert.equal(zeroSnapshot.date, '2024-09-15');
+assert.ok(Array.isArray(zeroSnapshot.cashDividendFields));
+assert.ok(zeroSnapshot.cashDividendFields.length > 0);
 
 // Mixed adjustment ratio sanity check
 const baseClose = 50;

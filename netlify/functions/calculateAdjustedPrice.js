@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.2 - TWSE/FinMind dividend diagnostics)
+// netlify/functions/calculateAdjustedPrice.js (v13.3 - TWSE/FinMind dividend diagnostics + zero-amount tracing)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -14,9 +14,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241216A
 // Patch Tag: LB-ADJ-COMPOSER-20250220A
 // Patch Tag: LB-ADJ-COMPOSER-20250320A
+// Patch Tag: LB-ADJ-COMPOSER-20250328A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250320A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250328A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -155,6 +156,77 @@ const SUBSCRIPTION_PRICE_ALIAS_PATTERNS = [
   /(發行|訂價).*(價格|價)/i,
   /配股價格/i,
 ];
+
+const CASH_DIVIDEND_PRIMARY_KEY = 'cash_dividend';
+const CASH_DIVIDEND_PART_KEYS = [
+  'cash_dividend_from_earnings',
+  'cash_dividend_from_retain_earnings',
+  'cash_dividend_from_retained_earnings',
+  'cash_dividend_from_capital_reserve',
+  'cash_dividend_from_capital_surplus',
+  'cash_dividend_from_capital',
+  'cash_dividend_total',
+  'cash_dividend_total_amount',
+];
+
+const STOCK_DIVIDEND_PRIMARY_KEY = 'stock_dividend';
+const STOCK_DIVIDEND_PART_KEYS = [
+  'stock_dividend_from_earnings',
+  'stock_dividend_from_retain_earnings',
+  'stock_dividend_from_retained_earnings',
+  'stock_dividend_from_capital_reserve',
+  'stock_dividend_from_capital_surplus',
+  'stock_dividend_from_capital',
+  'stock_dividend_total',
+  'stock_dividend_total_amount',
+];
+
+const CASH_INCREASE_PRIMARY_KEY = 'cash_capital_increase';
+const CASH_INCREASE_PART_KEYS = [
+  'cash_capital_increase_ratio',
+  'cash_capital_increase_total',
+  'cash_capital_increase_total_ratio',
+  'cash_capital_increase_subscription_ratio',
+  'cash_capital_increase_subscribe_ratio',
+  'cash_capital_increase_subscription_rate',
+  'cash_capital_increase_ratio_total',
+  'cash_capital_increase_ratio_percent',
+  'cash_capital_increase_percent',
+  'cash_capital_increase_percentage',
+  'cash_capital_increase_per_share',
+  'cash_capital_increase_share_ratio',
+  'cash_capital_increase_shares_ratio',
+  'cash_increase_ratio',
+  'cash_increase_total_ratio',
+  'cash_increase_percent',
+  'cash_increase_percentage',
+  'cash_subscription_ratio',
+  'subscription_ratio',
+  'subscription_rate',
+  'subscription_percent',
+  'subscription_percentage',
+  'rights_issue_ratio',
+  'rights_issue_percent',
+  'rights_issue_percentage',
+];
+
+const STOCK_INCREASE_PRIMARY_KEY = 'stock_capital_increase';
+const STOCK_INCREASE_PART_KEYS = [
+  'stock_capital_increase_ratio',
+  'stock_capital_increase_total',
+  'stock_capital_increase_total_ratio',
+  'stock_capital_increase_percent',
+  'stock_capital_increase_percentage',
+  'stock_capital_increase_per_share',
+  'stock_capital_increase_share_ratio',
+  'stock_capital_increase_shares_ratio',
+  'stock_dividend_capital_increase',
+  'stock_dividend_capital_increase_ratio',
+  'stock_dividend_capital_increase_total',
+  'stock_dividend_capital_increase_total_ratio',
+];
+
+const ZERO_AMOUNT_SAMPLE_LIMIT = 4;
 
 const DEFAULT_EXCLUDE_NORMALISED_TOKENS = [
   'date',
@@ -592,6 +664,143 @@ function shouldSkipNormalisedKey(normalisedKey, tokens = []) {
   return tokens.some((token) => token && normalisedKey.includes(token));
 }
 
+function gatherDividendFieldHints(raw, options = {}) {
+  if (!raw || typeof raw !== 'object') return [];
+  const {
+    keys = [],
+    aliasPatterns = [],
+    prefixTokens = [],
+    parseOptions = {},
+    limit = 4,
+  } = options;
+
+  const resolvedLimit = Number.isFinite(limit) && limit > 0 ? limit : 4;
+  const activeKeys = Array.isArray(keys) ? keys : [];
+  const activePatterns = Array.isArray(aliasPatterns) ? aliasPatterns : [];
+  const activePrefixes = Array.isArray(prefixTokens) ? prefixTokens : [];
+  if (activeKeys.length === 0 && activePatterns.length === 0 && activePrefixes.length === 0) {
+    return [];
+  }
+
+  const hints = [];
+  const seen = new Set();
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+    const normalisedKey = normaliseKeyName(rawKey);
+    if (seen.has(normalisedKey)) continue;
+
+    const matchesKeyList = activeKeys.some((key) => normaliseKeyName(key) === normalisedKey);
+    const matchesAlias = matchesAnyPattern(rawKey, activePatterns);
+    const matchesPrefix = activePrefixes.some((token) => token && normalisedKey.includes(token));
+    if (!matchesKeyList && !matchesAlias && !matchesPrefix) continue;
+
+    const hint = {
+      key: rawKey,
+      raw: typeof rawValue === 'string' ? rawValue : String(rawValue),
+    };
+    const numeric = parseNumber(rawValue, parseOptions);
+    if (Number.isFinite(numeric)) {
+      hint.numeric = Number(numeric);
+    }
+    hints.push(hint);
+    seen.add(normalisedKey);
+
+    if (hints.length >= resolvedLimit) {
+      break;
+    }
+  }
+
+  return hints;
+}
+
+function collectZeroAmountSample(diagnostics, raw, context = {}) {
+  if (!diagnostics || !raw || typeof raw !== 'object') return;
+  if (!Array.isArray(diagnostics.zeroAmountSamples)) {
+    diagnostics.zeroAmountSamples = [];
+  }
+
+  const limit = Number.isFinite(context.limit) && context.limit > 0 ? context.limit : ZERO_AMOUNT_SAMPLE_LIMIT;
+  if (diagnostics.zeroAmountSamples.length >= limit) return;
+
+  const exInfo = context.exDateInfo || resolveExDate(raw);
+
+  const buildPrefixes = (keys = [], fallback) => {
+    const tokens = new Set();
+    if (fallback) {
+      const fallbackToken = normaliseKeyName(fallback);
+      if (fallbackToken) tokens.add(fallbackToken);
+    }
+    if (Array.isArray(keys)) {
+      for (const key of keys) {
+        const token = normaliseKeyName(key);
+        if (token) tokens.add(token);
+      }
+    }
+    return Array.from(tokens);
+  };
+
+  const sample = {
+    date: exInfo?.iso || null,
+  };
+  if (exInfo?.sourceKey) {
+    sample.dateSource = {
+      key: exInfo.sourceKey,
+      value: exInfo.rawValue ?? null,
+    };
+  }
+
+  const cashFields = gatherDividendFieldHints(raw, {
+    keys: context.cashKeys || [],
+    aliasPatterns: context.cashAliasPatterns || [],
+    prefixTokens: buildPrefixes(context.cashKeys, context.cashFallback),
+    parseOptions: { treatAsRatio: false },
+  });
+  if (cashFields.length > 0) {
+    sample.cashDividendFields = cashFields;
+  }
+
+  const stockFields = gatherDividendFieldHints(raw, {
+    keys: context.stockKeys || [],
+    aliasPatterns: context.stockAliasPatterns || [],
+    prefixTokens: buildPrefixes(context.stockKeys, context.stockFallback),
+    parseOptions: { treatAsRatio: true },
+  });
+  if (stockFields.length > 0) {
+    sample.stockDividendFields = stockFields;
+  }
+
+  const cashIncreaseFields = gatherDividendFieldHints(raw, {
+    keys: context.cashIncreaseKeys || [],
+    aliasPatterns: context.cashIncreaseAliasPatterns || [],
+    prefixTokens: buildPrefixes(context.cashIncreaseKeys, context.cashIncreaseFallback),
+    parseOptions: { treatAsRatio: true },
+  });
+  if (cashIncreaseFields.length > 0) {
+    sample.cashIncreaseFields = cashIncreaseFields;
+  }
+
+  const stockIncreaseFields = gatherDividendFieldHints(raw, {
+    keys: context.stockIncreaseKeys || [],
+    aliasPatterns: context.stockIncreaseAliasPatterns || [],
+    prefixTokens: buildPrefixes(context.stockIncreaseKeys, context.stockIncreaseFallback),
+    parseOptions: { treatAsRatio: true },
+  });
+  if (stockIncreaseFields.length > 0) {
+    sample.stockIncreaseFields = stockIncreaseFields;
+  }
+
+  if (
+    (!sample.cashDividendFields || sample.cashDividendFields.length === 0) &&
+    (!sample.stockDividendFields || sample.stockDividendFields.length === 0) &&
+    (!sample.cashIncreaseFields || sample.cashIncreaseFields.length === 0) &&
+    (!sample.stockIncreaseFields || sample.stockIncreaseFields.length === 0)
+  ) {
+    return;
+  }
+
+  diagnostics.zeroAmountSamples.push(sample);
+}
+
 function resolveDividendAmount(raw, primaryKey, partKeys = [], options = {}) {
   const parseOptions = options.treatAsRatio ? { treatAsRatio: true } : {};
   const aliasKeys = Array.isArray(options.aliasKeys) ? options.aliasKeys : [];
@@ -807,24 +1016,30 @@ function resolveExDate(raw) {
   return null;
 }
 
-function normaliseDividendRecord(raw) {
+function normaliseDividendRecord(raw, context = {}) {
   if (!raw || typeof raw !== 'object') return null;
   const exDateInfo = resolveExDate(raw);
   if (!exDateInfo?.iso) return null;
 
+  const collectKeys = (...groups) => {
+    const seen = new Set();
+    const result = [];
+    for (const group of groups) {
+      if (!Array.isArray(group)) continue;
+      for (const key of group) {
+        const token = key || key === 0 ? String(key) : null;
+        if (!token || seen.has(token)) continue;
+        seen.add(token);
+        result.push(key);
+      }
+    }
+    return result;
+  };
+
   const cashDividend = resolveDividendAmount(
     raw,
-    'cash_dividend',
-    [
-      'cash_dividend_from_earnings',
-      'cash_dividend_from_retain_earnings',
-      'cash_dividend_from_retained_earnings',
-      'cash_dividend_from_capital_reserve',
-      'cash_dividend_from_capital_surplus',
-      'cash_dividend_from_capital',
-      'cash_dividend_total',
-      'cash_dividend_total_amount',
-    ],
+    CASH_DIVIDEND_PRIMARY_KEY,
+    CASH_DIVIDEND_PART_KEYS,
     {
       aliasKeys: CASH_DIVIDEND_ALIAS_KEYS,
       aliasPatterns: CASH_DIVIDEND_ALIAS_PATTERNS,
@@ -834,17 +1049,8 @@ function normaliseDividendRecord(raw) {
   );
   const stockDividend = resolveDividendAmount(
     raw,
-    'stock_dividend',
-    [
-      'stock_dividend_from_earnings',
-      'stock_dividend_from_retain_earnings',
-      'stock_dividend_from_retained_earnings',
-      'stock_dividend_from_capital_reserve',
-      'stock_dividend_from_capital_surplus',
-      'stock_dividend_from_capital',
-      'stock_dividend_total',
-      'stock_dividend_total_amount',
-    ],
+    STOCK_DIVIDEND_PRIMARY_KEY,
+    STOCK_DIVIDEND_PART_KEYS,
     {
       treatAsRatio: true,
       aliasKeys: STOCK_DIVIDEND_ALIAS_KEYS,
@@ -855,12 +1061,8 @@ function normaliseDividendRecord(raw) {
   );
   const cashCapitalIncrease = resolveDividendAmount(
     raw,
-    'cash_capital_increase',
-    [
-      'cash_capital_increase_ratio',
-      'cash_capital_increase_total',
-      'cash_capital_increase_total_ratio',
-    ],
+    CASH_INCREASE_PRIMARY_KEY,
+    CASH_INCREASE_PART_KEYS,
     {
       treatAsRatio: true,
       aliasKeys: CASH_INCREASE_ALIAS_KEYS,
@@ -871,12 +1073,8 @@ function normaliseDividendRecord(raw) {
   );
   const stockCapitalIncrease = resolveDividendAmount(
     raw,
-    'stock_capital_increase',
-    [
-      'stock_capital_increase_ratio',
-      'stock_capital_increase_total',
-      'stock_capital_increase_total_ratio',
-    ],
+    STOCK_INCREASE_PRIMARY_KEY,
+    STOCK_INCREASE_PART_KEYS,
     {
       treatAsRatio: true,
       aliasKeys: STOCK_INCREASE_ALIAS_KEYS,
@@ -887,12 +1085,29 @@ function normaliseDividendRecord(raw) {
   );
   const subscriptionPrice = resolveSubscriptionPrice(raw);
 
-  if (
-    cashDividend === 0 &&
-    stockDividend === 0 &&
-    cashCapitalIncrease === 0 &&
-    stockCapitalIncrease === 0
-  ) {
+  const hasComponent = [
+    cashDividend,
+    stockDividend,
+    cashCapitalIncrease,
+    stockCapitalIncrease,
+  ].some((value) => Number.isFinite(value) && value > 0);
+
+  if (!hasComponent) {
+    collectZeroAmountSample(context?.diagnostics, raw, {
+      exDateInfo,
+      cashKeys: collectKeys([CASH_DIVIDEND_PRIMARY_KEY], CASH_DIVIDEND_PART_KEYS, CASH_DIVIDEND_ALIAS_KEYS),
+      cashAliasPatterns: CASH_DIVIDEND_ALIAS_PATTERNS,
+      cashFallback: CASH_DIVIDEND_PRIMARY_KEY,
+      stockKeys: collectKeys([STOCK_DIVIDEND_PRIMARY_KEY], STOCK_DIVIDEND_PART_KEYS, STOCK_DIVIDEND_ALIAS_KEYS),
+      stockAliasPatterns: STOCK_DIVIDEND_ALIAS_PATTERNS,
+      stockFallback: STOCK_DIVIDEND_PRIMARY_KEY,
+      cashIncreaseKeys: collectKeys([CASH_INCREASE_PRIMARY_KEY], CASH_INCREASE_PART_KEYS, CASH_INCREASE_ALIAS_KEYS),
+      cashIncreaseAliasPatterns: CASH_INCREASE_ALIAS_PATTERNS,
+      cashIncreaseFallback: CASH_INCREASE_PRIMARY_KEY,
+      stockIncreaseKeys: collectKeys([STOCK_INCREASE_PRIMARY_KEY], STOCK_INCREASE_PART_KEYS, STOCK_INCREASE_ALIAS_KEYS),
+      stockIncreaseAliasPatterns: STOCK_INCREASE_ALIAS_PATTERNS,
+      stockIncreaseFallback: STOCK_INCREASE_PRIMARY_KEY,
+    });
     return null;
   }
 
@@ -978,7 +1193,7 @@ function prepareDividendEvents(dividendRecords, context = {}) {
       incrementDiagnosticCounter(diagnostics, 'missingExDate');
       continue;
     }
-    const normalised = normaliseDividendRecord(rawRecord);
+    const normalised = normaliseDividendRecord(rawRecord, { diagnostics });
     if (!normalised) {
       incrementDiagnosticCounter(diagnostics, 'zeroAmountRecords');
       continue;
@@ -1649,6 +1864,7 @@ export const handler = async (event) => {
       zeroAmountRecords: 0,
       normalisedRecords: 0,
       aggregatedEvents: 0,
+      zeroAmountSamples: [],
     };
 
     const preparedDividendEvents = prepareDividendEvents(filteredDividendSeries, {
