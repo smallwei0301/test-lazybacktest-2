@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.1 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v13.2 - TWSE/FinMind dividend diagnostics)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -13,9 +13,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241209A
 // Patch Tag: LB-ADJ-COMPOSER-20241216A
 // Patch Tag: LB-ADJ-COMPOSER-20250220A
+// Patch Tag: LB-ADJ-COMPOSER-20250320A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250312A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250320A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',
@@ -957,11 +958,32 @@ function filterDividendRecordsByPriceRange(dividendRecords, rangeStartISO, range
   });
 }
 
-function prepareDividendEvents(dividendRecords) {
+function incrementDiagnosticCounter(diagnostics, key) {
+  if (!diagnostics || !key) return;
+  const current = Number.isFinite(diagnostics[key]) ? diagnostics[key] : Number(diagnostics[key]);
+  if (Number.isFinite(current)) {
+    diagnostics[key] = current + 1;
+  } else {
+    diagnostics[key] = 1;
+  }
+}
+
+function prepareDividendEvents(dividendRecords, context = {}) {
+  const diagnostics = context?.diagnostics;
   const eventMap = new Map();
   for (const rawRecord of dividendRecords || []) {
+    incrementDiagnosticCounter(diagnostics, 'totalRecords');
+    const exInfo = resolveExDate(rawRecord);
+    if (!exInfo?.iso) {
+      incrementDiagnosticCounter(diagnostics, 'missingExDate');
+      continue;
+    }
     const normalised = normaliseDividendRecord(rawRecord);
-    if (!normalised) continue;
+    if (!normalised) {
+      incrementDiagnosticCounter(diagnostics, 'zeroAmountRecords');
+      continue;
+    }
+    incrementDiagnosticCounter(diagnostics, 'normalisedRecords');
     const key = normalised.date;
     const signature = normalised.raw ? JSON.stringify(normalised.raw) : null;
     const existing = eventMap.get(key);
@@ -1058,6 +1080,10 @@ function prepareDividendEvents(dividendRecords) {
         event.stockCapitalIncrease > 0,
     )
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  if (diagnostics) {
+    diagnostics.aggregatedEvents = events.length;
+  }
 
   return events;
 }
@@ -1617,7 +1643,17 @@ export const handler = async (event) => {
       priceRangeEndISO || endISO,
     );
 
-    const preparedDividendEvents = prepareDividendEvents(filteredDividendSeries);
+    const dividendDiagnostics = {
+      totalRecords: 0,
+      missingExDate: 0,
+      zeroAmountRecords: 0,
+      normalisedRecords: 0,
+      aggregatedEvents: 0,
+    };
+
+    const preparedDividendEvents = prepareDividendEvents(filteredDividendSeries, {
+      diagnostics: dividendDiagnostics,
+    });
 
     const { rows: adjustedRows, adjustments, events } = applyBackwardAdjustments(
       priceRows,
@@ -1662,6 +1698,7 @@ export const handler = async (event) => {
       data: adjustedRows,
       adjustments,
       dividendEvents: events,
+      dividendDiagnostics,
       debugSteps,
     };
 

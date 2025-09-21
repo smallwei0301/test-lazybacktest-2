@@ -239,6 +239,10 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const dividendFetchStart = payload?.summary?.dividendFetchStart;
             const dividendFetchEnd = payload?.summary?.dividendFetchEnd;
             const lookbackDays = payload?.summary?.dividendLookbackDays;
+            const dividendDiagnostics =
+                payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === 'object'
+                    ? payload.dividendDiagnostics
+                    : null;
             const lines = [
                 `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
                 `資料筆數: <span class="font-semibold">${total}</span>`,
@@ -278,6 +282,31 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 lines.push(
                     `FinMind 股利查詢區間: <span class="font-semibold">${rangeStart} ~ ${rangeEnd}</span>${suffix}`,
                 );
+            }
+            if (dividendDiagnostics) {
+                const diagParts = [];
+                if (Number.isFinite(dividendDiagnostics.totalRecords)) {
+                    diagParts.push(`總筆數 ${dividendDiagnostics.totalRecords}`);
+                }
+                if (Number.isFinite(dividendDiagnostics.normalisedRecords)) {
+                    diagParts.push(`成功正規化 ${dividendDiagnostics.normalisedRecords}`);
+                }
+                if (Number.isFinite(dividendDiagnostics.aggregatedEvents)) {
+                    diagParts.push(`彙整事件 ${dividendDiagnostics.aggregatedEvents}`);
+                }
+                const skipDetails = [];
+                if (Number.isFinite(dividendDiagnostics.missingExDate) && dividendDiagnostics.missingExDate > 0) {
+                    skipDetails.push(`缺少除權息日 ×${dividendDiagnostics.missingExDate}`);
+                }
+                if (Number.isFinite(dividendDiagnostics.zeroAmountRecords) && dividendDiagnostics.zeroAmountRecords > 0) {
+                    skipDetails.push(`金額為 0 ×${dividendDiagnostics.zeroAmountRecords}`);
+                }
+                if (skipDetails.length > 0) {
+                    diagParts.push(`略過原因：${skipDetails.join('、')}`);
+                }
+                if (diagParts.length > 0) {
+                    lines.push(`FinMind 事件診斷：<span class="font-semibold">${diagParts.join(' / ')}</span>`);
+                }
             }
             if (
                 adjustmentSkipReasons &&

@@ -1,7 +1,8 @@
-// netlify/functions/twse-proxy.js (v10.5 - TWSE primary with FinMind adaptive retries)
+// netlify/functions/twse-proxy.js (v10.6 - TWSE primary with FinMind adaptive retries + request logs)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
+// Patch Tag: LB-TWSE-PROXY-20250320A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -516,6 +517,15 @@ export default async (req) => {
         const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
         const forceSourceParam = params.get('forceSource');
 
+        console.log('[TWSE Proxy v10.6] 入口參數', {
+            stockNo,
+            month: monthParam || null,
+            start: startParam || legacyDate || null,
+            end: endParam || legacyDate || null,
+            adjusted,
+            forceSource: forceSourceParam || null,
+        });
+
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
 
@@ -535,6 +545,12 @@ export default async (req) => {
         }
 
         const months = ensureMonthList(startDate, endDate);
+        console.log('[TWSE Proxy v10.6] 月份分段', {
+            stockNo,
+            segmentCount: months.length,
+            startISO: formatISODateFromDate(startDate),
+            endISO: formatISODateFromDate(endDate),
+        });
         if (months.length === 0) {
             return new Response(JSON.stringify({ stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: 'TWSE' }), {
                 headers: { 'Content-Type': 'application/json' }

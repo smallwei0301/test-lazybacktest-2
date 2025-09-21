@@ -1,11 +1,12 @@
 
-// --- Worker Data Acquisition & Cache (v11.2 - Adjusted fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.3 - Dividend diagnostics fallback) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
 // Patch Tag: LB-ADJ-PIPE-20250305A
 // Patch Tag: LB-ADJ-PIPE-20250312A
-const WORKER_DATA_VERSION = "v11.2";
+// Patch Tag: LB-ADJ-PIPE-20250320A
+const WORKER_DATA_VERSION = "v11.3";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -531,15 +532,78 @@ function applyFallbackAdjustments(rows, events) {
 }
 
 // Patch Tag: LB-ADJ-PIPE-20250305A
-function maybeApplyAdjustments(rows, adjustments) {
+function normaliseDividendEvent(event) {
+  if (!event) return null;
+  const date = event.date || event.exDate || event.ex_date || null;
+  if (!date) return null;
+  const cashDividend = readEventNumber(event, [
+    "cashDividend",
+    "cash_dividend",
+  ]);
+  const stockDividend = readEventNumber(event, [
+    "stockDividend",
+    "stock_dividend",
+  ]);
+  const cashCapitalIncrease = readEventNumber(event, [
+    "cashCapitalIncrease",
+    "cash_capital_increase",
+  ]);
+  const stockCapitalIncrease = readEventNumber(event, [
+    "stockCapitalIncrease",
+    "stock_capital_increase",
+  ]);
+  const subscriptionPrice = readEventNumber(event, [
+    "subscriptionPrice",
+    "subscription_price",
+  ]);
+  const hasComponent = [
+    cashDividend,
+    stockDividend,
+    cashCapitalIncrease,
+    stockCapitalIncrease,
+  ].some((value) => Number.isFinite(value) && value > 0);
+  if (!hasComponent) {
+    return null;
+  }
+  return {
+    date,
+    ratio: null,
+    cashDividend: Math.max(0, cashDividend || 0),
+    stockDividend: Math.max(0, stockDividend || 0),
+    cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
+    stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
+    subscriptionPrice:
+      Number.isFinite(subscriptionPrice) && subscriptionPrice > 0
+        ? subscriptionPrice
+        : null,
+    baseClose: Number(event.baseClose ?? event.base_close ?? null),
+  };
+}
+
+function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
   const result = { rows, fallbackApplied: false };
   if (!Array.isArray(rows) || rows.length === 0) return result;
-  if (!Array.isArray(adjustments) || adjustments.length === 0) return result;
 
-  const preparedEvents = adjustments
-    .map(normaliseAdjustmentEvent)
-    .filter((event) => event && event.date)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const preparedEvents = [];
+  if (Array.isArray(adjustments)) {
+    adjustments
+      .map(normaliseAdjustmentEvent)
+      .filter((event) => event && event.date)
+      .forEach((event) => {
+        preparedEvents.push(event);
+      });
+  }
+
+  if (preparedEvents.length === 0 && Array.isArray(dividendEvents)) {
+    dividendEvents
+      .map(normaliseDividendEvent)
+      .filter((event) => event && event.date)
+      .forEach((event) => {
+        preparedEvents.push(event);
+      });
+  }
+
+  preparedEvents.sort((a, b) => a.date.localeCompare(b.date));
 
   if (preparedEvents.length === 0) {
     return result;
@@ -634,9 +698,18 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       ? summary.sources.join(" + ")
       : "Netlify 還原管線");
 
+  const dividendEvents = Array.isArray(payload?.dividendEvents)
+    ? payload.dividendEvents
+    : [];
+  const dividendDiagnostics =
+    payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === "object"
+      ? payload.dividendDiagnostics
+      : null;
+
   const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
     normalizedRows,
     adjustments,
+    dividendEvents,
   );
 
   return {
@@ -648,6 +721,8 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     priceSource,
     adjustmentFallbackApplied: fallbackApplied,
     debugSteps,
+    dividendEvents,
+    dividendDiagnostics,
   };
 }
 
@@ -862,6 +937,14 @@ async function fetchStockData(
         debugSteps: Array.isArray(adjustedResult.debugSteps)
           ? adjustedResult.debugSteps
           : [],
+        dividendDiagnostics:
+          adjustedResult.dividendDiagnostics &&
+          typeof adjustedResult.dividendDiagnostics === "object"
+            ? adjustedResult.dividendDiagnostics
+            : null,
+        dividendEvents: Array.isArray(adjustedResult.dividendEvents)
+          ? adjustedResult.dividendEvents
+          : [],
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -876,6 +959,14 @@ async function fetchStockData(
       adjustmentFallbackApplied: Boolean(
         adjustedResult.adjustmentFallbackApplied,
       ),
+      dividendDiagnostics:
+        adjustedResult.dividendDiagnostics &&
+        typeof adjustedResult.dividendDiagnostics === "object"
+          ? adjustedResult.dividendDiagnostics
+          : null,
+      dividendEvents: Array.isArray(adjustedResult.dividendEvents)
+        ? adjustedResult.dividendEvents
+        : [],
     };
   }
 
@@ -4649,6 +4740,13 @@ self.onmessage = async function (e) {
         priceSource: outcome?.priceSource || workerLastMeta?.priceSource || null,
         dataSource: outcome?.dataSource || workerLastMeta?.dataSource || null,
         adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+        dividendDiagnostics:
+          outcome?.dividendDiagnostics || workerLastMeta?.dividendDiagnostics || null,
+        dividendEvents: Array.isArray(outcome?.dividendEvents)
+          ? outcome.dividendEvents
+          : Array.isArray(workerLastMeta?.dividendEvents)
+            ? workerLastMeta.dividendEvents
+            : [],
       };
 
       if (!useCachedData && fetched) {
@@ -4659,6 +4757,10 @@ self.onmessage = async function (e) {
           priceSource: outcome?.priceSource || null,
           dataSource: outcome?.dataSource || null,
           adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
+          dividendDiagnostics: outcome?.dividendDiagnostics || null,
+          dividendEvents: Array.isArray(outcome?.dividendEvents)
+            ? outcome.dividendEvents
+            : [],
         };
       }
 

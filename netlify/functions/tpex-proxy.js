@@ -1,8 +1,9 @@
-// netlify/functions/tpex-proxy.js (v11.0 - segmented FinMind fetch + cache-aware summaries)
+// netlify/functions/tpex-proxy.js (v11.1 - segmented FinMind fetch + request diagnostics)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TPEX-PROXY-20241216A
+// Patch Tag: LB-TPEX-PROXY-20250320A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -713,6 +714,15 @@ export default async (req) => {
         const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
         const forceSourceParam = params.get('forceSource');
 
+        console.log('[TPEX Proxy v11.1] 入口參數', {
+            stockNo,
+            month: monthParam || null,
+            start: startParam || legacyDate || null,
+            end: endParam || legacyDate || null,
+            adjusted,
+            forceSource: forceSourceParam || null,
+        });
+
         let startDate = parseDate(startParam);
         let endDate = parseDate(endParam);
         if (!startDate || !endDate) {
@@ -731,6 +741,12 @@ export default async (req) => {
         }
 
         const months = ensureMonthList(startDate, endDate);
+        console.log('[TPEX Proxy v11.1] 月份分段', {
+            stockNo,
+            segmentCount: months.length,
+            startISO: formatISODateFromDate(startDate),
+            endISO: formatISODateFromDate(endDate),
+        });
         if (months.length === 0) {
             return new Response(JSON.stringify({ stockName: stockNo, iTotalRecords: 0, aaData: [], dataSource: adjusted ? 'Yahoo Finance' : 'FinMind' }), {
                 headers: { 'Content-Type': 'application/json' }

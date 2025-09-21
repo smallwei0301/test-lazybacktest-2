@@ -82,6 +82,30 @@ approxEqual(secondEvent.cashCapitalIncrease, 0.15);
 approxEqual(secondEvent.stockCapitalIncrease, 0.1);
 approxEqual(secondEvent.subscriptionPrice, 35);
 
+const diagnostics = {
+  totalRecords: 0,
+  missingExDate: 0,
+  zeroAmountRecords: 0,
+  normalisedRecords: 0,
+  aggregatedEvents: 0,
+};
+
+const diagEvents = prepareDividendEvents(
+  [
+    { cash_dividend_ex_dividend_date: '2024-09-10', cash_dividend: '1.2' },
+    { cash_dividend_ex_dividend_date: '2024-09-12', cash_dividend: '0' },
+    { cash_dividend: '1.5' },
+  ],
+  { diagnostics },
+);
+
+assert.equal(diagnostics.totalRecords, 3);
+assert.equal(diagnostics.normalisedRecords, 1);
+assert.equal(diagnostics.missingExDate, 1);
+assert.equal(diagnostics.zeroAmountRecords, 1);
+assert.equal(diagnostics.aggregatedEvents, 1);
+assert.equal(diagEvents.length, 1);
+
 // Mixed adjustment ratio sanity check
 const baseClose = 50;
 const mixedRatio = computeAdjustmentRatio(baseClose, {
