@@ -1,7 +1,7 @@
 // netlify/functions/lib/goodinfo.js
-// Patch Tag: LB-GOODINFO-ADJ-20241015A
+// Patch Tag: LB-GOODINFO-ADJ-20241020B
 
-const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241015A';
+const GOODINFO_VERSION = 'LB-GOODINFO-ADJ-20241020B';
 
 const GOODINFO_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -14,7 +14,10 @@ const GOODINFO_HEADERS = {
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Dest': 'document',
     'Upgrade-Insecure-Requests': '1',
+    'Accept-Encoding': 'gzip, deflate, br',
 };
+
+const GOODINFO_MARKERS = ['還原權值股價', '還原股價', '還原收盤'];
 
 function stripTags(html) {
     if (!html) return '';
@@ -94,13 +97,58 @@ function extractStockName(html, fallback) {
     return fallback;
 }
 
+function collectDocumentWriteTables(html) {
+    const tables = [];
+    if (!html) return tables;
+    const docWritePattern = /document\.write\((['"])\s*([\s\S]*?)\s*\1\)/gi;
+    let match;
+    while ((match = docWritePattern.exec(html))) {
+        const snippet = decodeEntities(match[2]);
+        const innerTables = snippet.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
+        if (innerTables) {
+            tables.push(...innerTables.map((item) => decodeEntities(item)));
+        }
+    }
+    return tables;
+}
+
 function locateAdjustedTable(html) {
     if (!html) return null;
-    const marker = html.indexOf('還原權值股價');
-    if (marker === -1) return null;
-    const sliced = html.slice(marker);
-    const match = sliced.match(/<table[^>]*>([\s\S]*?)<\/table>/i);
-    return match ? match[0] : null;
+
+    const candidates = [];
+    const decodedHtml = decodeEntities(html);
+    const pools = [html, decodedHtml];
+
+    for (const pool of pools) {
+        const directTables = pool.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
+        if (directTables) {
+            candidates.push(...directTables.map((item) => decodeEntities(item)));
+        }
+        const docTables = collectDocumentWriteTables(pool);
+        if (docTables.length > 0) {
+            candidates.push(...docTables);
+        }
+    }
+
+    const markerRegexes = GOODINFO_MARKERS.map((marker) => new RegExp(marker));
+
+    for (const table of candidates) {
+        if (!table) continue;
+        if (markerRegexes.some((regex) => regex.test(table))) {
+            return table;
+        }
+        const headerMatches = table.match(/<t[hd][^>]*>[\s\S]*?<\/t[hd]>/gi);
+        if (!headerMatches) continue;
+        const hasAdjustedColumn = headerMatches.some((cell) => {
+            const text = normaliseText(cell);
+            return /還原/.test(text) && (/收盤/.test(text) || /權值/.test(text));
+        });
+        if (hasAdjustedColumn) {
+            return table;
+        }
+    }
+
+    return null;
 }
 
 function parseAdjustedRows(tableHtml) {
@@ -223,7 +271,9 @@ export async function fetchGoodinfoAdjustedSeries(fetchImpl, stockNo, options = 
     const builders = [
         (id) => `https://goodinfo.tw/tw/StockDividendSchedule.asp?STOCK_ID=${encodeURIComponent(id)}`,
         (id) => `https://goodinfo.tw/StockInfo/StockDividendSchedule.asp?STOCK_ID=${encodeURIComponent(id)}`,
-        (id) => `https://goodinfo.tw/tw/StockPriceHistory.asp?STOCK_ID=${encodeURIComponent(id)}`,
+        (id) => `https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=${encodeURIComponent(id)}`,
+        (id) => `https://goodinfo.tw/StockInfo/StockDetail.asp?STOCK_ID=${encodeURIComponent(id)}`,
+        (id) => `https://goodinfo.tw/StockInfo/StockPriceHistory.asp?STOCK_ID=${encodeURIComponent(id)}`,
     ];
     const errors = [];
     for (const builder of builders) {
