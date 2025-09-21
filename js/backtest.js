@@ -31,6 +31,7 @@ function runBacktestInternal() {
                 const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
                 cachedStockData = sliced;
                 lastFetchSettings = curSettings;
+                refreshPriceInspectorControls();
                 console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
@@ -102,6 +103,7 @@ function runBacktestInternal() {
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings=curSettings;
+                     refreshPriceInspectorControls();
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
                      cachedEntry = cacheEntry;
                 } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
@@ -121,6 +123,7 @@ function runBacktestInternal() {
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = curSettings;
+                     refreshPriceInspectorControls();
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
 
@@ -244,6 +247,107 @@ function updateDataSourceDisplay(dataSource, stockName) {
         displayEl.classList.add('hidden');
     }
 }
+
+// Patch Tag: LB-PRICE-INSPECTOR-20250302A
+function refreshPriceInspectorControls() {
+    const controls = document.getElementById('priceInspectorControls');
+    const openBtn = document.getElementById('openPriceInspector');
+    const summaryEl = document.getElementById('priceInspectorSummary');
+    if (!controls || !openBtn) return;
+
+    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    if (!hasData) {
+        controls.classList.add('hidden');
+        openBtn.disabled = true;
+        if (summaryEl) summaryEl.textContent = '';
+        return;
+    }
+
+    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
+    const firstDate = cachedStockData[0]?.date || lastFetchSettings?.startDate || '';
+    const lastDate = cachedStockData[cachedStockData.length - 1]?.date || lastFetchSettings?.endDate || '';
+
+    controls.classList.remove('hidden');
+    openBtn.disabled = false;
+    if (summaryEl) {
+        summaryEl.textContent = `${firstDate} ~ ${lastDate} ・ ${cachedStockData.length} 筆 (${modeLabel})`;
+    }
+}
+
+function openPriceInspectorModal() {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        showError('尚未取得價格資料，請先執行回測。');
+        return;
+    }
+    const modal = document.getElementById('priceInspectorModal');
+    const tbody = document.getElementById('priceInspectorTableBody');
+    const subtitle = document.getElementById('priceInspectorSubtitle');
+    if (!modal || !tbody) return;
+
+    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
+    if (subtitle) {
+        const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
+        subtitle.textContent = `${modeLabel} ・ ${marketLabel} ・ ${cachedStockData.length} 筆`;
+    }
+
+    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
+    const formatFactor = (value) => (Number.isFinite(value) ? Number(value).toFixed(6) : '1.000000');
+    const rowsHtml = cachedStockData
+        .map((row) => {
+            const volumeLabel = Number.isFinite(row?.volume)
+                ? Number(row.volume).toLocaleString('zh-TW')
+                : '—';
+            return `
+                <tr>
+                    <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.high)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.low)}</td>
+                    <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${formatNumber(row?.close)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${formatFactor(row?.adjustedFactor)}</td>
+                </tr>`;
+        })
+        .join('');
+
+    tbody.innerHTML = rowsHtml || '<tr><td class="px-3 py-4 text-center" colspan="7" style="color: var(--muted-foreground);">無資料</td></tr>';
+
+    const scroller = modal.querySelector('.overflow-auto');
+    if (scroller) scroller.scrollTop = 0;
+
+    modal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+}
+
+function closePriceInspectorModal() {
+    const modal = document.getElementById('priceInspectorModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const openBtn = document.getElementById('openPriceInspector');
+    const closeBtn = document.getElementById('closePriceInspector');
+    const modal = document.getElementById('priceInspectorModal');
+
+    openBtn?.addEventListener('click', openPriceInspectorModal);
+    closeBtn?.addEventListener('click', closePriceInspectorModal);
+    modal?.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closePriceInspectorModal();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closePriceInspectorModal();
+        }
+    });
+
+    refreshPriceInspectorControls();
+});
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
@@ -1485,7 +1589,7 @@ function updateStrategyParams(type) {
         }
     }
 }
-function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; clearPreviousResults(); showSuccess("設定已重置"); }
+ function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 

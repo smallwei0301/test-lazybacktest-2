@@ -304,45 +304,142 @@ function roundTo(value, decimals = 4) {
   return Math.round(value * power) / power;
 }
 
-function maybeApplyAdjustments(rows, adjustments) {
-  if (!Array.isArray(rows) || rows.length === 0) return rows;
-  if (!Array.isArray(adjustments) || adjustments.length === 0) return rows;
+function readEventNumber(event, candidates = []) {
+  if (!event || typeof event !== "object") return null;
+  for (const key of candidates) {
+    if (key === null || key === undefined) continue;
+    if (Object.prototype.hasOwnProperty.call(event, key)) {
+      const raw = event[key];
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num;
+    }
+    const snakeKey = String(key)
+      .replace(/([A-Z])/g, "_$1")
+      .replace(/__+/g, "_")
+      .toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(event, snakeKey)) {
+      const raw = event[snakeKey];
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num;
+    }
+  }
+  return null;
+}
 
-  const hasFactor = rows.some(
-    (row) => Number.isFinite(row.adjustedFactor) && row.adjustedFactor > 0 && row.adjustedFactor <= 1.000001,
+function computeFallbackRatio(baseClose, components) {
+  if (!Number.isFinite(baseClose) || baseClose <= 0) return 1;
+  const cashDividend = Math.max(0, components.cashDividend || 0);
+  const stockComponent = Math.max(
+    0,
+    (components.stockDividend || 0) + (components.stockCapitalIncrease || 0),
   );
-  if (hasFactor) {
-    return rows;
+  let ratio = 1;
+  const denominator = baseClose * (1 + stockComponent) + cashDividend;
+  if (Number.isFinite(denominator) && denominator > 0) {
+    ratio = baseClose / denominator;
+  }
+  const rightsRatio = Math.max(0, components.cashCapitalIncrease || 0);
+  const subscriptionPrice = components.subscriptionPrice;
+  if (rightsRatio > 0 && Number.isFinite(subscriptionPrice) && subscriptionPrice > 0) {
+    const theoreticalDenominator = baseClose * (1 + rightsRatio) - rightsRatio * subscriptionPrice;
+    if (Number.isFinite(theoreticalDenominator) && theoreticalDenominator > 0) {
+      ratio *= baseClose / theoreticalDenominator;
+    }
+  }
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return 1;
+  }
+  return ratio;
+}
+
+// Patch Tag: LB-ADJ-PIPE-20250302A
+function maybeApplyAdjustments(rows, adjustments) {
+  const result = { rows, fallbackApplied: false };
+  if (!Array.isArray(rows) || rows.length === 0) return result;
+  if (!Array.isArray(adjustments) || adjustments.length === 0) return result;
+
+  const hasMeaningfulFactor = rows.some(
+    (row) => Number.isFinite(row?.adjustedFactor) && row.adjustedFactor > 0 && row.adjustedFactor < 0.9999,
+  );
+  if (hasMeaningfulFactor) {
+    return result;
+  }
+
+  const preparedEvents = adjustments
+    .filter((event) => event && !event.skipped)
+    .map((event) => {
+      const cashDividend = readEventNumber(event, ["cashDividend", "cash_dividend"]);
+      const stockDividend = readEventNumber(event, ["stockDividend", "stock_dividend"]);
+      const cashCapitalIncrease = readEventNumber(event, ["cashCapitalIncrease", "cash_capital_increase"]);
+      const stockCapitalIncrease = readEventNumber(event, ["stockCapitalIncrease", "stock_capital_increase"]);
+      const subscriptionPrice = readEventNumber(event, ["subscriptionPrice", "subscription_price"]);
+      const hasPositiveComponent = [
+        cashDividend,
+        stockDividend,
+        cashCapitalIncrease,
+        stockCapitalIncrease,
+      ].some((value) => Number.isFinite(value) && value > 0);
+      if (!hasPositiveComponent) {
+        return null;
+      }
+      return {
+        date: event.appliedDate || event.date || event.exDate || null,
+        cashDividend: Math.max(0, cashDividend || 0),
+        stockDividend: Math.max(0, stockDividend || 0),
+        cashCapitalIncrease: Math.max(0, cashCapitalIncrease || 0),
+        stockCapitalIncrease: Math.max(0, stockCapitalIncrease || 0),
+        subscriptionPrice:
+          Number.isFinite(subscriptionPrice) && subscriptionPrice > 0 ? subscriptionPrice : null,
+      };
+    })
+    .filter((event) => event && event.date);
+
+  if (preparedEvents.length === 0) {
+    return result;
   }
 
   const factors = rows.map(() => 1);
+  let applied = false;
 
-  adjustments.forEach((event) => {
-    const ratio = Number(event?.ratio);
-    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) return;
+  preparedEvents.forEach((event) => {
+    let baseIndex = rows.findIndex((row) => row?.date >= event.date);
+    if (baseIndex < 0) return;
+    let cursor = baseIndex;
+    while (
+      cursor < rows.length &&
+      (!Number.isFinite(rows[cursor]?.close) || rows[cursor].close === null || rows[cursor].close <= 0)
+    ) {
+      cursor += 1;
+    }
+    if (cursor >= rows.length || cursor <= 0) return;
 
-    let baseIndex = Number.isInteger(event?.baseRowIndex) ? event.baseRowIndex : null;
-    if (!Number.isInteger(baseIndex) || baseIndex < 0 || baseIndex >= rows.length) {
-      const appliedDate = event?.appliedDate || event?.date;
-      if (appliedDate) {
-        baseIndex = rows.findIndex((row) => row.date >= appliedDate);
+    const baseClose = rows[cursor].close;
+    if (!Number.isFinite(baseClose) || baseClose <= 0) return;
+
+    const ratio = computeFallbackRatio(baseClose, event);
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 0.999999) {
+      return;
+    }
+
+    for (let i = 0; i < cursor; i += 1) {
+      if (!Number.isFinite(factors[i]) || factors[i] <= 0) {
+        factors[i] = ratio;
+      } else {
+        factors[i] *= ratio;
       }
     }
-
-    if (!Number.isInteger(baseIndex) || baseIndex <= 0) return;
-
-    for (let i = 0; i < baseIndex; i += 1) {
-      factors[i] *= ratio;
-    }
+    applied = true;
   });
 
-  const needsAdjustment = factors.some((factor) => Number.isFinite(factor) && factor > 0 && factor < 0.9999);
-  if (!needsAdjustment) return rows;
+  if (!applied) {
+    return result;
+  }
 
-  return rows.map((row, index) => {
+  const adjustedRows = rows.map((row, index) => {
     const factor = factors[index];
     if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
-      return { ...row, adjustedFactor: Number.isFinite(factor) ? factor : row.adjustedFactor ?? 1 };
+      const preservedFactor = Number.isFinite(factor) ? factor : row.adjustedFactor ?? 1;
+      return { ...row, adjustedFactor: preservedFactor };
     }
     const scale = (value) =>
       value === null || value === undefined || !Number.isFinite(value) ? value : roundTo(value * factor, 4);
@@ -355,6 +452,25 @@ function maybeApplyAdjustments(rows, adjustments) {
       adjustedFactor: factor,
     };
   });
+
+  const mutated = adjustedRows.some((row, index) => {
+    const original = rows[index];
+    if (!original) return true;
+    const compare = (prop) => {
+      const a = row[prop];
+      const b = original[prop];
+      if (!Number.isFinite(a) && !Number.isFinite(b)) return false;
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+      return Math.abs(a - b) > 1e-6;
+    };
+    return compare("open") || compare("high") || compare("low") || compare("close");
+  });
+
+  if (!mutated) {
+    return result;
+  }
+
+  return { rows: adjustedRows, fallbackApplied: true };
 }
 
 async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
@@ -432,8 +548,10 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       ? summary.sources.join(" + ")
       : "Netlify 還原管線");
 
-  const adjustedRows = maybeApplyAdjustments(normalizedRows, adjustments);
-  const fallbackApplied = adjustedRows !== normalizedRows;
+  const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
+    normalizedRows,
+    adjustments,
+  );
 
   return {
     data: adjustedRows,
