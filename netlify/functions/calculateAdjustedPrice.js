@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.0 - TWSE/FinMind dividend composer)
+// netlify/functions/calculateAdjustedPrice.js (v13.1 - TWSE/FinMind dividend composer)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
@@ -12,9 +12,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20241126A
 // Patch Tag: LB-ADJ-COMPOSER-20241209A
 // Patch Tag: LB-ADJ-COMPOSER-20241216A
+// Patch Tag: LB-ADJ-COMPOSER-20250220A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20241216A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250220A';
 
 const CASH_DIVIDEND_ALIAS_KEYS = [
   'cash_dividend_total',

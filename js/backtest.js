@@ -96,7 +96,8 @@ function runBacktestInternal() {
                          coverage: mergedCoverage,
                          fetchedAt: Date.now(),
                          adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode
+                         priceMode: priceMode,
+                         adjustmentFallbackApplied: Boolean(data?.adjustmentFallbackApplied),
                      };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
@@ -114,7 +115,8 @@ function runBacktestInternal() {
                          dataSource: summariseSourceLabels(updatedArray),
                          fetchedAt: cachedEntry.fetchedAt || Date.now(),
                          adjustedPrice: params.adjustedPrice,
-                         priceMode: priceMode
+                         priceMode: priceMode,
+                         adjustmentFallbackApplied: Boolean(data?.adjustmentFallbackApplied ?? cachedEntry.adjustmentFallbackApplied),
                      };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);

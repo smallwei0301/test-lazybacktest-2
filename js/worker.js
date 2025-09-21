@@ -1,8 +1,9 @@
 
-// --- Worker Data Acquisition & Cache (v11.0 - Adjusted fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.1 - Adjusted fallback integration) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
-const WORKER_DATA_VERSION = "v11.0";
+// Patch Tag: LB-ADJ-PIPE-20250220A
+const WORKER_DATA_VERSION = "v11.1";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -297,6 +298,65 @@ async function fetchWithAdaptiveRetry(url, options = {}, attempt = 1) {
   return response.json();
 }
 
+function roundTo(value, decimals = 4) {
+  if (!Number.isFinite(value)) return value;
+  const power = 10 ** decimals;
+  return Math.round(value * power) / power;
+}
+
+function maybeApplyAdjustments(rows, adjustments) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  if (!Array.isArray(adjustments) || adjustments.length === 0) return rows;
+
+  const hasFactor = rows.some(
+    (row) => Number.isFinite(row.adjustedFactor) && row.adjustedFactor > 0 && row.adjustedFactor <= 1.000001,
+  );
+  if (hasFactor) {
+    return rows;
+  }
+
+  const factors = rows.map(() => 1);
+
+  adjustments.forEach((event) => {
+    const ratio = Number(event?.ratio);
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) return;
+
+    let baseIndex = Number.isInteger(event?.baseRowIndex) ? event.baseRowIndex : null;
+    if (!Number.isInteger(baseIndex) || baseIndex < 0 || baseIndex >= rows.length) {
+      const appliedDate = event?.appliedDate || event?.date;
+      if (appliedDate) {
+        baseIndex = rows.findIndex((row) => row.date >= appliedDate);
+      }
+    }
+
+    if (!Number.isInteger(baseIndex) || baseIndex <= 0) return;
+
+    for (let i = 0; i < baseIndex; i += 1) {
+      factors[i] *= ratio;
+    }
+  });
+
+  const needsAdjustment = factors.some((factor) => Number.isFinite(factor) && factor > 0 && factor < 0.9999);
+  if (!needsAdjustment) return rows;
+
+  return rows.map((row, index) => {
+    const factor = factors[index];
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) {
+      return { ...row, adjustedFactor: Number.isFinite(factor) ? factor : row.adjustedFactor ?? 1 };
+    }
+    const scale = (value) =>
+      value === null || value === undefined || !Number.isFinite(value) ? value : roundTo(value * factor, 4);
+    return {
+      ...row,
+      open: scale(row.open),
+      high: scale(row.high),
+      low: scale(row.low),
+      close: scale(row.close),
+      adjustedFactor: factor,
+    };
+  });
+}
+
 async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
   const params = new URLSearchParams({
     stockNo,
@@ -340,6 +400,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
     const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
 
     const fallbackOpen = close ?? open ?? 0;
     const normalizedOpen = open ?? fallbackOpen;
@@ -356,6 +417,7 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       low: normalizedLow,
       close: normalizedClose,
       volume: Math.round(volumeRaw / 1000),
+      adjustedFactor: Number.isFinite(factor) ? factor : undefined,
     });
   });
 
@@ -370,13 +432,17 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
       ? summary.sources.join(" + ")
       : "Netlify 還原管線");
 
+  const adjustedRows = maybeApplyAdjustments(normalizedRows, adjustments);
+  const fallbackApplied = adjustedRows !== normalizedRows;
+
   return {
-    data: normalizedRows,
+    data: adjustedRows,
     dataSource: sourceLabel,
     stockName: payload?.stockName || stockNo,
     summary,
     adjustments,
     priceSource,
+    adjustmentFallbackApplied: fallbackApplied,
   };
 }
 
@@ -549,6 +615,9 @@ async function fetchStockData(
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
       stockName: cachedEntry.stockName || stockNo,
+      adjustmentFallbackApplied: Boolean(
+        cachedEntry?.meta?.adjustmentFallbackApplied,
+      ),
     };
   }
 
@@ -583,6 +652,8 @@ async function fetchStockData(
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
+        adjustmentFallbackApplied:
+          Boolean(adjustedResult.adjustmentFallbackApplied),
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -594,6 +665,9 @@ async function fetchStockData(
       summary: adjustedResult.summary || null,
       adjustments: adjustedResult.adjustments || [],
       priceSource: adjustedResult.priceSource || null,
+      adjustmentFallbackApplied: Boolean(
+        adjustedResult.adjustmentFallbackApplied,
+      ),
     };
   }
 
@@ -4315,6 +4389,9 @@ self.onmessage = async function (e) {
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call
+      backtestResult.adjustmentFallbackApplied = Boolean(
+        outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
+      );
 
       // 將結果與資料來源一起回傳
       const metaInfo = outcome ||
@@ -4329,6 +4406,7 @@ self.onmessage = async function (e) {
         data: backtestResult,
         stockName: metaInfo?.stockName || "",
         dataSource: metaInfo?.dataSource || "未知",
+        adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
       });
     } else if (type === "runOptimization") {
       if (!optimizeTargetStrategy || !optimizeParamName || !optimizeRange)
