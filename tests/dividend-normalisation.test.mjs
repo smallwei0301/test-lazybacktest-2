@@ -32,7 +32,14 @@ const primaryResultRecord = {
 const fallbackResultRecord = {
   date: '2024-09-18',
   before_price: '50',
+  after_price: '48',
   stock_and_cache_dividend: '2',
+};
+
+const missingAfterPriceRecord = {
+  date: '2024-11-05',
+  before_price: '80',
+  stock_and_cache_dividend: '1.5',
 };
 
 const normalisedPrimary = normaliseDividendResultRecord(primaryResultRecord);
@@ -44,12 +51,15 @@ approxEqual(normalisedPrimary.ratio, 0.97, 1e-6);
 approxEqual(normalisedPrimary.dividendTotal, 3);
 
 const normalisedFallback = normaliseDividendResultRecord(fallbackResultRecord);
-assert.ok(normalisedFallback, 'Fallback result record should normalise even without after_price');
+assert.ok(normalisedFallback, 'Fallback result record should normalise when after_price exists');
 assert.equal(normalisedFallback.date, '2024-09-18');
 approxEqual(normalisedFallback.beforePrice, 50);
 approxEqual(normalisedFallback.afterPrice, 48);
 approxEqual(normalisedFallback.ratio, 0.96, 1e-6);
 approxEqual(normalisedFallback.dividendTotal, 2);
+
+const missingAfter = normaliseDividendResultRecord(missingAfterPriceRecord);
+assert.equal(missingAfter, null, 'Record without after_price should be ignored');
 
 const combinedEvents = buildDividendResultEvents([
   primaryResultRecord,

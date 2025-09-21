@@ -21,9 +21,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250414A
 // Patch Tag: LB-ADJ-COMPOSER-20250421A
 // Patch Tag: LB-ADJ-COMPOSER-20250426A
+// Patch Tag: LB-ADJ-COMPOSER-20250509A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250426A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250509A';
 
 let fetchImpl = fetch;
 
@@ -768,7 +769,7 @@ function normaliseDividendResultRecord(raw) {
     return null;
   }
 
-  let afterPrice = parseNumber(
+  const afterPrice = parseNumber(
     readField(raw, 'after_price') ?? readField(raw, 'afterPrice') ?? readField(raw, 'reference_price'),
   );
   const dividendTotal = parseNumber(
@@ -776,12 +777,6 @@ function normaliseDividendResultRecord(raw) {
       readField(raw, 'stock_and_cash_dividend') ??
       readField(raw, 'dividend_total'),
   );
-
-  if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
-    if (Number.isFinite(dividendTotal)) {
-      afterPrice = beforePrice - dividendTotal;
-    }
-  }
 
   if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
     return null;
