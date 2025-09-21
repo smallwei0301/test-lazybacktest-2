@@ -356,9 +356,11 @@ function syncSplitAdjustmentState() {
     if (!splitCheckbox) return;
     if (!isAdjustedMode()) {
         splitCheckbox.checked = false;
-        splitCheckbox.disabled = true;
-    } else {
-        splitCheckbox.disabled = false;
+    }
+    splitCheckbox.setAttribute('aria-disabled', String(!isAdjustedMode()));
+    const container = splitCheckbox.closest('.flex.items-center');
+    if (container) {
+        container.classList.toggle('opacity-60', !isAdjustedMode());
     }
 }
 
@@ -998,7 +1000,17 @@ function initDataSourceTester() {
         refreshDataSourceTester();
     });
     const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
-    splitCheckbox?.addEventListener('change', refreshDataSourceTester);
+    if (splitCheckbox) {
+        splitCheckbox.addEventListener('change', () => {
+            const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
+            if (splitCheckbox.checked && adjustedCheckbox && !adjustedCheckbox.checked) {
+                adjustedCheckbox.checked = true;
+                adjustedCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                return;
+            }
+            refreshDataSourceTester();
+        });
+    }
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
         lucide.createIcons();
