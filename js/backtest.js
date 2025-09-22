@@ -18,6 +18,13 @@ let lastPriceDebug = {
     finmindStatus: null,
 };
 
+// Patch Tag: LB-FALLBACK-ALERT-20240605A
+let fallbackNoticeState = {
+    applied: false,
+    message: '',
+    dataSourceLabel: '',
+};
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -231,7 +238,11 @@ function runBacktestInternal() {
                      else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
 
                     hideLoading();
-                    showSuccess("回測完成！");
+                    if (fallbackNoticeState?.applied && fallbackNoticeState?.message) {
+                        showInfo(fallbackNoticeState.message);
+                    } else {
+                        showSuccess("回測完成！");
+                    }
                     if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
                 }
             } else if(type==='suggestionError'){
@@ -320,6 +331,11 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    fallbackNoticeState = {
+        applied: false,
+        message: '',
+        dataSourceLabel: '',
+    };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
 }
@@ -458,8 +474,19 @@ function updateDataSourceDisplay(dataSource, stockName) {
     const displayEl = document.getElementById('dataSourceDisplay');
     if (!displayEl) return;
 
-    if (dataSource) {
-        let sourceText = `數據來源: ${dataSource}`;
+    const fallbackActive = Boolean(fallbackNoticeState?.applied);
+    const fallbackLabel = fallbackNoticeState?.dataSourceLabel || '';
+    const primaryLabel = dataSource || fallbackLabel;
+
+    if (primaryLabel || fallbackActive) {
+        let sourceText = primaryLabel ? `數據來源: ${primaryLabel}` : '數據來源: -';
+        if (fallbackActive) {
+            if (fallbackLabel && fallbackLabel !== primaryLabel) {
+                sourceText += `（備援來源：${fallbackLabel}）`;
+            } else {
+                sourceText += '（備援模式啟用）';
+            }
+        }
         displayEl.textContent = sourceText;
         displayEl.classList.remove('hidden');
         if (typeof window.refreshDataSourceTester === 'function') {
@@ -664,6 +691,67 @@ function handleBacktestResult(result, stockName, dataSource) {
     try {
         lastOverallResult = result;
         lastSubPeriodResults = result.subPeriodResults;
+
+        const fallbackApplied = typeof result.adjustmentFallbackApplied === 'boolean'
+            ? result.adjustmentFallbackApplied
+            : typeof result?.dataDebug?.adjustmentFallbackApplied === 'boolean'
+                ? result.dataDebug.adjustmentFallbackApplied
+                : Boolean(lastPriceDebug?.fallbackApplied);
+        if (fallbackApplied) {
+            const candidateLabels = [];
+            if (Array.isArray(result?.dataDebug?.dataSources)) {
+                candidateLabels.push(...result.dataDebug.dataSources);
+            }
+            if (Array.isArray(result?.dataDebug?.sources)) {
+                candidateLabels.push(...result.dataDebug.sources);
+            }
+            if (Array.isArray(result?.dataDebug?.sourceLabels)) {
+                candidateLabels.push(...result.dataDebug.sourceLabels);
+            }
+            if (typeof result?.dataDebug?.dataSource === 'string') {
+                candidateLabels.push(result.dataDebug.dataSource);
+            }
+            if (typeof result?.dataDebug?.priceSource === 'string') {
+                candidateLabels.push(result.dataDebug.priceSource);
+            }
+            if (typeof dataSource === 'string') {
+                candidateLabels.push(dataSource);
+            }
+            if (typeof lastPriceDebug?.dataSource === 'string') {
+                candidateLabels.push(lastPriceDebug.dataSource);
+            }
+            if (Array.isArray(lastPriceDebug?.dataSources)) {
+                candidateLabels.push(...lastPriceDebug.dataSources);
+            }
+            if (Array.isArray(lastPriceDebug?.summary?.sources)) {
+                candidateLabels.push(...lastPriceDebug.summary.sources);
+            }
+            if (typeof lastPriceDebug?.summary?.priceSource === 'string') {
+                candidateLabels.push(lastPriceDebug.summary.priceSource);
+            }
+            const inspectorSource = typeof resolvePriceInspectorSourceLabel === 'function'
+                ? resolvePriceInspectorSourceLabel()
+                : '';
+            if (inspectorSource) {
+                candidateLabels.push(inspectorSource);
+            }
+            const resolvedLabelArray = candidateLabels.filter((label) => typeof label === 'string' && label.trim().length > 0);
+            const resolvedSourceLabel = summariseSourceLabels(resolvedLabelArray)
+                || (resolvedLabelArray.length > 0 ? resolvedLabelArray[0] : '系統備援資料來源');
+            const infoMessage = `偵測到進出場資料缺漏，已切換至備用來源：${resolvedSourceLabel}`;
+            fallbackNoticeState = {
+                applied: true,
+                message: infoMessage,
+                dataSourceLabel: resolvedSourceLabel,
+            };
+            showInfo(infoMessage);
+        } else {
+            fallbackNoticeState = {
+                applied: false,
+                message: '',
+                dataSourceLabel: '',
+            };
+        }
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
