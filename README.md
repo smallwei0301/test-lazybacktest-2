@@ -49,6 +49,8 @@ app.listen(3000);
 
 直接 fetch `/api/tpex/st43_result.php?...`、`/api/twse/...` 或 `/api/us/?stockNo=AAPL`，不用寫死 localhost。
 
+> **前端名稱查詢**：回測頁面會在股票代碼輸入達四個字元後才啟動名稱辨識，並依代碼自動判斷上市／上櫃／美股／ETF。查詢結果會快取於前端，以避免頻繁呼叫 proxy 並加速再次輸入時的辨識速度。
+
 ## 本地測試（使用 Netlify CLI - Windows PowerShell）
 
 1. 安裝 Netlify CLI（若尚未安裝）：

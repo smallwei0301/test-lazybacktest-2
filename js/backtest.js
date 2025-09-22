@@ -2778,16 +2778,181 @@ function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(
 let currentMarket = 'TWSE'; // 預設為上市
 let isAutoSwitching = false; // 防止無限重複切換
 let isFetchingName = false; // 防止重複查詢股票名稱
+const stockNameLookupCache = new Map(); // Map<cacheKey, { info, cachedAt }>
+const STOCK_NAME_CACHE_LIMIT = 120;
+const MIN_STOCK_LOOKUP_LENGTH = 4;
+const STOCK_NAME_DEBOUNCE_MS = 800;
 
 // Patch Tag: LB-US-MARKET-20250612A
+// Patch Tag: LB-NAME-CACHE-20250614A
 const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
 };
 
+function createStockNameCacheKey(market, stockCode) {
+    const normalizedMarket = normalizeMarketValue(typeof market === 'string' ? market : '');
+    const normalizedCode = (stockCode || '').trim().toUpperCase();
+    if (!normalizedMarket || !normalizedCode) return null;
+    return `${normalizedMarket}|${normalizedCode}`;
+}
+
+function storeStockNameCacheEntry(market, stockCode, info) {
+    const key = createStockNameCacheKey(market, stockCode);
+    if (!key || !info || !info.name) return;
+    if (stockNameLookupCache.has(key)) {
+        stockNameLookupCache.delete(key);
+    }
+    stockNameLookupCache.set(key, { info, cachedAt: Date.now() });
+    while (stockNameLookupCache.size > STOCK_NAME_CACHE_LIMIT) {
+        const oldest = stockNameLookupCache.keys().next().value;
+        if (!oldest) break;
+        stockNameLookupCache.delete(oldest);
+    }
+}
+
+function findStockNameCacheEntry(stockCode, markets) {
+    if (!Array.isArray(markets) || markets.length === 0) return null;
+    const normalizedCode = (stockCode || '').trim().toUpperCase();
+    if (!normalizedCode) return null;
+    for (const market of markets) {
+        const key = createStockNameCacheKey(market, normalizedCode);
+        if (!key) continue;
+        const entry = stockNameLookupCache.get(key);
+        if (entry && entry.info && entry.info.name) {
+            return { market: normalizeMarketValue(market), info: entry.info, cachedAt: entry.cachedAt };
+        }
+    }
+    return null;
+}
+
+function getEffectiveSymbolLength(symbol) {
+    if (!symbol) return 0;
+    return symbol.replace(/[^0-9A-Z]/gi, '').length;
+}
+
+function isLikelyTaiwanETF(symbol) {
+    const normalized = (symbol || '').trim().toUpperCase();
+    return /^\d{4}$/.test(normalized) && normalized.startsWith('00');
+}
+
+function deriveNameSourceLabel(market) {
+    const normalized = normalizeMarketValue(market || '');
+    if (normalized === 'US') return 'FinMind USStockInfo';
+    if (normalized === 'TPEX') return 'TPEX 公開資訊';
+    if (normalized === 'TWSE') return 'TWSE 日成交資訊';
+    return '';
+}
+
 function getMarketDisplayName(market) {
     return MARKET_META[market]?.label || market;
+}
+
+function resolveStockNameSearchOrder(stockCode, preferredMarket) {
+    const normalizedCode = (stockCode || '').trim().toUpperCase();
+    const hasAlpha = /[A-Z]/.test(normalizedCode);
+    const isNumeric = /^\d+$/.test(normalizedCode);
+    const preferred = normalizeMarketValue(preferredMarket || '');
+    const baseOrder = [];
+    if (hasAlpha && !isNumeric) {
+        baseOrder.push('US', 'TWSE', 'TPEX');
+    } else {
+        baseOrder.push('TWSE', 'TPEX', 'US');
+    }
+    const order = [];
+    const seen = new Set();
+    const push = (market) => {
+        const normalized = normalizeMarketValue(market || '');
+        if (!normalized || seen.has(normalized) || !MARKET_META[normalized]) return;
+        seen.add(normalized);
+        order.push(normalized);
+    };
+    push(preferred);
+    baseOrder.forEach(push);
+    return order;
+}
+
+function normalizeStockNameResult(result, context = {}) {
+    if (!result) return null;
+    const stockCode = (context.stockCode || '').trim().toUpperCase();
+    const market = normalizeMarketValue(context.market || currentMarket || 'TWSE');
+    const defaultSource = deriveNameSourceLabel(market);
+
+    if (typeof result === 'string') {
+        const trimmed = result.trim();
+        if (!trimmed) return null;
+        return {
+            name: trimmed,
+            market,
+            board: MARKET_META[market]?.label || market,
+            sourceLabel: defaultSource,
+            symbol: stockCode || trimmed,
+        };
+    }
+
+    if (typeof result !== 'object') return null;
+    if (result.error) return null;
+
+    const name = (result.name || result.stockName || result.stock_name || result.fullName || '').toString().trim();
+    if (!name) return null;
+
+    const info = {
+        name,
+        market: result.market ? normalizeMarketValue(result.market) : market,
+        board: result.board || result.marketLabel || result.marketType || MARKET_META[market]?.label || market,
+        instrumentType: result.instrumentType || result.securityType || result.type || null,
+        marketCategory: result.marketCategory || result.marketCategoryName || result.exchange || null,
+        sourceLabel: result.source || result.sourceLabel || result.infoSource || defaultSource,
+        symbol: (result.symbol || result.stockNo || result.stock_id || result.stockId || result.data_id || result.ticker || stockCode || '').toString().toUpperCase(),
+        matchStrategy: result.matchStrategy || null,
+        resolvedSymbol: result.resolvedSymbol || null,
+    };
+
+    if ((result.isETF || result.etf === true) && !info.instrumentType) {
+        info.instrumentType = 'ETF';
+    }
+
+    if (!info.instrumentType && info.market !== 'US' && isLikelyTaiwanETF(stockCode)) {
+        info.instrumentType = 'ETF';
+    }
+
+    return info;
+}
+
+function formatStockNameDisplay(info, options = {}) {
+    if (!info || !info.name) return null;
+    const classificationParts = [];
+    const marketLabel = info.market ? getMarketDisplayName(info.market) : null;
+    if (marketLabel) classificationParts.push(marketLabel);
+    else if (info.board) classificationParts.push(info.board);
+    if (info.instrumentType) classificationParts.push(info.instrumentType);
+    if (info.marketCategory) classificationParts.push(info.marketCategory);
+    const uniqueClassification = [...new Set(classificationParts.filter(Boolean))];
+
+    const suffixParts = [];
+    if (options.autoSwitched && options.targetLabel) {
+        suffixParts.push(`已切換至${options.targetLabel}`);
+    }
+    if (options.fromCache) {
+        suffixParts.push('快取');
+    }
+
+    const main = `${info.name}${uniqueClassification.length > 0 ? `（${uniqueClassification.join('・')}）` : ''}`;
+    const suffix = suffixParts.length > 0 ? `（${suffixParts.join('・')}）` : '';
+
+    return {
+        text: `${main}${suffix}`,
+        sourceLabel: info.sourceLabel || '',
+    };
+}
+
+function composeStockNameText(display, fallback = '') {
+    if (!display) return fallback;
+    if (display.sourceLabel) {
+        return `${display.text} ｜ 來源：${display.sourceLabel}`;
+    }
+    return display.text;
 }
 
 // 初始化市場切換功能
@@ -2815,7 +2980,7 @@ function initializeMarketSwitch() {
 
         const stockCode = stockNoInput.value.trim().toUpperCase();
         if (stockCode && stockCode !== 'TAIEX') {
-            debouncedFetchStockName(stockCode);
+            debouncedFetchStockName(stockCode, { force: true, immediate: true });
         }
         setDefaultFees(stockCode);
     });
@@ -2835,65 +3000,93 @@ function initializeMarketSwitch() {
     stockNoInput.addEventListener('blur', function() {
         const stockCode = this.value.trim().toUpperCase();
         if (stockCode && stockCode !== 'TAIEX') {
-            debouncedFetchStockName(stockCode);
+            debouncedFetchStockName(stockCode, { force: true, immediate: true });
         }
     });
 }
 
 // 防抖函數 - 避免頻繁 API 請求
 let stockNameTimeout;
-function debouncedFetchStockName(stockCode) {
+function debouncedFetchStockName(stockCode, options = {}) {
     clearTimeout(stockNameTimeout);
+    const normalizedCode = (stockCode || '').trim().toUpperCase();
+    if (!normalizedCode || normalizedCode === 'TAIEX') return;
+    const effectiveLength = getEffectiveSymbolLength(normalizedCode);
+    if (!options.force && effectiveLength < MIN_STOCK_LOOKUP_LENGTH) {
+        console.log(`[Stock Name] Skip auto lookup (${normalizedCode}), length ${effectiveLength} < ${MIN_STOCK_LOOKUP_LENGTH}`);
+        return;
+    }
+    const delay = options.immediate ? 0 : STOCK_NAME_DEBOUNCE_MS;
     stockNameTimeout = setTimeout(() => {
-        fetchStockName(stockCode);
-    }, 800);
+        fetchStockName(normalizedCode, options);
+    }, delay);
 }
 
-async function resolveStockName(fetcher, stockCode) {
+async function resolveStockName(fetcher, stockCode, market) {
     try {
         const result = await fetcher(stockCode);
-        if (!result) return null;
-        if (typeof result === 'string') return result;
-        if (typeof result === 'object' && result.name) return result.name;
-        if (typeof result === 'object' && result.stockName) return result.stockName;
-        return null;
+        return normalizeStockNameResult(result, { stockCode, market });
     } catch (error) {
         console.warn('[Stock Name] 查詢時發生錯誤:', error);
         return null;
     }
 }
 
-async function fetchStockName(stockCode) {
+async function fetchStockName(stockCode, options = {}) {
     if (!stockCode || stockCode === 'TAIEX') return;
+    const normalizedCode = stockCode.trim().toUpperCase();
+    const effectiveLength = getEffectiveSymbolLength(normalizedCode);
+    if (!options.force && effectiveLength < MIN_STOCK_LOOKUP_LENGTH) {
+        console.log(`[Stock Name] Skip lookup (${normalizedCode}), length ${effectiveLength} < ${MIN_STOCK_LOOKUP_LENGTH}`);
+        return;
+    }
     if (isFetchingName) {
         console.log('[Stock Name] 已有進行中的查詢，跳過本次請求');
         return;
     }
     isFetchingName = true;
 
-    console.log(`[Stock Name] 查詢股票名稱: ${stockCode} (市場: ${currentMarket})`);
+    console.log(`[Stock Name] 查詢股票名稱: ${normalizedCode} (市場: ${currentMarket})`);
 
     try {
         showStockName('查詢中...', 'info');
-        const searchOrder = [currentMarket, ...Object.keys(MARKET_META).filter((market) => market !== currentMarket)];
+        const searchOrder = resolveStockNameSearchOrder(normalizedCode, currentMarket);
+
+        const cacheHit = findStockNameCacheEntry(normalizedCode, searchOrder);
+        if (cacheHit && cacheHit.info) {
+            if (cacheHit.market === currentMarket) {
+                const display = formatStockNameDisplay(cacheHit.info, { fromCache: true });
+                showStockName(composeStockNameText(display, cacheHit.info.name), 'success');
+                return;
+            }
+            await switchToMarket(cacheHit.market, normalizedCode, {
+                presetInfo: cacheHit.info,
+                fromCache: true,
+                skipToast: true,
+            });
+            return;
+        }
 
         for (const market of searchOrder) {
             const fetcher = MARKET_META[market]?.fetchName;
             if (typeof fetcher !== 'function') continue;
-            const name = await resolveStockName(fetcher, stockCode);
-            if (!name) continue;
+            const info = await resolveStockName(fetcher, normalizedCode, market);
+            if (!info) continue;
+
+            storeStockNameCacheEntry(market, normalizedCode, info);
 
             if (market === currentMarket) {
-                showStockName(name, 'success');
+                const display = formatStockNameDisplay(info);
+                showStockName(composeStockNameText(display, info.name), 'success');
                 return;
             }
 
-            await switchToMarket(market, stockCode);
+            await switchToMarket(market, normalizedCode, { presetInfo: info });
             return;
         }
 
         const currentLabel = getMarketDisplayName(currentMarket);
-        showMarketSwitchSuggestion(stockCode, currentLabel, null);
+        showMarketSwitchSuggestion(normalizedCode, currentLabel, null);
     } catch (error) {
         console.error('[Stock Name] 查詢錯誤:', error);
         showStockName('查詢失敗', 'error');
@@ -2919,10 +3112,16 @@ async function fetchStockNameFromTWSE(stockCode) {
             // 從 title 提取股票名稱，通常格式為："110年01月 2330 台積電 各日成交資訊"
             const match = data.title.match(/\d+年\d+月\s+\d+\s+(.+?)\s+各日成交資訊/);
             if (match && match[1]) {
-                return match[1].trim();
+                const name = match[1].trim();
+                return {
+                    name,
+                    board: '上市',
+                    source: 'TWSE 日成交資訊',
+                    instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
+                };
             }
         }
-        
+
         return null;
     } catch (error) {
         console.error('[TWSE API] 查詢股票名稱失敗:', error);
@@ -2937,16 +3136,26 @@ async function fetchStockNameFromTPEX(stockCode) {
 
         // 方法1: 使用代理伺服器 (如果可用)
         const proxyResult = await fetchTPEXNameViaProxy(stockCode);
-        if (proxyResult) {
-            return proxyResult;
+        if (proxyResult && !proxyResult.error && proxyResult.name) {
+            return {
+                name: proxyResult.name.trim(),
+                board: '上櫃',
+                source: proxyResult.source || 'TPEX 公開資訊代理',
+                instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
+            };
         }
-        
+
         // 方法2: 使用JSONP方式嘗試舊API
         const jsonpResult = await fetchTPEXNameViaJSONP(stockCode);
         if (jsonpResult) {
-            return jsonpResult;
+            return {
+                name: typeof jsonpResult === 'string' ? jsonpResult.trim() : String(jsonpResult),
+                board: '上櫃',
+                source: 'TPEX JSONP',
+                instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
+            };
         }
-        
+
         // 方法3: 使用本地股票名稱對照表 (常用上櫃股票)
         const stockNameMap = {
             '3260': '威剛',
@@ -2980,10 +3189,15 @@ async function fetchStockNameFromTPEX(stockCode) {
             '4160': '創源',
             '6472': '保瑞'
         };
-        
+
         if (stockNameMap[stockCode]) {
             console.log(`[TPEX Name] 從本地對照表取得: ${stockNameMap[stockCode]}`);
-            return stockNameMap[stockCode];
+            return {
+                name: stockNameMap[stockCode],
+                board: '上櫃',
+                source: 'TPEX 名稱快取',
+                instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
+            };
         }
         
         console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
@@ -3004,10 +3218,31 @@ async function fetchStockNameFromUS(stockCode) {
             return null;
         }
         const data = await response.json();
-        if (!data) return null;
-        if (typeof data === 'string') return data;
-        if (typeof data === 'object' && data.stockName) return data.stockName;
-        if (typeof data === 'object' && data.name) return data.name;
+        if (!data || data.error) return null;
+        if (typeof data === 'string') {
+            const name = data.trim();
+            if (!name) return null;
+            return {
+                name,
+                market: 'US',
+                source: 'FinMind USStockInfo',
+                symbol: stockCode,
+            };
+        }
+        if (typeof data === 'object') {
+            const name = (data.stockName || data.name || '').toString().trim();
+            if (!name) return null;
+            return {
+                name,
+                market: 'US',
+                marketCategory: data.marketCategory || data.marketCategoryName || data.market || null,
+                source: data.source || data.infoSource || 'FinMind USStockInfo',
+                instrumentType: data.securityType || data.instrumentType || null,
+                symbol: (data.symbol || data.stockNo || stockCode || '').toString().toUpperCase(),
+                matchStrategy: data.matchStrategy || null,
+                resolvedSymbol: data.resolvedSymbol || null,
+            };
+        }
         return null;
     } catch (error) {
         console.error('[US Name] 查詢股票名稱失敗:', error);
@@ -3038,11 +3273,11 @@ async function fetchTPEXNameViaProxy(stockNo) {
         }
 
         if (data.iTotalRecords > 0 && data.stockName) {
-            return { name: data.stockName.trim() };
+            return { name: data.stockName.trim(), source: 'TPEX Proxy' };
         } else if (data.aaData && data.aaData.length > 0) {
             const nameField = data.aaData[0][1] || '';
             const name = nameField.replace(stockNo, '').trim();
-            return { name: name };
+            return { name, source: 'TPEX Proxy' };
         } else {
              return { error: 'no_data' };
         }
@@ -3157,35 +3392,52 @@ function showMarketSwitchSuggestion(stockCode, currentMarketLabel, targetMarket)
     }
 }
 
-async function switchToMarket(targetMarket, stockCode) {
-    const targetLabel = getMarketDisplayName(targetMarket);
-    console.log(`[Market Switch] 切換到 ${targetMarket} 查詢 ${stockCode}`);
+async function switchToMarket(targetMarket, stockCode, options = {}) {
+    const normalizedMarket = normalizeMarketValue(targetMarket || 'TWSE');
+    const normalizedCode = (stockCode || '').trim().toUpperCase();
+    const targetLabel = getMarketDisplayName(normalizedMarket);
+    const { presetInfo = null, fromCache = false, skipToast = false } = options;
+
+    console.log(`[Market Switch] 切換到 ${normalizedMarket} 查詢 ${normalizedCode}`);
 
     isAutoSwitching = true;
-    currentMarket = targetMarket;
+    currentMarket = normalizedMarket;
 
     const marketSelect = document.getElementById('marketSelect');
-    if (marketSelect && marketSelect.value !== targetMarket) {
-        marketSelect.value = targetMarket;
+    if (marketSelect && marketSelect.value !== normalizedMarket) {
+        marketSelect.value = normalizedMarket;
     }
     window.applyMarketPreset?.(currentMarket);
     window.refreshDataSourceTester?.();
-    setDefaultFees(stockCode);
+    setDefaultFees(normalizedCode);
 
-    showStockName('查詢中...', 'info');
+    if (!presetInfo) {
+        showStockName('查詢中...', 'info');
+    }
 
     try {
-        const fetcher = MARKET_META[targetMarket]?.fetchName;
-        const stockName = fetcher ? await resolveStockName(fetcher, stockCode) : null;
-        if (stockName) {
-            showStockName(`${stockName} (已切換至${targetLabel})`, 'success');
-            showSuccess(`已切換至${targetLabel}市場並找到: ${stockName}`);
-        } else {
-            showStockName(`當前市場查無「${stockCode}」`, 'error');
+        let info = presetInfo;
+        if (!info) {
+            const fetcher = MARKET_META[normalizedMarket]?.fetchName;
+            info = fetcher ? await resolveStockName(fetcher, normalizedCode, normalizedMarket) : null;
         }
+
+        if (info) {
+            storeStockNameCacheEntry(normalizedMarket, normalizedCode, info);
+            const display = formatStockNameDisplay(info, { autoSwitched: true, targetLabel, fromCache });
+            showStockName(composeStockNameText(display, info.name), 'success');
+            if (!skipToast) {
+                showSuccess(`已切換至${targetLabel}市場並找到: ${info.name}`);
+            }
+            return info;
+        }
+
+        showStockName(`當前市場查無「${normalizedCode}」`, 'error');
+        return null;
     } catch (error) {
         console.error('[Market Switch] 查詢錯誤:', error);
         showStockName('查詢失敗', 'error');
+        return null;
     } finally {
         isAutoSwitching = false;
     }
@@ -3194,9 +3446,10 @@ async function switchToMarket(targetMarket, stockCode) {
 function showStockName(name, type = 'success') {
     const stockNameDisplay = document.getElementById('stockNameDisplay');
     if (!stockNameDisplay) return;
-    
+
     stockNameDisplay.style.display = 'block';
-    stockNameDisplay.innerHTML = `<span class="stock-name-text">${name}</span>`;
+    const safeText = escapeHtml(typeof name === 'string' ? name : String(name ?? ''));
+    stockNameDisplay.innerHTML = `<span class="stock-name-text">${safeText}</span>`;
     
     // 獲取內部的文字元素來設定顏色
     const textElement = stockNameDisplay.querySelector('.stock-name-text');

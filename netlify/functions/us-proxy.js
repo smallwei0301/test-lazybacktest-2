@@ -1,6 +1,7 @@
-// netlify/functions/us-proxy.js (v1.1 - FinMind primary with Yahoo fallback)
+// netlify/functions/us-proxy.js (v1.2 - FinMind primary with Yahoo fallback)
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
+// Patch Tag: LB-US-NAMEFIX-20250614A
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
@@ -54,6 +55,16 @@ function normaliseFinMindErrorMessage(message) {
 
 function normalizeStockNo(value) {
     return (value || '').trim().toUpperCase();
+}
+
+function normalizeUsComparisonKey(value) {
+    const normalized = normalizeStockNo(value);
+    if (!normalized) return null;
+    return normalized
+        .replace(/^US[:.]/i, '')
+        .replace(/\.US$/i, '')
+        .replace(/-US$/i, '')
+        .replace(/\s+/g, '');
 }
 
 function pad2(value) {
@@ -213,14 +224,91 @@ async function fetchFinMindData(dataset, params) {
     return Array.isArray(json.data) ? json.data : [];
 }
 
-function extractUSStockName(data, stockNo) {
+function findUSStockInfoRecord(data, stockNo) {
     if (!Array.isArray(data)) return null;
-    const match = data.find((row) => {
-        const id = row?.stock_id || row?.stockId || row?.data_id || row?.dataId;
-        return id && normalizeStockNo(id) === stockNo;
-    }) || data[0];
-    if (!match) return null;
-    return match.stock_name || match.stockName || match.stock_name_en || match.name || null;
+    const normalizedTarget = normalizeStockNo(stockNo);
+    if (!normalizedTarget) return null;
+    const targetCore = normalizeUsComparisonKey(normalizedTarget) || normalizedTarget;
+
+    const candidateFields = [
+        'stock_id',
+        'stockId',
+        'data_id',
+        'dataId',
+        'ticker',
+        'symbol',
+        'stock_code',
+        'code',
+    ];
+
+    for (const row of data) {
+        if (!row) continue;
+        for (const field of candidateFields) {
+            const rawValue = row[field];
+            if (!rawValue) continue;
+            const normalized = normalizeStockNo(rawValue);
+            if (normalized && normalized === normalizedTarget) {
+                return {
+                    row,
+                    matchStrategy: `field=${field} exact`,
+                    resolvedSymbol: normalized,
+                };
+            }
+            const normalizedCore = normalizeUsComparisonKey(rawValue);
+            if (normalizedCore && normalizedCore === targetCore) {
+                return {
+                    row,
+                    matchStrategy: `field=${field} normalized`,
+                    resolvedSymbol: normalizedCore,
+                };
+            }
+        }
+    }
+
+    if (data.length === 1 && data[0]) {
+        return {
+            row: data[0],
+            matchStrategy: 'single-record fallback',
+            resolvedSymbol: normalizeStockNo(
+                data[0].stock_id
+                || data[0].stockId
+                || data[0].data_id
+                || data[0].dataId
+                || data[0].ticker
+                || data[0].symbol
+            ),
+        };
+    }
+
+    return null;
+}
+
+function extractUSStockMetadata(data, stockNo) {
+    const matched = findUSStockInfoRecord(data, stockNo);
+    if (!matched || !matched.row) return null;
+    const { row, matchStrategy, resolvedSymbol } = matched;
+    const stockName = row.stock_name || row.stockName || row.stock_name_en || row.name || null;
+    const marketCategory = row.market_category || row.marketCategory || row.exchange || row.market || null;
+    const securityType = row.security_type || row.securityType || row.type || row.stock_type || null;
+    const symbol = normalizeStockNo(
+        row.stock_id
+        || row.stockId
+        || row.data_id
+        || row.dataId
+        || row.ticker
+        || row.symbol
+        || resolvedSymbol
+        || stockNo
+    );
+    return {
+        stockName: stockName || stockNo,
+        symbol: symbol || stockNo,
+        marketCategory: marketCategory || null,
+        securityType: securityType || null,
+        matchStrategy: matchStrategy || null,
+        resolvedSymbol: resolvedSymbol || symbol || null,
+        source: FINMIND_SOURCE_LABEL,
+    };
 }
 
 async function fetchUSStockInfo(stockNo) {
@@ -245,13 +333,27 @@ async function fetchUSStockInfo(stockNo) {
                 console.warn('[US Proxy v1.1] USStockInfo data_id 查無資料，stock_id fallback 亦失敗:', fallbackError);
             }
         }
-        const stockName = extractUSStockName(data, normalized) || normalized;
-        const payload = { stockNo: normalized, stockName };
+        const metadata = extractUSStockMetadata(data, normalized) || null;
+        const payload = {
+            stockNo: normalized,
+            stockName: metadata?.stockName || normalized,
+            symbol: metadata?.symbol || normalized,
+            marketCategory: metadata?.marketCategory || null,
+            securityType: metadata?.securityType || null,
+            matchStrategy: metadata?.matchStrategy || null,
+            resolvedSymbol: metadata?.resolvedSymbol || null,
+            source: metadata?.source || FINMIND_SOURCE_LABEL,
+        };
         await writeInfoCache(store, normalized, payload);
         return payload;
     } catch (error) {
         console.error('[US Proxy v1.1] 取得 USStockInfo 失敗:', error);
-        return { stockNo: normalized, stockName: normalized };
+        return {
+            stockNo: normalized,
+            stockName: normalized,
+            symbol: normalized,
+            source: FINMIND_SOURCE_LABEL,
+        };
     }
 }
 
@@ -499,6 +601,7 @@ export default async (req) => {
             const sourceList = Array.from(new Set(sourceListRaw.filter(Boolean)));
             payload = {
                 stockName: info.stockName || stockNo,
+                stockInfo: info,
                 data: dataRows.map((row) => ({
                     date: row.date,
                     open: row.open ?? row.Open ?? null,
@@ -510,6 +613,7 @@ export default async (req) => {
                 dataSource: primarySource,
                 dataSources: sourceList,
                 fallback: priceResult.fallback || null,
+                source: primarySource,
             };
             await writeCache(store, cacheKey, payload);
         }
@@ -517,11 +621,12 @@ export default async (req) => {
         return new Response(
             JSON.stringify({
                 stockName: payload.stockName || stockNo,
+                stockInfo: payload.stockInfo || null,
                 data: Array.isArray(payload.data) ? payload.data : [],
                 dataSource: payload.dataSource || FINMIND_SOURCE_LABEL,
                 dataSources: Array.isArray(payload.dataSources) ? payload.dataSources : undefined,
                 fallback: payload.fallback || null,
-                source: payload.source || null,
+                source: payload.source || payload.dataSource || null,
             }),
             {
                 headers: { 'Content-Type': 'application/json' },
