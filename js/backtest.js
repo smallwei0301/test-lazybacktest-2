@@ -2777,6 +2777,8 @@ function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(
 // 全域變數
 let currentMarket = 'TWSE'; // 預設為上市
 let isAutoSwitching = false; // 防止無限重複切換
+let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動辨識
+let manualOverrideCodeSnapshot = ''; // 紀錄觸發鎖定時的股票代碼
 let isFetchingName = false; // 防止重複查詢股票名稱
 const stockNameLookupCache = new Map(); // Map<cacheKey, { info, cachedAt }>
 const STOCK_NAME_CACHE_LIMIT = 120;
@@ -2796,6 +2798,17 @@ function createStockNameCacheKey(market, stockCode) {
     const normalizedCode = (stockCode || '').trim().toUpperCase();
     if (!normalizedMarket || !normalizedCode) return null;
     return `${normalizedMarket}|${normalizedCode}`;
+}
+
+function getLeadingDigitCount(symbol) {
+    if (!symbol) return 0;
+    const match = symbol.match(/^\d+/);
+    return match ? match[0].length : 0;
+}
+
+function shouldEnforceNumericLookupGate(symbol) {
+    if (!symbol) return false;
+    return /^\d/.test(symbol);
 }
 
 function storeStockNameCacheEntry(market, stockCode, info) {
@@ -2827,11 +2840,6 @@ function findStockNameCacheEntry(stockCode, markets) {
     return null;
 }
 
-function getEffectiveSymbolLength(symbol) {
-    if (!symbol) return 0;
-    return symbol.replace(/[^0-9A-Z]/gi, '').length;
-}
-
 function isLikelyTaiwanETF(symbol) {
     const normalized = (symbol || '').trim().toUpperCase();
     return /^\d{4}$/.test(normalized) && normalized.startsWith('00');
@@ -2853,9 +2861,13 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const normalizedCode = (stockCode || '').trim().toUpperCase();
     const hasAlpha = /[A-Z]/.test(normalizedCode);
     const isNumeric = /^\d+$/.test(normalizedCode);
+    const leadingDigits = getLeadingDigitCount(normalizedCode);
+    const startsWithFourDigits = leadingDigits >= MIN_STOCK_LOOKUP_LENGTH;
     const preferred = normalizeMarketValue(preferredMarket || '');
     const baseOrder = [];
-    if (hasAlpha && !isNumeric) {
+    if (startsWithFourDigits) {
+        baseOrder.push('TWSE', 'TPEX', 'US');
+    } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
         baseOrder.push('US', 'TWSE', 'TPEX');
     } else {
         baseOrder.push('TWSE', 'TPEX', 'US');
@@ -2969,12 +2981,20 @@ function initializeMarketSwitch() {
         const nextMarket = normalizeMarketValue(marketSelect.value || 'TWSE');
         if (currentMarket === nextMarket) return;
 
+        const triggeredByAuto = isAutoSwitching === true;
         currentMarket = nextMarket;
         console.log(`[Market Switch] 切換到: ${currentMarket}`);
+        if (triggeredByAuto) {
+            manualMarketOverride = false;
+            manualOverrideCodeSnapshot = '';
+        } else {
+            manualMarketOverride = true;
+            manualOverrideCodeSnapshot = (stockNoInput.value || '').trim().toUpperCase();
+        }
         window.applyMarketPreset?.(currentMarket);
         window.refreshDataSourceTester?.();
 
-        if (!isAutoSwitching) {
+        if (!triggeredByAuto) {
             hideStockName();
         }
 
@@ -2987,6 +3007,11 @@ function initializeMarketSwitch() {
 
     stockNoInput.addEventListener('input', function() {
         const stockCode = this.value.trim().toUpperCase();
+        if (manualMarketOverride && stockCode !== manualOverrideCodeSnapshot) {
+            manualMarketOverride = false;
+            manualOverrideCodeSnapshot = '';
+        }
+        manualOverrideCodeSnapshot = stockCode;
         hideStockName();
         if (stockCode === 'TAIEX') {
             showStockName('台灣加權指數', 'success');
@@ -3011,10 +3036,15 @@ function debouncedFetchStockName(stockCode, options = {}) {
     clearTimeout(stockNameTimeout);
     const normalizedCode = (stockCode || '').trim().toUpperCase();
     if (!normalizedCode || normalizedCode === 'TAIEX') return;
-    const effectiveLength = getEffectiveSymbolLength(normalizedCode);
-    if (!options.force && effectiveLength < MIN_STOCK_LOOKUP_LENGTH) {
-        console.log(`[Stock Name] Skip auto lookup (${normalizedCode}), length ${effectiveLength} < ${MIN_STOCK_LOOKUP_LENGTH}`);
-        return;
+    const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
+    if (!options.force && enforceGate) {
+        const leadingDigits = getLeadingDigitCount(normalizedCode);
+        if (leadingDigits < MIN_STOCK_LOOKUP_LENGTH) {
+            console.log(
+                `[Stock Name] Skip auto lookup (${normalizedCode}), leading digits ${leadingDigits} < ${MIN_STOCK_LOOKUP_LENGTH}`
+            );
+            return;
+        }
     }
     const delay = options.immediate ? 0 : STOCK_NAME_DEBOUNCE_MS;
     stockNameTimeout = setTimeout(() => {
@@ -3035,10 +3065,15 @@ async function resolveStockName(fetcher, stockCode, market) {
 async function fetchStockName(stockCode, options = {}) {
     if (!stockCode || stockCode === 'TAIEX') return;
     const normalizedCode = stockCode.trim().toUpperCase();
-    const effectiveLength = getEffectiveSymbolLength(normalizedCode);
-    if (!options.force && effectiveLength < MIN_STOCK_LOOKUP_LENGTH) {
-        console.log(`[Stock Name] Skip lookup (${normalizedCode}), length ${effectiveLength} < ${MIN_STOCK_LOOKUP_LENGTH}`);
-        return;
+    const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
+    if (!options.force && enforceGate) {
+        const leadingDigits = getLeadingDigitCount(normalizedCode);
+        if (leadingDigits < MIN_STOCK_LOOKUP_LENGTH) {
+            console.log(
+                `[Stock Name] Skip lookup (${normalizedCode}), leading digits ${leadingDigits} < ${MIN_STOCK_LOOKUP_LENGTH}`
+            );
+            return;
+        }
     }
     if (isFetchingName) {
         console.log('[Stock Name] 已有進行中的查詢，跳過本次請求');
@@ -3050,21 +3085,26 @@ async function fetchStockName(stockCode, options = {}) {
 
     try {
         showStockName('查詢中...', 'info');
-        const searchOrder = resolveStockNameSearchOrder(normalizedCode, currentMarket);
+        const allowAutoSwitch = !manualMarketOverride;
+        const searchOrder = allowAutoSwitch
+            ? resolveStockNameSearchOrder(normalizedCode, currentMarket)
+            : [currentMarket];
 
         const cacheHit = findStockNameCacheEntry(normalizedCode, searchOrder);
         if (cacheHit && cacheHit.info) {
-            if (cacheHit.market === currentMarket) {
+            if (cacheHit.market === currentMarket || !allowAutoSwitch) {
                 const display = formatStockNameDisplay(cacheHit.info, { fromCache: true });
                 showStockName(composeStockNameText(display, cacheHit.info.name), 'success');
                 return;
             }
-            await switchToMarket(cacheHit.market, normalizedCode, {
-                presetInfo: cacheHit.info,
-                fromCache: true,
-                skipToast: true,
-            });
-            return;
+            if (allowAutoSwitch) {
+                await switchToMarket(cacheHit.market, normalizedCode, {
+                    presetInfo: cacheHit.info,
+                    fromCache: true,
+                    skipToast: true,
+                });
+                return;
+            }
         }
 
         for (const market of searchOrder) {
@@ -3075,14 +3115,16 @@ async function fetchStockName(stockCode, options = {}) {
 
             storeStockNameCacheEntry(market, normalizedCode, info);
 
-            if (market === currentMarket) {
+            if (market === currentMarket || !allowAutoSwitch) {
                 const display = formatStockNameDisplay(info);
                 showStockName(composeStockNameText(display, info.name), 'success');
                 return;
             }
 
-            await switchToMarket(market, normalizedCode, { presetInfo: info });
-            return;
+            if (allowAutoSwitch) {
+                await switchToMarket(market, normalizedCode, { presetInfo: info });
+                return;
+            }
         }
 
         const currentLabel = getMarketDisplayName(currentMarket);
@@ -3400,6 +3442,8 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
 
     console.log(`[Market Switch] 切換到 ${normalizedMarket} 查詢 ${normalizedCode}`);
 
+    manualMarketOverride = false;
+    manualOverrideCodeSnapshot = '';
     isAutoSwitching = true;
     currentMarket = normalizedMarket;
 
