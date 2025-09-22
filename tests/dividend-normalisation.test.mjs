@@ -106,7 +106,7 @@ approxEqual(splitNormalized.ratio, 0.5, 1e-6);
 const splitNormalizedSecondary = normaliseSplitRecord(splitSecondaryRecord);
 assert.ok(splitNormalizedSecondary, 'Split secondary ratio should normalise');
 assert.equal(splitNormalizedSecondary.date, '2024-07-11');
-approxEqual(splitNormalizedSecondary.ratio, 1, 1e-6);
+approxEqual(splitNormalizedSecondary.ratio, 0.5, 1e-6);
 
 const splitEvents = buildSplitEvents([
   splitPrimaryRecord,
@@ -313,7 +313,7 @@ try {
   assert.equal(payload.finmindStatus?.splitPrice?.dataset, 'TaiwanStockSplitPrice');
   const splitAdjustment = payload.adjustments.find((event) => event?.source === 'FinMind 股票拆分');
   assert.ok(splitAdjustment, 'Split adjustment should be applied when enabled');
-  approxEqual(splitAdjustment.ratio, 1, 1e-6);
+  approxEqual(splitAdjustment.ratio, 0.5, 1e-6);
 } finally {
   resetFetchImplementation();
   if (originalToken === undefined) {

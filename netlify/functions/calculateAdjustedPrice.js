@@ -23,9 +23,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250426A
 // Patch Tag: LB-ADJ-COMPOSER-20250509A
 // Patch Tag: LB-ADJ-COMPOSER-20250518A
+// Patch Tag: LB-ADJ-COMPOSER-20250522A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250518A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250522A';
 
 let fetchImpl = fetch;
 
@@ -923,6 +924,44 @@ function buildDividendResultEvents(records) {
   );
 }
 
+function parseSplitRatioToken(rawValue) {
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const direct = parseNumber(rawValue, { treatAsRatio: true });
+
+  let explicit = null;
+  if (typeof rawValue === 'string' || rawValue instanceof String) {
+    const cleaned = normaliseNumericText(rawValue);
+    if (cleaned.includes(':')) {
+      const [lhsRaw, rhsRaw] = cleaned.split(':');
+      const lhs = Number(lhsRaw);
+      const rhs = Number(rhsRaw);
+      if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
+        explicit = rhs / lhs;
+      }
+    } else if (cleaned.includes('/')) {
+      const [lhsRaw, rhsRaw] = cleaned.split('/');
+      const lhs = Number(lhsRaw);
+      const rhs = Number(rhsRaw);
+      if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
+        explicit = lhs / rhs;
+      }
+    }
+  }
+
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct;
+  }
+
+  return null;
+}
+
 function normaliseSplitRecord(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -940,42 +979,52 @@ function normaliseSplitRecord(raw) {
 
   const beforePrice = resolveNumericByKeys(raw, SPLIT_BEFORE_PRICE_KEYS);
   const afterPrice = resolveNumericByKeys(raw, SPLIT_AFTER_PRICE_KEYS);
-  let ratio = resolveNumericByKeys(raw, SPLIT_RATIO_KEYS, { treatAsRatio: true });
 
-  if (!Number.isFinite(ratio) || ratio <= 0) {
-    for (let i = 0; i < SPLIT_RATIO_KEYS.length; i += 1) {
-      const rawValue = readField(raw, SPLIT_RATIO_KEYS[i]);
-      if (typeof rawValue === 'string') {
-        const cleaned = normaliseNumericText(rawValue);
-        if (cleaned.includes(':')) {
-          const [lhsRaw, rhsRaw] = cleaned.split(':');
-          const lhs = Number(lhsRaw);
-          const rhs = Number(rhsRaw);
-          if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
-            ratio = rhs / lhs;
-            break;
-          }
-        } else if (cleaned.includes('/')) {
-          const [lhsRaw, rhsRaw] = cleaned.split('/');
-          const lhs = Number(lhsRaw);
-          const rhs = Number(rhsRaw);
-          if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
-            ratio = lhs / rhs;
-            break;
-          }
-        }
+  const ratioTokens = [];
+  let ratio = null;
+  for (let i = 0; i < SPLIT_RATIO_KEYS.length; i += 1) {
+    const key = SPLIT_RATIO_KEYS[i];
+    const rawValue = readField(raw, key);
+    if (rawValue === null || rawValue === undefined || rawValue === '') continue;
+    ratioTokens.push(rawValue);
+    const numeric = parseNumber(rawValue, { treatAsRatio: true });
+    if (Number.isFinite(numeric) && numeric > 0) {
+      ratio = numeric;
+      if (Math.abs(numeric - 1) > 1e-8) {
+        break;
       }
     }
   }
 
-  if (!Number.isFinite(ratio) || ratio <= 0) {
+  if (ratioTokens.length > 0) {
+    for (let i = 0; i < ratioTokens.length; i += 1) {
+      const parsed = parseSplitRatioToken(ratioTokens[i]);
+      if (!Number.isFinite(parsed) || parsed <= 0) continue;
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        ratio = parsed;
+      }
+      if (Math.abs(parsed - 1) > 1e-8 && Math.abs(parsed - ratio) > 1e-8) {
+        ratio = parsed;
+      }
+      if (Math.abs(ratio - 1) > 1e-8) {
+        break;
+      }
+    }
+  }
+
+  if (
+    Number.isFinite(beforePrice) &&
+    beforePrice > 0 &&
+    Number.isFinite(afterPrice) &&
+    afterPrice > 0
+  ) {
+    const inferred = afterPrice / beforePrice;
     if (
-      Number.isFinite(beforePrice) &&
-      beforePrice > 0 &&
-      Number.isFinite(afterPrice) &&
-      afterPrice > 0
+      Number.isFinite(inferred) &&
+      inferred > 0 &&
+      (!Number.isFinite(ratio) || ratio <= 0 || Math.abs(inferred - ratio) > 1e-6)
     ) {
-      ratio = afterPrice / beforePrice;
+      ratio = inferred;
     }
   }
 
@@ -1022,7 +1071,12 @@ function buildSplitEvents(records) {
     if (existing) {
       if (Number.isFinite(normalised.ratio) && normalised.ratio > 0) {
         if (Number.isFinite(existing.manualRatio) && existing.manualRatio > 0) {
-          existing.manualRatio *= normalised.ratio;
+          const ratioDelta = Math.abs(normalised.ratio - existing.manualRatio);
+          if (ratioDelta <= 1e-6) {
+            existing.manualRatio = normalised.ratio;
+          } else {
+            existing.manualRatio *= normalised.ratio;
+          }
         } else {
           existing.manualRatio = normalised.ratio;
         }
