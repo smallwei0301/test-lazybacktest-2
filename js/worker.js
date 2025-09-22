@@ -1,5 +1,5 @@
 
-// --- Worker Data Acquisition & Cache (v11.4 - FinMind diagnostics propagation) ---
+// --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -7,7 +7,8 @@
 // Patch Tag: LB-ADJ-PIPE-20250312A
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
-const WORKER_DATA_VERSION = "v11.4";
+// Patch Tag: LB-ADJ-PIPE-20250527A
+const WORKER_DATA_VERSION = "v11.5";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -24,8 +25,9 @@ function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
 }
 
-function buildCacheKey(stockNo, startDate, endDate, adjusted = false) {
-  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}`;
+function buildCacheKey(stockNo, startDate, endDate, adjusted = false, split = false) {
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}__${splitFlag}`;
 }
 
 function ensureMarketCache(marketKey) {
@@ -42,23 +44,24 @@ function ensureMonthlyMarketCache(marketKey) {
   return workerMonthlyCache.get(marketKey);
 }
 
-function getMonthlyStockKey(stockNo, adjusted = false) {
-  return `${stockNo}__${getPriceModeKey(adjusted)}`;
+function getMonthlyStockKey(stockNo, adjusted = false, split = false) {
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockNo}__${getPriceModeKey(adjusted)}__${splitFlag}`;
 }
 
-function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false) {
+function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = false) {
   const marketCache = ensureMonthlyMarketCache(marketKey);
-  const stockKey = getMonthlyStockKey(stockNo, adjusted);
+  const stockKey = getMonthlyStockKey(stockNo, adjusted, split);
   if (!marketCache.has(stockKey)) {
     marketCache.set(stockKey, new Map());
   }
   return marketCache.get(stockKey);
 }
 
-function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
+function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, split = false) {
   const marketCache = workerMonthlyCache.get(marketKey);
   if (!marketCache) return null;
-  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted));
+  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted, split));
   if (!stockCache) return null;
   const entry = stockCache.get(monthKey);
   if (!entry) return null;
@@ -74,8 +77,8 @@ function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false) {
   return entry;
 }
 
-function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false) {
-  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted);
+function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = false, split = false) {
+  const stockCache = ensureMonthlyStockCache(marketKey, stockNo, adjusted, split);
   if (!(entry.sources instanceof Set)) {
     entry.sources = new Set(entry.sources || []);
   }
@@ -660,13 +663,23 @@ function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
   return { rows: adjustedRows, fallbackApplied: true };
 }
 
-async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
+async function fetchAdjustedPriceRange(
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  options = {},
+) {
   const params = new URLSearchParams({
     stockNo,
     startDate,
     endDate,
     market: marketKey,
   });
+  const splitEnabled = Boolean(options && options.splitAdjustment);
+  if (splitEnabled) {
+    params.set("split", "1");
+  }
   const response = await fetch(`/api/adjusted-price/?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
@@ -777,10 +790,20 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     payload?.dividendDiagnostics && typeof payload.dividendDiagnostics === "object"
       ? payload.dividendDiagnostics
       : null;
+  const splitDiagnostics =
+    payload?.splitDiagnostics && typeof payload.splitDiagnostics === "object"
+      ? payload.splitDiagnostics
+      : null;
   const finmindStatus =
     payload?.finmindStatus && typeof payload.finmindStatus === "object"
       ? payload.finmindStatus
       : null;
+  const adjustmentDebugLog = Array.isArray(payload?.adjustmentDebugLog)
+    ? payload.adjustmentDebugLog
+    : [];
+  const adjustmentChecks = Array.isArray(payload?.adjustmentChecks)
+    ? payload.adjustmentChecks
+    : [];
 
   const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
     normalizedRows,
@@ -802,7 +825,10 @@ async function fetchAdjustedPriceRange(stockNo, startDate, endDate, marketKey) {
     debugSteps,
     dividendEvents,
     dividendDiagnostics,
+    splitDiagnostics,
     finmindStatus,
+    adjustmentDebugLog,
+    adjustmentChecks,
   };
 }
 
@@ -953,6 +979,7 @@ async function fetchStockData(
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
   const adjusted = Boolean(options.adjusted || options.adjustedPrice);
+  const split = Boolean(options.splitAdjustment);
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -963,7 +990,7 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
-  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted);
+  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   if (cachedEntry) {
     self.postMessage({
@@ -979,6 +1006,42 @@ async function fetchStockData(
         cachedEntry?.meta?.adjustmentFallbackApplied,
       ),
       adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
+      summary:
+        cachedEntry?.meta?.summary &&
+        typeof cachedEntry.meta.summary === "object"
+          ? cachedEntry.meta.summary
+          : null,
+      adjustments: Array.isArray(cachedEntry?.meta?.adjustments)
+        ? cachedEntry.meta.adjustments
+        : [],
+      priceSource: cachedEntry?.meta?.priceSource || null,
+      debugSteps: Array.isArray(cachedEntry?.meta?.debugSteps)
+        ? cachedEntry.meta.debugSteps
+        : [],
+      dividendDiagnostics:
+        cachedEntry?.meta?.dividendDiagnostics &&
+        typeof cachedEntry.meta.dividendDiagnostics === "object"
+          ? cachedEntry.meta.dividendDiagnostics
+          : null,
+      dividendEvents: Array.isArray(cachedEntry?.meta?.dividendEvents)
+        ? cachedEntry.meta.dividendEvents
+        : [],
+      splitDiagnostics:
+        cachedEntry?.meta?.splitDiagnostics &&
+        typeof cachedEntry.meta.splitDiagnostics === "object"
+          ? cachedEntry.meta.splitDiagnostics
+          : null,
+      finmindStatus:
+        cachedEntry?.meta?.finmindStatus &&
+        typeof cachedEntry.meta.finmindStatus === "object"
+          ? cachedEntry.meta.finmindStatus
+          : null,
+      adjustmentDebugLog: Array.isArray(cachedEntry?.meta?.adjustmentDebugLog)
+        ? cachedEntry.meta.adjustmentDebugLog
+        : [],
+      adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
+        ? cachedEntry.meta.adjustmentChecks
+        : [],
     };
   }
 
@@ -999,17 +1062,20 @@ async function fetchStockData(
       startDate,
       endDate,
       marketKey,
+      { splitAdjustment: split },
     );
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
       dataSource: adjustedResult.dataSource,
       timestamp: Date.now(),
+      splitAdjustment: split,
       meta: {
         stockNo,
         startDate,
         endDate,
         priceMode: getPriceModeKey(adjusted),
+        splitAdjustment: split,
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
@@ -1030,6 +1096,22 @@ async function fetchStockData(
             : null,
         dividendEvents: Array.isArray(adjustedResult.dividendEvents)
           ? adjustedResult.dividendEvents
+          : [],
+        splitDiagnostics:
+          adjustedResult.splitDiagnostics &&
+          typeof adjustedResult.splitDiagnostics === "object"
+            ? adjustedResult.splitDiagnostics
+            : null,
+        finmindStatus:
+          adjustedResult.finmindStatus &&
+          typeof adjustedResult.finmindStatus === "object"
+            ? adjustedResult.finmindStatus
+            : null,
+        adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
+          ? adjustedResult.adjustmentDebugLog
+          : [],
+        adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
+          ? adjustedResult.adjustmentChecks
           : [],
       },
       priceMode: getPriceModeKey(adjusted),
@@ -1057,6 +1139,22 @@ async function fetchStockData(
           : null,
       dividendEvents: Array.isArray(adjustedResult.dividendEvents)
         ? adjustedResult.dividendEvents
+        : [],
+      splitDiagnostics:
+        adjustedResult.splitDiagnostics &&
+        typeof adjustedResult.splitDiagnostics === "object"
+          ? adjustedResult.splitDiagnostics
+          : null,
+      finmindStatus:
+        adjustedResult.finmindStatus &&
+        typeof adjustedResult.finmindStatus === "object"
+          ? adjustedResult.finmindStatus
+          : null,
+      adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
+        ? adjustedResult.adjustmentDebugLog
+        : [],
+      adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
+        ? adjustedResult.adjustmentChecks
         : [],
     };
   }
@@ -1093,6 +1191,7 @@ async function fetchStockData(
           stockNo,
           monthInfo.monthKey,
           adjusted,
+          split,
         );
         if (!monthEntry) {
           monthEntry = {
@@ -1108,6 +1207,7 @@ async function fetchStockData(
             monthInfo.monthKey,
             monthEntry,
             adjusted,
+            split,
           );
         }
 
@@ -4067,7 +4167,10 @@ async function runOptimization(
         baseParams.startDate,
         baseParams.endDate,
         baseParams.marketType || baseParams.market || "TWSE",
-        { adjusted: baseParams.adjustedPrice },
+        {
+          adjusted: baseParams.adjustedPrice,
+          splitAdjustment: baseParams.splitAdjustment,
+        },
       );
       stockData = fetched?.data || [];
       dataFetched = true;
@@ -4784,6 +4887,20 @@ self.onmessage = async function (e) {
             marketKey,
             dataSource: "主執行緒快取",
             stockName: params.stockNo,
+            splitDiagnostics:
+              cachedMeta.splitDiagnostics && typeof cachedMeta.splitDiagnostics === "object"
+                ? cachedMeta.splitDiagnostics
+                : null,
+            finmindStatus:
+              cachedMeta.finmindStatus && typeof cachedMeta.finmindStatus === "object"
+                ? cachedMeta.finmindStatus
+                : null,
+            adjustmentDebugLog: Array.isArray(cachedMeta.adjustmentDebugLog)
+              ? cachedMeta.adjustmentDebugLog
+              : [],
+            adjustmentChecks: Array.isArray(cachedMeta.adjustmentChecks)
+              ? cachedMeta.adjustmentChecks
+              : [],
           };
         }
       } else {
@@ -4793,7 +4910,10 @@ self.onmessage = async function (e) {
           params.startDate,
           params.endDate,
           params.marketType,
-          { adjusted: params.adjustedPrice },
+          {
+            adjusted: params.adjustedPrice,
+            splitAdjustment: params.splitAdjustment,
+          },
         );
         dataToUse = outcome.data;
         fetched = true;
@@ -4850,6 +4970,20 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.dividendEvents)
             ? workerLastMeta.dividendEvents
             : [],
+        splitDiagnostics:
+          outcome?.splitDiagnostics || workerLastMeta?.splitDiagnostics || null,
+        finmindStatus:
+          outcome?.finmindStatus || workerLastMeta?.finmindStatus || null,
+        adjustmentDebugLog: Array.isArray(outcome?.adjustmentDebugLog)
+          ? outcome.adjustmentDebugLog
+          : Array.isArray(workerLastMeta?.adjustmentDebugLog)
+            ? workerLastMeta.adjustmentDebugLog
+            : [],
+        adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
+          ? outcome.adjustmentChecks
+          : Array.isArray(workerLastMeta?.adjustmentChecks)
+            ? workerLastMeta.adjustmentChecks
+            : [],
       };
 
       if (!useCachedData && fetched) {
@@ -4864,6 +4998,20 @@ self.onmessage = async function (e) {
           dividendDiagnostics: outcome?.dividendDiagnostics || null,
           dividendEvents: Array.isArray(outcome?.dividendEvents)
             ? outcome.dividendEvents
+            : [],
+          splitDiagnostics:
+            outcome?.splitDiagnostics && typeof outcome.splitDiagnostics === "object"
+              ? outcome.splitDiagnostics
+              : null,
+          finmindStatus:
+            outcome?.finmindStatus && typeof outcome.finmindStatus === "object"
+              ? outcome.finmindStatus
+              : null,
+          adjustmentDebugLog: Array.isArray(outcome?.adjustmentDebugLog)
+            ? outcome.adjustmentDebugLog
+            : [],
+          adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
+            ? outcome.adjustmentChecks
             : [],
         };
       }

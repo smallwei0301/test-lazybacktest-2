@@ -1,5 +1,6 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.6 - FinMind adjusted series resilience)
+// netlify/functions/calculateAdjustedPrice.js (v13.7 - Split ratio diagnostics)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
+// Patch Tag: LB-ADJ-COMPOSER-20250523A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
 // Patch Tag: LB-ADJ-COMPOSER-20241024A
@@ -23,9 +24,11 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250426A
 // Patch Tag: LB-ADJ-COMPOSER-20250509A
 // Patch Tag: LB-ADJ-COMPOSER-20250518A
+// Patch Tag: LB-ADJ-COMPOSER-20250522A
+// Patch Tag: LB-ADJ-COMPOSER-20250527A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250518A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250527A';
 
 let fetchImpl = fetch;
 
@@ -66,6 +69,51 @@ const SUBSCRIPTION_PRICE_ALIAS_PATTERNS = [
   /(增資|配售|現增).*(價格|價)/i,
   /(發行|訂價).*(價格|價)/i,
   /配股價格/i,
+];
+
+const SPLIT_DATE_KEYS = [
+  'date',
+  'split_date',
+  'splitday',
+  'split_day',
+  'ex_date',
+  'ex_right_date',
+  'announcement_date',
+  'announce_date',
+];
+
+const SPLIT_BEFORE_PRICE_KEYS = [
+  'before_price',
+  'before_split_price',
+  'before_reference_price',
+  'before_price_reference',
+  'before',
+  'before_close',
+  'close_before',
+  'price_before',
+  'before_adjust_price',
+  'price_before_split',
+];
+
+const SPLIT_AFTER_PRICE_KEYS = [
+  'after_price',
+  'after_split_price',
+  'after_reference_price',
+  'after_price_reference',
+  'after',
+  'after_close',
+  'close_after',
+  'price_after',
+  'price_after_split',
+];
+
+const SPLIT_RATIO_KEYS = [
+  'split_ratio',
+  'ratio',
+  'split_rate',
+  'splitratio',
+  'splitrate',
+  'ratio_split',
 ];
 
 const DEFAULT_EXCLUDE_NORMALISED_TOKENS = [
@@ -154,12 +202,16 @@ const DEFAULT_EXCLUDE_ORIGINAL_PATTERNS = [
   /Declare/i,
 ];
 
+// Patch Tag: LB-ADJ-COMPOSER-SPLIT-20250518A
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_MAX_SPAN_DAYS = 120;
 const FINMIND_MIN_PRICE_SPAN_DAYS = 30;
 const FINMIND_DIVIDEND_SPAN_DAYS = 365;
 const FINMIND_DIVIDEND_LOOKBACK_DAYS = 540;
 const FINMIND_MIN_DIVIDEND_SPAN_DAYS = 30;
+const FINMIND_SPLIT_SPAN_DAYS = 365;
+const FINMIND_SPLIT_LOOKBACK_DAYS = 900;
+const FINMIND_MIN_SPLIT_SPAN_DAYS = 30;
 const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
@@ -167,6 +219,8 @@ const FINMIND_SPLITTABLE_STATUS = new Set([400, 408, 429, 500, 502, 503, 504, 52
 const FINMIND_ADJUSTED_LABEL = 'FinMind 還原序列';
 const FINMIND_DIVIDEND_RESULT_DATASET = 'TaiwanStockDividendResult';
 const FINMIND_DIVIDEND_RESULT_LABEL = 'FinMind (TaiwanStockDividendResult)';
+const FINMIND_SPLIT_DATASET = 'TaiwanStockSplitPrice';
+const FINMIND_SPLIT_LABEL = 'FinMind 股票拆分';
 const ADJUSTED_SERIES_RATIO_EPSILON = 1e-5;
 
 const FINMIND_PERMISSION_PATTERNS = [
@@ -222,6 +276,9 @@ function resolveFinMindDatasetLabel(dataset) {
   const token = String(dataset);
   if (token === FINMIND_DIVIDEND_RESULT_DATASET) {
     return 'TaiwanStockDividendResult';
+  }
+  if (token === FINMIND_SPLIT_DATASET) {
+    return 'TaiwanStockSplitPrice';
   }
   if (token === 'TaiwanStockPriceAdj') {
     return 'TaiwanStockPriceAdj';
@@ -599,6 +656,17 @@ function readField(raw, key) {
   return undefined;
 }
 
+function resolveNumericByKeys(raw, keys, options = {}) {
+  if (!Array.isArray(keys) || keys.length === 0) return null;
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = parseNumber(readField(raw, keys[i]), options);
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function normaliseKeyName(key) {
   if (!key && key !== 0) return '';
   return String(key)
@@ -858,6 +926,209 @@ function buildDividendResultEvents(records) {
   );
 }
 
+function parseSplitRatioToken(rawValue) {
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const direct = parseNumber(rawValue, { treatAsRatio: true });
+
+  let explicit = null;
+  if (typeof rawValue === 'string' || rawValue instanceof String) {
+    const cleaned = normaliseNumericText(rawValue);
+    if (cleaned.includes(':')) {
+      const [lhsRaw, rhsRaw] = cleaned.split(':');
+      const lhs = Number(lhsRaw);
+      const rhs = Number(rhsRaw);
+      if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
+        explicit = rhs / lhs;
+      }
+    } else if (cleaned.includes('/')) {
+      const [lhsRaw, rhsRaw] = cleaned.split('/');
+      const lhs = Number(lhsRaw);
+      const rhs = Number(rhsRaw);
+      if (Number.isFinite(lhs) && Number.isFinite(rhs) && lhs > 0 && rhs > 0) {
+        explicit = lhs / rhs;
+      }
+    }
+  }
+
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct;
+  }
+
+  return null;
+}
+
+function normaliseSplitRecord(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  let dateToken = null;
+  for (let i = 0; i < SPLIT_DATE_KEYS.length; i += 1) {
+    const value = readField(raw, SPLIT_DATE_KEYS[i]);
+    if (value) {
+      dateToken = value;
+      break;
+    }
+  }
+
+  const isoDate = toISODate(dateToken);
+  if (!isoDate) return null;
+
+  const beforePrice = resolveNumericByKeys(raw, SPLIT_BEFORE_PRICE_KEYS);
+  const afterPrice = resolveNumericByKeys(raw, SPLIT_AFTER_PRICE_KEYS);
+
+  const ratioTokens = [];
+  let ratio = null;
+  for (let i = 0; i < SPLIT_RATIO_KEYS.length; i += 1) {
+    const key = SPLIT_RATIO_KEYS[i];
+    const rawValue = readField(raw, key);
+    if (rawValue === null || rawValue === undefined || rawValue === '') continue;
+    ratioTokens.push(rawValue);
+    const numeric = parseNumber(rawValue, { treatAsRatio: true });
+    if (Number.isFinite(numeric) && numeric > 0) {
+      ratio = numeric;
+      if (Math.abs(numeric - 1) > 1e-8) {
+        break;
+      }
+    }
+  }
+
+  if (ratioTokens.length > 0) {
+    for (let i = 0; i < ratioTokens.length; i += 1) {
+      const parsed = parseSplitRatioToken(ratioTokens[i]);
+      if (!Number.isFinite(parsed) || parsed <= 0) continue;
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        ratio = parsed;
+      }
+      if (Math.abs(parsed - 1) > 1e-8 && Math.abs(parsed - ratio) > 1e-8) {
+        ratio = parsed;
+      }
+      if (Math.abs(ratio - 1) > 1e-8) {
+        break;
+      }
+    }
+  }
+
+  if (
+    Number.isFinite(beforePrice) &&
+    beforePrice > 0 &&
+    Number.isFinite(afterPrice) &&
+    afterPrice > 0
+  ) {
+    const inferred = afterPrice / beforePrice;
+    if (
+      Number.isFinite(inferred) &&
+      inferred > 0 &&
+      (!Number.isFinite(ratio) || ratio <= 0 || Math.abs(inferred - ratio) > 1e-6)
+    ) {
+      ratio = inferred;
+    }
+  }
+
+  if (Number.isFinite(ratio) && ratio > 0) {
+    if (ratio >= 100 && ratio <= 200) {
+      ratio /= 100;
+    }
+    if (ratio > 100) {
+      ratio = null;
+    }
+  } else {
+    ratio = null;
+  }
+
+  const resolvedBefore =
+    Number.isFinite(beforePrice) && beforePrice > 0 ? beforePrice : null;
+  const resolvedAfter =
+    Number.isFinite(afterPrice) && afterPrice > 0 ? afterPrice : null;
+  const resolvedRatio =
+    Number.isFinite(ratio) && ratio > 0
+      ? Number(Math.round(ratio * 1e8) / 1e8)
+      : null;
+
+  return {
+    date: isoDate,
+    beforePrice: resolvedBefore,
+    afterPrice: resolvedAfter,
+    ratio: resolvedRatio,
+    raw,
+  };
+}
+
+function buildSplitEvents(records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return [];
+  }
+
+  const eventMap = new Map();
+  for (let i = 0; i < records.length; i += 1) {
+    const normalised = normaliseSplitRecord(records[i]);
+    if (!normalised) continue;
+
+    const existing = eventMap.get(normalised.date);
+    if (existing) {
+      if (Number.isFinite(normalised.ratio) && normalised.ratio > 0) {
+        if (Number.isFinite(existing.manualRatio) && existing.manualRatio > 0) {
+          const ratioDelta = Math.abs(normalised.ratio - existing.manualRatio);
+          if (ratioDelta <= 1e-6) {
+            existing.manualRatio = normalised.ratio;
+          } else {
+            existing.manualRatio *= normalised.ratio;
+          }
+        } else {
+          existing.manualRatio = normalised.ratio;
+        }
+      }
+      if (
+        Number.isFinite(normalised.beforePrice) &&
+        normalised.beforePrice > 0
+      ) {
+        existing.beforePrice = normalised.beforePrice;
+      }
+      if (
+        Number.isFinite(normalised.afterPrice) &&
+        normalised.afterPrice > 0
+      ) {
+        existing.afterPrice = normalised.afterPrice;
+      }
+      if (!Array.isArray(existing.rawRecords)) {
+        existing.rawRecords = [];
+      }
+      existing.rawRecords.push(normalised.raw);
+    } else {
+      eventMap.set(normalised.date, {
+        date: normalised.date,
+        manualRatio: Number.isFinite(normalised.ratio) ? normalised.ratio : null,
+        manualRatioSource: FINMIND_SPLIT_DATASET,
+        ratioSource: 'FinMindSplitPrice',
+        label: FINMIND_SPLIT_LABEL,
+        source: FINMIND_SPLIT_LABEL,
+        dataset: FINMIND_SPLIT_DATASET,
+        beforePrice: normalised.beforePrice,
+        afterPrice: normalised.afterPrice,
+        cashDividend: 0,
+        stockDividend: 0,
+        cashCapitalIncrease: 0,
+        stockCapitalIncrease: 0,
+        rawRecords: [normalised.raw],
+      });
+    }
+  }
+
+  return Array.from(eventMap.values())
+    .map((event) => {
+      if (Number.isFinite(event.manualRatio) && event.manualRatio > 0) {
+        event.manualRatio = Number(Math.round(event.manualRatio * 1e8) / 1e8);
+      }
+      return event;
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
 function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
   const preparedEvents = Array.isArray(options.preparedEvents)
     ? options.preparedEvents
@@ -903,14 +1174,14 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
     if (
       Number.isFinite(event.manualRatio) &&
       event.manualRatio > 0 &&
-      event.manualRatio < 1.5
+      event.manualRatio < 10
     ) {
       ratio = Number(Math.round(event.manualRatio * 1e8) / 1e8);
       ratioSource = event.ratioSource || event.manualRatioSource || 'manual';
     } else {
       ratio = computeAdjustmentRatio(baseClose, event);
     }
-    if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 10) {
       adjustments.push({
         ...event,
         ratio: 1,
@@ -920,9 +1191,43 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
       });
       continue;
     }
+    const firstAffectedIndex = baseIndex > 0 ? baseIndex - 1 : -1;
+    const firstAffectedRow =
+      firstAffectedIndex >= 0 && firstAffectedIndex < sortedRows.length
+        ? sortedRows[firstAffectedIndex]
+        : null;
+    const factorBeforeValue =
+      firstAffectedIndex >= 0 && Number.isFinite(multipliers[firstAffectedIndex])
+        ? multipliers[firstAffectedIndex]
+        : null;
+    const rawCloseBeforeValue = (() => {
+      if (!firstAffectedRow || typeof firstAffectedRow !== 'object') return null;
+      const rawCandidate =
+        Number(firstAffectedRow.rawClose ?? firstAffectedRow.raw_close ?? null);
+      if (Number.isFinite(rawCandidate) && rawCandidate > 0) {
+        return rawCandidate;
+      }
+      const closeCandidate = Number(firstAffectedRow.close ?? null);
+      return Number.isFinite(closeCandidate) && closeCandidate > 0
+        ? closeCandidate
+        : null;
+    })();
+
     for (let i = 0; i < baseIndex; i += 1) {
       multipliers[i] *= ratio;
     }
+
+    const factorAfterValue =
+      firstAffectedIndex >= 0 && Number.isFinite(multipliers[firstAffectedIndex])
+        ? multipliers[firstAffectedIndex]
+        : null;
+    const expectedFactorValue = Number.isFinite(factorBeforeValue)
+      ? factorBeforeValue * ratio
+      : ratio;
+    const expectedAdjustedCloseValue =
+      Number.isFinite(rawCloseBeforeValue) && Number.isFinite(factorAfterValue)
+        ? safeRound(rawCloseBeforeValue * factorAfterValue)
+        : null;
     adjustments.push({
       ...event,
       ratio,
@@ -930,6 +1235,16 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
       baseClose,
       baseRowIndex: baseIndex,
       ratioSource: event.ratioSource || ratioSource,
+      firstAffectedDate: firstAffectedRow?.date || null,
+      firstAffectedIndex,
+      factorBefore: Number.isFinite(factorBeforeValue) ? factorBeforeValue : null,
+      factorAfter: Number.isFinite(factorAfterValue) ? factorAfterValue : null,
+      targetFactor: Number.isFinite(expectedFactorValue) ? expectedFactorValue : null,
+      rawCloseBefore:
+        Number.isFinite(rawCloseBeforeValue) && rawCloseBeforeValue > 0
+          ? rawCloseBeforeValue
+          : null,
+      expectedAdjustedClose: expectedAdjustedCloseValue,
     });
   }
 
@@ -1653,6 +1968,11 @@ async function deriveAdjustedSeriesFromDividendResult({
   const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(priceRows, [], {
     preparedEvents: events,
   });
+  const applicationChecks = buildAdjustmentApplicationChecks(adjustments, adjustedRows);
+  const debugLogEntries = buildAdjustmentDebugEntries(applicationChecks, {
+    label: FINMIND_DIVIDEND_RESULT_LABEL,
+    prefix: 'dividend',
+  });
 
   const appliedAdjustments = adjustments.filter((item) => !item?.skipped);
   const applied = appliedAdjustments.length > 0;
@@ -1699,6 +2019,138 @@ async function deriveAdjustedSeriesFromDividendResult({
     diagnostics,
     statusMeta,
     payload,
+    applicationChecks,
+    debugLog: debugLogEntries,
+  };
+}
+
+async function deriveAdjustedSeriesFromSplitPrice({
+  stockNo,
+  startISO,
+  endISO,
+  priceRows,
+  priceRangeStartISO,
+  priceRangeEndISO,
+}) {
+  if (!Array.isArray(priceRows) || priceRows.length === 0) {
+    return null;
+  }
+
+  let payload;
+  let fetchError = null;
+  try {
+    payload = await fetchStockSplitSeries(stockNo, startISO, endISO);
+  } catch (error) {
+    fetchError = error;
+  }
+
+  if (fetchError) {
+    const responses = Array.isArray(fetchError?.finmindMeta?.responses)
+      ? fetchError.finmindMeta.responses.slice(0, 10)
+      : [];
+    const info = {
+      applied: false,
+      status: 'error',
+      label: FINMIND_SPLIT_LABEL,
+      detail: fetchError.message || 'FinMind 股票拆分失敗',
+      responseLog: responses,
+    };
+    return {
+      applied: false,
+      rows: priceRows,
+      adjustments: [],
+      events: [],
+      info,
+      diagnostics: {
+        totalRecords: 0,
+        filteredRecords: 0,
+        eventCount: 0,
+        appliedAdjustments: 0,
+        responseLog: responses,
+      },
+      statusMeta: {
+        statusCode:
+          fetchError?.finmindMeta?.statusCode ??
+          fetchError?.statusCode ??
+          extractStatusCode(fetchError) ??
+          null,
+        message: fetchError?.finmindMeta?.message || fetchError.message || null,
+        spanStart: fetchError?.finmindMeta?.spanStart || null,
+        spanEnd: fetchError?.finmindMeta?.spanEnd || null,
+        dataCount: 0,
+      },
+      error: fetchError,
+    };
+  }
+
+  const allRows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const filteredRows = filterDividendRecordsByPriceRange(
+    allRows,
+    priceRangeStartISO || startISO,
+    priceRangeEndISO || endISO,
+  );
+  const events = buildSplitEvents(filteredRows);
+
+  const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(
+    priceRows,
+    [],
+    {
+      preparedEvents: events,
+    },
+  );
+  const applicationChecks = buildAdjustmentApplicationChecks(adjustments, adjustedRows);
+  const debugLogEntries = buildAdjustmentDebugEntries(applicationChecks, {
+    label: FINMIND_SPLIT_LABEL,
+    prefix: 'split',
+  });
+
+  const appliedAdjustments = adjustments.filter((item) => !item?.skipped);
+  const applied = appliedAdjustments.length > 0;
+
+  const infoDetailParts = [
+    `原始 ${allRows.length} 筆`,
+    `區間 ${filteredRows.length} 筆`,
+    `事件 ${events.length} 件`,
+    `成功 ${appliedAdjustments.length} 件`,
+  ];
+
+  const diagnostics = {
+    totalRecords: allRows.length,
+    filteredRecords: filteredRows.length,
+    eventCount: events.length,
+    appliedAdjustments: appliedAdjustments.length,
+    responseLog: Array.isArray(payload?.responseLog)
+      ? payload.responseLog.slice(0, 10)
+      : [],
+  };
+
+  const info = {
+    applied,
+    status: applied ? 'success' : 'warning',
+    label: FINMIND_SPLIT_LABEL,
+    detail: infoDetailParts.join(' ・ '),
+    responseLog: diagnostics.responseLog,
+  };
+
+  const statusMeta = {
+    statusCode: payload?.lastStatus ?? null,
+    message: payload?.lastMessage || null,
+    spanStart: payload?.fetchStartISO || null,
+    spanEnd: payload?.fetchEndISO || null,
+    dataCount: filteredRows.length,
+  };
+
+  return {
+    applied,
+    rows: applied ? adjustedRows : priceRows,
+    adjustments,
+    events,
+    info,
+    diagnostics,
+    statusMeta,
+    payload,
+    applicationChecks,
+    debugLog: debugLogEntries,
   };
 }
 
@@ -1849,6 +2301,175 @@ async function fetchDividendResultSeries(stockNo, startISO, endISO) {
   };
 }
 
+async function fetchStockSplitSeries(stockNo, startISO, endISO) {
+  const token = process.env.FINMIND_TOKEN;
+  if (!token) {
+    throw new Error('未設定 FinMind Token');
+  }
+
+  const startDate = new Date(startISO);
+  const endDate = new Date(endISO);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return {
+      rows: [],
+      fetchStartISO: null,
+      fetchEndISO: null,
+      responseLog: [],
+      lastStatus: null,
+      lastMessage: null,
+    };
+  }
+
+  const fetchStart = new Date(startDate.getTime());
+  if (
+    Number.isFinite(FINMIND_SPLIT_LOOKBACK_DAYS) &&
+    FINMIND_SPLIT_LOOKBACK_DAYS > 0
+  ) {
+    fetchStart.setUTCDate(
+      fetchStart.getUTCDate() - FINMIND_SPLIT_LOOKBACK_DAYS,
+    );
+  }
+  if (fetchStart > endDate) {
+    fetchStart.setTime(endDate.getTime());
+  }
+
+  const spans = enumerateDateSpans(fetchStart, endDate, FINMIND_SPLIT_SPAN_DAYS);
+  if (spans.length === 0) {
+    return {
+      rows: [],
+      fetchStartISO: formatISODateFromDate(fetchStart),
+      fetchEndISO: formatISODateFromDate(endDate),
+      responseLog: [],
+      lastStatus: null,
+      lastMessage: null,
+    };
+  }
+
+  const combined = [];
+  const queue = [...spans];
+  const responseLog = [];
+
+  while (queue.length > 0) {
+    const span = queue.shift();
+    const spanDays = countSpanDays(span);
+    const urlParams = {
+      dataset: FINMIND_SPLIT_DATASET,
+      data_id: stockNo,
+      start_date: span.startISO,
+      end_date: span.endISO,
+      token,
+    };
+
+    let json;
+    try {
+      json = await executeFinMindQuery(urlParams);
+    } catch (error) {
+      if (
+        shouldSplitSpan(error, spanDays, FINMIND_MIN_SPLIT_SPAN_DAYS)
+      ) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              error.message || error
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      const enriched = new Error(
+        `[FinMind 股票拆分段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${
+          error.message || error
+        }`,
+      );
+      enriched.original = error;
+      enriched.statusCode = extractStatusCode(error);
+      enriched.finmindMeta = {
+        dataset: FINMIND_SPLIT_DATASET,
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        statusCode: enriched.statusCode,
+        message: error?.message || '',
+        responses: responseLog.slice(),
+        type: 'network',
+      };
+      throw enriched;
+    }
+
+    if (json?.status !== 200 || !Array.isArray(json?.data)) {
+      const payloadError = new Error(
+        `FinMind 股票拆分回應錯誤: ${json?.msg || 'unknown error'}`,
+      );
+      payloadError.statusCode = json?.status;
+      if (
+        shouldSplitSpan(
+          payloadError,
+          spanDays,
+          FINMIND_MIN_SPLIT_SPAN_DAYS,
+        )
+      ) {
+        const split = splitSpan(span);
+        if (split && split.length === 2) {
+          console.warn(
+            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
+              payloadError.message || payloadError
+            }`,
+          );
+          await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
+          queue.unshift(...split);
+          continue;
+        }
+      }
+      payloadError.finmindMeta = {
+        dataset: FINMIND_SPLIT_DATASET,
+        spanStart: span.startISO,
+        spanEnd: span.endISO,
+        statusCode: payloadError.statusCode,
+        message: json?.msg || payloadError.message,
+        responses: [
+          ...responseLog,
+          {
+            spanStart: span.startISO,
+            spanEnd: span.endISO,
+            status: json?.status ?? null,
+            message: json?.msg || '',
+            rowCount: Array.isArray(json?.data) ? json.data.length : 0,
+          },
+        ],
+        type: 'payload',
+      };
+      throw payloadError;
+    }
+
+    const rowCount = Array.isArray(json?.data) ? json.data.length : 0;
+    responseLog.push({
+      spanStart: span.startISO,
+      spanEnd: span.endISO,
+      status: json?.status ?? null,
+      message: json?.msg || '',
+      rowCount,
+    });
+    combined.push(...json.data);
+    if (queue.length > 0) {
+      await delay(FINMIND_SEGMENT_COOLDOWN_MS);
+    }
+  }
+
+  const lastEntry =
+    responseLog.length > 0 ? responseLog[responseLog.length - 1] : null;
+
+  return {
+    rows: combined,
+    fetchStartISO: formatISODateFromDate(fetchStart),
+    fetchEndISO: formatISODateFromDate(endDate),
+    responseLog,
+    lastStatus: lastEntry?.status ?? null,
+    lastMessage: lastEntry?.message || null,
+  };
+}
+
 function summariseAdjustmentSkipReasons(adjustments = []) {
   if (!Array.isArray(adjustments) || adjustments.length === 0) return null;
   const counts = adjustments.reduce((acc, event) => {
@@ -1860,10 +2481,240 @@ function summariseAdjustmentSkipReasons(adjustments = []) {
   return Object.keys(counts).length > 0 ? counts : null;
 }
 
+function formatNumberForLog(value, digits = 6) {
+  if (!Number.isFinite(value)) return '—';
+  const fixed = Number(value).toFixed(digits);
+  return fixed.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
+}
+
+function formatPercentForLog(value, digits = 3) {
+  if (!Number.isFinite(value)) return '—';
+  const scaled = value * 100;
+  return `${formatNumberForLog(scaled, digits)}%`;
+}
+
+function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
+  if (!Array.isArray(adjustments) || adjustments.length === 0) {
+    return [];
+  }
+  const rows = Array.isArray(adjustedRows) ? adjustedRows : [];
+  return adjustments.map((adjustment, index) => {
+    const firstAffectedIndex = Number.isFinite(adjustment?.firstAffectedIndex)
+      ? adjustment.firstAffectedIndex
+      : Number.isFinite(adjustment?.baseRowIndex)
+        ? adjustment.baseRowIndex - 1
+        : -1;
+    const firstRow =
+      firstAffectedIndex >= 0 && firstAffectedIndex < rows.length
+        ? rows[firstAffectedIndex]
+        : null;
+    const observedFactorRaw = Number(firstRow?.adjustedFactor ?? null);
+    let expectedFactorRaw = Number(
+      Number.isFinite(adjustment?.manualRatio)
+        ? adjustment.manualRatio
+        : null,
+    );
+    if (!Number.isFinite(expectedFactorRaw) || expectedFactorRaw <= 0) {
+      expectedFactorRaw = Number(
+        Number.isFinite(adjustment?.factorAfter)
+          ? adjustment.factorAfter
+          : Number.isFinite(adjustment?.targetFactor)
+            ? adjustment.targetFactor
+            : null,
+      );
+    }
+    const downstreamMultiplier = Number(
+      Number.isFinite(observedFactorRaw) &&
+        Number.isFinite(expectedFactorRaw) &&
+        expectedFactorRaw !== 0
+        ? observedFactorRaw / expectedFactorRaw
+        : null,
+    );
+    const normalisedObservedFactor = Number(
+      Number.isFinite(downstreamMultiplier) &&
+        downstreamMultiplier !== 0
+        ? observedFactorRaw / downstreamMultiplier
+        : observedFactorRaw,
+    );
+    const expectedFactor = Number.isFinite(expectedFactorRaw)
+      ? expectedFactorRaw
+      : null;
+    const rawClose = Number(
+      firstRow?.rawClose ??
+        firstRow?.raw_close ??
+        adjustment?.rawCloseBefore ??
+        null,
+    );
+    const adjustedClose = Number(firstRow?.close ?? null);
+    const expectedAdjustedClose = Number(
+      Number.isFinite(adjustment?.expectedAdjustedClose)
+        ? adjustment.expectedAdjustedClose
+        : Number.isFinite(rawClose) && Number.isFinite(expectedFactor)
+          ? safeRound(rawClose * expectedFactor)
+          : null,
+    );
+    const factorDiff = Number(
+      Number.isFinite(normalisedObservedFactor) && Number.isFinite(expectedFactor)
+        ? normalisedObservedFactor - expectedFactor
+        : null,
+    );
+    const relativeDiff = Number(
+      Number.isFinite(factorDiff) && Number.isFinite(expectedFactor) && expectedFactor !== 0
+        ? Math.abs(factorDiff) / Math.abs(expectedFactor)
+        : null,
+    );
+    let status = 'info';
+    if (adjustment?.skipped) {
+      status = 'skipped';
+    } else if (Number.isFinite(relativeDiff)) {
+      status = relativeDiff <= 1e-4 ? 'success' : 'warning';
+    } else if (Number.isFinite(normalisedObservedFactor) && Number.isFinite(expectedFactor)) {
+      status = 'success';
+    }
+    return {
+      index,
+      status,
+      skipped: Boolean(adjustment?.skipped),
+      source: adjustment?.source || adjustment?.label || adjustment?.dataset || '還原事件',
+      dataset: adjustment?.dataset || null,
+      date: adjustment?.date || null,
+      appliedDate: adjustment?.appliedDate || null,
+      firstAffectedDate: firstRow?.date || adjustment?.firstAffectedDate || null,
+      firstAffectedIndex,
+      ratio: Number(adjustment?.ratio ?? null),
+      manualRatio: Number(adjustment?.manualRatio ?? null),
+      beforePrice: Number(adjustment?.beforePrice ?? null),
+      afterPrice: Number(adjustment?.afterPrice ?? null),
+      baseClose: Number(adjustment?.baseClose ?? null),
+      rawClose,
+      adjustedClose: Number.isFinite(adjustedClose) ? adjustedClose : null,
+      expectedAdjustedClose: Number.isFinite(expectedAdjustedClose)
+        ? expectedAdjustedClose
+        : null,
+      observedFactor: Number.isFinite(observedFactorRaw) ? observedFactorRaw : null,
+      normalisedObservedFactor: Number.isFinite(normalisedObservedFactor)
+        ? normalisedObservedFactor
+        : null,
+      expectedFactor: Number.isFinite(expectedFactor) ? expectedFactor : null,
+      factorDiff: Number.isFinite(factorDiff) ? factorDiff : null,
+      relativeDiff: Number.isFinite(relativeDiff) ? relativeDiff : null,
+      downstreamMultiplier:
+        Number.isFinite(downstreamMultiplier) && downstreamMultiplier !== 0
+          ? downstreamMultiplier
+          : null,
+      ratioSource: adjustment?.ratioSource || null,
+      reason: adjustment?.reason || null,
+    };
+  });
+}
+
+function buildAdjustmentDebugEntries(checks = [], options = {}) {
+  if (!Array.isArray(checks) || checks.length === 0) {
+    return [];
+  }
+  const label = options.label || '還原檢查';
+  const prefix = options.prefix || 'combined';
+  return checks.map((check) => {
+    const sourceLabel = check?.source || label;
+    const dateLabel = check?.date || check?.appliedDate || '未知日期';
+    const ratioValue = Number.isFinite(check?.manualRatio)
+      ? check.manualRatio
+      : Number.isFinite(check?.ratio)
+        ? check.ratio
+        : null;
+    const ratioText = Number.isFinite(ratioValue)
+      ? formatPercentForLog(ratioValue, 4)
+      : '—';
+    const lines = [];
+    if (Number.isFinite(check?.beforePrice) && Number.isFinite(check?.afterPrice)) {
+      lines.push(
+        `資料來源：${sourceLabel} ・ 計算方式：after_price ÷ before_price = 手動還原係數`,
+      );
+      lines.push(`拆分基準日：${check?.date || '—'}`);
+      lines.push(`手動還原比率：${ratioText}`);
+      lines.push(
+        `前收盤：${formatNumberForLog(check.beforePrice, 3)} ・ 後參考：${formatNumberForLog(check.afterPrice, 3)}`,
+      );
+      if (Number.isFinite(check.afterPrice) && Number.isFinite(check.beforePrice) && check.beforePrice !== 0) {
+        lines.push(
+          `計算：${formatNumberForLog(check.afterPrice, 3)} ÷ ${formatNumberForLog(check.beforePrice, 3)} ≈ ${formatNumberForLog(
+            check.afterPrice / check.beforePrice,
+            6,
+          )}`,
+        );
+      }
+    } else {
+      lines.push(`資料來源：${sourceLabel}`);
+      lines.push(`事件日期：${dateLabel}`);
+      if (ratioText !== '—') {
+        lines.push(`手動還原比率：${ratioText}`);
+      }
+    }
+
+    if (Number.isFinite(check?.rawClose) && Number.isFinite(check?.observedFactor)) {
+      const adjustedClose = Number.isFinite(check?.adjustedClose)
+        ? check.adjustedClose
+        : Number.isFinite(check?.rawClose) && Number.isFinite(check?.observedFactor)
+          ? safeRound(check.rawClose * check.observedFactor)
+          : null;
+      const factorForComparison = Number.isFinite(check?.normalisedObservedFactor)
+        ? check.normalisedObservedFactor
+        : check.observedFactor;
+      lines.push(
+        `套用檢查：${check?.firstAffectedDate || '—'} 因子 ${formatNumberForLog(
+          factorForComparison,
+          6,
+        )} ・ 預期 ${formatNumberForLog(check?.expectedFactor, 6)} ・ 差異 ${
+          Number.isFinite(check?.relativeDiff)
+            ? formatPercentForLog(check.relativeDiff, 3)
+            : '—'
+        }`,
+      );
+      if (
+        Number.isFinite(check?.downstreamMultiplier) &&
+        Number.isFinite(check?.observedFactor) &&
+        Math.abs(check.downstreamMultiplier - 1) > 1e-6
+      ) {
+        lines.push(
+          `最終係數：${formatNumberForLog(check.observedFactor, 6)}（含後續事件）`,
+        );
+      }
+      if (Number.isFinite(adjustedClose)) {
+        lines.push(
+          `價格檢查：${formatNumberForLog(check.rawClose, 3)} × ${formatNumberForLog(
+            check.observedFactor,
+            6,
+          )} ≈ ${formatNumberForLog(adjustedClose, 3)}`,
+        );
+      }
+    } else if (check?.status === 'skipped') {
+      lines.push(
+        `套用檢查：事件被略過，原因 ${check?.reason || '未知'}`,
+      );
+    } else {
+      lines.push('套用檢查：缺少前一交易日資料，無法驗證');
+    }
+
+    if (check?.ratioSource) {
+      lines.push(`還原來源：${check.ratioSource}`);
+    }
+
+    return {
+      key: `${prefix}-${check?.index ?? 0}`,
+      title: `${sourceLabel} @ ${dateLabel}`,
+      status: check?.status || 'info',
+      lines,
+      source: sourceLabel,
+      date: dateLabel,
+    };
+  });
+}
+
 function buildDebugSteps({
   priceData,
   priceSourceLabel,
   dividendResultStats,
+  splitStats,
   resultEvents,
   adjustments,
   fallbackInfo,
@@ -1899,6 +2750,26 @@ function buildDebugSteps({
       status: totalDividendRows > 0 ? 'success' : 'warning',
       detail: `原始 ${totalDividendRows} 筆 ・ 區間 ${filteredDividendRows} 筆`,
     },
+  ];
+
+  if (splitStats) {
+    const totalSplitRows = Number.isFinite(splitStats.totalRecords)
+      ? splitStats.totalRecords
+      : Array.isArray(splitStats.rawRecords)
+        ? splitStats.rawRecords.length
+        : 0;
+    const filteredSplitRows = Number.isFinite(splitStats.filteredRecords)
+      ? splitStats.filteredRecords
+      : 0;
+    steps.push({
+      key: 'splitFetch',
+      label: '股票拆分',
+      status: totalSplitRows > 0 ? 'success' : 'warning',
+      detail: `原始 ${totalSplitRows} 筆 ・ 區間 ${filteredSplitRows} 筆`,
+    });
+  }
+
+  steps.push(
     {
       key: 'dividendResultEvents',
       label: '還原事件',
@@ -1912,7 +2783,7 @@ function buildDebugSteps({
       detail: `成功 ${appliedAdjustments} 件 ・ 略過 ${skippedAdjustments} 件`,
       skipReasons,
     },
-  ];
+  );
 
   if (fallbackInfo) {
     steps.push({
@@ -1933,10 +2804,18 @@ function buildSummary(
   priceSourceLabel,
   dividendStats = {},
   fallbackInfo = null,
+  splitStats = null,
 ) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
   const uniqueSources = new Set([basePriceSource, 'FinMind (除權息還原)']);
+  if (
+    splitStats &&
+    Number.isFinite(splitStats.eventCount) &&
+    splitStats.eventCount > 0
+  ) {
+    uniqueSources.add(`${FINMIND_SPLIT_LABEL}`);
+  }
   if (fallbackInfo?.applied) {
     uniqueSources.add(fallbackInfo.label || FINMIND_ADJUSTED_LABEL);
   }
@@ -1949,6 +2828,19 @@ function buildSummary(
     fetchEndISO,
     dividendSourceLabel,
   } = dividendStats || {};
+
+  const splitEventCount = Number.isFinite(splitStats?.eventCount)
+    ? splitStats.eventCount
+    : undefined;
+  const splitFilteredCount = Number.isFinite(splitStats?.filteredRecords)
+    ? splitStats.filteredRecords
+    : undefined;
+  const splitTotalCount = Number.isFinite(splitStats?.totalRecords)
+    ? splitStats.totalRecords
+    : undefined;
+  const splitFetchStart = splitStats?.fetchStartISO || undefined;
+  const splitFetchEnd = splitStats?.fetchEndISO || undefined;
+
   const appliedEvents = Array.isArray(adjustments)
     ? adjustments.filter((event) => !event?.skipped)
     : [];
@@ -1972,6 +2864,11 @@ function buildSummary(
     priceSource: basePriceSource,
     dividendSource: dividendSourceLabel || FINMIND_DIVIDEND_RESULT_LABEL,
     sources: Array.from(uniqueSources),
+    splitEvents: splitEventCount,
+    splitRows: splitFilteredCount,
+    splitRowsTotal: splitTotalCount,
+    splitFetchStart,
+    splitFetchEnd,
   };
 }
 
@@ -1986,6 +2883,8 @@ export const __TESTING__ = {
   applyBackwardAdjustments,
   normaliseDividendResultRecord,
   buildDividendResultEvents,
+  normaliseSplitRecord,
+  buildSplitEvents,
   setFetchImplementation,
   resetFetchImplementation,
 };
@@ -1994,6 +2893,7 @@ export const handler = async (event) => {
   const finmindStatus = {
     tokenPresent: Boolean(process.env.FINMIND_TOKEN),
     dividendResult: null,
+    splitPrice: null,
     price: null,
   };
   try {
@@ -2003,6 +2903,17 @@ export const handler = async (event) => {
     const endISO = toISODate(params.endDate || params.end);
     const marketParam = params.market || params.marketType || 'TWSE';
     const market = marketParam.toUpperCase() === 'TPEX' ? 'TPEX' : 'TWSE';
+    const splitParam =
+      params.split ??
+      params.splitAdjustment ??
+      params.splitAdjusted ??
+      params.enableSplit ??
+      params.enableSplitAdjustment;
+    const enableSplitAdjustment = (() => {
+      if (typeof splitParam === 'undefined') return false;
+      const token = String(splitParam).toLowerCase();
+      return token === '1' || token === 'true' || token === 'on' || token === 'yes';
+    })();
 
     if (!stockNo) {
       return jsonResponse(400, { error: '缺少股票代號' });
@@ -2057,6 +2968,14 @@ export const handler = async (event) => {
       eventPreviewMore: 0,
       eventPreviewLimit: DIVIDEND_RESULT_PREVIEW_LIMIT,
     };
+    const splitDiagnostics = {
+      splitResult: null,
+      responseLog: [],
+      eventPreview: [],
+      eventPreviewTotal: 0,
+      eventPreviewMore: 0,
+      eventPreviewLimit: DIVIDEND_RESULT_PREVIEW_LIMIT,
+    };
     let fallbackInfo = null;
     let effectiveRows = priceRows;
     let effectiveAdjustments = [];
@@ -2083,6 +3002,17 @@ export const handler = async (event) => {
           priceRangeEndISO,
         })
       : null;
+    const splitResultOutcome =
+      enableSplitAdjustment && priceRows.length
+        ? await deriveAdjustedSeriesFromSplitPrice({
+            stockNo,
+            startISO,
+            endISO,
+            priceRows,
+            priceRangeStartISO,
+            priceRangeEndISO,
+          })
+        : null;
 
     if (dividendResultOutcome) {
       const diag = dividendResultOutcome.diagnostics || null;
@@ -2099,6 +3029,12 @@ export const handler = async (event) => {
         dividendDiagnostics.responseLog = fallbackLog;
       }
       dividendDiagnostics.resultInfo = dividendResultOutcome.info || null;
+      if (Array.isArray(dividendResultOutcome.debugLog)) {
+        dividendDiagnostics.debugLog = dividendResultOutcome.debugLog;
+      }
+      if (Array.isArray(dividendResultOutcome.applicationChecks)) {
+        dividendDiagnostics.applicationChecks = dividendResultOutcome.applicationChecks;
+      }
 
       effectiveAdjustments = Array.isArray(dividendResultOutcome.adjustments)
         ? dividendResultOutcome.adjustments
@@ -2143,8 +3079,151 @@ export const handler = async (event) => {
       dividendDiagnostics.responseLog = [];
     }
 
+    if (splitResultOutcome) {
+      const splitDiag = splitResultOutcome.diagnostics || null;
+      const derivedSplit = {
+        totalRecords: splitDiag?.totalRecords ?? 0,
+        filteredRecords: splitDiag?.filteredRecords ?? 0,
+        eventCount: splitDiag?.eventCount ?? 0,
+        appliedAdjustments: splitDiag?.appliedAdjustments ?? 0,
+        responseLog: Array.isArray(splitDiag?.responseLog)
+          ? splitDiag.responseLog.slice(0, 10)
+          : [],
+        fetchStartISO: splitResultOutcome?.payload?.fetchStartISO || null,
+        fetchEndISO: splitResultOutcome?.payload?.fetchEndISO || null,
+        resultInfo: splitResultOutcome.info || null,
+        debugLog: Array.isArray(splitResultOutcome?.debugLog)
+          ? splitResultOutcome.debugLog
+          : [],
+        applicationChecks: Array.isArray(splitResultOutcome?.applicationChecks)
+          ? splitResultOutcome.applicationChecks
+          : [],
+      };
+      splitDiagnostics.splitResult = derivedSplit;
+      dividendDiagnostics.splitResult = derivedSplit;
+      splitDiagnostics.responseLog = derivedSplit.responseLog;
+      if (!Array.isArray(splitDiagnostics.debugLog)) {
+        splitDiagnostics.debugLog = [];
+      }
+      if (Array.isArray(splitResultOutcome?.debugLog)) {
+        splitDiagnostics.debugLog = splitResultOutcome.debugLog;
+      }
+      if (Array.isArray(splitResultOutcome?.applicationChecks)) {
+        splitDiagnostics.applicationChecks = splitResultOutcome.applicationChecks;
+      }
+
+      if (
+        Array.isArray(splitResultOutcome.events) &&
+        splitResultOutcome.events.length > 0
+      ) {
+        const previewItems = splitResultOutcome.events
+          .slice(0, DIVIDEND_RESULT_PREVIEW_LIMIT)
+          .map((event) => ({
+            date: event.date || null,
+            manualRatio: Number.isFinite(event.manualRatio)
+              ? event.manualRatio
+              : null,
+            beforePrice: Number.isFinite(event.beforePrice)
+              ? event.beforePrice
+              : null,
+            afterPrice: Number.isFinite(event.afterPrice)
+              ? event.afterPrice
+              : null,
+          }));
+        splitDiagnostics.eventPreview = previewItems;
+        splitDiagnostics.eventPreviewTotal = splitResultOutcome.events.length;
+        splitDiagnostics.eventPreviewMore = Math.max(
+          0,
+          splitResultOutcome.events.length - previewItems.length,
+        );
+      }
+
+      const splitClassification = classifyFinMindOutcome({
+        tokenPresent: finmindStatus.tokenPresent,
+        dataset: FINMIND_SPLIT_DATASET,
+        statusCode: splitResultOutcome.statusMeta?.statusCode,
+        message: splitResultOutcome.statusMeta?.message || null,
+        rawMessage: splitResultOutcome.error?.message || null,
+        dataCount:
+          splitResultOutcome.statusMeta?.dataCount ??
+          splitResultOutcome.diagnostics?.eventCount ??
+          (Array.isArray(splitResultOutcome.events)
+            ? splitResultOutcome.events.length
+            : 0),
+        spanStart:
+          splitResultOutcome.statusMeta?.spanStart ??
+          splitResultOutcome.payload?.fetchStartISO ??
+          priceRangeStartISO ??
+          startISO,
+        spanEnd:
+          splitResultOutcome.statusMeta?.spanEnd ??
+          splitResultOutcome.payload?.fetchEndISO ??
+          priceRangeEndISO ??
+          endISO,
+        error: splitResultOutcome.error || null,
+      });
+      finmindStatus.splitPrice = splitClassification;
+    }
+
     const appliedAdjustments = effectiveAdjustments.filter((event) => !event?.skipped);
     let hasAppliedAdjustments = appliedAdjustments.length > 0;
+    const combinedApplicationChecks = buildAdjustmentApplicationChecks(
+      effectiveAdjustments,
+      effectiveRows,
+    );
+    const combinedDebugLog = buildAdjustmentDebugEntries(combinedApplicationChecks, {
+      label: '整合還原流程',
+      prefix: 'combined',
+    });
+    combinedApplicationChecks.forEach((check) => {
+      const logPayload = {
+        source: check.source,
+        date: check.date,
+        ratio: check.manualRatio ?? check.ratio ?? null,
+        expectedFactor: check.expectedFactor,
+        observedFactor: check.observedFactor,
+        relativeDiff: check.relativeDiff,
+        status: check.status,
+      };
+      if (check.status === 'warning') {
+        console.warn('[calculateAdjustedPrice] 還原係數檢查異常', logPayload);
+      } else if (check.status === 'skipped') {
+        console.info('[calculateAdjustedPrice] 還原事件被略過', {
+          ...logPayload,
+          reason: check.reason || null,
+        });
+      } else {
+        console.debug('[calculateAdjustedPrice] 還原係數檢查', logPayload);
+      }
+    });
+
+    if (splitResultOutcome && Array.isArray(splitResultOutcome.events)) {
+      const splitEvents = splitResultOutcome.events;
+      if (splitEvents.length > 0) {
+        const combinedEvents = [...effectiveEvents, ...splitEvents].sort(
+          (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+        );
+        const combinedResult = applyBackwardAdjustments(priceRows, [], {
+          preparedEvents: combinedEvents,
+        });
+        effectiveEvents = combinedEvents;
+        effectiveAdjustments = combinedResult.adjustments;
+        if (Array.isArray(combinedResult.rows) && combinedResult.rows.length > 0) {
+          effectiveRows = combinedResult.rows;
+        }
+        hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
+        const recalculatedChecks = buildAdjustmentApplicationChecks(
+          effectiveAdjustments,
+          effectiveRows,
+        );
+        combinedApplicationChecks.splice(0, combinedApplicationChecks.length, ...recalculatedChecks);
+        const updatedDebug = buildAdjustmentDebugEntries(recalculatedChecks, {
+          label: '整合還原流程',
+          prefix: 'combined',
+        });
+        combinedDebugLog.splice(0, combinedDebugLog.length, ...updatedDebug);
+      }
+    }
 
     if (effectiveEvents.length > 0) {
       const previewItems = effectiveEvents
@@ -2190,6 +3269,16 @@ export const handler = async (event) => {
           effectiveAdjustments = [...effectiveAdjustments, ...fallbackResult.adjustments];
         }
         hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
+        const fallbackChecks = buildAdjustmentApplicationChecks(
+          effectiveAdjustments,
+          effectiveRows,
+        );
+        combinedApplicationChecks.splice(0, combinedApplicationChecks.length, ...fallbackChecks);
+        const fallbackDebugEntries = buildAdjustmentDebugEntries(fallbackChecks, {
+          label: fallbackResult.info?.label || 'FinMind 還原序列',
+          prefix: 'fallback',
+        });
+        combinedDebugLog.splice(0, combinedDebugLog.length, ...fallbackDebugEntries);
       }
     }
 
@@ -2198,10 +3287,14 @@ export const handler = async (event) => {
       fallbackInfo = { ...latest, history: fallbackHistory };
     }
 
+    dividendDiagnostics.combinedDebugLog = combinedDebugLog;
+    dividendDiagnostics.combinedChecks = combinedApplicationChecks;
+
     const debugSteps = buildDebugSteps({
       priceData,
       priceSourceLabel,
       dividendResultStats: dividendDiagnostics.dividendResult,
+      splitStats: splitDiagnostics.splitResult,
       resultEvents: effectiveEvents,
       adjustments: effectiveAdjustments,
       fallbackInfo,
@@ -2211,6 +3304,13 @@ export const handler = async (event) => {
       priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
     ;
     const combinedSourceParts = [baseSourceLabel, 'FinMind (除權息還原)'];
+    if (
+      splitResultOutcome &&
+      Array.isArray(splitResultOutcome.events) &&
+      splitResultOutcome.events.length > 0
+    ) {
+      combinedSourceParts.push(FINMIND_SPLIT_LABEL);
+    }
     if (fallbackInfo?.applied) {
       combinedSourceParts.push(fallbackInfo.label || FINMIND_ADJUSTED_LABEL);
     }
@@ -2237,6 +3337,24 @@ export const handler = async (event) => {
       dividendSourceLabel: dividendSourceLabelForSummary,
     };
 
+    const splitSummaryStats = splitResultOutcome
+      ? {
+          resultFilteredCount: Number.isFinite(splitDiagnostics?.splitResult?.filteredRecords)
+            ? splitDiagnostics.splitResult.filteredRecords
+            : undefined,
+          resultTotalCount: Number.isFinite(splitDiagnostics?.splitResult?.totalRecords)
+            ? splitDiagnostics.splitResult.totalRecords
+            : undefined,
+          eventCount: Number.isFinite(splitDiagnostics?.splitResult?.eventCount)
+            ? splitDiagnostics.splitResult.eventCount
+            : Array.isArray(splitResultOutcome.events)
+              ? splitResultOutcome.events.length
+              : 0,
+          fetchStartISO: splitResultOutcome?.payload?.fetchStartISO || null,
+          fetchEndISO: splitResultOutcome?.payload?.fetchEndISO || null,
+        }
+      : null;
+
     const responseBody = {
       version: FUNCTION_VERSION,
       stockNo,
@@ -2251,12 +3369,16 @@ export const handler = async (event) => {
         priceSourceLabel,
         dividendSummaryStats,
         fallbackInfo,
+        splitSummaryStats,
       ),
       data: effectiveRows,
       adjustments: effectiveAdjustments,
       dividendEvents: effectiveEvents,
       dividendDiagnostics,
+      splitDiagnostics,
       debugSteps,
+      adjustmentDebugLog: combinedDebugLog,
+      adjustmentChecks: combinedApplicationChecks,
       adjustmentFallback: fallbackInfo || null,
       adjustmentFallbackApplied: Boolean(fallbackInfo?.applied),
       finmindStatus,
@@ -2273,6 +3395,24 @@ export const handler = async (event) => {
       finmindStatus.dividendResult = classifyFinMindOutcome({
         tokenPresent: finmindStatus.tokenPresent,
         dataset: FINMIND_DIVIDEND_RESULT_DATASET,
+        statusCode: Number.isFinite(error.statusCode)
+          ? error.statusCode
+          : error?.finmindMeta?.statusCode,
+        message: error?.finmindMeta?.message || null,
+        rawMessage: error?.message || null,
+        dataCount: 0,
+        spanStart: error?.finmindMeta?.spanStart || null,
+        spanEnd: error?.finmindMeta?.spanEnd || null,
+        error,
+      });
+    }
+    if (
+      !finmindStatus.splitPrice &&
+      error?.finmindMeta?.dataset === FINMIND_SPLIT_DATASET
+    ) {
+      finmindStatus.splitPrice = classifyFinMindOutcome({
+        tokenPresent: finmindStatus.tokenPresent,
+        dataset: FINMIND_SPLIT_DATASET,
         statusCode: Number.isFinite(error.statusCode)
           ? error.statusCode
           : error?.finmindMeta?.statusCode,
