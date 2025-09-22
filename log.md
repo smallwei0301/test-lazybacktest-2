@@ -1,3 +1,9 @@
+# 2025-05-30 — Patch LB-RANGE-FALLBACK-20250530A
+- **Issue recap**: 月線快取僅落地前半段資料時，尾端缺口達一週仍無法觸發備援切換，前端缺乏涵蓋率提示，難以判讀是否改用備援來源。
+- **Fix**: Worker 新增區間涵蓋度檢測，尾端缺口達 5 個交易日即切換 `/api/stock-range` 備援，並透過 `fallbackRangeMeta` 回傳覆蓋率與缺口；前端價格檢視器同步顯示區間備援摘要。
+- **Diagnostics**: Price Inspector Summary 顯示覆蓋率變化、尾端缺口與觸發原因，協助營運端判斷備援狀態與成效。
+- **Testing**: `node scripts/check-range-fallback.mjs`（手動驗證觸發條件，確認 console 無錯誤）。
+
 # Lazybacktest Debug Log
 
 # 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A
