@@ -1,5 +1,11 @@
 # Lazybacktest Debug Log
 
+# 2025-05-29 — Patch LB-ADJ-PIPE-20250529A
+- **Issue recap**: 月度快取的 coverage 以請求區間直接標記，遇到實際僅回傳局部資料或舊快取殘留時，會誤判為完整覆蓋而停止重抓。
+- **Fix**: Worker 依據回傳資料計算觀測到的起迄日期，只在足夠覆蓋時更新 coverage，並保留缺口給後續重試；若接受覆蓋則依據資料重建 coverage，清除舊快取造成的錯誤區間。
+- **Diagnostics**: 當覆蓋不足被保留缺口時輸出 `console.warn` 訊息，協助判讀需重試的範圍，coverage 亦可透過月度快取檢視器確認實際段落。
+- **Testing**: （Worker-only 調整，暫無可執行的自動化測試指令）。
+
 # 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A
 - **Issue recap**: 備援還原流程仍以「已還原股價 × 還原因子」進行縮放，導致雙重折算；前端區間價格缺乏原始價格來源標籤，難以分辨 TWSE 與 FinMind 來源。
 - **Fix**: Netlify 還原函式在調整時保留 `rawOpen`/`rawClose` 等基準數據並標示 `priceSource`，Worker 備援計算改以原始價格乘上係數；價格檢視器摘要與表格同步顯示 TWSE、FinMind 來源。
