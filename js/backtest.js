@@ -21,6 +21,7 @@ let lastPriceDebug = {
 let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
+let lastDatasetDiagnostics = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -234,6 +235,8 @@ function runBacktestInternal() {
                         fetchRange: fetchedRange,
                         effectiveStartDate: rawEffectiveStart,
                         lookbackDays: resolvedLookback,
+                        datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
+                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
                     };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
@@ -291,6 +294,8 @@ function runBacktestInternal() {
                         fetchRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
                         effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
                         lookbackDays: cachedEntry.lookbackDays || lookbackDays,
+                        datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
+                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,
                     };
                     cachedDataStore.set(cacheKey, updatedEntry);
                     visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
@@ -304,6 +309,37 @@ function runBacktestInternal() {
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }
+                if (data?.datasetDiagnostics) {
+                    lastDatasetDiagnostics = data.datasetDiagnostics;
+                    const runtimeDataset = data.datasetDiagnostics.runtime?.dataset || null;
+                    const warmupDiag = data.datasetDiagnostics.runtime?.warmup || null;
+                    const fetchDiag = data.datasetDiagnostics.fetch || null;
+                    if (typeof console.groupCollapsed === 'function') {
+                        console.groupCollapsed('[Main] Dataset diagnostics', params?.stockNo || '');
+                        console.log('[Main] Runtime dataset summary', runtimeDataset);
+                        console.log('[Main] Warmup summary', warmupDiag);
+                        console.log('[Main] Fetch diagnostics', fetchDiag);
+                        console.groupEnd();
+                    } else {
+                        console.log('[Main] Runtime dataset summary', runtimeDataset);
+                        console.log('[Main] Warmup summary', warmupDiag);
+                        console.log('[Main] Fetch diagnostics', fetchDiag);
+                    }
+                    if (runtimeDataset && Number.isFinite(runtimeDataset.firstValidCloseGapFromEffective) && runtimeDataset.firstValidCloseGapFromEffective > 1) {
+                        console.warn(`[Main] ${params?.stockNo || ''} 第一筆有效收盤價落後暖身起點 ${runtimeDataset.firstValidCloseGapFromEffective} 天。`);
+                    }
+                    if (runtimeDataset?.invalidRowsInRange?.count > 0) {
+                        const reasonSummary = formatDiagnosticsReasonCounts(runtimeDataset.invalidRowsInRange.reasons);
+                        console.warn(`[Main] ${params?.stockNo || ''} 區間內偵測到 ${runtimeDataset.invalidRowsInRange.count} 筆無效資料，原因統計: ${reasonSummary}`);
+                    }
+                    if (fetchDiag?.overview?.invalidRowsInRange?.count > 0) {
+                        const fetchReason = formatDiagnosticsReasonCounts(fetchDiag.overview.invalidRowsInRange.reasons);
+                        console.warn(`[Main] ${params?.stockNo || ''} 遠端回應包含 ${fetchDiag.overview.invalidRowsInRange.count} 筆無效欄位，原因統計: ${fetchReason}`);
+                    }
+                } else {
+                    lastDatasetDiagnostics = null;
+                }
+                refreshDataDiagnosticsPanel(lastDatasetDiagnostics);
                 handleBacktestResult(data, stockName, dataSource); // Process and display main results
 
                 getSuggestion();
@@ -378,6 +414,7 @@ function runBacktestInternal() {
                     fetchRange: cachedEntry.fetchRange || null,
                     effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
                     lookbackDays: cachedEntry.lookbackDays || lookbackDays,
+                    diagnostics: cachedEntry.fetchDiagnostics || cachedEntry.datasetDiagnostics || null,
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
@@ -418,7 +455,8 @@ function clearPreviousResults() {
     lastOverallResult = null; lastSubPeriodResults = null;
     lastIndicatorSeries = null;
     lastPositionStates = [];
-    
+    lastDatasetDiagnostics = null;
+
     const suggestionArea = document.getElementById('today-suggestion-area');
     const suggestionText = document.getElementById('suggestion-text');
     if (suggestionArea && suggestionText) {
@@ -429,6 +467,7 @@ function clearPreviousResults() {
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
+    refreshDataDiagnosticsPanel();
 }
 
 const adjustmentReasonLabels = {
@@ -559,6 +598,296 @@ function renderPriceInspectorDebug() {
     }).join('');
     panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
     panel.classList.remove('hidden');
+}
+
+const dataDiagnosticsState = { open: false };
+
+function formatDiagnosticsValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'number') {
+        if (Number.isNaN(value)) return '—';
+        return value.toString();
+    }
+    return String(value);
+}
+
+function formatDiagnosticsRange(start, end) {
+    if (!start && !end) return '—';
+    if (start && end) return `${start} ~ ${end}`;
+    return start || end || '—';
+}
+
+function formatDiagnosticsIndex(entry) {
+    if (!entry || typeof entry !== 'object') return '—';
+    const date = entry.date || '—';
+    const index = Number.isFinite(entry.index) ? `#${entry.index}` : '#—';
+    return `${date} (${index})`;
+}
+
+function formatDiagnosticsGap(days) {
+    if (!Number.isFinite(days)) return '—';
+    if (days === 0) return '0 天';
+    return `${days > 0 ? '+' : ''}${days} 天`;
+}
+
+function formatDiagnosticsReasonCounts(reasons) {
+    if (!reasons || typeof reasons !== 'object') return '—';
+    const entries = Object.entries(reasons)
+        .map(([reason, count]) => [reason, Number(count)])
+        .filter(([, count]) => Number.isFinite(count) && count > 0)
+        .sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return '—';
+    return entries.map(([reason, count]) => `${reason}×${count}`).join('、');
+}
+
+function renderDiagnosticsEntries(containerId, entries) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(entries) || entries.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">無資料</p>`;
+        return;
+    }
+    container.innerHTML = entries
+        .map((entry) => {
+            const label = escapeHtml(entry.label || '');
+            const value = escapeHtml(formatDiagnosticsValue(entry.value));
+            const valueClass = entry.emphasis ? 'font-semibold' : '';
+            return `<div class="flex justify-between gap-2 text-[11px]">
+                <span class="text-muted-foreground" style="color: var(--muted-foreground);">${label}</span>
+                <span class="${valueClass}" style="color: var(--foreground);">${value}</span>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsSamples(containerId, samples, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(samples) || samples.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">${options.emptyText || '無異常樣本'}</p>`;
+        return;
+    }
+    container.innerHTML = samples
+        .map((sample) => {
+            const date = escapeHtml(sample.date || '');
+            const index = Number.isFinite(sample.index) ? `#${sample.index}` : '#—';
+            const reasons = Array.isArray(sample.reasons)
+                ? escapeHtml(sample.reasons.join('、'))
+                : '—';
+            const close = sample.close !== undefined && sample.close !== null
+                ? escapeHtml(sample.close.toString())
+                : '—';
+            const volume = sample.volume !== undefined && sample.volume !== null
+                ? escapeHtml(sample.volume.toString())
+                : '—';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div style="color: var(--foreground);">${date} (${index})</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">原因: ${reasons}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收盤: ${close} ｜ 量: ${volume}</div>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsPreview(containerId, rows) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(rows) || rows.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未取得鄰近樣本。</p>`;
+        return;
+    }
+    container.innerHTML = rows
+        .map((row) => {
+            const index = Number.isFinite(row.index) ? `#${row.index}` : '#—';
+            const date = escapeHtml(row.date || '');
+            const close = row.close !== undefined && row.close !== null
+                ? escapeHtml(row.close.toString())
+                : '—';
+            const open = row.open !== undefined && row.open !== null
+                ? escapeHtml(row.open.toString())
+                : '—';
+            const high = row.high !== undefined && row.high !== null
+                ? escapeHtml(row.high.toString())
+                : '—';
+            const low = row.low !== undefined && row.low !== null
+                ? escapeHtml(row.low.toString())
+                : '—';
+            const volume = row.volume !== undefined && row.volume !== null
+                ? escapeHtml(row.volume.toString())
+                : '—';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div style="color: var(--foreground);">${date} (${index})</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">開:${open} 高:${high} 低:${low}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收:${close} ｜ 量:${volume}</div>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsTestingGuidance(diag) {
+    const container = document.getElementById('dataDiagnosticsTesting');
+    if (!container) return;
+    if (!diag) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">執行回測後會在此提供建議的手動測試步驟。</p>`;
+        return;
+    }
+    const dataset = diag.runtime?.dataset || {};
+    const buyHold = diag.runtime?.buyHold || {};
+    const fetchOverview = diag.fetch?.overview || {};
+    const reasonSummary = formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons);
+    const buyHoldFirst = buyHold.firstValidPriceDate || '—';
+    const fetchRange = formatDiagnosticsRange(fetchOverview.firstDate, fetchOverview.lastDate);
+    container.innerHTML = `<ol class="list-decimal pl-4 space-y-1">
+        <li style="color: var(--foreground);">請比對圖表起點（${escapeHtml(dataset.requestedStart || '—')}）與買入持有首日（${escapeHtml(buyHoldFirst)}），並於回報時附上此卡片截圖。</li>
+        <li style="color: var(--foreground);">若「無效欄位統計」顯示 ${escapeHtml(reasonSummary)}，請擷取 console 中 [Worker] dataset/fetch summary 的表格輸出。</li>
+        <li style="color: var(--foreground);">確認遠端資料範圍 ${escapeHtml(fetchRange)} 是否覆蓋暖身期，如仍缺資料請於回報時註記。</li>
+    </ol>`;
+}
+
+function renderDiagnosticsFetch(fetchDiag) {
+    const summaryContainer = document.getElementById('dataDiagnosticsFetchSummary');
+    const monthsContainer = document.getElementById('dataDiagnosticsFetchMonths');
+    if (!summaryContainer || !monthsContainer) return;
+    if (!fetchDiag) {
+        summaryContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未擷取遠端資料。</p>`;
+        monthsContainer.innerHTML = '';
+        return;
+    }
+    const overview = fetchDiag.overview || {};
+    renderDiagnosticsEntries('dataDiagnosticsFetchSummary', [
+        { label: '抓取起點', value: fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '遠端資料範圍', value: formatDiagnosticsRange(overview.firstDate, overview.lastDate) },
+        { label: '暖身起點', value: overview.effectiveStartDate || fetchDiag.effectiveStartDate || '—' },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterEffectiveStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(overview.firstValidCloseGapFromEffective) },
+        { label: '遠端無效筆數', value: overview.invalidRowsInRange?.count ?? 0 },
+        { label: '遠端無效欄位', value: formatDiagnosticsReasonCounts(overview.invalidRowsInRange?.reasons) },
+        { label: '月度分段', value: Array.isArray(fetchDiag.months) ? fetchDiag.months.length : 0 },
+    ]);
+    if (!Array.isArray(fetchDiag.months) || fetchDiag.months.length === 0) {
+        monthsContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">沒有月度快取紀錄。</p>`;
+        return;
+    }
+    const recentMonths = fetchDiag.months.slice(-6);
+    monthsContainer.innerHTML = recentMonths
+        .map((month) => {
+            const monthLabel = escapeHtml(month.label || month.monthKey || '—');
+            const rows = formatDiagnosticsValue(month.rowsReturned);
+            const missing = formatDiagnosticsValue(month.missingSegments);
+            const forced = formatDiagnosticsValue(month.forcedRepairs);
+            const firstDate = escapeHtml(month.firstRowDate || '—');
+            const cacheUsed = month.usedCache ? '是' : '否';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div class="font-medium" style="color: var(--foreground);">${monthLabel}</div>
+                <div class="flex flex-wrap gap-2 text-muted-foreground" style="color: var(--muted-foreground);">
+                    <span>筆數 ${rows}</span>
+                    <span>缺口 ${missing}</span>
+                    <span>強制補抓 ${forced}</span>
+                    <span>首筆 ${firstDate}</span>
+                    <span>使用快取 ${cacheUsed}</span>
+                </div>
+            </div>`;
+        })
+        .join('');
+}
+
+function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
+    const hintEl = document.getElementById('dataDiagnosticsHint');
+    const contentEl = document.getElementById('dataDiagnosticsContent');
+    const titleEl = document.getElementById('dataDiagnosticsTitle');
+    if (!hintEl || !contentEl || !titleEl) return;
+    if (!diag) {
+        hintEl.textContent = '請先執行回測後，再查看暖身與快取診斷資訊。';
+        contentEl.classList.add('hidden');
+        titleEl.textContent = '資料暖身診斷';
+        renderDiagnosticsEntries('dataDiagnosticsSummary', []);
+        renderDiagnosticsEntries('dataDiagnosticsWarmup', []);
+        renderDiagnosticsEntries('dataDiagnosticsBuyHold', []);
+        renderDiagnosticsSamples('dataDiagnosticsInvalidSamples', []);
+        renderDiagnosticsSamples('dataDiagnosticsBuyHoldSamples', []);
+        renderDiagnosticsFetch(null);
+        renderDiagnosticsPreview('dataDiagnosticsPreview', []);
+        renderDiagnosticsTestingGuidance(null);
+        return;
+    }
+    hintEl.textContent = '若需回報問題，請一併提供此卡片內容與 console 診斷資訊。';
+    contentEl.classList.remove('hidden');
+    const dataset = diag.runtime?.dataset || {};
+    const warmup = diag.runtime?.warmup || {};
+    const buyHold = diag.runtime?.buyHold || {};
+    titleEl.textContent = `資料暖身診斷：${dataset.requestedStart || warmup.requestedStart || '—'} → ${dataset.endDate || diag.fetch?.requested?.end || '—'}`;
+    renderDiagnosticsEntries('dataDiagnosticsSummary', [
+        { label: '資料總筆數', value: dataset.totalRows },
+        { label: '資料範圍', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
+        { label: '使用者起點', value: dataset.requestedStart || warmup.requestedStart || '—' },
+        { label: '暖身起點', value: dataset.effectiveStartDate || warmup.effectiveStartDate || '—' },
+        { label: '暖身筆數', value: dataset.warmupRows },
+        { label: '區間筆數', value: dataset.rowsWithinRange },
+        { label: '第一筆>=使用者起點', value: formatDiagnosticsIndex(dataset.firstRowOnOrAfterRequestedStart) },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(dataset.firstValidCloseOnOrAfterRequestedStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromEffective) },
+        { label: '區間內無效筆數', value: dataset.invalidRowsInRange?.count ?? 0 },
+        { label: '第一筆無效資料', value: dataset.firstInvalidRowOnOrAfterEffectiveStart ? formatDiagnosticsIndex(dataset.firstInvalidRowOnOrAfterEffectiveStart) : '—' },
+        { label: '無效欄位統計', value: formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons) },
+    ]);
+    renderDiagnosticsSamples(
+        'dataDiagnosticsInvalidSamples',
+        dataset.invalidRowsInRange?.samples || [],
+        { emptyText: '區間內尚未觀察到無效筆數。' }
+    );
+    renderDiagnosticsEntries('dataDiagnosticsWarmup', [
+        { label: 'Longest 指標窗', value: warmup.longestLookback },
+        { label: 'KD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.kdNeedLong)} / ${formatDiagnosticsValue(warmup.kdNeedShort)}` },
+        { label: 'MACD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.macdNeedLong)} / ${formatDiagnosticsValue(warmup.macdNeedShort)}` },
+        { label: '模擬起始索引', value: warmup.computedStartIndex },
+        { label: '有效起始索引', value: warmup.effectiveStartIndex },
+        { label: '暖身耗用筆數', value: warmup.barsBeforeFirstTrade },
+        { label: '設定 Lookback 天數', value: warmup.lookbackDays },
+    ]);
+    renderDiagnosticsEntries('dataDiagnosticsBuyHold', [
+        { label: '首筆有效收盤索引', value: buyHold.firstValidPriceIdx },
+        { label: '首筆有效收盤日期', value: buyHold.firstValidPriceDate || '—' },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromRequested) },
+        { label: '暖身後無效收盤筆數', value: buyHold.invalidBarsBeforeFirstValid?.count ?? 0 },
+    ]);
+    renderDiagnosticsSamples(
+        'dataDiagnosticsBuyHoldSamples',
+        buyHold.invalidBarsBeforeFirstValid?.samples || [],
+        { emptyText: '暖身後未觀察到收盤價缺失。' }
+    );
+    renderDiagnosticsPreview('dataDiagnosticsPreview', warmup.previewRows || []);
+    renderDiagnosticsFetch(diag.fetch || null);
+    renderDiagnosticsTestingGuidance(diag);
+}
+
+function toggleDataDiagnostics(forceOpen) {
+    const panel = document.getElementById('dataDiagnosticsPanel');
+    const toggleBtn = document.getElementById('toggleDataDiagnostics');
+    if (!panel || !toggleBtn) return;
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !dataDiagnosticsState.open;
+    dataDiagnosticsState.open = shouldOpen;
+    if (shouldOpen) {
+        panel.classList.remove('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        refreshDataDiagnosticsPanel();
+    } else {
+        panel.classList.add('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function initDataDiagnosticsPanel() {
+    const toggleBtn = document.getElementById('toggleDataDiagnostics');
+    const closeBtn = document.getElementById('closeDataDiagnostics');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => toggleDataDiagnostics());
+    }
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => toggleDataDiagnostics(false));
+    }
+    refreshDataDiagnosticsPanel();
+    window.refreshDataDiagnosticsPanel = refreshDataDiagnosticsPanel;
 }
 
 function updateDataSourceDisplay(dataSource, stockName) {
@@ -855,6 +1184,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshPriceInspectorControls();
 });
+
+document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");

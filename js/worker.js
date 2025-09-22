@@ -343,6 +343,208 @@ function rangeBoundsToISO(range) {
   return { startISO, endISO };
 }
 
+function diffIsoDays(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const startTs = Date.parse(startISO);
+  const endTs = Date.parse(endISO);
+  if (!Number.isFinite(startTs) || !Number.isFinite(endTs)) return null;
+  return Math.round((endTs - startTs) / DAY_MS);
+}
+
+function formatReasonCountMap(reasonCounts) {
+  if (!reasonCounts || typeof reasonCounts !== "object") return "無";
+  const entries = Object.entries(reasonCounts)
+    .map(([reason, count]) => [reason, Number(count)])
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return "無";
+  return entries.map(([reason, count]) => `${reason}×${count}`).join("、");
+}
+
+function summariseDatasetRows(rows, context = {}) {
+  const summary = {
+    totalRows: Array.isArray(rows) ? rows.length : 0,
+    firstDate: null,
+    lastDate: null,
+    requestedStart: context.requestedStart || null,
+    effectiveStartDate: context.effectiveStartDate || null,
+    endDate: context.endDate || null,
+    warmupRows: 0,
+    rowsWithinRange: 0,
+    firstRowOnOrAfterRequestedStart: null,
+    firstRowOnOrAfterEffectiveStart: null,
+    firstValidCloseOnOrAfterRequestedStart: null,
+    firstValidCloseOnOrAfterEffectiveStart: null,
+    firstValidVolumeOnOrAfterRequestedStart: null,
+    firstInvalidRowOnOrAfterEffectiveStart: null,
+    invalidRowsInRange: { count: 0, samples: [], reasons: {} },
+    firstValidCloseGapFromRequested: null,
+    firstValidCloseGapFromEffective: null,
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return summary;
+  }
+
+  summary.firstDate = rows[0]?.date || null;
+  summary.lastDate = rows[rows.length - 1]?.date || null;
+
+  const sampleLimit = 5;
+  const requestedStartISO = summary.requestedStart;
+  const effectiveStartISO = summary.effectiveStartDate || requestedStartISO;
+  const endISO = summary.endDate || null;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || typeof row.date !== "string") continue;
+    const date = row.date;
+    const open = Number.isFinite(row.open) ? row.open : null;
+    const high = Number.isFinite(row.high) ? row.high : null;
+    const low = Number.isFinite(row.low) ? row.low : null;
+    const close = Number.isFinite(row.close) ? row.close : null;
+    const volume = Number.isFinite(row.volume) ? row.volume : null;
+    const validClose = close !== null && close > 0;
+    const validVolume = volume !== null && volume > 0;
+
+    if (
+      requestedStartISO &&
+      !summary.firstRowOnOrAfterRequestedStart &&
+      date >= requestedStartISO
+    ) {
+      summary.firstRowOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
+
+    if (
+      effectiveStartISO &&
+      !summary.firstRowOnOrAfterEffectiveStart &&
+      date >= effectiveStartISO
+    ) {
+      summary.firstRowOnOrAfterEffectiveStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
+
+    if (
+      requestedStartISO &&
+      !summary.firstValidCloseOnOrAfterRequestedStart &&
+      date >= requestedStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        close,
+      };
+    }
+
+    if (
+      effectiveStartISO &&
+      !summary.firstValidCloseOnOrAfterEffectiveStart &&
+      date >= effectiveStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterEffectiveStart = {
+        date,
+        index: i,
+        close,
+      };
+    }
+
+    if (
+      requestedStartISO &&
+      !summary.firstValidVolumeOnOrAfterRequestedStart &&
+      date >= requestedStartISO &&
+      validVolume
+    ) {
+      summary.firstValidVolumeOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        volume,
+      };
+    }
+
+    if (effectiveStartISO && date < effectiveStartISO) {
+      summary.warmupRows += 1;
+    }
+
+    const withinRange =
+      (!requestedStartISO || date >= requestedStartISO) &&
+      (!endISO || date <= endISO);
+    if (withinRange) {
+      summary.rowsWithinRange += 1;
+      const invalidReasons = [];
+      if (!validClose) invalidReasons.push("close");
+      if (open === null || open <= 0) invalidReasons.push("open");
+      if (high === null || high <= 0) invalidReasons.push("high");
+      if (low === null || low <= 0) invalidReasons.push("low");
+      if (!validVolume) invalidReasons.push("volume");
+      if (invalidReasons.length > 0) {
+        summary.invalidRowsInRange.count += 1;
+        invalidReasons.forEach((reason) => {
+          if (!reason) return;
+          const current = summary.invalidRowsInRange.reasons[reason] || 0;
+          summary.invalidRowsInRange.reasons[reason] = current + 1;
+        });
+        if (summary.invalidRowsInRange.samples.length < sampleLimit) {
+          summary.invalidRowsInRange.samples.push({
+            date,
+            index: i,
+            reasons: invalidReasons,
+            open,
+            high,
+            low,
+            close,
+            volume,
+          });
+        }
+        if (
+          effectiveStartISO &&
+          !summary.firstInvalidRowOnOrAfterEffectiveStart &&
+          date >= effectiveStartISO
+        ) {
+          summary.firstInvalidRowOnOrAfterEffectiveStart = {
+            date,
+            index: i,
+            close,
+            volume,
+            reasons: invalidReasons.slice(0, 5),
+          };
+        }
+      }
+    }
+  }
+
+  if (
+    requestedStartISO &&
+    summary.firstValidCloseOnOrAfterRequestedStart?.date
+  ) {
+    summary.firstValidCloseGapFromRequested = diffIsoDays(
+      requestedStartISO,
+      summary.firstValidCloseOnOrAfterRequestedStart.date,
+    );
+  }
+
+  if (
+    effectiveStartISO &&
+    summary.firstValidCloseOnOrAfterEffectiveStart?.date
+  ) {
+    summary.firstValidCloseGapFromEffective = diffIsoDays(
+      effectiveStartISO,
+      summary.firstValidCloseOnOrAfterEffectiveStart.date,
+    );
+  }
+
+  return summary;
+}
+
 function mergeMonthlyData(entry, newRows) {
   if (!entry || !Array.isArray(newRows)) return;
   const map = new Map(
@@ -1143,6 +1345,18 @@ async function fetchStockData(
   const marketKey = getMarketKey(marketType);
   const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
+  const fetchDiagnostics = {
+    stockNo,
+    marketKey,
+    adjusted,
+    split,
+    requested: { start: startDate, end: endDate },
+    effectiveStartDate: optionEffectiveStart || null,
+    lookbackDays: optionLookbackDays,
+    dataStartDate: startDate,
+    months: [],
+    usedCache: Boolean(cachedEntry),
+  };
   if (cachedEntry) {
     self.postMessage({
       type: "progress",
@@ -1198,6 +1412,7 @@ async function fetchStockData(
         { start: startDate, end: endDate },
       effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
       lookbackDays: cachedEntry?.meta?.lookbackDays || null,
+      diagnostics: cachedEntry?.meta?.diagnostics || null,
     };
   }
 
@@ -1220,6 +1435,20 @@ async function fetchStockData(
       marketKey,
       { splitAdjustment: split },
     );
+    const adjustedRows = Array.isArray(adjustedResult?.data)
+      ? adjustedResult.data
+      : [];
+    const adjustedOverview = summariseDatasetRows(adjustedRows, {
+      requestedStart: optionEffectiveStart || startDate,
+      effectiveStartDate: optionEffectiveStart || startDate,
+      endDate,
+    });
+    const adjustedDiagnostics = {
+      ...fetchDiagnostics,
+      months: [],
+      overview: adjustedOverview,
+      usedCache: false,
+    };
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
@@ -1272,6 +1501,7 @@ async function fetchStockData(
         adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
           ? adjustedResult.adjustmentChecks
           : [],
+        diagnostics: adjustedDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1318,11 +1548,18 @@ async function fetchStockData(
       fetchRange: { start: startDate, end: endDate },
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
+      diagnostics: adjustedDiagnostics,
     };
   }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
+    fetchDiagnostics.usedCache = false;
+    fetchDiagnostics.overview = summariseDatasetRows([], {
+      requestedStart: optionEffectiveStart || startDate,
+      effectiveStartDate: optionEffectiveStart || startDate,
+      endDate,
+    });
     const entry = {
       data: [],
       stockName: stockNo,
@@ -1336,6 +1573,7 @@ async function fetchStockData(
         priceMode: getPriceModeKey(adjusted),
         lookbackDays: optionLookbackDays,
         fetchRange: { start: startDate, end: endDate },
+        diagnostics: fetchDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1347,6 +1585,7 @@ async function fetchStockData(
       fetchRange: { start: startDate, end: endDate },
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
+      diagnostics: fetchDiagnostics,
     };
   }
   const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
@@ -1529,11 +1768,32 @@ async function fetchStockData(
         const usedCache =
           missingRanges.length === 0 || coveredLengthBefore > 0;
 
+        const monthDiagnostics = {
+          monthKey: monthInfo.monthKey,
+          label: monthInfo.label,
+          requestedStart: monthInfo.rangeStartISO,
+          requestedEnd: monthInfo.rangeEndISO,
+          missingSegments: missingRanges.length,
+          forcedRepairs: forcedRepairRanges.length,
+          forcedRepairSamples: forcedRepairRanges
+            .slice(0, 3)
+            .map((range) => rangeBoundsToISO(range)),
+          cacheCoverageDaysBefore: Math.round(
+            coveredLengthBefore / DAY_MS,
+          ),
+          usedCache,
+          rowsReturned: rowsForRange.length,
+          firstRowDate: rowsForRange[0]?.date || null,
+          lastRowDate:
+            rowsForRange[rowsForRange.length - 1]?.date || null,
+          cacheSources: Array.from(monthSourceFlags),
+        };
         return {
           rows: rowsForRange,
           sourceFlags: Array.from(monthSourceFlags),
           stockName: monthStockName,
           usedCache,
+          diagnostics: monthDiagnostics,
         };
       } finally {
         completed += 1;
@@ -1561,6 +1821,9 @@ async function fetchStockData(
     if (res.usedCache) {
       sourceFlags.add("Worker月度快取");
     }
+    if (res.diagnostics) {
+      fetchDiagnostics.months.push(res.diagnostics);
+    }
     (res.rows || []).forEach((row) => {
       const normalized = normalizeProxyRow(
         row,
@@ -1587,6 +1850,44 @@ async function fetchStockData(
     { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
 
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    endDate,
+  });
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.usedCache = false;
+  if (
+    Number.isFinite(overview?.firstValidCloseGapFromEffective) &&
+    overview.firstValidCloseGapFromEffective > 1
+  ) {
+    console.warn(
+      `[Worker] ${stockNo} 第一筆有效收盤價落後暖身起點 ${overview.firstValidCloseGapFromEffective} 天，請檢查快取或資料源是否缺漏。`,
+    );
+  }
+  if (overview?.invalidRowsInRange?.count > 0) {
+    const reasonText = formatReasonCountMap(overview.invalidRowsInRange.reasons);
+    console.warn(
+      `[Worker] ${stockNo} 遠端回應共有 ${overview.invalidRowsInRange.count} 筆無效資料。原因統計: ${reasonText}`,
+    );
+    if (
+      Array.isArray(overview.invalidRowsInRange.samples) &&
+      overview.invalidRowsInRange.samples.length > 0 &&
+      typeof console.table === "function"
+    ) {
+      const invalidTable = overview.invalidRowsInRange.samples.map((sample) => ({
+        index: sample.index,
+        date: sample.date,
+        reasons: Array.isArray(sample.reasons)
+          ? sample.reasons.join(", ")
+          : sample.reasons,
+        close: sample.close,
+        volume: sample.volume,
+      }));
+      console.table(invalidTable);
+    }
+  }
+
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
     stockName: stockName || stockNo,
@@ -1601,6 +1902,7 @@ async function fetchStockData(
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
+      diagnostics: fetchDiagnostics,
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -1618,6 +1920,7 @@ async function fetchStockData(
     fetchRange: { start: startDate, end: endDate },
     effectiveStartDate: optionEffectiveStart,
     lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
   };
 }
 
@@ -3287,13 +3590,80 @@ function runStrategy(data, params) {
   const lows = data.map((d) => d.low);
   const closes = data.map((d) => d.close);
   const volumes = data.map((d) => d.volume);
+  const userStartISO = params.originalStartDate || params.startDate || null;
   const effectiveStartISO = params.effectiveStartDate || params.startDate || null;
+  const datasetSummary = summariseDatasetRows(data, {
+    requestedStart: userStartISO,
+    effectiveStartDate: effectiveStartISO,
+    endDate: params.endDate || null,
+  });
+  if (
+    Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective) &&
+    datasetSummary.firstValidCloseGapFromEffective > 1
+  ) {
+    console.warn(
+      `[Worker] ${params.stockNo} 於暖身後首個有效收盤價落後 ${datasetSummary.firstValidCloseGapFromEffective} 天。`,
+    );
+  }
+  if (datasetSummary?.invalidRowsInRange?.count > 0) {
+    const reasonText = formatReasonCountMap(
+      datasetSummary.invalidRowsInRange.reasons,
+    );
+    console.warn(
+      `[Worker] ${params.stockNo} 區間內偵測到 ${datasetSummary.invalidRowsInRange.count} 筆無效資料。原因統計: ${reasonText}`,
+    );
+    if (
+      Array.isArray(datasetSummary.invalidRowsInRange.samples) &&
+      datasetSummary.invalidRowsInRange.samples.length > 0 &&
+      typeof console.table === "function"
+    ) {
+      const invalidTable = datasetSummary.invalidRowsInRange.samples.map(
+        (sample) => ({
+          index: sample.index,
+          date: sample.date,
+          reasons: Array.isArray(sample.reasons)
+            ? sample.reasons.join(", ")
+            : sample.reasons,
+          close: sample.close,
+          volume: sample.volume,
+        }),
+      );
+      console.table(invalidTable);
+    }
+  }
   let effectiveStartIdx = 0;
   if (effectiveStartISO) {
     const foundIndex = dates.findIndex(
       (date) => typeof date === "string" && date >= effectiveStartISO,
     );
     effectiveStartIdx = foundIndex >= 0 ? foundIndex : 0;
+  }
+  const previewRows = [];
+  if (Number.isFinite(datasetSummary?.firstRowOnOrAfterEffectiveStart?.index)) {
+    const previewStart = Math.max(
+      0,
+      datasetSummary.firstRowOnOrAfterEffectiveStart.index - 2,
+    );
+    const previewEnd = Math.min(n, previewStart + 6);
+    for (let idx = previewStart; idx < previewEnd; idx += 1) {
+      const row = data[idx];
+      if (!row) continue;
+      previewRows.push({
+        index: idx,
+        date: row.date,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+      });
+    }
+    if (previewRows.length > 0 && typeof console.table === "function") {
+      console.table(
+        previewRows,
+        ["index", "date", "open", "high", "low", "close", "volume"],
+      );
+    }
   }
   const positionStatesFull = new Array(n).fill("空手");
   const longStateSeries = new Array(n).fill("空手");
@@ -3307,6 +3677,22 @@ function runStrategy(data, params) {
   }
 
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
+  const warmupSummary = {
+    requestedStart: userStartISO,
+    effectiveStartDate: effectiveStartISO,
+    dataStartDate: params.dataStartDate || null,
+    lookbackDays: params.lookbackDays || null,
+    longestLookback: 0,
+    kdNeedLong: 0,
+    kdNeedShort: 0,
+    macdNeedLong: 0,
+    macdNeedShort: 0,
+    computedStartIndex: null,
+    effectiveStartIndex: effectiveStartIdx,
+    barsBeforeFirstTrade: null,
+    totalBars: n,
+    previewRows: [],
+  };
   let allPeriods = [
     entryParams?.shortPeriod,
     entryParams?.longPeriod,
@@ -3344,22 +3730,26 @@ function runStrategy(data, params) {
   );
   const longestLookback =
     validPeriods.length > 0 ? Math.max(...validPeriods) : 0;
+  warmupSummary.longestLookback = longestLookback;
   const kdNeedLong =
     entryStrategy === "k_d_cross" || exitStrategy === "k_d_cross_exit"
       ? entryParams?.period || exitParams?.period || 9
       : 0;
+  warmupSummary.kdNeedLong = kdNeedLong;
   const kdNeedShort =
     enableShorting &&
     (shortEntryStrategy === "short_k_d_cross" ||
       shortExitStrategy === "cover_k_d_cross")
       ? shortEntryParams?.period || shortExitParams?.period || 9
       : 0;
+  warmupSummary.kdNeedShort = kdNeedShort;
   const macdNeedLong =
     entryStrategy === "macd_cross" || exitStrategy === "macd_cross_exit"
       ? (entryParams?.longPeriod || exitParams?.longPeriod || 26) +
         (entryParams?.signalPeriod || exitParams?.signalPeriod || 9) -
         1
       : 0;
+  warmupSummary.macdNeedLong = macdNeedLong;
   const macdNeedShort =
     enableShorting &&
     (shortEntryStrategy === "short_macd_cross" ||
@@ -3368,6 +3758,7 @@ function runStrategy(data, params) {
         (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
         1
       : 0;
+  warmupSummary.macdNeedShort = macdNeedShort;
   let startIdx = Math.max(
     1,
     longestLookback,
@@ -3380,6 +3771,13 @@ function runStrategy(data, params) {
   startIdx = Math.max(startIdx, effectiveStartIdx);
   startIdx = Math.min(startIdx, n - 1);
   startIdx = Math.max(1, startIdx);
+  warmupSummary.computedStartIndex = startIdx;
+  warmupSummary.effectiveStartIndex = effectiveStartIdx;
+  warmupSummary.barsBeforeFirstTrade = Math.max(
+    0,
+    startIdx - effectiveStartIdx,
+  );
+  warmupSummary.previewRows = previewRows.slice(0, 6);
 
   const portfolioVal = Array(n).fill(initialCapital);
   const strategyReturns = Array(n).fill(0);
@@ -4864,11 +5262,18 @@ function runStrategy(data, params) {
       }
     }
 
-    let annualR = 0;
-    let buyHoldAnnualizedReturn = 0;
-    // 使用使用者設定的日期範圍來計算年化報酬
-    const firstDateStr = params.startDate;
-    const lastDateStr = params.endDate;
+  let annualR = 0;
+  let buyHoldAnnualizedReturn = 0;
+  const buyHoldSummary = {
+    firstValidPriceIdx: null,
+    firstValidPriceDate: null,
+    firstValidPriceGapFromEffective: null,
+    firstValidPriceGapFromRequested: null,
+    invalidBarsBeforeFirstValid: { count: 0, samples: [] },
+  };
+  // 使用使用者設定的日期範圍來計算年化報酬
+  const firstDateStr = params.startDate;
+  const lastDateStr = params.endDate;
     if (firstDateStr && lastDateStr) {
       const firstD = new Date(firstDateStr);
       const lastD = new Date(lastDateStr);
@@ -4915,6 +5320,57 @@ function runStrategy(data, params) {
         const lastValidPriceBH = closes[lastValidPriceIdxBH];
         const firstValidDateBH = new Date(dates[firstValidPriceIdxBH]);
         const lastValidDateBH = new Date(dates[lastValidPriceIdxBH]);
+        buyHoldSummary.firstValidPriceIdx = firstValidPriceIdxBH;
+        buyHoldSummary.firstValidPriceDate = dates[firstValidPriceIdxBH] || null;
+        buyHoldSummary.firstValidPriceGapFromEffective = diffIsoDays(
+          effectiveStartISO,
+          dates[firstValidPriceIdxBH],
+        );
+        buyHoldSummary.firstValidPriceGapFromRequested = diffIsoDays(
+          userStartISO,
+          dates[firstValidPriceIdxBH],
+        );
+        let invalidBeforeCount = 0;
+        const invalidBeforeSamples = [];
+        if (firstValidPriceIdxBH > effectiveStartIdx) {
+          for (let i = effectiveStartIdx; i < firstValidPriceIdxBH; i += 1) {
+            if (!check(closes[i]) || closes[i] <= 0) {
+              invalidBeforeCount += 1;
+              if (invalidBeforeSamples.length < 5) {
+                invalidBeforeSamples.push({
+                  index: i,
+                  date: dates[i],
+                  close: closes[i],
+                  volume: volumes[i],
+                });
+              }
+            }
+          }
+        }
+        buyHoldSummary.invalidBarsBeforeFirstValid = {
+          count: invalidBeforeCount,
+          samples: invalidBeforeSamples,
+        };
+        if (
+          Number.isFinite(
+            buyHoldSummary.firstValidPriceGapFromEffective,
+          ) &&
+          buyHoldSummary.firstValidPriceGapFromEffective > 1
+        ) {
+          console.warn(
+            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
+          );
+        }
+        if (invalidBeforeCount > 0) {
+          const invalidPreview = invalidBeforeSamples.map((sample) =>
+            `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
+          );
+          console.warn(
+            `[Worker] ${params.stockNo} 暖身期內共有 ${invalidBeforeCount} 筆收盤價無效資料，樣本：${invalidPreview
+              .slice(0, 3)
+              .join("；")}`,
+          );
+        }
         const bhYears =
           (lastValidDateBH.getTime() - firstValidDateBH.getTime()) /
           (1000 * 60 * 60 * 24 * 365.25);
@@ -5139,6 +5595,24 @@ function runStrategy(data, params) {
       visibleStartIdx,
     );
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
+    const runtimeDiagnostics = {
+      dataset: datasetSummary,
+      warmup: warmupSummary,
+      buyHold: buyHoldSummary,
+    };
+    if (typeof console.groupCollapsed === "function") {
+      console.groupCollapsed(
+        `[Worker] Runtime dataset diagnostics for ${params.stockNo}`,
+      );
+      console.log("[Worker] Dataset summary", datasetSummary);
+      console.log("[Worker] Warmup summary", warmupSummary);
+      console.log("[Worker] BuyHold summary", buyHoldSummary);
+      console.groupEnd();
+    } else {
+      console.log("[Worker] Dataset summary", datasetSummary);
+      console.log("[Worker] Warmup summary", warmupSummary);
+      console.log("[Worker] BuyHold summary", buyHoldSummary);
+    }
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -5186,6 +5660,7 @@ function runStrategy(data, params) {
       subPeriodResults: subPeriodResults,
       priceIndicatorSeries: trimmedIndicatorDisplay,
       positionStates: trimmedPositionStates,
+      diagnostics: runtimeDiagnostics,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);
@@ -5994,6 +6469,7 @@ self.onmessage = async function (e) {
                 (dataStartDate
                   ? { start: dataStartDate, end: params.endDate }
                   : null),
+              diagnostics: cachedMeta?.diagnostics || null,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
@@ -6043,6 +6519,7 @@ self.onmessage = async function (e) {
                 ? { start: dataStartDate, end: params.endDate }
                 : null),
             lookbackDays,
+            diagnostics: cachedMeta.diagnostics || null,
           };
         }
       } else {
@@ -6114,6 +6591,7 @@ self.onmessage = async function (e) {
       // 我們需要傳遞的是 K 線資料，而不是整個包裹
       const strategyParams = {
         ...params,
+        originalStartDate: params.startDate,
         startDate: effectiveStartDate || params.startDate,
         dataStartDate: dataStartDate || params.startDate,
         effectiveStartDate: effectiveStartDate || params.startDate,
@@ -6130,6 +6608,12 @@ self.onmessage = async function (e) {
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
       );
+      const fetchDiagnostics =
+        outcome?.diagnostics || workerLastMeta?.diagnostics || null;
+      backtestResult.datasetDiagnostics = {
+        runtime: backtestResult.diagnostics || null,
+        fetch: fetchDiagnostics,
+      };
 
       const debugSteps = Array.isArray(outcome?.debugSteps)
         ? outcome.debugSteps
