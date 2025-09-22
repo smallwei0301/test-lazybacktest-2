@@ -18,6 +18,7 @@ let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 
 function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
@@ -159,6 +160,113 @@ function mergeRangeBounds(ranges) {
     }
   }
   return merged;
+}
+
+function subtractRangeBounds(baseRanges, subtractRanges) {
+  if (!Array.isArray(baseRanges) || baseRanges.length === 0) return [];
+  if (!Array.isArray(subtractRanges) || subtractRanges.length === 0) {
+    return baseRanges.map((range) => ({ ...range }));
+  }
+  const normalizedBase = mergeRangeBounds(
+    baseRanges.map((range) => ({ ...range })),
+  );
+  const normalizedSubtract = mergeRangeBounds(
+    subtractRanges.map((range) => ({ ...range })),
+  );
+  const result = [];
+  normalizedBase.forEach((base) => {
+    let segments = [{ ...base }];
+    normalizedSubtract.forEach((sub) => {
+      const nextSegments = [];
+      segments.forEach((segment) => {
+        if (sub.end <= segment.start || sub.start >= segment.end) {
+          nextSegments.push(segment);
+          return;
+        }
+        if (sub.start > segment.start) {
+          nextSegments.push({ start: segment.start, end: Math.min(sub.start, segment.end) });
+        }
+        if (sub.end < segment.end) {
+          nextSegments.push({ start: Math.max(sub.end, segment.start), end: segment.end });
+        }
+      });
+      segments = nextSegments;
+    });
+    segments.forEach((segment) => {
+      if (segment.end > segment.start) {
+        result.push(segment);
+      }
+    });
+  });
+  return result;
+}
+
+function detectCoverageGapsForMonth(entry, rangeStartISO, rangeEndISO, options = {}) {
+  if (!entry || !Array.isArray(entry.data)) return [];
+  const toleranceDays = Number.isFinite(options.toleranceDays)
+    ? Math.max(0, Math.floor(options.toleranceDays))
+    : COVERAGE_GAP_TOLERANCE_DAYS;
+  const startUTC = isoToUTC(rangeStartISO);
+  const endUTCExclusive = isoToUTC(rangeEndISO) + DAY_MS;
+  if (!Number.isFinite(startUTC) || !Number.isFinite(endUTCExclusive) || endUTCExclusive <= startUTC) {
+    return [];
+  }
+  const rowsInRange = entry.data
+    .filter(
+      (row) =>
+        row &&
+        typeof row.date === "string" &&
+        row.date >= rangeStartISO &&
+        row.date <= rangeEndISO,
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (rowsInRange.length === 0) {
+    return [{ start: startUTC, end: endUTCExclusive }];
+  }
+  const validRows = rowsInRange.filter((row) => Number.isFinite(row.close));
+  if (validRows.length === 0) {
+    return [{ start: startUTC, end: endUTCExclusive }];
+  }
+  const gapToleranceMs = toleranceDays * DAY_MS;
+  const forcedRanges = [];
+
+  const firstValidUTC = isoToUTC(validRows[0].date);
+  if (
+    Number.isFinite(firstValidUTC) &&
+    firstValidUTC > startUTC &&
+    firstValidUTC - startUTC > gapToleranceMs
+  ) {
+    forcedRanges.push({ start: startUTC, end: Math.min(firstValidUTC, endUTCExclusive) });
+  }
+
+  for (let i = 1; i < validRows.length; i += 1) {
+    const prevUTCExclusive = isoToUTC(validRows[i - 1].date) + DAY_MS;
+    const currentUTC = isoToUTC(validRows[i].date);
+    if (
+      Number.isFinite(prevUTCExclusive) &&
+      Number.isFinite(currentUTC) &&
+      currentUTC - prevUTCExclusive > gapToleranceMs
+    ) {
+      forcedRanges.push({
+        start: Math.max(prevUTCExclusive, startUTC),
+        end: Math.min(currentUTC, endUTCExclusive),
+      });
+    }
+  }
+
+  const lastValidUTCExclusive = isoToUTC(validRows[validRows.length - 1].date) + DAY_MS;
+  if (
+    Number.isFinite(lastValidUTCExclusive) &&
+    endUTCExclusive > lastValidUTCExclusive &&
+    endUTCExclusive - lastValidUTCExclusive > gapToleranceMs
+  ) {
+    forcedRanges.push({
+      start: Math.max(lastValidUTCExclusive, startUTC),
+      end: endUTCExclusive,
+    });
+  }
+
+  return mergeRangeBounds(forcedRanges);
 }
 
 function addCoverage(entry, startISO, endISO) {
@@ -1278,15 +1386,41 @@ async function fetchStockData(
         const existingCoverage = Array.isArray(monthEntry.coverage)
           ? monthEntry.coverage.map((range) => ({ ...range }))
           : [];
+        const forcedRepairRanges = detectCoverageGapsForMonth(
+          monthEntry,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+          { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
+        );
+        let coverageForComputation = existingCoverage;
+        if (forcedRepairRanges.length > 0) {
+          coverageForComputation = subtractRangeBounds(
+            existingCoverage,
+            forcedRepairRanges,
+          );
+          monthEntry.coverage = subtractRangeBounds(
+            monthEntry.coverage || [],
+            forcedRepairRanges,
+          );
+          monthEntry.lastForcedReloadAt = Date.now();
+          if (forcedRepairRanges.length > 0) {
+            console.warn(
+              `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
+            );
+          }
+        }
         const missingRanges = computeMissingRanges(
-          existingCoverage,
+          coverageForComputation,
           monthInfo.rangeStartISO,
           monthInfo.rangeEndISO,
         );
         const coveredLengthBefore = getCoveredLength(
-          existingCoverage,
+          coverageForComputation,
           monthInfo.rangeStartISO,
           monthInfo.rangeEndISO,
+        );
+        const forcedRangeKeys = new Set(
+          forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
         );
         const monthSourceFlags = new Set(
           monthEntry.sources instanceof Set
@@ -1307,6 +1441,12 @@ async function fetchStockData(
               end: endISO,
             });
             if (adjusted) params.set("adjusted", "1");
+            if (forcedRangeKeys.size > 0) {
+              const rangeKey = `${missingRange.start}-${missingRange.end}`;
+              if (forcedRangeKeys.has(rangeKey)) {
+                params.set("cacheBust", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+              }
+            }
             const url = `${proxyPath}?${params.toString()}`;
             try {
               const payload = await fetchWithAdaptiveRetry(url, {
