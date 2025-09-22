@@ -19,6 +19,19 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
+const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+
+function getPrimaryForceSource(marketKey, adjusted) {
+  if (adjusted) return "yahoo";
+  if (marketKey === "TPEX") return "finmind";
+  return "twse";
+}
+
+function getFallbackForceSource(marketKey, adjusted) {
+  if (adjusted) return null;
+  if (marketKey === "TPEX") return null;
+  return "finmind";
+}
 
 function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
@@ -1411,6 +1424,8 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
+  const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
+  const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   const fetchDiagnostics = {
@@ -1739,89 +1754,137 @@ async function fetchStockData(
             : monthEntry.sources || [],
         );
         const monthCacheFlags = new Set();
+        const forcedSourceUsage = new Set();
         let monthStockName = monthEntry.stockName || "";
 
         if (missingRanges.length > 0) {
           for (let i = 0; i < missingRanges.length; i += 1) {
             const missingRange = missingRanges[i];
             const { startISO, endISO } = rangeBoundsToISO(missingRange);
-            const params = new URLSearchParams({
-              stockNo,
-              month: monthInfo.monthKey,
-              start: startISO,
-              end: endISO,
-            });
-            if (adjusted) params.set("adjusted", "1");
-            if (forcedRangeKeys.size > 0) {
-              const rangeKey = `${missingRange.start}-${missingRange.end}`;
-              if (forcedRangeKeys.has(rangeKey)) {
-                params.set("cacheBust", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+            const rangeKey = `${missingRange.start}-${missingRange.end}`;
+            const shouldForceRange =
+              forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+            const candidateSources = [];
+            if (shouldForceRange) {
+              if (primaryForceSource) candidateSources.push(primaryForceSource);
+              if (
+                fallbackForceSource &&
+                fallbackForceSource !== primaryForceSource
+              ) {
+                candidateSources.push(fallbackForceSource);
               }
             }
-            const url = `${proxyPath}?${params.toString()}`;
-            try {
-              const payload = await fetchWithAdaptiveRetry(url, {
-                headers: { Accept: "application/json" },
+            candidateSources.push(null);
+
+            let payload = null;
+            let lastError = null;
+            for (let c = 0; c < candidateSources.length; c += 1) {
+              const forceSource = candidateSources[c];
+              const params = new URLSearchParams({
+                stockNo,
+                month: monthInfo.monthKey,
+                start: startISO,
+                end: endISO,
               });
-              if (payload?.error) {
-                throw new Error(payload.error);
-              }
-              if (payload?.source === "blob") {
-                const cacheLabel = isTpex
-                  ? "TPEX (快取)"
-                  : "TWSE (快取)";
-                monthCacheFlags.add(cacheLabel);
-                monthEntry.sources.add(cacheLabel);
-              } else if (payload?.source === "memory") {
-                const cacheLabel = isTpex
-                  ? "TPEX (記憶體快取)"
-                  : "TWSE (記憶體快取)";
-                monthCacheFlags.add(cacheLabel);
-                monthEntry.sources.add(cacheLabel);
-              }
-              const rows = Array.isArray(payload?.aaData)
-                ? payload.aaData
-                : Array.isArray(payload?.data)
-                  ? payload.data
-                  : [];
-              const normalized = [];
-              rows.forEach((row) => {
-                const normalizedRow = normalizeProxyRow(
-                  row,
-                  isTpex,
-                  startDateObj,
-                  endDateObj,
+              if (adjusted) params.set("adjusted", "1");
+              if (forceSource) params.set("forceSource", forceSource);
+              if (shouldForceRange) {
+                params.set(
+                  "cacheBust",
+                  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 );
-                if (normalizedRow) normalized.push(normalizedRow);
-              });
-              if (payload?.stockName) {
-                monthStockName = payload.stockName;
               }
-              const sourceLabel =
-                payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-              if (sourceLabel) {
-                monthSourceFlags.add(sourceLabel);
-                monthEntry.sources.add(sourceLabel);
-              }
-              if (normalized.length > 0) {
-                mergeMonthlyData(monthEntry, normalized);
-                const sortedNormalized = normalized
-                  .slice()
-                  .sort((a, b) => a.date.localeCompare(b.date));
-                const coverageStart = sortedNormalized[0]?.date || null;
-                const coverageEnd =
-                  sortedNormalized[sortedNormalized.length - 1]?.date || null;
-                if (coverageStart && coverageEnd) {
-                  addCoverage(monthEntry, coverageStart, coverageEnd);
+              const url = `${proxyPath}?${params.toString()}`;
+              try {
+                const responsePayload = await fetchWithAdaptiveRetry(url, {
+                  headers: { Accept: "application/json" },
+                });
+                if (responsePayload?.error) {
+                  throw new Error(responsePayload.error);
                 }
-                rebuildCoverageFromData(monthEntry);
+                payload = responsePayload;
+                if (forceSource) {
+                  forcedSourceUsage.add(forceSource);
+                  console.warn(
+                    `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
+                      responsePayload?.aaData,
+                    )
+                      ? responsePayload.aaData.length
+                      : Array.isArray(responsePayload?.data)
+                        ? responsePayload.data.length
+                        : 0} 筆資料。`,
+                  );
+                }
+                break;
+              } catch (error) {
+                lastError = error;
+                console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+                payload = null;
               }
-              monthEntry.lastUpdated = Date.now();
-              if (!monthEntry.stockName && monthStockName) {
-                monthEntry.stockName = monthStockName;
+            }
+
+            if (!payload) {
+              if (lastError) {
+                console.error(
+                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
+                );
               }
-            } catch (error) {
-              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+              continue;
+            }
+
+            if (payload?.source === "blob") {
+              const cacheLabel = isTpex
+                ? "TPEX (快取)"
+                : "TWSE (快取)";
+              monthCacheFlags.add(cacheLabel);
+              monthEntry.sources.add(cacheLabel);
+            } else if (payload?.source === "memory") {
+              const cacheLabel = isTpex
+                ? "TPEX (記憶體快取)"
+                : "TWSE (記憶體快取)";
+              monthCacheFlags.add(cacheLabel);
+              monthEntry.sources.add(cacheLabel);
+            }
+            const rows = Array.isArray(payload?.aaData)
+              ? payload.aaData
+              : Array.isArray(payload?.data)
+                ? payload.data
+                : [];
+            const normalized = [];
+            rows.forEach((row) => {
+              const normalizedRow = normalizeProxyRow(
+                row,
+                isTpex,
+                startDateObj,
+                endDateObj,
+              );
+              if (normalizedRow) normalized.push(normalizedRow);
+            });
+            if (payload?.stockName) {
+              monthStockName = payload.stockName;
+            }
+            const sourceLabel =
+              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+            if (sourceLabel) {
+              monthSourceFlags.add(sourceLabel);
+              monthEntry.sources.add(sourceLabel);
+            }
+            if (normalized.length > 0) {
+              mergeMonthlyData(monthEntry, normalized);
+              const sortedNormalized = normalized
+                .slice()
+                .sort((a, b) => a.date.localeCompare(b.date));
+              const coverageStart = sortedNormalized[0]?.date || null;
+              const coverageEnd =
+                sortedNormalized[sortedNormalized.length - 1]?.date || null;
+              if (coverageStart && coverageEnd) {
+                addCoverage(monthEntry, coverageStart, coverageEnd);
+              }
+              rebuildCoverageFromData(monthEntry);
+            }
+            monthEntry.lastUpdated = Date.now();
+            if (!monthEntry.stockName && monthStockName) {
+              monthEntry.stockName = monthStockName;
             }
           }
         }
@@ -1859,6 +1922,7 @@ async function fetchStockData(
           lastRowDate:
             rowsForRange[rowsForRange.length - 1]?.date || null,
           cacheSources: Array.from(monthSourceFlags),
+          forcedSources: Array.from(forcedSourceUsage),
         };
         return {
           rows: rowsForRange,
@@ -1882,6 +1946,7 @@ async function fetchStockData(
   const normalizedRows = [];
   const sourceFlags = new Set();
   let stockName = "";
+  const fetchForcedSources = new Set();
   monthResults.forEach((res) => {
     if (!res) return;
     if (res.stockName && !stockName) stockName = res.stockName;
@@ -1895,6 +1960,11 @@ async function fetchStockData(
     }
     if (res.diagnostics) {
       fetchDiagnostics.months.push(res.diagnostics);
+      if (Array.isArray(res.diagnostics.forcedSources)) {
+        res.diagnostics.forcedSources.forEach((src) => {
+          if (src) fetchForcedSources.add(src);
+        });
+      }
     }
     (res.rows || []).forEach((row) => {
       const normalized = normalizeProxyRow(
@@ -1906,6 +1976,9 @@ async function fetchStockData(
       if (normalized) normalizedRows.push(normalized);
     });
   });
+  if (fetchForcedSources.size > 0) {
+    fetchDiagnostics.forcedSources = Array.from(fetchForcedSources);
+  }
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
@@ -1931,6 +2004,13 @@ async function fetchStockData(
   });
   fetchDiagnostics.overview = overview;
   fetchDiagnostics.usedCache = false;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+  if (
+    Number.isFinite(overview?.firstValidCloseGapFromRequested)
+  ) {
+    fetchDiagnostics.firstValidCloseGapFromRequested =
+      overview.firstValidCloseGapFromRequested;
+  }
   if (
     Number.isFinite(overview?.firstValidCloseGapFromEffective) &&
     overview.firstValidCloseGapFromEffective > 1
@@ -5351,6 +5431,8 @@ function runStrategy(data, params) {
     firstValidPriceGapFromEffective: null,
     firstValidPriceGapFromRequested: null,
     invalidBarsBeforeFirstValid: { count: 0, samples: [] },
+    gapToleranceDays: CRITICAL_START_GAP_TOLERANCE_DAYS,
+    exceedsGapTolerance: false,
   };
   // 使用使用者設定的日期範圍來計算年化報酬
   const firstDateStr = params.startDate;
@@ -5442,6 +5524,18 @@ function runStrategy(data, params) {
             `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
           );
         }
+        if (
+          Number.isFinite(
+            buyHoldSummary.firstValidPriceGapFromRequested,
+          ) &&
+          buyHoldSummary.firstValidPriceGapFromRequested >
+            CRITICAL_START_GAP_TOLERANCE_DAYS
+        ) {
+          buyHoldSummary.exceedsGapTolerance = true;
+          console.warn(
+            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後使用者起點 ${buyHoldSummary.firstValidPriceGapFromRequested} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。`,
+          );
+        }
         if (invalidBeforeCount > 0) {
           const invalidPreview = invalidBeforeSamples.map((sample) =>
             `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
@@ -5461,10 +5555,13 @@ function runStrategy(data, params) {
         console.log(
           `[Worker] Annualization Years (B&H): ${bhYears.toFixed(4)} (from ${dates[firstValidPriceIdxBH]} to ${dates[lastValidPriceIdxBH]})`,
         );
-        const bhTotalReturn =
+        let bhTotalReturn =
           firstValidPriceBH !== 0
             ? ((lastValidPriceBH - firstValidPriceBH) / firstValidPriceBH) * 100
             : 0;
+        if (buyHoldSummary.exceedsGapTolerance) {
+          bhTotalReturn = 0;
+        }
         if (bhYears > 1 / (365.25 * 2) && firstValidPriceBH > 0) {
           try {
             buyHoldAnnualizedReturn =
@@ -5479,6 +5576,9 @@ function runStrategy(data, params) {
           console.warn(
             `[Worker] B&H duration (${bhYears.toFixed(4)} years) too short for meaningful annualization. Using total B&H return rate.`,
           );
+        }
+        if (buyHoldSummary.exceedsGapTolerance) {
+          buyHoldAnnualizedReturn = 0;
         }
       }
     }
@@ -5594,6 +5694,9 @@ function runStrategy(data, params) {
             ? bhReturnsFull[i - 1]
             : 0,
       );
+    }
+    if (buyHoldSummary.exceedsGapTolerance) {
+      bhReturnsFull = Array(n).fill(0);
     }
     for (const [label, months] of Object.entries(periodsToCalculate)) {
       const subStartDate = new Date(overallEndDate);
