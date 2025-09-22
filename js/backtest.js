@@ -16,6 +16,9 @@ let lastPriceDebug = {
     priceMode: null,
     splitDiagnostics: null,
     finmindStatus: null,
+    coverageAlerts: [],
+    coverageDiagnostics: null,
+    coverageRanges: [],
 };
 
 // --- 主回測函數 ---
@@ -90,65 +93,83 @@ function runBacktestInternal() {
             } else if(type==='result'){
                 if(!useCache&&data?.rawData){
                      const existingEntry = cachedDataStore.get(cacheKey);
-                     const mergedDataMap = new Map(Array.isArray(existingEntry?.data) ? existingEntry.data.map(row => [row.date, row]) : []);
-                     if (Array.isArray(data.rawData)) {
-                         data.rawData.forEach(row => {
-                             if (row && row.date) {
-                                 mergedDataMap.set(row.date, row);
-                             }
-                         });
-                     }
-                     const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
-                     const mergedCoverage = mergeIsoCoverage(existingEntry?.coverage || [], { start: curSettings.startDate, end: curSettings.endDate });
-                     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
-                     if (dataSource) sourceSet.add(dataSource);
-                     const sourceArray = Array.from(sourceSet);
-                     const rawMeta = data.rawMeta || {};
-                     const debugSteps = Array.isArray(rawMeta.debugSteps)
-                         ? rawMeta.debugSteps
-                         : (Array.isArray(data?.dataDebug?.debugSteps) ? data.dataDebug.debugSteps : []);
-                     const summaryMeta = rawMeta.summary || data?.dataDebug?.summary || null;
-                     const adjustmentsMeta = Array.isArray(rawMeta.adjustments)
-                         ? rawMeta.adjustments
-                         : (Array.isArray(data?.dataDebug?.adjustments) ? data.dataDebug.adjustments : []);
-                     const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
-                         ? rawMeta.adjustmentFallbackApplied
-                         : Boolean(data?.dataDebug?.adjustmentFallbackApplied);
-                    const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
-                    const splitDiagnosticsMeta = rawMeta.splitDiagnostics
-                        || data?.dataDebug?.splitDiagnostics
-                        || existingEntry?.splitDiagnostics
-                        || null;
-                    const finmindStatusMeta = rawMeta.finmindStatus
-                        || data?.dataDebug?.finmindStatus
-                        || existingEntry?.finmindStatus
-                        || null;
-                    const adjustmentDebugLogMeta = Array.isArray(rawMeta.adjustmentDebugLog)
-                        ? rawMeta.adjustmentDebugLog
-                        : (Array.isArray(data?.dataDebug?.adjustmentDebugLog) ? data.dataDebug.adjustmentDebugLog : []);
-                    const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
-                        ? rawMeta.adjustmentChecks
-                        : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
-                    const cacheEntry = {
-                        data: mergedData,
-                        stockName: stockName || existingEntry?.stockName || params.stockNo,
-                         dataSources: sourceArray,
-                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
-                         coverage: mergedCoverage,
-                         fetchedAt: Date.now(),
-                        adjustedPrice: params.adjustedPrice,
-                        splitAdjustment: params.splitAdjustment,
-                        priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
-                        summary: summaryMeta,
-                        adjustments: adjustmentsMeta,
-                        debugSteps,
-                        priceSource: priceSourceMeta,
-                        splitDiagnostics: splitDiagnosticsMeta,
-                        finmindStatus: finmindStatusMeta,
-                        adjustmentDebugLog: adjustmentDebugLogMeta,
-                        adjustmentChecks: adjustmentChecksMeta,
-                    };
+                const mergedDataMap = new Map(Array.isArray(existingEntry?.data) ? existingEntry.data.map(row => [row.date, row]) : []);
+                if (Array.isArray(data.rawData)) {
+                    data.rawData.forEach(row => {
+                        if (row && row.date) {
+                            mergedDataMap.set(row.date, row);
+                        }
+                    });
+                }
+                const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
+                const coverageRangesFromWorker = Array.isArray(data?.dataDebug?.coverageRanges)
+                    ? data.dataDebug.coverageRanges
+                    : Array.isArray(data?.rawMeta?.coverageRanges)
+                        ? data.rawMeta.coverageRanges
+                        : [];
+                const mergedCoverage = mergeIsoCoverage(
+                    existingEntry?.coverage || [],
+                    coverageRangesFromWorker,
+                );
+                const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
+                if (dataSource) sourceSet.add(dataSource);
+                const sourceArray = Array.from(sourceSet);
+                const rawMeta = data.rawMeta || {};
+                const debugSteps = Array.isArray(rawMeta.debugSteps)
+                    ? rawMeta.debugSteps
+                    : (Array.isArray(data?.dataDebug?.debugSteps) ? data.dataDebug.debugSteps : []);
+                const summaryMeta = rawMeta.summary || data?.dataDebug?.summary || null;
+                const adjustmentsMeta = Array.isArray(rawMeta.adjustments)
+                    ? rawMeta.adjustments
+                    : (Array.isArray(data?.dataDebug?.adjustments) ? data.dataDebug.adjustments : []);
+                const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
+                    ? rawMeta.adjustmentFallbackApplied
+                    : Boolean(data?.dataDebug?.adjustmentFallbackApplied);
+                const priceSourceMeta = rawMeta.priceSource || data?.dataDebug?.priceSource || null;
+                const splitDiagnosticsMeta = rawMeta.splitDiagnostics
+                    || data?.dataDebug?.splitDiagnostics
+                    || existingEntry?.splitDiagnostics
+                    || null;
+                const finmindStatusMeta = rawMeta.finmindStatus
+                    || data?.dataDebug?.finmindStatus
+                    || existingEntry?.finmindStatus
+                    || null;
+                const adjustmentDebugLogMeta = Array.isArray(rawMeta.adjustmentDebugLog)
+                    ? rawMeta.adjustmentDebugLog
+                    : (Array.isArray(data?.dataDebug?.adjustmentDebugLog) ? data.dataDebug.adjustmentDebugLog : []);
+                const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
+                    ? rawMeta.adjustmentChecks
+                    : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
+                const coverageAlertsMeta = Array.isArray(rawMeta.coverageAlerts)
+                    ? rawMeta.coverageAlerts
+                    : (Array.isArray(data?.dataDebug?.coverageAlerts) ? data.dataDebug.coverageAlerts : []);
+                const coverageDiagnosticsMeta = rawMeta.coverageDiagnostics
+                    || data?.dataDebug?.coverageDiagnostics
+                    || existingEntry?.coverageDiagnostics
+                    || null;
+                const cacheEntry = {
+                    data: mergedData,
+                    stockName: stockName || existingEntry?.stockName || params.stockNo,
+                     dataSources: sourceArray,
+                     dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
+                     coverage: mergedCoverage,
+                     coverageRanges: coverageRangesFromWorker,
+                     coverageAlerts: coverageAlertsMeta,
+                     coverageDiagnostics: coverageDiagnosticsMeta,
+                     fetchedAt: Date.now(),
+                    adjustedPrice: params.adjustedPrice,
+                    splitAdjustment: params.splitAdjustment,
+                    priceMode: priceMode,
+                     adjustmentFallbackApplied: fallbackFlag,
+                    summary: summaryMeta,
+                    adjustments: adjustmentsMeta,
+                    debugSteps,
+                    priceSource: priceSourceMeta,
+                    splitDiagnostics: splitDiagnosticsMeta,
+                    finmindStatus: finmindStatusMeta,
+                    adjustmentDebugLog: adjustmentDebugLogMeta,
+                    adjustmentChecks: adjustmentChecksMeta,
+                };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
@@ -157,51 +178,69 @@ function runBacktestInternal() {
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
                      cachedEntry = cacheEntry;
                 } else if (useCache && cachedEntry && Array.isArray(cachedEntry.data) ) {
-                     const updatedSources = new Set(Array.isArray(cachedEntry.dataSources) ? cachedEntry.dataSources : []);
-                     if (dataSource) updatedSources.add(dataSource);
-                     const updatedArray = Array.from(updatedSources);
-                     const debugSteps = Array.isArray(data?.dataDebug?.debugSteps)
-                         ? data.dataDebug.debugSteps
-                         : Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [];
-                     const summaryMeta = data?.dataDebug?.summary || cachedEntry.summary || null;
-                     const adjustmentsMeta = Array.isArray(data?.dataDebug?.adjustments)
-                         ? data.dataDebug.adjustments
-                         : Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [];
-                     const fallbackFlag = typeof data?.dataDebug?.adjustmentFallbackApplied === 'boolean'
-                         ? data.dataDebug.adjustmentFallbackApplied
-                         : Boolean(cachedEntry.adjustmentFallbackApplied);
-                    const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
-                    const splitDiagnosticsMeta = data?.dataDebug?.splitDiagnostics
-                        || cachedEntry.splitDiagnostics
-                        || null;
-                    const finmindStatusMeta = data?.dataDebug?.finmindStatus
-                        || cachedEntry.finmindStatus
-                        || null;
-                    const adjustmentDebugLogMeta = Array.isArray(data?.dataDebug?.adjustmentDebugLog)
-                        ? data.dataDebug.adjustmentDebugLog
-                        : Array.isArray(cachedEntry.adjustmentDebugLog) ? cachedEntry.adjustmentDebugLog : [];
-                    const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
-                        ? data.dataDebug.adjustmentChecks
-                        : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
-                    const updatedEntry = {
-                        ...cachedEntry,
-                        stockName: stockName || cachedEntry.stockName || params.stockNo,
-                         dataSources: updatedArray,
-                         dataSource: summariseSourceLabels(updatedArray),
-                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
-                        adjustedPrice: params.adjustedPrice,
-                        splitAdjustment: params.splitAdjustment,
-                        priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
-                        summary: summaryMeta,
-                        adjustments: adjustmentsMeta,
-                        debugSteps,
-                        priceSource: priceSourceMeta,
-                        splitDiagnostics: splitDiagnosticsMeta,
-                        finmindStatus: finmindStatusMeta,
-                        adjustmentDebugLog: adjustmentDebugLogMeta,
-                        adjustmentChecks: adjustmentChecksMeta,
-                    };
+                const updatedSources = new Set(Array.isArray(cachedEntry.dataSources) ? cachedEntry.dataSources : []);
+                if (dataSource) updatedSources.add(dataSource);
+                const updatedArray = Array.from(updatedSources);
+                const coverageRangesFromWorker = Array.isArray(data?.dataDebug?.coverageRanges)
+                    ? data.dataDebug.coverageRanges
+                    : [];
+                const mergedCoverage = coverageRangesFromWorker.length > 0
+                    ? mergeIsoCoverage(cachedEntry.coverage || [], coverageRangesFromWorker)
+                    : cachedEntry.coverage || [];
+                const debugSteps = Array.isArray(data?.dataDebug?.debugSteps)
+                    ? data.dataDebug.debugSteps
+                    : Array.isArray(cachedEntry.debugSteps) ? cachedEntry.debugSteps : [];
+                const summaryMeta = data?.dataDebug?.summary || cachedEntry.summary || null;
+                const adjustmentsMeta = Array.isArray(data?.dataDebug?.adjustments)
+                    ? data.dataDebug.adjustments
+                    : Array.isArray(cachedEntry.adjustments) ? cachedEntry.adjustments : [];
+                const fallbackFlag = typeof data?.dataDebug?.adjustmentFallbackApplied === 'boolean'
+                    ? data.dataDebug.adjustmentFallbackApplied
+                    : Boolean(cachedEntry.adjustmentFallbackApplied);
+                const priceSourceMeta = data?.dataDebug?.priceSource || cachedEntry.priceSource || null;
+                const splitDiagnosticsMeta = data?.dataDebug?.splitDiagnostics
+                    || cachedEntry.splitDiagnostics
+                    || null;
+                const finmindStatusMeta = data?.dataDebug?.finmindStatus
+                    || cachedEntry.finmindStatus
+                    || null;
+                const adjustmentDebugLogMeta = Array.isArray(data?.dataDebug?.adjustmentDebugLog)
+                    ? data.dataDebug.adjustmentDebugLog
+                    : Array.isArray(cachedEntry.adjustmentDebugLog) ? cachedEntry.adjustmentDebugLog : [];
+                const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
+                    ? data.dataDebug.adjustmentChecks
+                    : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
+                const coverageAlertsMeta = Array.isArray(data?.dataDebug?.coverageAlerts)
+                    ? data.dataDebug.coverageAlerts
+                    : Array.isArray(cachedEntry.coverageAlerts) ? cachedEntry.coverageAlerts : [];
+                const coverageDiagnosticsMeta = data?.dataDebug?.coverageDiagnostics
+                    || cachedEntry.coverageDiagnostics
+                    || null;
+                const updatedEntry = {
+                    ...cachedEntry,
+                    stockName: stockName || cachedEntry.stockName || params.stockNo,
+                     dataSources: updatedArray,
+                     dataSource: summariseSourceLabels(updatedArray),
+                     fetchedAt: cachedEntry.fetchedAt || Date.now(),
+                    adjustedPrice: params.adjustedPrice,
+                    splitAdjustment: params.splitAdjustment,
+                    priceMode: priceMode,
+                     adjustmentFallbackApplied: fallbackFlag,
+                    summary: summaryMeta,
+                    adjustments: adjustmentsMeta,
+                    debugSteps,
+                    priceSource: priceSourceMeta,
+                    splitDiagnostics: splitDiagnosticsMeta,
+                    finmindStatus: finmindStatusMeta,
+                    adjustmentDebugLog: adjustmentDebugLogMeta,
+                    adjustmentChecks: adjustmentChecksMeta,
+                    coverage: mergedCoverage,
+                    coverageRanges: coverageRangesFromWorker.length > 0
+                        ? coverageRangesFromWorker
+                        : (cachedEntry.coverageRanges || []),
+                    coverageAlerts: coverageAlertsMeta,
+                    coverageDiagnostics: coverageDiagnosticsMeta,
+                };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
                      lastFetchSettings = { ...curSettings };
@@ -274,6 +313,9 @@ function runBacktestInternal() {
                     priceSource: cachedEntry.priceSource || null,
                     dataSource: cachedEntry.dataSource || null,
                     splitAdjustment: Boolean(cachedEntry.splitAdjustment),
+                    coverageAlerts: Array.isArray(cachedEntry.coverageAlerts) ? cachedEntry.coverageAlerts : [],
+                    coverageDiagnostics: cachedEntry.coverageDiagnostics || null,
+                    coverageRanges: Array.isArray(cachedEntry.coverageRanges) ? cachedEntry.coverageRanges : [],
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
@@ -322,6 +364,7 @@ function clearPreviousResults() {
     }
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
+    updateCoverageWarningBanner([]);
 }
 
 const adjustmentReasonLabels = {
@@ -352,6 +395,89 @@ function formatSkipReasons(skipReasons) {
         .join('、');
 }
 
+function buildCoverageAlertsHtml(alerts, options = {}) {
+    if (!Array.isArray(alerts) || alerts.length === 0) return '';
+    const title = escapeHtml(options.title || '價格資料涵蓋警示');
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : alerts.length;
+    const formatPercent = (ratio) => {
+        if (!Number.isFinite(ratio)) return '—';
+        const percent = ratio * 100;
+        const decimals = percent > 0 && percent < 100 ? 1 : 0;
+        const formatted = percent.toFixed(decimals).replace(/\.0$/, '');
+        return `${escapeHtml(formatted)}%`;
+    };
+    const items = alerts.slice(0, limit)
+        .map((alert) => {
+            const monthLabel = escapeHtml(alert?.label || alert?.monthKey || '未命名月份');
+            const rangeStart = escapeHtml(alert?.rangeStart || '—');
+            const rangeEnd = escapeHtml(alert?.rangeEnd || '—');
+            const observedDays = Number.isFinite(alert?.observedTradingDays)
+                ? escapeHtml(alert.observedTradingDays)
+                : '—';
+            const expectedDays = Number.isFinite(alert?.expectedTradingDays)
+                ? escapeHtml(alert.expectedTradingDays)
+                : '—';
+            const ratioText = formatPercent(alert?.coverageRatio);
+            const observedStart = alert?.observedStart ? escapeHtml(alert.observedStart) : null;
+            const observedEnd = alert?.observedEnd ? escapeHtml(alert.observedEnd) : null;
+            const observedLine = observedStart || observedEnd
+                ? `<div class="text-[11px]" style="color: var(--muted-foreground);">實際資料範圍：${observedStart || '—'} ~ ${observedEnd || '—'}</div>`
+                : '';
+            const missingSpans = Array.isArray(alert?.missingSpans) ? alert.missingSpans : [];
+            const missingPreview = missingSpans.slice(0, 3)
+                .map((span) => escapeHtml(`${span?.start || '—'} ~ ${span?.end || '—'}`))
+                .filter((text) => text.length > 0);
+            const missingLine = missingPreview.length > 0
+                ? `<div class="text-[11px]" style="color: var(--muted-foreground);">仍缺：${missingPreview.join('、')}</div>`
+                : '';
+            const remainingCount = Math.max(0, missingSpans.length - missingPreview.length);
+            const remainingLine = remainingCount > 0
+                ? `<div class="text-[11px]" style="color: var(--muted-foreground);">尚有 ${escapeHtml(remainingCount)} 個缺口未列出</div>`
+                : '';
+            return `<div class="rounded-md border border-amber-300 bg-amber-50/80 px-3 py-2 space-y-1">
+    <div class="text-[11px] font-semibold text-amber-700">⚠️ ${monthLabel}</div>
+    <div class="text-[11px]" style="color: var(--foreground);">查詢區間：${rangeStart} ~ ${rangeEnd}</div>
+    <div class="text-[11px]" style="color: var(--foreground);">取得 ${observedDays} / ${expectedDays} 個交易日（約 ${ratioText}）</div>
+    ${observedLine}${missingLine}${remainingLine}
+</div>`;
+        })
+        .join('');
+    const moreNote = alerts.length > limit
+        ? `<div class="text-[11px]" style="color: var(--muted-foreground);">另有 ${escapeHtml(alerts.length - limit)} 個月份有警示。</div>`
+        : '';
+    return `<div class="space-y-2"><div class="text-[11px] font-semibold" style="color: var(--foreground);">${title}</div><div class="space-y-2">${items}</div>${moreNote}</div>`;
+}
+
+function updateCoverageWarningBanner(alerts) {
+    const banner = document.getElementById('coverageWarningBanner');
+    if (!banner) return;
+    if (!Array.isArray(alerts) || alerts.length === 0) {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+        return;
+    }
+    const primaryAlert = alerts[0] || {};
+    const label = escapeHtml(primaryAlert.label || primaryAlert.monthKey || '資料不足月份');
+    const observedDays = Number.isFinite(primaryAlert?.observedTradingDays)
+        ? escapeHtml(primaryAlert.observedTradingDays)
+        : '—';
+    const expectedDays = Number.isFinite(primaryAlert?.expectedTradingDays)
+        ? escapeHtml(primaryAlert.expectedTradingDays)
+        : '—';
+    const percentValue = Number.isFinite(primaryAlert?.coverageRatio)
+        ? primaryAlert.coverageRatio * 100
+        : null;
+    const percentText = Number.isFinite(percentValue)
+        ? escapeHtml(percentValue.toFixed(percentValue > 0 && percentValue < 100 ? 1 : 0).replace(/\.0$/, ''))
+        : '—';
+    const extraNote = alerts.length > 1
+        ? ` ・ 另有 ${escapeHtml(alerts.length - 1)} 個月份警示`
+        : '';
+    banner.innerHTML = `<span class="font-semibold">⚠️ ${label}</span> 僅取得 ${observedDays} / ${expectedDays} 個交易日（約 ${percentText}%）${extraNote}`;
+    banner.className = 'mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700';
+    banner.classList.remove('hidden');
+}
+
 function updatePriceDebug(meta = {}) {
     const steps = Array.isArray(meta.debugSteps) ? meta.debugSteps : Array.isArray(meta.steps) ? meta.steps : [];
     const summary = meta.summary || null;
@@ -367,6 +493,12 @@ function updatePriceDebug(meta = {}) {
     const finmindStatus = meta.finmindStatus || null;
     const adjustmentDebugLog = Array.isArray(meta.adjustmentDebugLog) ? meta.adjustmentDebugLog : [];
     const adjustmentChecks = Array.isArray(meta.adjustmentChecks) ? meta.adjustmentChecks : [];
+    const coverageAlerts = Array.isArray(meta.coverageAlerts) ? meta.coverageAlerts : [];
+    const coverageDiagnostics =
+        meta.coverageDiagnostics && typeof meta.coverageDiagnostics === 'object'
+            ? meta.coverageDiagnostics
+            : null;
+    const coverageRanges = Array.isArray(meta.coverageRanges) ? meta.coverageRanges : [];
     lastPriceDebug = {
         steps,
         summary,
@@ -380,9 +512,13 @@ function updatePriceDebug(meta = {}) {
         finmindStatus,
         adjustmentDebugLog,
         adjustmentChecks,
+        coverageAlerts,
+        coverageDiagnostics,
+        coverageRanges,
     };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
+    updateCoverageWarningBanner(coverageAlerts);
 }
 
 function renderPricePipelineSteps() {
@@ -423,6 +559,31 @@ function renderPriceInspectorDebug() {
         panel.innerHTML = '';
         return;
     }
+    const coverageAlerts = Array.isArray(lastPriceDebug.coverageAlerts)
+        ? lastPriceDebug.coverageAlerts
+        : [];
+    let coverageSection = '';
+    if (coverageAlerts.length > 0) {
+        const primaryAlert = coverageAlerts[0] || {};
+        const label = escapeHtml(primaryAlert.label || primaryAlert.monthKey || '資料不足月份');
+        const observedDays = Number.isFinite(primaryAlert?.observedTradingDays)
+            ? escapeHtml(primaryAlert.observedTradingDays)
+            : '—';
+        const expectedDays = Number.isFinite(primaryAlert?.expectedTradingDays)
+            ? escapeHtml(primaryAlert.expectedTradingDays)
+            : '—';
+        const percentValue = Number.isFinite(primaryAlert?.coverageRatio)
+            ? primaryAlert.coverageRatio * 100
+            : null;
+        const percentText = Number.isFinite(percentValue)
+            ? escapeHtml(percentValue.toFixed(percentValue > 0 && percentValue < 100 ? 1 : 0).replace(/\.0$/, ''))
+            : '—';
+        const extraNote = coverageAlerts.length > 1
+            ? ` ・ 另有 ${escapeHtml(coverageAlerts.length - 1)} 個月份警示`
+            : '';
+        coverageSection = `<div class="rounded-md border border-amber-300 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-700">⚠️ ${label} 僅 ${observedDays} / ${expectedDays} 個交易日（約 ${percentText}%）${extraNote}</div>`;
+        coverageSection += `<div class="mt-2">${buildCoverageAlertsHtml(coverageAlerts, { title: '價格資料涵蓋警示' })}</div>`;
+    }
     const summaryItems = [];
     if (lastPriceDebug.summary && typeof lastPriceDebug.summary === 'object') {
         const applied = Number(lastPriceDebug.summary.adjustmentEvents || 0);
@@ -450,7 +611,7 @@ function renderPriceInspectorDebug() {
             <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
         </div>`;
     }).join('');
-    panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
+    panel.innerHTML = `<div class="space-y-2">${coverageSection}${summaryLine}${stepsHtml}</div>`;
     panel.classList.remove('hidden');
 }
 
