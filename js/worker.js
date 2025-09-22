@@ -8,6 +8,7 @@
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
 // Patch Tag: LB-ADJ-PIPE-20250527A
+// Patch Tag: LB-ADJ-PIPE-20250529A
 const WORKER_DATA_VERSION = "v11.5";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -194,6 +195,89 @@ function rangeBoundsToISO(range) {
   const startISO = utcToISO(range.start);
   const endISO = utcToISO(range.end - DAY_MS);
   return { startISO, endISO };
+}
+
+function deriveCoverageFromData(entry) {
+  if (!entry || !Array.isArray(entry.data)) return [];
+  const uniqueDates = Array.from(
+    new Set(
+      entry.data
+        .map((row) => isoToUTC(row?.date))
+        .filter((value) => Number.isFinite(value)),
+    ),
+  ).sort((a, b) => a - b);
+  if (uniqueDates.length === 0) {
+    return [];
+  }
+  const ranges = [];
+  const maxGap = DAY_MS * 5;
+  let segmentStart = uniqueDates[0];
+  let lastDate = uniqueDates[0];
+  for (let i = 1; i < uniqueDates.length; i += 1) {
+    const current = uniqueDates[i];
+    if (!Number.isFinite(current)) continue;
+    if (current - lastDate <= maxGap) {
+      lastDate = current;
+    } else {
+      ranges.push({ start: segmentStart, end: lastDate + DAY_MS });
+      segmentStart = current;
+      lastDate = current;
+    }
+  }
+  ranges.push({ start: segmentStart, end: lastDate + DAY_MS });
+  return mergeRangeBounds(ranges);
+}
+
+function extractObservedRange(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  let minDate = Infinity;
+  let maxDate = -Infinity;
+  rows.forEach((row) => {
+    const ms = isoToUTC(row?.date);
+    if (!Number.isFinite(ms)) return;
+    if (ms < minDate) minDate = ms;
+    if (ms > maxDate) maxDate = ms;
+  });
+  if (!Number.isFinite(minDate) || !Number.isFinite(maxDate)) {
+    return null;
+  }
+  return {
+    start: minDate,
+    end: maxDate + DAY_MS,
+    startISO: utcToISO(minDate),
+    endISO: utcToISO(maxDate),
+  };
+}
+
+function shouldAcceptObservedRange(missingRange, observedRange, rowCount) {
+  if (!missingRange || !observedRange) return false;
+  if (!Number.isFinite(observedRange.start) || !Number.isFinite(observedRange.end)) {
+    return false;
+  }
+  const requestedSpan = missingRange.end - missingRange.start;
+  const observedSpan = observedRange.end - observedRange.start;
+  if (!Number.isFinite(requestedSpan) || requestedSpan <= 0) {
+    return true;
+  }
+  if (!Number.isFinite(observedSpan) || observedSpan <= 0) {
+    return false;
+  }
+  if (rowCount >= 8) {
+    return true;
+  }
+  if (requestedSpan <= DAY_MS * 7) {
+    return true;
+  }
+  const ratio = observedSpan / requestedSpan;
+  if (ratio >= 0.35) {
+    return true;
+  }
+  const touchesStart = Math.abs(observedRange.start - missingRange.start) <= DAY_MS * 2;
+  const touchesEnd = Math.abs(observedRange.end - missingRange.end) <= DAY_MS * 2;
+  if (touchesStart && touchesEnd) {
+    return true;
+  }
+  return false;
 }
 
 function mergeMonthlyData(entry, newRows) {
@@ -1231,6 +1315,8 @@ async function fetchStockData(
         );
         const monthCacheFlags = new Set();
         let monthStockName = monthEntry.stockName || "";
+        let dataUpdated = false;
+        let coverageUpdated = false;
 
         if (missingRanges.length > 0) {
           for (let i = 0; i < missingRanges.length; i += 1) {
@@ -1290,16 +1376,42 @@ async function fetchStockData(
               }
               if (normalized.length > 0) {
                 mergeMonthlyData(monthEntry, normalized);
-              }
-              addCoverage(monthEntry, startISO, endISO);
-              monthEntry.lastUpdated = Date.now();
-              if (!monthEntry.stockName && monthStockName) {
-                monthEntry.stockName = monthStockName;
+                dataUpdated = true;
+                const observedRange = extractObservedRange(normalized);
+                const acceptCoverage =
+                  observedRange &&
+                  shouldAcceptObservedRange(
+                    missingRange,
+                    observedRange,
+                    normalized.length,
+                  );
+                if (acceptCoverage) {
+                  addCoverage(
+                    monthEntry,
+                    observedRange.startISO,
+                    observedRange.endISO,
+                  );
+                  coverageUpdated = true;
+                } else if (!acceptCoverage) {
+                  console.warn(
+                    `[Worker] ${stockNo} ${monthInfo.monthKey} 覆蓋不足，保留缺口 ${startISO}~${endISO}`,
+                  );
+                }
               }
             } catch (error) {
               console.error(`[Worker] 抓取 ${url} 失敗:`, error);
             }
           }
+        }
+
+        if (coverageUpdated) {
+          monthEntry.coverage = deriveCoverageFromData(monthEntry);
+        }
+        if (dataUpdated) {
+          monthEntry.lastUpdated = Date.now();
+        }
+        if (!monthEntry.stockName && monthStockName) {
+          monthEntry.stockName = monthStockName;
         }
 
         const rowsForRange = (monthEntry.data || []).filter(
