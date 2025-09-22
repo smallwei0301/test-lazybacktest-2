@@ -1,5 +1,5 @@
 
-// --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
+// --- Worker Data Acquisition & Cache (v11.6 - Coverage diagnostics & alerts) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -8,7 +8,8 @@
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
 // Patch Tag: LB-ADJ-PIPE-20250527A
-const WORKER_DATA_VERSION = "v11.5";
+// Patch Tag: LB-DATACOVERAGE-20250530A
+const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -16,6 +17,8 @@ let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const COVERAGE_SEGMENT_MAX_GAP_DAYS = 4;
+const COVERAGE_SEGMENT_MAX_GAP_MS = COVERAGE_SEGMENT_MAX_GAP_DAYS * DAY_MS;
 
 function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
@@ -135,6 +138,70 @@ function addCoverage(entry, startISO, endISO) {
   entry.coverage = mergeRangeBounds(normalized);
 }
 
+function deriveCoverageSegmentsFromDates(dateList) {
+  if (!Array.isArray(dateList) || dateList.length === 0) return [];
+  const uniqueDates = Array.from(
+    new Set(
+      dateList
+        .filter((value) => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim()),
+    ),
+  );
+  if (uniqueDates.length === 0) return [];
+  const normalized = uniqueDates
+    .map((iso) => {
+      const ms = isoToUTC(iso);
+      if (!Number.isFinite(ms)) return null;
+      return { iso, ms };
+    })
+    .filter((item) => item !== null)
+    .sort((a, b) => a.ms - b.ms);
+  if (normalized.length === 0) return [];
+  const segments = [];
+  let segStart = normalized[0];
+  let prev = normalized[0];
+  for (let i = 1; i < normalized.length; i += 1) {
+    const cur = normalized[i];
+    if (cur.ms - prev.ms <= COVERAGE_SEGMENT_MAX_GAP_MS) {
+      prev = cur;
+      continue;
+    }
+    segments.push({ startISO: segStart.iso, endISO: prev.iso });
+    segStart = cur;
+    prev = cur;
+  }
+  segments.push({ startISO: segStart.iso, endISO: prev.iso });
+  return segments;
+}
+
+function deriveIsoCoverageFromRows(rows, clampStartISO = null, clampEndISO = null) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const minMs = clampStartISO ? isoToUTC(clampStartISO) : null;
+  const maxMs = clampEndISO ? isoToUTC(clampEndISO) : null;
+  const dateList = [];
+  rows.forEach((row) => {
+    const isoDate = row?.date;
+    if (!isoDate || typeof isoDate !== "string") return;
+    const trimmed = isoDate.trim();
+    const ms = isoToUTC(trimmed);
+    if (!Number.isFinite(ms)) return;
+    if (minMs !== null && ms < minMs) return;
+    if (maxMs !== null && ms > maxMs) return;
+    dateList.push(trimmed);
+  });
+  const segments = deriveCoverageSegmentsFromDates(dateList);
+  return segments.map((segment) => ({ start: segment.startISO, end: segment.endISO }));
+}
+
+function applyObservedCoverage(entry, rows, clampStartISO = null, clampEndISO = null) {
+  if (!entry || !Array.isArray(rows) || rows.length === 0) return;
+  const segments = deriveIsoCoverageFromRows(rows, clampStartISO, clampEndISO);
+  if (segments.length === 0) return;
+  segments.forEach((segment) => {
+    addCoverage(entry, segment.start, segment.end);
+  });
+}
+
 function computeMissingRanges(existingCoverage, targetStartISO, targetEndISO) {
   const targetStart = isoToUTC(targetStartISO);
   const targetEnd = isoToUTC(targetEndISO);
@@ -194,6 +261,77 @@ function rangeBoundsToISO(range) {
   const startISO = utcToISO(range.start);
   const endISO = utcToISO(range.end - DAY_MS);
   return { startISO, endISO };
+}
+
+function countWeekdaysBetween(startISO, endISO) {
+  const start = isoToUTC(startISO);
+  const end = isoToUTC(endISO);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return 0;
+  }
+  let count = 0;
+  for (let cursor = start; cursor <= end; cursor += DAY_MS) {
+    const day = new Date(cursor).getUTCDay();
+    if (day !== 0 && day !== 6) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function buildCoverageStatsForMonth(
+  monthInfo,
+  monthEntry,
+  rowsForRange,
+  sourceFlags,
+) {
+  if (!monthInfo) return null;
+  const expectedTradingDays = countWeekdaysBetween(
+    monthInfo.rangeStartISO,
+    monthInfo.rangeEndISO,
+  );
+  const sortedDates = Array.from(
+    new Set(
+      (rowsForRange || [])
+        .map((row) => row?.date)
+        .filter((value) => typeof value === "string" && value.trim().length > 0),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+  const observedTradingDays = sortedDates.length;
+  const ratio =
+    expectedTradingDays > 0
+      ? observedTradingDays / expectedTradingDays
+      : 0;
+  const missingRanges = computeMissingRanges(
+    Array.isArray(monthEntry?.coverage) ? monthEntry.coverage : [],
+    monthInfo.rangeStartISO,
+    monthInfo.rangeEndISO,
+  ).map((range) => {
+    const { startISO, endISO } = rangeBoundsToISO(range);
+    return { start: startISO, end: endISO };
+  });
+  return {
+    monthKey: monthInfo.monthKey,
+    label: monthInfo.label,
+    rangeStart: monthInfo.rangeStartISO,
+    rangeEnd: monthInfo.rangeEndISO,
+    expectedTradingDays,
+    observedTradingDays,
+    coverageRatio:
+      expectedTradingDays > 0
+        ? Math.round(ratio * 1000) / 1000
+        : 0,
+    observedStart: sortedDates[0] || null,
+    observedEnd: sortedDates[sortedDates.length - 1] || null,
+    missingSpans: missingRanges,
+    rowCount: rowsForRange?.length || 0,
+    sources: Array.isArray(sourceFlags)
+      ? sourceFlags
+      : Array.from(sourceFlags || []),
+    alert:
+      observedTradingDays === 0 ||
+      (expectedTradingDays > 0 && ratio < 0.5),
+  };
 }
 
 function mergeMonthlyData(entry, newRows) {
@@ -1042,6 +1180,19 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
         ? cachedEntry.meta.adjustmentChecks
         : [],
+      coverageRanges: Array.isArray(cachedEntry?.meta?.coverageRanges)
+        ? cachedEntry.meta.coverageRanges
+        : Array.isArray(cachedEntry?.coverage)
+          ? cachedEntry.coverage
+          : [],
+      coverageAlerts: Array.isArray(cachedEntry?.meta?.coverageAlerts)
+        ? cachedEntry.meta.coverageAlerts
+        : [],
+      coverageDiagnostics:
+        cachedEntry?.meta?.coverageDiagnostics &&
+        typeof cachedEntry.meta.coverageDiagnostics === "object"
+          ? cachedEntry.meta.coverageDiagnostics
+          : null,
     };
   }
 
@@ -1113,6 +1264,17 @@ async function fetchStockData(
         adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
           ? adjustedResult.adjustmentChecks
           : [],
+        coverageRanges: Array.isArray(adjustedResult.coverageRanges)
+          ? adjustedResult.coverageRanges
+          : [],
+        coverageAlerts: Array.isArray(adjustedResult.coverageAlerts)
+          ? adjustedResult.coverageAlerts
+          : [],
+        coverageDiagnostics:
+          adjustedResult.coverageDiagnostics &&
+          typeof adjustedResult.coverageDiagnostics === "object"
+            ? adjustedResult.coverageDiagnostics
+            : null,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1156,6 +1318,17 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
         ? adjustedResult.adjustmentChecks
         : [],
+      coverageRanges: Array.isArray(adjustedResult.coverageRanges)
+        ? adjustedResult.coverageRanges
+        : [],
+      coverageAlerts: Array.isArray(adjustedResult.coverageAlerts)
+        ? adjustedResult.coverageAlerts
+        : [],
+      coverageDiagnostics:
+        adjustedResult.coverageDiagnostics &&
+        typeof adjustedResult.coverageDiagnostics === "object"
+          ? adjustedResult.coverageDiagnostics
+          : null,
     };
   }
 
@@ -1184,7 +1357,7 @@ async function fetchStockData(
   const monthResults = await runWithConcurrency(
     months,
     concurrencyLimit,
-    async (monthInfo) => {
+    async (monthInfo, monthIndex) => {
       try {
         let monthEntry = getMonthlyCacheEntry(
           marketKey,
@@ -1290,8 +1463,13 @@ async function fetchStockData(
               }
               if (normalized.length > 0) {
                 mergeMonthlyData(monthEntry, normalized);
+                applyObservedCoverage(
+                  monthEntry,
+                  normalized,
+                  startISO,
+                  endISO,
+                );
               }
-              addCoverage(monthEntry, startISO, endISO);
               monthEntry.lastUpdated = Date.now();
               if (!monthEntry.stockName && monthStockName) {
                 monthEntry.stockName = monthStockName;
@@ -1316,11 +1494,42 @@ async function fetchStockData(
         const usedCache =
           missingRanges.length === 0 || coveredLengthBefore > 0;
 
+        const coverageStats = buildCoverageStatsForMonth(
+          monthInfo,
+          monthEntry,
+          rowsForRange,
+          Array.from(monthSourceFlags),
+        );
+        if (coverageStats?.alert) {
+          const warnProgress = Number.isFinite(monthIndex)
+            ? Math.min(
+                45,
+                10 +
+                  Math.max(
+                    0,
+                    Math.round(
+                      ((monthIndex + 0.5) / Math.max(1, months.length)) * 35,
+                    ),
+                  ),
+              )
+            : 42;
+          const warnMessage =
+            `⚠️ ${stockNo} ${monthInfo.label} 僅取得 ${coverageStats.observedTradingDays}/` +
+            `${coverageStats.expectedTradingDays} 個交易日`;
+          console.warn(`[Worker] ${warnMessage}`);
+          self.postMessage({
+            type: "progress",
+            progress: warnProgress,
+            message: warnMessage,
+          });
+        }
+
         return {
           rows: rowsForRange,
           sourceFlags: Array.from(monthSourceFlags),
           stockName: monthStockName,
           usedCache,
+          coverageStats,
         };
       } finally {
         completed += 1;
@@ -1337,6 +1546,7 @@ async function fetchStockData(
   const normalizedRows = [];
   const sourceFlags = new Set();
   let stockName = "";
+  const coverageStatsCollection = [];
   monthResults.forEach((res) => {
     if (!res) return;
     if (res.stockName && !stockName) stockName = res.stockName;
@@ -1347,6 +1557,9 @@ async function fetchStockData(
     }
     if (res.usedCache) {
       sourceFlags.add("Worker月度快取");
+    }
+    if (res.coverageStats) {
+      coverageStatsCollection.push(res.coverageStats);
     }
     (res.rows || []).forEach((row) => {
       const normalized = normalizeProxyRow(
@@ -1361,6 +1574,14 @@ async function fetchStockData(
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
+  const coverageRanges = deriveIsoCoverageFromRows(
+    deduped,
+    startDate,
+    endDate,
+  );
+  const coverageAlerts = coverageStatsCollection.filter(
+    (stat) => stat && stat.alert,
+  );
   const defaultRemoteLabel = isTpex
     ? adjusted
       ? "Yahoo Finance (還原)"
@@ -1379,11 +1600,15 @@ async function fetchStockData(
     stockName: stockName || stockNo,
     dataSource: dataSourceLabel,
     timestamp: Date.now(),
+    coverage: coverageRanges,
     meta: {
       stockNo,
       startDate,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      coverageRanges,
+      coverageAlerts,
+      coverageDiagnostics: { months: coverageStatsCollection },
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -1398,6 +1623,9 @@ async function fetchStockData(
     data: deduped,
     dataSource: dataSourceLabel,
     stockName: stockName || stockNo,
+    coverageRanges,
+    coverageAlerts,
+    coverageDiagnostics: { months: coverageStatsCollection },
   };
 }
 
@@ -4859,6 +5087,17 @@ self.onmessage = async function (e) {
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
                 ? cachedMeta.debugSteps
                 : [],
+              coverageRanges: Array.isArray(cachedMeta?.coverageRanges)
+                ? cachedMeta.coverageRanges
+                : [],
+              coverageAlerts: Array.isArray(cachedMeta?.coverageAlerts)
+                ? cachedMeta.coverageAlerts
+                : [],
+              coverageDiagnostics:
+                cachedMeta?.coverageDiagnostics &&
+                typeof cachedMeta.coverageDiagnostics === "object"
+                  ? cachedMeta.coverageDiagnostics
+                  : null,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
@@ -4901,6 +5140,17 @@ self.onmessage = async function (e) {
             adjustmentChecks: Array.isArray(cachedMeta.adjustmentChecks)
               ? cachedMeta.adjustmentChecks
               : [],
+            coverageRanges: Array.isArray(cachedMeta.coverageRanges)
+              ? cachedMeta.coverageRanges
+              : [],
+            coverageAlerts: Array.isArray(cachedMeta.coverageAlerts)
+              ? cachedMeta.coverageAlerts
+              : [],
+            coverageDiagnostics:
+              cachedMeta.coverageDiagnostics &&
+              typeof cachedMeta.coverageDiagnostics === "object"
+                ? cachedMeta.coverageDiagnostics
+                : null,
           };
         }
       } else {
@@ -4984,6 +5234,18 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.adjustmentChecks)
             ? workerLastMeta.adjustmentChecks
             : [],
+        coverageRanges: Array.isArray(outcome?.coverageRanges)
+          ? outcome.coverageRanges
+          : Array.isArray(workerLastMeta?.coverageRanges)
+            ? workerLastMeta.coverageRanges
+            : [],
+        coverageAlerts: Array.isArray(outcome?.coverageAlerts)
+          ? outcome.coverageAlerts
+          : Array.isArray(workerLastMeta?.coverageAlerts)
+            ? workerLastMeta.coverageAlerts
+            : [],
+        coverageDiagnostics:
+          outcome?.coverageDiagnostics || workerLastMeta?.coverageDiagnostics || null,
       };
 
       if (!useCachedData && fetched) {
@@ -5013,6 +5275,17 @@ self.onmessage = async function (e) {
           adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
             ? outcome.adjustmentChecks
             : [],
+          coverageRanges: Array.isArray(outcome?.coverageRanges)
+            ? outcome.coverageRanges
+            : [],
+          coverageAlerts: Array.isArray(outcome?.coverageAlerts)
+            ? outcome.coverageAlerts
+            : [],
+          coverageDiagnostics:
+            outcome?.coverageDiagnostics &&
+            typeof outcome.coverageDiagnostics === "object"
+              ? outcome.coverageDiagnostics
+              : null,
         };
       }
 

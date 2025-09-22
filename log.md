@@ -1,5 +1,17 @@
 # Lazybacktest Debug Log
 
+# 2025-05-31 — Patch LB-DATACOVERAGE-20250531A
+- **Issue recap**: 資料來源測試卡僅顯示 coverage 警示標章，缺乏完整的月份檢查紀錄，開發者難以比對缺口區段與實際觀測範圍。
+- **Fix**: 新增 `buildCoverageDiagnosticsLogHtml` 工具，將 Worker 回傳的 `coverageDiagnostics.months` 轉為月份檢查 log，並於還原管線與原始資料測試結果中顯示。
+- **Diagnostics**: Coverage log 詳列查詢區間、實際資料範圍、來源旗標與缺口片段，超過 3 段會提示剩餘數量，協助排查資料短缺原因。
+- **Testing**: 手動於測試卡片重跑 3260 / 2024-09-23~2025-09-19 還原模式，確認 log 顯示 coverage 狀態（尚未執行自動化測試）。
+
+# 2025-05-30 — Patch LB-DATACOVERAGE-20250530A
+- **Issue recap**: 區間價格於 2025/03、2025/04 等月份僅取得單日資料仍被標記為完整覆蓋，導致 UI 呈現 140 筆原始收盤價與測試卡 FinMind 筆數 243 之間產生落差。
+- **Fix**: Worker 僅根據實際取得之交易日期更新月度 coverage，並計算每月交易日覆蓋率回傳 `coverageAlerts` 與 `coverageDiagnostics`；前端測試卡與價格檢視器加入明顯警示、覆蓋列表與橘色橫幅提醒。
+- **Diagnostics**: `coverageAlerts` 詳列月份、取得筆數與缺口範圍，主畫面 `coverageWarningBanner` 同步提示開發者資料不足。
+- **Testing**: 手動檢視回測流程與資料來源測試卡（未執行自動化測試）。
+
 # 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A
 - **Issue recap**: 備援還原流程仍以「已還原股價 × 還原因子」進行縮放，導致雙重折算；前端區間價格缺乏原始價格來源標籤，難以分辨 TWSE 與 FinMind 來源。
 - **Fix**: Netlify 還原函式在調整時保留 `rawOpen`/`rawClose` 等基準數據並標示 `priceSource`，Worker 備援計算改以原始價格乘上係數；價格檢視器摘要與表格同步顯示 TWSE、FinMind 來源。

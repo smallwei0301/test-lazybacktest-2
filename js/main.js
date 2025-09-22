@@ -1,5 +1,7 @@
-// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
+// --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.4 ---
 // Patch Tag: LB-ADJ-SPLIT-20250518A
+// Patch Tag: LB-DATACOVERAGE-20250530A
+// Patch Tag: LB-DATACOVERAGE-20250531A
 
 // 全局變量
 let stockChart = null;
@@ -211,6 +213,138 @@ function buildAdjustmentDiagnosticsHtml(adjustments) {
         ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 3 筆事件，總計 ${testerEscapeHtml(adjustments.length)} 筆。</div>`
         : '';
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 space-y-1">${items}</div>${remainderNote}</div>`;
+}
+
+function buildCoverageAlertList(alerts, options = {}) {
+    if (!Array.isArray(alerts) || alerts.length === 0) return '';
+    const title = testerEscapeHtml(options.title || '資料涵蓋警示');
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : alerts.length;
+    const formatPercent = (ratio) => {
+        if (!Number.isFinite(ratio)) return '—';
+        const percent = ratio * 100;
+        const decimals = percent > 0 && percent < 100 ? 1 : 0;
+        const formatted = percent.toFixed(decimals).replace(/\.0$/, '');
+        return `${testerEscapeHtml(formatted)}%`;
+    };
+    const items = alerts.slice(0, limit)
+        .map((alert) => {
+            const monthLabel = testerEscapeHtml(alert?.label || alert?.monthKey || '未命名月份');
+            const rangeStart = testerEscapeHtml(alert?.rangeStart || '—');
+            const rangeEnd = testerEscapeHtml(alert?.rangeEnd || '—');
+            const observedDays = Number.isFinite(alert?.observedTradingDays)
+                ? testerEscapeHtml(alert.observedTradingDays)
+                : '—';
+            const expectedDays = Number.isFinite(alert?.expectedTradingDays)
+                ? testerEscapeHtml(alert.expectedTradingDays)
+                : '—';
+            const ratioText = formatPercent(alert?.coverageRatio);
+            const observedStart = alert?.observedStart ? testerEscapeHtml(alert.observedStart) : null;
+            const observedEnd = alert?.observedEnd ? testerEscapeHtml(alert.observedEnd) : null;
+            const observedLine = observedStart || observedEnd
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">實際資料範圍：${observedStart || '—'} ~ ${observedEnd || '—'}</div>`
+                : '';
+            const missingSpans = Array.isArray(alert?.missingSpans) ? alert.missingSpans : [];
+            const missingPreview = missingSpans.slice(0, 3)
+                .map((span) => testerEscapeHtml(`${span?.start || '—'} ~ ${span?.end || '—'}`))
+                .filter((text) => text.length > 0);
+            const missingLine = missingPreview.length > 0
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">仍缺：${missingPreview.join('、')}</div>`
+                : '';
+            const remainingCount = Math.max(0, missingSpans.length - missingPreview.length);
+            const remainingLine = remainingCount > 0
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">尚有 ${testerEscapeHtml(remainingCount)} 個缺口未列出</div>`
+                : '';
+            return `<div class="rounded border border-amber-200 bg-amber-50/80 px-3 py-2 space-y-1">
+    <div class="text-[11px] font-semibold text-amber-700">⚠️ ${monthLabel}</div>
+    <div class="text-[10px]" style="color: var(--foreground);">查詢區間：${rangeStart} ~ ${rangeEnd}</div>
+    <div class="text-[10px]" style="color: var(--foreground);">取得 ${observedDays} / ${expectedDays} 個交易日（約 ${ratioText}）</div>
+    ${observedLine}${missingLine}${remainingLine}
+</div>`;
+        })
+        .join('');
+    const moreNote = alerts.length > limit
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">另有 ${testerEscapeHtml(alerts.length - limit)} 個月份有警示。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">${title}</div><div class="mt-2 space-y-2">${items}</div>${moreNote}</div>`;
+}
+
+function buildCoverageDiagnosticsLogHtml(diagnostics, options = {}) {
+    const months = Array.isArray(diagnostics?.months) ? diagnostics.months : [];
+    if (months.length === 0) return '';
+    const title = testerEscapeHtml(options.title || 'Coverage 檢查紀錄');
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : months.length;
+    const formatPercent = (ratio) => {
+        if (!Number.isFinite(ratio)) return '—';
+        const percent = ratio * 100;
+        const decimals = percent > 0 && percent < 100 ? 1 : 0;
+        return `${testerEscapeHtml(percent.toFixed(decimals).replace(/\.0$/, ''))}%`;
+    };
+    const formatCount = (value) => (Number.isFinite(value) ? testerEscapeHtml(value) : '—');
+    const items = months
+        .slice(0, limit)
+        .map((month) => {
+            const statusClass = month?.alert ? 'text-amber-600' : 'text-emerald-600';
+            let statusLabel = month?.alert ? '警示' : '通過';
+            if (month?.alert && Number.isFinite(month?.observedTradingDays) && month.observedTradingDays === 0) {
+                statusLabel = '無資料';
+            }
+            const monthLabel = testerEscapeHtml(month?.label || month?.monthKey || '未命名月份');
+            const rangeStart = testerEscapeHtml(month?.rangeStart || '—');
+            const rangeEnd = testerEscapeHtml(month?.rangeEnd || '—');
+            const observedDays = formatCount(month?.observedTradingDays);
+            const expectedDays = formatCount(month?.expectedTradingDays);
+            const ratioText = formatPercent(month?.coverageRatio);
+            const observedStart = month?.observedStart ? testerEscapeHtml(month.observedStart) : null;
+            const observedEnd = month?.observedEnd ? testerEscapeHtml(month.observedEnd) : null;
+            const sourceList = Array.isArray(month?.sources)
+                ? month.sources
+                      .map((src) => testerEscapeHtml(src))
+                      .filter((text) => text.length > 0)
+                : [];
+            const missingSpans = Array.isArray(month?.missingSpans) ? month.missingSpans : [];
+            const missingPreview = missingSpans
+                .slice(0, 3)
+                .map((span) => testerEscapeHtml(`${span?.start || '—'} ~ ${span?.end || '—'}`))
+                .filter((text) => text.length > 0);
+            const remainderCount = Math.max(0, missingSpans.length - missingPreview.length);
+            const detailLines = [
+                `查詢區間：${rangeStart} ~ ${rangeEnd}`,
+                `取得 ${observedDays} / ${expectedDays} 個交易日（約 ${ratioText}）`,
+            ];
+            if (observedStart || observedEnd) {
+                detailLines.push(`實際資料：${observedStart || '—'} ~ ${observedEnd || '—'}`);
+            }
+            if (sourceList.length > 0) {
+                detailLines.push(`資料來源：${sourceList.join('、')}`);
+            }
+            if (missingPreview.length > 0) {
+                const remainderNote = remainderCount > 0 ? `，另有 ${testerEscapeHtml(remainderCount)} 段未列出` : '';
+                detailLines.push(`缺口區間：${missingPreview.join('、')}${remainderNote}`);
+            } else if (!month?.alert && Number.isFinite(month?.observedTradingDays) && Number.isFinite(month?.expectedTradingDays) && month.observedTradingDays === month.expectedTradingDays) {
+                detailLines.push('缺口區間：無');
+            }
+            if (Number.isFinite(month?.rowCount)) {
+                detailLines.push(`資料列數：${testerEscapeHtml(month.rowCount)}`);
+            }
+            const detailsHtml = detailLines
+                .map((line) => `<div>${line}</div>`)
+                .join('');
+            return `<div class="rounded border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+    <div class="flex items-center gap-2 text-[11px]" style="color: var(--foreground);">
+        <span class="${statusClass}">●</span>
+        <span class="font-semibold">${monthLabel}</span>
+        <span class="text-[10px] ${statusClass}">${statusLabel}</span>
+    </div>
+    <div class="mt-1 space-y-1 text-[10px]" style="color: var(--muted-foreground);">
+        ${detailsHtml}
+    </div>
+</div>`;
+        })
+        .join('');
+    const remainderNote = months.length > limit
+        ? `<div class="text-[10px]" style="color: var(--muted-foreground);">僅顯示前 ${testerEscapeHtml(limit)} 個月份，總計 ${testerEscapeHtml(months.length)} 個月。</div>`
+        : '';
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">${title}</div><div class="mt-2 space-y-2">${items}</div>${remainderNote}</div>`;
 }
 
 function buildAdjustmentDebugLogHtml(logEntries, options = {}) {
@@ -586,6 +720,12 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const fallbackAppliedFlag = Boolean(payload?.adjustmentFallbackApplied);
             const appliedAdjustments = adjustmentsList.filter((event) => !event.skipped).length;
             const skippedAdjustments = adjustmentsList.filter((event) => event.skipped).length;
+            const coverageAlerts = Array.isArray(payload?.coverageAlerts) ? payload.coverageAlerts : [];
+            const coverageDiagnostics =
+                payload?.coverageDiagnostics && typeof payload.coverageDiagnostics === 'object'
+                    ? payload.coverageDiagnostics
+                    : null;
+            const coverageRanges = Array.isArray(payload?.coverageRanges) ? payload.coverageRanges : [];
             const {
                 priceSource,
                 priceRows,
@@ -626,6 +766,46 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                         : ''
                 }`,
             ];
+            if (coverageAlerts.length > 0) {
+                const primaryAlert = coverageAlerts[0] || {};
+                const summaryLabel = testerEscapeHtml(primaryAlert.label || primaryAlert.monthKey || '資料不足月份');
+                const observedDaysText = Number.isFinite(primaryAlert?.observedTradingDays)
+                    ? testerEscapeHtml(primaryAlert.observedTradingDays)
+                    : '—';
+                const expectedDaysText = Number.isFinite(primaryAlert?.expectedTradingDays)
+                    ? testerEscapeHtml(primaryAlert.expectedTradingDays)
+                    : '—';
+                const percentValue = Number.isFinite(primaryAlert?.coverageRatio)
+                    ? primaryAlert.coverageRatio * 100
+                    : null;
+                const percentText = Number.isFinite(percentValue)
+                    ? testerEscapeHtml(percentValue.toFixed(percentValue > 0 && percentValue < 100 ? 1 : 0).replace(/\.0$/, ''))
+                    : '—';
+                lines.push(
+                    `<span class="inline-flex items-center gap-2 rounded-md bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">⚠️ ${summaryLabel} 僅 ${observedDaysText} / ${expectedDaysText} 個交易日（約 ${percentText}%）</span>`,
+                );
+                const coverageHtml = buildCoverageAlertList(coverageAlerts, { title: '價格資料涵蓋警示' });
+                if (coverageHtml) {
+                    extraSections.push(coverageHtml);
+                }
+            } else if (coverageRanges.length > 0) {
+                const spanText = coverageRanges
+                    .slice(0, 2)
+                    .map((span) => testerEscapeHtml(`${span?.start || '—'} ~ ${span?.end || '—'}`))
+                    .join('、');
+                if (spanText) {
+                    lines.push(`資料覆蓋範圍: <span class="font-semibold">${spanText}${
+                        coverageRanges.length > 2 ? ` 等 ${testerEscapeHtml(coverageRanges.length)} 段` : ''
+                    }</span>`);
+                }
+            }
+            const coverageLogHtml = buildCoverageDiagnosticsLogHtml(coverageDiagnostics, {
+                title: 'Coverage 檢查紀錄',
+                limit: 6,
+            });
+            if (coverageLogHtml) {
+                extraSections.push(coverageLogHtml);
+            }
             if (Number.isFinite(priceRows)) {
                 lines.push(`價格筆數: <span class="font-semibold">${testerEscapeHtml(priceRows)}</span>`);
             }
@@ -951,11 +1131,58 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const firstDate = isoDates.length > 0 ? isoDates[0] : start;
             const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
             const sourceSummary = payload?.dataSource || '未知資料來源';
-            detailHtml = [
+            const coverageAlerts = Array.isArray(payload?.coverageAlerts) ? payload.coverageAlerts : [];
+            const coverageDiagnostics =
+                payload?.coverageDiagnostics && typeof payload.coverageDiagnostics === 'object'
+                    ? payload.coverageDiagnostics
+                    : null;
+            const coverageRanges = Array.isArray(payload?.coverageRanges) ? payload.coverageRanges : [];
+            const baseLines = [
                 `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
                 `資料筆數: <span class="font-semibold">${total}</span>`,
                 `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-            ].join('<br>');
+            ];
+            if (coverageAlerts.length > 0) {
+                const primaryAlert = coverageAlerts[0] || {};
+                const label = testerEscapeHtml(primaryAlert.label || primaryAlert.monthKey || '資料不足月份');
+                const observedText = Number.isFinite(primaryAlert?.observedTradingDays)
+                    ? testerEscapeHtml(primaryAlert.observedTradingDays)
+                    : '—';
+                const expectedText = Number.isFinite(primaryAlert?.expectedTradingDays)
+                    ? testerEscapeHtml(primaryAlert.expectedTradingDays)
+                    : '—';
+                const percentValue = Number.isFinite(primaryAlert?.coverageRatio)
+                    ? primaryAlert.coverageRatio * 100
+                    : null;
+                const percentText = Number.isFinite(percentValue)
+                    ? testerEscapeHtml(percentValue.toFixed(percentValue > 0 && percentValue < 100 ? 1 : 0).replace(/\.0$/, ''))
+                    : '—';
+                baseLines.push(
+                    `<span class="inline-flex items-center gap-2 rounded-md bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">⚠️ ${label} 僅 ${observedText} / ${expectedText} 個交易日（約 ${percentText}%）</span>`,
+                );
+                const coverageHtml = buildCoverageAlertList(coverageAlerts, { title: '價格資料涵蓋警示' });
+                if (coverageHtml) {
+                    baseLines.push(coverageHtml);
+                }
+            } else if (coverageRanges.length > 0) {
+                const spanText = coverageRanges
+                    .slice(0, 2)
+                    .map((span) => testerEscapeHtml(`${span?.start || '—'} ~ ${span?.end || '—'}`))
+                    .join('、');
+                if (spanText) {
+                    baseLines.push(`資料覆蓋範圍: <span class="font-semibold">${spanText}${
+                        coverageRanges.length > 2 ? ` 等 ${testerEscapeHtml(coverageRanges.length)} 段` : ''
+                    }</span>`);
+                }
+            }
+            const coverageLogHtml = buildCoverageDiagnosticsLogHtml(coverageDiagnostics, {
+                title: 'Coverage 檢查紀錄',
+                limit: 6,
+            });
+            if (coverageLogHtml) {
+                baseLines.push(coverageLogHtml);
+            }
+            detailHtml = baseLines.join('<br>');
         }
         showTesterResult(
             'success',
@@ -1387,13 +1614,18 @@ function normalizeRange(startISO, endISO) {
 
 function mergeIsoCoverage(existing, additionalRange) {
     const bounds = [];
-    (existing || []).forEach((range) => {
-        const normalized = normalizeRange(range.start, range.end);
+    const pushRange = (range) => {
+        if (!range) return;
+        const startISO = range.start ?? range.startISO ?? null;
+        const endISO = range.end ?? range.endISO ?? null;
+        const normalized = normalizeRange(startISO, endISO);
         if (normalized) bounds.push(normalized);
-    });
-    if (additionalRange) {
-        const normalized = normalizeRange(additionalRange.start, additionalRange.end);
-        if (normalized) bounds.push(normalized);
+    };
+    (existing || []).forEach(pushRange);
+    if (Array.isArray(additionalRange)) {
+        additionalRange.forEach(pushRange);
+    } else if (additionalRange) {
+        pushRange(additionalRange);
     }
     const mergedBounds = mergeRangeBounds(bounds);
     return mergedBounds.map((range) => ({
