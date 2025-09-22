@@ -5425,6 +5425,8 @@ function runStrategy(data, params) {
 
   let annualR = 0;
   let buyHoldAnnualizedReturn = 0;
+  let firstValidPriceIdxBH = -1;
+  let lastValidPriceIdxBH = -1;
   const buyHoldSummary = {
     firstValidPriceIdx: null,
     firstValidPriceDate: null,
@@ -5468,10 +5470,10 @@ function runStrategy(data, params) {
       // 使用設定的日期範圍找出對應的價格
       const startDate = new Date(params.startDate);
       const endDate = new Date(params.endDate);
-      const firstValidPriceIdxBH = closes.findIndex(
+      firstValidPriceIdxBH = closes.findIndex(
         (p, i) => check(p) && p > 0 && new Date(dates[i]) >= startDate,
       );
-      const lastValidPriceIdxBH = closes
+      lastValidPriceIdxBH = closes
         .map((p, i) => check(p) && p > 0 && new Date(dates[i]) <= endDate)
         .lastIndexOf(true);
       if (
@@ -5684,16 +5686,36 @@ function runStrategy(data, params) {
     if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
       periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
     }
-    const initP_bh_full = closes.find((p0) => check(p0) && p0 > 0) || 1;
     let bhReturnsFull = Array(n).fill(null);
-    if (check(initP_bh_full)) {
-      bhReturnsFull = closes.map((p, i) =>
-        check(p) && p > 0
-          ? ((p - initP_bh_full) / initP_bh_full) * 100
-          : i > 0 && bhReturnsFull[i - 1] !== null
-            ? bhReturnsFull[i - 1]
-            : 0,
-      );
+    const bhBaselineIdx = firstValidPriceIdxBH;
+    if (
+      bhBaselineIdx !== -1 &&
+      bhBaselineIdx < n &&
+      check(closes[bhBaselineIdx]) &&
+      closes[bhBaselineIdx] > 0
+    ) {
+      const baselinePrice = closes[bhBaselineIdx];
+      for (let i = bhBaselineIdx; i < n; i += 1) {
+        if (check(closes[i]) && closes[i] > 0) {
+          bhReturnsFull[i] = ((closes[i] - baselinePrice) / baselinePrice) * 100;
+        } else if (i > bhBaselineIdx && bhReturnsFull[i - 1] !== null) {
+          bhReturnsFull[i] = bhReturnsFull[i - 1];
+        } else if (i === bhBaselineIdx) {
+          bhReturnsFull[i] = 0;
+        } else {
+          bhReturnsFull[i] = 0;
+        }
+      }
+      if (bhBaselineIdx > 0 && effectiveStartIdx < n) {
+        const fillStart = Math.max(0, effectiveStartIdx);
+        for (let i = bhBaselineIdx - 1; i >= fillStart; i -= 1) {
+          if (bhReturnsFull[i] === null) {
+            bhReturnsFull[i] = 0;
+          }
+        }
+      }
+    } else {
+      bhReturnsFull = Array(n).fill(0);
     }
     if (buyHoldSummary.exceedsGapTolerance) {
       bhReturnsFull = Array(n).fill(0);
