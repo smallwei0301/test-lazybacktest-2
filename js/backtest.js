@@ -16,6 +16,7 @@ let lastPriceDebug = {
     priceMode: null,
     splitDiagnostics: null,
     finmindStatus: null,
+    rangeFallback: null,
 };
 
 // --- 主回測函數 ---
@@ -129,6 +130,10 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
                         ? rawMeta.adjustmentChecks
                         : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
+                    const fallbackRangeMeta = rawMeta.fallbackRangeMeta
+                        || data?.dataDebug?.fallbackRangeMeta
+                        || existingEntry?.fallbackRangeMeta
+                        || null;
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
@@ -148,6 +153,7 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fallbackRangeMeta,
                     };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
@@ -183,6 +189,9 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
+                    const fallbackRangeMeta = data?.dataDebug?.fallbackRangeMeta
+                        || cachedEntry.fallbackRangeMeta
+                        || null;
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
@@ -201,6 +210,7 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fallbackRangeMeta,
                     };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
@@ -367,6 +377,10 @@ function updatePriceDebug(meta = {}) {
     const finmindStatus = meta.finmindStatus || null;
     const adjustmentDebugLog = Array.isArray(meta.adjustmentDebugLog) ? meta.adjustmentDebugLog : [];
     const adjustmentChecks = Array.isArray(meta.adjustmentChecks) ? meta.adjustmentChecks : [];
+    const rangeFallbackMeta =
+        meta?.fallbackRangeMeta && typeof meta.fallbackRangeMeta === 'object'
+            ? meta.fallbackRangeMeta
+            : null;
     lastPriceDebug = {
         steps,
         summary,
@@ -380,6 +394,7 @@ function updatePriceDebug(meta = {}) {
         finmindStatus,
         adjustmentDebugLog,
         adjustmentChecks,
+        rangeFallback: rangeFallbackMeta,
     };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -432,6 +447,58 @@ function renderPriceInspectorDebug() {
     }
     if (lastPriceDebug.fallbackApplied) {
         summaryItems.push('備援縮放已啟用');
+    }
+    const rangeFallback = lastPriceDebug.rangeFallback;
+    if (
+        rangeFallback &&
+        (rangeFallback.triggered || rangeFallback.fallbackAttempted || rangeFallback.fallbackApplied)
+    ) {
+        const formatPercentage = (value) => (Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '—');
+        const formatWeekdays = (value) => (Number.isFinite(value) ? `${value} 天` : '—');
+        const ratioBeforeText = formatPercentage(
+            Number.isFinite(rangeFallback.observedRatioBeforeFallback)
+                ? rangeFallback.observedRatioBeforeFallback
+                : Number.isFinite(rangeFallback.observedRatio)
+                    ? rangeFallback.observedRatio
+                    : null,
+        );
+        const ratioAfterText = formatPercentage(rangeFallback.observedRatioAfterFallback);
+        const trailingBeforeText = formatWeekdays(rangeFallback.trailingGapWeekdays);
+        const trailingAfterText = formatWeekdays(rangeFallback.trailingGapWeekdaysAfterFallback);
+        const reasonMap = {
+            trailingGap: '尾端缺口過大',
+            lowDensity: '涵蓋率不足',
+        };
+        const reasonLabel = rangeFallback.triggerReason
+            ? reasonMap[rangeFallback.triggerReason] || rangeFallback.triggerReason
+            : null;
+
+        let fallbackLine = '';
+        if (rangeFallback.fallbackApplied) {
+            const sourceLabel = rangeFallback.fallbackSource
+                ? escapeHtml(rangeFallback.fallbackSource)
+                : '備援來源';
+            const ratioSegment =
+                ratioBeforeText !== '—' && ratioAfterText !== '—'
+                    ? `${ratioBeforeText} → ${ratioAfterText}`
+                    : ratioAfterText !== '—'
+                        ? ratioAfterText
+                        : ratioBeforeText;
+            const trailingSegment = trailingAfterText !== '—' ? trailingAfterText : trailingBeforeText;
+            const rowsText = Number.isFinite(rangeFallback.fallbackRows)
+                ? ` ・ 筆數 ${escapeHtml(rangeFallback.fallbackRows)}`
+                : '';
+            fallbackLine = `區間備援: 已啟用 ${sourceLabel} ・ 覆蓋率 ${ratioSegment} ・ 尾端缺口 ${trailingSegment}${rowsText}`;
+        } else if (rangeFallback.fallbackAttempted && rangeFallback.fallbackError) {
+            fallbackLine = `區間備援: 嘗試啟用失敗 (${escapeHtml(rangeFallback.fallbackError)})`;
+        } else if (rangeFallback.triggered) {
+            const trailingSegment = trailingBeforeText;
+            const reasonSegment = reasonLabel ? ` ・ 原因 ${escapeHtml(reasonLabel)}` : '';
+            fallbackLine = `區間備援: 判定需啟用 ・ 覆蓋率 ${ratioBeforeText} ・ 尾端缺口 ${trailingSegment}${reasonSegment}`;
+        }
+        if (fallbackLine) {
+            summaryItems.push(fallbackLine);
+        }
     }
     const summaryLine = summaryItems.length > 0
         ? `<div class="text-[11px] font-medium" style="color: var(--foreground);">${escapeHtml(summaryItems.join(' ・ '))}</div>`

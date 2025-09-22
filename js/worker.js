@@ -8,7 +8,8 @@
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
 // Patch Tag: LB-ADJ-PIPE-20250527A
-const WORKER_DATA_VERSION = "v11.5";
+// Patch Tag: LB-RANGE-FALLBACK-20250530A
+const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -16,6 +17,12 @@ let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const RANGE_FALLBACK_CONFIG = Object.freeze({
+  MIN_REQUESTED_WEEKDAYS: 5,
+  TRAILING_GAP_WEEKDAYS_THRESHOLD: 5,
+  DENSITY_THRESHOLD: 0.7,
+});
 
 function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
@@ -104,6 +111,149 @@ function utcToISO(ms) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
     date.getUTCDate(),
   )}`;
+}
+
+function countWeekdaysBetweenUTC(startUTC, endUTC) {
+  if (!Number.isFinite(startUTC) || !Number.isFinite(endUTC)) return 0;
+  if (endUTC < startUTC) return 0;
+  const totalDays = Math.floor((endUTC - startUTC) / DAY_MS) + 1;
+  if (!Number.isFinite(totalDays) || totalDays <= 0) return 0;
+  const startDate = new Date(startUTC);
+  const fullWeeks = Math.floor(totalDays / 7);
+  let weekdays = fullWeeks * 5;
+  let remainder = totalDays % 7;
+  let day = startDate.getUTCDay();
+  while (remainder > 0) {
+    if (day !== 0 && day !== 6) {
+      weekdays += 1;
+    }
+    day = (day + 1) % 7;
+    remainder -= 1;
+  }
+  return weekdays;
+}
+
+function countWeekdaysBetweenISO(startISO, endISO) {
+  const startUTC = isoToUTC(startISO);
+  const endUTC = isoToUTC(endISO);
+  if (!Number.isFinite(startUTC) || !Number.isFinite(endUTC)) return 0;
+  return countWeekdaysBetweenUTC(startUTC, endUTC);
+}
+
+function countWeekdaysExclusive(startISO, endISO) {
+  const startUTC = isoToUTC(startISO);
+  const endUTC = isoToUTC(endISO);
+  if (!Number.isFinite(startUTC) || !Number.isFinite(endUTC)) return 0;
+  return countWeekdaysBetweenUTC(startUTC + DAY_MS, endUTC);
+}
+
+function computeRangeCoverageMeta(rows, startISO, endISO) {
+  const requestedWeekdays = countWeekdaysBetweenISO(startISO, endISO);
+  const uniqueTradingDays = new Set();
+  let firstUTC = null;
+  let lastUTC = null;
+
+  if (Array.isArray(rows)) {
+    rows.forEach((row) => {
+      const isoDate = row?.date;
+      if (!isoDate) return;
+      const utcValue = isoToUTC(isoDate);
+      if (!Number.isFinite(utcValue)) return;
+      const weekday = new Date(utcValue).getUTCDay();
+      if (weekday === 0 || weekday === 6) return;
+      if (!uniqueTradingDays.has(utcValue)) {
+        uniqueTradingDays.add(utcValue);
+        if (firstUTC === null || utcValue < firstUTC) firstUTC = utcValue;
+        if (lastUTC === null || utcValue > lastUTC) lastUTC = utcValue;
+      }
+    });
+  }
+
+  const observedTradingDays = uniqueTradingDays.size;
+  const firstObservedDate = Number.isFinite(firstUTC) ? utcToISO(firstUTC) : null;
+  const lastObservedDate = Number.isFinite(lastUTC) ? utcToISO(lastUTC) : null;
+  const leadingGapWeekdays = firstObservedDate
+    ? Math.min(
+        countWeekdaysExclusive(startISO, firstObservedDate),
+        requestedWeekdays,
+      )
+    : requestedWeekdays;
+  const trailingGapWeekdays = lastObservedDate
+    ? Math.min(
+        countWeekdaysExclusive(lastObservedDate, endISO),
+        requestedWeekdays,
+      )
+    : requestedWeekdays;
+  const observedRatio =
+    requestedWeekdays > 0 ? observedTradingDays / requestedWeekdays : 0;
+
+  return {
+    requestedWeekdays,
+    observedTradingDays,
+    observedRatio: Number.isFinite(observedRatio) ? observedRatio : 0,
+    leadingGapWeekdays,
+    trailingGapWeekdays,
+    missingWeekdays: Math.max(requestedWeekdays - observedTradingDays, 0),
+    firstObservedDate,
+    lastObservedDate,
+  };
+}
+
+function shouldTriggerFallbackRangeSwitch(metrics, config = {}) {
+  const trailingGapThreshold = Number.isFinite(config.trailingGapThreshold)
+    ? config.trailingGapThreshold
+    : RANGE_FALLBACK_CONFIG.TRAILING_GAP_WEEKDAYS_THRESHOLD;
+  const densityThreshold = Number.isFinite(config.densityThreshold)
+    ? config.densityThreshold
+    : RANGE_FALLBACK_CONFIG.DENSITY_THRESHOLD;
+  const minWeekdays = Number.isFinite(config.minWeekdays)
+    ? config.minWeekdays
+    : RANGE_FALLBACK_CONFIG.MIN_REQUESTED_WEEKDAYS;
+
+  const result = {
+    trigger: false,
+    reason: null,
+    trailingGapExceeded: false,
+    densityBelowThreshold: false,
+    observedRatio: metrics?.observedRatio ?? null,
+    appliedThresholds: {
+      trailingGapWeekdays: trailingGapThreshold,
+      density: densityThreshold,
+      minRequestedWeekdays: minWeekdays,
+    },
+  };
+
+  if (
+    !metrics ||
+    !Number.isFinite(metrics.requestedWeekdays) ||
+    metrics.requestedWeekdays < minWeekdays
+  ) {
+    return result;
+  }
+
+  const trailingGapExceeded =
+    Number.isFinite(metrics.trailingGapWeekdays) &&
+    metrics.trailingGapWeekdays >= trailingGapThreshold &&
+    metrics.observedTradingDays < metrics.requestedWeekdays;
+
+  if (trailingGapExceeded) {
+    result.trigger = true;
+    result.reason = "trailingGap";
+    result.trailingGapExceeded = true;
+  }
+
+  if (
+    Number.isFinite(metrics.observedRatio) &&
+    metrics.observedRatio < densityThreshold
+  ) {
+    result.densityBelowThreshold = true;
+    if (!result.trigger) {
+      result.trigger = true;
+      result.reason = "lowDensity";
+    }
+  }
+
+  return result;
 }
 
 function mergeRangeBounds(ranges) {
@@ -832,6 +982,52 @@ async function fetchAdjustedPriceRange(
   };
 }
 
+async function fetchFallbackRangeData(stockNo, startDate, endDate, marketKey) {
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    marketType: marketKey,
+  });
+  const response = await fetch(`/api/stock-range/?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  const rawText = await response.text();
+  let payload = {};
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    throw new Error("區間備援服務回傳格式錯誤");
+  }
+  if (!response.ok || payload?.error) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const isTpex = marketKey === "TPEX";
+  const startDateObj = new Date(startDate);
+  const endDateObj = new Date(endDate);
+  const rows = Array.isArray(payload?.aaData) ? payload.aaData : [];
+  const normalized = [];
+  rows.forEach((row) => {
+    const normalizedRow = normalizeProxyRow(
+      row,
+      isTpex,
+      startDateObj,
+      endDateObj,
+    );
+    if (normalizedRow) normalized.push(normalizedRow);
+  });
+
+  return {
+    rows: dedupeAndSortData(normalized),
+    dataSource:
+      payload?.dataSource ||
+      (isTpex ? "TPEX (備援)" : "TWSE (備援)"),
+    stockName: payload?.stockName || stockNo,
+  };
+}
+
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   try {
     let dateStr = null;
@@ -1368,36 +1564,148 @@ async function fetchStockData(
     : adjusted
       ? "Yahoo Finance (還原)"
       : "TWSE (主來源)";
-  const dataSourceLabel = summariseDataSourceFlags(
+  const originalDataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     defaultRemoteLabel,
     { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
 
+  let finalRows = deduped;
+  let finalStockName = stockName || stockNo;
+  let finalSourceFlags = new Set(sourceFlags);
+  let finalDataSourceLabel = originalDataSourceLabel;
+
+  const coverageMeta = computeRangeCoverageMeta(deduped, startDate, endDate);
+  const fallbackDecision = shouldTriggerFallbackRangeSwitch(coverageMeta, {
+    trailingGapThreshold: RANGE_FALLBACK_CONFIG.TRAILING_GAP_WEEKDAYS_THRESHOLD,
+    densityThreshold: RANGE_FALLBACK_CONFIG.DENSITY_THRESHOLD,
+    minWeekdays: RANGE_FALLBACK_CONFIG.MIN_REQUESTED_WEEKDAYS,
+  });
+
+  const fallbackRangeMeta = {
+    ...coverageMeta,
+    requestedRange: { start: startDate, end: endDate },
+    originalSources: Array.from(sourceFlags),
+    originalDataSource: originalDataSourceLabel,
+    triggered: fallbackDecision.trigger,
+    triggerReason: fallbackDecision.reason,
+    trailingGapThreshold:
+      fallbackDecision.appliedThresholds?.trailingGapWeekdays ??
+      RANGE_FALLBACK_CONFIG.TRAILING_GAP_WEEKDAYS_THRESHOLD,
+    densityThreshold:
+      fallbackDecision.appliedThresholds?.density ??
+      RANGE_FALLBACK_CONFIG.DENSITY_THRESHOLD,
+    minRequestedWeekdays:
+      fallbackDecision.appliedThresholds?.minRequestedWeekdays ??
+      RANGE_FALLBACK_CONFIG.MIN_REQUESTED_WEEKDAYS,
+    trailingGapExceeded: Boolean(fallbackDecision.trailingGapExceeded),
+    densityBelowThreshold: Boolean(fallbackDecision.densityBelowThreshold),
+    fallbackAttempted: false,
+    fallbackApplied: false,
+    fallbackSource: null,
+    fallbackRows: 0,
+    fallbackError: null,
+    observedCountBeforeFallback: coverageMeta.observedTradingDays,
+    observedRatioBeforeFallback: coverageMeta.observedRatio,
+    firstObservedDateBeforeFallback: coverageMeta.firstObservedDate,
+    lastObservedDateBeforeFallback: coverageMeta.lastObservedDate,
+  };
+
+  if (fallbackDecision.trigger) {
+    fallbackRangeMeta.fallbackAttempted = true;
+    try {
+      const fallbackOutcome = await fetchFallbackRangeData(
+        stockNo,
+        startDate,
+        endDate,
+        marketKey,
+      );
+      const fallbackRows = Array.isArray(fallbackOutcome?.rows)
+        ? fallbackOutcome.rows
+        : [];
+      if (fallbackRows.length > 0) {
+        finalRows = fallbackRows;
+        finalStockName = fallbackOutcome?.stockName || finalStockName;
+        finalSourceFlags = new Set();
+        if (fallbackOutcome?.dataSource) {
+          finalSourceFlags.add(fallbackOutcome.dataSource);
+        }
+        const fallbackCoverage = computeRangeCoverageMeta(
+          fallbackRows,
+          startDate,
+          endDate,
+        );
+        fallbackRangeMeta.fallbackApplied = true;
+        fallbackRangeMeta.fallbackSource = fallbackOutcome?.dataSource || null;
+        fallbackRangeMeta.fallbackRows = fallbackRows.length;
+        fallbackRangeMeta.fallbackError = null;
+        fallbackRangeMeta.observedCountAfterFallback =
+          fallbackCoverage.observedTradingDays;
+        fallbackRangeMeta.observedRatioAfterFallback =
+          fallbackCoverage.observedRatio;
+        fallbackRangeMeta.leadingGapWeekdaysAfterFallback =
+          fallbackCoverage.leadingGapWeekdays;
+        fallbackRangeMeta.trailingGapWeekdaysAfterFallback =
+          fallbackCoverage.trailingGapWeekdays;
+        fallbackRangeMeta.firstObservedDateAfterFallback =
+          fallbackCoverage.firstObservedDate;
+        fallbackRangeMeta.lastObservedDateAfterFallback =
+          fallbackCoverage.lastObservedDate;
+        if (
+          Number.isFinite(fallbackRangeMeta.observedRatioBeforeFallback) &&
+          Number.isFinite(fallbackCoverage.observedRatio)
+        ) {
+          fallbackRangeMeta.coverageImproved =
+            fallbackCoverage.observedRatio >
+            fallbackRangeMeta.observedRatioBeforeFallback;
+        }
+      } else {
+        fallbackRangeMeta.fallbackApplied = false;
+        fallbackRangeMeta.fallbackSource = fallbackOutcome?.dataSource || null;
+        fallbackRangeMeta.fallbackRows = 0;
+        fallbackRangeMeta.fallbackError = "備援來源無資料";
+      }
+    } catch (error) {
+      console.error("[Worker] 區間備援失敗:", error);
+      fallbackRangeMeta.fallbackApplied = false;
+      fallbackRangeMeta.fallbackError = error.message || String(error);
+    }
+  }
+
+  finalDataSourceLabel = summariseDataSourceFlags(
+    finalSourceFlags,
+    defaultRemoteLabel,
+    { market: isTpex ? "TPEX" : "TWSE", adjusted },
+  );
+  fallbackRangeMeta.finalSources = Array.from(finalSourceFlags);
+  fallbackRangeMeta.finalDataSource = finalDataSourceLabel;
+
   setWorkerCacheEntry(marketKey, cacheKey, {
-    data: deduped,
-    stockName: stockName || stockNo,
-    dataSource: dataSourceLabel,
+    data: finalRows,
+    stockName: finalStockName,
+    dataSource: finalDataSourceLabel,
     timestamp: Date.now(),
     meta: {
       stockNo,
       startDate,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      fallbackRangeMeta,
     },
     priceMode: getPriceModeKey(adjusted),
   });
 
-  if (deduped.length === 0) {
+  if (finalRows.length === 0) {
     console.warn(
       `[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`,
     );
   }
 
   return {
-    data: deduped,
-    dataSource: dataSourceLabel,
-    stockName: stockName || stockNo,
+    data: finalRows,
+    dataSource: finalDataSourceLabel,
+    stockName: finalStockName,
+    fallbackRangeMeta,
   };
 }
 
@@ -4859,6 +5167,11 @@ self.onmessage = async function (e) {
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
                 ? cachedMeta.debugSteps
                 : [],
+              fallbackRangeMeta:
+                cachedMeta?.fallbackRangeMeta &&
+                typeof cachedMeta.fallbackRangeMeta === "object"
+                  ? cachedMeta.fallbackRangeMeta
+                  : null,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
@@ -4884,6 +5197,11 @@ self.onmessage = async function (e) {
             debugSteps: Array.isArray(cachedMeta.debugSteps)
               ? cachedMeta.debugSteps
               : [],
+            fallbackRangeMeta:
+              cachedMeta?.fallbackRangeMeta &&
+              typeof cachedMeta.fallbackRangeMeta === "object"
+                ? cachedMeta.fallbackRangeMeta
+                : null,
             marketKey,
             dataSource: "主執行緒快取",
             stockName: params.stockNo,
@@ -4984,6 +5302,10 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.adjustmentChecks)
             ? workerLastMeta.adjustmentChecks
             : [],
+        fallbackRangeMeta:
+          outcome?.fallbackRangeMeta ||
+          workerLastMeta?.fallbackRangeMeta ||
+          null,
       };
 
       if (!useCachedData && fetched) {
@@ -5013,6 +5335,11 @@ self.onmessage = async function (e) {
           adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
             ? outcome.adjustmentChecks
             : [],
+          fallbackRangeMeta:
+            outcome?.fallbackRangeMeta &&
+            typeof outcome.fallbackRangeMeta === "object"
+              ? outcome.fallbackRangeMeta
+              : null,
         };
       }
 
