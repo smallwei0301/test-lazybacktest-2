@@ -1,5 +1,13 @@
 # Lazybacktest Debug Log
 
+# 2025-06-05 — Patch LB-DATA-AUTOSWITCH-20240605A
+- **Issue recap**: 主來源（TWSE／FinMind）在停牌或資料缺漏時仍回傳快取標記，導致整段回測僅得零星交易日；營運端需手動比對 Yahoo 或 FinMind
+  落差才能確認是否需要切換資料來源。
+- **Fix**: Worker 新增區間涵蓋度分析，當有效交易日密度過低時自動呼叫 Netlify proxy 的備援來源（TWSE→FinMind、TPEX→Yahoo），並以欄位完整度優先合併
+  兩側資料，更新快取與資料來源摘要。
+- **Diagnostics**: `dataDebug.dataSources` 與 `fallbackRange` 提供實際採用的來源清單與補齊筆數，前端提示可直接顯示「備援來源：FinMind / Yahoo」。
+- **Testing**: `npm test`（專案未定義測試腳本，命令回傳錯誤）。
+
 # 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A
 - **Issue recap**: 備援還原流程仍以「已還原股價 × 還原因子」進行縮放，導致雙重折算；前端區間價格缺乏原始價格來源標籤，難以分辨 TWSE 與 FinMind 來源。
 - **Fix**: Netlify 還原函式在調整時保留 `rawOpen`/`rawClose` 等基準數據並標示 `priceSource`，Worker 備援計算改以原始價格乘上係數；價格檢視器摘要與表格同步顯示 TWSE、FinMind 來源。

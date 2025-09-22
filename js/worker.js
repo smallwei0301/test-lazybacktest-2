@@ -196,6 +196,159 @@ function rangeBoundsToISO(range) {
   return { startISO, endISO };
 }
 
+// Patch Tag: LB-DATA-AUTOSWITCH-20240605A
+function parseISODateStrict(isoText) {
+  if (!isoText || typeof isoText !== "string") return null;
+  const date = new Date(isoText);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function countWeekdaysBetween(startISO, endISO) {
+  const startDate = parseISODateStrict(startISO);
+  const endDate = parseISODateStrict(endISO);
+  if (!startDate || !endDate || endDate < startDate) return 0;
+  let count = 0;
+  const cursor = new Date(startDate.getTime());
+  while (cursor <= endDate) {
+    const day = cursor.getUTCDay();
+    if (day !== 0 && day !== 6) count += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
+
+function computeWeekdayGap(previousISO, nextISO) {
+  if (!previousISO || !nextISO) return 0;
+  const prevDate = parseISODateStrict(previousISO);
+  const nextDate = parseISODateStrict(nextISO);
+  if (!prevDate || !nextDate || nextDate <= prevDate) return 0;
+  const gapStart = new Date(prevDate.getTime());
+  gapStart.setUTCDate(gapStart.getUTCDate() + 1);
+  const gapCount = countWeekdaysBetween(
+    gapStart.toISOString().slice(0, 10),
+    nextISO,
+  );
+  return Math.max(0, gapCount - 1);
+}
+
+function analyseRangeCoverage(rows, startISO, endISO) {
+  const requestedWeekdays = countWeekdaysBetween(startISO, endISO);
+  const uniqueDates = new Set();
+  rows.forEach((row) => {
+    if (row && typeof row.date === "string") {
+      const trimmed = row.date.trim();
+      if (trimmed.length === 10) uniqueDates.add(trimmed);
+    }
+  });
+
+  const sortedDates = Array.from(uniqueDates).sort();
+  const observedCount = sortedDates.length;
+  const firstDate = sortedDates[0] || null;
+  const lastDate = sortedDates[sortedDates.length - 1] || null;
+
+  const effectiveStart = firstDate
+    ? (firstDate > startISO ? firstDate : startISO)
+    : startISO;
+  const effectiveEnd = lastDate
+    ? (lastDate < endISO ? lastDate : endISO)
+    : endISO;
+  const effectiveWeekdays = countWeekdaysBetween(effectiveStart, effectiveEnd);
+
+  const leadingGapWeekdays = firstDate && firstDate > startISO
+    ? countWeekdaysBetween(startISO, firstDate) - 1
+    : 0;
+  const trailingGapWeekdays = lastDate && lastDate < endISO
+    ? countWeekdaysBetween(lastDate, endISO) - 1
+    : 0;
+
+  let maxInternalGap = 0;
+  for (let i = 1; i < sortedDates.length; i += 1) {
+    const gap = computeWeekdayGap(sortedDates[i - 1], sortedDates[i]);
+    if (gap > maxInternalGap) maxInternalGap = gap;
+  }
+
+  return {
+    requestedWeekdays,
+    observedCount,
+    firstDate,
+    lastDate,
+    effectiveWeekdays,
+    leadingGapWeekdays: Math.max(0, leadingGapWeekdays),
+    trailingGapWeekdays: Math.max(0, trailingGapWeekdays),
+    maxInternalGapWeekdays: maxInternalGap,
+  };
+}
+
+function shouldTriggerFallbackRangeSwitch(analysis, options = {}) {
+  if (!analysis || typeof analysis !== "object") return false;
+  const {
+    requestedWeekdays,
+    observedCount,
+    effectiveWeekdays,
+    leadingGapWeekdays,
+    trailingGapWeekdays,
+    maxInternalGapWeekdays,
+  } = analysis;
+
+  if (observedCount === 0) return true;
+
+  const meaningfulWindow = requestedWeekdays >= 10;
+  if (!meaningfulWindow) return false;
+
+  const density = effectiveWeekdays > 0 ? observedCount / effectiveWeekdays : 1;
+  if (effectiveWeekdays >= 30 && density < 0.55) return true;
+  if (effectiveWeekdays >= 45 && density < 0.65 && maxInternalGapWeekdays >= 6) {
+    return true;
+  }
+  if (leadingGapWeekdays >= 7) return true;
+  if (trailingGapWeekdays >= 10 && density < 0.7) return true;
+  if (maxInternalGapWeekdays >= 8 && density < 0.75) return true;
+
+  const marketKey = options.marketKey || "";
+  if (marketKey === "TPEX" && density < 0.6 && effectiveWeekdays >= 25) {
+    return true;
+  }
+  return false;
+}
+
+function computeRowCompletenessScore(row) {
+  if (!row || typeof row !== "object") return 0;
+  let score = 0;
+  if (Number.isFinite(row.close)) score += 6;
+  if (Number.isFinite(row.open)) score += 3;
+  if (Number.isFinite(row.high)) score += 2;
+  if (Number.isFinite(row.low)) score += 2;
+  if (Number.isFinite(row.volume)) score += 1;
+  return score;
+}
+
+function mergeRowsPreferringCompleteness(primaryRows, fallbackRows) {
+  const merged = new Map();
+  const addOrUpdate = (row, source) => {
+    if (!row || typeof row.date !== "string") return;
+    const existing = merged.get(row.date);
+    if (!existing) {
+      merged.set(row.date, { ...row, __source: source });
+      return;
+    }
+    const existingScore = computeRowCompletenessScore(existing);
+    const incomingScore = computeRowCompletenessScore(row);
+    if (incomingScore > existingScore) {
+      merged.set(row.date, { ...row, __source: source });
+    }
+  };
+
+  (primaryRows || []).forEach((row) => addOrUpdate(row, "primary"));
+  (fallbackRows || []).forEach((row) => addOrUpdate(row, "fallback"));
+
+  return Array.from(merged.values()).map((row) => {
+    const cloned = { ...row };
+    delete cloned.__source;
+    return cloned;
+  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
 function mergeMonthlyData(entry, newRows) {
   if (!entry || !Array.isArray(newRows)) return;
   const map = new Map(
@@ -948,6 +1101,64 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
   return uniqueRemote.join(' + ');
 }
 
+async function fetchProxyRangeWithForceSource(
+  stockNo,
+  startDateISO,
+  endDateISO,
+  marketKey,
+  options = {},
+  forceSource = null,
+) {
+  if (!forceSource) return null;
+  const basePath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
+  const params = new URLSearchParams({
+    stockNo,
+    start: startDateISO,
+    end: endDateISO,
+  });
+  if (options.adjusted) params.set("adjusted", "1");
+  params.set("forceSource", forceSource);
+
+  const url = `${basePath}?${params.toString()}`;
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const rawText = await response.text();
+  let payload = {};
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    throw new Error("備援來源回傳格式錯誤");
+  }
+  if (!response.ok || payload?.error) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const startDateObj = new Date(startDateISO);
+  const endDateObj = new Date(endDateISO);
+  const isTpex = marketKey === "TPEX";
+  const normalizedRows = Array.isArray(payload?.aaData)
+    ? payload.aaData
+        .map((row) => normalizeProxyRow(row, isTpex, startDateObj, endDateObj))
+        .filter(Boolean)
+    : [];
+  normalizedRows.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const sourceFlags = new Set();
+  if (typeof payload?.dataSource === "string" && payload.dataSource.trim().length > 0) {
+    sourceFlags.add(payload.dataSource.trim());
+  }
+
+  return {
+    rows: normalizedRows,
+    label:
+      (typeof payload?.dataSource === "string" && payload.dataSource.trim().length > 0)
+        ? payload.dataSource
+        : forceSource,
+    stockName: payload?.stockName || stockNo,
+    sourceFlags: Array.from(sourceFlags),
+  };
+}
+
 async function runWithConcurrency(items, limit, workerFn) {
   const results = new Array(items.length);
   let index = 0;
@@ -1002,6 +1213,14 @@ async function fetchStockData(
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
       stockName: cachedEntry.stockName || stockNo,
+      dataSources: Array.isArray(cachedEntry?.meta?.dataSources)
+        ? cachedEntry.meta.dataSources
+        : [],
+      fallbackRange:
+        cachedEntry?.meta?.fallbackRange &&
+        typeof cachedEntry.meta.fallbackRange === "object"
+          ? cachedEntry.meta.fallbackRange
+          : null,
       adjustmentFallbackApplied: Boolean(
         cachedEntry?.meta?.adjustmentFallbackApplied,
       ),
@@ -1079,6 +1298,12 @@ async function fetchStockData(
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
+        dataSources:
+          Array.isArray(adjustedResult?.summary?.sources)
+            ? adjustedResult.summary.sources
+            : Array.isArray(adjustedResult?.sources)
+              ? adjustedResult.sources
+              : [],
         adjustmentFallbackApplied:
           Boolean(adjustedResult.adjustmentFallbackApplied),
         adjustmentFallbackInfo:
@@ -1120,6 +1345,12 @@ async function fetchStockData(
     return {
       data: adjustedResult.data,
       dataSource: adjustedResult.dataSource,
+      dataSources:
+        Array.isArray(adjustedResult?.summary?.sources)
+          ? adjustedResult.summary.sources
+          : Array.isArray(adjustedResult?.sources)
+            ? adjustedResult.sources
+            : [],
       stockName: adjustedResult.stockName || stockNo,
       summary: adjustedResult.summary || null,
       adjustments: adjustedResult.adjustments || [],
@@ -1368,36 +1599,119 @@ async function fetchStockData(
     : adjusted
       ? "Yahoo Finance (還原)"
       : "TWSE (主來源)";
-  const dataSourceLabel = summariseDataSourceFlags(
-    sourceFlags,
+  let finalRows = deduped;
+  const finalSourceFlags = new Set(sourceFlags);
+  let finalDataSourceLabel = summariseDataSourceFlags(
+    finalSourceFlags,
     defaultRemoteLabel,
     { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
+  let fallbackRangeMeta = null;
+
+  const coverageAnalysis = analyseRangeCoverage(
+    finalRows,
+    startDate,
+    endDate,
+  );
+  if (
+    shouldTriggerFallbackRangeSwitch(
+      coverageAnalysis,
+      { marketKey, adjusted },
+    )
+  ) {
+    const fallbackCandidates = [];
+    if (!adjusted) {
+      if (marketKey === "TWSE") {
+        fallbackCandidates.push("finmind");
+      } else if (marketKey === "TPEX") {
+        fallbackCandidates.push("yahoo");
+      }
+    }
+    for (let i = 0; i < fallbackCandidates.length; i += 1) {
+      const candidate = fallbackCandidates[i];
+      try {
+        const fallbackResult = await fetchProxyRangeWithForceSource(
+          stockNo,
+          startDate,
+          endDate,
+          marketKey,
+          { adjusted },
+          candidate,
+        );
+        if (!fallbackResult) continue;
+        const mergedRows = mergeRowsPreferringCompleteness(
+          finalRows,
+          fallbackResult.rows,
+        );
+        const improvement = mergedRows.length - finalRows.length;
+        if (improvement > 0) {
+          finalRows = mergedRows;
+          stockName = fallbackResult.stockName || stockName;
+          const fallbackLabels = Array.isArray(fallbackResult.sourceFlags)
+            ? fallbackResult.sourceFlags
+            : [];
+          if (fallbackLabels.length > 0) {
+            fallbackLabels.forEach((label) => {
+              if (label) finalSourceFlags.add(label);
+            });
+          } else if (fallbackResult.label) {
+            finalSourceFlags.add(fallbackResult.label);
+          } else {
+            finalSourceFlags.add(`${candidate.toUpperCase()} 備援`);
+          }
+          finalDataSourceLabel = summariseDataSourceFlags(
+            finalSourceFlags,
+            defaultRemoteLabel,
+            { market: isTpex ? "TPEX" : "TWSE", adjusted },
+          );
+          fallbackRangeMeta = {
+            source: fallbackResult.label || candidate,
+            improvement,
+            requestedWeekdays: coverageAnalysis.requestedWeekdays,
+            observedBefore: deduped.length,
+            observedAfter: finalRows.length,
+            leadingGap: coverageAnalysis.leadingGapWeekdays,
+            trailingGap: coverageAnalysis.trailingGapWeekdays,
+            maxInternalGap: coverageAnalysis.maxInternalGapWeekdays,
+          };
+          break;
+        }
+      } catch (error) {
+        console.warn(`[Worker] 備援來源 ${candidate} 取得失敗:`, error);
+      }
+    }
+  }
+
+  const dataSourcesArray = Array.from(finalSourceFlags);
 
   setWorkerCacheEntry(marketKey, cacheKey, {
-    data: deduped,
+    data: finalRows,
     stockName: stockName || stockNo,
-    dataSource: dataSourceLabel,
+    dataSource: finalDataSourceLabel,
     timestamp: Date.now(),
     meta: {
       stockNo,
       startDate,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      dataSources: dataSourcesArray,
+      fallbackRange: fallbackRangeMeta,
     },
     priceMode: getPriceModeKey(adjusted),
   });
 
-  if (deduped.length === 0) {
+  if (finalRows.length === 0) {
     console.warn(
       `[Worker] 指定範圍 (${startDate} ~ ${endDate}) 無 ${stockNo} 交易數據`,
     );
   }
 
   return {
-    data: deduped,
-    dataSource: dataSourceLabel,
+    data: finalRows,
+    dataSource: finalDataSourceLabel,
+    dataSources: dataSourcesArray,
     stockName: stockName || stockNo,
+    fallbackRange: fallbackRangeMeta,
   };
 }
 
@@ -4960,6 +5274,11 @@ self.onmessage = async function (e) {
         debugSteps,
         priceSource: outcome?.priceSource || workerLastMeta?.priceSource || null,
         dataSource: outcome?.dataSource || workerLastMeta?.dataSource || null,
+        dataSources: Array.isArray(outcome?.dataSources)
+          ? outcome.dataSources
+          : Array.isArray(workerLastMeta?.dataSources)
+            ? workerLastMeta.dataSources
+            : [],
         adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
         adjustmentFallbackInfo:
           outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
@@ -4984,6 +5303,8 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.adjustmentChecks)
             ? workerLastMeta.adjustmentChecks
             : [],
+        fallbackRange:
+          outcome?.fallbackRange || workerLastMeta?.fallbackRange || null,
       };
 
       if (!useCachedData && fetched) {
@@ -4993,6 +5314,7 @@ self.onmessage = async function (e) {
           debugSteps: Array.isArray(outcome?.debugSteps) ? outcome.debugSteps : [],
           priceSource: outcome?.priceSource || null,
           dataSource: outcome?.dataSource || null,
+          dataSources: Array.isArray(outcome?.dataSources) ? outcome.dataSources : [],
           adjustmentFallbackApplied: backtestResult.adjustmentFallbackApplied,
           adjustmentFallbackInfo: outcome?.adjustmentFallbackInfo || null,
           dividendDiagnostics: outcome?.dividendDiagnostics || null,
@@ -5013,6 +5335,10 @@ self.onmessage = async function (e) {
           adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
             ? outcome.adjustmentChecks
             : [],
+          fallbackRange:
+            outcome?.fallbackRange && typeof outcome.fallbackRange === "object"
+              ? outcome.fallbackRange
+              : null,
         };
       }
 
