@@ -18,6 +18,102 @@ let lastPriceDebug = {
     finmindStatus: null,
 };
 
+let visibleStockData = [];
+let lastIndicatorSeries = null;
+let lastPositionStates = [];
+let lastDatasetDiagnostics = null;
+
+const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
+const START_GAP_TOLERANCE_DAYS = 7;
+const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
+
+function parseISODateToUTC(iso) {
+    if (!iso || typeof iso !== 'string') return NaN;
+    const [y, m, d] = iso.split('-').map((val) => parseInt(val, 10));
+    if ([y, m, d].some((num) => Number.isNaN(num))) return NaN;
+    return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+function computeEffectiveStartGap(data, effectiveStartISO) {
+    if (!Array.isArray(data) || data.length === 0 || !effectiveStartISO) return null;
+    const startUTC = parseISODateToUTC(effectiveStartISO);
+    if (!Number.isFinite(startUTC)) return null;
+    for (let i = 0; i < data.length; i += 1) {
+        const row = data[i];
+        if (!row || typeof row.date !== 'string') continue;
+        if (row.date < effectiveStartISO) continue;
+        const rowUTC = parseISODateToUTC(row.date);
+        if (!Number.isFinite(rowUTC)) continue;
+        const diffDays = Math.floor((rowUTC - startUTC) / BACKTEST_DAY_MS);
+        return {
+            firstEffectiveDate: row.date,
+            gapDays: diffDays,
+        };
+    }
+    return {
+        firstEffectiveDate: null,
+        gapDays: Number.POSITIVE_INFINITY,
+    };
+}
+
+function applyCacheStartMetadata(cacheKey, cacheEntry, effectiveStartISO, options = {}) {
+    if (!cacheEntry || !Array.isArray(cacheEntry.data) || !effectiveStartISO) return { gapDays: null, firstEffectiveDate: null };
+    const { toleranceDays = START_GAP_TOLERANCE_DAYS, acknowledgeExcessGap = false } = options;
+    const info = computeEffectiveStartGap(cacheEntry.data, effectiveStartISO) || { gapDays: null, firstEffectiveDate: null };
+    const gapDays = Number.isFinite(info.gapDays) ? info.gapDays : null;
+    cacheEntry.firstEffectiveRowDate = info.firstEffectiveDate || null;
+    cacheEntry.startGapEffectiveStart = effectiveStartISO;
+    cacheEntry.startGapDays = gapDays;
+    if (gapDays !== null && gapDays > toleranceDays) {
+        if (acknowledgeExcessGap) {
+            cacheEntry.startGapAcknowledgedAt = Date.now();
+        } else {
+            cacheEntry.startGapAcknowledgedAt = cacheEntry.startGapAcknowledgedAt || null;
+        }
+    } else {
+        cacheEntry.startGapAcknowledgedAt = null;
+    }
+    if (cacheKey) {
+        cachedDataStore.set(cacheKey, cacheEntry);
+    }
+    return {
+        gapDays,
+        firstEffectiveDate: info.firstEffectiveDate || null,
+    };
+}
+
+function evaluateCacheStartGap(cacheKey, cacheEntry, effectiveStartISO, options = {}) {
+    const { toleranceDays = START_GAP_TOLERANCE_DAYS, retryMs = START_GAP_RETRY_MS } = options;
+    if (!cacheEntry || !Array.isArray(cacheEntry.data) || !effectiveStartISO) {
+        return { shouldForce: true, reason: 'missingCache' };
+    }
+    const { gapDays, firstEffectiveDate } = applyCacheStartMetadata(cacheKey, cacheEntry, effectiveStartISO, { toleranceDays });
+    if (gapDays === null) {
+        return { shouldForce: false, reason: 'noGapInfo', firstEffectiveDate: firstEffectiveDate || null };
+    }
+    if (gapDays <= toleranceDays) {
+        return { shouldForce: false, gapDays, firstEffectiveDate };
+    }
+    const ackStart = cacheEntry.startGapEffectiveStart || null;
+    const ackGap = Number.isFinite(cacheEntry.startGapDays) ? cacheEntry.startGapDays : null;
+    const ackAt = Number.isFinite(cacheEntry.startGapAcknowledgedAt) ? cacheEntry.startGapAcknowledgedAt : null;
+    const sameContext = ackStart === effectiveStartISO && ackGap === gapDays && ackAt;
+    const now = Date.now();
+    if (!sameContext) {
+        cacheEntry.startGapAcknowledgedAt = null;
+        if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+        return { shouldForce: true, gapDays, firstEffectiveDate, reason: 'unacknowledged' };
+    }
+    if (retryMs && ackAt && now - ackAt > retryMs) {
+        cacheEntry.startGapAcknowledgedAt = null;
+        if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+        return { shouldForce: true, gapDays, firstEffectiveDate, reason: 'retryWindowElapsed' };
+    }
+    cacheEntry.startGapAcknowledgedAt = ackAt || now;
+    if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+    return { shouldForce: false, gapDays, firstEffectiveDate, acknowledged: true };
+}
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -29,30 +125,74 @@ function runBacktestInternal() {
         console.log("[Main] Validation:", isValid);
         if(!isValid) return;
 
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+        const maxIndicatorPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(params)
+            : 0;
+        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxIndicatorPeriod * 2);
+        const effectiveStartDate = params.startDate;
+        let dataStartDate = effectiveStartDate;
+        if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
+            dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+                minDate: sharedUtils.MIN_DATA_DATE,
+                marginTradingDays: 12,
+                extraCalendarDays: 7,
+            }) || effectiveStartDate;
+        }
+        if (!dataStartDate) dataStartDate = effectiveStartDate;
+        params.effectiveStartDate = effectiveStartDate;
+        params.dataStartDate = dataStartDate;
+        params.lookbackDays = lookbackDays;
+
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
         const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, splitAdjustment: params.splitAdjustment, priceMode: priceMode};
+        const curSettings={
+            stockNo:params.stockNo,
+            startDate:dataStartDate,
+            endDate:params.endDate,
+            effectiveStartDate,
+            market:marketKey,
+            adjustedPrice: params.adjustedPrice,
+            splitAdjustment: params.splitAdjustment,
+            priceMode: priceMode,
+            lookbackDays,
+        };
         let useCache=!needsDataFetch(curSettings);
-        const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
-        showLoading(msg);
         const cacheKey = buildCacheKey(curSettings);
         let cachedEntry = null;
         if (useCache) {
             cachedEntry = cachedDataStore.get(cacheKey);
-
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
-                const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
-                cachedStockData = sliced;
-                lastFetchSettings = { ...curSettings };
-                refreshPriceInspectorControls();
-                updatePriceDebug(cachedEntry);
-                console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
+                const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
+                if (startCheck.shouldForce) {
+                    const gapText = Number.isFinite(startCheck.gapDays)
+                        ? `${startCheck.gapDays} 天`
+                        : '未知天數';
+                    const firstDateText = startCheck.firstEffectiveDate || '無';
+                    console.warn(`[Main] 快取首筆有效日期 (${firstDateText}) 較設定起點落後 ${gapText}，改為重新抓取。 start=${effectiveStartDate}`);
+                    useCache = false;
+                    cachedEntry = null;
+                } else if (startCheck.acknowledged && Number.isFinite(startCheck.gapDays) && startCheck.gapDays > START_GAP_TOLERANCE_DAYS) {
+                    console.warn(`[Main] 快取首筆有效日期已落後 ${startCheck.gapDays} 天，已在近期確認資料缺口，暫時沿用快取資料。`);
+                }
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
-
                 useCache = false;
                 cachedEntry = null;
             }
+        }
+        const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
+        showLoading(msg);
+        if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
+            const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
+            visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
+            cachedStockData = cachedEntry.data;
+            lastFetchSettings = { ...curSettings };
+            refreshPriceInspectorControls();
+            updatePriceDebug(cachedEntry);
+            console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
 
@@ -99,7 +239,15 @@ function runBacktestInternal() {
                          });
                      }
                      const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
-                     const mergedCoverage = mergeIsoCoverage(existingEntry?.coverage || [], { start: curSettings.startDate, end: curSettings.endDate });
+                     const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
+                        ? data.rawMeta.fetchRange
+                        : { start: curSettings.startDate, end: curSettings.endDate };
+                     const mergedCoverage = mergeIsoCoverage(
+                        existingEntry?.coverage || [],
+                        fetchedRange && fetchedRange.start && fetchedRange.end
+                            ? { start: fetchedRange.start, end: fetchedRange.end }
+                            : null
+                     );
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -129,17 +277,21 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
                         ? rawMeta.adjustmentChecks
                         : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
+                    const rawEffectiveStart = data?.rawMeta?.effectiveStartDate || effectiveStartDate;
+                    const resolvedLookback = Number.isFinite(data?.rawMeta?.lookbackDays)
+                        ? data.rawMeta.lookbackDays
+                        : lookbackDays;
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
-                         dataSources: sourceArray,
-                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
-                         coverage: mergedCoverage,
-                         fetchedAt: Date.now(),
+                        dataSources: sourceArray,
+                        dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
+                        coverage: mergedCoverage,
+                        fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
+                        adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
                         debugSteps,
@@ -148,9 +300,19 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fetchRange: fetchedRange,
+                        effectiveStartDate: rawEffectiveStart,
+                        lookbackDays: resolvedLookback,
+                        datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
+                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
                     };
+                    applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
+                        toleranceDays: START_GAP_TOLERANCE_DAYS,
+                        acknowledgeExcessGap: true,
+                    });
                      cachedDataStore.set(cacheKey, cacheEntry);
-                     cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
+                     visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
+                     cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
@@ -186,13 +348,13 @@ function runBacktestInternal() {
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
-                         dataSources: updatedArray,
-                         dataSource: summariseSourceLabels(updatedArray),
-                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
+                        dataSources: updatedArray,
+                        dataSource: summariseSourceLabels(updatedArray),
+                        fetchedAt: cachedEntry.fetchedAt || Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
+                        adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
                         debugSteps,
@@ -201,18 +363,59 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fetchRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
+                        effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                        lookbackDays: cachedEntry.lookbackDays || lookbackDays,
+                        datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
+                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,
                     };
-                     cachedDataStore.set(cacheKey, updatedEntry);
-                     cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings = { ...curSettings };
-                     refreshPriceInspectorControls();
-                     updatePriceDebug(updatedEntry);
+                    applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
+                        toleranceDays: START_GAP_TOLERANCE_DAYS,
+                        acknowledgeExcessGap: false,
+                    });
+                    cachedDataStore.set(cacheKey, updatedEntry);
+                    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+                    cachedStockData = updatedEntry.data;
+                    lastFetchSettings = { ...curSettings };
+                    refreshPriceInspectorControls();
+                    updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
 
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }
+                if (data?.datasetDiagnostics) {
+                    lastDatasetDiagnostics = data.datasetDiagnostics;
+                    const runtimeDataset = data.datasetDiagnostics.runtime?.dataset || null;
+                    const warmupDiag = data.datasetDiagnostics.runtime?.warmup || null;
+                    const fetchDiag = data.datasetDiagnostics.fetch || null;
+                    if (typeof console.groupCollapsed === 'function') {
+                        console.groupCollapsed('[Main] Dataset diagnostics', params?.stockNo || '');
+                        console.log('[Main] Runtime dataset summary', runtimeDataset);
+                        console.log('[Main] Warmup summary', warmupDiag);
+                        console.log('[Main] Fetch diagnostics', fetchDiag);
+                        console.groupEnd();
+                    } else {
+                        console.log('[Main] Runtime dataset summary', runtimeDataset);
+                        console.log('[Main] Warmup summary', warmupDiag);
+                        console.log('[Main] Fetch diagnostics', fetchDiag);
+                    }
+                    if (runtimeDataset && Number.isFinite(runtimeDataset.firstValidCloseGapFromEffective) && runtimeDataset.firstValidCloseGapFromEffective > 1) {
+                        console.warn(`[Main] ${params?.stockNo || ''} 第一筆有效收盤價落後暖身起點 ${runtimeDataset.firstValidCloseGapFromEffective} 天。`);
+                    }
+                    if (runtimeDataset?.invalidRowsInRange?.count > 0) {
+                        const reasonSummary = formatDiagnosticsReasonCounts(runtimeDataset.invalidRowsInRange.reasons);
+                        console.warn(`[Main] ${params?.stockNo || ''} 區間內偵測到 ${runtimeDataset.invalidRowsInRange.count} 筆無效資料，原因統計: ${reasonSummary}`);
+                    }
+                    if (fetchDiag?.overview?.invalidRowsInRange?.count > 0) {
+                        const fetchReason = formatDiagnosticsReasonCounts(fetchDiag.overview.invalidRowsInRange.reasons);
+                        console.warn(`[Main] ${params?.stockNo || ''} 遠端回應包含 ${fetchDiag.overview.invalidRowsInRange.count} 筆無效欄位，原因統計: ${fetchReason}`);
+                    }
+                } else {
+                    lastDatasetDiagnostics = null;
+                }
+                refreshDataDiagnosticsPanel(lastDatasetDiagnostics);
                 handleBacktestResult(data, stockName, dataSource); // Process and display main results
 
                 getSuggestion();
@@ -262,9 +465,19 @@ function runBacktestInternal() {
               if (suggestionArea) suggestionArea.classList.add('hidden');
         };
 
-        const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData = cachedStockData; // Send main thread cache to worker
+        const workerMsg={
+            type:'runBacktest',
+            params:params,
+            useCachedData:useCache,
+            dataStartDate:dataStartDate,
+            effectiveStartDate:effectiveStartDate,
+            lookbackDays:lookbackDays,
+        };
+        if(useCache) {
+            const cachePayload = cachedEntry?.data || cachedStockData;
+            if (Array.isArray(cachePayload)) {
+                workerMsg.cachedData = cachePayload; // Prefer完整快取資料
+            }
             if (cachedEntry) {
                 workerMsg.cachedMeta = {
                     summary: cachedEntry.summary || null,
@@ -274,6 +487,10 @@ function runBacktestInternal() {
                     priceSource: cachedEntry.priceSource || null,
                     dataSource: cachedEntry.dataSource || null,
                     splitAdjustment: Boolean(cachedEntry.splitAdjustment),
+                    fetchRange: cachedEntry.fetchRange || null,
+                    effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                    lookbackDays: cachedEntry.lookbackDays || lookbackDays,
+                    diagnostics: cachedEntry.fetchDiagnostics || cachedEntry.datasetDiagnostics || null,
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
@@ -312,7 +529,10 @@ function clearPreviousResults() {
     resEl.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md';
     resEl.innerHTML = `<i class="fas fa-info-circle mr-2"></i> 請設定參數並執行。`;
     lastOverallResult = null; lastSubPeriodResults = null;
-    
+    lastIndicatorSeries = null;
+    lastPositionStates = [];
+    lastDatasetDiagnostics = null;
+
     const suggestionArea = document.getElementById('today-suggestion-area');
     const suggestionText = document.getElementById('suggestion-text');
     if (suggestionArea && suggestionText) {
@@ -320,8 +540,10 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
+    refreshDataDiagnosticsPanel();
 }
 
 const adjustmentReasonLabels = {
@@ -388,7 +610,7 @@ function updatePriceDebug(meta = {}) {
 function renderPricePipelineSteps() {
     const container = document.getElementById('pricePipelineSteps');
     if (!container) return;
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
     if (!hasData || !hasSteps) {
         container.classList.add('hidden');
@@ -416,7 +638,7 @@ function renderPricePipelineSteps() {
 function renderPriceInspectorDebug() {
     const panel = document.getElementById('priceInspectorDebugPanel');
     if (!panel) return;
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
     if (!hasData || !hasSteps) {
         panel.classList.add('hidden');
@@ -452,6 +674,299 @@ function renderPriceInspectorDebug() {
     }).join('');
     panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
     panel.classList.remove('hidden');
+}
+
+const dataDiagnosticsState = { open: false };
+
+function formatDiagnosticsValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'number') {
+        if (Number.isNaN(value)) return '—';
+        return value.toString();
+    }
+    return String(value);
+}
+
+function formatDiagnosticsRange(start, end) {
+    if (!start && !end) return '—';
+    if (start && end) return `${start} ~ ${end}`;
+    return start || end || '—';
+}
+
+function formatDiagnosticsIndex(entry) {
+    if (!entry || typeof entry !== 'object') return '—';
+    const date = entry.date || '—';
+    const index = Number.isFinite(entry.index) ? `#${entry.index}` : '#—';
+    return `${date} (${index})`;
+}
+
+function formatDiagnosticsGap(days) {
+    if (!Number.isFinite(days)) return '—';
+    if (days === 0) return '0 天';
+    return `${days > 0 ? '+' : ''}${days} 天`;
+}
+
+function formatDiagnosticsReasonCounts(reasons) {
+    if (!reasons || typeof reasons !== 'object') return '—';
+    const entries = Object.entries(reasons)
+        .map(([reason, count]) => [reason, Number(count)])
+        .filter(([, count]) => Number.isFinite(count) && count > 0)
+        .sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return '—';
+    return entries.map(([reason, count]) => `${reason}×${count}`).join('、');
+}
+
+function renderDiagnosticsEntries(containerId, entries) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(entries) || entries.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">無資料</p>`;
+        return;
+    }
+    container.innerHTML = entries
+        .map((entry) => {
+            const label = escapeHtml(entry.label || '');
+            const value = escapeHtml(formatDiagnosticsValue(entry.value));
+            const valueClass = entry.emphasis ? 'font-semibold' : '';
+            return `<div class="flex justify-between gap-2 text-[11px]">
+                <span class="text-muted-foreground" style="color: var(--muted-foreground);">${label}</span>
+                <span class="${valueClass}" style="color: var(--foreground);">${value}</span>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsSamples(containerId, samples, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(samples) || samples.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">${options.emptyText || '無異常樣本'}</p>`;
+        return;
+    }
+    container.innerHTML = samples
+        .map((sample) => {
+            const date = escapeHtml(sample.date || '');
+            const index = Number.isFinite(sample.index) ? `#${sample.index}` : '#—';
+            const reasons = Array.isArray(sample.reasons)
+                ? escapeHtml(sample.reasons.join('、'))
+                : '—';
+            const close = sample.close !== undefined && sample.close !== null
+                ? escapeHtml(sample.close.toString())
+                : '—';
+            const volume = sample.volume !== undefined && sample.volume !== null
+                ? escapeHtml(sample.volume.toString())
+                : '—';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div style="color: var(--foreground);">${date} (${index})</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">原因: ${reasons}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收盤: ${close} ｜ 量: ${volume}</div>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsPreview(containerId, rows) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!Array.isArray(rows) || rows.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未取得鄰近樣本。</p>`;
+        return;
+    }
+    container.innerHTML = rows
+        .map((row) => {
+            const index = Number.isFinite(row.index) ? `#${row.index}` : '#—';
+            const date = escapeHtml(row.date || '');
+            const close = row.close !== undefined && row.close !== null
+                ? escapeHtml(row.close.toString())
+                : '—';
+            const open = row.open !== undefined && row.open !== null
+                ? escapeHtml(row.open.toString())
+                : '—';
+            const high = row.high !== undefined && row.high !== null
+                ? escapeHtml(row.high.toString())
+                : '—';
+            const low = row.low !== undefined && row.low !== null
+                ? escapeHtml(row.low.toString())
+                : '—';
+            const volume = row.volume !== undefined && row.volume !== null
+                ? escapeHtml(row.volume.toString())
+                : '—';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div style="color: var(--foreground);">${date} (${index})</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">開:${open} 高:${high} 低:${low}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收:${close} ｜ 量:${volume}</div>
+            </div>`;
+        })
+        .join('');
+}
+
+function renderDiagnosticsTestingGuidance(diag) {
+    const container = document.getElementById('dataDiagnosticsTesting');
+    if (!container) return;
+    if (!diag) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">執行回測後會在此提供建議的手動測試步驟。</p>`;
+        return;
+    }
+    const dataset = diag.runtime?.dataset || {};
+    const buyHold = diag.runtime?.buyHold || {};
+    const fetchOverview = diag.fetch?.overview || {};
+    const reasonSummary = formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons);
+    const buyHoldFirst = buyHold.firstValidPriceDate || '—';
+    const fetchRange = formatDiagnosticsRange(fetchOverview.firstDate, fetchOverview.lastDate);
+    container.innerHTML = `<ol class="list-decimal pl-4 space-y-1">
+        <li style="color: var(--foreground);">請比對圖表起點（${escapeHtml(dataset.requestedStart || '—')}）與買入持有首日（${escapeHtml(buyHoldFirst)}），並於回報時附上此卡片截圖。</li>
+        <li style="color: var(--foreground);">若「無效欄位統計」顯示 ${escapeHtml(reasonSummary)}，請擷取 console 中 [Worker] dataset/fetch summary 的表格輸出。</li>
+        <li style="color: var(--foreground);">確認遠端資料範圍 ${escapeHtml(fetchRange)} 是否覆蓋暖身期，如仍缺資料請於回報時註記。</li>
+    </ol>`;
+}
+
+function renderDiagnosticsFetch(fetchDiag) {
+    const summaryContainer = document.getElementById('dataDiagnosticsFetchSummary');
+    const monthsContainer = document.getElementById('dataDiagnosticsFetchMonths');
+    if (!summaryContainer || !monthsContainer) return;
+    if (!fetchDiag) {
+        summaryContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未擷取遠端資料。</p>`;
+        monthsContainer.innerHTML = '';
+        return;
+    }
+    const overview = fetchDiag.overview || {};
+    renderDiagnosticsEntries('dataDiagnosticsFetchSummary', [
+        { label: '抓取起點', value: fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '遠端資料範圍', value: formatDiagnosticsRange(overview.firstDate, overview.lastDate) },
+        { label: '暖身起點', value: overview.warmupStartDate || fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterWarmupStart || overview.firstValidCloseOnOrAfterEffectiveStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(overview.firstValidCloseGapFromWarmup ?? overview.firstValidCloseGapFromEffective) },
+        { label: '遠端無效筆數', value: overview.invalidRowsInRange?.count ?? 0 },
+        { label: '遠端無效欄位', value: formatDiagnosticsReasonCounts(overview.invalidRowsInRange?.reasons) },
+        { label: '月度分段', value: Array.isArray(fetchDiag.months) ? fetchDiag.months.length : 0 },
+    ]);
+    if (!Array.isArray(fetchDiag.months) || fetchDiag.months.length === 0) {
+        monthsContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">沒有月度快取紀錄。</p>`;
+        return;
+    }
+    const recentMonths = fetchDiag.months.slice(-6);
+    monthsContainer.innerHTML = recentMonths
+        .map((month) => {
+            const monthLabel = escapeHtml(month.label || month.monthKey || '—');
+            const rows = formatDiagnosticsValue(month.rowsReturned);
+            const missing = formatDiagnosticsValue(month.missingSegments);
+            const forced = formatDiagnosticsValue(month.forcedRepairs);
+            const firstDate = escapeHtml(month.firstRowDate || '—');
+            const cacheUsed = month.usedCache ? '是' : '否';
+            return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
+                <div class="font-medium" style="color: var(--foreground);">${monthLabel}</div>
+                <div class="flex flex-wrap gap-2 text-muted-foreground" style="color: var(--muted-foreground);">
+                    <span>筆數 ${rows}</span>
+                    <span>缺口 ${missing}</span>
+                    <span>強制補抓 ${forced}</span>
+                    <span>首筆 ${firstDate}</span>
+                    <span>使用快取 ${cacheUsed}</span>
+                </div>
+            </div>`;
+        })
+        .join('');
+}
+
+function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
+    const hintEl = document.getElementById('dataDiagnosticsHint');
+    const contentEl = document.getElementById('dataDiagnosticsContent');
+    const titleEl = document.getElementById('dataDiagnosticsTitle');
+    if (!hintEl || !contentEl || !titleEl) return;
+    if (!diag) {
+        hintEl.textContent = '請先執行回測後，再查看暖身與快取診斷資訊。';
+        contentEl.classList.add('hidden');
+        titleEl.textContent = '資料暖身診斷';
+        renderDiagnosticsEntries('dataDiagnosticsSummary', []);
+        renderDiagnosticsEntries('dataDiagnosticsWarmup', []);
+        renderDiagnosticsEntries('dataDiagnosticsBuyHold', []);
+        renderDiagnosticsSamples('dataDiagnosticsInvalidSamples', []);
+        renderDiagnosticsSamples('dataDiagnosticsBuyHoldSamples', []);
+        renderDiagnosticsFetch(null);
+        renderDiagnosticsPreview('dataDiagnosticsPreview', []);
+        renderDiagnosticsTestingGuidance(null);
+        return;
+    }
+    hintEl.textContent = '若需回報問題，請一併提供此卡片內容與 console 診斷資訊。';
+    contentEl.classList.remove('hidden');
+    const dataset = diag.runtime?.dataset || {};
+    const warmup = diag.runtime?.warmup || {};
+    const buyHold = diag.runtime?.buyHold || {};
+    titleEl.textContent = `資料暖身診斷：${dataset.requestedStart || warmup.requestedStart || '—'} → ${dataset.endDate || diag.fetch?.requested?.end || '—'}`;
+    renderDiagnosticsEntries('dataDiagnosticsSummary', [
+        { label: '資料總筆數', value: dataset.totalRows },
+        { label: '資料範圍', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
+        { label: '使用者起點', value: dataset.requestedStart || warmup.requestedStart || '—' },
+        { label: '暖身起點', value: dataset.warmupStartDate || warmup.warmupStartDate || dataset.dataStartDate || warmup.dataStartDate || '—' },
+        { label: '暖身筆數', value: dataset.warmupRows },
+        { label: '區間筆數', value: dataset.rowsWithinRange },
+        { label: '第一筆>=使用者起點', value: formatDiagnosticsIndex(dataset.firstRowOnOrAfterRequestedStart) },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(dataset.firstValidCloseOnOrAfterRequestedStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromRequested) },
+        { label: '區間內無效筆數', value: dataset.invalidRowsInRange?.count ?? 0 },
+        { label: '第一筆無效資料', value: dataset.firstInvalidRowOnOrAfterEffectiveStart ? formatDiagnosticsIndex(dataset.firstInvalidRowOnOrAfterEffectiveStart) : '—' },
+        { label: '無效欄位統計', value: formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons) },
+    ]);
+    renderDiagnosticsSamples(
+        'dataDiagnosticsInvalidSamples',
+        dataset.invalidRowsInRange?.samples || [],
+        { emptyText: '區間內尚未觀察到無效筆數。' }
+    );
+    renderDiagnosticsEntries('dataDiagnosticsWarmup', [
+        { label: '暖身起點', value: warmup.warmupStartDate || warmup.dataStartDate || dataset.warmupStartDate || '—' },
+        { label: 'Longest 指標窗', value: warmup.longestLookback },
+        { label: 'KD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.kdNeedLong)} / ${formatDiagnosticsValue(warmup.kdNeedShort)}` },
+        { label: 'MACD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.macdNeedLong)} / ${formatDiagnosticsValue(warmup.macdNeedShort)}` },
+        { label: '模擬起始索引', value: warmup.computedStartIndex },
+        { label: '有效起始索引', value: warmup.effectiveStartIndex },
+        { label: '暖身耗用筆數', value: warmup.barsBeforeFirstTrade },
+        { label: '設定 Lookback 天數', value: warmup.lookbackDays },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(warmup.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromWarmup) },
+    ]);
+    renderDiagnosticsEntries('dataDiagnosticsBuyHold', [
+        { label: '首筆有效收盤索引', value: buyHold.firstValidPriceIdx },
+        { label: '首筆有效收盤日期', value: buyHold.firstValidPriceDate || '—' },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromRequested) },
+        { label: '暖身後無效收盤筆數', value: buyHold.invalidBarsBeforeFirstValid?.count ?? 0 },
+    ]);
+    renderDiagnosticsSamples(
+        'dataDiagnosticsBuyHoldSamples',
+        buyHold.invalidBarsBeforeFirstValid?.samples || [],
+        { emptyText: '暖身後未觀察到收盤價缺失。' }
+    );
+    renderDiagnosticsPreview('dataDiagnosticsPreview', warmup.previewRows || []);
+    renderDiagnosticsFetch(diag.fetch || null);
+    renderDiagnosticsTestingGuidance(diag);
+}
+
+function toggleDataDiagnostics(forceOpen) {
+    const panel = document.getElementById('dataDiagnosticsPanel');
+    const toggleBtn = document.getElementById('toggleDataDiagnostics');
+    if (!panel || !toggleBtn) return;
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !dataDiagnosticsState.open;
+    dataDiagnosticsState.open = shouldOpen;
+    if (shouldOpen) {
+        panel.classList.remove('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        refreshDataDiagnosticsPanel();
+    } else {
+        panel.classList.add('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function initDataDiagnosticsPanel() {
+    const toggleBtn = document.getElementById('toggleDataDiagnostics');
+    const closeBtn = document.getElementById('closeDataDiagnostics');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => toggleDataDiagnostics());
+    }
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => toggleDataDiagnostics(false));
+    }
+    refreshDataDiagnosticsPanel();
+    window.refreshDataDiagnosticsPanel = refreshDataDiagnosticsPanel;
 }
 
 function updateDataSourceDisplay(dataSource, stockName) {
@@ -499,7 +1014,7 @@ function refreshPriceInspectorControls() {
     const summaryEl = document.getElementById('priceInspectorSummary');
     if (!controls || !openBtn) return;
 
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     if (!hasData) {
         controls.classList.add('hidden');
         openBtn.disabled = true;
@@ -510,13 +1025,15 @@ function refreshPriceInspectorControls() {
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
     const sourceLabel = resolvePriceInspectorSourceLabel();
-    const firstDate = cachedStockData[0]?.date || lastFetchSettings?.startDate || '';
-    const lastDate = cachedStockData[cachedStockData.length - 1]?.date || lastFetchSettings?.endDate || '';
+    const lastStartFallback = lastFetchSettings?.effectiveStartDate || lastFetchSettings?.startDate || '';
+    const displayData = visibleStockData.length > 0 ? visibleStockData : [];
+    const firstDate = displayData[0]?.date || lastStartFallback;
+    const lastDate = displayData[displayData.length - 1]?.date || lastFetchSettings?.endDate || '';
 
     controls.classList.remove('hidden');
     openBtn.disabled = false;
     if (summaryEl) {
-        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${cachedStockData.length} 筆 (${modeLabel})`];
+        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 筆 (${modeLabel})`];
         if (sourceLabel) {
             summaryParts.push(sourceLabel);
         }
@@ -525,8 +1042,67 @@ function refreshPriceInspectorControls() {
     renderPricePipelineSteps();
 }
 
+function resolveStrategyDisplayName(key) {
+    if (!key) return '';
+    const direct = strategyDescriptions?.[key];
+    if (direct?.name) return direct.name;
+    const exitVariant = strategyDescriptions?.[`${key}_exit`];
+    if (exitVariant?.name) return exitVariant.name;
+    return key;
+}
+
+function collectPriceInspectorIndicatorColumns() {
+    if (!lastOverallResult) return [];
+    const series = lastIndicatorSeries || {};
+    const columns = [];
+    const pushColumn = (seriesKey, headerLabel) => {
+        const entry = series?.[seriesKey];
+        if (entry && Array.isArray(entry.columns) && entry.columns.length > 0) {
+            columns.push({ key: seriesKey, header: headerLabel, series: entry });
+        }
+    };
+
+    pushColumn('longEntry', `多單進場｜${resolveStrategyDisplayName(lastOverallResult.entryStrategy)}`);
+    pushColumn('longExit', `多單出場｜${resolveStrategyDisplayName(lastOverallResult.exitStrategy)}`);
+    if (lastOverallResult.enableShorting) {
+        pushColumn('shortEntry', `做空進場｜${resolveStrategyDisplayName(lastOverallResult.shortEntryStrategy)}`);
+        pushColumn('shortExit', `做空出場｜${resolveStrategyDisplayName(lastOverallResult.shortExitStrategy)}`);
+    }
+    return columns;
+}
+
+function formatIndicatorNumericValue(value, column) {
+    if (!Number.isFinite(value)) return '不足';
+    if (column?.format === 'integer') {
+        return Math.round(value).toLocaleString('zh-TW');
+    }
+    const digits = typeof column?.decimals === 'number' ? column.decimals : 2;
+    return Number(value).toFixed(digits);
+}
+
+function renderIndicatorCell(columnGroup, rowIndex) {
+    if (!columnGroup || !Array.isArray(columnGroup.columns) || columnGroup.columns.length === 0) {
+        return '—';
+    }
+    const lines = [];
+    columnGroup.columns.forEach((col) => {
+        const values = Array.isArray(col.values) ? col.values : [];
+        const rawValue = values[rowIndex];
+        if (col.format === 'text') {
+            const textValue = rawValue !== null && rawValue !== undefined && rawValue !== ''
+                ? String(rawValue)
+                : '—';
+            lines.push(`${escapeHtml(col.label)}: ${escapeHtml(textValue)}`);
+        } else {
+            const formatted = formatIndicatorNumericValue(rawValue, col);
+            lines.push(`${escapeHtml(col.label)}: ${formatted}`);
+        }
+    });
+    return lines.length > 0 ? lines.join('<br>') : '—';
+}
+
 function openPriceInspectorModal() {
-    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
         showError('尚未取得價格資料，請先執行回測。');
         return;
     }
@@ -540,7 +1116,7 @@ function openPriceInspectorModal() {
     const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
-        const subtitleParts = [`${modeLabel}`, marketLabel, `${cachedStockData.length} 筆`];
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
         if (sourceLabel) {
             subtitleParts.push(sourceLabel);
         }
@@ -549,6 +1125,35 @@ function openPriceInspectorModal() {
     renderPriceInspectorDebug();
 
     // Patch Tag: LB-PRICE-INSPECTOR-20250512A
+    const headerRow = document.getElementById('priceInspectorHeaderRow');
+    const indicatorColumns = collectPriceInspectorIndicatorColumns();
+    const baseHeaderConfig = [
+        { key: 'date', label: '日期', align: 'left' },
+        { key: 'open', label: '開盤', align: 'right' },
+        { key: 'high', label: '最高', align: 'right' },
+        { key: 'low', label: '最低', align: 'right' },
+        { key: 'rawClose', label: '原始收盤', align: 'right' },
+        { key: 'close', label: '還原收盤', align: 'right' },
+        { key: 'factor', label: '還原因子', align: 'right' },
+    ];
+    indicatorColumns.forEach((col) => {
+        baseHeaderConfig.push({ key: col.key, label: col.header, align: 'left', isIndicator: true, series: col.series });
+    });
+    baseHeaderConfig.push(
+        { key: 'position', label: '倉位狀態', align: 'left' },
+        { key: 'formula', label: '計算公式', align: 'left' },
+        { key: 'volume', label: '(千股)量', align: 'right' },
+        { key: 'source', label: '價格來源', align: 'left' },
+    );
+
+    if (headerRow) {
+        headerRow.innerHTML = baseHeaderConfig
+            .map((cfg) => `<th class="px-3 py-2 text-${cfg.align} font-medium">${escapeHtml(cfg.label)}</th>`)
+            .join('');
+    }
+
+    const totalColumns = baseHeaderConfig.length;
+
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
     const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
     const computeRawClose = (row) => {
@@ -572,8 +1177,8 @@ function openPriceInspectorModal() {
         const raw = Number(row.close) / factor;
         return Number.isFinite(raw) ? raw : Number(row.close);
     };
-    const rowsHtml = cachedStockData
-        .map((row) => {
+    const rowsHtml = visibleStockData
+        .map((row, rowIndex) => {
             const volumeLabel = Number.isFinite(row?.volume)
                 ? Number(row.volume).toLocaleString('zh-TW')
                 : '—';
@@ -596,6 +1201,12 @@ function openPriceInspectorModal() {
                 typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
                     ? row.priceSource.trim()
                     : sourceLabel || '—';
+            const indicatorCells = indicatorColumns
+                .map((col) =>
+                    `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`
+                )
+                .join('');
+            const positionLabel = lastPositionStates[rowIndex] || '空手';
             return `
                 <tr>
                     <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
@@ -605,6 +1216,8 @@ function openPriceInspectorModal() {
                     <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
                     <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
+                    ${indicatorCells}
+                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(positionLabel)}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
@@ -614,7 +1227,7 @@ function openPriceInspectorModal() {
 
     tbody.innerHTML =
         rowsHtml ||
-        '<tr><td class="px-3 py-4 text-center" colspan="10" style="color: var(--muted-foreground);">無資料</td></tr>';
+        `<tr><td class="px-3 py-4 text-center" colspan="${totalColumns}" style="color: var(--muted-foreground);">無資料</td></tr>`;
 
     const scroller = modal.querySelector('.overflow-auto');
     if (scroller) scroller.scrollTop = 0;
@@ -651,6 +1264,8 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshPriceInspectorControls();
 });
 
+document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
+
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
@@ -664,6 +1279,8 @@ function handleBacktestResult(result, stockName, dataSource) {
     try {
         lastOverallResult = result;
         lastSubPeriodResults = result.subPeriodResults;
+        lastIndicatorSeries = result.priceIndicatorSeries || null;
+        lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
@@ -1582,6 +2199,9 @@ function runOptimizationInternal(optimizeType) {
             } else if(type==='result'){ 
                 if(!useCache&&data?.rawDataUsed){
                     cachedStockData=data.rawDataUsed;
+                    if (Array.isArray(data.rawDataUsed)) {
+                        visibleStockData = data.rawDataUsed;
+                    }
                     lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
                 } else if(!useCache&&data&&!data.rawDataUsed) {
@@ -1913,7 +2533,7 @@ function updateStrategyParams(type) {
         }
     }
 }
- function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
+function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 

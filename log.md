@@ -1,3 +1,77 @@
+# 2025-06-09 — Patch LB-CACHE-START-20250609A
+- **Issue recap**: 買入持有基準修正後，快取檢查會因首筆有效日期落後 7 天而在每次回測都強制重抓，熱門股票回測等待時間明顯拉長。
+- **Fix**: 主執行緒於快取項目記錄首筆有效交易日、落後天數與確認時間，僅於首次或超過等待期限時才重新抓取，其餘情境沿用快取並保留警示。
+- **Diagnostics**: 快取結構新增 `firstEffectiveRowDate`、`startGapDays` 與 `startGapAcknowledgedAt`，價格診斷可追蹤暖身缺口是否已人工確認。
+- **Testing**: 受限於容器無法連線實際台股 API，採程式碼審閱與節點驗證。
+
+# 2025-06-08 — Patch LB-BUYHOLD-BASE-20250608A
+- **Issue recap**: 買入持有報酬仍以暖身期內第一筆有效收盤作為基準，造成使用者設定起始日的首筆報酬出現 20% 以上落差。尤其在 2330 案例
+  中，2024-09-02 應為 0% 的首日卻顯示 21% 報酬。
+- **Fix**: Worker 將買入持有基準鎖定在資料摘要標記的首筆有效收盤，對於起始日前的缺口一律視為 0% 並維持同一基準計算後續報酬，確
+  保圖表與診斷一致。
+- **Diagnostics**: 若暖身期結束後仍找不到有效收盤價，報酬序列會回傳全 0 並沿用既有的暖身落差警示，方便比對缺漏原因。
+- **Testing**: 靜態檢閱 Worker 買入持有報酬基準計算與暖身缺口覆寫邏輯（環境無法連線實際台股 API）。
+
+# 2025-06-07 — Patch LB-COVERAGE-FORCE-20250607A
+- **Issue recap**: 2330 在暖身期間即便多次重抓仍缺少 9/01～9/20 的交易日，買入持有首筆有效收盤距離使用者起點 22 天，導致基準報酬無法對齊。
+- **Fix**: Worker 於偵測月度缺口時會優先以 `forceSource` 重新向主來源（TWSE／FinMind／Yahoo）補抓資料並記錄來源，若仍落後超過 7 天則將買入持有報酬鎖定為 0%，避免誤導績效。
+- **Diagnostics**: 月度診斷新增 `forcedSources` 追蹤強制補抓來源，回測摘要亦揭露是否啟用強制補抓與買入持有暖身寬限設定，便於釐清資料仍缺漏或被歸零的原因。
+- **Testing**: 靜態檢查 Worker 月度補抓流程、forceSource 參數傳遞與買入持有報酬計算分支（環境無法連線實際台股 API）。
+
+# 2025-06-05 — Patch LB-WARMUP-DIAG-20250605A
+- **Issue recap**: 診斷卡的「暖身起點」仍顯示使用者設定日期，造成 2330 等案例雖已回推 90 日暖身卻看不出快取實際抓取的起點，也難以衡量第一筆有效收盤距離暖身資料的落差。
+- **Fix**: `summariseDatasetRows` 增加 `warmupStartDate` 與對應缺口統計，Worker 在回傳診斷與暖身摘要時帶入緩衝起點，前端改以 `warmupStartDate` 呈現並同時列出距暖身／使用者起點的天數，方便比對快取與實際資料差距。
+- **Diagnostics**: 資料暖身面板與遠端抓取摘要新增暖身起點與缺口欄位，Warmup 摘要同步呈現暖身起點與首筆有效收盤差距，協助判斷是否仍需追查 Proxy 或月度快取缺漏。
+- **Testing**: 以 Node 解析 `shared-lookback` 與 Worker 函式模擬輸出，檢查診斷結構；受限於環境無法連線 Proxy/API，未進行實際回測。
+
+# 2025-06-04 — Patch LB-COVERAGE-TRACE-20250604A / LB-DATA-DIAG-20250604A
+- **Issue recap**: 仍有用戶反映設定 9/01 起始日後，回測圖表與買進持有報告自 9/23 才出現有效價格；既有診斷卡片雖能顯示暖身資訊，但缺乏無效欄位統計、資料範例與手動測試指引，難以釐清遠端資料是否仍缺漏。 
+- **Fix**: Worker 在 `summariseDatasetRows` 中累計無效欄位的原因與首筆位置，若仍落後會輸出 console 警示並附上鄰近樣本；同時於買進持有檢查與月度抓取流程新增無效資料統計，方便定位快取或遠端回應的資料斷層。 
+- **Diagnostics**: 前端診斷卡新增「使用者起點鄰近樣本」、「無效欄位統計」與「手動測試指引」，並於主執行緒同步輸出原因彙總，協助營運與使用者蒐集回報所需資訊。 
+- **Testing**: 以本地模擬資料驗證診斷卡、console 警示與快取合併流程；受限於環境無法連線 Proxy，未能進行實際 API 回測。 
+
+# 2025-06-02 — Patch LB-COVERAGE-RECOVERY-20250602A
+- **Issue recap**: 2330 月度快取曾被標記為已覆蓋完整九月區間，導致 Worker 判定 9/01～9/20 無需重抓，即便主執行緒強制重新整理仍只得到 9/23 起的資料。
+- **Fix**: Worker 針對月度資料檢查實際成交日是否留有缺口，必要時會移除既有覆蓋區段並加入 cache bust 參數強制補抓缺漏天數，確保暖身期與使用者區間可一次補齊。
+- **Diagnostics**: 一旦觸發強制補抓，Worker 會輸出 console 警示並記錄 `lastForcedReloadAt`，後續可於 price inspector 驗證首日資料是否補齊。
+- **Testing**: 靜態檢查覆蓋修復流程（受限於本地環境無法連線實際台股 API 與瀏覽器）。
+
+# 2025-06-01 — Patch LB-COVERAGE-GAP-20250601A
+- **Issue recap**: 2330 一鍵回測後即使調整開始日期，價格表仍從 9/23 開始，研判為月度快取將未填補的起始區間視為已覆蓋，導致主執行緒重複沿用殘缺資料。
+- **Fix**: Worker 僅在取得實際筆數時才記錄月度覆蓋範圍，並以資料列重新建構 coverage，避免零筆回應也標記整段完成；主執行緒若偵測快取首筆日期距離設定起點超過一週，會強制放棄快取改抓遠端。
+- **Diagnostics**: 透過 console 警示 `快取首筆日期較設定起點晚於允許範圍` 判斷是否觸發重新抓取，同時在快取匯總中保留完整暖身資料供價格檢視器驗證首日交易狀態。
+- **Testing**: 靜態檢視流程與日誌（受限於本地環境無法連線實際台股 API）。
+
+# 2025-05-31 — Patch LB-WARMUP-SIGNAL-20250531A
+- **Issue recap**: 僅使用均線策略時，價格區間表首日仍顯示「不足」，顯示暖身資料未被納入指標計算；不同指標的最大週期也可能低估所需緩衝，導致 Worker 未向 Proxy 抓取足量歷史資料。
+- **Fix**: Worker 在執行策略時計算完整暖身序列並於回傳時僅裁切使用者指定區間，同步調高共享 lookback 工具的最小樣本數、緩衝日與交易日回推邏輯，確保主執行緒與批量優化皆向 Proxy 要求足夠歷史資料。
+- **Diagnostics**: 若指定區間完全無交易資料會回傳 `no_data` 訊息並註記僅保留暖身資料，前端快取依然保有完整序列供價格檢視器查驗。
+- **Testing**: 靜態檢查程式流程並重播 Worker 暖身資料行為（受限於此環境無法連線實際台股 API）。
+
+# 2025-05-30 — Patch LB-PRICE-INDICATOR-20250530A
+- **Issue recap**: 長週期策略在價格檢視器中無法辨識暖身期是否充足，指標欄位缺乏顯示且倉位狀態難以追蹤，部分突破策略的最高/最低計算亦出現位移。
+- **Fix**: Worker 端保留暖身資料後回傳 `priceIndicatorSeries` 與 `positionStates`，修正 `computeRollingExtrema` 的窗口對齊，並在前端價格檢視表動態生成各進出場策略指標與倉位欄位，未達計算標準時標示「不足」。
+- **Diagnostics**: 價格檢視器可同時看到原始/還原價格、各策略指標值、倉位狀態與來源標籤，方便驗證首日即可觸發進出場條件；若指標尚在暖身將直接顯示「不足」。
+- **Testing**: 本地模擬 Worker 計算流程並檢查 console log，確認無同步錯誤（此環境仍無法連線實際台股 API）。
+
+# 2025-05-28 — Patch LB-LOOKBACK-BUFFER-20250528A
+- **Issue recap**: 發現主執行緒合併回傳資料時，`mergeIsoCoverage` 於 `fetchedRange` 尚未定義前即被呼叫，導致部分瀏覽器在處理長週期回測結果時丟出 `ReferenceError`，使得首日暖身資料未能寫入快取。
+- **Fix**: 先解析 `fetchedRange` 再呼叫 `mergeIsoCoverage`，並在缺少範圍資訊時安全地跳過合併；保持緩衝區間與 `effectiveStartDate` 的紀錄完整。
+- **Diagnostics**: 維持 `fetchRange`、`lookbackDays` 等欄位回傳，便於部署後檢視暖身區間是否落地。
+- **Testing**: 本地以開發工具模擬 Worker 回傳資料流程，確認不再出現 `ReferenceError`（此環境仍無法連線實際 API）。
+
+# 2025-06-03 — Patch LB-COVERAGE-DEBUG-20250603A / LB-DATA-DIAG-20250603A
+- **Issue recap**: 使用者仍回報 2330 回測圖表起點落後，舊版程式缺乏首筆有效收盤與暖身筆數的診斷資訊，無法釐清快取是否成功補齊。
+- **Fix**: Worker 回傳 `datasetDiagnostics`，列出暖身起點、模擬索引、買入持有首筆有效收盤與月度補抓紀錄，主執行緒同步將診斷寫入快取並在 console 輸出差異。
+- **Diagnostics**: 前端新增「診斷資料暖身」卡片，顯示區間筆數、無效樣本、暖身需求與月度抓取摘要，方便手動測試時一鍵截圖提供資訊；同時在 warmup 與 B&H 發現落差時主動輸出警示。
+- **Testing**: 受限於離線環境，未能串接實際 Proxy，已透過本地資料結構模擬檢查面板渲染與 console 輸出格式。
+
+# 2025-05-27 — Patch LB-LOOKBACK-BUFFER-20250527A / LB-DATA-BUFFER-20250527A
+- **Issue recap**: 長週期指標與 MACD/KD 等策略在回測首日無法產生訊號，主因是資料抓取未留足夠暖身期間，主執行緒與 Worker 快取也缺乏緩衝期間辨識，導致不同 lookback 需求互相覆蓋。
+- **Fix**: 新增共享的指標週期工具，主線與 Worker 依據最大指標週期計算 lookback 並回推緩衝起點，所有資料抓取、快取 key、Meta 與 UI 顯示均改為記錄緩衝區間與 effectiveStartDate，同步在 Worker 執行策略前依有效區間切片。
+- **Diagnostics**: `rawMeta` 與 `dataDebug` 會帶回 `fetchRange`、`effectiveStartDate`、`lookbackDays`，前端快取也保存完整緩衝區，避免後續優化或建議功能讀取到截短資料。
+- **Testing**: 手動驗證參數前處理與快取合併流程（本地環境無法連線實際 API，僅能檢視程式日誌與流程）。
+
 # Lazybacktest Debug Log
 
 # 2025-05-18 — Patch LB-ADJ-COMPOSER-20250518A / LB-PRICE-INSPECTOR-20250518A

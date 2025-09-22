@@ -1,4 +1,6 @@
 
+importScripts('shared-lookback.js');
+
 // --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
@@ -16,6 +18,20 @@ let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const COVERAGE_GAP_TOLERANCE_DAYS = 6;
+const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+
+function getPrimaryForceSource(marketKey, adjusted) {
+  if (adjusted) return "yahoo";
+  if (marketKey === "TPEX") return "finmind";
+  return "twse";
+}
+
+function getFallbackForceSource(marketKey, adjusted) {
+  if (adjusted) return null;
+  if (marketKey === "TPEX") return null;
+  return "finmind";
+}
 
 function getMarketKey(marketType) {
   return (marketType || "TWSE").toUpperCase();
@@ -58,6 +74,42 @@ function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = f
   return marketCache.get(stockKey);
 }
 
+function rebuildCoverageFromData(entry) {
+  if (!entry) return;
+  const rows = Array.isArray(entry.data) ? entry.data : [];
+  if (rows.length === 0) {
+    entry.coverage = [];
+    return;
+  }
+  const sortedUtc = rows
+    .map((row) => (row && row.date ? isoToUTC(row.date) : NaN))
+    .filter((ms) => Number.isFinite(ms))
+    .sort((a, b) => a - b);
+  if (sortedUtc.length === 0) {
+    entry.coverage = [];
+    return;
+  }
+  const segments = [];
+  const MAX_GAP = DAY_MS * 6;
+  let segStart = sortedUtc[0];
+  let segEnd = segStart + DAY_MS;
+  for (let i = 1; i < sortedUtc.length; i += 1) {
+    const current = sortedUtc[i];
+    if (!Number.isFinite(current)) continue;
+    if (current <= segEnd + MAX_GAP) {
+      if (current + DAY_MS > segEnd) {
+        segEnd = current + DAY_MS;
+      }
+    } else {
+      segments.push({ start: segStart, end: segEnd });
+      segStart = current;
+      segEnd = current + DAY_MS;
+    }
+  }
+  segments.push({ start: segStart, end: segEnd });
+  entry.coverage = mergeRangeBounds(segments);
+}
+
 function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, split = false) {
   const marketCache = workerMonthlyCache.get(marketKey);
   if (!marketCache) return null;
@@ -74,6 +126,7 @@ function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, sp
   if (!Array.isArray(entry.data)) {
     entry.data = [];
   }
+  rebuildCoverageFromData(entry);
   return entry;
 }
 
@@ -120,6 +173,113 @@ function mergeRangeBounds(ranges) {
     }
   }
   return merged;
+}
+
+function subtractRangeBounds(baseRanges, subtractRanges) {
+  if (!Array.isArray(baseRanges) || baseRanges.length === 0) return [];
+  if (!Array.isArray(subtractRanges) || subtractRanges.length === 0) {
+    return baseRanges.map((range) => ({ ...range }));
+  }
+  const normalizedBase = mergeRangeBounds(
+    baseRanges.map((range) => ({ ...range })),
+  );
+  const normalizedSubtract = mergeRangeBounds(
+    subtractRanges.map((range) => ({ ...range })),
+  );
+  const result = [];
+  normalizedBase.forEach((base) => {
+    let segments = [{ ...base }];
+    normalizedSubtract.forEach((sub) => {
+      const nextSegments = [];
+      segments.forEach((segment) => {
+        if (sub.end <= segment.start || sub.start >= segment.end) {
+          nextSegments.push(segment);
+          return;
+        }
+        if (sub.start > segment.start) {
+          nextSegments.push({ start: segment.start, end: Math.min(sub.start, segment.end) });
+        }
+        if (sub.end < segment.end) {
+          nextSegments.push({ start: Math.max(sub.end, segment.start), end: segment.end });
+        }
+      });
+      segments = nextSegments;
+    });
+    segments.forEach((segment) => {
+      if (segment.end > segment.start) {
+        result.push(segment);
+      }
+    });
+  });
+  return result;
+}
+
+function detectCoverageGapsForMonth(entry, rangeStartISO, rangeEndISO, options = {}) {
+  if (!entry || !Array.isArray(entry.data)) return [];
+  const toleranceDays = Number.isFinite(options.toleranceDays)
+    ? Math.max(0, Math.floor(options.toleranceDays))
+    : COVERAGE_GAP_TOLERANCE_DAYS;
+  const startUTC = isoToUTC(rangeStartISO);
+  const endUTCExclusive = isoToUTC(rangeEndISO) + DAY_MS;
+  if (!Number.isFinite(startUTC) || !Number.isFinite(endUTCExclusive) || endUTCExclusive <= startUTC) {
+    return [];
+  }
+  const rowsInRange = entry.data
+    .filter(
+      (row) =>
+        row &&
+        typeof row.date === "string" &&
+        row.date >= rangeStartISO &&
+        row.date <= rangeEndISO,
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (rowsInRange.length === 0) {
+    return [{ start: startUTC, end: endUTCExclusive }];
+  }
+  const validRows = rowsInRange.filter((row) => Number.isFinite(row.close));
+  if (validRows.length === 0) {
+    return [{ start: startUTC, end: endUTCExclusive }];
+  }
+  const gapToleranceMs = toleranceDays * DAY_MS;
+  const forcedRanges = [];
+
+  const firstValidUTC = isoToUTC(validRows[0].date);
+  if (
+    Number.isFinite(firstValidUTC) &&
+    firstValidUTC > startUTC &&
+    firstValidUTC - startUTC > gapToleranceMs
+  ) {
+    forcedRanges.push({ start: startUTC, end: Math.min(firstValidUTC, endUTCExclusive) });
+  }
+
+  for (let i = 1; i < validRows.length; i += 1) {
+    const prevUTCExclusive = isoToUTC(validRows[i - 1].date) + DAY_MS;
+    const currentUTC = isoToUTC(validRows[i].date);
+    if (
+      Number.isFinite(prevUTCExclusive) &&
+      Number.isFinite(currentUTC) &&
+      currentUTC - prevUTCExclusive > gapToleranceMs
+    ) {
+      forcedRanges.push({
+        start: Math.max(prevUTCExclusive, startUTC),
+        end: Math.min(currentUTC, endUTCExclusive),
+      });
+    }
+  }
+
+  const lastValidUTCExclusive = isoToUTC(validRows[validRows.length - 1].date) + DAY_MS;
+  if (
+    Number.isFinite(lastValidUTCExclusive) &&
+    endUTCExclusive > lastValidUTCExclusive &&
+    endUTCExclusive - lastValidUTCExclusive > gapToleranceMs
+  ) {
+    forcedRanges.push({
+      start: Math.max(lastValidUTCExclusive, startUTC),
+      end: endUTCExclusive,
+    });
+  }
+
+  return mergeRangeBounds(forcedRanges);
 }
 
 function addCoverage(entry, startISO, endISO) {
@@ -194,6 +354,276 @@ function rangeBoundsToISO(range) {
   const startISO = utcToISO(range.start);
   const endISO = utcToISO(range.end - DAY_MS);
   return { startISO, endISO };
+}
+
+function diffIsoDays(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const startTs = Date.parse(startISO);
+  const endTs = Date.parse(endISO);
+  if (!Number.isFinite(startTs) || !Number.isFinite(endTs)) return null;
+  return Math.round((endTs - startTs) / DAY_MS);
+}
+
+function formatReasonCountMap(reasonCounts) {
+  if (!reasonCounts || typeof reasonCounts !== "object") return "無";
+  const entries = Object.entries(reasonCounts)
+    .map(([reason, count]) => [reason, Number(count)])
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return "無";
+  return entries.map(([reason, count]) => `${reason}×${count}`).join("、");
+}
+
+function summariseDatasetRows(rows, context = {}) {
+  const summary = {
+    totalRows: Array.isArray(rows) ? rows.length : 0,
+    firstDate: null,
+    lastDate: null,
+    requestedStart: context.requestedStart || null,
+    effectiveStartDate: context.effectiveStartDate || null,
+    warmupStartDate: context.warmupStartDate || context.dataStartDate || null,
+    dataStartDate: context.dataStartDate || context.warmupStartDate || null,
+    endDate: context.endDate || null,
+    warmupRows: 0,
+    rowsWithinRange: 0,
+    firstRowOnOrAfterRequestedStart: null,
+    firstRowOnOrAfterEffectiveStart: null,
+    firstRowOnOrAfterWarmupStart: null,
+    firstValidCloseOnOrAfterRequestedStart: null,
+    firstValidCloseOnOrAfterEffectiveStart: null,
+    firstValidCloseOnOrAfterWarmupStart: null,
+    firstValidVolumeOnOrAfterRequestedStart: null,
+    firstValidVolumeOnOrAfterWarmupStart: null,
+    firstInvalidRowOnOrAfterEffectiveStart: null,
+    invalidRowsInRange: { count: 0, samples: [], reasons: {} },
+    firstValidCloseGapFromRequested: null,
+    firstValidCloseGapFromEffective: null,
+    firstValidCloseGapFromWarmup: null,
+    firstValidVolumeGapFromWarmup: null,
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return summary;
+  }
+
+  summary.firstDate = rows[0]?.date || null;
+  summary.lastDate = rows[rows.length - 1]?.date || null;
+
+  const sampleLimit = 5;
+  const requestedStartISO = summary.requestedStart;
+  const effectiveStartISO = summary.effectiveStartDate || requestedStartISO;
+  const warmupStartISO = summary.warmupStartDate || summary.dataStartDate || null;
+  const warmupCutoffISO = requestedStartISO || effectiveStartISO;
+  const endISO = summary.endDate || null;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || typeof row.date !== "string") continue;
+    const date = row.date;
+    const open = Number.isFinite(row.open) ? row.open : null;
+    const high = Number.isFinite(row.high) ? row.high : null;
+    const low = Number.isFinite(row.low) ? row.low : null;
+    const close = Number.isFinite(row.close) ? row.close : null;
+    const volume = Number.isFinite(row.volume) ? row.volume : null;
+    const validClose = close !== null && close > 0;
+    const validVolume = volume !== null && volume > 0;
+
+    if (
+      warmupStartISO &&
+      !summary.firstRowOnOrAfterWarmupStart &&
+      date >= warmupStartISO
+    ) {
+      summary.firstRowOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
+
+    if (
+      requestedStartISO &&
+      !summary.firstRowOnOrAfterRequestedStart &&
+      date >= requestedStartISO
+    ) {
+      summary.firstRowOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
+
+    if (
+      effectiveStartISO &&
+      !summary.firstRowOnOrAfterEffectiveStart &&
+      date >= effectiveStartISO
+    ) {
+      summary.firstRowOnOrAfterEffectiveStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
+
+    if (
+      warmupStartISO &&
+      !summary.firstValidCloseOnOrAfterWarmupStart &&
+      date >= warmupStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        close,
+      };
+    }
+
+    if (
+      requestedStartISO &&
+      !summary.firstValidCloseOnOrAfterRequestedStart &&
+      date >= requestedStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        close,
+      };
+    }
+
+    if (
+      effectiveStartISO &&
+      !summary.firstValidCloseOnOrAfterEffectiveStart &&
+      date >= effectiveStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterEffectiveStart = {
+        date,
+        index: i,
+        close,
+      };
+    }
+
+    if (
+      warmupStartISO &&
+      !summary.firstValidVolumeOnOrAfterWarmupStart &&
+      date >= warmupStartISO &&
+      validVolume
+    ) {
+      summary.firstValidVolumeOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        volume,
+      };
+    }
+
+    if (
+      requestedStartISO &&
+      !summary.firstValidVolumeOnOrAfterRequestedStart &&
+      date >= requestedStartISO &&
+      validVolume
+    ) {
+      summary.firstValidVolumeOnOrAfterRequestedStart = {
+        date,
+        index: i,
+        volume,
+      };
+    }
+
+    if (warmupCutoffISO && date < warmupCutoffISO) {
+      summary.warmupRows += 1;
+    }
+
+    const withinRange =
+      (!requestedStartISO || date >= requestedStartISO) &&
+      (!endISO || date <= endISO);
+    if (withinRange) {
+      summary.rowsWithinRange += 1;
+      const invalidReasons = [];
+      if (!validClose) invalidReasons.push("close");
+      if (open === null || open <= 0) invalidReasons.push("open");
+      if (high === null || high <= 0) invalidReasons.push("high");
+      if (low === null || low <= 0) invalidReasons.push("low");
+      if (!validVolume) invalidReasons.push("volume");
+      if (invalidReasons.length > 0) {
+        summary.invalidRowsInRange.count += 1;
+        invalidReasons.forEach((reason) => {
+          if (!reason) return;
+          const current = summary.invalidRowsInRange.reasons[reason] || 0;
+          summary.invalidRowsInRange.reasons[reason] = current + 1;
+        });
+        if (summary.invalidRowsInRange.samples.length < sampleLimit) {
+          summary.invalidRowsInRange.samples.push({
+            date,
+            index: i,
+            reasons: invalidReasons,
+            open,
+            high,
+            low,
+            close,
+            volume,
+          });
+        }
+        if (
+          effectiveStartISO &&
+          !summary.firstInvalidRowOnOrAfterEffectiveStart &&
+          date >= effectiveStartISO
+        ) {
+          summary.firstInvalidRowOnOrAfterEffectiveStart = {
+            date,
+            index: i,
+            close,
+            volume,
+            reasons: invalidReasons.slice(0, 5),
+          };
+        }
+      }
+    }
+  }
+
+  if (
+    requestedStartISO &&
+    summary.firstValidCloseOnOrAfterRequestedStart?.date
+  ) {
+    summary.firstValidCloseGapFromRequested = diffIsoDays(
+      requestedStartISO,
+      summary.firstValidCloseOnOrAfterRequestedStart.date,
+    );
+  }
+
+  if (
+    effectiveStartISO &&
+    summary.firstValidCloseOnOrAfterEffectiveStart?.date
+  ) {
+    summary.firstValidCloseGapFromEffective = diffIsoDays(
+      effectiveStartISO,
+      summary.firstValidCloseOnOrAfterEffectiveStart.date,
+    );
+  }
+
+  if (
+    warmupStartISO &&
+    summary.firstValidCloseOnOrAfterWarmupStart?.date
+  ) {
+    summary.firstValidCloseGapFromWarmup = diffIsoDays(
+      warmupStartISO,
+      summary.firstValidCloseOnOrAfterWarmupStart.date,
+    );
+  }
+
+  if (
+    warmupStartISO &&
+    summary.firstValidVolumeOnOrAfterWarmupStart?.date
+  ) {
+    summary.firstValidVolumeGapFromWarmup = diffIsoDays(
+      warmupStartISO,
+      summary.firstValidVolumeOnOrAfterWarmupStart.date,
+    );
+  }
+
+  return summary;
 }
 
 function mergeMonthlyData(entry, newRows) {
@@ -980,6 +1410,10 @@ async function fetchStockData(
   const endDateObj = new Date(endDate);
   const adjusted = Boolean(options.adjusted || options.adjustedPrice);
   const split = Boolean(options.splitAdjustment);
+  const optionEffectiveStart = options.effectiveStartDate || startDate;
+  const optionLookbackDays = Number.isFinite(options.lookbackDays)
+    ? Number(options.lookbackDays)
+    : null;
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -990,8 +1424,22 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
+  const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
+  const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
+  const fetchDiagnostics = {
+    stockNo,
+    marketKey,
+    adjusted,
+    split,
+    requested: { start: startDate, end: endDate },
+    effectiveStartDate: optionEffectiveStart || null,
+    lookbackDays: optionLookbackDays,
+    dataStartDate: startDate,
+    months: [],
+    usedCache: Boolean(cachedEntry),
+  };
   if (cachedEntry) {
     self.postMessage({
       type: "progress",
@@ -1042,6 +1490,12 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
         ? cachedEntry.meta.adjustmentChecks
         : [],
+      fetchRange:
+        cachedEntry?.meta?.fetchRange ||
+        { start: startDate, end: endDate },
+      effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
+      lookbackDays: cachedEntry?.meta?.lookbackDays || null,
+      diagnostics: cachedEntry?.meta?.diagnostics || null,
     };
   }
 
@@ -1064,6 +1518,22 @@ async function fetchStockData(
       marketKey,
       { splitAdjustment: split },
     );
+    const adjustedRows = Array.isArray(adjustedResult?.data)
+      ? adjustedResult.data
+      : [];
+    const adjustedOverview = summariseDatasetRows(adjustedRows, {
+      requestedStart: optionEffectiveStart || startDate,
+      effectiveStartDate: optionEffectiveStart || startDate,
+      warmupStartDate: startDate,
+      dataStartDate: startDate,
+      endDate,
+    });
+    const adjustedDiagnostics = {
+      ...fetchDiagnostics,
+      months: [],
+      overview: adjustedOverview,
+      usedCache: false,
+    };
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
@@ -1073,9 +1543,12 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
         splitAdjustment: split,
+        lookbackDays: optionLookbackDays,
+        fetchRange: { start: startDate, end: endDate },
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
@@ -1113,6 +1586,7 @@ async function fetchStockData(
         adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
           ? adjustedResult.adjustmentChecks
           : [],
+        diagnostics: adjustedDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1156,11 +1630,23 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
         ? adjustedResult.adjustmentChecks
         : [],
+      fetchRange: { start: startDate, end: endDate },
+      effectiveStartDate: optionEffectiveStart,
+      lookbackDays: optionLookbackDays,
+      diagnostics: adjustedDiagnostics,
     };
   }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
+    fetchDiagnostics.usedCache = false;
+    fetchDiagnostics.overview = summariseDatasetRows([], {
+      requestedStart: optionEffectiveStart || startDate,
+      effectiveStartDate: optionEffectiveStart || startDate,
+      warmupStartDate: startDate,
+      dataStartDate: startDate,
+      endDate,
+    });
     const entry = {
       data: [],
       stockName: stockNo,
@@ -1169,13 +1655,25 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
+        lookbackDays: optionLookbackDays,
+        fetchRange: { start: startDate, end: endDate },
+        diagnostics: fetchDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
     setWorkerCacheEntry(marketKey, cacheKey, entry);
-    return { data: [], dataSource: marketKey, stockName };
+    return {
+      data: [],
+      dataSource: marketKey,
+      stockName,
+      fetchRange: { start: startDate, end: endDate },
+      effectiveStartDate: optionEffectiveStart,
+      lookbackDays: optionLookbackDays,
+      diagnostics: fetchDiagnostics,
+    };
   }
   const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
   const isTpex = marketKey === "TPEX";
@@ -1214,15 +1712,41 @@ async function fetchStockData(
         const existingCoverage = Array.isArray(monthEntry.coverage)
           ? monthEntry.coverage.map((range) => ({ ...range }))
           : [];
+        const forcedRepairRanges = detectCoverageGapsForMonth(
+          monthEntry,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+          { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
+        );
+        let coverageForComputation = existingCoverage;
+        if (forcedRepairRanges.length > 0) {
+          coverageForComputation = subtractRangeBounds(
+            existingCoverage,
+            forcedRepairRanges,
+          );
+          monthEntry.coverage = subtractRangeBounds(
+            monthEntry.coverage || [],
+            forcedRepairRanges,
+          );
+          monthEntry.lastForcedReloadAt = Date.now();
+          if (forcedRepairRanges.length > 0) {
+            console.warn(
+              `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
+            );
+          }
+        }
         const missingRanges = computeMissingRanges(
-          existingCoverage,
+          coverageForComputation,
           monthInfo.rangeStartISO,
           monthInfo.rangeEndISO,
         );
         const coveredLengthBefore = getCoveredLength(
-          existingCoverage,
+          coverageForComputation,
           monthInfo.rangeStartISO,
           monthInfo.rangeEndISO,
+        );
+        const forcedRangeKeys = new Set(
+          forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
         );
         const monthSourceFlags = new Set(
           monthEntry.sources instanceof Set
@@ -1230,74 +1754,137 @@ async function fetchStockData(
             : monthEntry.sources || [],
         );
         const monthCacheFlags = new Set();
+        const forcedSourceUsage = new Set();
         let monthStockName = monthEntry.stockName || "";
 
         if (missingRanges.length > 0) {
           for (let i = 0; i < missingRanges.length; i += 1) {
             const missingRange = missingRanges[i];
             const { startISO, endISO } = rangeBoundsToISO(missingRange);
-            const params = new URLSearchParams({
-              stockNo,
-              month: monthInfo.monthKey,
-              start: startISO,
-              end: endISO,
-            });
-            if (adjusted) params.set("adjusted", "1");
-            const url = `${proxyPath}?${params.toString()}`;
-            try {
-              const payload = await fetchWithAdaptiveRetry(url, {
-                headers: { Accept: "application/json" },
+            const rangeKey = `${missingRange.start}-${missingRange.end}`;
+            const shouldForceRange =
+              forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+            const candidateSources = [];
+            if (shouldForceRange) {
+              if (primaryForceSource) candidateSources.push(primaryForceSource);
+              if (
+                fallbackForceSource &&
+                fallbackForceSource !== primaryForceSource
+              ) {
+                candidateSources.push(fallbackForceSource);
+              }
+            }
+            candidateSources.push(null);
+
+            let payload = null;
+            let lastError = null;
+            for (let c = 0; c < candidateSources.length; c += 1) {
+              const forceSource = candidateSources[c];
+              const params = new URLSearchParams({
+                stockNo,
+                month: monthInfo.monthKey,
+                start: startISO,
+                end: endISO,
               });
-              if (payload?.error) {
-                throw new Error(payload.error);
-              }
-              if (payload?.source === "blob") {
-                const cacheLabel = isTpex
-                  ? "TPEX (快取)"
-                  : "TWSE (快取)";
-                monthCacheFlags.add(cacheLabel);
-                monthEntry.sources.add(cacheLabel);
-              } else if (payload?.source === "memory") {
-                const cacheLabel = isTpex
-                  ? "TPEX (記憶體快取)"
-                  : "TWSE (記憶體快取)";
-                monthCacheFlags.add(cacheLabel);
-                monthEntry.sources.add(cacheLabel);
-              }
-              const rows = Array.isArray(payload?.aaData)
-                ? payload.aaData
-                : Array.isArray(payload?.data)
-                  ? payload.data
-                  : [];
-              const normalized = [];
-              rows.forEach((row) => {
-                const normalizedRow = normalizeProxyRow(
-                  row,
-                  isTpex,
-                  startDateObj,
-                  endDateObj,
+              if (adjusted) params.set("adjusted", "1");
+              if (forceSource) params.set("forceSource", forceSource);
+              if (shouldForceRange) {
+                params.set(
+                  "cacheBust",
+                  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 );
-                if (normalizedRow) normalized.push(normalizedRow);
-              });
-              if (payload?.stockName) {
-                monthStockName = payload.stockName;
               }
-              const sourceLabel =
-                payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-              if (sourceLabel) {
-                monthSourceFlags.add(sourceLabel);
-                monthEntry.sources.add(sourceLabel);
+              const url = `${proxyPath}?${params.toString()}`;
+              try {
+                const responsePayload = await fetchWithAdaptiveRetry(url, {
+                  headers: { Accept: "application/json" },
+                });
+                if (responsePayload?.error) {
+                  throw new Error(responsePayload.error);
+                }
+                payload = responsePayload;
+                if (forceSource) {
+                  forcedSourceUsage.add(forceSource);
+                  console.warn(
+                    `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
+                      responsePayload?.aaData,
+                    )
+                      ? responsePayload.aaData.length
+                      : Array.isArray(responsePayload?.data)
+                        ? responsePayload.data.length
+                        : 0} 筆資料。`,
+                  );
+                }
+                break;
+              } catch (error) {
+                lastError = error;
+                console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+                payload = null;
               }
-              if (normalized.length > 0) {
-                mergeMonthlyData(monthEntry, normalized);
+            }
+
+            if (!payload) {
+              if (lastError) {
+                console.error(
+                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
+                );
               }
-              addCoverage(monthEntry, startISO, endISO);
-              monthEntry.lastUpdated = Date.now();
-              if (!monthEntry.stockName && monthStockName) {
-                monthEntry.stockName = monthStockName;
+              continue;
+            }
+
+            if (payload?.source === "blob") {
+              const cacheLabel = isTpex
+                ? "TPEX (快取)"
+                : "TWSE (快取)";
+              monthCacheFlags.add(cacheLabel);
+              monthEntry.sources.add(cacheLabel);
+            } else if (payload?.source === "memory") {
+              const cacheLabel = isTpex
+                ? "TPEX (記憶體快取)"
+                : "TWSE (記憶體快取)";
+              monthCacheFlags.add(cacheLabel);
+              monthEntry.sources.add(cacheLabel);
+            }
+            const rows = Array.isArray(payload?.aaData)
+              ? payload.aaData
+              : Array.isArray(payload?.data)
+                ? payload.data
+                : [];
+            const normalized = [];
+            rows.forEach((row) => {
+              const normalizedRow = normalizeProxyRow(
+                row,
+                isTpex,
+                startDateObj,
+                endDateObj,
+              );
+              if (normalizedRow) normalized.push(normalizedRow);
+            });
+            if (payload?.stockName) {
+              monthStockName = payload.stockName;
+            }
+            const sourceLabel =
+              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+            if (sourceLabel) {
+              monthSourceFlags.add(sourceLabel);
+              monthEntry.sources.add(sourceLabel);
+            }
+            if (normalized.length > 0) {
+              mergeMonthlyData(monthEntry, normalized);
+              const sortedNormalized = normalized
+                .slice()
+                .sort((a, b) => a.date.localeCompare(b.date));
+              const coverageStart = sortedNormalized[0]?.date || null;
+              const coverageEnd =
+                sortedNormalized[sortedNormalized.length - 1]?.date || null;
+              if (coverageStart && coverageEnd) {
+                addCoverage(monthEntry, coverageStart, coverageEnd);
               }
-            } catch (error) {
-              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+              rebuildCoverageFromData(monthEntry);
+            }
+            monthEntry.lastUpdated = Date.now();
+            if (!monthEntry.stockName && monthStockName) {
+              monthEntry.stockName = monthStockName;
             }
           }
         }
@@ -1316,11 +1903,33 @@ async function fetchStockData(
         const usedCache =
           missingRanges.length === 0 || coveredLengthBefore > 0;
 
+        const monthDiagnostics = {
+          monthKey: monthInfo.monthKey,
+          label: monthInfo.label,
+          requestedStart: monthInfo.rangeStartISO,
+          requestedEnd: monthInfo.rangeEndISO,
+          missingSegments: missingRanges.length,
+          forcedRepairs: forcedRepairRanges.length,
+          forcedRepairSamples: forcedRepairRanges
+            .slice(0, 3)
+            .map((range) => rangeBoundsToISO(range)),
+          cacheCoverageDaysBefore: Math.round(
+            coveredLengthBefore / DAY_MS,
+          ),
+          usedCache,
+          rowsReturned: rowsForRange.length,
+          firstRowDate: rowsForRange[0]?.date || null,
+          lastRowDate:
+            rowsForRange[rowsForRange.length - 1]?.date || null,
+          cacheSources: Array.from(monthSourceFlags),
+          forcedSources: Array.from(forcedSourceUsage),
+        };
         return {
           rows: rowsForRange,
           sourceFlags: Array.from(monthSourceFlags),
           stockName: monthStockName,
           usedCache,
+          diagnostics: monthDiagnostics,
         };
       } finally {
         completed += 1;
@@ -1337,6 +1946,7 @@ async function fetchStockData(
   const normalizedRows = [];
   const sourceFlags = new Set();
   let stockName = "";
+  const fetchForcedSources = new Set();
   monthResults.forEach((res) => {
     if (!res) return;
     if (res.stockName && !stockName) stockName = res.stockName;
@@ -1348,6 +1958,14 @@ async function fetchStockData(
     if (res.usedCache) {
       sourceFlags.add("Worker月度快取");
     }
+    if (res.diagnostics) {
+      fetchDiagnostics.months.push(res.diagnostics);
+      if (Array.isArray(res.diagnostics.forcedSources)) {
+        res.diagnostics.forcedSources.forEach((src) => {
+          if (src) fetchForcedSources.add(src);
+        });
+      }
+    }
     (res.rows || []).forEach((row) => {
       const normalized = normalizeProxyRow(
         row,
@@ -1358,6 +1976,9 @@ async function fetchStockData(
       if (normalized) normalizedRows.push(normalized);
     });
   });
+  if (fetchForcedSources.size > 0) {
+    fetchDiagnostics.forcedSources = Array.from(fetchForcedSources);
+  }
 
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   const deduped = dedupeAndSortData(normalizedRows);
@@ -1374,6 +1995,53 @@ async function fetchStockData(
     { market: isTpex ? "TPEX" : "TWSE", adjusted },
   );
 
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate: startDate,
+    endDate,
+  });
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.usedCache = false;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+  if (
+    Number.isFinite(overview?.firstValidCloseGapFromRequested)
+  ) {
+    fetchDiagnostics.firstValidCloseGapFromRequested =
+      overview.firstValidCloseGapFromRequested;
+  }
+  if (
+    Number.isFinite(overview?.firstValidCloseGapFromEffective) &&
+    overview.firstValidCloseGapFromEffective > 1
+  ) {
+    console.warn(
+      `[Worker] ${stockNo} 第一筆有效收盤價落後暖身起點 ${overview.firstValidCloseGapFromEffective} 天，請檢查快取或資料源是否缺漏。`,
+    );
+  }
+  if (overview?.invalidRowsInRange?.count > 0) {
+    const reasonText = formatReasonCountMap(overview.invalidRowsInRange.reasons);
+    console.warn(
+      `[Worker] ${stockNo} 遠端回應共有 ${overview.invalidRowsInRange.count} 筆無效資料。原因統計: ${reasonText}`,
+    );
+    if (
+      Array.isArray(overview.invalidRowsInRange.samples) &&
+      overview.invalidRowsInRange.samples.length > 0 &&
+      typeof console.table === "function"
+    ) {
+      const invalidTable = overview.invalidRowsInRange.samples.map((sample) => ({
+        index: sample.index,
+        date: sample.date,
+        reasons: Array.isArray(sample.reasons)
+          ? sample.reasons.join(", ")
+          : sample.reasons,
+        close: sample.close,
+        volume: sample.volume,
+      }));
+      console.table(invalidTable);
+    }
+  }
+
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
     stockName: stockName || stockNo,
@@ -1382,8 +2050,13 @@ async function fetchStockData(
     meta: {
       stockNo,
       startDate,
+      effectiveStartDate: optionEffectiveStart,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
+      diagnostics: fetchDiagnostics,
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -1398,6 +2071,10 @@ async function fetchStockData(
     data: deduped,
     dataSource: dataSourceLabel,
     stockName: stockName || stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
   };
 }
 
@@ -2257,6 +2934,771 @@ function calculateAllIndicators(data, params) {
   return indic;
 }
 
+function computeRollingExtrema(values, period, type) {
+  const length = Array.isArray(values) ? values.length : 0;
+  const result = new Array(length).fill(null);
+  if (!Number.isFinite(period) || period <= 0) return result;
+  const window = [];
+  for (let i = 0; i < length; i += 1) {
+    const numeric = Number(values[i]);
+    const incoming = Number.isFinite(numeric) ? numeric : null;
+    window.push(incoming);
+    if (window.length > period) {
+      window.shift();
+    }
+    if (window.length === period) {
+      let valid = true;
+      let extremum = type === "min" ? Infinity : -Infinity;
+      for (let j = 0; j < window.length; j += 1) {
+        const val = window[j];
+        if (!Number.isFinite(val)) {
+          valid = false;
+          break;
+        }
+        extremum =
+          type === "min" ? Math.min(extremum, val) : Math.max(extremum, val);
+      }
+      result[i] = valid ? extremum : null;
+    }
+  }
+  return result;
+}
+
+function makeIndicatorColumn(label, values, options = {}) {
+  return {
+    label,
+    values: Array.isArray(values) ? values : [],
+    format: options.format,
+    decimals: options.decimals,
+  };
+}
+
+function getIndicatorArray(ctx, key) {
+  const source = ctx.indicators && ctx.indicators[key];
+  if (Array.isArray(source) && source.length === ctx.length) {
+    return source;
+  }
+  if (Array.isArray(source)) {
+    const copy = new Array(ctx.length).fill(null);
+    for (let i = 0; i < ctx.length && i < source.length; i += 1) {
+      copy[i] = source[i];
+    }
+    return copy;
+  }
+  return new Array(ctx.length).fill(null);
+}
+
+function createIndicatorContext(baseContext, indicators) {
+  const data = Array.isArray(baseContext?.data) ? baseContext.data : [];
+  const length = data.length;
+  const highs =
+    Array.isArray(baseContext?.highs) && baseContext.highs.length === length
+      ? baseContext.highs
+      : data.map((d) => (Number.isFinite(d.high) ? Number(d.high) : null));
+  const lows =
+    Array.isArray(baseContext?.lows) && baseContext.lows.length === length
+      ? baseContext.lows
+      : data.map((d) => (Number.isFinite(d.low) ? Number(d.low) : null));
+  const closes =
+    Array.isArray(baseContext?.closes) && baseContext.closes.length === length
+      ? baseContext.closes
+      : data.map((d) => (Number.isFinite(d.close) ? Number(d.close) : null));
+  const volumes =
+    Array.isArray(baseContext?.volumes) && baseContext.volumes.length === length
+      ? baseContext.volumes
+      : data.map((d) => (Number.isFinite(d.volume) ? Number(d.volume) : null));
+  const rollingHighCache = new Map();
+  const rollingLowCache = new Map();
+
+  return {
+    length,
+    indicators,
+    highs,
+    lows,
+    closes,
+    volumes,
+    longTrailingStops:
+      Array.isArray(baseContext?.longTrailingStops) &&
+      baseContext.longTrailingStops.length === length
+        ? baseContext.longTrailingStops
+        : new Array(length).fill(null),
+    shortTrailingStops:
+      Array.isArray(baseContext?.shortTrailingStops) &&
+      baseContext.shortTrailingStops.length === length
+        ? baseContext.shortTrailingStops
+        : new Array(length).fill(null),
+    getRollingHigh(period) {
+      const key = Number(period) || 0;
+      if (!Number.isFinite(key) || key <= 0) {
+        return new Array(length).fill(null);
+      }
+      if (!rollingHighCache.has(key)) {
+        rollingHighCache.set(key, computeRollingExtrema(highs, key, "max"));
+      }
+      return rollingHighCache.get(key);
+    },
+    getRollingLow(period) {
+      const key = Number(period) || 0;
+      if (!Number.isFinite(key) || key <= 0) {
+        return new Array(length).fill(null);
+      }
+      if (!rollingLowCache.has(key)) {
+        rollingLowCache.set(key, computeRollingExtrema(lows, key, "min"));
+      }
+      return rollingLowCache.get(key);
+    },
+    getVolumeRatio(avgArray) {
+      const ratio = new Array(length).fill(null);
+      if (!Array.isArray(avgArray)) return ratio;
+      for (let i = 0; i < length; i += 1) {
+        const avg = avgArray[i];
+        const vol = volumes[i];
+        if (Number.isFinite(avg) && Number.isFinite(vol) && avg !== 0) {
+          ratio[i] = vol / avg;
+        } else {
+          ratio[i] = null;
+        }
+      }
+      return ratio;
+    },
+  };
+}
+
+const entryIndicatorBuilders = {
+  ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShort"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLong"),
+      ),
+    ];
+  },
+  ma_above(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  rsi_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdEntry"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalEntry"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  bollinger_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `上軌(${period})`,
+        getIndicatorArray(ctx, "bollingerUpperEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        "中軌",
+        getIndicatorArray(ctx, "bollingerMiddleEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
+    ];
+  },
+  price_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  williams_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  turtle_breakout(params, ctx) {
+    const period = Number(params?.breakoutPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+};
+entryIndicatorBuilders.ema_cross = entryIndicatorBuilders.ma_cross;
+
+const exitIndicatorBuilders = {
+  ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortExit"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongExit"),
+      ),
+    ];
+  },
+  ma_below(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  rsi_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdExit"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalExit"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  bollinger_reversal(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `中軌(${period})`,
+        getIndicatorArray(ctx, "bollingerMiddleExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kExit"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  trailing_stop(params, ctx) {
+    const pct = Number(params?.percentage) || 5;
+    return [
+      makeIndicatorColumn(
+        `移動停損價(${pct}%)`,
+        ctx.longTrailingStops,
+        { decimals: 2 },
+      ),
+    ];
+  },
+  price_breakdown(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  williams_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  turtle_stop_loss(params, ctx) {
+    const period = Number(params?.stopLossPeriod) || 10;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  fixed_stop_loss() {
+    return [];
+  },
+};
+exitIndicatorBuilders.ma_cross_exit = exitIndicatorBuilders.ma_cross;
+exitIndicatorBuilders.macd_cross_exit = exitIndicatorBuilders.macd_cross;
+
+const shortEntryIndicatorBuilders = {
+  short_ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortShortEntry"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongShortEntry"),
+      ),
+    ];
+  },
+  short_ma_below(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  short_rsi_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdShortEntry"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalShortEntry"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  short_bollinger_reversal(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `中軌(${period})`,
+        getIndicatorArray(ctx, "bollingerMiddleShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kShortEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_price_breakdown(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_williams_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_turtle_stop_loss(params, ctx) {
+    const period = Number(params?.stopLossPeriod) || 10;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+};
+shortEntryIndicatorBuilders.short_ema_cross =
+  shortEntryIndicatorBuilders.short_ma_cross;
+
+const shortExitIndicatorBuilders = {
+  cover_ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortCover"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongCover"),
+      ),
+    ];
+  },
+  cover_ma_above(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  cover_rsi_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdCover"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalCover"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  cover_bollinger_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `上軌(${period})`,
+        getIndicatorArray(ctx, "bollingerUpperCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kCover"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_price_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_williams_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_turtle_breakout(params, ctx) {
+    const period = Number(params?.breakoutPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_trailing_stop(params, ctx) {
+    const pct = Number(params?.percentage) || 5;
+    return [
+      makeIndicatorColumn(
+        `移動停損價(${pct}%)`,
+        ctx.shortTrailingStops,
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_fixed_stop_loss() {
+    return [];
+  },
+};
+shortExitIndicatorBuilders.cover_ema_cross =
+  shortExitIndicatorBuilders.cover_ma_cross;
+
+const INDICATOR_BUILDERS = {
+  entry: entryIndicatorBuilders,
+  exit: exitIndicatorBuilders,
+  shortEntry: shortEntryIndicatorBuilders,
+  shortExit: shortExitIndicatorBuilders,
+};
+
+function buildIndicatorDisplay(params, indicators, baseContext) {
+  const ctx = createIndicatorContext(baseContext, indicators);
+  const result = {};
+
+  const buildForRole = (slotKey, role, strategyKey, strategyParams) => {
+    if (!strategyKey) return;
+    const builders = INDICATOR_BUILDERS[role];
+    if (!builders) return;
+    let builder = builders[strategyKey];
+    if (!builder && strategyKey.endsWith("_exit")) {
+      builder = builders[strategyKey.replace(/_exit$/, "")];
+    }
+    if (!builder) return;
+    const columns = builder(strategyParams || {}, ctx, params);
+    if (Array.isArray(columns) && columns.length > 0) {
+      result[slotKey] = {
+        strategy: strategyKey,
+        columns: columns.map((col) => ({
+          label: col.label,
+          values: Array.isArray(col.values)
+            ? col.values
+            : new Array(ctx.length).fill(null),
+          format: col.format,
+          decimals: col.decimals,
+        })),
+      };
+    }
+  };
+
+  buildForRole("longEntry", "entry", params.entryStrategy, params.entryParams);
+  buildForRole("longExit", "exit", params.exitStrategy, params.exitParams);
+  if (params.enableShorting) {
+    buildForRole(
+      "shortEntry",
+      "shortEntry",
+      params.shortEntryStrategy,
+      params.shortEntryParams,
+    );
+    buildForRole(
+      "shortExit",
+      "shortExit",
+      params.shortExitStrategy,
+      params.shortExitParams,
+    );
+  }
+
+  return result;
+}
+
+function sliceIndicatorDisplay(series, startIndex) {
+  if (!series || typeof series !== "object") return {};
+  const keys = ["longEntry", "longExit", "shortEntry", "shortExit"];
+  const result = {};
+  keys.forEach((key) => {
+    const entry = series[key];
+    if (entry && Array.isArray(entry.columns)) {
+      result[key] = {
+        strategy: entry.strategy,
+        columns: entry.columns.map((col) => ({
+          label: col.label,
+          format: col.format,
+          decimals: col.decimals,
+          values: Array.isArray(col.values)
+            ? col.values.slice(startIndex)
+            : [],
+        })),
+      };
+    }
+  });
+  return result;
+}
+
+function computeTrailingStopLevels(
+  longStates,
+  shortStates,
+  highs,
+  lows,
+  options,
+) {
+  const length = Array.isArray(longStates) ? longStates.length : 0;
+  const longLevels = new Array(length).fill(null);
+  const shortLevels = new Array(length).fill(null);
+  const longPctRaw =
+    options?.exitStrategy === "trailing_stop"
+      ? Number(options?.exitParams?.percentage ?? 5)
+      : null;
+  if (Number.isFinite(longPctRaw)) {
+    let peak = null;
+    for (let i = 0; i < length; i += 1) {
+      const state = longStates[i];
+      const active =
+        state === "持有" || state === "進場" || state === "出場";
+      if (active && Number.isFinite(highs?.[i])) {
+        peak = peak !== null ? Math.max(peak, highs[i]) : highs[i];
+      }
+      if (active && Number.isFinite(peak)) {
+        longLevels[i] = peak * (1 - longPctRaw / 100);
+      }
+      if (state === "出場" || state === "空手") {
+        peak = null;
+      }
+    }
+  }
+
+  const shortPctRaw =
+    options?.enableShorting &&
+    options?.shortExitStrategy === "cover_trailing_stop"
+      ? Number(options?.shortExitParams?.percentage ?? 5)
+      : null;
+  if (Number.isFinite(shortPctRaw)) {
+    let trough = null;
+    for (let i = 0; i < length; i += 1) {
+      const state = shortStates[i];
+      const active =
+        state === "持有" || state === "進場" || state === "出場";
+      if (active && Number.isFinite(lows?.[i])) {
+        trough = trough !== null ? Math.min(trough, lows[i]) : lows[i];
+      }
+      if (active && Number.isFinite(trough)) {
+        shortLevels[i] = trough * (1 + shortPctRaw / 100);
+      }
+      if (state === "出場" || state === "空手") {
+        trough = null;
+      }
+    }
+  }
+
+  return { longLevels, shortLevels };
+}
+
+function combinePositionLabel(longState, shortState) {
+  const parts = [];
+  if (longState && longState !== "空手") {
+    parts.push(`多單${longState}`);
+  }
+  if (shortState && shortState !== "空手") {
+    parts.push(`空單${shortState}`);
+  }
+  if (parts.length === 0) return "空手";
+  return parts.join("｜");
+}
+
 // --- 運行策略回測 (修正年化報酬率計算) ---
 function runStrategy(data, params) {
   // --- 新增的保護機制 ---
@@ -2302,6 +3744,87 @@ function runStrategy(data, params) {
   const lows = data.map((d) => d.low);
   const closes = data.map((d) => d.close);
   const volumes = data.map((d) => d.volume);
+  const userStartISO = params.originalStartDate || params.startDate || null;
+  const effectiveStartISO = params.effectiveStartDate || params.startDate || null;
+  const datasetSummary = summariseDatasetRows(data, {
+    requestedStart: userStartISO,
+    effectiveStartDate: effectiveStartISO,
+    warmupStartDate: params.dataStartDate || null,
+    dataStartDate: params.dataStartDate || null,
+    endDate: params.endDate || null,
+  });
+  if (
+    Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective) &&
+    datasetSummary.firstValidCloseGapFromEffective > 1
+  ) {
+    console.warn(
+      `[Worker] ${params.stockNo} 於暖身後首個有效收盤價落後 ${datasetSummary.firstValidCloseGapFromEffective} 天。`,
+    );
+  }
+  if (datasetSummary?.invalidRowsInRange?.count > 0) {
+    const reasonText = formatReasonCountMap(
+      datasetSummary.invalidRowsInRange.reasons,
+    );
+    console.warn(
+      `[Worker] ${params.stockNo} 區間內偵測到 ${datasetSummary.invalidRowsInRange.count} 筆無效資料。原因統計: ${reasonText}`,
+    );
+    if (
+      Array.isArray(datasetSummary.invalidRowsInRange.samples) &&
+      datasetSummary.invalidRowsInRange.samples.length > 0 &&
+      typeof console.table === "function"
+    ) {
+      const invalidTable = datasetSummary.invalidRowsInRange.samples.map(
+        (sample) => ({
+          index: sample.index,
+          date: sample.date,
+          reasons: Array.isArray(sample.reasons)
+            ? sample.reasons.join(", ")
+            : sample.reasons,
+          close: sample.close,
+          volume: sample.volume,
+        }),
+      );
+      console.table(invalidTable);
+    }
+  }
+  let effectiveStartIdx = 0;
+  if (effectiveStartISO) {
+    const foundIndex = dates.findIndex(
+      (date) => typeof date === "string" && date >= effectiveStartISO,
+    );
+    effectiveStartIdx = foundIndex >= 0 ? foundIndex : 0;
+  }
+  const previewRows = [];
+  if (Number.isFinite(datasetSummary?.firstRowOnOrAfterEffectiveStart?.index)) {
+    const previewStart = Math.max(
+      0,
+      datasetSummary.firstRowOnOrAfterEffectiveStart.index - 2,
+    );
+    const previewEnd = Math.min(n, previewStart + 6);
+    for (let idx = previewStart; idx < previewEnd; idx += 1) {
+      const row = data[idx];
+      if (!row) continue;
+      previewRows.push({
+        index: idx,
+        date: row.date,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+      });
+    }
+    if (previewRows.length > 0 && typeof console.table === "function") {
+      console.table(
+        previewRows,
+        ["index", "date", "open", "high", "low", "close", "volume"],
+      );
+    }
+  }
+  const positionStatesFull = new Array(n).fill("空手");
+  const longStateSeries = new Array(n).fill("空手");
+  const shortStateSeries = new Array(n).fill("空手");
+  let indicatorDisplayFull = {};
   let indicators;
   try {
     indicators = calculateAllIndicators(data, params);
@@ -2310,6 +3833,23 @@ function runStrategy(data, params) {
   }
 
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
+  const warmupSummary = {
+    requestedStart: userStartISO,
+    effectiveStartDate: effectiveStartISO,
+    dataStartDate: params.dataStartDate || null,
+    warmupStartDate: params.dataStartDate || null,
+    lookbackDays: params.lookbackDays || null,
+    longestLookback: 0,
+    kdNeedLong: 0,
+    kdNeedShort: 0,
+    macdNeedLong: 0,
+    macdNeedShort: 0,
+    computedStartIndex: null,
+    effectiveStartIndex: effectiveStartIdx,
+    barsBeforeFirstTrade: null,
+    totalBars: n,
+    previewRows: [],
+  };
   let allPeriods = [
     entryParams?.shortPeriod,
     entryParams?.longPeriod,
@@ -2347,22 +3887,26 @@ function runStrategy(data, params) {
   );
   const longestLookback =
     validPeriods.length > 0 ? Math.max(...validPeriods) : 0;
+  warmupSummary.longestLookback = longestLookback;
   const kdNeedLong =
     entryStrategy === "k_d_cross" || exitStrategy === "k_d_cross_exit"
       ? entryParams?.period || exitParams?.period || 9
       : 0;
+  warmupSummary.kdNeedLong = kdNeedLong;
   const kdNeedShort =
     enableShorting &&
     (shortEntryStrategy === "short_k_d_cross" ||
       shortExitStrategy === "cover_k_d_cross")
       ? shortEntryParams?.period || shortExitParams?.period || 9
       : 0;
+  warmupSummary.kdNeedShort = kdNeedShort;
   const macdNeedLong =
     entryStrategy === "macd_cross" || exitStrategy === "macd_cross_exit"
       ? (entryParams?.longPeriod || exitParams?.longPeriod || 26) +
         (entryParams?.signalPeriod || exitParams?.signalPeriod || 9) -
         1
       : 0;
+  warmupSummary.macdNeedLong = macdNeedLong;
   const macdNeedShort =
     enableShorting &&
     (shortEntryStrategy === "short_macd_cross" ||
@@ -2371,17 +3915,30 @@ function runStrategy(data, params) {
         (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
         1
       : 0;
-  let startIdx =
-    Math.max(
-      1,
-      longestLookback,
-      kdNeedLong,
-      kdNeedShort,
-      macdNeedLong,
-      macdNeedShort,
-    ) + 1;
+  warmupSummary.macdNeedShort = macdNeedShort;
+  let startIdx = Math.max(
+    1,
+    longestLookback,
+    kdNeedLong,
+    kdNeedShort,
+    macdNeedLong,
+    macdNeedShort,
+  );
+  startIdx = Math.min(startIdx, n - 1);
+  startIdx = Math.max(startIdx, effectiveStartIdx);
   startIdx = Math.min(startIdx, n - 1);
   startIdx = Math.max(1, startIdx);
+  warmupSummary.computedStartIndex = startIdx;
+  warmupSummary.effectiveStartIndex = effectiveStartIdx;
+  warmupSummary.barsBeforeFirstTrade = Math.max(
+    0,
+    startIdx - effectiveStartIdx,
+  );
+  warmupSummary.previewRows = previewRows.slice(0, 6);
+  warmupSummary.firstValidCloseGapFromWarmup =
+    datasetSummary.firstValidCloseGapFromWarmup;
+  warmupSummary.firstValidVolumeGapFromWarmup =
+    datasetSummary.firstValidVolumeGapFromWarmup;
 
   const portfolioVal = Array(n).fill(initialCapital);
   const strategyReturns = Array(n).fill(0);
@@ -2473,9 +4030,18 @@ function runStrategy(data, params) {
     const curO = opens[i];
     const prevC = i > 0 ? closes[i - 1] : null;
     const nextO = i + 1 < n ? opens[i + 1] : null;
+    let executedBuy = false;
+    let executedSell = false;
+    let executedShort = false;
+    let executedCover = false;
+    let longState = longPos === 1 ? "持有" : "空手";
+    let shortState = shortPos === 1 ? "持有" : "空手";
     longPl[i] = longPl[i - 1] ?? 0;
     shortPl[i] = shortPl[i - 1] ?? 0;
     if (!check(curC) || curC <= 0) {
+      longStateSeries[i] = longState;
+      shortStateSeries[i] = shortState;
+      positionStatesFull[i] = combinePositionLabel(longState, shortState);
       portfolioVal[i] = portfolioVal[i - 1] ?? initialCapital;
       strategyReturns[i] = strategyReturns[i - 1] ?? 0;
       continue;
@@ -2518,6 +4084,7 @@ function runStrategy(data, params) {
             };
             longTrades.push(tradeData);
             buySigs.push({ date: dates[i], index: i });
+            executedBuy = true;
           }
         } else if (pendingTrade.type === "short") {
           // 執行隔日做空
@@ -2558,6 +4125,7 @@ function runStrategy(data, params) {
             console.log(
               `[Worker SHORT] Delayed Short Executed: ${shortShares}@${actualTradePrice} on ${dates[i]}, Cap Before Cover: ${shortCap.toFixed(0)}`,
             );
+            executedShort = true;
           }
         }
         pendingNextDayTrade = null;
@@ -2807,6 +4375,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               sellSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedSell = true;
             const lastBuyIdx = longTrades.map((t) => t.type).lastIndexOf("buy");
             if (
               lastBuyIdx !== -1 &&
@@ -3087,6 +4656,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               coverSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedCover = true;
             const lastShortIdx = shortTrades
               .map((t) => t.type)
               .lastIndexOf("short");
@@ -3351,6 +4921,7 @@ function runStrategy(data, params) {
                   tradeData.indicatorValues = entryIndicatorValues;
                 longTrades.push(tradeData);
                 buySigs.push({ date: dates[i], index: i });
+                executedBuy = true;
               }
             }
           }
@@ -3627,6 +5198,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               shortSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedShort = true;
             console.log(
               `[Worker SHORT] Short Executed: ${shortShares}@${tradePrice} on ${tradeDate}, Cap Before Cover: ${shortCap.toFixed(0)}`,
             );
@@ -3644,6 +5216,28 @@ function runStrategy(data, params) {
         }
       }
     }
+
+    if (executedSell) {
+      longState = "出場";
+    } else if (executedBuy) {
+      longState = "進場";
+    } else if (longPos === 1) {
+      longState = "持有";
+    } else {
+      longState = "空手";
+    }
+    if (executedCover) {
+      shortState = "出場";
+    } else if (executedShort) {
+      shortState = "進場";
+    } else if (shortPos === 1) {
+      shortState = "持有";
+    } else {
+      shortState = "空手";
+    }
+    longStateSeries[i] = longState;
+    shortStateSeries[i] = shortState;
+    positionStatesFull[i] = combinePositionLabel(longState, shortState);
 
     // --- STEP 3: Update Daily P/L AFTER all potential trades ---
     longPl[i] =
@@ -3703,6 +5297,11 @@ function runStrategy(data, params) {
       longTrades.push(finalTradeData);
       if (!sellSigs.some((s) => s.index === lastIdx))
         sellSigs.push({ date: dates[lastIdx], index: lastIdx });
+      longStateSeries[lastIdx] = "出場";
+      positionStatesFull[lastIdx] = combinePositionLabel(
+        longStateSeries[lastIdx],
+        shortStateSeries[lastIdx],
+      );
       const lastBuyI = longTrades.map((t) => t.type).lastIndexOf("buy");
       if (lastBuyI !== -1 && longTrades[lastBuyI].shares === longShares) {
         longCompletedTrades.push({
@@ -3743,6 +5342,11 @@ function runStrategy(data, params) {
       shortTrades.push(finalTradeData);
       if (!coverSigs.some((s) => s.index === lastIdx))
         coverSigs.push({ date: dates[lastIdx], index: lastIdx });
+      shortStateSeries[lastIdx] = "出場";
+      positionStatesFull[lastIdx] = combinePositionLabel(
+        longStateSeries[lastIdx],
+        shortStateSeries[lastIdx],
+      );
       const lastShortI = shortTrades.map((t) => t.type).lastIndexOf("short");
       if (lastShortI !== -1 && shortTrades[lastShortI].shares === shortShares) {
         shortCompletedTrades.push({
@@ -3761,6 +5365,28 @@ function runStrategy(data, params) {
     } else if (shortPos === 1) {
       shortPl[lastIdx] = shortPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
+    const trailingLevels = computeTrailingStopLevels(
+      longStateSeries,
+      shortStateSeries,
+      highs,
+      lows,
+      {
+        exitStrategy,
+        exitParams,
+        enableShorting,
+        shortExitStrategy,
+        shortExitParams,
+      },
+    );
+    indicatorDisplayFull = buildIndicatorDisplay(params, indicators, {
+      data,
+      highs,
+      lows,
+      closes,
+      volumes,
+      longTrailingStops: trailingLevels.longLevels,
+      shortTrailingStops: trailingLevels.shortLevels,
+    });
     self.postMessage({
       type: "progress",
       progress: 95,
@@ -3797,11 +5423,22 @@ function runStrategy(data, params) {
       }
     }
 
-    let annualR = 0;
-    let buyHoldAnnualizedReturn = 0;
-    // 使用使用者設定的日期範圍來計算年化報酬
-    const firstDateStr = params.startDate;
-    const lastDateStr = params.endDate;
+  let annualR = 0;
+  let buyHoldAnnualizedReturn = 0;
+  let firstValidPriceIdxBH = -1;
+  let lastValidPriceIdxBH = -1;
+  const buyHoldSummary = {
+    firstValidPriceIdx: null,
+    firstValidPriceDate: null,
+    firstValidPriceGapFromEffective: null,
+    firstValidPriceGapFromRequested: null,
+    invalidBarsBeforeFirstValid: { count: 0, samples: [] },
+    gapToleranceDays: CRITICAL_START_GAP_TOLERANCE_DAYS,
+    exceedsGapTolerance: false,
+  };
+  // 使用使用者設定的日期範圍來計算年化報酬
+  const firstDateStr = params.startDate;
+  const lastDateStr = params.endDate;
     if (firstDateStr && lastDateStr) {
       const firstD = new Date(firstDateStr);
       const lastD = new Date(lastDateStr);
@@ -3833,10 +5470,10 @@ function runStrategy(data, params) {
       // 使用設定的日期範圍找出對應的價格
       const startDate = new Date(params.startDate);
       const endDate = new Date(params.endDate);
-      const firstValidPriceIdxBH = closes.findIndex(
+      firstValidPriceIdxBH = closes.findIndex(
         (p, i) => check(p) && p > 0 && new Date(dates[i]) >= startDate,
       );
-      const lastValidPriceIdxBH = closes
+      lastValidPriceIdxBH = closes
         .map((p, i) => check(p) && p > 0 && new Date(dates[i]) <= endDate)
         .lastIndexOf(true);
       if (
@@ -3848,6 +5485,69 @@ function runStrategy(data, params) {
         const lastValidPriceBH = closes[lastValidPriceIdxBH];
         const firstValidDateBH = new Date(dates[firstValidPriceIdxBH]);
         const lastValidDateBH = new Date(dates[lastValidPriceIdxBH]);
+        buyHoldSummary.firstValidPriceIdx = firstValidPriceIdxBH;
+        buyHoldSummary.firstValidPriceDate = dates[firstValidPriceIdxBH] || null;
+        buyHoldSummary.firstValidPriceGapFromEffective = diffIsoDays(
+          effectiveStartISO,
+          dates[firstValidPriceIdxBH],
+        );
+        buyHoldSummary.firstValidPriceGapFromRequested = diffIsoDays(
+          userStartISO,
+          dates[firstValidPriceIdxBH],
+        );
+        let invalidBeforeCount = 0;
+        const invalidBeforeSamples = [];
+        if (firstValidPriceIdxBH > effectiveStartIdx) {
+          for (let i = effectiveStartIdx; i < firstValidPriceIdxBH; i += 1) {
+            if (!check(closes[i]) || closes[i] <= 0) {
+              invalidBeforeCount += 1;
+              if (invalidBeforeSamples.length < 5) {
+                invalidBeforeSamples.push({
+                  index: i,
+                  date: dates[i],
+                  close: closes[i],
+                  volume: volumes[i],
+                });
+              }
+            }
+          }
+        }
+        buyHoldSummary.invalidBarsBeforeFirstValid = {
+          count: invalidBeforeCount,
+          samples: invalidBeforeSamples,
+        };
+        if (
+          Number.isFinite(
+            buyHoldSummary.firstValidPriceGapFromEffective,
+          ) &&
+          buyHoldSummary.firstValidPriceGapFromEffective > 1
+        ) {
+          console.warn(
+            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
+          );
+        }
+        if (
+          Number.isFinite(
+            buyHoldSummary.firstValidPriceGapFromRequested,
+          ) &&
+          buyHoldSummary.firstValidPriceGapFromRequested >
+            CRITICAL_START_GAP_TOLERANCE_DAYS
+        ) {
+          buyHoldSummary.exceedsGapTolerance = true;
+          console.warn(
+            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後使用者起點 ${buyHoldSummary.firstValidPriceGapFromRequested} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。`,
+          );
+        }
+        if (invalidBeforeCount > 0) {
+          const invalidPreview = invalidBeforeSamples.map((sample) =>
+            `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
+          );
+          console.warn(
+            `[Worker] ${params.stockNo} 暖身期內共有 ${invalidBeforeCount} 筆收盤價無效資料，樣本：${invalidPreview
+              .slice(0, 3)
+              .join("；")}`,
+          );
+        }
         const bhYears =
           (lastValidDateBH.getTime() - firstValidDateBH.getTime()) /
           (1000 * 60 * 60 * 24 * 365.25);
@@ -3857,10 +5557,13 @@ function runStrategy(data, params) {
         console.log(
           `[Worker] Annualization Years (B&H): ${bhYears.toFixed(4)} (from ${dates[firstValidPriceIdxBH]} to ${dates[lastValidPriceIdxBH]})`,
         );
-        const bhTotalReturn =
+        let bhTotalReturn =
           firstValidPriceBH !== 0
             ? ((lastValidPriceBH - firstValidPriceBH) / firstValidPriceBH) * 100
             : 0;
+        if (buyHoldSummary.exceedsGapTolerance) {
+          bhTotalReturn = 0;
+        }
         if (bhYears > 1 / (365.25 * 2) && firstValidPriceBH > 0) {
           try {
             buyHoldAnnualizedReturn =
@@ -3875,6 +5578,9 @@ function runStrategy(data, params) {
           console.warn(
             `[Worker] B&H duration (${bhYears.toFixed(4)} years) too short for meaningful annualization. Using total B&H return rate.`,
           );
+        }
+        if (buyHoldSummary.exceedsGapTolerance) {
+          buyHoldAnnualizedReturn = 0;
         }
       }
     }
@@ -3980,16 +5686,39 @@ function runStrategy(data, params) {
     if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
       periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
     }
-    const initP_bh_full = closes.find((p0) => check(p0) && p0 > 0) || 1;
     let bhReturnsFull = Array(n).fill(null);
-    if (check(initP_bh_full)) {
-      bhReturnsFull = closes.map((p, i) =>
-        check(p) && p > 0
-          ? ((p - initP_bh_full) / initP_bh_full) * 100
-          : i > 0 && bhReturnsFull[i - 1] !== null
-            ? bhReturnsFull[i - 1]
-            : 0,
-      );
+    const bhBaselineIdx = firstValidPriceIdxBH;
+    if (
+      bhBaselineIdx !== -1 &&
+      bhBaselineIdx < n &&
+      check(closes[bhBaselineIdx]) &&
+      closes[bhBaselineIdx] > 0
+    ) {
+      const baselinePrice = closes[bhBaselineIdx];
+      for (let i = bhBaselineIdx; i < n; i += 1) {
+        if (check(closes[i]) && closes[i] > 0) {
+          bhReturnsFull[i] = ((closes[i] - baselinePrice) / baselinePrice) * 100;
+        } else if (i > bhBaselineIdx && bhReturnsFull[i - 1] !== null) {
+          bhReturnsFull[i] = bhReturnsFull[i - 1];
+        } else if (i === bhBaselineIdx) {
+          bhReturnsFull[i] = 0;
+        } else {
+          bhReturnsFull[i] = 0;
+        }
+      }
+      if (bhBaselineIdx > 0 && effectiveStartIdx < n) {
+        const fillStart = Math.max(0, effectiveStartIdx);
+        for (let i = bhBaselineIdx - 1; i >= fillStart; i -= 1) {
+          if (bhReturnsFull[i] === null) {
+            bhReturnsFull[i] = 0;
+          }
+        }
+      }
+    } else {
+      bhReturnsFull = Array(n).fill(0);
+    }
+    if (buyHoldSummary.exceedsGapTolerance) {
+      bhReturnsFull = Array(n).fill(0);
     }
     for (const [label, months] of Object.entries(periodsToCalculate)) {
       const subStartDate = new Date(overallEndDate);
@@ -4056,6 +5785,40 @@ function runStrategy(data, params) {
     }
 
     self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    const visibleStartIdx = Math.max(0, effectiveStartIdx);
+    const sliceArray = (arr) =>
+      Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
+    const adjustSignals = (signals) =>
+      Array.isArray(signals)
+        ? signals
+            .filter(
+              (s) => typeof s.index === "number" && s.index >= visibleStartIdx,
+            )
+            .map((s) => ({ ...s, index: s.index - visibleStartIdx }))
+        : [];
+    const trimmedIndicatorDisplay = sliceIndicatorDisplay(
+      indicatorDisplayFull,
+      visibleStartIdx,
+    );
+    const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
+    const runtimeDiagnostics = {
+      dataset: datasetSummary,
+      warmup: warmupSummary,
+      buyHold: buyHoldSummary,
+    };
+    if (typeof console.groupCollapsed === "function") {
+      console.groupCollapsed(
+        `[Worker] Runtime dataset diagnostics for ${params.stockNo}`,
+      );
+      console.log("[Worker] Dataset summary", datasetSummary);
+      console.log("[Worker] Warmup summary", warmupSummary);
+      console.log("[Worker] BuyHold summary", buyHoldSummary);
+      console.groupEnd();
+    } else {
+      console.log("[Worker] Dataset summary", datasetSummary);
+      console.log("[Worker] Warmup summary", warmupSummary);
+      console.log("[Worker] BuyHold summary", buyHoldSummary);
+    }
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -4072,13 +5835,13 @@ function runStrategy(data, params) {
       maxConsecutiveLosses: maxCL,
       trades: allTrades,
       completedTrades: allCompletedTrades,
-      buyHoldReturns: bhReturnsFull,
-      strategyReturns: strategyReturns,
-      dates: dates,
-      chartBuySignals: buySigs,
-      chartSellSignals: sellSigs,
-      chartShortSignals: shortSigs,
-      chartCoverSignals: coverSigs,
+      buyHoldReturns: sliceArray(bhReturnsFull),
+      strategyReturns: sliceArray(strategyReturns),
+      dates: sliceArray(dates),
+      chartBuySignals: adjustSignals(buySigs),
+      chartSellSignals: adjustSignals(sellSigs),
+      chartShortSignals: adjustSignals(shortSigs),
+      chartCoverSignals: adjustSignals(coverSigs),
       entryStrategy: params.entryStrategy,
       exitStrategy: params.exitStrategy,
       entryParams: params.entryParams,
@@ -4101,6 +5864,9 @@ function runStrategy(data, params) {
       annReturnHalf2: annReturnHalf2,
       sharpeHalf2: sharpeHalf2,
       subPeriodResults: subPeriodResults,
+      priceIndicatorSeries: trimmedIndicatorDisplay,
+      positionStates: trimmedPositionStates,
+      diagnostics: runtimeDiagnostics,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);
@@ -4162,14 +5928,23 @@ async function runOptimization(
       stockData = workerLastDataset;
       console.log("[Worker Opt] Using worker's cached data.");
     } else {
+      const optDataStart =
+        baseParams.dataStartDate || baseParams.startDate;
+      const optEffectiveStart =
+        baseParams.effectiveStartDate || baseParams.startDate;
+      const optLookback = Number.isFinite(baseParams.lookbackDays)
+        ? baseParams.lookbackDays
+        : null;
       const fetched = await fetchStockData(
         baseParams.stockNo,
-        baseParams.startDate,
+        optDataStart,
         baseParams.endDate,
         baseParams.marketType || baseParams.market || "TWSE",
         {
           adjusted: baseParams.adjustedPrice,
           splitAdjustment: baseParams.splitAdjustment,
+          effectiveStartDate: optEffectiveStart,
+          lookbackDays: optLookback,
         },
       );
       stockData = fetched?.data || [];
@@ -4814,8 +6589,38 @@ self.onmessage = async function (e) {
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
-    lookbackDays,
   } = e.data;
+  const sharedUtils =
+    typeof lazybacktestShared === "object" && lazybacktestShared
+      ? lazybacktestShared
+      : null;
+  const incomingLookback = Number.isFinite(e.data?.lookbackDays)
+    ? e.data.lookbackDays
+    : Number.isFinite(params?.lookbackDays)
+      ? params.lookbackDays
+      : 0;
+  const inferredMax =
+    sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === "function"
+      ? sharedUtils.getMaxIndicatorPeriod(params || {})
+      : 0;
+  let lookbackDays = incomingLookback;
+  if (
+    (!Number.isFinite(lookbackDays) || lookbackDays <= 0) &&
+    sharedUtils &&
+    typeof sharedUtils.estimateLookbackBars === "function"
+  ) {
+    lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
+      minBars: 90,
+      multiplier: 2,
+    });
+  }
+  if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+    lookbackDays = Math.max(90, inferredMax * 2);
+  }
+  const effectiveStartDate =
+    e.data?.effectiveStartDate || params?.effectiveStartDate || params?.startDate || null;
+  const dataStartDate =
+    e.data?.dataStartDate || params?.dataStartDate || effectiveStartDate || params?.startDate;
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
@@ -4826,13 +6631,15 @@ self.onmessage = async function (e) {
       );
       const cacheKey = buildCacheKey(
         params.stockNo,
-        params.startDate,
+        dataStartDate || params.startDate,
         params.endDate,
         params.adjustedPrice,
+        params.splitAdjustment,
       );
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
         dataToUse = cachedData;
+        workerLastDataset = cachedData;
         const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
         if (!existingEntry) {
           setWorkerCacheEntry(marketKey, cacheKey, {
@@ -4842,15 +6649,19 @@ self.onmessage = async function (e) {
             timestamp: Date.now(),
             meta: {
               stockNo: params.stockNo,
-              startDate: params.startDate,
+              startDate: dataStartDate || params.startDate,
+              effectiveStartDate: effectiveStartDate || params.startDate,
               endDate: params.endDate,
               priceMode: getPriceModeKey(params.adjustedPrice),
+              lookbackDays,
               summary: cachedMeta?.summary || null,
               adjustments: Array.isArray(cachedMeta?.adjustments)
                 ? cachedMeta.adjustments
                 : [],
               priceSource: cachedMeta?.priceSource || null,
-              adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+              adjustmentFallbackApplied: Boolean(
+                cachedMeta?.adjustmentFallbackApplied,
+              ),
               adjustmentFallbackInfo:
                 cachedMeta?.adjustmentFallbackInfo &&
                 typeof cachedMeta.adjustmentFallbackInfo === "object"
@@ -4859,6 +6670,12 @@ self.onmessage = async function (e) {
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
                 ? cachedMeta.debugSteps
                 : [],
+              fetchRange:
+                cachedMeta?.fetchRange ||
+                (dataStartDate
+                  ? { start: dataStartDate, end: params.endDate }
+                  : null),
+              diagnostics: cachedMeta?.diagnostics || null,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
@@ -4867,7 +6684,8 @@ self.onmessage = async function (e) {
           workerLastMeta = {
             ...(workerLastMeta || {}),
             stockNo: params.stockNo,
-            startDate: params.startDate,
+            startDate: dataStartDate || params.startDate,
+            effectiveStartDate: effectiveStartDate || params.startDate,
             endDate: params.endDate,
             priceMode: getPriceModeKey(params.adjustedPrice),
             summary: cachedMeta.summary || null,
@@ -4901,21 +6719,35 @@ self.onmessage = async function (e) {
             adjustmentChecks: Array.isArray(cachedMeta.adjustmentChecks)
               ? cachedMeta.adjustmentChecks
               : [],
+            fetchRange:
+              cachedMeta.fetchRange ||
+              (dataStartDate
+                ? { start: dataStartDate, end: params.endDate }
+                : null),
+            lookbackDays,
+            diagnostics: cachedMeta.diagnostics || null,
           };
         }
       } else {
         console.log("[Worker] Fetching new data for backtest.");
         outcome = await fetchStockData(
           params.stockNo,
-          params.startDate,
+          dataStartDate || params.startDate,
           params.endDate,
           params.marketType,
           {
             adjusted: params.adjustedPrice,
             splitAdjustment: params.splitAdjustment,
+            effectiveStartDate: effectiveStartDate || params.startDate,
+            lookbackDays,
           },
         );
         dataToUse = outcome.data;
+        workerLastDataset = Array.isArray(outcome?.data)
+          ? outcome.data
+          : Array.isArray(dataToUse)
+            ? dataToUse
+            : null;
         fetched = true;
       }
       if (!Array.isArray(dataToUse) || dataToUse.length === 0) {
@@ -4934,15 +6766,60 @@ self.onmessage = async function (e) {
         return;
       }
 
+      const strategyData = Array.isArray(dataToUse) ? dataToUse : [];
+      const startISO = effectiveStartDate || params.startDate || null;
+      const endISO = params.endDate || null;
+      const visibleStrategyData = Array.isArray(strategyData)
+        ? strategyData.filter((row) => {
+            if (!row || !row.date) return false;
+            if (startISO && row.date < startISO) return false;
+            if (endISO && row.date > endISO) return false;
+            return true;
+          })
+        : [];
+
+      if (visibleStrategyData.length === 0) {
+        const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 有效交易數據`;
+        console.warn(`[Worker] ${msg}（暖身資料僅供指標計算）`);
+        self.postMessage({
+          type: "no_data",
+          data: {
+            stockNo: params.stockNo,
+            start: params.startDate,
+            end: params.endDate,
+            message: msg,
+          },
+        });
+        return;
+      }
+
       // 關鍵修正：
       // 我們需要傳遞的是 K 線資料，而不是整個包裹
-      const backtestResult = runStrategy(dataToUse, params);
+      const strategyParams = {
+        ...params,
+        originalStartDate: params.startDate,
+        startDate: effectiveStartDate || params.startDate,
+        dataStartDate: dataStartDate || params.startDate,
+        effectiveStartDate: effectiveStartDate || params.startDate,
+        lookbackDays,
+      };
+      const backtestResult = runStrategy(strategyData, strategyParams);
+      backtestResult.rawDataUsed = visibleStrategyData;
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call
+      if (!useCachedData && fetched) {
+        backtestResult.rawData = dataToUse;
+      }
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
       );
+      const fetchDiagnostics =
+        outcome?.diagnostics || workerLastMeta?.diagnostics || null;
+      backtestResult.datasetDiagnostics = {
+        runtime: backtestResult.diagnostics || null,
+        fetch: fetchDiagnostics,
+      };
 
       const debugSteps = Array.isArray(outcome?.debugSteps)
         ? outcome.debugSteps
@@ -4984,6 +6861,12 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.adjustmentChecks)
             ? workerLastMeta.adjustmentChecks
             : [],
+        fetchRange:
+          outcome?.fetchRange ||
+          workerLastMeta?.fetchRange ||
+          (dataStartDate ? { start: dataStartDate, end: params.endDate } : null),
+        effectiveStartDate: effectiveStartDate || workerLastMeta?.effectiveStartDate || params.startDate,
+        lookbackDays,
       };
 
       if (!useCachedData && fetched) {
@@ -5013,6 +6896,11 @@ self.onmessage = async function (e) {
           adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
             ? outcome.adjustmentChecks
             : [],
+          fetchRange:
+            outcome?.fetchRange ||
+            (dataStartDate ? { start: dataStartDate, end: params.endDate } : null),
+          effectiveStartDate: effectiveStartDate || params.startDate,
+          lookbackDays,
         };
       }
 

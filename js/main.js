@@ -1455,8 +1455,6 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: cur.startDate, end: cur.endDate });
 
 }
-function getMaxPeriod(params) { let maxP = 0; const checkParams = (paramObj) => { if (!paramObj) return; for (const key in paramObj) { if (key.toLowerCase().includes('period') && !key.toLowerCase().includes('signal')) { const value = parseFloat(paramObj[key]); if (!isNaN(value) && value > maxP) maxP = value; } else if (['shortperiod', 'longperiod', 'breakoutperiod', 'stoplossperiod'].includes(key.toLowerCase())) { const value = parseFloat(paramObj[key]); if (!isNaN(value) && value > maxP) maxP = value; } } }; checkParams(params.entryParams); checkParams(params.exitParams); if (params.enableShorting) { checkParams(params.shortEntryParams); checkParams(params.shortExitParams); } console.log("[getMaxPeriod] Found max period:", maxP); return maxP; }
-
 // --- 新增：請求並顯示策略建議 ---
 function getSuggestion() {
     console.log("[Main] getSuggestion called");
@@ -1485,8 +1483,13 @@ function getSuggestion() {
 
     try {
         const params = getBacktestParams();
-        const maxPeriod = getMaxPeriod(params);
-        const lookbackDays = Math.max(20, maxPeriod * 2);
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+        const maxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(params)
+            : 0;
+        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxPeriod * 2);
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {
