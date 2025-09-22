@@ -24,6 +24,8 @@ let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
+const START_GAP_TOLERANCE_DAYS = 7;
+const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
 
 function parseISODateToUTC(iso) {
     if (!iso || typeof iso !== 'string') return NaN;
@@ -32,25 +34,84 @@ function parseISODateToUTC(iso) {
     return Date.UTC(y, (m || 1) - 1, d || 1);
 }
 
-function shouldForceRefetchForStart(data, startISO, toleranceDays = 7) {
-    if (!startISO) return false;
-    if (!Array.isArray(data) || data.length === 0) return true;
-    const startUTC = parseISODateToUTC(startISO);
-    if (!Number.isFinite(startUTC)) return false;
-    let firstValid = null;
+function computeEffectiveStartGap(data, effectiveStartISO) {
+    if (!Array.isArray(data) || data.length === 0 || !effectiveStartISO) return null;
+    const startUTC = parseISODateToUTC(effectiveStartISO);
+    if (!Number.isFinite(startUTC)) return null;
     for (let i = 0; i < data.length; i += 1) {
         const row = data[i];
         if (!row || typeof row.date !== 'string') continue;
-        if (row.date >= startISO) {
-            firstValid = row.date;
-            break;
-        }
+        if (row.date < effectiveStartISO) continue;
+        const rowUTC = parseISODateToUTC(row.date);
+        if (!Number.isFinite(rowUTC)) continue;
+        const diffDays = Math.floor((rowUTC - startUTC) / BACKTEST_DAY_MS);
+        return {
+            firstEffectiveDate: row.date,
+            gapDays: diffDays,
+        };
     }
-    if (!firstValid) return true;
-    const firstUTC = parseISODateToUTC(firstValid);
-    if (!Number.isFinite(firstUTC)) return false;
-    const diffDays = Math.floor((firstUTC - startUTC) / BACKTEST_DAY_MS);
-    return diffDays > toleranceDays;
+    return {
+        firstEffectiveDate: null,
+        gapDays: Number.POSITIVE_INFINITY,
+    };
+}
+
+function applyCacheStartMetadata(cacheKey, cacheEntry, effectiveStartISO, options = {}) {
+    if (!cacheEntry || !Array.isArray(cacheEntry.data) || !effectiveStartISO) return { gapDays: null, firstEffectiveDate: null };
+    const { toleranceDays = START_GAP_TOLERANCE_DAYS, acknowledgeExcessGap = false } = options;
+    const info = computeEffectiveStartGap(cacheEntry.data, effectiveStartISO) || { gapDays: null, firstEffectiveDate: null };
+    const gapDays = Number.isFinite(info.gapDays) ? info.gapDays : null;
+    cacheEntry.firstEffectiveRowDate = info.firstEffectiveDate || null;
+    cacheEntry.startGapEffectiveStart = effectiveStartISO;
+    cacheEntry.startGapDays = gapDays;
+    if (gapDays !== null && gapDays > toleranceDays) {
+        if (acknowledgeExcessGap) {
+            cacheEntry.startGapAcknowledgedAt = Date.now();
+        } else {
+            cacheEntry.startGapAcknowledgedAt = cacheEntry.startGapAcknowledgedAt || null;
+        }
+    } else {
+        cacheEntry.startGapAcknowledgedAt = null;
+    }
+    if (cacheKey) {
+        cachedDataStore.set(cacheKey, cacheEntry);
+    }
+    return {
+        gapDays,
+        firstEffectiveDate: info.firstEffectiveDate || null,
+    };
+}
+
+function evaluateCacheStartGap(cacheKey, cacheEntry, effectiveStartISO, options = {}) {
+    const { toleranceDays = START_GAP_TOLERANCE_DAYS, retryMs = START_GAP_RETRY_MS } = options;
+    if (!cacheEntry || !Array.isArray(cacheEntry.data) || !effectiveStartISO) {
+        return { shouldForce: true, reason: 'missingCache' };
+    }
+    const { gapDays, firstEffectiveDate } = applyCacheStartMetadata(cacheKey, cacheEntry, effectiveStartISO, { toleranceDays });
+    if (gapDays === null) {
+        return { shouldForce: false, reason: 'noGapInfo', firstEffectiveDate: firstEffectiveDate || null };
+    }
+    if (gapDays <= toleranceDays) {
+        return { shouldForce: false, gapDays, firstEffectiveDate };
+    }
+    const ackStart = cacheEntry.startGapEffectiveStart || null;
+    const ackGap = Number.isFinite(cacheEntry.startGapDays) ? cacheEntry.startGapDays : null;
+    const ackAt = Number.isFinite(cacheEntry.startGapAcknowledgedAt) ? cacheEntry.startGapAcknowledgedAt : null;
+    const sameContext = ackStart === effectiveStartISO && ackGap === gapDays && ackAt;
+    const now = Date.now();
+    if (!sameContext) {
+        cacheEntry.startGapAcknowledgedAt = null;
+        if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+        return { shouldForce: true, gapDays, firstEffectiveDate, reason: 'unacknowledged' };
+    }
+    if (retryMs && ackAt && now - ackAt > retryMs) {
+        cacheEntry.startGapAcknowledgedAt = null;
+        if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+        return { shouldForce: true, gapDays, firstEffectiveDate, reason: 'retryWindowElapsed' };
+    }
+    cacheEntry.startGapAcknowledgedAt = ackAt || now;
+    if (cacheKey) cachedDataStore.set(cacheKey, cacheEntry);
+    return { shouldForce: false, gapDays, firstEffectiveDate, acknowledged: true };
 }
 
 // --- 主回測函數 ---
@@ -104,10 +165,17 @@ function runBacktestInternal() {
         if (useCache) {
             cachedEntry = cachedDataStore.get(cacheKey);
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
-                if (shouldForceRefetchForStart(cachedEntry.data, effectiveStartDate)) {
-                    console.warn(`[Main] 快取首筆日期較設定起點晚於允許範圍，改為重新抓取。 start=${effectiveStartDate}`);
+                const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
+                if (startCheck.shouldForce) {
+                    const gapText = Number.isFinite(startCheck.gapDays)
+                        ? `${startCheck.gapDays} 天`
+                        : '未知天數';
+                    const firstDateText = startCheck.firstEffectiveDate || '無';
+                    console.warn(`[Main] 快取首筆有效日期 (${firstDateText}) 較設定起點落後 ${gapText}，改為重新抓取。 start=${effectiveStartDate}`);
                     useCache = false;
                     cachedEntry = null;
+                } else if (startCheck.acknowledged && Number.isFinite(startCheck.gapDays) && startCheck.gapDays > START_GAP_TOLERANCE_DAYS) {
+                    console.warn(`[Main] 快取首筆有效日期已落後 ${startCheck.gapDays} 天，已在近期確認資料缺口，暫時沿用快取資料。`);
                 }
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
@@ -238,6 +306,10 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
                         fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
                     };
+                    applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
+                        toleranceDays: START_GAP_TOLERANCE_DAYS,
+                        acknowledgeExcessGap: true,
+                    });
                      cachedDataStore.set(cacheKey, cacheEntry);
                      visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
                      cachedStockData = mergedData;
@@ -297,6 +369,10 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,
                     };
+                    applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
+                        toleranceDays: START_GAP_TOLERANCE_DAYS,
+                        acknowledgeExcessGap: false,
+                    });
                     cachedDataStore.set(cacheKey, updatedEntry);
                     visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
                     cachedStockData = updatedEntry.data;
