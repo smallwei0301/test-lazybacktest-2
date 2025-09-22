@@ -2,6 +2,7 @@
 // Patch Tag: LB-ADJ-SPLIT-20250518A
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
+// Patch Tag: LB-TW-DIRECTORY-20250620A
 
 // 全局變量
 let stockChart = null;
@@ -1074,25 +1075,38 @@ function refreshDataSourceTester() {
         : '原始股價';
     modeEl.textContent = `${getMarketLabel(market)} ・ ${modeText}`;
     renderDataSourceTesterButtons(sources, missingInputs || dataSourceTesterState.busy);
+    const messageLines = [];
+    let messageColor = 'var(--muted-foreground)';
     if (missingInputs) {
-        hintEl.textContent = '請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。';
-        hintEl.style.color = 'var(--muted-foreground)';
+        messageLines.push('請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。');
         clearTesterResult();
     } else if (adjusted) {
-        hintEl.textContent = splitEnabled
-            ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
-            : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
-        hintEl.style.color = 'var(--muted-foreground)';
+        messageLines.push(
+            splitEnabled
+                ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
+                : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。',
+        );
     } else if (market === 'US') {
-        hintEl.textContent = 'FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。';
-        hintEl.style.color = 'var(--muted-foreground)';
+        messageLines.push('FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。');
     } else if (market === 'TPEX') {
-        hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';
-        hintEl.style.color = 'var(--muted-foreground)';
+        messageLines.push('FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。');
     } else {
-        hintEl.textContent = 'TWSE 為主來源，FinMind 為備援來源。建議主備來源都測試一次。';
-        hintEl.style.color = 'var(--muted-foreground)';
+        messageLines.push('TWSE 為主來源，FinMind 為備援來源。建議主備來源都測試一次。');
     }
+
+    if (!missingInputs && (market === 'TWSE' || market === 'TPEX')) {
+        const directoryMeta = typeof window.getTaiwanDirectoryMeta === 'function' ? window.getTaiwanDirectoryMeta() : null;
+        if (directoryMeta?.version) {
+            const sourceLabel = directoryMeta.source || '台股官方清單';
+            const updatedLabel = directoryMeta.updatedAt ? `，更新於 ${directoryMeta.updatedAt}` : '';
+            messageLines.push(`${sourceLabel} 版本 ${directoryMeta.version}${updatedLabel}`);
+        } else if (directoryMeta && directoryMeta.ready === false) {
+            messageLines.push('台股官方清單載入中，請稍候。');
+        }
+    }
+
+    hintEl.style.color = messageColor;
+    hintEl.innerHTML = messageLines.map((line) => testerEscapeHtml(line)).join('<br>');
     setTesterButtonsDisabled(dataSourceTesterState.busy || missingInputs);
 }
 

@@ -1,8 +1,17 @@
 
+// Patch Tag: LB-TW-DIRECTORY-20250620A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    const shouldForceRefresh = !taiwanDirectoryState.cachedAt
+        || (Date.now() - taiwanDirectoryState.cachedAt) > TAIWAN_DIRECTORY_CACHE_TTL_MS;
+    ensureTaiwanDirectoryReady({ forceRefresh: shouldForceRefresh }).catch((error) => {
+        console.warn('[Taiwan Directory] 預載入失敗:', error);
+    });
 });
 
 let lastPriceDebug = {
@@ -386,7 +395,20 @@ function runBacktestInternal() {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }
                 if (data?.datasetDiagnostics) {
-                    lastDatasetDiagnostics = data.datasetDiagnostics;
+                    const enrichedDiagnostics = { ...data.datasetDiagnostics };
+                    const existingMeta = (data.datasetDiagnostics && data.datasetDiagnostics.meta) || {};
+                    const nameInfo = resolveCachedStockNameInfo(params?.stockNo, params?.marketType || params?.market);
+                    enrichedDiagnostics.meta = {
+                        ...existingMeta,
+                        stockNo: params?.stockNo || existingMeta.stockNo || null,
+                        stockName: nameInfo?.info?.name || existingMeta.stockName || stockName || null,
+                        nameSource: nameInfo?.info?.sourceLabel || existingMeta.nameSource || null,
+                        nameMarket: nameInfo?.market || existingMeta.nameMarket || null,
+                        directoryVersion: taiwanDirectoryState.version || existingMeta.directoryVersion || null,
+                        directoryUpdatedAt: taiwanDirectoryState.updatedAt || existingMeta.directoryUpdatedAt || null,
+                        directorySource: taiwanDirectoryState.source || existingMeta.directorySource || null,
+                    };
+                    lastDatasetDiagnostics = enrichedDiagnostics;
                     const runtimeDataset = data.datasetDiagnostics.runtime?.dataset || null;
                     const warmupDiag = data.datasetDiagnostics.runtime?.warmup || null;
                     const fetchDiag = data.datasetDiagnostics.fetch || null;
@@ -877,6 +899,7 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         contentEl.classList.add('hidden');
         titleEl.textContent = '資料暖身診斷';
         renderDiagnosticsEntries('dataDiagnosticsSummary', []);
+        renderDiagnosticsEntries('dataDiagnosticsName', []);
         renderDiagnosticsEntries('dataDiagnosticsWarmup', []);
         renderDiagnosticsEntries('dataDiagnosticsBuyHold', []);
         renderDiagnosticsSamples('dataDiagnosticsInvalidSamples', []);
@@ -888,10 +911,20 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
     }
     hintEl.textContent = '若需回報問題，請一併提供此卡片內容與 console 診斷資訊。';
     contentEl.classList.remove('hidden');
+    const meta = diag.meta || {};
     const dataset = diag.runtime?.dataset || {};
     const warmup = diag.runtime?.warmup || {};
     const buyHold = diag.runtime?.buyHold || {};
     titleEl.textContent = `資料暖身診斷：${dataset.requestedStart || warmup.requestedStart || '—'} → ${dataset.endDate || diag.fetch?.requested?.end || '—'}`;
+    renderDiagnosticsEntries('dataDiagnosticsName', [
+        { label: '股票代碼', value: meta.stockNo || dataset.stockNo || '—' },
+        { label: '股票名稱', value: meta.stockName || '—' },
+        { label: '名稱來源', value: meta.nameSource || '—' },
+        { label: '名稱市場', value: meta.nameMarket ? getMarketDisplayName(meta.nameMarket) : '—' },
+        { label: '台股清單來源', value: meta.directorySource || '—' },
+        { label: '清單版本', value: meta.directoryVersion || '—' },
+        { label: '清單更新時間', value: meta.directoryUpdatedAt || '—' },
+    ]);
     renderDiagnosticsEntries('dataDiagnosticsSummary', [
         { label: '資料總筆數', value: dataset.totalRows },
         { label: '資料範圍', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
@@ -2782,14 +2815,32 @@ let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動�
 let manualOverrideCodeSnapshot = ''; // 紀錄觸發鎖定時的股票代碼
 let isFetchingName = false; // 防止重複查詢股票名稱
 const stockNameLookupCache = new Map(); // Map<cacheKey, { info, cachedAt }>
-const STOCK_NAME_CACHE_LIMIT = 120;
+const STOCK_NAME_CACHE_LIMIT = 4096;
 const STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 小時記憶體快取
-const LOCAL_STOCK_NAME_CACHE_KEY = 'LB_TW_NAME_CACHE_V20250616A';
+const LOCAL_STOCK_NAME_CACHE_KEY = 'LB_TW_NAME_CACHE_V20250620A';
 const LOCAL_STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 台股名稱保留 7 天
+const TAIWAN_DIRECTORY_CACHE_KEY = 'LB_TW_DIRECTORY_CACHE_V20250620A';
+const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單 24 小時過期
+const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
 const persistentTaiwanNameCache = loadPersistentTaiwanNameCache();
+const taiwanDirectoryState = {
+    ready: false,
+    loading: false,
+    version: null,
+    updatedAt: null,
+    source: null,
+    cache: null,
+    cachedAt: null,
+    entries: new Map(),
+    lastError: null,
+};
+let taiwanDirectoryReadyPromise = null;
 hydrateTaiwanNameCache();
+preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
+    console.warn('[Taiwan Directory] 本地清單預載失敗:', error);
+});
 
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-NAME-CACHE-20250614A
@@ -2947,7 +2998,7 @@ function isStockNameCacheEntryFresh(entry, ttlMs) {
     return Date.now() - cachedAt <= ttlMs;
 }
 
-function storeStockNameCacheEntry(market, stockCode, info) {
+function storeStockNameCacheEntry(market, stockCode, info, options = {}) {
     const key = createStockNameCacheKey(market, stockCode);
     if (!key || !info || !info.name) return;
     const now = Date.now();
@@ -2961,9 +3012,271 @@ function storeStockNameCacheEntry(market, stockCode, info) {
         if (!oldest) break;
         stockNameLookupCache.delete(oldest);
     }
-    if (isTaiwanMarket(market)) {
+    if (isTaiwanMarket(market) && options.persist !== false) {
         persistTaiwanNameCacheEntry(key, entry);
     }
+}
+
+function loadTaiwanDirectoryFromStorage() {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    try {
+        const raw = window.localStorage.getItem(TAIWAN_DIRECTORY_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const cachedAt = typeof parsed.cachedAt === 'number' ? parsed.cachedAt : 0;
+        if (cachedAt && Date.now() - cachedAt > TAIWAN_DIRECTORY_CACHE_TTL_MS) {
+            return null;
+        }
+        const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+        return {
+            version: parsed.version || null,
+            updatedAt: parsed.updatedAt || null,
+            source: parsed.source || null,
+            cache: parsed.cache || null,
+            entries,
+            cachedAt,
+        };
+    } catch (error) {
+        console.warn('[Taiwan Directory] 無法讀取本地清單快取:', error);
+        return null;
+    }
+}
+
+function saveTaiwanDirectoryToStorage(payload) {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (!payload) return;
+    try {
+        const cachedAt = typeof payload.cachedAt === 'number' ? payload.cachedAt : Date.now();
+        const record = {
+            version: payload.version || null,
+            updatedAt: payload.updatedAt || null,
+            source: payload.source || null,
+            entries: Array.isArray(payload.entries) ? payload.entries : [],
+            cachedAt,
+            cache: payload.cache || null,
+        };
+        window.localStorage.setItem(TAIWAN_DIRECTORY_CACHE_KEY, JSON.stringify(record));
+    } catch (error) {
+        console.warn('[Taiwan Directory] 無法寫入本地清單快取:', error);
+    }
+}
+
+function normaliseDirectoryEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const stockId = (entry.stockId || entry.stock_id || '').toString().trim().toUpperCase();
+    const name = (entry.name || entry.stock_name || '').toString().trim();
+    if (!stockId || !name) return null;
+    const market = entry.market ? normalizeMarketValue(entry.market) : null;
+    const board = entry.board || (market === 'TWSE' ? '上市' : market === 'TPEX' ? '上櫃' : null);
+    const instrumentType = entry.instrumentType || (entry.isETF ? 'ETF' : null);
+    const isETF = entry.isETF === true || /^00\d{2,4}$/.test(stockId);
+    const marketCategory = entry.marketCategory || entry.rawType || null;
+    return {
+        stockId,
+        name,
+        market,
+        board,
+        instrumentType,
+        isETF,
+        marketCategory,
+    };
+}
+
+function applyTaiwanDirectoryPayload(payload, options = {}) {
+    if (!payload) return false;
+    const seedCache = options.seedCache !== false;
+    const rawEntries = Array.isArray(payload.entries)
+        ? payload.entries
+        : Array.isArray(payload.data)
+            ? payload.data
+            : payload.data && typeof payload.data === 'object'
+                ? Object.values(payload.data)
+                : payload.entries && typeof payload.entries === 'object'
+                    ? Object.values(payload.entries)
+                    : [];
+    const map = new Map();
+    const sourceLabel = payload.source || '台股官方清單';
+    const versionLabel = payload.version ? `${sourceLabel}｜${payload.version}` : sourceLabel;
+
+    for (const raw of rawEntries) {
+        const entry = normaliseDirectoryEntry(raw);
+        if (!entry) continue;
+        map.set(entry.stockId, entry);
+
+        if (seedCache && entry.market) {
+            const info = {
+                name: entry.name,
+                board: entry.board,
+                instrumentType: entry.instrumentType,
+                marketCategory: entry.marketCategory,
+                market: entry.market,
+                sourceLabel: versionLabel,
+                matchStrategy: 'taiwan-directory',
+                directoryVersion: payload.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: entry.stockId,
+                infoSource: sourceLabel,
+            };
+            storeStockNameCacheEntry(entry.market, entry.stockId, info, { persist: false });
+        }
+    }
+
+    if (map.size === 0) return false;
+
+    taiwanDirectoryState.entries = map;
+    taiwanDirectoryState.version = payload.version || TAIWAN_DIRECTORY_VERSION;
+    taiwanDirectoryState.updatedAt = payload.updatedAt || payload.fetchedAt || null;
+    taiwanDirectoryState.source = sourceLabel;
+    taiwanDirectoryState.cache = payload.cache || null;
+    taiwanDirectoryState.cachedAt = typeof payload.cachedAt === 'number' ? payload.cachedAt : Date.now();
+    taiwanDirectoryState.ready = true;
+    taiwanDirectoryState.lastError = null;
+
+    if (options.persist !== false) {
+        const storedEntries = Array.from(map.values()).map((entry) => ({
+            stockId: entry.stockId,
+            name: entry.name,
+            market: entry.market,
+            board: entry.board,
+            instrumentType: entry.instrumentType,
+            isETF: entry.isETF,
+            marketCategory: entry.marketCategory,
+        }));
+        saveTaiwanDirectoryToStorage({
+            version: taiwanDirectoryState.version,
+            updatedAt: taiwanDirectoryState.updatedAt,
+            source: taiwanDirectoryState.source,
+            entries: storedEntries,
+            cache: taiwanDirectoryState.cache,
+            cachedAt: taiwanDirectoryState.cachedAt,
+        });
+    }
+
+    return true;
+}
+
+async function preloadTaiwanDirectory(options = {}) {
+    if (taiwanDirectoryState.ready && !options.forceRefresh) {
+        return taiwanDirectoryState;
+    }
+    if (taiwanDirectoryState.loading) {
+        return taiwanDirectoryReadyPromise || taiwanDirectoryState;
+    }
+
+    taiwanDirectoryState.loading = true;
+
+    try {
+        if (!options.forceRefresh) {
+            const stored = loadTaiwanDirectoryFromStorage();
+            if (stored) {
+                applyTaiwanDirectoryPayload(
+                    {
+                        version: stored.version,
+                        updatedAt: stored.updatedAt,
+                        source: stored.source,
+                        cache: stored.cache,
+                        entries: stored.entries,
+                        cachedAt: stored.cachedAt,
+                    },
+                    { seedCache: options.seedCache !== false, persist: false },
+                );
+            }
+            if (taiwanDirectoryState.ready && options.skipNetwork) {
+                return taiwanDirectoryState;
+            }
+        }
+
+        if (options.skipNetwork) {
+            return taiwanDirectoryState;
+        }
+
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), 16000) : null;
+        const response = await fetch('/.netlify/functions/taiwan-directory', {
+            signal: controller?.signal,
+        });
+        if (timeoutId) clearTimeout(timeoutId);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        if (!payload || payload.status === 'error') {
+            throw new Error(payload?.message || '台股官方清單回應異常');
+        }
+        const entries = payload.data && typeof payload.data === 'object' ? Object.values(payload.data) : [];
+        applyTaiwanDirectoryPayload(
+            {
+                version: payload.version || null,
+                updatedAt: payload.updatedAt || null,
+                source: payload.source || null,
+                cache: payload.cache || null,
+                entries,
+                cachedAt: Date.now(),
+            },
+            { seedCache: options.seedCache !== false },
+        );
+    } catch (error) {
+        taiwanDirectoryState.lastError = error;
+        console.warn('[Taiwan Directory] 載入失敗:', error);
+    } finally {
+        taiwanDirectoryState.loading = false;
+    }
+
+    return taiwanDirectoryState;
+}
+
+function ensureTaiwanDirectoryReady(options = {}) {
+    if (taiwanDirectoryState.ready && !options.forceRefresh) {
+        return Promise.resolve(taiwanDirectoryState);
+    }
+    if (!taiwanDirectoryReadyPromise) {
+        taiwanDirectoryReadyPromise = preloadTaiwanDirectory(options).finally(() => {
+            taiwanDirectoryReadyPromise = null;
+        });
+    }
+    return taiwanDirectoryReadyPromise;
+}
+
+function getTaiwanDirectoryEntry(stockCode) {
+    if (!stockCode) return null;
+    const normalized = stockCode.trim().toUpperCase();
+    if (!normalized) return null;
+    if (!(taiwanDirectoryState.entries instanceof Map)) return null;
+    return taiwanDirectoryState.entries.get(normalized) || null;
+}
+
+function resolveCachedStockNameInfo(stockCode, preferredMarket) {
+    const normalized = (stockCode || '').trim().toUpperCase();
+    if (!normalized) return null;
+    const candidateMarkets = preferredMarket
+        ? [normalizeMarketValue(preferredMarket), 'TWSE', 'TPEX', 'US']
+        : ['TWSE', 'TPEX', 'US'];
+    const cacheHit = findStockNameCacheEntry(normalized, candidateMarkets.filter(Boolean));
+    if (cacheHit && cacheHit.info) {
+        return {
+            market: cacheHit.market,
+            info: cacheHit.info,
+        };
+    }
+    const directoryEntry = getTaiwanDirectoryEntry(normalized);
+    if (directoryEntry) {
+        return {
+            market: directoryEntry.market || preferredMarket || null,
+            info: {
+                name: directoryEntry.name,
+                board: directoryEntry.board,
+                instrumentType: directoryEntry.instrumentType,
+                marketCategory: directoryEntry.marketCategory,
+                sourceLabel: taiwanDirectoryState.source
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
+                infoSource: taiwanDirectoryState.source || 'Taiwan Directory',
+                directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+                market: directoryEntry.market || preferredMarket || null,
+            },
+        };
+    }
+    return null;
 }
 
 function findStockNameCacheEntry(stockCode, markets) {
@@ -3073,6 +3386,8 @@ function normalizeStockNameResult(result, context = {}) {
         symbol: (result.symbol || result.stockNo || result.stock_id || result.stockId || result.data_id || result.ticker || stockCode || '').toString().toUpperCase(),
         matchStrategy: result.matchStrategy || null,
         resolvedSymbol: result.resolvedSymbol || null,
+        directoryVersion: result.directoryVersion || result.directory_version || null,
+        infoSource: result.infoSource || result.info_source || null,
     };
 
     if ((result.isETF || result.etf === true) && !info.instrumentType) {
@@ -3303,10 +3618,28 @@ async function fetchStockName(stockCode, options = {}) {
 // 從 TWSE 取得股票名稱
 async function fetchStockNameFromTWSE(stockCode) {
     try {
+        await ensureTaiwanDirectoryReady();
+        const directoryEntry = getTaiwanDirectoryEntry(stockCode);
+        if (directoryEntry) {
+            return {
+                name: directoryEntry.name,
+                board: directoryEntry.board || '上市',
+                source: taiwanDirectoryState.source
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
+                instrumentType: directoryEntry.instrumentType,
+                market: directoryEntry.market || 'TWSE',
+                marketCategory: directoryEntry.marketCategory || null,
+                matchStrategy: 'taiwan-directory',
+                directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: directoryEntry.stockId,
+            };
+        }
+
         // 使用當月第一天作為查詢日期
         const now = new Date();
         const queryDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}01`;
-        
+
         const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&stockNo=${stockCode}&date=${queryDate}&_=${Date.now()}`;
         const response = await fetch(url);
         
@@ -3338,6 +3671,24 @@ async function fetchStockNameFromTWSE(stockCode) {
 // 從 TPEX 取得股票名稱 (使用代理伺服器解決CORS問題)
 async function fetchStockNameFromTPEX(stockCode) {
     try {
+        await ensureTaiwanDirectoryReady();
+        const directoryEntry = getTaiwanDirectoryEntry(stockCode);
+        if (directoryEntry) {
+            return {
+                name: directoryEntry.name,
+                board: directoryEntry.board || '上櫃',
+                source: taiwanDirectoryState.source
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
+                instrumentType: directoryEntry.instrumentType,
+                market: directoryEntry.market || 'TPEX',
+                marketCategory: directoryEntry.marketCategory || null,
+                matchStrategy: 'taiwan-directory',
+                directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: directoryEntry.stockId,
+            };
+        }
+
         console.log(`[TPEX Name] 查詢股票代碼: ${stockCode}`);
 
         // 方法1: 使用代理伺服器 (如果可用)
@@ -3362,53 +3713,9 @@ async function fetchStockNameFromTPEX(stockCode) {
             };
         }
 
-        // 方法3: 使用本地股票名稱對照表 (常用上櫃股票)
-        const stockNameMap = {
-            '3260': '威剛',
-            '6446': '藥華藥',
-            '4735': '豪展',
-            '6488': '環球晶',
-            '8069': '元太',
-            '3293': '鈊象',
-            '1565': '精華',
-            '2230': '泰茂',
-            '4994': '傳奇',
-            '6456': 'GIS-KY',
-            '3064': '泰偉',
-            '4966': '譜瑞-KY',
-            '6477': '安集',
-            '8924': '大田',
-            '3324': '雙鴻',
-            '6180': '橘子',
-            '3587': '閎康',
-            '4968': '立積',
-            '6531': '愛普',
-            '8050': '廣積',
-            '6235': '華孚',
-            '4743': '合一',
-            '8044': '網家',
-            '6491': '晶碩',
-            '4952': '凌通',
-            '3707': '漢碩',
-            '6781': 'AES-KY',
-            '8040': '九暘',
-            '4160': '創源',
-            '6472': '保瑞'
-        };
-
-        if (stockNameMap[stockCode]) {
-            console.log(`[TPEX Name] 從本地對照表取得: ${stockNameMap[stockCode]}`);
-            return {
-                name: stockNameMap[stockCode],
-                board: '上櫃',
-                source: 'TPEX 名稱快取',
-                instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
-            };
-        }
-        
         console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
         return null;
-        
+
     } catch (error) {
         console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
         return null;
@@ -3685,6 +3992,15 @@ function hideStockName() {
 
 // --- 全局函數 ---
 // 將 switchToMarket 函數添加到全局範圍，供 HTML onclick 調用
+window.getTaiwanDirectoryMeta = function getTaiwanDirectoryMeta() {
+    return {
+        ready: taiwanDirectoryState.ready,
+        version: taiwanDirectoryState.version,
+        updatedAt: taiwanDirectoryState.updatedAt,
+        source: taiwanDirectoryState.source,
+        cachedAt: taiwanDirectoryState.cachedAt,
+    };
+};
 window.switchToMarket = switchToMarket;
 
 // --- 初始化 ---

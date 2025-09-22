@@ -39,7 +39,7 @@ app.listen(3000);
 
 1. 登入 [Netlify](https://app.netlify.com/) 並連結你的 GitHub repo。
 2. 確認 `netlify.toml` 已在專案根目錄。
-3. 部署後，`/api/tpex/*` 會自動 proxy 到 TPEX 官網，`/api/twse/*` 會串接 TWSE/FinMind 代理，而 `/api/us/*` 則會優先透過 FinMind 取得美股資料、必要時退回 Yahoo Finance 備援。
+3. 部署後，`/api/tpex/*` 會自動 proxy 到 TPEX 官網，`/api/twse/*` 會串接 TWSE/FinMind 代理，而 `/api/us/*` 則會優先透過 FinMind 取得美股資料、必要時退回 Yahoo Finance 備援；同時可透過 `/.netlify/functions/taiwan-directory` 快取 FinMind `TaiwanStockInfo` 清單，提供上市／上櫃名稱與市場別。
 
 > **FinMind Token**：TWSE 與 US proxy 皆依賴 FinMind API，請在 Netlify 專案設定 `FINMIND_TOKEN` 環境變數（Sponsor 等級）後再部署。即使 US proxy 具備 Yahoo 備援，若沒有 Token 將僅能取得 Yahoo 價格且無法取得 FinMind 股票名稱。
 
@@ -49,7 +49,7 @@ app.listen(3000);
 
 直接 fetch `/api/tpex/st43_result.php?...`、`/api/twse/...` 或 `/api/us/?stockNo=AAPL`，不用寫死 localhost。
 
-> **前端名稱查詢**：股票代碼若以數字開頭，會等到輸入滿四碼才啟動名稱辨識；純英文字母則採 800ms 防抖即可查詢，確保美股代號能即時比對。數字開頭且前四碼為數字的代號一律限縮在上市／上櫃資料源間查詢，避免誤用美股名稱，並同步將查詢結果寫入記憶體與 `localStorage` 台股名稱快取以加速下次顯示。查詢結果沿用快取並依代碼判斷上市／上櫃／美股／ETF（ETF 辨識支援 4~6 位數、末碼帶字母的 00 系列代號）；若使用者手動切換市場，系統會暫停自動辨識與市場切換，直到重新輸入代碼為止。
+> **前端名稱查詢**：股票代碼若以數字開頭，會等到輸入滿四碼才啟動名稱辨識；純英文字母則採 800ms 防抖即可查詢，確保美股代號能即時比對。數字開頭且前四碼為數字的代號一律限縮在上市／上櫃資料源間查詢，避免誤用美股名稱。頁面載入時會先呼叫 `/.netlify/functions/taiwan-directory` 載入台股官方清單並寫入記憶體／`localStorage` 雙層快取，之後查詢結果沿用清單資訊或遠端回應並依代碼判斷上市／上櫃／美股／ETF（ETF 辨識支援 4~6 位數、末碼帶字母的 00 系列代號）。若使用者手動切換市場，系統會暫停自動辨識與市場切換，直到重新輸入代碼為止。
 
 ## 本地測試（使用 Netlify CLI - Windows PowerShell）
 
