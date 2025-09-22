@@ -60,6 +60,42 @@ function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = f
   return marketCache.get(stockKey);
 }
 
+function rebuildCoverageFromData(entry) {
+  if (!entry) return;
+  const rows = Array.isArray(entry.data) ? entry.data : [];
+  if (rows.length === 0) {
+    entry.coverage = [];
+    return;
+  }
+  const sortedUtc = rows
+    .map((row) => (row && row.date ? isoToUTC(row.date) : NaN))
+    .filter((ms) => Number.isFinite(ms))
+    .sort((a, b) => a - b);
+  if (sortedUtc.length === 0) {
+    entry.coverage = [];
+    return;
+  }
+  const segments = [];
+  const MAX_GAP = DAY_MS * 6;
+  let segStart = sortedUtc[0];
+  let segEnd = segStart + DAY_MS;
+  for (let i = 1; i < sortedUtc.length; i += 1) {
+    const current = sortedUtc[i];
+    if (!Number.isFinite(current)) continue;
+    if (current <= segEnd + MAX_GAP) {
+      if (current + DAY_MS > segEnd) {
+        segEnd = current + DAY_MS;
+      }
+    } else {
+      segments.push({ start: segStart, end: segEnd });
+      segStart = current;
+      segEnd = current + DAY_MS;
+    }
+  }
+  segments.push({ start: segStart, end: segEnd });
+  entry.coverage = mergeRangeBounds(segments);
+}
+
 function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, split = false) {
   const marketCache = workerMonthlyCache.get(marketKey);
   if (!marketCache) return null;
@@ -76,6 +112,7 @@ function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, sp
   if (!Array.isArray(entry.data)) {
     entry.data = [];
   }
+  rebuildCoverageFromData(entry);
   return entry;
 }
 
@@ -1317,8 +1354,17 @@ async function fetchStockData(
               }
               if (normalized.length > 0) {
                 mergeMonthlyData(monthEntry, normalized);
+                const sortedNormalized = normalized
+                  .slice()
+                  .sort((a, b) => a.date.localeCompare(b.date));
+                const coverageStart = sortedNormalized[0]?.date || null;
+                const coverageEnd =
+                  sortedNormalized[sortedNormalized.length - 1]?.date || null;
+                if (coverageStart && coverageEnd) {
+                  addCoverage(monthEntry, coverageStart, coverageEnd);
+                }
+                rebuildCoverageFromData(monthEntry);
               }
-              addCoverage(monthEntry, startISO, endISO);
               monthEntry.lastUpdated = Date.now();
               if (!monthEntry.stockName && monthStockName) {
                 monthEntry.stockName = monthStockName;

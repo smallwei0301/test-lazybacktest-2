@@ -22,6 +22,36 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 
+const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseISODateToUTC(iso) {
+    if (!iso || typeof iso !== 'string') return NaN;
+    const [y, m, d] = iso.split('-').map((val) => parseInt(val, 10));
+    if ([y, m, d].some((num) => Number.isNaN(num))) return NaN;
+    return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+function shouldForceRefetchForStart(data, startISO, toleranceDays = 7) {
+    if (!startISO) return false;
+    if (!Array.isArray(data) || data.length === 0) return true;
+    const startUTC = parseISODateToUTC(startISO);
+    if (!Number.isFinite(startUTC)) return false;
+    let firstValid = null;
+    for (let i = 0; i < data.length; i += 1) {
+        const row = data[i];
+        if (!row || typeof row.date !== 'string') continue;
+        if (row.date >= startISO) {
+            firstValid = row.date;
+            break;
+        }
+    }
+    if (!firstValid) return true;
+    const firstUTC = parseISODateToUTC(firstValid);
+    if (!Number.isFinite(firstUTC)) return false;
+    const diffDays = Math.floor((firstUTC - startUTC) / BACKTEST_DAY_MS);
+    return diffDays > toleranceDays;
+}
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -68,27 +98,32 @@ function runBacktestInternal() {
             lookbackDays,
         };
         let useCache=!needsDataFetch(curSettings);
-        const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
-        showLoading(msg);
         const cacheKey = buildCacheKey(curSettings);
         let cachedEntry = null;
         if (useCache) {
             cachedEntry = cachedDataStore.get(cacheKey);
-
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
-                const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
-                visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
-                cachedStockData = cachedEntry.data;
-                lastFetchSettings = { ...curSettings };
-                refreshPriceInspectorControls();
-                updatePriceDebug(cachedEntry);
-                console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
+                if (shouldForceRefetchForStart(cachedEntry.data, effectiveStartDate)) {
+                    console.warn(`[Main] 快取首筆日期較設定起點晚於允許範圍，改為重新抓取。 start=${effectiveStartDate}`);
+                    useCache = false;
+                    cachedEntry = null;
+                }
             } else {
                 console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
-
                 useCache = false;
                 cachedEntry = null;
             }
+        }
+        const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
+        showLoading(msg);
+        if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
+            const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
+            visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
+            cachedStockData = cachedEntry.data;
+            lastFetchSettings = { ...curSettings };
+            refreshPriceInspectorControls();
+            updatePriceDebug(cachedEntry);
+            console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
 
