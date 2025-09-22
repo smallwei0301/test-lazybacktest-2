@@ -1,5 +1,6 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.6 - FinMind adjusted series resilience)
+// netlify/functions/calculateAdjustedPrice.js (v13.7 - Split ratio diagnostics)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
+// Patch Tag: LB-ADJ-COMPOSER-20250523A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
 // Patch Tag: LB-ADJ-COMPOSER-20241022A
 // Patch Tag: LB-ADJ-COMPOSER-20241024A
@@ -26,7 +27,7 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250522A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250522A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250523A';
 
 let fetchImpl = fetch;
 
@@ -1189,9 +1190,43 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
       });
       continue;
     }
+    const firstAffectedIndex = baseIndex > 0 ? baseIndex - 1 : -1;
+    const firstAffectedRow =
+      firstAffectedIndex >= 0 && firstAffectedIndex < sortedRows.length
+        ? sortedRows[firstAffectedIndex]
+        : null;
+    const factorBeforeValue =
+      firstAffectedIndex >= 0 && Number.isFinite(multipliers[firstAffectedIndex])
+        ? multipliers[firstAffectedIndex]
+        : null;
+    const rawCloseBeforeValue = (() => {
+      if (!firstAffectedRow || typeof firstAffectedRow !== 'object') return null;
+      const rawCandidate =
+        Number(firstAffectedRow.rawClose ?? firstAffectedRow.raw_close ?? null);
+      if (Number.isFinite(rawCandidate) && rawCandidate > 0) {
+        return rawCandidate;
+      }
+      const closeCandidate = Number(firstAffectedRow.close ?? null);
+      return Number.isFinite(closeCandidate) && closeCandidate > 0
+        ? closeCandidate
+        : null;
+    })();
+
     for (let i = 0; i < baseIndex; i += 1) {
       multipliers[i] *= ratio;
     }
+
+    const factorAfterValue =
+      firstAffectedIndex >= 0 && Number.isFinite(multipliers[firstAffectedIndex])
+        ? multipliers[firstAffectedIndex]
+        : null;
+    const expectedFactorValue = Number.isFinite(factorBeforeValue)
+      ? factorBeforeValue * ratio
+      : ratio;
+    const expectedAdjustedCloseValue =
+      Number.isFinite(rawCloseBeforeValue) && Number.isFinite(factorAfterValue)
+        ? safeRound(rawCloseBeforeValue * factorAfterValue)
+        : null;
     adjustments.push({
       ...event,
       ratio,
@@ -1199,6 +1234,16 @@ function applyBackwardAdjustments(priceRows, _dividendRecords, options = {}) {
       baseClose,
       baseRowIndex: baseIndex,
       ratioSource: event.ratioSource || ratioSource,
+      firstAffectedDate: firstAffectedRow?.date || null,
+      firstAffectedIndex,
+      factorBefore: Number.isFinite(factorBeforeValue) ? factorBeforeValue : null,
+      factorAfter: Number.isFinite(factorAfterValue) ? factorAfterValue : null,
+      targetFactor: Number.isFinite(expectedFactorValue) ? expectedFactorValue : null,
+      rawCloseBefore:
+        Number.isFinite(rawCloseBeforeValue) && rawCloseBeforeValue > 0
+          ? rawCloseBeforeValue
+          : null,
+      expectedAdjustedClose: expectedAdjustedCloseValue,
     });
   }
 
@@ -1922,6 +1967,11 @@ async function deriveAdjustedSeriesFromDividendResult({
   const { rows: adjustedRows, adjustments } = applyBackwardAdjustments(priceRows, [], {
     preparedEvents: events,
   });
+  const applicationChecks = buildAdjustmentApplicationChecks(adjustments, adjustedRows);
+  const debugLogEntries = buildAdjustmentDebugEntries(applicationChecks, {
+    label: FINMIND_DIVIDEND_RESULT_LABEL,
+    prefix: 'dividend',
+  });
 
   const appliedAdjustments = adjustments.filter((item) => !item?.skipped);
   const applied = appliedAdjustments.length > 0;
@@ -1968,6 +2018,8 @@ async function deriveAdjustedSeriesFromDividendResult({
     diagnostics,
     statusMeta,
     payload,
+    applicationChecks,
+    debugLog: debugLogEntries,
   };
 }
 
@@ -2045,6 +2097,11 @@ async function deriveAdjustedSeriesFromSplitPrice({
       preparedEvents: events,
     },
   );
+  const applicationChecks = buildAdjustmentApplicationChecks(adjustments, adjustedRows);
+  const debugLogEntries = buildAdjustmentDebugEntries(applicationChecks, {
+    label: FINMIND_SPLIT_LABEL,
+    prefix: 'split',
+  });
 
   const appliedAdjustments = adjustments.filter((item) => !item?.skipped);
   const applied = appliedAdjustments.length > 0;
@@ -2091,6 +2148,8 @@ async function deriveAdjustedSeriesFromSplitPrice({
     diagnostics,
     statusMeta,
     payload,
+    applicationChecks,
+    debugLog: debugLogEntries,
   };
 }
 
@@ -2421,6 +2480,193 @@ function summariseAdjustmentSkipReasons(adjustments = []) {
   return Object.keys(counts).length > 0 ? counts : null;
 }
 
+function formatNumberForLog(value, digits = 6) {
+  if (!Number.isFinite(value)) return '—';
+  const fixed = Number(value).toFixed(digits);
+  return fixed.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
+}
+
+function formatPercentForLog(value, digits = 3) {
+  if (!Number.isFinite(value)) return '—';
+  const scaled = value * 100;
+  return `${formatNumberForLog(scaled, digits)}%`;
+}
+
+function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
+  if (!Array.isArray(adjustments) || adjustments.length === 0) {
+    return [];
+  }
+  const rows = Array.isArray(adjustedRows) ? adjustedRows : [];
+  return adjustments.map((adjustment, index) => {
+    const firstAffectedIndex = Number.isFinite(adjustment?.firstAffectedIndex)
+      ? adjustment.firstAffectedIndex
+      : Number.isFinite(adjustment?.baseRowIndex)
+        ? adjustment.baseRowIndex - 1
+        : -1;
+    const firstRow =
+      firstAffectedIndex >= 0 && firstAffectedIndex < rows.length
+        ? rows[firstAffectedIndex]
+        : null;
+    const observedFactor = Number(firstRow?.adjustedFactor ?? null);
+    const expectedFactor = Number(
+      Number.isFinite(adjustment?.factorAfter)
+        ? adjustment.factorAfter
+        : Number.isFinite(adjustment?.targetFactor)
+          ? adjustment.targetFactor
+          : null,
+    );
+    const rawClose = Number(
+      firstRow?.rawClose ??
+        firstRow?.raw_close ??
+        adjustment?.rawCloseBefore ??
+        null,
+    );
+    const adjustedClose = Number(firstRow?.close ?? null);
+    const expectedAdjustedClose = Number(
+      Number.isFinite(adjustment?.expectedAdjustedClose)
+        ? adjustment.expectedAdjustedClose
+        : Number.isFinite(rawClose) && Number.isFinite(expectedFactor)
+          ? safeRound(rawClose * expectedFactor)
+          : null,
+    );
+    const factorDiff = Number(
+      Number.isFinite(observedFactor) && Number.isFinite(expectedFactor)
+        ? observedFactor - expectedFactor
+        : null,
+    );
+    const relativeDiff = Number(
+      Number.isFinite(factorDiff) && Number.isFinite(expectedFactor) && expectedFactor !== 0
+        ? Math.abs(factorDiff) / Math.abs(expectedFactor)
+        : null,
+    );
+    let status = 'info';
+    if (adjustment?.skipped) {
+      status = 'skipped';
+    } else if (Number.isFinite(relativeDiff)) {
+      status = relativeDiff <= 1e-4 ? 'success' : 'warning';
+    } else if (Number.isFinite(observedFactor) && Number.isFinite(expectedFactor)) {
+      status = 'success';
+    }
+    return {
+      index,
+      status,
+      skipped: Boolean(adjustment?.skipped),
+      source: adjustment?.source || adjustment?.label || adjustment?.dataset || '還原事件',
+      dataset: adjustment?.dataset || null,
+      date: adjustment?.date || null,
+      appliedDate: adjustment?.appliedDate || null,
+      firstAffectedDate: firstRow?.date || adjustment?.firstAffectedDate || null,
+      firstAffectedIndex,
+      ratio: Number(adjustment?.ratio ?? null),
+      manualRatio: Number(adjustment?.manualRatio ?? null),
+      beforePrice: Number(adjustment?.beforePrice ?? null),
+      afterPrice: Number(adjustment?.afterPrice ?? null),
+      baseClose: Number(adjustment?.baseClose ?? null),
+      rawClose,
+      adjustedClose: Number.isFinite(adjustedClose) ? adjustedClose : null,
+      expectedAdjustedClose: Number.isFinite(expectedAdjustedClose)
+        ? expectedAdjustedClose
+        : null,
+      observedFactor: Number.isFinite(observedFactor) ? observedFactor : null,
+      expectedFactor: Number.isFinite(expectedFactor) ? expectedFactor : null,
+      factorDiff: Number.isFinite(factorDiff) ? factorDiff : null,
+      relativeDiff: Number.isFinite(relativeDiff) ? relativeDiff : null,
+      ratioSource: adjustment?.ratioSource || null,
+      reason: adjustment?.reason || null,
+    };
+  });
+}
+
+function buildAdjustmentDebugEntries(checks = [], options = {}) {
+  if (!Array.isArray(checks) || checks.length === 0) {
+    return [];
+  }
+  const label = options.label || '還原檢查';
+  const prefix = options.prefix || 'combined';
+  return checks.map((check) => {
+    const sourceLabel = check?.source || label;
+    const dateLabel = check?.date || check?.appliedDate || '未知日期';
+    const ratioValue = Number.isFinite(check?.manualRatio)
+      ? check.manualRatio
+      : Number.isFinite(check?.ratio)
+        ? check.ratio
+        : null;
+    const ratioText = Number.isFinite(ratioValue)
+      ? formatPercentForLog(ratioValue, 4)
+      : '—';
+    const lines = [];
+    if (Number.isFinite(check?.beforePrice) && Number.isFinite(check?.afterPrice)) {
+      lines.push(
+        `資料來源：${sourceLabel} ・ 計算方式：after_price ÷ before_price = 手動還原係數`,
+      );
+      lines.push(`拆分基準日：${check?.date || '—'}`);
+      lines.push(`手動還原比率：${ratioText}`);
+      lines.push(
+        `前收盤：${formatNumberForLog(check.beforePrice, 3)} ・ 後參考：${formatNumberForLog(check.afterPrice, 3)}`,
+      );
+      if (Number.isFinite(check.afterPrice) && Number.isFinite(check.beforePrice) && check.beforePrice !== 0) {
+        lines.push(
+          `計算：${formatNumberForLog(check.afterPrice, 3)} ÷ ${formatNumberForLog(check.beforePrice, 3)} ≈ ${formatNumberForLog(
+            check.afterPrice / check.beforePrice,
+            6,
+          )}`,
+        );
+      }
+    } else {
+      lines.push(`資料來源：${sourceLabel}`);
+      lines.push(`事件日期：${dateLabel}`);
+      if (ratioText !== '—') {
+        lines.push(`手動還原比率：${ratioText}`);
+      }
+    }
+
+    if (Number.isFinite(check?.rawClose) && Number.isFinite(check?.observedFactor)) {
+      const adjustedClose = Number.isFinite(check?.adjustedClose)
+        ? check.adjustedClose
+        : Number.isFinite(check?.rawClose) && Number.isFinite(check?.observedFactor)
+          ? safeRound(check.rawClose * check.observedFactor)
+          : null;
+      lines.push(
+        `套用檢查：${check?.firstAffectedDate || '—'} 因子 ${formatNumberForLog(
+          check.observedFactor,
+          6,
+        )} ・ 預期 ${formatNumberForLog(check?.expectedFactor, 6)} ・ 差異 ${
+          Number.isFinite(check?.relativeDiff)
+            ? formatPercentForLog(check.relativeDiff, 3)
+            : '—'
+        }`,
+      );
+      if (Number.isFinite(adjustedClose)) {
+        lines.push(
+          `價格檢查：${formatNumberForLog(check.rawClose, 3)} × ${formatNumberForLog(
+            check.observedFactor,
+            6,
+          )} ≈ ${formatNumberForLog(adjustedClose, 3)}`,
+        );
+      }
+    } else if (check?.status === 'skipped') {
+      lines.push(
+        `套用檢查：事件被略過，原因 ${check?.reason || '未知'}`,
+      );
+    } else {
+      lines.push('套用檢查：缺少前一交易日資料，無法驗證');
+    }
+
+    if (check?.ratioSource) {
+      lines.push(`還原來源：${check.ratioSource}`);
+    }
+
+    return {
+      key: `${prefix}-${check?.index ?? 0}`,
+      title: `${sourceLabel} @ ${dateLabel}`,
+      status: check?.status || 'info',
+      lines,
+      source: sourceLabel,
+      date: dateLabel,
+    };
+  });
+}
+
 function buildDebugSteps({
   priceData,
   priceSourceLabel,
@@ -2740,6 +2986,12 @@ export const handler = async (event) => {
         dividendDiagnostics.responseLog = fallbackLog;
       }
       dividendDiagnostics.resultInfo = dividendResultOutcome.info || null;
+      if (Array.isArray(dividendResultOutcome.debugLog)) {
+        dividendDiagnostics.debugLog = dividendResultOutcome.debugLog;
+      }
+      if (Array.isArray(dividendResultOutcome.applicationChecks)) {
+        dividendDiagnostics.applicationChecks = dividendResultOutcome.applicationChecks;
+      }
 
       effectiveAdjustments = Array.isArray(dividendResultOutcome.adjustments)
         ? dividendResultOutcome.adjustments
@@ -2797,10 +3049,25 @@ export const handler = async (event) => {
         fetchStartISO: splitResultOutcome?.payload?.fetchStartISO || null,
         fetchEndISO: splitResultOutcome?.payload?.fetchEndISO || null,
         resultInfo: splitResultOutcome.info || null,
+        debugLog: Array.isArray(splitResultOutcome?.debugLog)
+          ? splitResultOutcome.debugLog
+          : [],
+        applicationChecks: Array.isArray(splitResultOutcome?.applicationChecks)
+          ? splitResultOutcome.applicationChecks
+          : [],
       };
       splitDiagnostics.splitResult = derivedSplit;
       dividendDiagnostics.splitResult = derivedSplit;
       splitDiagnostics.responseLog = derivedSplit.responseLog;
+      if (!Array.isArray(splitDiagnostics.debugLog)) {
+        splitDiagnostics.debugLog = [];
+      }
+      if (Array.isArray(splitResultOutcome?.debugLog)) {
+        splitDiagnostics.debugLog = splitResultOutcome.debugLog;
+      }
+      if (Array.isArray(splitResultOutcome?.applicationChecks)) {
+        splitDiagnostics.applicationChecks = splitResultOutcome.applicationChecks;
+      }
 
       if (
         Array.isArray(splitResultOutcome.events) &&
@@ -2857,6 +3124,35 @@ export const handler = async (event) => {
 
     const appliedAdjustments = effectiveAdjustments.filter((event) => !event?.skipped);
     let hasAppliedAdjustments = appliedAdjustments.length > 0;
+    const combinedApplicationChecks = buildAdjustmentApplicationChecks(
+      effectiveAdjustments,
+      effectiveRows,
+    );
+    const combinedDebugLog = buildAdjustmentDebugEntries(combinedApplicationChecks, {
+      label: '整合還原流程',
+      prefix: 'combined',
+    });
+    combinedApplicationChecks.forEach((check) => {
+      const logPayload = {
+        source: check.source,
+        date: check.date,
+        ratio: check.manualRatio ?? check.ratio ?? null,
+        expectedFactor: check.expectedFactor,
+        observedFactor: check.observedFactor,
+        relativeDiff: check.relativeDiff,
+        status: check.status,
+      };
+      if (check.status === 'warning') {
+        console.warn('[calculateAdjustedPrice] 還原係數檢查異常', logPayload);
+      } else if (check.status === 'skipped') {
+        console.info('[calculateAdjustedPrice] 還原事件被略過', {
+          ...logPayload,
+          reason: check.reason || null,
+        });
+      } else {
+        console.debug('[calculateAdjustedPrice] 還原係數檢查', logPayload);
+      }
+    });
 
     if (splitResultOutcome && Array.isArray(splitResultOutcome.events)) {
       const splitEvents = splitResultOutcome.events;
@@ -2873,6 +3169,16 @@ export const handler = async (event) => {
           effectiveRows = combinedResult.rows;
         }
         hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
+        const recalculatedChecks = buildAdjustmentApplicationChecks(
+          effectiveAdjustments,
+          effectiveRows,
+        );
+        combinedApplicationChecks.splice(0, combinedApplicationChecks.length, ...recalculatedChecks);
+        const updatedDebug = buildAdjustmentDebugEntries(recalculatedChecks, {
+          label: '整合還原流程',
+          prefix: 'combined',
+        });
+        combinedDebugLog.splice(0, combinedDebugLog.length, ...updatedDebug);
       }
     }
 
@@ -2920,6 +3226,16 @@ export const handler = async (event) => {
           effectiveAdjustments = [...effectiveAdjustments, ...fallbackResult.adjustments];
         }
         hasAppliedAdjustments = recomputeAppliedFlag(effectiveAdjustments);
+        const fallbackChecks = buildAdjustmentApplicationChecks(
+          effectiveAdjustments,
+          effectiveRows,
+        );
+        combinedApplicationChecks.splice(0, combinedApplicationChecks.length, ...fallbackChecks);
+        const fallbackDebugEntries = buildAdjustmentDebugEntries(fallbackChecks, {
+          label: fallbackResult.info?.label || 'FinMind 還原序列',
+          prefix: 'fallback',
+        });
+        combinedDebugLog.splice(0, combinedDebugLog.length, ...fallbackDebugEntries);
       }
     }
 
@@ -2927,6 +3243,9 @@ export const handler = async (event) => {
       const latest = fallbackHistory[fallbackHistory.length - 1];
       fallbackInfo = { ...latest, history: fallbackHistory };
     }
+
+    dividendDiagnostics.combinedDebugLog = combinedDebugLog;
+    dividendDiagnostics.combinedChecks = combinedApplicationChecks;
 
     const debugSteps = buildDebugSteps({
       priceData,
@@ -3015,6 +3334,8 @@ export const handler = async (event) => {
       dividendDiagnostics,
       splitDiagnostics,
       debugSteps,
+      adjustmentDebugLog: combinedDebugLog,
+      adjustmentChecks: combinedApplicationChecks,
       adjustmentFallback: fallbackInfo || null,
       adjustmentFallbackApplied: Boolean(fallbackInfo?.applied),
       finmindStatus,

@@ -314,6 +314,20 @@ try {
   const splitAdjustment = payload.adjustments.find((event) => event?.source === 'FinMind 股票拆分');
   assert.ok(splitAdjustment, 'Split adjustment should be applied when enabled');
   approxEqual(splitAdjustment.ratio, 0.5, 1e-6);
+  assert.ok(Array.isArray(payload.adjustmentDebugLog), 'Adjustment debug log should be present');
+  const splitLogEntry = payload.adjustmentDebugLog.find((entry) =>
+    entry?.title?.includes('股票拆分') || entry?.source?.includes('股票拆分'),
+  );
+  assert.ok(splitLogEntry, 'Split debug log entry should exist');
+  assert.ok(
+    Array.isArray(splitLogEntry.lines) &&
+      splitLogEntry.lines.some((line) => line.includes('after_price ÷ before_price')),
+    'Split debug log should include ratio calculation details',
+  );
+  assert.ok(
+    Array.isArray(payload.splitDiagnostics?.debugLog) && payload.splitDiagnostics.debugLog.length > 0,
+    'Split diagnostics should expose debug log entries',
+  );
 } finally {
   resetFetchImplementation();
   if (originalToken === undefined) {

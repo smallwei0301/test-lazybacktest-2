@@ -213,6 +213,37 @@ function buildAdjustmentDiagnosticsHtml(adjustments) {
     return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">還原事件追蹤</div><div class="mt-1 space-y-1">${items}</div>${remainderNote}</div>`;
 }
 
+function buildAdjustmentDebugLogHtml(logEntries, options = {}) {
+    if (!Array.isArray(logEntries) || logEntries.length === 0) return '';
+    const title = testerEscapeHtml(options.title || '還原係數檢查');
+    const items = logEntries
+        .map((entry) => {
+            const status = entry?.status;
+            const statusClass = status === 'warning'
+                ? 'text-amber-600'
+                : status === 'success'
+                    ? 'text-emerald-600'
+                    : status === 'skipped'
+                        ? 'text-slate-500'
+                        : 'text-slate-600';
+            const titleText = testerEscapeHtml(entry?.title || entry?.source || '還原事件');
+            const linesHtml = Array.isArray(entry?.lines)
+                ? entry.lines
+                      .map((line) => `<div class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(line)}</div>`)
+                      .join('')
+                : '';
+            return `<div class="rounded border px-3 py-2 bg-white/70" style="border-color: var(--border);">
+    <div class="flex items-center gap-2 text-[11px]" style="color: var(--foreground);">
+        <span class="${statusClass}">●</span>
+        <span class="font-semibold">${titleText}</span>
+    </div>
+    ${linesHtml}
+</div>`;
+        })
+        .join('');
+    return `<div class="mt-3 text-[11px]"><div class="font-semibold" style="color: var(--foreground);">${title}</div><div class="mt-2 space-y-2">${items}</div></div>`;
+}
+
 function buildDividendEventPreviewHtml(events) {
     if (!Array.isArray(events) || events.length === 0) return '';
     const blocks = events.slice(0, 3).map((event) => {
@@ -881,6 +912,27 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             const adjustmentHtml = buildAdjustmentDiagnosticsHtml(adjustmentsList);
             if (adjustmentHtml) {
                 detailHtml += adjustmentHtml;
+            }
+            const combinedLogHtml = buildAdjustmentDebugLogHtml(
+                Array.isArray(payload?.adjustmentDebugLog) ? payload.adjustmentDebugLog : [],
+                { title: '整合還原係數檢查' },
+            );
+            if (combinedLogHtml) {
+                detailHtml += combinedLogHtml;
+            }
+            const splitLogHtml = buildAdjustmentDebugLogHtml(
+                Array.isArray(splitDiagnostics?.debugLog) ? splitDiagnostics.debugLog : [],
+                { title: '拆分係數檢查' },
+            );
+            if (splitLogHtml) {
+                detailHtml += splitLogHtml;
+            }
+            const dividendLogHtml = buildAdjustmentDebugLogHtml(
+                Array.isArray(dividendDiagnostics?.debugLog) ? dividendDiagnostics.debugLog : [],
+                { title: '配息還原檢查' },
+            );
+            if (dividendLogHtml) {
+                detailHtml += dividendLogHtml;
             }
             const finmindStatusHtml = buildFinMindApiStatusHtml(
                 payload?.finmindStatus || dividendDiagnostics?.finmindStatus || null,

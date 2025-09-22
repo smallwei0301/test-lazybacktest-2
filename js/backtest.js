@@ -123,6 +123,12 @@ function runBacktestInternal() {
                         || data?.dataDebug?.finmindStatus
                         || existingEntry?.finmindStatus
                         || null;
+                    const adjustmentDebugLogMeta = Array.isArray(rawMeta.adjustmentDebugLog)
+                        ? rawMeta.adjustmentDebugLog
+                        : (Array.isArray(data?.dataDebug?.adjustmentDebugLog) ? data.dataDebug.adjustmentDebugLog : []);
+                    const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
+                        ? rawMeta.adjustmentChecks
+                        : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
@@ -140,6 +146,8 @@ function runBacktestInternal() {
                         priceSource: priceSourceMeta,
                         splitDiagnostics: splitDiagnosticsMeta,
                         finmindStatus: finmindStatusMeta,
+                        adjustmentDebugLog: adjustmentDebugLogMeta,
+                        adjustmentChecks: adjustmentChecksMeta,
                     };
                      cachedDataStore.set(cacheKey, cacheEntry);
                      cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
@@ -169,6 +177,12 @@ function runBacktestInternal() {
                     const finmindStatusMeta = data?.dataDebug?.finmindStatus
                         || cachedEntry.finmindStatus
                         || null;
+                    const adjustmentDebugLogMeta = Array.isArray(data?.dataDebug?.adjustmentDebugLog)
+                        ? data.dataDebug.adjustmentDebugLog
+                        : Array.isArray(cachedEntry.adjustmentDebugLog) ? cachedEntry.adjustmentDebugLog : [];
+                    const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
+                        ? data.dataDebug.adjustmentChecks
+                        : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
@@ -185,6 +199,8 @@ function runBacktestInternal() {
                         priceSource: priceSourceMeta,
                         splitDiagnostics: splitDiagnosticsMeta,
                         finmindStatus: finmindStatusMeta,
+                        adjustmentDebugLog: adjustmentDebugLogMeta,
+                        adjustmentChecks: adjustmentChecksMeta,
                     };
                      cachedDataStore.set(cacheKey, updatedEntry);
                      cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
@@ -349,6 +365,8 @@ function updatePriceDebug(meta = {}) {
     const priceMode = meta.priceMode || (typeof meta.adjustedPrice === 'boolean' ? (meta.adjustedPrice ? 'adjusted' : 'raw') : null);
     const splitDiagnostics = meta.splitDiagnostics || null;
     const finmindStatus = meta.finmindStatus || null;
+    const adjustmentDebugLog = Array.isArray(meta.adjustmentDebugLog) ? meta.adjustmentDebugLog : [];
+    const adjustmentChecks = Array.isArray(meta.adjustmentChecks) ? meta.adjustmentChecks : [];
     lastPriceDebug = {
         steps,
         summary,
@@ -360,6 +378,8 @@ function updatePriceDebug(meta = {}) {
         priceMode,
         splitDiagnostics,
         finmindStatus,
+        adjustmentDebugLog,
+        adjustmentChecks,
     };
     renderPricePipelineSteps();
     renderPriceInspectorDebug();

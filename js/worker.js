@@ -797,6 +797,12 @@ async function fetchAdjustedPriceRange(
     payload?.finmindStatus && typeof payload.finmindStatus === "object"
       ? payload.finmindStatus
       : null;
+  const adjustmentDebugLog = Array.isArray(payload?.adjustmentDebugLog)
+    ? payload.adjustmentDebugLog
+    : [];
+  const adjustmentChecks = Array.isArray(payload?.adjustmentChecks)
+    ? payload.adjustmentChecks
+    : [];
 
   const { rows: adjustedRows, fallbackApplied } = maybeApplyAdjustments(
     normalizedRows,
@@ -820,6 +826,8 @@ async function fetchAdjustedPriceRange(
     dividendDiagnostics,
     splitDiagnostics,
     finmindStatus,
+    adjustmentDebugLog,
+    adjustmentChecks,
   };
 }
 
@@ -1027,6 +1035,12 @@ async function fetchStockData(
         typeof cachedEntry.meta.finmindStatus === "object"
           ? cachedEntry.meta.finmindStatus
           : null,
+      adjustmentDebugLog: Array.isArray(cachedEntry?.meta?.adjustmentDebugLog)
+        ? cachedEntry.meta.adjustmentDebugLog
+        : [],
+      adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
+        ? cachedEntry.meta.adjustmentChecks
+        : [],
     };
   }
 
@@ -1092,6 +1106,12 @@ async function fetchStockData(
           typeof adjustedResult.finmindStatus === "object"
             ? adjustedResult.finmindStatus
             : null,
+        adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
+          ? adjustedResult.adjustmentDebugLog
+          : [],
+        adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
+          ? adjustedResult.adjustmentChecks
+          : [],
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1129,6 +1149,12 @@ async function fetchStockData(
         typeof adjustedResult.finmindStatus === "object"
           ? adjustedResult.finmindStatus
           : null,
+      adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
+        ? adjustedResult.adjustmentDebugLog
+        : [],
+      adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
+        ? adjustedResult.adjustmentChecks
+        : [],
     };
   }
 
@@ -4865,6 +4891,12 @@ self.onmessage = async function (e) {
               cachedMeta.finmindStatus && typeof cachedMeta.finmindStatus === "object"
                 ? cachedMeta.finmindStatus
                 : null,
+            adjustmentDebugLog: Array.isArray(cachedMeta.adjustmentDebugLog)
+              ? cachedMeta.adjustmentDebugLog
+              : [],
+            adjustmentChecks: Array.isArray(cachedMeta.adjustmentChecks)
+              ? cachedMeta.adjustmentChecks
+              : [],
           };
         }
       } else {
@@ -4935,6 +4967,16 @@ self.onmessage = async function (e) {
           outcome?.splitDiagnostics || workerLastMeta?.splitDiagnostics || null,
         finmindStatus:
           outcome?.finmindStatus || workerLastMeta?.finmindStatus || null,
+        adjustmentDebugLog: Array.isArray(outcome?.adjustmentDebugLog)
+          ? outcome.adjustmentDebugLog
+          : Array.isArray(workerLastMeta?.adjustmentDebugLog)
+            ? workerLastMeta.adjustmentDebugLog
+            : [],
+        adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
+          ? outcome.adjustmentChecks
+          : Array.isArray(workerLastMeta?.adjustmentChecks)
+            ? workerLastMeta.adjustmentChecks
+            : [],
       };
 
       if (!useCachedData && fetched) {
@@ -4958,6 +5000,12 @@ self.onmessage = async function (e) {
             outcome?.finmindStatus && typeof outcome.finmindStatus === "object"
               ? outcome.finmindStatus
               : null,
+          adjustmentDebugLog: Array.isArray(outcome?.adjustmentDebugLog)
+            ? outcome.adjustmentDebugLog
+            : [],
+          adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
+            ? outcome.adjustmentChecks
+            : [],
         };
       }
 
