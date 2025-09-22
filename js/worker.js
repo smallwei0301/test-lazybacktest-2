@@ -1,7 +1,7 @@
 
 importScripts('shared-lookback.js');
 
-// --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
+// --- Worker Data Acquisition & Cache (v11.6 - US Yahoo fallback integration) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -11,7 +11,8 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250410A
 // Patch Tag: LB-ADJ-PIPE-20250527A
 // Patch Tag: LB-US-MARKET-20250612A
-const WORKER_DATA_VERSION = "v11.5";
+// Patch Tag: LB-US-YAHOO-20250613A
+const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -1884,6 +1885,14 @@ async function fetchStockData(
             if (sourceLabel) {
               monthSourceFlags.add(sourceLabel);
               monthEntry.sources.add(sourceLabel);
+            }
+            if (Array.isArray(payload?.dataSources)) {
+              payload.dataSources
+                .filter((label) => typeof label === "string" && label.trim() !== "")
+                .forEach((label) => {
+                  monthSourceFlags.add(label);
+                  monthEntry.sources.add(label);
+                });
             }
             if (normalized.length > 0) {
               mergeMonthlyData(monthEntry, normalized);

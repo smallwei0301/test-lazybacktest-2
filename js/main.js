@@ -1,6 +1,7 @@
 // --- 主 JavaScript 邏輯 (Part 1 of X) - v3.5.3 ---
 // Patch Tag: LB-ADJ-SPLIT-20250518A
 // Patch Tag: LB-US-MARKET-20250612A
+// Patch Tag: LB-US-YAHOO-20250613A
 
 // 全局變量
 let stockChart = null;
@@ -469,6 +470,7 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
     if (market === 'US') {
         return [
             { id: 'finmind', label: 'FinMind 主來源', description: 'FinMind 美股日線資料' },
+            { id: 'yahoo', label: 'Yahoo 備援', description: 'FinMind 失效時啟用' },
         ];
     }
     if (market === 'TPEX') {
@@ -591,7 +593,9 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             return;
         }
     } else {
-        const endpoint = market === 'TPEX' ? '/api/tpex/' : '/api/twse/';
+        let endpoint = '/api/twse/';
+        if (market === 'TPEX') endpoint = '/api/tpex/';
+        else if (market === 'US') endpoint = '/api/us/';
         const params = new URLSearchParams({
             stockNo,
             start,
@@ -998,20 +1002,43 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             }
         } else {
             const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+            const dataRows = Array.isArray(payload.data) ? payload.data : [];
             const total = Number.isFinite(payload.iTotalRecords)
                 ? payload.iTotalRecords
-                : aaData.length;
+                : aaData.length > 0
+                    ? aaData.length
+                    : dataRows.length;
             const isoDates = aaData
                 .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
                 .filter((value) => Boolean(value));
-            const firstDate = isoDates.length > 0 ? isoDates[0] : start;
-            const lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
-            const sourceSummary = payload?.dataSource || '未知資料來源';
-            detailHtml = [
-                `來源摘要: <span class="font-semibold">${sourceSummary}</span>`,
-                `資料筆數: <span class="font-semibold">${total}</span>`,
-                `涵蓋區間: <span class="font-semibold">${firstDate} ~ ${lastDate}</span>`,
-            ].join('<br>');
+            let firstDate = isoDates.length > 0 ? isoDates[0] : start;
+            let lastDate = isoDates.length > 0 ? isoDates[isoDates.length - 1] : end;
+            if (isoDates.length === 0 && dataRows.length > 0) {
+                const dataDates = dataRows
+                    .map((row) => (row && typeof row.date === 'string' ? row.date : null))
+                    .filter((value) => Boolean(value))
+                    .sort();
+                if (dataDates.length > 0) {
+                    firstDate = dataDates[0];
+                    lastDate = dataDates[dataDates.length - 1];
+                }
+            }
+            const sourcesRaw = Array.isArray(payload?.dataSources) && payload.dataSources.length > 0
+                ? payload.dataSources
+                : payload?.dataSource
+                    ? [payload.dataSource]
+                    : ['未知資料來源'];
+            const detailLines = [
+                `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourcesRaw.join('、'))}</span>`,
+                `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
+                `涵蓋區間: <span class="font-semibold">${testerEscapeHtml(firstDate)} ~ ${testerEscapeHtml(lastDate)}</span>`,
+            ];
+            if (payload?.fallback?.reason) {
+                const fallbackSource = testerEscapeHtml(payload.dataSource || '備援來源');
+                const fallbackReason = testerEscapeHtml(payload.fallback.reason);
+                detailLines.push(`備援狀態: <span class="font-semibold">改用 ${fallbackSource}</span> ・ 原因：${fallbackReason}`);
+            }
+            detailHtml = detailLines.join('<br>');
         }
         showTesterResult(
             'success',
@@ -1057,7 +1084,7 @@ function refreshDataSourceTester() {
             : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'US') {
-        hintEl.textContent = 'FinMind 為唯一來源，請確認已設定 Sponsor 等級的 FINMIND_TOKEN。';
+        hintEl.textContent = 'FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。';
         hintEl.style.color = 'var(--muted-foreground)';
     } else if (market === 'TPEX') {
         hintEl.textContent = 'FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。';

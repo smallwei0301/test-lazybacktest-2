@@ -1,5 +1,6 @@
-// netlify/functions/us-proxy.js (v1.0 - FinMind US market bridge)
+// netlify/functions/us-proxy.js (v1.1 - FinMind primary with Yahoo fallback)
 // Patch Tag: LB-US-MARKET-20250612A
+// Patch Tag: LB-US-YAHOO-20250613A
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
@@ -7,6 +8,9 @@ import fetch from 'node-fetch';
 const US_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const US_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
+const FINMIND_SOURCE_LABEL = 'FinMind (US)';
+const YAHOO_SOURCE_LABEL = 'Yahoo Finance (US)';
+const YAHOO_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryInfoCache = new Map(); // Map<stockNo, { timestamp, data }>
@@ -31,7 +35,7 @@ function obtainStore(name) {
     } catch (error) {
         if (error?.name === 'MissingBlobsEnvironmentError') {
             if (!inMemoryStores.has(name)) {
-                console.warn('[US Proxy v1.0] Netlify Blobs 未配置，使用記憶體快取模擬。');
+                console.warn('[US Proxy v1.1] Netlify Blobs 未配置，使用記憶體快取模擬。');
                 inMemoryStores.set(name, createMemoryBlobStore());
             }
             return inMemoryStores.get(name);
@@ -80,6 +84,30 @@ function formatISODate(date) {
     return `${year}-${month}-${day}`;
 }
 
+function toUnixTimestamp(date, options = {}) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const clone = new Date(date.getTime());
+    if (options.endOfDay) {
+        clone.setUTCHours(23, 59, 59, 999);
+    } else {
+        clone.setUTCHours(0, 0, 0, 0);
+    }
+    return Math.floor(clone.getTime() / 1000);
+}
+
+function formatYahooDate(timestamp) {
+    if (!Number.isFinite(timestamp)) return null;
+    const date = new Date(timestamp * 1000);
+    if (Number.isNaN(date.getTime())) return null;
+    return formatISODate(date);
+}
+
+function normalizeYahooNumber(value) {
+    if (value === null || value === undefined) return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
 function resolveDateRange(startParam, endParam, monthParam) {
     let start = parseISODate(startParam);
     let end = parseISODate(endParam);
@@ -118,7 +146,7 @@ async function readCache(store, cacheKey) {
             return { ...blobHit.data, source: 'blob' };
         }
     } catch (error) {
-        console.error('[US Proxy v1.0] 讀取 Blobs 時發生錯誤:', error);
+        console.error('[US Proxy v1.1] 讀取 Blobs 時發生錯誤:', error);
     }
     return null;
 }
@@ -129,7 +157,7 @@ async function writeCache(store, cacheKey, payload) {
     try {
         await store.setJSON(cacheKey, record);
     } catch (error) {
-        console.error('[US Proxy v1.0] 寫入 Blobs 失敗:', error);
+        console.error('[US Proxy v1.1] 寫入 Blobs 失敗:', error);
     }
 }
 
@@ -145,7 +173,7 @@ async function readInfoCache(store, stockNo) {
             return blobHit.data;
         }
     } catch (error) {
-        console.error('[US Proxy v1.0] 讀取 USStockInfo Blobs 失敗:', error);
+        console.error('[US Proxy v1.1] 讀取 USStockInfo Blobs 失敗:', error);
     }
     return null;
 }
@@ -156,7 +184,7 @@ async function writeInfoCache(store, stockNo, payload) {
     try {
         await store.setJSON(stockNo, record);
     } catch (error) {
-        console.error('[US Proxy v1.0] 寫入 USStockInfo Blobs 失敗:', error);
+        console.error('[US Proxy v1.1] 寫入 USStockInfo Blobs 失敗:', error);
     }
 }
 
@@ -214,7 +242,7 @@ async function fetchUSStockInfo(stockNo) {
                     stock_id: normalized,
                 });
             } catch (fallbackError) {
-                console.warn('[US Proxy v1.0] USStockInfo data_id 查無資料，stock_id fallback 亦失敗:', fallbackError);
+                console.warn('[US Proxy v1.1] USStockInfo data_id 查無資料，stock_id fallback 亦失敗:', fallbackError);
             }
         }
         const stockName = extractUSStockName(data, normalized) || normalized;
@@ -222,27 +250,200 @@ async function fetchUSStockInfo(stockNo) {
         await writeInfoCache(store, normalized, payload);
         return payload;
     } catch (error) {
-        console.error('[US Proxy v1.0] 取得 USStockInfo 失敗:', error);
+        console.error('[US Proxy v1.1] 取得 USStockInfo 失敗:', error);
         return { stockNo: normalized, stockName: normalized };
     }
 }
 
-async function fetchUSPriceRange(stockNo, startISO, endISO) {
-    const normalized = normalizeStockNo(stockNo);
-    const data = await fetchFinMindData('USStockPrice', {
-        data_id: normalized,
-        start_date: startISO,
-        end_date: endISO,
-    });
-    return Array.isArray(data) ? data : [];
-}
-
-function buildCacheKey(stockNo, rangeKey) {
-    return `${stockNo}_${rangeKey}`;
+function buildCacheKey(stockNo, rangeKey, options = {}) {
+    const sourceSuffix = options.forceSource ? `_${options.forceSource}` : '';
+    return `${stockNo}_${rangeKey}${sourceSuffix}`;
 }
 
 function buildRangeKey(startISO, endISO) {
     return `${startISO}_${endISO}`;
+}
+
+async function fetchYahooFinanceRange(stockNo, startISO, endISO) {
+    const startDate = parseISODate(startISO);
+    const endDate = parseISODate(endISO);
+    if (!startDate || !endDate) {
+        throw new Error('Yahoo Finance 日期參數無效');
+    }
+    const period1 = toUnixTimestamp(startDate, { endOfDay: false });
+    const period2Base = toUnixTimestamp(endDate, { endOfDay: true });
+    if (!Number.isFinite(period1) || !Number.isFinite(period2Base)) {
+        throw new Error('Yahoo Finance 無法轉換日期');
+    }
+    const period2 = period2Base + 86400; // 延伸一天確保涵蓋結束日期
+    const url = new URL(`${YAHOO_ENDPOINT}${encodeURIComponent(stockNo)}`);
+    url.searchParams.set('interval', '1d');
+    url.searchParams.set('includePrePost', 'false');
+    url.searchParams.set('events', 'div,splits');
+    url.searchParams.set('period1', period1);
+    url.searchParams.set('period2', period2);
+
+    const response = await fetch(url.toString(), {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (LazyBacktest)'
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Yahoo Finance HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const chart = payload?.chart;
+    if (!chart) {
+        throw new Error('Yahoo Finance 回應格式異常');
+    }
+    if (chart.error) {
+        throw new Error(chart.error.description || chart.error.code || 'Yahoo Finance 查詢失敗');
+    }
+    const result = Array.isArray(chart.result) ? chart.result[0] : null;
+    if (!result) return [];
+    const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+    const quote = result?.indicators?.quote?.[0] || {};
+    const opens = Array.isArray(quote.open) ? quote.open : [];
+    const highs = Array.isArray(quote.high) ? quote.high : [];
+    const lows = Array.isArray(quote.low) ? quote.low : [];
+    const closes = Array.isArray(quote.close) ? quote.close : [];
+    const volumes = Array.isArray(quote.volume) ? quote.volume : [];
+    const rows = [];
+    for (let i = 0; i < timestamps.length; i += 1) {
+        const iso = formatYahooDate(timestamps[i]);
+        if (!iso) continue;
+        const open = normalizeYahooNumber(opens[i]);
+        const high = normalizeYahooNumber(highs[i]);
+        const low = normalizeYahooNumber(lows[i]);
+        const close = normalizeYahooNumber(closes[i]);
+        const volume = normalizeYahooNumber(volumes[i]);
+        if (open === null && high === null && low === null && close === null) continue;
+        rows.push({
+            date: iso,
+            open,
+            high,
+            low,
+            close,
+            volume: volume ?? 0,
+        });
+    }
+    return rows;
+}
+
+async function fetchUSPriceRange(stockNo, startISO, endISO, options = {}) {
+    const normalized = normalizeStockNo(stockNo);
+    if (!normalized) {
+        return {
+            rows: [],
+            primarySource: FINMIND_SOURCE_LABEL,
+            sources: [],
+        };
+    }
+
+    const forceSource = (options.forceSource || '').toLowerCase();
+    const allowFinMind = forceSource !== 'yahoo';
+    const allowYahoo = forceSource !== 'finmind';
+
+    let finmindRows = null;
+    let finmindError = null;
+    let finmindEmpty = false;
+    const finmindAttempted = allowFinMind;
+
+    if (allowFinMind) {
+        try {
+            const data = await fetchFinMindData('USStockPrice', {
+                data_id: normalized,
+                start_date: startISO,
+                end_date: endISO,
+            });
+            finmindRows = Array.isArray(data) ? data : [];
+            if (finmindRows.length > 0 || forceSource === 'finmind') {
+                return {
+                    rows: finmindRows,
+                    primarySource: FINMIND_SOURCE_LABEL,
+                    sources: [FINMIND_SOURCE_LABEL],
+                };
+            }
+            finmindEmpty = true;
+        } catch (error) {
+            finmindError = error;
+            console.warn(`[US Proxy v1.1] FinMind 取得 ${normalized} 失敗:`, error);
+            if (forceSource === 'finmind') {
+                throw error;
+            }
+        }
+    }
+
+    if (!allowYahoo) {
+        return {
+            rows: Array.isArray(finmindRows) ? finmindRows : [],
+            primarySource: FINMIND_SOURCE_LABEL,
+            sources: [FINMIND_SOURCE_LABEL],
+            fallback: finmindEmpty
+                ? { source: FINMIND_SOURCE_LABEL, reason: 'FinMind 無資料' }
+                : finmindError
+                    ? { source: FINMIND_SOURCE_LABEL, reason: finmindError.message }
+                    : null,
+        };
+    }
+
+    let yahooRows = [];
+    let yahooError = null;
+    try {
+        yahooRows = await fetchYahooFinanceRange(normalized, startISO, endISO);
+    } catch (error) {
+        yahooError = error;
+        console.error(`[US Proxy v1.1] Yahoo Finance 取得 ${normalized} 失敗:`, error);
+    }
+
+    if (Array.isArray(yahooRows) && yahooRows.length > 0) {
+        const fallbackInfo = finmindAttempted && (finmindError || finmindEmpty)
+            ? {
+                source: FINMIND_SOURCE_LABEL,
+                reason: finmindError ? finmindError.message : 'FinMind 無資料',
+            }
+            : null;
+        if (fallbackInfo) {
+            console.warn(`[US Proxy v1.1] ${normalized} 改用 Yahoo Finance 備援，原因: ${fallbackInfo.reason}`);
+        }
+        return {
+            rows: yahooRows,
+            primarySource: YAHOO_SOURCE_LABEL,
+            sources: [YAHOO_SOURCE_LABEL],
+            fallback: fallbackInfo,
+        };
+    }
+
+    if (yahooError) {
+        if (finmindError) {
+            throw new Error(`FinMind 取得失敗 (${finmindError.message}); Yahoo Finance 取得失敗 (${yahooError.message})`);
+        }
+        if (finmindEmpty) {
+            throw new Error(`FinMind 無資料且 Yahoo Finance 取得失敗 (${yahooError.message})`);
+        }
+        throw yahooError;
+    }
+
+    if (Array.isArray(finmindRows) && finmindRows.length > 0) {
+        return {
+            rows: finmindRows,
+            primarySource: FINMIND_SOURCE_LABEL,
+            sources: [FINMIND_SOURCE_LABEL],
+        };
+    }
+
+    if (finmindError) {
+        throw finmindError;
+    }
+
+    return {
+        rows: [],
+        primarySource: FINMIND_SOURCE_LABEL,
+        sources: [FINMIND_SOURCE_LABEL],
+        fallback: finmindEmpty
+            ? { source: FINMIND_SOURCE_LABEL, reason: 'FinMind 無資料' }
+            : null,
+    };
 }
 
 export default async (req) => {
@@ -263,9 +464,10 @@ export default async (req) => {
             });
         }
 
-        const forceSource = params.get('forceSource');
-        if (forceSource && forceSource.toLowerCase() !== 'finmind') {
-            return new Response(JSON.stringify({ error: '美股資料僅支援 FinMind 來源' }), { status: 400 });
+        const forceSourceParam = params.get('forceSource');
+        const normalizedForceSource = forceSourceParam ? forceSourceParam.toLowerCase() : null;
+        if (normalizedForceSource && !['finmind', 'yahoo'].includes(normalizedForceSource)) {
+            return new Response(JSON.stringify({ error: 'forceSource 僅支援 finmind 或 yahoo' }), { status: 400 });
         }
 
         const range = resolveDateRange(params.get('start'), params.get('end'), params.get('month'));
@@ -273,7 +475,9 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: '日期範圍無效' }), { status: 400 });
         }
 
-        const cacheKey = buildCacheKey(stockNo, buildRangeKey(range.startISO, range.endISO));
+        const cacheKey = buildCacheKey(stockNo, buildRangeKey(range.startISO, range.endISO), {
+            forceSource: normalizedForceSource || undefined,
+        });
         const store = obtainStore('us_price_store');
         const cacheBypassed = params.has('cacheBust');
 
@@ -283,11 +487,19 @@ export default async (req) => {
         }
 
         if (!payload) {
-            const priceRows = await fetchUSPriceRange(stockNo, range.startISO, range.endISO);
+            const priceResult = await fetchUSPriceRange(stockNo, range.startISO, range.endISO, {
+                forceSource: normalizedForceSource || undefined,
+            });
             const info = await fetchUSStockInfo(stockNo);
+            const dataRows = Array.isArray(priceResult.rows) ? priceResult.rows : [];
+            const primarySource = priceResult.primarySource || FINMIND_SOURCE_LABEL;
+            const sourceListRaw = Array.isArray(priceResult.sources) && priceResult.sources.length > 0
+                ? priceResult.sources
+                : [primarySource];
+            const sourceList = Array.from(new Set(sourceListRaw.filter(Boolean)));
             payload = {
                 stockName: info.stockName || stockNo,
-                data: priceRows.map((row) => ({
+                data: dataRows.map((row) => ({
                     date: row.date,
                     open: row.open ?? row.Open ?? null,
                     high: row.high ?? row.High ?? row.max ?? null,
@@ -295,7 +507,9 @@ export default async (req) => {
                     close: row.close ?? row.Close ?? null,
                     volume: row.volume ?? row.Volume ?? row.Trading_Volume ?? 0,
                 })),
-                dataSource: 'FinMind (US)',
+                dataSource: primarySource,
+                dataSources: sourceList,
+                fallback: priceResult.fallback || null,
             };
             await writeCache(store, cacheKey, payload);
         }
@@ -304,7 +518,9 @@ export default async (req) => {
             JSON.stringify({
                 stockName: payload.stockName || stockNo,
                 data: Array.isArray(payload.data) ? payload.data : [],
-                dataSource: payload.dataSource || 'FinMind (US)',
+                dataSource: payload.dataSource || FINMIND_SOURCE_LABEL,
+                dataSources: Array.isArray(payload.dataSources) ? payload.dataSources : undefined,
+                fallback: payload.fallback || null,
                 source: payload.source || null,
             }),
             {
@@ -312,7 +528,7 @@ export default async (req) => {
             },
         );
     } catch (error) {
-        console.error('[US Proxy v1.0] 發生錯誤:', error);
+        console.error('[US Proxy v1.1] 發生錯誤:', error);
         return new Response(
             JSON.stringify({ error: error?.message || 'US Proxy error' }),
             { status: error?.message === '未設定 FinMind Token' ? 500 : 502 },
