@@ -1,4 +1,6 @@
 
+importScripts('shared-lookback.js');
+
 // --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
@@ -980,6 +982,10 @@ async function fetchStockData(
   const endDateObj = new Date(endDate);
   const adjusted = Boolean(options.adjusted || options.adjustedPrice);
   const split = Boolean(options.splitAdjustment);
+  const optionEffectiveStart = options.effectiveStartDate || startDate;
+  const optionLookbackDays = Number.isFinite(options.lookbackDays)
+    ? Number(options.lookbackDays)
+    : null;
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -1042,6 +1048,11 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
         ? cachedEntry.meta.adjustmentChecks
         : [],
+      fetchRange:
+        cachedEntry?.meta?.fetchRange ||
+        { start: startDate, end: endDate },
+      effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
+      lookbackDays: cachedEntry?.meta?.lookbackDays || null,
     };
   }
 
@@ -1073,9 +1084,12 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
         splitAdjustment: split,
+        lookbackDays: optionLookbackDays,
+        fetchRange: { start: startDate, end: endDate },
         summary: adjustedResult.summary || null,
         adjustments: adjustedResult.adjustments || [],
         priceSource: adjustedResult.priceSource || null,
@@ -1156,6 +1170,9 @@ async function fetchStockData(
       adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
         ? adjustedResult.adjustmentChecks
         : [],
+      fetchRange: { start: startDate, end: endDate },
+      effectiveStartDate: optionEffectiveStart,
+      lookbackDays: optionLookbackDays,
     };
   }
 
@@ -1169,13 +1186,23 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
+        lookbackDays: optionLookbackDays,
+        fetchRange: { start: startDate, end: endDate },
       },
       priceMode: getPriceModeKey(adjusted),
     };
     setWorkerCacheEntry(marketKey, cacheKey, entry);
-    return { data: [], dataSource: marketKey, stockName };
+    return {
+      data: [],
+      dataSource: marketKey,
+      stockName,
+      fetchRange: { start: startDate, end: endDate },
+      effectiveStartDate: optionEffectiveStart,
+      lookbackDays: optionLookbackDays,
+    };
   }
   const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
   const isTpex = marketKey === "TPEX";
@@ -1382,8 +1409,12 @@ async function fetchStockData(
     meta: {
       stockNo,
       startDate,
+      effectiveStartDate: optionEffectiveStart,
       endDate,
       priceMode: getPriceModeKey(adjusted),
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -1398,6 +1429,9 @@ async function fetchStockData(
     data: deduped,
     dataSource: dataSourceLabel,
     stockName: stockName || stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
   };
 }
 
@@ -4162,14 +4196,23 @@ async function runOptimization(
       stockData = workerLastDataset;
       console.log("[Worker Opt] Using worker's cached data.");
     } else {
+      const optDataStart =
+        baseParams.dataStartDate || baseParams.startDate;
+      const optEffectiveStart =
+        baseParams.effectiveStartDate || baseParams.startDate;
+      const optLookback = Number.isFinite(baseParams.lookbackDays)
+        ? baseParams.lookbackDays
+        : null;
       const fetched = await fetchStockData(
         baseParams.stockNo,
-        baseParams.startDate,
+        optDataStart,
         baseParams.endDate,
         baseParams.marketType || baseParams.market || "TWSE",
         {
           adjusted: baseParams.adjustedPrice,
           splitAdjustment: baseParams.splitAdjustment,
+          effectiveStartDate: optEffectiveStart,
+          lookbackDays: optLookback,
         },
       );
       stockData = fetched?.data || [];
@@ -4814,8 +4857,36 @@ self.onmessage = async function (e) {
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
-    lookbackDays,
   } = e.data;
+  const sharedUtils =
+    typeof lazybacktestShared === "object" && lazybacktestShared
+      ? lazybacktestShared
+      : null;
+  const incomingLookback = Number.isFinite(e.data?.lookbackDays)
+    ? e.data.lookbackDays
+    : Number.isFinite(params?.lookbackDays)
+      ? params.lookbackDays
+      : 0;
+  let lookbackDays = incomingLookback;
+  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && sharedUtils) {
+    const inferredMax =
+      typeof sharedUtils.getMaxIndicatorPeriod === "function"
+        ? sharedUtils.getMaxIndicatorPeriod(params || {})
+        : 0;
+    if (typeof sharedUtils.estimateLookbackBars === "function") {
+      lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
+        minBars: 20,
+        multiplier: 2,
+      });
+    }
+  }
+  if (!Number.isFinite(lookbackDays) || lookbackDays < 0) {
+    lookbackDays = 0;
+  }
+  const effectiveStartDate =
+    e.data?.effectiveStartDate || params?.effectiveStartDate || params?.startDate || null;
+  const dataStartDate =
+    e.data?.dataStartDate || params?.dataStartDate || effectiveStartDate || params?.startDate;
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
@@ -4826,9 +4897,10 @@ self.onmessage = async function (e) {
       );
       const cacheKey = buildCacheKey(
         params.stockNo,
-        params.startDate,
+        dataStartDate || params.startDate,
         params.endDate,
         params.adjustedPrice,
+        params.splitAdjustment,
       );
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
@@ -4842,15 +4914,19 @@ self.onmessage = async function (e) {
             timestamp: Date.now(),
             meta: {
               stockNo: params.stockNo,
-              startDate: params.startDate,
+              startDate: dataStartDate || params.startDate,
+              effectiveStartDate: effectiveStartDate || params.startDate,
               endDate: params.endDate,
               priceMode: getPriceModeKey(params.adjustedPrice),
+              lookbackDays,
               summary: cachedMeta?.summary || null,
               adjustments: Array.isArray(cachedMeta?.adjustments)
                 ? cachedMeta.adjustments
                 : [],
               priceSource: cachedMeta?.priceSource || null,
-              adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+              adjustmentFallbackApplied: Boolean(
+                cachedMeta?.adjustmentFallbackApplied,
+              ),
               adjustmentFallbackInfo:
                 cachedMeta?.adjustmentFallbackInfo &&
                 typeof cachedMeta.adjustmentFallbackInfo === "object"
@@ -4859,6 +4935,11 @@ self.onmessage = async function (e) {
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
                 ? cachedMeta.debugSteps
                 : [],
+              fetchRange:
+                cachedMeta?.fetchRange ||
+                (dataStartDate
+                  ? { start: dataStartDate, end: params.endDate }
+                  : null),
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
@@ -4867,7 +4948,8 @@ self.onmessage = async function (e) {
           workerLastMeta = {
             ...(workerLastMeta || {}),
             stockNo: params.stockNo,
-            startDate: params.startDate,
+            startDate: dataStartDate || params.startDate,
+            effectiveStartDate: effectiveStartDate || params.startDate,
             endDate: params.endDate,
             priceMode: getPriceModeKey(params.adjustedPrice),
             summary: cachedMeta.summary || null,
@@ -4901,18 +4983,26 @@ self.onmessage = async function (e) {
             adjustmentChecks: Array.isArray(cachedMeta.adjustmentChecks)
               ? cachedMeta.adjustmentChecks
               : [],
+            fetchRange:
+              cachedMeta.fetchRange ||
+              (dataStartDate
+                ? { start: dataStartDate, end: params.endDate }
+                : null),
+            lookbackDays,
           };
         }
       } else {
         console.log("[Worker] Fetching new data for backtest.");
         outcome = await fetchStockData(
           params.stockNo,
-          params.startDate,
+          dataStartDate || params.startDate,
           params.endDate,
           params.marketType,
           {
             adjusted: params.adjustedPrice,
             splitAdjustment: params.splitAdjustment,
+            effectiveStartDate: effectiveStartDate || params.startDate,
+            lookbackDays,
           },
         );
         dataToUse = outcome.data;
@@ -4934,12 +5024,38 @@ self.onmessage = async function (e) {
         return;
       }
 
+      // 先依 effectiveStartDate 切片資料，確保策略回測以使用者指定區間為主
+      let strategyData = dataToUse;
+      if (
+        Array.isArray(dataToUse) &&
+        effectiveStartDate &&
+        typeof effectiveStartDate === "string"
+      ) {
+        const filtered = dataToUse.filter(
+          (row) => row && row.date && row.date >= effectiveStartDate,
+        );
+        if (filtered.length > 0) {
+          strategyData = filtered;
+        }
+      }
+
       // 關鍵修正：
       // 我們需要傳遞的是 K 線資料，而不是整個包裹
-      const backtestResult = runStrategy(dataToUse, params);
+      const strategyParams = {
+        ...params,
+        startDate: effectiveStartDate || params.startDate,
+        dataStartDate: dataStartDate || params.startDate,
+        effectiveStartDate: effectiveStartDate || params.startDate,
+        lookbackDays,
+      };
+      const backtestResult = runStrategy(strategyData, strategyParams);
+      backtestResult.rawDataUsed = strategyData;
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call
+      if (!useCachedData && fetched) {
+        backtestResult.rawData = dataToUse;
+      }
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
       );
@@ -4984,6 +5100,12 @@ self.onmessage = async function (e) {
           : Array.isArray(workerLastMeta?.adjustmentChecks)
             ? workerLastMeta.adjustmentChecks
             : [],
+        fetchRange:
+          outcome?.fetchRange ||
+          workerLastMeta?.fetchRange ||
+          (dataStartDate ? { start: dataStartDate, end: params.endDate } : null),
+        effectiveStartDate: effectiveStartDate || workerLastMeta?.effectiveStartDate || params.startDate,
+        lookbackDays,
       };
 
       if (!useCachedData && fetched) {
@@ -5013,6 +5135,11 @@ self.onmessage = async function (e) {
           adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
             ? outcome.adjustmentChecks
             : [],
+          fetchRange:
+            outcome?.fetchRange ||
+            (dataStartDate ? { start: dataStartDate, end: params.endDate } : null),
+          effectiveStartDate: effectiveStartDate || params.startDate,
+          lookbackDays,
         };
       }
 

@@ -56,6 +56,34 @@ let batchWorkerStatus = {
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
 
+function enrichParamsWithLookback(params) {
+    if (!params || typeof params !== 'object') return params;
+    const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+    if (!sharedUtils) return params;
+    const maxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        ? sharedUtils.getMaxIndicatorPeriod(params)
+        : 0;
+    const lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
+        ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 60, multiplier: 2 })
+        : Math.max(60, maxPeriod * 2);
+    const effectiveStartDate = params.startDate;
+    let dataStartDate = effectiveStartDate;
+    if (typeof sharedUtils.computeBufferedStartDate === 'function') {
+        dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+            minDate: sharedUtils.MIN_DATA_DATE,
+            marginTradingDays: 7,
+            extraCalendarDays: 5,
+        }) || effectiveStartDate;
+    }
+    if (!dataStartDate) dataStartDate = effectiveStartDate;
+    return {
+        ...params,
+        effectiveStartDate,
+        dataStartDate,
+        lookbackDays,
+    };
+}
+
 function resetBatchWorkerStatus() {
     batchWorkerStatus.concurrencyLimit = 0;
     batchWorkerStatus.inFlightCount = 0;
@@ -1231,9 +1259,10 @@ async function executeBacktestForCombination(combination) {
                     resolve(null);
                 };
 
+                const preparedParams = enrichParamsWithLookback(params);
                 tempWorker.postMessage({
                     type: 'runBacktest',
-                    params: params,
+                    params: preparedParams,
                     useCachedData: true,
                     cachedData: cachedStockData
                 });
@@ -1520,10 +1549,12 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
+        const preparedParams = enrichParamsWithLookback(params);
+
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
-            params: params,
+            params: preparedParams,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
@@ -1636,10 +1667,12 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             resolve({ value: undefined, metric: -Infinity });
         };
         
+        const preparedParams = enrichParamsWithLookback(params);
+
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
-            params: params,
+            params: preparedParams,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
@@ -2519,9 +2552,10 @@ function performSingleBacktest(params) {
             
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
+            const preparedParams = enrichParamsWithLookback(params);
             worker.postMessage({
                 type: 'runBacktest',
-                params: params,
+                params: preparedParams,
                 useCachedData: false
             });
             
@@ -3619,9 +3653,10 @@ function performSingleBacktestFast(params) {
             };
             
             // 發送回測請求 - 使用緩存數據提高速度
+            const preparedParams = enrichParamsWithLookback(params);
             worker.postMessage({
                 type: 'runBacktest',
-                params: params,
+                params: preparedParams,
                 useCachedData: true,
                 cachedData: cachedStockData
             });

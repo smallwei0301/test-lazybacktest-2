@@ -18,6 +18,8 @@ let lastPriceDebug = {
     finmindStatus: null,
 };
 
+let visibleStockData = [];
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -29,9 +31,40 @@ function runBacktestInternal() {
         console.log("[Main] Validation:", isValid);
         if(!isValid) return;
 
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+        const maxIndicatorPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(params)
+            : 0;
+        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 60, multiplier: 2 })
+            : Math.max(60, maxIndicatorPeriod * 2);
+        const effectiveStartDate = params.startDate;
+        let dataStartDate = effectiveStartDate;
+        if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
+            dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+                minDate: sharedUtils.MIN_DATA_DATE,
+                marginTradingDays: 7,
+                extraCalendarDays: 5,
+            }) || effectiveStartDate;
+        }
+        if (!dataStartDate) dataStartDate = effectiveStartDate;
+        params.effectiveStartDate = effectiveStartDate;
+        params.dataStartDate = dataStartDate;
+        params.lookbackDays = lookbackDays;
+
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
         const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
-        const curSettings={stockNo:params.stockNo, startDate:params.startDate, endDate:params.endDate, market:marketKey, adjustedPrice: params.adjustedPrice, splitAdjustment: params.splitAdjustment, priceMode: priceMode};
+        const curSettings={
+            stockNo:params.stockNo,
+            startDate:dataStartDate,
+            endDate:params.endDate,
+            effectiveStartDate,
+            market:marketKey,
+            adjustedPrice: params.adjustedPrice,
+            splitAdjustment: params.splitAdjustment,
+            priceMode: priceMode,
+            lookbackDays,
+        };
         let useCache=!needsDataFetch(curSettings);
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
@@ -41,8 +74,9 @@ function runBacktestInternal() {
             cachedEntry = cachedDataStore.get(cacheKey);
 
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
-                const sliced = extractRangeData(cachedEntry.data, curSettings.startDate, curSettings.endDate);
-                cachedStockData = sliced;
+                const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
+                visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
+                cachedStockData = cachedEntry.data;
                 lastFetchSettings = { ...curSettings };
                 refreshPriceInspectorControls();
                 updatePriceDebug(cachedEntry);
@@ -99,7 +133,15 @@ function runBacktestInternal() {
                          });
                      }
                      const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
-                     const mergedCoverage = mergeIsoCoverage(existingEntry?.coverage || [], { start: curSettings.startDate, end: curSettings.endDate });
+                     const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
+                        ? data.rawMeta.fetchRange
+                        : { start: curSettings.startDate, end: curSettings.endDate };
+                     const mergedCoverage = mergeIsoCoverage(
+                        existingEntry?.coverage || [],
+                        fetchedRange && fetchedRange.start && fetchedRange.end
+                            ? { start: fetchedRange.start, end: fetchedRange.end }
+                            : null
+                     );
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -129,17 +171,21 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(rawMeta.adjustmentChecks)
                         ? rawMeta.adjustmentChecks
                         : (Array.isArray(data?.dataDebug?.adjustmentChecks) ? data.dataDebug.adjustmentChecks : []);
+                    const rawEffectiveStart = data?.rawMeta?.effectiveStartDate || effectiveStartDate;
+                    const resolvedLookback = Number.isFinite(data?.rawMeta?.lookbackDays)
+                        ? data.rawMeta.lookbackDays
+                        : lookbackDays;
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
-                         dataSources: sourceArray,
-                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
-                         coverage: mergedCoverage,
-                         fetchedAt: Date.now(),
+                        dataSources: sourceArray,
+                        dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
+                        coverage: mergedCoverage,
+                        fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
+                        adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
                         debugSteps,
@@ -148,9 +194,13 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fetchRange: fetchedRange,
+                        effectiveStartDate: rawEffectiveStart,
+                        lookbackDays: resolvedLookback,
                     };
                      cachedDataStore.set(cacheKey, cacheEntry);
-                     cachedStockData = extractRangeData(mergedData, curSettings.startDate, curSettings.endDate);
+                     visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
+                     cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
@@ -186,13 +236,13 @@ function runBacktestInternal() {
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
-                         dataSources: updatedArray,
-                         dataSource: summariseSourceLabels(updatedArray),
-                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
+                        dataSources: updatedArray,
+                        dataSource: summariseSourceLabels(updatedArray),
+                        fetchedAt: cachedEntry.fetchedAt || Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
-                         adjustmentFallbackApplied: fallbackFlag,
+                        adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
                         debugSteps,
@@ -201,12 +251,16 @@ function runBacktestInternal() {
                         finmindStatus: finmindStatusMeta,
                         adjustmentDebugLog: adjustmentDebugLogMeta,
                         adjustmentChecks: adjustmentChecksMeta,
+                        fetchRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
+                        effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                        lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                     };
-                     cachedDataStore.set(cacheKey, updatedEntry);
-                     cachedStockData = extractRangeData(updatedEntry.data, curSettings.startDate, curSettings.endDate);
-                     lastFetchSettings = { ...curSettings };
-                     refreshPriceInspectorControls();
-                     updatePriceDebug(updatedEntry);
+                    cachedDataStore.set(cacheKey, updatedEntry);
+                    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+                    cachedStockData = updatedEntry.data;
+                    lastFetchSettings = { ...curSettings };
+                    refreshPriceInspectorControls();
+                    updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
                      console.log("[Main] 使用主執行緒快取資料執行回測。");
 
@@ -262,9 +316,19 @@ function runBacktestInternal() {
               if (suggestionArea) suggestionArea.classList.add('hidden');
         };
 
-        const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData = cachedStockData; // Send main thread cache to worker
+        const workerMsg={
+            type:'runBacktest',
+            params:params,
+            useCachedData:useCache,
+            dataStartDate:dataStartDate,
+            effectiveStartDate:effectiveStartDate,
+            lookbackDays:lookbackDays,
+        };
+        if(useCache) {
+            const cachePayload = cachedEntry?.data || cachedStockData;
+            if (Array.isArray(cachePayload)) {
+                workerMsg.cachedData = cachePayload; // Prefer完整快取資料
+            }
             if (cachedEntry) {
                 workerMsg.cachedMeta = {
                     summary: cachedEntry.summary || null,
@@ -274,6 +338,9 @@ function runBacktestInternal() {
                     priceSource: cachedEntry.priceSource || null,
                     dataSource: cachedEntry.dataSource || null,
                     splitAdjustment: Boolean(cachedEntry.splitAdjustment),
+                    fetchRange: cachedEntry.fetchRange || null,
+                    effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                    lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
@@ -320,6 +387,7 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
 }
@@ -388,7 +456,7 @@ function updatePriceDebug(meta = {}) {
 function renderPricePipelineSteps() {
     const container = document.getElementById('pricePipelineSteps');
     if (!container) return;
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
     if (!hasData || !hasSteps) {
         container.classList.add('hidden');
@@ -416,7 +484,7 @@ function renderPricePipelineSteps() {
 function renderPriceInspectorDebug() {
     const panel = document.getElementById('priceInspectorDebugPanel');
     if (!panel) return;
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     const hasSteps = Array.isArray(lastPriceDebug.steps) && lastPriceDebug.steps.length > 0;
     if (!hasData || !hasSteps) {
         panel.classList.add('hidden');
@@ -499,7 +567,7 @@ function refreshPriceInspectorControls() {
     const summaryEl = document.getElementById('priceInspectorSummary');
     if (!controls || !openBtn) return;
 
-    const hasData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    const hasData = Array.isArray(visibleStockData) && visibleStockData.length > 0;
     if (!hasData) {
         controls.classList.add('hidden');
         openBtn.disabled = true;
@@ -510,13 +578,15 @@ function refreshPriceInspectorControls() {
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
     const sourceLabel = resolvePriceInspectorSourceLabel();
-    const firstDate = cachedStockData[0]?.date || lastFetchSettings?.startDate || '';
-    const lastDate = cachedStockData[cachedStockData.length - 1]?.date || lastFetchSettings?.endDate || '';
+    const lastStartFallback = lastFetchSettings?.effectiveStartDate || lastFetchSettings?.startDate || '';
+    const displayData = visibleStockData.length > 0 ? visibleStockData : [];
+    const firstDate = displayData[0]?.date || lastStartFallback;
+    const lastDate = displayData[displayData.length - 1]?.date || lastFetchSettings?.endDate || '';
 
     controls.classList.remove('hidden');
     openBtn.disabled = false;
     if (summaryEl) {
-        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${cachedStockData.length} 筆 (${modeLabel})`];
+        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 筆 (${modeLabel})`];
         if (sourceLabel) {
             summaryParts.push(sourceLabel);
         }
@@ -526,7 +596,7 @@ function refreshPriceInspectorControls() {
 }
 
 function openPriceInspectorModal() {
-    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
         showError('尚未取得價格資料，請先執行回測。');
         return;
     }
@@ -540,7 +610,7 @@ function openPriceInspectorModal() {
     const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
-        const subtitleParts = [`${modeLabel}`, marketLabel, `${cachedStockData.length} 筆`];
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
         if (sourceLabel) {
             subtitleParts.push(sourceLabel);
         }
@@ -572,7 +642,7 @@ function openPriceInspectorModal() {
         const raw = Number(row.close) / factor;
         return Number.isFinite(raw) ? raw : Number(row.close);
     };
-    const rowsHtml = cachedStockData
+    const rowsHtml = visibleStockData
         .map((row) => {
             const volumeLabel = Number.isFinite(row?.volume)
                 ? Number(row.volume).toLocaleString('zh-TW')
@@ -1582,6 +1652,9 @@ function runOptimizationInternal(optimizeType) {
             } else if(type==='result'){ 
                 if(!useCache&&data?.rawDataUsed){
                     cachedStockData=data.rawDataUsed;
+                    if (Array.isArray(data.rawDataUsed)) {
+                        visibleStockData = data.rawDataUsed;
+                    }
                     lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
                 } else if(!useCache&&data&&!data.rawDataUsed) {
@@ -1913,7 +1986,7 @@ function updateStrategyParams(type) {
         }
     }
 }
- function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
+function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 
