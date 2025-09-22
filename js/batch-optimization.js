@@ -64,15 +64,15 @@ function enrichParamsWithLookback(params) {
         ? sharedUtils.getMaxIndicatorPeriod(params)
         : 0;
     const lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
-        ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 60, multiplier: 2 })
-        : Math.max(60, maxPeriod * 2);
+        ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+        : Math.max(90, maxPeriod * 2);
     const effectiveStartDate = params.startDate;
     let dataStartDate = effectiveStartDate;
     if (typeof sharedUtils.computeBufferedStartDate === 'function') {
         dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
             minDate: sharedUtils.MIN_DATA_DATE,
-            marginTradingDays: 7,
-            extraCalendarDays: 5,
+            marginTradingDays: 12,
+            extraCalendarDays: 7,
         }) || effectiveStartDate;
     }
     if (!dataStartDate) dataStartDate = effectiveStartDate;

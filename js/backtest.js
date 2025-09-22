@@ -38,15 +38,15 @@ function runBacktestInternal() {
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
         const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 60, multiplier: 2 })
-            : Math.max(60, maxIndicatorPeriod * 2);
+            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxIndicatorPeriod * 2);
         const effectiveStartDate = params.startDate;
         let dataStartDate = effectiveStartDate;
         if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
             dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
                 minDate: sharedUtils.MIN_DATA_DATE,
-                marginTradingDays: 7,
-                extraCalendarDays: 5,
+                marginTradingDays: 12,
+                extraCalendarDays: 7,
             }) || effectiveStartDate;
         }
         if (!dataStartDate) dataStartDate = effectiveStartDate;

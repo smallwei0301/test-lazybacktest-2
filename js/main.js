@@ -1488,8 +1488,8 @@ function getSuggestion() {
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
         const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 20, multiplier: 2 })
-            : Math.max(20, maxPeriod * 2);
+            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxPeriod * 2);
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {

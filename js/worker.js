@@ -5732,21 +5732,23 @@ self.onmessage = async function (e) {
     : Number.isFinite(params?.lookbackDays)
       ? params.lookbackDays
       : 0;
+  const inferredMax =
+    sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === "function"
+      ? sharedUtils.getMaxIndicatorPeriod(params || {})
+      : 0;
   let lookbackDays = incomingLookback;
-  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && sharedUtils) {
-    const inferredMax =
-      typeof sharedUtils.getMaxIndicatorPeriod === "function"
-        ? sharedUtils.getMaxIndicatorPeriod(params || {})
-        : 0;
-    if (typeof sharedUtils.estimateLookbackBars === "function") {
-      lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
-        minBars: 20,
-        multiplier: 2,
-      });
-    }
+  if (
+    (!Number.isFinite(lookbackDays) || lookbackDays <= 0) &&
+    sharedUtils &&
+    typeof sharedUtils.estimateLookbackBars === "function"
+  ) {
+    lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
+      minBars: 90,
+      multiplier: 2,
+    });
   }
-  if (!Number.isFinite(lookbackDays) || lookbackDays < 0) {
-    lookbackDays = 0;
+  if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+    lookbackDays = Math.max(90, inferredMax * 2);
   }
   const effectiveStartDate =
     e.data?.effectiveStartDate || params?.effectiveStartDate || params?.startDate || null;
@@ -5770,6 +5772,7 @@ self.onmessage = async function (e) {
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
         dataToUse = cachedData;
+        workerLastDataset = cachedData;
         const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
         if (!existingEntry) {
           setWorkerCacheEntry(marketKey, cacheKey, {
@@ -5871,6 +5874,11 @@ self.onmessage = async function (e) {
           },
         );
         dataToUse = outcome.data;
+        workerLastDataset = Array.isArray(outcome?.data)
+          ? outcome.data
+          : Array.isArray(dataToUse)
+            ? dataToUse
+            : null;
         fetched = true;
       }
       if (!Array.isArray(dataToUse) || dataToUse.length === 0) {
@@ -5889,19 +5897,31 @@ self.onmessage = async function (e) {
         return;
       }
 
-      // 先依 effectiveStartDate 切片資料，確保策略回測以使用者指定區間為主
-      let strategyData = dataToUse;
-      if (
-        Array.isArray(dataToUse) &&
-        effectiveStartDate &&
-        typeof effectiveStartDate === "string"
-      ) {
-        const filtered = dataToUse.filter(
-          (row) => row && row.date && row.date >= effectiveStartDate,
-        );
-        if (filtered.length > 0) {
-          strategyData = filtered;
-        }
+      const strategyData = Array.isArray(dataToUse) ? dataToUse : [];
+      const startISO = effectiveStartDate || params.startDate || null;
+      const endISO = params.endDate || null;
+      const visibleStrategyData = Array.isArray(strategyData)
+        ? strategyData.filter((row) => {
+            if (!row || !row.date) return false;
+            if (startISO && row.date < startISO) return false;
+            if (endISO && row.date > endISO) return false;
+            return true;
+          })
+        : [];
+
+      if (visibleStrategyData.length === 0) {
+        const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 有效交易數據`;
+        console.warn(`[Worker] ${msg}（暖身資料僅供指標計算）`);
+        self.postMessage({
+          type: "no_data",
+          data: {
+            stockNo: params.stockNo,
+            start: params.startDate,
+            end: params.endDate,
+            message: msg,
+          },
+        });
+        return;
       }
 
       // 關鍵修正：
@@ -5914,7 +5934,7 @@ self.onmessage = async function (e) {
         lookbackDays,
       };
       const backtestResult = runStrategy(strategyData, strategyParams);
-      backtestResult.rawDataUsed = strategyData;
+      backtestResult.rawDataUsed = visibleStrategyData;
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call

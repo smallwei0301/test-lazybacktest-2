@@ -69,12 +69,28 @@
   }
 
   function estimateLookbackBars(maxPeriod, options = {}) {
-    const multiplier = Number.isFinite(options.multiplier) && options.multiplier > 0 ? options.multiplier : 2;
-    const minBars = Number.isFinite(options.minBars) ? options.minBars : 0;
-    const extraBars = Number.isFinite(options.extraBars) ? options.extraBars : 0;
+    const multiplier =
+      Number.isFinite(options.multiplier) && options.multiplier > 0
+        ? options.multiplier
+        : 2;
+    const minBars =
+      Number.isFinite(options.minBars) && options.minBars > 0
+        ? Math.ceil(options.minBars)
+        : 0;
+    const extraBars =
+      Number.isFinite(options.extraBars) && options.extraBars > 0
+        ? Math.ceil(options.extraBars)
+        : 0;
     const base = Number.isFinite(maxPeriod) && maxPeriod > 0 ? maxPeriod : 0;
-    const scaled = Math.ceil(base * multiplier) + extraBars;
-    return Math.max(minBars, scaled, 0);
+    const scaled = base > 0 ? Math.ceil(base * multiplier) : 0;
+    const margin = Number.isFinite(options.marginPeriods) && options.marginPeriods > 0
+      ? Math.ceil(options.marginPeriods)
+      : base > 0
+        ? Math.max(10, Math.ceil(base * 0.5))
+        : 0;
+    const total = scaled + extraBars + margin;
+    const fallback = base + margin;
+    return Math.max(minBars, total, fallback, 0);
   }
 
   function parseISOToUTC(iso) {
@@ -121,12 +137,12 @@
     if (!effectiveStartISO) return effectiveStartISO;
     const marginTradingDays = Number.isFinite(options.marginTradingDays)
       ? Math.max(0, Math.floor(options.marginTradingDays))
-      : 5;
+      : 10;
     const totalTradingDays = Math.max(0, Math.ceil((lookbackBars || 0) + marginTradingDays));
     let buffered = subtractTradingDays(effectiveStartISO, totalTradingDays, options);
     const extraCalendarDays = Number.isFinite(options.extraCalendarDays)
       ? Math.max(0, Math.floor(options.extraCalendarDays))
-      : 0;
+      : 7;
     if (extraCalendarDays > 0) {
       const bufferedUTC = parseISOToUTC(buffered);
       const minUTC = parseISOToUTC(options.minDate || DEFAULT_MIN_DATA_DATE);
