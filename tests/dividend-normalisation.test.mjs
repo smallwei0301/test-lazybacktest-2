@@ -328,6 +328,18 @@ try {
     Array.isArray(payload.splitDiagnostics?.debugLog) && payload.splitDiagnostics.debugLog.length > 0,
     'Split diagnostics should expose debug log entries',
   );
+  const splitAdjustedRow = payload.data.find((row) => row.date === '2024-07-10');
+  assert.ok(splitAdjustedRow, 'Should return July 10 price row with split applied');
+  approxEqual(splitAdjustedRow.close, 48.5, 1e-6);
+  approxEqual(splitAdjustedRow.adjustedFactor, 0.485, 1e-6);
+  const splitCheck = Array.isArray(payload.adjustmentChecks)
+    ? payload.adjustmentChecks.find((check) => check?.source?.includes('股票拆分'))
+    : null;
+  assert.ok(splitCheck, 'Combined adjustment checks should include split entry');
+  approxEqual(splitCheck.normalisedObservedFactor, 0.5, 1e-6);
+  approxEqual(splitCheck.observedFactor, 0.485, 1e-6);
+  approxEqual(splitCheck.relativeDiff ?? 0, 0, 1e-8);
+  assert.equal(splitCheck.status, 'success');
 } finally {
   resetFetchImplementation();
   if (originalToken === undefined) {

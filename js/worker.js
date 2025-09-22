@@ -1,5 +1,5 @@
 
-// --- Worker Data Acquisition & Cache (v11.4 - FinMind diagnostics propagation) ---
+// --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -7,7 +7,8 @@
 // Patch Tag: LB-ADJ-PIPE-20250312A
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
-const WORKER_DATA_VERSION = "v11.4";
+// Patch Tag: LB-ADJ-PIPE-20250527A
+const WORKER_DATA_VERSION = "v11.5";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -4166,7 +4167,10 @@ async function runOptimization(
         baseParams.startDate,
         baseParams.endDate,
         baseParams.marketType || baseParams.market || "TWSE",
-        { adjusted: baseParams.adjustedPrice },
+        {
+          adjusted: baseParams.adjustedPrice,
+          splitAdjustment: baseParams.splitAdjustment,
+        },
       );
       stockData = fetched?.data || [];
       dataFetched = true;
@@ -4906,7 +4910,10 @@ self.onmessage = async function (e) {
           params.startDate,
           params.endDate,
           params.marketType,
-          { adjusted: params.adjustedPrice },
+          {
+            adjusted: params.adjustedPrice,
+            splitAdjustment: params.splitAdjustment,
+          },
         );
         dataToUse = outcome.data;
         fetched = true;

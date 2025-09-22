@@ -25,9 +25,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250509A
 // Patch Tag: LB-ADJ-COMPOSER-20250518A
 // Patch Tag: LB-ADJ-COMPOSER-20250522A
+// Patch Tag: LB-ADJ-COMPOSER-20250527A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250523A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250527A';
 
 let fetchImpl = fetch;
 
@@ -2507,14 +2508,37 @@ function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
       firstAffectedIndex >= 0 && firstAffectedIndex < rows.length
         ? rows[firstAffectedIndex]
         : null;
-    const observedFactor = Number(firstRow?.adjustedFactor ?? null);
-    const expectedFactor = Number(
-      Number.isFinite(adjustment?.factorAfter)
-        ? adjustment.factorAfter
-        : Number.isFinite(adjustment?.targetFactor)
-          ? adjustment.targetFactor
-          : null,
+    const observedFactorRaw = Number(firstRow?.adjustedFactor ?? null);
+    let expectedFactorRaw = Number(
+      Number.isFinite(adjustment?.manualRatio)
+        ? adjustment.manualRatio
+        : null,
     );
+    if (!Number.isFinite(expectedFactorRaw) || expectedFactorRaw <= 0) {
+      expectedFactorRaw = Number(
+        Number.isFinite(adjustment?.factorAfter)
+          ? adjustment.factorAfter
+          : Number.isFinite(adjustment?.targetFactor)
+            ? adjustment.targetFactor
+            : null,
+      );
+    }
+    const downstreamMultiplier = Number(
+      Number.isFinite(observedFactorRaw) &&
+        Number.isFinite(expectedFactorRaw) &&
+        expectedFactorRaw !== 0
+        ? observedFactorRaw / expectedFactorRaw
+        : null,
+    );
+    const normalisedObservedFactor = Number(
+      Number.isFinite(downstreamMultiplier) &&
+        downstreamMultiplier !== 0
+        ? observedFactorRaw / downstreamMultiplier
+        : observedFactorRaw,
+    );
+    const expectedFactor = Number.isFinite(expectedFactorRaw)
+      ? expectedFactorRaw
+      : null;
     const rawClose = Number(
       firstRow?.rawClose ??
         firstRow?.raw_close ??
@@ -2530,8 +2554,8 @@ function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
           : null,
     );
     const factorDiff = Number(
-      Number.isFinite(observedFactor) && Number.isFinite(expectedFactor)
-        ? observedFactor - expectedFactor
+      Number.isFinite(normalisedObservedFactor) && Number.isFinite(expectedFactor)
+        ? normalisedObservedFactor - expectedFactor
         : null,
     );
     const relativeDiff = Number(
@@ -2544,7 +2568,7 @@ function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
       status = 'skipped';
     } else if (Number.isFinite(relativeDiff)) {
       status = relativeDiff <= 1e-4 ? 'success' : 'warning';
-    } else if (Number.isFinite(observedFactor) && Number.isFinite(expectedFactor)) {
+    } else if (Number.isFinite(normalisedObservedFactor) && Number.isFinite(expectedFactor)) {
       status = 'success';
     }
     return {
@@ -2567,10 +2591,17 @@ function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
       expectedAdjustedClose: Number.isFinite(expectedAdjustedClose)
         ? expectedAdjustedClose
         : null,
-      observedFactor: Number.isFinite(observedFactor) ? observedFactor : null,
+      observedFactor: Number.isFinite(observedFactorRaw) ? observedFactorRaw : null,
+      normalisedObservedFactor: Number.isFinite(normalisedObservedFactor)
+        ? normalisedObservedFactor
+        : null,
       expectedFactor: Number.isFinite(expectedFactor) ? expectedFactor : null,
       factorDiff: Number.isFinite(factorDiff) ? factorDiff : null,
       relativeDiff: Number.isFinite(relativeDiff) ? relativeDiff : null,
+      downstreamMultiplier:
+        Number.isFinite(downstreamMultiplier) && downstreamMultiplier !== 0
+          ? downstreamMultiplier
+          : null,
       ratioSource: adjustment?.ratioSource || null,
       reason: adjustment?.reason || null,
     };
@@ -2626,9 +2657,12 @@ function buildAdjustmentDebugEntries(checks = [], options = {}) {
         : Number.isFinite(check?.rawClose) && Number.isFinite(check?.observedFactor)
           ? safeRound(check.rawClose * check.observedFactor)
           : null;
+      const factorForComparison = Number.isFinite(check?.normalisedObservedFactor)
+        ? check.normalisedObservedFactor
+        : check.observedFactor;
       lines.push(
         `套用檢查：${check?.firstAffectedDate || '—'} 因子 ${formatNumberForLog(
-          check.observedFactor,
+          factorForComparison,
           6,
         )} ・ 預期 ${formatNumberForLog(check?.expectedFactor, 6)} ・ 差異 ${
           Number.isFinite(check?.relativeDiff)
@@ -2636,6 +2670,15 @@ function buildAdjustmentDebugEntries(checks = [], options = {}) {
             : '—'
         }`,
       );
+      if (
+        Number.isFinite(check?.downstreamMultiplier) &&
+        Number.isFinite(check?.observedFactor) &&
+        Math.abs(check.downstreamMultiplier - 1) > 1e-6
+      ) {
+        lines.push(
+          `最終係數：${formatNumberForLog(check.observedFactor, 6)}（含後續事件）`,
+        );
+      }
       if (Number.isFinite(adjustedClose)) {
         lines.push(
           `價格檢查：${formatNumberForLog(check.rawClose, 3)} × ${formatNumberForLog(
