@@ -757,9 +757,9 @@ function renderDiagnosticsFetch(fetchDiag) {
     renderDiagnosticsEntries('dataDiagnosticsFetchSummary', [
         { label: '抓取起點', value: fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
         { label: '遠端資料範圍', value: formatDiagnosticsRange(overview.firstDate, overview.lastDate) },
-        { label: '暖身起點', value: overview.effectiveStartDate || fetchDiag.effectiveStartDate || '—' },
-        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterEffectiveStart) },
-        { label: '距暖身起點天數', value: formatDiagnosticsGap(overview.firstValidCloseGapFromEffective) },
+        { label: '暖身起點', value: overview.warmupStartDate || fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterWarmupStart || overview.firstValidCloseOnOrAfterEffectiveStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(overview.firstValidCloseGapFromWarmup ?? overview.firstValidCloseGapFromEffective) },
         { label: '遠端無效筆數', value: overview.invalidRowsInRange?.count ?? 0 },
         { label: '遠端無效欄位', value: formatDiagnosticsReasonCounts(overview.invalidRowsInRange?.reasons) },
         { label: '月度分段', value: Array.isArray(fetchDiag.months) ? fetchDiag.months.length : 0 },
@@ -820,12 +820,13 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         { label: '資料總筆數', value: dataset.totalRows },
         { label: '資料範圍', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
         { label: '使用者起點', value: dataset.requestedStart || warmup.requestedStart || '—' },
-        { label: '暖身起點', value: dataset.effectiveStartDate || warmup.effectiveStartDate || '—' },
+        { label: '暖身起點', value: dataset.warmupStartDate || warmup.warmupStartDate || dataset.dataStartDate || warmup.dataStartDate || '—' },
         { label: '暖身筆數', value: dataset.warmupRows },
         { label: '區間筆數', value: dataset.rowsWithinRange },
         { label: '第一筆>=使用者起點', value: formatDiagnosticsIndex(dataset.firstRowOnOrAfterRequestedStart) },
         { label: '第一筆有效收盤', value: formatDiagnosticsIndex(dataset.firstValidCloseOnOrAfterRequestedStart) },
-        { label: '距暖身起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromEffective) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromRequested) },
         { label: '區間內無效筆數', value: dataset.invalidRowsInRange?.count ?? 0 },
         { label: '第一筆無效資料', value: dataset.firstInvalidRowOnOrAfterEffectiveStart ? formatDiagnosticsIndex(dataset.firstInvalidRowOnOrAfterEffectiveStart) : '—' },
         { label: '無效欄位統計', value: formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons) },
@@ -836,6 +837,7 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         { emptyText: '區間內尚未觀察到無效筆數。' }
     );
     renderDiagnosticsEntries('dataDiagnosticsWarmup', [
+        { label: '暖身起點', value: warmup.warmupStartDate || warmup.dataStartDate || dataset.warmupStartDate || '—' },
         { label: 'Longest 指標窗', value: warmup.longestLookback },
         { label: 'KD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.kdNeedLong)} / ${formatDiagnosticsValue(warmup.kdNeedShort)}` },
         { label: 'MACD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.macdNeedLong)} / ${formatDiagnosticsValue(warmup.macdNeedShort)}` },
@@ -843,6 +845,7 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         { label: '有效起始索引', value: warmup.effectiveStartIndex },
         { label: '暖身耗用筆數', value: warmup.barsBeforeFirstTrade },
         { label: '設定 Lookback 天數', value: warmup.lookbackDays },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(warmup.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromWarmup) },
     ]);
     renderDiagnosticsEntries('dataDiagnosticsBuyHold', [
         { label: '首筆有效收盤索引', value: buyHold.firstValidPriceIdx },

@@ -368,18 +368,25 @@ function summariseDatasetRows(rows, context = {}) {
     lastDate: null,
     requestedStart: context.requestedStart || null,
     effectiveStartDate: context.effectiveStartDate || null,
+    warmupStartDate: context.warmupStartDate || context.dataStartDate || null,
+    dataStartDate: context.dataStartDate || context.warmupStartDate || null,
     endDate: context.endDate || null,
     warmupRows: 0,
     rowsWithinRange: 0,
     firstRowOnOrAfterRequestedStart: null,
     firstRowOnOrAfterEffectiveStart: null,
+    firstRowOnOrAfterWarmupStart: null,
     firstValidCloseOnOrAfterRequestedStart: null,
     firstValidCloseOnOrAfterEffectiveStart: null,
+    firstValidCloseOnOrAfterWarmupStart: null,
     firstValidVolumeOnOrAfterRequestedStart: null,
+    firstValidVolumeOnOrAfterWarmupStart: null,
     firstInvalidRowOnOrAfterEffectiveStart: null,
     invalidRowsInRange: { count: 0, samples: [], reasons: {} },
     firstValidCloseGapFromRequested: null,
     firstValidCloseGapFromEffective: null,
+    firstValidCloseGapFromWarmup: null,
+    firstValidVolumeGapFromWarmup: null,
   };
 
   if (!Array.isArray(rows) || rows.length === 0) {
@@ -392,6 +399,8 @@ function summariseDatasetRows(rows, context = {}) {
   const sampleLimit = 5;
   const requestedStartISO = summary.requestedStart;
   const effectiveStartISO = summary.effectiveStartDate || requestedStartISO;
+  const warmupStartISO = summary.warmupStartDate || summary.dataStartDate || null;
+  const warmupCutoffISO = requestedStartISO || effectiveStartISO;
   const endISO = summary.endDate || null;
 
   for (let i = 0; i < rows.length; i += 1) {
@@ -405,6 +414,19 @@ function summariseDatasetRows(rows, context = {}) {
     const volume = Number.isFinite(row.volume) ? row.volume : null;
     const validClose = close !== null && close > 0;
     const validVolume = volume !== null && volume > 0;
+
+    if (
+      warmupStartISO &&
+      !summary.firstRowOnOrAfterWarmupStart &&
+      date >= warmupStartISO
+    ) {
+      summary.firstRowOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        close,
+        volume,
+      };
+    }
 
     if (
       requestedStartISO &&
@@ -429,6 +451,19 @@ function summariseDatasetRows(rows, context = {}) {
         index: i,
         close,
         volume,
+      };
+    }
+
+    if (
+      warmupStartISO &&
+      !summary.firstValidCloseOnOrAfterWarmupStart &&
+      date >= warmupStartISO &&
+      validClose
+    ) {
+      summary.firstValidCloseOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        close,
       };
     }
 
@@ -459,6 +494,19 @@ function summariseDatasetRows(rows, context = {}) {
     }
 
     if (
+      warmupStartISO &&
+      !summary.firstValidVolumeOnOrAfterWarmupStart &&
+      date >= warmupStartISO &&
+      validVolume
+    ) {
+      summary.firstValidVolumeOnOrAfterWarmupStart = {
+        date,
+        index: i,
+        volume,
+      };
+    }
+
+    if (
       requestedStartISO &&
       !summary.firstValidVolumeOnOrAfterRequestedStart &&
       date >= requestedStartISO &&
@@ -471,7 +519,7 @@ function summariseDatasetRows(rows, context = {}) {
       };
     }
 
-    if (effectiveStartISO && date < effectiveStartISO) {
+    if (warmupCutoffISO && date < warmupCutoffISO) {
       summary.warmupRows += 1;
     }
 
@@ -539,6 +587,26 @@ function summariseDatasetRows(rows, context = {}) {
     summary.firstValidCloseGapFromEffective = diffIsoDays(
       effectiveStartISO,
       summary.firstValidCloseOnOrAfterEffectiveStart.date,
+    );
+  }
+
+  if (
+    warmupStartISO &&
+    summary.firstValidCloseOnOrAfterWarmupStart?.date
+  ) {
+    summary.firstValidCloseGapFromWarmup = diffIsoDays(
+      warmupStartISO,
+      summary.firstValidCloseOnOrAfterWarmupStart.date,
+    );
+  }
+
+  if (
+    warmupStartISO &&
+    summary.firstValidVolumeOnOrAfterWarmupStart?.date
+  ) {
+    summary.firstValidVolumeGapFromWarmup = diffIsoDays(
+      warmupStartISO,
+      summary.firstValidVolumeOnOrAfterWarmupStart.date,
     );
   }
 
@@ -1441,6 +1509,8 @@ async function fetchStockData(
     const adjustedOverview = summariseDatasetRows(adjustedRows, {
       requestedStart: optionEffectiveStart || startDate,
       effectiveStartDate: optionEffectiveStart || startDate,
+      warmupStartDate: startDate,
+      dataStartDate: startDate,
       endDate,
     });
     const adjustedDiagnostics = {
@@ -1558,6 +1628,8 @@ async function fetchStockData(
     fetchDiagnostics.overview = summariseDatasetRows([], {
       requestedStart: optionEffectiveStart || startDate,
       effectiveStartDate: optionEffectiveStart || startDate,
+      warmupStartDate: startDate,
+      dataStartDate: startDate,
       endDate,
     });
     const entry = {
@@ -1853,6 +1925,8 @@ async function fetchStockData(
   const overview = summariseDatasetRows(deduped, {
     requestedStart: optionEffectiveStart || startDate,
     effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate: startDate,
     endDate,
   });
   fetchDiagnostics.overview = overview;
@@ -3595,6 +3669,8 @@ function runStrategy(data, params) {
   const datasetSummary = summariseDatasetRows(data, {
     requestedStart: userStartISO,
     effectiveStartDate: effectiveStartISO,
+    warmupStartDate: params.dataStartDate || null,
+    dataStartDate: params.dataStartDate || null,
     endDate: params.endDate || null,
   });
   if (
@@ -3681,6 +3757,7 @@ function runStrategy(data, params) {
     requestedStart: userStartISO,
     effectiveStartDate: effectiveStartISO,
     dataStartDate: params.dataStartDate || null,
+    warmupStartDate: params.dataStartDate || null,
     lookbackDays: params.lookbackDays || null,
     longestLookback: 0,
     kdNeedLong: 0,
@@ -3778,6 +3855,10 @@ function runStrategy(data, params) {
     startIdx - effectiveStartIdx,
   );
   warmupSummary.previewRows = previewRows.slice(0, 6);
+  warmupSummary.firstValidCloseGapFromWarmup =
+    datasetSummary.firstValidCloseGapFromWarmup;
+  warmupSummary.firstValidVolumeGapFromWarmup =
+    datasetSummary.firstValidVolumeGapFromWarmup;
 
   const portfolioVal = Array(n).fill(initialCapital);
   const strategyReturns = Array(n).fill(0);
