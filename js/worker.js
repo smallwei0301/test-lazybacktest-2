@@ -2291,6 +2291,771 @@ function calculateAllIndicators(data, params) {
   return indic;
 }
 
+function computeRollingExtrema(values, period, type) {
+  const length = Array.isArray(values) ? values.length : 0;
+  const result = new Array(length).fill(null);
+  if (!Number.isFinite(period) || period <= 0) return result;
+  const window = [];
+  for (let i = 0; i < length; i += 1) {
+    const numeric = Number(values[i]);
+    const incoming = Number.isFinite(numeric) ? numeric : null;
+    window.push(incoming);
+    if (window.length > period) {
+      window.shift();
+    }
+    if (window.length === period) {
+      let valid = true;
+      let extremum = type === "min" ? Infinity : -Infinity;
+      for (let j = 0; j < window.length; j += 1) {
+        const val = window[j];
+        if (!Number.isFinite(val)) {
+          valid = false;
+          break;
+        }
+        extremum =
+          type === "min" ? Math.min(extremum, val) : Math.max(extremum, val);
+      }
+      result[i] = valid ? extremum : null;
+    }
+  }
+  return result;
+}
+
+function makeIndicatorColumn(label, values, options = {}) {
+  return {
+    label,
+    values: Array.isArray(values) ? values : [],
+    format: options.format,
+    decimals: options.decimals,
+  };
+}
+
+function getIndicatorArray(ctx, key) {
+  const source = ctx.indicators && ctx.indicators[key];
+  if (Array.isArray(source) && source.length === ctx.length) {
+    return source;
+  }
+  if (Array.isArray(source)) {
+    const copy = new Array(ctx.length).fill(null);
+    for (let i = 0; i < ctx.length && i < source.length; i += 1) {
+      copy[i] = source[i];
+    }
+    return copy;
+  }
+  return new Array(ctx.length).fill(null);
+}
+
+function createIndicatorContext(baseContext, indicators) {
+  const data = Array.isArray(baseContext?.data) ? baseContext.data : [];
+  const length = data.length;
+  const highs =
+    Array.isArray(baseContext?.highs) && baseContext.highs.length === length
+      ? baseContext.highs
+      : data.map((d) => (Number.isFinite(d.high) ? Number(d.high) : null));
+  const lows =
+    Array.isArray(baseContext?.lows) && baseContext.lows.length === length
+      ? baseContext.lows
+      : data.map((d) => (Number.isFinite(d.low) ? Number(d.low) : null));
+  const closes =
+    Array.isArray(baseContext?.closes) && baseContext.closes.length === length
+      ? baseContext.closes
+      : data.map((d) => (Number.isFinite(d.close) ? Number(d.close) : null));
+  const volumes =
+    Array.isArray(baseContext?.volumes) && baseContext.volumes.length === length
+      ? baseContext.volumes
+      : data.map((d) => (Number.isFinite(d.volume) ? Number(d.volume) : null));
+  const rollingHighCache = new Map();
+  const rollingLowCache = new Map();
+
+  return {
+    length,
+    indicators,
+    highs,
+    lows,
+    closes,
+    volumes,
+    longTrailingStops:
+      Array.isArray(baseContext?.longTrailingStops) &&
+      baseContext.longTrailingStops.length === length
+        ? baseContext.longTrailingStops
+        : new Array(length).fill(null),
+    shortTrailingStops:
+      Array.isArray(baseContext?.shortTrailingStops) &&
+      baseContext.shortTrailingStops.length === length
+        ? baseContext.shortTrailingStops
+        : new Array(length).fill(null),
+    getRollingHigh(period) {
+      const key = Number(period) || 0;
+      if (!Number.isFinite(key) || key <= 0) {
+        return new Array(length).fill(null);
+      }
+      if (!rollingHighCache.has(key)) {
+        rollingHighCache.set(key, computeRollingExtrema(highs, key, "max"));
+      }
+      return rollingHighCache.get(key);
+    },
+    getRollingLow(period) {
+      const key = Number(period) || 0;
+      if (!Number.isFinite(key) || key <= 0) {
+        return new Array(length).fill(null);
+      }
+      if (!rollingLowCache.has(key)) {
+        rollingLowCache.set(key, computeRollingExtrema(lows, key, "min"));
+      }
+      return rollingLowCache.get(key);
+    },
+    getVolumeRatio(avgArray) {
+      const ratio = new Array(length).fill(null);
+      if (!Array.isArray(avgArray)) return ratio;
+      for (let i = 0; i < length; i += 1) {
+        const avg = avgArray[i];
+        const vol = volumes[i];
+        if (Number.isFinite(avg) && Number.isFinite(vol) && avg !== 0) {
+          ratio[i] = vol / avg;
+        } else {
+          ratio[i] = null;
+        }
+      }
+      return ratio;
+    },
+  };
+}
+
+const entryIndicatorBuilders = {
+  ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShort"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLong"),
+      ),
+    ];
+  },
+  ma_above(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  rsi_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdEntry"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalEntry"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  bollinger_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `上軌(${period})`,
+        getIndicatorArray(ctx, "bollingerUpperEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        "中軌",
+        getIndicatorArray(ctx, "bollingerMiddleEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
+    ];
+  },
+  price_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  williams_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  turtle_breakout(params, ctx) {
+    const period = Number(params?.breakoutPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+};
+entryIndicatorBuilders.ema_cross = entryIndicatorBuilders.ma_cross;
+
+const exitIndicatorBuilders = {
+  ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortExit"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongExit"),
+      ),
+    ];
+  },
+  ma_below(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  rsi_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdExit"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalExit"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  bollinger_reversal(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `中軌(${period})`,
+        getIndicatorArray(ctx, "bollingerMiddleExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kExit"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  trailing_stop(params, ctx) {
+    const pct = Number(params?.percentage) || 5;
+    return [
+      makeIndicatorColumn(
+        `移動停損價(${pct}%)`,
+        ctx.longTrailingStops,
+        { decimals: 2 },
+      ),
+    ];
+  },
+  price_breakdown(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  williams_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsExit"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  turtle_stop_loss(params, ctx) {
+    const period = Number(params?.stopLossPeriod) || 10;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  fixed_stop_loss() {
+    return [];
+  },
+};
+exitIndicatorBuilders.ma_cross_exit = exitIndicatorBuilders.ma_cross;
+exitIndicatorBuilders.macd_cross_exit = exitIndicatorBuilders.macd_cross;
+
+const shortEntryIndicatorBuilders = {
+  short_ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortShortEntry"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongShortEntry"),
+      ),
+    ];
+  },
+  short_ma_below(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  short_rsi_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdShortEntry"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalShortEntry"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  short_bollinger_reversal(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `中軌(${period})`,
+        getIndicatorArray(ctx, "bollingerMiddleShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kShortEntry"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_price_breakdown(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_williams_overbought(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsShortEntry"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  short_turtle_stop_loss(params, ctx) {
+    const period = Number(params?.stopLossPeriod) || 10;
+    return [
+      makeIndicatorColumn(
+        `${period}日低`,
+        ctx.getRollingLow(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+};
+shortEntryIndicatorBuilders.short_ema_cross =
+  shortEntryIndicatorBuilders.short_ma_cross;
+
+const shortExitIndicatorBuilders = {
+  cover_ma_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 5;
+    const longPeriod = Number(params?.longPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `短SMA(${shortPeriod})`,
+        getIndicatorArray(ctx, "maShortCover"),
+      ),
+      makeIndicatorColumn(
+        `長SMA(${longPeriod})`,
+        getIndicatorArray(ctx, "maLongCover"),
+      ),
+    ];
+  },
+  cover_ma_above(params, ctx) {
+    const period =
+      Number(params?.period) ||
+      Number(params?.longPeriod) ||
+      Number(params?.shortPeriod) ||
+      20;
+    return [
+      makeIndicatorColumn(
+        `SMA(${period})`,
+        getIndicatorArray(ctx, "maExit"),
+      ),
+    ];
+  },
+  cover_rsi_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `RSI(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "rsiCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_macd_cross(params, ctx) {
+    const shortPeriod = Number(params?.shortPeriod) || 12;
+    const longPeriod = Number(params?.longPeriod) || 26;
+    const signalPeriod = Number(params?.signalPeriod) || 9;
+    return [
+      makeIndicatorColumn(
+        `DIF(${shortPeriod}/${longPeriod})`,
+        getIndicatorArray(ctx, "macdCover"),
+        { decimals: 4 },
+      ),
+      makeIndicatorColumn(
+        `DEA(${signalPeriod})`,
+        getIndicatorArray(ctx, "macdSignalCover"),
+        { decimals: 4 },
+      ),
+    ];
+  },
+  cover_bollinger_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `上軌(${period})`,
+        getIndicatorArray(ctx, "bollingerUpperCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_k_d_cross(params, ctx) {
+    const period = Number(params?.period) || 9;
+    return [
+      makeIndicatorColumn(
+        `K(${period})`,
+        getIndicatorArray(ctx, "kCover"),
+        { decimals: 2 },
+      ),
+      makeIndicatorColumn(
+        `D(${period})`,
+        getIndicatorArray(ctx, "dCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_price_breakout(params, ctx) {
+    const period = Number(params?.period) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_williams_oversold(params, ctx) {
+    return [
+      makeIndicatorColumn(
+        `%R(${Number(params?.period) || 14})`,
+        getIndicatorArray(ctx, "williamsCover"),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_turtle_breakout(params, ctx) {
+    const period = Number(params?.breakoutPeriod) || 20;
+    return [
+      makeIndicatorColumn(
+        `${period}日高`,
+        ctx.getRollingHigh(period),
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_trailing_stop(params, ctx) {
+    const pct = Number(params?.percentage) || 5;
+    return [
+      makeIndicatorColumn(
+        `移動停損價(${pct}%)`,
+        ctx.shortTrailingStops,
+        { decimals: 2 },
+      ),
+    ];
+  },
+  cover_fixed_stop_loss() {
+    return [];
+  },
+};
+shortExitIndicatorBuilders.cover_ema_cross =
+  shortExitIndicatorBuilders.cover_ma_cross;
+
+const INDICATOR_BUILDERS = {
+  entry: entryIndicatorBuilders,
+  exit: exitIndicatorBuilders,
+  shortEntry: shortEntryIndicatorBuilders,
+  shortExit: shortExitIndicatorBuilders,
+};
+
+function buildIndicatorDisplay(params, indicators, baseContext) {
+  const ctx = createIndicatorContext(baseContext, indicators);
+  const result = {};
+
+  const buildForRole = (slotKey, role, strategyKey, strategyParams) => {
+    if (!strategyKey) return;
+    const builders = INDICATOR_BUILDERS[role];
+    if (!builders) return;
+    let builder = builders[strategyKey];
+    if (!builder && strategyKey.endsWith("_exit")) {
+      builder = builders[strategyKey.replace(/_exit$/, "")];
+    }
+    if (!builder) return;
+    const columns = builder(strategyParams || {}, ctx, params);
+    if (Array.isArray(columns) && columns.length > 0) {
+      result[slotKey] = {
+        strategy: strategyKey,
+        columns: columns.map((col) => ({
+          label: col.label,
+          values: Array.isArray(col.values)
+            ? col.values
+            : new Array(ctx.length).fill(null),
+          format: col.format,
+          decimals: col.decimals,
+        })),
+      };
+    }
+  };
+
+  buildForRole("longEntry", "entry", params.entryStrategy, params.entryParams);
+  buildForRole("longExit", "exit", params.exitStrategy, params.exitParams);
+  if (params.enableShorting) {
+    buildForRole(
+      "shortEntry",
+      "shortEntry",
+      params.shortEntryStrategy,
+      params.shortEntryParams,
+    );
+    buildForRole(
+      "shortExit",
+      "shortExit",
+      params.shortExitStrategy,
+      params.shortExitParams,
+    );
+  }
+
+  return result;
+}
+
+function sliceIndicatorDisplay(series, startIndex) {
+  if (!series || typeof series !== "object") return {};
+  const keys = ["longEntry", "longExit", "shortEntry", "shortExit"];
+  const result = {};
+  keys.forEach((key) => {
+    const entry = series[key];
+    if (entry && Array.isArray(entry.columns)) {
+      result[key] = {
+        strategy: entry.strategy,
+        columns: entry.columns.map((col) => ({
+          label: col.label,
+          format: col.format,
+          decimals: col.decimals,
+          values: Array.isArray(col.values)
+            ? col.values.slice(startIndex)
+            : [],
+        })),
+      };
+    }
+  });
+  return result;
+}
+
+function computeTrailingStopLevels(
+  longStates,
+  shortStates,
+  highs,
+  lows,
+  options,
+) {
+  const length = Array.isArray(longStates) ? longStates.length : 0;
+  const longLevels = new Array(length).fill(null);
+  const shortLevels = new Array(length).fill(null);
+  const longPctRaw =
+    options?.exitStrategy === "trailing_stop"
+      ? Number(options?.exitParams?.percentage ?? 5)
+      : null;
+  if (Number.isFinite(longPctRaw)) {
+    let peak = null;
+    for (let i = 0; i < length; i += 1) {
+      const state = longStates[i];
+      const active =
+        state === "持有" || state === "進場" || state === "出場";
+      if (active && Number.isFinite(highs?.[i])) {
+        peak = peak !== null ? Math.max(peak, highs[i]) : highs[i];
+      }
+      if (active && Number.isFinite(peak)) {
+        longLevels[i] = peak * (1 - longPctRaw / 100);
+      }
+      if (state === "出場" || state === "空手") {
+        peak = null;
+      }
+    }
+  }
+
+  const shortPctRaw =
+    options?.enableShorting &&
+    options?.shortExitStrategy === "cover_trailing_stop"
+      ? Number(options?.shortExitParams?.percentage ?? 5)
+      : null;
+  if (Number.isFinite(shortPctRaw)) {
+    let trough = null;
+    for (let i = 0; i < length; i += 1) {
+      const state = shortStates[i];
+      const active =
+        state === "持有" || state === "進場" || state === "出場";
+      if (active && Number.isFinite(lows?.[i])) {
+        trough = trough !== null ? Math.min(trough, lows[i]) : lows[i];
+      }
+      if (active && Number.isFinite(trough)) {
+        shortLevels[i] = trough * (1 + shortPctRaw / 100);
+      }
+      if (state === "出場" || state === "空手") {
+        trough = null;
+      }
+    }
+  }
+
+  return { longLevels, shortLevels };
+}
+
+function combinePositionLabel(longState, shortState) {
+  const parts = [];
+  if (longState && longState !== "空手") {
+    parts.push(`多單${longState}`);
+  }
+  if (shortState && shortState !== "空手") {
+    parts.push(`空單${shortState}`);
+  }
+  if (parts.length === 0) return "空手";
+  return parts.join("｜");
+}
+
 // --- 運行策略回測 (修正年化報酬率計算) ---
 function runStrategy(data, params) {
   // --- 新增的保護機制 ---
@@ -2336,6 +3101,18 @@ function runStrategy(data, params) {
   const lows = data.map((d) => d.low);
   const closes = data.map((d) => d.close);
   const volumes = data.map((d) => d.volume);
+  const effectiveStartISO = params.effectiveStartDate || params.startDate || null;
+  let effectiveStartIdx = 0;
+  if (effectiveStartISO) {
+    const foundIndex = dates.findIndex(
+      (date) => typeof date === "string" && date >= effectiveStartISO,
+    );
+    effectiveStartIdx = foundIndex >= 0 ? foundIndex : 0;
+  }
+  const positionStatesFull = new Array(n).fill("空手");
+  const longStateSeries = new Array(n).fill("空手");
+  const shortStateSeries = new Array(n).fill("空手");
+  let indicatorDisplayFull = {};
   let indicators;
   try {
     indicators = calculateAllIndicators(data, params);
@@ -2405,15 +3182,16 @@ function runStrategy(data, params) {
         (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
         1
       : 0;
-  let startIdx =
-    Math.max(
-      1,
-      longestLookback,
-      kdNeedLong,
-      kdNeedShort,
-      macdNeedLong,
-      macdNeedShort,
-    ) + 1;
+  let startIdx = Math.max(
+    1,
+    longestLookback,
+    kdNeedLong,
+    kdNeedShort,
+    macdNeedLong,
+    macdNeedShort,
+  );
+  startIdx = Math.min(startIdx, n - 1);
+  startIdx = Math.max(startIdx, effectiveStartIdx);
   startIdx = Math.min(startIdx, n - 1);
   startIdx = Math.max(1, startIdx);
 
@@ -2507,9 +3285,18 @@ function runStrategy(data, params) {
     const curO = opens[i];
     const prevC = i > 0 ? closes[i - 1] : null;
     const nextO = i + 1 < n ? opens[i + 1] : null;
+    let executedBuy = false;
+    let executedSell = false;
+    let executedShort = false;
+    let executedCover = false;
+    let longState = longPos === 1 ? "持有" : "空手";
+    let shortState = shortPos === 1 ? "持有" : "空手";
     longPl[i] = longPl[i - 1] ?? 0;
     shortPl[i] = shortPl[i - 1] ?? 0;
     if (!check(curC) || curC <= 0) {
+      longStateSeries[i] = longState;
+      shortStateSeries[i] = shortState;
+      positionStatesFull[i] = combinePositionLabel(longState, shortState);
       portfolioVal[i] = portfolioVal[i - 1] ?? initialCapital;
       strategyReturns[i] = strategyReturns[i - 1] ?? 0;
       continue;
@@ -2552,6 +3339,7 @@ function runStrategy(data, params) {
             };
             longTrades.push(tradeData);
             buySigs.push({ date: dates[i], index: i });
+            executedBuy = true;
           }
         } else if (pendingTrade.type === "short") {
           // 執行隔日做空
@@ -2592,6 +3380,7 @@ function runStrategy(data, params) {
             console.log(
               `[Worker SHORT] Delayed Short Executed: ${shortShares}@${actualTradePrice} on ${dates[i]}, Cap Before Cover: ${shortCap.toFixed(0)}`,
             );
+            executedShort = true;
           }
         }
         pendingNextDayTrade = null;
@@ -2841,6 +3630,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               sellSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedSell = true;
             const lastBuyIdx = longTrades.map((t) => t.type).lastIndexOf("buy");
             if (
               lastBuyIdx !== -1 &&
@@ -3121,6 +3911,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               coverSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedCover = true;
             const lastShortIdx = shortTrades
               .map((t) => t.type)
               .lastIndexOf("short");
@@ -3385,6 +4176,7 @@ function runStrategy(data, params) {
                   tradeData.indicatorValues = entryIndicatorValues;
                 longTrades.push(tradeData);
                 buySigs.push({ date: dates[i], index: i });
+                executedBuy = true;
               }
             }
           }
@@ -3661,6 +4453,7 @@ function runStrategy(data, params) {
             } else if (canTradeOpen) {
               shortSigs.push({ date: dates[i + 1], index: i + 1 });
             }
+            executedShort = true;
             console.log(
               `[Worker SHORT] Short Executed: ${shortShares}@${tradePrice} on ${tradeDate}, Cap Before Cover: ${shortCap.toFixed(0)}`,
             );
@@ -3678,6 +4471,28 @@ function runStrategy(data, params) {
         }
       }
     }
+
+    if (executedSell) {
+      longState = "出場";
+    } else if (executedBuy) {
+      longState = "進場";
+    } else if (longPos === 1) {
+      longState = "持有";
+    } else {
+      longState = "空手";
+    }
+    if (executedCover) {
+      shortState = "出場";
+    } else if (executedShort) {
+      shortState = "進場";
+    } else if (shortPos === 1) {
+      shortState = "持有";
+    } else {
+      shortState = "空手";
+    }
+    longStateSeries[i] = longState;
+    shortStateSeries[i] = shortState;
+    positionStatesFull[i] = combinePositionLabel(longState, shortState);
 
     // --- STEP 3: Update Daily P/L AFTER all potential trades ---
     longPl[i] =
@@ -3737,6 +4552,11 @@ function runStrategy(data, params) {
       longTrades.push(finalTradeData);
       if (!sellSigs.some((s) => s.index === lastIdx))
         sellSigs.push({ date: dates[lastIdx], index: lastIdx });
+      longStateSeries[lastIdx] = "出場";
+      positionStatesFull[lastIdx] = combinePositionLabel(
+        longStateSeries[lastIdx],
+        shortStateSeries[lastIdx],
+      );
       const lastBuyI = longTrades.map((t) => t.type).lastIndexOf("buy");
       if (lastBuyI !== -1 && longTrades[lastBuyI].shares === longShares) {
         longCompletedTrades.push({
@@ -3777,6 +4597,11 @@ function runStrategy(data, params) {
       shortTrades.push(finalTradeData);
       if (!coverSigs.some((s) => s.index === lastIdx))
         coverSigs.push({ date: dates[lastIdx], index: lastIdx });
+      shortStateSeries[lastIdx] = "出場";
+      positionStatesFull[lastIdx] = combinePositionLabel(
+        longStateSeries[lastIdx],
+        shortStateSeries[lastIdx],
+      );
       const lastShortI = shortTrades.map((t) => t.type).lastIndexOf("short");
       if (lastShortI !== -1 && shortTrades[lastShortI].shares === shortShares) {
         shortCompletedTrades.push({
@@ -3795,6 +4620,28 @@ function runStrategy(data, params) {
     } else if (shortPos === 1) {
       shortPl[lastIdx] = shortPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
+    const trailingLevels = computeTrailingStopLevels(
+      longStateSeries,
+      shortStateSeries,
+      highs,
+      lows,
+      {
+        exitStrategy,
+        exitParams,
+        enableShorting,
+        shortExitStrategy,
+        shortExitParams,
+      },
+    );
+    indicatorDisplayFull = buildIndicatorDisplay(params, indicators, {
+      data,
+      highs,
+      lows,
+      closes,
+      volumes,
+      longTrailingStops: trailingLevels.longLevels,
+      shortTrailingStops: trailingLevels.shortLevels,
+    });
     self.postMessage({
       type: "progress",
       progress: 95,
@@ -4090,6 +4937,22 @@ function runStrategy(data, params) {
     }
 
     self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    const visibleStartIdx = Math.max(0, effectiveStartIdx);
+    const sliceArray = (arr) =>
+      Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
+    const adjustSignals = (signals) =>
+      Array.isArray(signals)
+        ? signals
+            .filter(
+              (s) => typeof s.index === "number" && s.index >= visibleStartIdx,
+            )
+            .map((s) => ({ ...s, index: s.index - visibleStartIdx }))
+        : [];
+    const trimmedIndicatorDisplay = sliceIndicatorDisplay(
+      indicatorDisplayFull,
+      visibleStartIdx,
+    );
+    const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -4106,13 +4969,13 @@ function runStrategy(data, params) {
       maxConsecutiveLosses: maxCL,
       trades: allTrades,
       completedTrades: allCompletedTrades,
-      buyHoldReturns: bhReturnsFull,
-      strategyReturns: strategyReturns,
-      dates: dates,
-      chartBuySignals: buySigs,
-      chartSellSignals: sellSigs,
-      chartShortSignals: shortSigs,
-      chartCoverSignals: coverSigs,
+      buyHoldReturns: sliceArray(bhReturnsFull),
+      strategyReturns: sliceArray(strategyReturns),
+      dates: sliceArray(dates),
+      chartBuySignals: adjustSignals(buySigs),
+      chartSellSignals: adjustSignals(sellSigs),
+      chartShortSignals: adjustSignals(shortSigs),
+      chartCoverSignals: adjustSignals(coverSigs),
       entryStrategy: params.entryStrategy,
       exitStrategy: params.exitStrategy,
       entryParams: params.entryParams,
@@ -4135,6 +4998,8 @@ function runStrategy(data, params) {
       annReturnHalf2: annReturnHalf2,
       sharpeHalf2: sharpeHalf2,
       subPeriodResults: subPeriodResults,
+      priceIndicatorSeries: trimmedIndicatorDisplay,
+      positionStates: trimmedPositionStates,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);

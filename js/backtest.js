@@ -19,6 +19,8 @@ let lastPriceDebug = {
 };
 
 let visibleStockData = [];
+let lastIndicatorSeries = null;
+let lastPositionStates = [];
 
 // --- 主回測函數 ---
 function runBacktestInternal() {
@@ -379,6 +381,8 @@ function clearPreviousResults() {
     resEl.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md';
     resEl.innerHTML = `<i class="fas fa-info-circle mr-2"></i> 請設定參數並執行。`;
     lastOverallResult = null; lastSubPeriodResults = null;
+    lastIndicatorSeries = null;
+    lastPositionStates = [];
     
     const suggestionArea = document.getElementById('today-suggestion-area');
     const suggestionText = document.getElementById('suggestion-text');
@@ -595,6 +599,65 @@ function refreshPriceInspectorControls() {
     renderPricePipelineSteps();
 }
 
+function resolveStrategyDisplayName(key) {
+    if (!key) return '';
+    const direct = strategyDescriptions?.[key];
+    if (direct?.name) return direct.name;
+    const exitVariant = strategyDescriptions?.[`${key}_exit`];
+    if (exitVariant?.name) return exitVariant.name;
+    return key;
+}
+
+function collectPriceInspectorIndicatorColumns() {
+    if (!lastOverallResult) return [];
+    const series = lastIndicatorSeries || {};
+    const columns = [];
+    const pushColumn = (seriesKey, headerLabel) => {
+        const entry = series?.[seriesKey];
+        if (entry && Array.isArray(entry.columns) && entry.columns.length > 0) {
+            columns.push({ key: seriesKey, header: headerLabel, series: entry });
+        }
+    };
+
+    pushColumn('longEntry', `多單進場｜${resolveStrategyDisplayName(lastOverallResult.entryStrategy)}`);
+    pushColumn('longExit', `多單出場｜${resolveStrategyDisplayName(lastOverallResult.exitStrategy)}`);
+    if (lastOverallResult.enableShorting) {
+        pushColumn('shortEntry', `做空進場｜${resolveStrategyDisplayName(lastOverallResult.shortEntryStrategy)}`);
+        pushColumn('shortExit', `做空出場｜${resolveStrategyDisplayName(lastOverallResult.shortExitStrategy)}`);
+    }
+    return columns;
+}
+
+function formatIndicatorNumericValue(value, column) {
+    if (!Number.isFinite(value)) return '不足';
+    if (column?.format === 'integer') {
+        return Math.round(value).toLocaleString('zh-TW');
+    }
+    const digits = typeof column?.decimals === 'number' ? column.decimals : 2;
+    return Number(value).toFixed(digits);
+}
+
+function renderIndicatorCell(columnGroup, rowIndex) {
+    if (!columnGroup || !Array.isArray(columnGroup.columns) || columnGroup.columns.length === 0) {
+        return '—';
+    }
+    const lines = [];
+    columnGroup.columns.forEach((col) => {
+        const values = Array.isArray(col.values) ? col.values : [];
+        const rawValue = values[rowIndex];
+        if (col.format === 'text') {
+            const textValue = rawValue !== null && rawValue !== undefined && rawValue !== ''
+                ? String(rawValue)
+                : '—';
+            lines.push(`${escapeHtml(col.label)}: ${escapeHtml(textValue)}`);
+        } else {
+            const formatted = formatIndicatorNumericValue(rawValue, col);
+            lines.push(`${escapeHtml(col.label)}: ${formatted}`);
+        }
+    });
+    return lines.length > 0 ? lines.join('<br>') : '—';
+}
+
 function openPriceInspectorModal() {
     if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
         showError('尚未取得價格資料，請先執行回測。');
@@ -619,6 +682,35 @@ function openPriceInspectorModal() {
     renderPriceInspectorDebug();
 
     // Patch Tag: LB-PRICE-INSPECTOR-20250512A
+    const headerRow = document.getElementById('priceInspectorHeaderRow');
+    const indicatorColumns = collectPriceInspectorIndicatorColumns();
+    const baseHeaderConfig = [
+        { key: 'date', label: '日期', align: 'left' },
+        { key: 'open', label: '開盤', align: 'right' },
+        { key: 'high', label: '最高', align: 'right' },
+        { key: 'low', label: '最低', align: 'right' },
+        { key: 'rawClose', label: '原始收盤', align: 'right' },
+        { key: 'close', label: '還原收盤', align: 'right' },
+        { key: 'factor', label: '還原因子', align: 'right' },
+    ];
+    indicatorColumns.forEach((col) => {
+        baseHeaderConfig.push({ key: col.key, label: col.header, align: 'left', isIndicator: true, series: col.series });
+    });
+    baseHeaderConfig.push(
+        { key: 'position', label: '倉位狀態', align: 'left' },
+        { key: 'formula', label: '計算公式', align: 'left' },
+        { key: 'volume', label: '(千股)量', align: 'right' },
+        { key: 'source', label: '價格來源', align: 'left' },
+    );
+
+    if (headerRow) {
+        headerRow.innerHTML = baseHeaderConfig
+            .map((cfg) => `<th class="px-3 py-2 text-${cfg.align} font-medium">${escapeHtml(cfg.label)}</th>`)
+            .join('');
+    }
+
+    const totalColumns = baseHeaderConfig.length;
+
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
     const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
     const computeRawClose = (row) => {
@@ -643,7 +735,7 @@ function openPriceInspectorModal() {
         return Number.isFinite(raw) ? raw : Number(row.close);
     };
     const rowsHtml = visibleStockData
-        .map((row) => {
+        .map((row, rowIndex) => {
             const volumeLabel = Number.isFinite(row?.volume)
                 ? Number(row.volume).toLocaleString('zh-TW')
                 : '—';
@@ -666,6 +758,12 @@ function openPriceInspectorModal() {
                 typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
                     ? row.priceSource.trim()
                     : sourceLabel || '—';
+            const indicatorCells = indicatorColumns
+                .map((col) =>
+                    `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`
+                )
+                .join('');
+            const positionLabel = lastPositionStates[rowIndex] || '空手';
             return `
                 <tr>
                     <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
@@ -675,6 +773,8 @@ function openPriceInspectorModal() {
                     <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
                     <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
+                    ${indicatorCells}
+                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(positionLabel)}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
@@ -684,7 +784,7 @@ function openPriceInspectorModal() {
 
     tbody.innerHTML =
         rowsHtml ||
-        '<tr><td class="px-3 py-4 text-center" colspan="10" style="color: var(--muted-foreground);">無資料</td></tr>';
+        `<tr><td class="px-3 py-4 text-center" colspan="${totalColumns}" style="color: var(--muted-foreground);">無資料</td></tr>`;
 
     const scroller = modal.querySelector('.overflow-auto');
     if (scroller) scroller.scrollTop = 0;
@@ -734,6 +834,8 @@ function handleBacktestResult(result, stockName, dataSource) {
     try {
         lastOverallResult = result;
         lastSubPeriodResults = result.subPeriodResults;
+        lastIndicatorSeries = result.priceIndicatorSeries || null;
+        lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
