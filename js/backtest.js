@@ -37,8 +37,8 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-// Patch Tag: LB-STRATEGY-STATUS-20250627A
-const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250627A';
+// Patch Tag: LB-STRATEGY-STATUS-20250628A
+const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250628A';
 const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
 const STRATEGY_STATUS_BADGE_VARIANTS = {
     positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
@@ -771,7 +771,7 @@ function getStrategyStatusCardElements() {
     return { card, headline, detail, badge };
 }
 
-function setStrategyStatusCardState({ visible, variant, badgeText, headlineText, detailText }) {
+function setStrategyStatusCardState({ visible, variant, badgeText, headlineText, detailText, detailHTML }) {
     const elements = getStrategyStatusCardElements();
     if (!elements) return;
     const { card, headline, detail, badge } = elements;
@@ -779,7 +779,13 @@ function setStrategyStatusCardState({ visible, variant, badgeText, headlineText,
     badge.className = `${STRATEGY_STATUS_BADGE_BASE_CLASS} ${variantClass}`;
     badge.textContent = badgeText;
     headline.textContent = headlineText;
-    detail.textContent = detailText;
+    if (typeof detailHTML === 'string' && detailHTML.length > 0) {
+        detail.innerHTML = detailHTML;
+    } else if (detailText !== undefined && detailText !== null) {
+        detail.textContent = detailText;
+    } else {
+        detail.textContent = '';
+    }
     if (visible) {
         card.classList.remove('hidden');
     } else {
@@ -967,6 +973,9 @@ function updateStrategyStatusCard(result) {
     let badgeText = '勝負未定';
     let headlineText = '🤝 暫時打成平手';
     let baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
+    let detailHTML = null;
+
+    const healthSummary = buildStrategyHealthSummary(result);
 
     if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'positive';
@@ -977,11 +986,30 @@ function updateStrategyStatusCard(result) {
         variant = 'negative';
         badgeText = '策略加油';
         headlineText = '🛠️ 策略暫時落後';
-        baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。`;
+        const bulletLines = [
+            `策略${metricLabel} ${formatPercentValue(strategyMetric)}。`,
+            `買入持有 ${formatPercentValue(buyHoldMetric)}。`,
+            `目前落後 ${formatPercentDiff(diff)}。`,
+        ];
+        if (healthSummary) {
+            bulletLines.push(healthSummary.endsWith('。') ? healthSummary : `${healthSummary}。`);
+        }
+        const bulletListHtml = bulletLines
+            .map((line) => `<li>${escapeHtml(line)}</li>`)
+            .join('');
+        detailHTML = `
+            <p class="text-[15px] font-semibold leading-relaxed" style="color: var(--foreground);">快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。</p>
+            <ul class="mt-2 space-y-1 list-disc pl-5 text-[13px] leading-relaxed" style="color: var(--foreground);">
+                ${bulletListHtml}
+            </ul>
+        `.trim();
     }
 
-    const healthSummary = buildStrategyHealthSummary(result);
-    const detailText = healthSummary ? `${baseDetailText} ${healthSummary}` : baseDetailText;
+    const detailText = detailHTML
+        ? undefined
+        : healthSummary
+            ? `${baseDetailText} ${healthSummary}`
+            : baseDetailText;
 
     setStrategyStatusCardState({
         visible: true,
@@ -989,6 +1017,7 @@ function updateStrategyStatusCard(result) {
         badgeText,
         headlineText,
         detailText,
+        detailHTML,
     });
 }
 
