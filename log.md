@@ -1,3 +1,9 @@
+# 2025-06-24 — Patch LB-EQUITY-SEGMENT-20250624B
+- **Issue recap**: 使用者回報頁面載入即出現「頁面初始化失敗: runBacktestInternal is not defined」，導致按鈕與 Enter 觸發無法啟動回測，趨勢分區也無法驗證。
+- **Fix**: 將 `runBacktestInternal` 正式掛載至 `window` 並派送 `lazybacktest:runBacktestReady` 事件，Loader 端改以彈性綁定與後備監聽方式處理回測按鈕／輸入框事件，避免函式尚未就緒時直接拋錯；同時修正參數複製流程中誤用未宣告變數造成的 runtime error。
+- **Diagnostics**: 若 Handler 尚未就緒，Loader 會輸出警告並等待事件通知；一旦綁定成功會記錄 `[Loader] runBacktestInternal handler 已綁定。`，便於在 console 追蹤。
+- **Testing**: 受限於容器無瀏覽器，未能啟動前端實測；以 `node --check js/backtest.js`、`node --check js/loader.js` 及程式碼檢視確認事件派送與 Loader 綁定流程無語法錯誤。
+
 # 2025-06-24 — Patch LB-EQUITY-SEGMENT-20250624A
 - **Issue recap**: 圖表新增趨勢色塊後仍缺乏顏色說明與靈敏度調節，使用者不易理解綠／灰／紅底對應的趨勢，也無法依個人偏好調整盤整判定門檻。
 - **Fix**: 在淨值曲線卡片加入起漲／盤整／跌落色塊圖例，並在「趨勢區間評估」卡片新增 0〜10 的趨勢靈敏度滑桿，以線性縮放 20 日斜率門檻（1.4×→0.45×）控制判定鬆緊；滑桿拖曳時即時計算分區報酬並更新圖表底色。

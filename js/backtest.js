@@ -1,10 +1,19 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-EQUITY-SEGMENT-20250623A
+// Patch Tag: LB-EQUITY-SEGMENT-20250624B
 // 確保 zoom 插件正確註冊
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof Chart === 'undefined') {
+        console.warn('[Chart] Chart.js 尚未載入，略過插件診斷輸出。');
+        return;
+    }
+    const pluginRegistry = Chart?.registry?.plugins;
+    const registeredPlugins = (pluginRegistry && typeof pluginRegistry.items === 'object')
+        ? Object.keys(pluginRegistry.items)
+        : [];
     console.log('Chart object:', typeof Chart);
-    console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
+    console.log('Available Chart plugins:', registeredPlugins.length > 0 ? registeredPlugins : 'No registry');
 });
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -641,6 +650,24 @@ function runBacktestInternal() {
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
         if(backtestWorker)backtestWorker.terminate(); backtestWorker = null;
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.runBacktestInternal = runBacktestInternal;
+    const notifyRunBacktestReady = () => {
+        try {
+            window.dispatchEvent(new CustomEvent('lazybacktest:runBacktestReady', {
+                detail: { handler: runBacktestInternal },
+            }));
+        } catch (dispatchError) {
+            console.warn('[Main] 無法派送 runBacktestReady 事件:', dispatchError);
+        }
+    };
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(notifyRunBacktestReady, 0);
+    } else {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(notifyRunBacktestReady, 0), { once: true });
     }
 }
 
