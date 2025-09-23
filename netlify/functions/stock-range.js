@@ -1,6 +1,7 @@
-﻿// netlify/functions/stock-range.js
+// netlify/functions/stock-range.js
 // Consolidated range endpoint to batch month-level fetches and cache merged results.
-import { getStore } from '@netlify/blobs';
+// Patch Tag: LB-BLOB-MONITOR-20250624A
+import { obtainMonitoredStore } from '../lib/blob-monitor.js';
 import fetch from 'node-fetch';
 
 const TWSE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -141,8 +142,8 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
     }
 }
 
-async function composeTwseRange(stockNo, startDate, endDate) {
-    const store = getStore('twse_cache_store');
+async function composeTwseRange(stockNo, startDate, endDate, request) {
+    const store = obtainMonitoredStore({ name: 'twse_cache_store', source: 'stock-range', request });
     const months = buildMonthKeyList(startDate, endDate);
     const merged = [];
     let stockName = stockNo;
@@ -242,9 +243,9 @@ async function fetchFromFinMind(stockNo) {
     };
 }
 
-async function composeTpexRange(stockNo) {
+async function composeTpexRange(stockNo, request) {
     const symbol = `${stockNo}.TWO`;
-    const store = getStore('tpex_cache_store');
+    const store = obtainMonitoredStore({ name: 'tpex_cache_store', source: 'stock-range', request });
 
     try {
         const cached = await store.get(symbol, { type: 'json' });
@@ -310,7 +311,7 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: 'Invalid date range' }), { status: 400 });
         }
 
-        const rangeStore = getStore('stock_range_cache_store');
+        const rangeStore = obtainMonitoredStore({ name: 'stock_range_cache_store', source: 'stock-range', request: req });
         const rangeKey = `${marketType}_${stockNo}_${startDateStr}_${endDateStr}`;
 
         try {
@@ -323,7 +324,10 @@ export default async (req) => {
                     iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
                     aaData: Array.isArray(base.aaData) ? base.aaData : [],
                     dataSource: `${base.dataSource || marketType} (cache)`,
-                    marketType: base.marketType || marketType
+                    marketType: base.marketType || marketType,
+                    cacheStatus: 'range-cache-hit',
+                    cacheKey: rangeKey,
+                    cacheTimestamp: cachedRange.timestamp
                 };
                 return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
             }
@@ -335,23 +339,27 @@ export default async (req) => {
 
         let merged;
         if (marketType === 'TPEX') {
-            merged = await composeTpexRange(stockNo);
+            merged = await composeTpexRange(stockNo, req);
         } else {
-            merged = await composeTwseRange(stockNo, startDate, endDate);
+            merged = await composeTwseRange(stockNo, startDate, endDate, req);
         }
 
         const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);
+        const now = Date.now();
         const responsePayload = {
             stockNo,
             stockName: merged.stockName || stockNo,
             iTotalRecords: filteredAaData.length,
             aaData: filteredAaData,
             dataSource: merged.dataSource,
-            marketType
+            marketType,
+            cacheStatus: 'range-cache-miss',
+            cacheKey: rangeKey,
+            cacheTimestamp: now
         };
 
         try {
-            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: responsePayload });
+            await rangeStore.setJSON(rangeKey, { timestamp: now, data: responsePayload });
         } catch (error) {
             if (!isQuotaError(error)) {
                 console.warn('[Range Endpoint] Failed to persist range cache:', error);

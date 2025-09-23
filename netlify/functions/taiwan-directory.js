@@ -1,7 +1,8 @@
 // netlify/functions/taiwan-directory.js (v1.0 - Taiwan directory cache)
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-BLOB-MONITOR-20250624A
 
-import { getStore } from '@netlify/blobs';
+import { obtainMonitoredStore } from '../lib/blob-monitor.js';
 import fetch from 'node-fetch';
 
 const DIRECTORY_STORE_NAME = 'taiwan_directory_store_v1';
@@ -11,43 +12,16 @@ const DIRECTORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_DATASET = 'TaiwanStockInfo';
 
-const inMemoryStores = new Map();
-
-function createMemoryStore() {
-    const memory = new Map();
-    return {
-        async get(key, options = {}) {
-            if (options.type === 'json') {
-                return memory.get(key) || null;
-            }
-            return memory.get(key) || null;
-        },
-        async setJSON(key, value) {
-            memory.set(key, value);
-        },
-    };
-}
-
-function obtainStore(name) {
-    try {
-        return getStore(name);
-    } catch (error) {
-        if (error?.name === 'MissingBlobsEnvironmentError') {
-            if (!inMemoryStores.has(name)) {
-                console.warn('[Taiwan Directory] Netlify Blobs 未配置，使用記憶體快取模擬。');
-                inMemoryStores.set(name, createMemoryStore());
-            }
-            return inMemoryStores.get(name);
-        }
-        throw error;
-    }
+function obtainStore(name, event) {
+    return obtainMonitoredStore({ name, source: 'taiwan-directory', event });
 }
 
 async function readCache(store, cacheKey) {
     try {
         const cached = await store.get(cacheKey, { type: 'json' });
         if (!cached) return null;
-        return cached;
+        const storageLayer = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
+        return { ...cached, cacheStore: storageLayer };
     } catch (error) {
         console.error('[Taiwan Directory] 讀取快取失敗:', error);
         return null;
@@ -56,7 +30,9 @@ async function readCache(store, cacheKey) {
 
 async function writeCache(store, cacheKey, payload) {
     try {
-        await store.setJSON(cacheKey, payload);
+        const cloned = { ...payload };
+        delete cloned.cacheStore;
+        await store.setJSON(cacheKey, cloned);
     } catch (error) {
         console.error('[Taiwan Directory] 寫入快取失敗:', error);
     }
@@ -166,11 +142,11 @@ export const handler = async (event) => {
     const forceRefresh = params.force === '1' || params.refresh === '1';
     const stockId = params.stockId ? params.stockId.trim().toUpperCase() : null;
 
-    const store = obtainStore(DIRECTORY_STORE_NAME);
+    const store = obtainStore(DIRECTORY_STORE_NAME, event);
     let cached = await readCache(store, DIRECTORY_CACHE_KEY);
     let cacheHit = false;
-    const isMemoryStore = inMemoryStores.get(DIRECTORY_STORE_NAME) === store;
-    let cacheStore = cached ? (isMemoryStore ? 'memory' : 'blob') : null;
+    const storageLayer = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
+    let cacheStore = cached ? cached.cacheStore || storageLayer : null;
 
     const now = Date.now();
     const cacheFresh = cached && cached.timestamp && now - cached.timestamp < DIRECTORY_TTL_MS;
@@ -187,7 +163,8 @@ export const handler = async (event) => {
                 ...fresh,
             };
             await writeCache(store, DIRECTORY_CACHE_KEY, cached);
-            cacheStore = isMemoryStore ? 'memory' : 'blob';
+            cacheStore = storageLayer;
+            cached.cacheStore = cacheStore;
             refreshed = true;
         } catch (error) {
             console.error('[Taiwan Directory] 無法刷新資料:', error);

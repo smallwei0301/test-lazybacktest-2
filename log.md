@@ -1,3 +1,27 @@
+# 2025-06-27 — Patch LB-BLOB-MONITOR-20250627B
+- **Issue recap**: Blob 監控記錄寫入成功，但在首次建立摘要時 `store.get` 404 會直接拋出錯誤，導致每日/全域統計文件未生成，儀表板僅顯示「尚未產生監控紀錄」。既有事件紀錄也缺乏補建機制。 
+- **Fix**: 更新 `blob-monitor` 在摘要寫入時容忍 404，必要時自動建構初始文件；`/api/blob-usage` 載入時若找不到摘要會掃描事件紀錄，重建指定日期與全域統計並回存 Blob，確保舊事件也能顯示。 
+- **Diagnostics**: 儀表板立即顯示最新的每日統計與全域累積事件，若 Blob 環境缺失仍會落回記憶體快取；維運可透過版本標籤 `LB-BLOB-MONITOR-20250627B` 確認修補已部署。 
+- **Testing**: `node --input-type=module -e "import('./netlify/lib/blob-monitor.js').then(()=>console.log('blob-monitor loaded'))"`
+
+# 2025-06-25 — Patch LB-BLOB-DASHBOARD-20250625A
+- **Issue recap**: Blob 監控 API 雖已提供每日摘要與事件清單，但前台缺乏可視化介面，營運端無法在 UI 直接檢視讀寫趨勢、快取層級或錯誤紀錄。
+- **Fix**: 回測摘要頁新增「Blob 流量監控」卡片，支援日期與事件上限篩選並串接 `/api/blob-usage`，呈現每日/全域統計、主要 Store、全域客戶端排行與最新事件時間軸；README 補充儀表板使用說明。
+- **Diagnostics**: 卡片顯示成功率、讀寫流量、命中狀態與事件耗時，事件列表附帶快取層級、來源 Function、鍵值與錯誤訊息，可快速定位異常請求。
+- **Testing**: `node --check js/main.js`、`node --input-type=module -e "import('./netlify/functions/blob-usage.js').then(() => console.log('blob-usage loaded'))"`
+
+# 2025-06-24 — Patch LB-BLOB-MONITOR-20250624A
+- **Issue recap**: Blob 快取擴張後缺乏集中監控，無法辨識哪些 Function 發生大量讀寫、用戶端是否命中記憶體備援或 Blob 正常層；營運端也無法統計每日流量、最近錯誤或追蹤特定使用者的請求模式。
+- **Fix**: 新增共用 `blob-monitor` 模組，統一為 Netlify Blobs 建立記憶體 fallback + 讀寫監控代理，並建立 `blob_traffic_monitor_store` 儲存事件與摘要；所有 Proxy 與範圍快取函式皆改用監控包裝的 Store，並新增 `/api/blob-usage` 函式匯出每日/全域統計與最近事件清單。
+- **Diagnostics**: 監控摘要保留每個 store 的成功/錯誤/bytes、客戶端雜湊與快取層級（blob 或 memory），事件則揭露操作類型、耗時、命中狀態與來源 Function，可透過 `?date=`、`?limit=` 控制回傳內容；原有函式也會在回應中附上 `cacheStore` 或 `source` 區分記憶體/Blob 讀取。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/blob-usage.js').then(()=>console.log('blob-usage loaded'))"`, `node --input-type=module -e "import('./netlify/functions/stock-range.js').then(()=>console.log('stock-range loaded'))"`, `node --input-type=module -e "import('./netlify/functions/twse-proxy.js').then(()=>console.log('twse-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/tpex-proxy.js').then(()=>console.log('tpex-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(()=>console.log('us-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/taiwan-directory.js').then(()=>console.log('taiwan-directory loaded'))"`, `node --input-type=module -e "import('./netlify/lib/blob-monitor.js').then(()=>console.log('blob-monitor loaded'))"`
+
+# 2025-06-23 — Patch LB-RANGE-ACCEL-20250623A
+- **Issue recap**: 熱門標的回測需要逐月向 `/api/twse/`、`/api/tpex/` 發出多次請求，Proxy 雖有月度快取但前端仍需等待多個 HTTP 往返；遇到暖身期較長的參數時，等待時間超過 12 秒且難以追蹤實際來源。
+- **Fix**: 新增 `stock-range` 函式集中整併月度資料並把合併結果寫入 Netlify Blob `stock_range_cache_store`，Worker 端導入範圍快取檢查，優先呼叫 `/api/stock-range` 命中後直接回傳整段序列；若 Blob 未命中則保留舊有月度補抓流程與診斷資訊。
+- **Diagnostics**: Worker `fetchDiagnostics` 增加 `rangeEndpoint` 詳細紀錄（cache status、cache key、timestamp），月份診斷亦會顯示 `rangeCacheKey`，方便比對是否命中範圍快取並追蹤 Blob 儲存狀態。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/stock-range.js').then(() => console.log('stock-range loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`、`node --check js/worker.js`
+
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
 - **Fix**: 導入美股名稱 `localStorage` 永續快取（3 天 TTL），頁面載入時回灌記憶體 Map；快取寫入時以「市場｜代碼」為 key，同步清理過期項目並與台股快取共用 4096 筆上限，確保重複輸入常用代號可立即命中。

@@ -2,8 +2,9 @@
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-US-NAMEFIX-20250614A
+// Patch Tag: LB-BLOB-MONITOR-20250624A
 
-import { getStore } from '@netlify/blobs';
+import { obtainMonitoredStore } from '../lib/blob-monitor.js';
 import fetch from 'node-fetch';
 
 const US_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
@@ -15,34 +16,8 @@ const YAHOO_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryInfoCache = new Map(); // Map<stockNo, { timestamp, data }>
-const inMemoryStores = new Map(); // Map<storeName, MemoryStore>
-
-function createMemoryBlobStore() {
-    const memory = new Map();
-    return {
-        async get(key, options = {}) {
-            if (options.type === 'json') return memory.get(key) || null;
-            return memory.get(key) || null;
-        },
-        async setJSON(key, value) {
-            memory.set(key, value);
-        },
-    };
-}
-
-function obtainStore(name) {
-    try {
-        return getStore(name);
-    } catch (error) {
-        if (error?.name === 'MissingBlobsEnvironmentError') {
-            if (!inMemoryStores.has(name)) {
-                console.warn('[US Proxy v1.1] Netlify Blobs 未配置，使用記憶體快取模擬。');
-                inMemoryStores.set(name, createMemoryBlobStore());
-            }
-            return inMemoryStores.get(name);
-        }
-        throw error;
-    }
+function obtainStore(name, request) {
+    return obtainMonitoredStore({ name, source: 'us-proxy', request });
 }
 
 function normaliseFinMindErrorMessage(message) {
@@ -150,11 +125,12 @@ async function readCache(store, cacheKey) {
         return { ...memoryHit.data, source: 'memory' };
     }
 
+    const storageLayer = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
     try {
         const blobHit = await store.get(cacheKey, { type: 'json' });
         if (blobHit && Date.now() - blobHit.timestamp < US_CACHE_TTL_MS) {
             inMemoryCache.set(cacheKey, { timestamp: Date.now(), data: blobHit.data });
-            return { ...blobHit.data, source: 'blob' };
+            return { ...blobHit.data, source: storageLayer };
         }
     } catch (error) {
         console.error('[US Proxy v1.1] 讀取 Blobs 時發生錯誤:', error);
@@ -175,13 +151,14 @@ async function writeCache(store, cacheKey, payload) {
 async function readInfoCache(store, stockNo) {
     const memoryHit = inMemoryInfoCache.get(stockNo);
     if (memoryHit && Date.now() - memoryHit.timestamp < US_INFO_TTL_MS) {
-        return memoryHit.data;
+        return { ...memoryHit.data, cacheStore: memoryHit.data?.cacheStore || 'memory' };
     }
+    const storageLayer = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
     try {
         const blobHit = await store.get(stockNo, { type: 'json' });
         if (blobHit && Date.now() - blobHit.timestamp < US_INFO_TTL_MS) {
             inMemoryInfoCache.set(stockNo, { timestamp: Date.now(), data: blobHit.data });
-            return blobHit.data;
+            return { ...blobHit.data, cacheStore: storageLayer };
         }
     } catch (error) {
         console.error('[US Proxy v1.1] 讀取 USStockInfo Blobs 失敗:', error);
@@ -190,7 +167,9 @@ async function readInfoCache(store, stockNo) {
 }
 
 async function writeInfoCache(store, stockNo, payload) {
-    const record = { timestamp: Date.now(), data: payload };
+    const cleaned = { ...payload };
+    delete cleaned.cacheStore;
+    const record = { timestamp: Date.now(), data: cleaned };
     inMemoryInfoCache.set(stockNo, record);
     try {
         await store.setJSON(stockNo, record);
@@ -311,10 +290,10 @@ function extractUSStockMetadata(data, stockNo) {
     };
 }
 
-async function fetchUSStockInfo(stockNo) {
+async function fetchUSStockInfo(stockNo, options = {}) {
     const normalized = normalizeStockNo(stockNo);
     if (!normalized) return { stockNo, stockName: stockNo };
-    const store = obtainStore('us_info_store');
+    const store = obtainStore('us_info_store', options.request);
     const cacheHit = await readInfoCache(store, normalized);
     if (cacheHit?.stockName) {
         return cacheHit;
@@ -344,8 +323,9 @@ async function fetchUSStockInfo(stockNo) {
             resolvedSymbol: metadata?.resolvedSymbol || null,
             source: metadata?.source || FINMIND_SOURCE_LABEL,
         };
+        const cacheStore = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
         await writeInfoCache(store, normalized, payload);
-        return payload;
+        return { ...payload, cacheStore };
     } catch (error) {
         console.error('[US Proxy v1.1] 取得 USStockInfo 失敗:', error);
         return {
@@ -560,7 +540,7 @@ export default async (req) => {
         }
 
         if (mode === 'info') {
-            const info = await fetchUSStockInfo(stockNo);
+            const info = await fetchUSStockInfo(stockNo, { request: req });
             return new Response(JSON.stringify(info), {
                 headers: { 'Content-Type': 'application/json' },
             });
@@ -580,7 +560,7 @@ export default async (req) => {
         const cacheKey = buildCacheKey(stockNo, buildRangeKey(range.startISO, range.endISO), {
             forceSource: normalizedForceSource || undefined,
         });
-        const store = obtainStore('us_price_store');
+        const store = obtainStore('us_price_store', req);
         const cacheBypassed = params.has('cacheBust');
 
         let payload = null;
@@ -592,7 +572,7 @@ export default async (req) => {
             const priceResult = await fetchUSPriceRange(stockNo, range.startISO, range.endISO, {
                 forceSource: normalizedForceSource || undefined,
             });
-            const info = await fetchUSStockInfo(stockNo);
+            const info = await fetchUSStockInfo(stockNo, { request: req });
             const dataRows = Array.isArray(priceResult.rows) ? priceResult.rows : [];
             const primarySource = priceResult.primarySource || FINMIND_SOURCE_LABEL;
             const sourceListRaw = Array.isArray(priceResult.sources) && priceResult.sources.length > 0

@@ -1014,6 +1014,103 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <div class="card shadow-lg mt-8" id="blob-usage-card">
+                                    <div class="card-header flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="database" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                Blob 流量監控
+                                            </h3>
+                                            <p class="card-description">觀察 Netlify Blob 讀寫用量與近期事件</p>
+                                        </div>
+                                        <div
+                                            id="blob-usage-version-badge"
+                                            class="text-[11px] px-2 py-1 rounded-md border"
+                                            style="border-color: var(--border); color: var(--muted-foreground);"
+                                        >
+                                            —
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div class="flex flex-wrap items-end gap-3">
+                                            <div>
+                                                <label for="blob-usage-date" class="block text-xs font-medium mb-1" style="color: var(--foreground);">統計日期</label>
+                                                <input
+                                                    type="date"
+                                                    id="blob-usage-date"
+                                                    class="px-3 py-2 border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label for="blob-usage-limit" class="block text-xs font-medium mb-1" style="color: var(--foreground);">事件上限</label>
+                                                <select
+                                                    id="blob-usage-limit"
+                                                    class="px-3 py-2 border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                >
+                                                    <option value="10">10 筆</option>
+                                                    <option value="20" selected>20 筆</option>
+                                                    <option value="50">50 筆</option>
+                                                </select>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <button
+                                                    id="blob-usage-refresh"
+                                                    type="button"
+                                                    class="btn-primary px-4 py-2 text-sm font-medium rounded-md flex items-center gap-1"
+                                                    style="background-color: var(--primary); color: var(--primary-foreground); border-color: var(--primary);"
+                                                >
+                                                    <i data-lucide="refresh-cw" class="lucide-sm"></i>
+                                                    重新整理
+                                                </button>
+                                                <button
+                                                    id="blob-usage-reset"
+                                                    type="button"
+                                                    class="btn-outline px-3 py-2 text-sm font-medium rounded-md"
+                                                    style="color: var(--foreground); border-color: var(--border);"
+                                                >
+                                                    回到今日
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div id="blob-usage-status" class="text-xs" style="color: var(--muted-foreground);">尚未載入監控資料</div>
+                                        <div id="blob-usage-summary" class="hidden space-y-6">
+                                            <div class="grid md:grid-cols-2 gap-4">
+                                                <div id="blob-usage-daily-section" class="rounded-lg border p-4 bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                    <div class="flex items-center justify-between text-[11px]" style="color: var(--muted-foreground);">
+                                                        <span>指定日期統計</span>
+                                                        <span id="blob-usage-daily-updated"></span>
+                                                    </div>
+                                                    <div id="blob-usage-daily-totals" class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"></div>
+                                                    <div class="mt-4">
+                                                        <div class="text-[11px] font-medium" style="color: var(--foreground);">主要 Store</div>
+                                                        <div id="blob-usage-store-list" class="mt-2 space-y-2 text-[11px]"></div>
+                                                    </div>
+                                                </div>
+                                                <div id="blob-usage-global-section" class="rounded-lg border p-4 bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                    <div class="flex items-center justify-between text-[11px]" style="color: var(--muted-foreground);">
+                                                        <span>全域累積</span>
+                                                        <span id="blob-usage-global-updated"></span>
+                                                    </div>
+                                                    <div id="blob-usage-global-totals" class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm"></div>
+                                                    <div class="mt-4">
+                                                        <div class="text-[11px] font-medium" style="color: var(--foreground);">主要客戶端（全域）</div>
+                                                        <div id="blob-usage-client-list" class="mt-2 space-y-2 text-[11px]"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div class="flex items-center justify-between text-[11px]" style="color: var(--muted-foreground);">
+                                                    <span>最近事件</span>
+                                                    <span id="blob-usage-event-count"></span>
+                                                </div>
+                                                <div id="blob-usage-events" class="mt-3 space-y-2"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Performance Tab -->

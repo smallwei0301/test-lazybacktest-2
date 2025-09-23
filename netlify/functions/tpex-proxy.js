@@ -4,12 +4,12 @@
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TPEX-PROXY-20241216A
 // Patch Tag: LB-TPEX-PROXY-20250320A
-import { getStore } from '@netlify/blobs';
+// Patch Tag: LB-BLOB-MONITOR-20250624A
+import { obtainMonitoredStore } from '../lib/blob-monitor.js';
 import fetch from 'node-fetch';
 
 const TPEX_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
-const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
 const FINMIND_BASE_URL = 'https://api.finmindtrade.com/api/v4/data';
@@ -24,31 +24,8 @@ function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
 }
 
-function createMemoryBlobStore() {
-    const memory = new Map();
-    return {
-        async get(key) {
-            return memory.get(key) || null;
-        },
-        async setJSON(key, value) {
-            memory.set(key, value);
-        },
-    };
-}
-
-function obtainStore(name) {
-    try {
-        return getStore(name);
-    } catch (error) {
-        if (error?.name === 'MissingBlobsEnvironmentError') {
-            if (!inMemoryBlobStores.has(name)) {
-                console.warn('[TPEX Proxy v10.4] Netlify Blobs 未配置，使用記憶體快取模擬。');
-                inMemoryBlobStores.set(name, createMemoryBlobStore());
-            }
-            return inMemoryBlobStores.get(name);
-        }
-        throw error;
-    }
+function obtainStore(name, request) {
+    return obtainMonitoredStore({ name, source: 'tpex-proxy', request });
 }
 
 function normaliseFinMindErrorMessage(message) {
@@ -290,11 +267,12 @@ async function readCache(store, cacheKey) {
         return { ...memoryHit.data, source: 'memory' };
     }
 
+    const storageLayer = store?.__blobMonitorLayer === 'memory-fallback' ? 'memory' : 'blob';
     try {
         const blobHit = await store.get(cacheKey, { type: 'json' });
         if (blobHit && Date.now() - blobHit.timestamp < TPEX_CACHE_TTL_MS) {
             inMemoryCache.set(cacheKey, { timestamp: Date.now(), data: blobHit.data });
-            return { ...blobHit.data, source: 'blob' };
+            return { ...blobHit.data, source: storageLayer };
         }
     } catch (error) {
         if (isQuotaError(error)) {
@@ -760,7 +738,7 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: error.message }), { status: 400 });
         }
 
-        const store = obtainStore('tpex_cache_store');
+        const store = obtainStore('tpex_cache_store', req);
         const combinedRows = [];
         const sourceFlags = new Set();
         let stockName = '';
