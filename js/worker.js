@@ -14,6 +14,7 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-PROGRESS-REDESIGN-20250710A
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -21,6 +22,160 @@ const workerYearSupersetCache = new Map(); // Map<marketKey, Map<stockKey, Map<y
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
+
+const BACKTEST_PROGRESS_SEGMENTS = [
+  {
+    key: "init",
+    start: 0,
+    end: 4,
+    label: "準備執行回測...",
+  },
+  {
+    key: "cache-scan",
+    start: 4,
+    end: 18,
+    label: "檢查快取...",
+  },
+  {
+    key: "blob-scan",
+    start: 18,
+    end: 26,
+    label: "檢查 Netlify Blob 範圍快取...",
+  },
+  {
+    key: "remote-plan",
+    start: 26,
+    end: 32,
+    label: "規劃遠端抓取...",
+  },
+  {
+    key: "fetch",
+    start: 32,
+    end: 58,
+    label: "下載歷史行情...",
+  },
+  {
+    key: "normalize",
+    start: 58,
+    end: 68,
+    label: "整理數據...",
+  },
+  {
+    key: "indicators",
+    start: 68,
+    end: 80,
+    label: "計算指標...",
+  },
+  {
+    key: "backtest",
+    start: 80,
+    end: 94,
+    label: "回測模擬中...",
+  },
+  {
+    key: "finalize",
+    start: 94,
+    end: 100,
+    label: "彙整結果...",
+  },
+];
+
+let backtestProgressReporter = null;
+
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function createStageProgressReporter(segments) {
+  const stageMap = new Map();
+  segments.forEach((segment) => {
+    if (!segment || !segment.key) return;
+    const start = Number.isFinite(segment.start) ? segment.start : 0;
+    const end = Number.isFinite(segment.end) ? segment.end : start;
+    stageMap.set(segment.key, {
+      key: segment.key,
+      start: Math.max(0, Math.min(100, start)),
+      end: Math.max(0, Math.min(100, end)),
+      label: segment.label || "處理中...",
+    });
+  });
+  let lastProgress = 0;
+  let lastStage = null;
+
+  function emit(stageKey, ratio = 0, message) {
+    const stage = stageMap.get(stageKey);
+    if (!stage) return;
+    const span = Math.max(0, stage.end - stage.start);
+    const normalized = span > 0 ? clamp01(ratio) : 1;
+    const computed = stage.start + span * normalized;
+    const value = Math.max(lastProgress, computed);
+    lastProgress = value;
+    const payload = {
+      type: "progress",
+      progress: Number(value.toFixed(2)),
+      stage: stageKey,
+    };
+    if (message) {
+      payload.message = message;
+    } else if (lastStage !== stageKey || !lastStage) {
+      payload.message = stage.label;
+    } else if (stage.label) {
+      payload.message = stage.label;
+    }
+    self.postMessage(payload);
+    lastStage = stageKey;
+  }
+
+  function complete(message) {
+    const stage = stageMap.get("finalize");
+    if (stage) {
+      const value = Math.max(lastProgress, stage.end);
+      lastProgress = value;
+      self.postMessage({
+        type: "progress",
+        progress: Number(value.toFixed(2)),
+        message: message || stage.label,
+        stage: "finalize",
+      });
+    } else {
+      const value = Math.max(lastProgress, 100);
+      lastProgress = value;
+      self.postMessage({
+        type: "progress",
+        progress: Number(value.toFixed(2)),
+        message: message || "處理完成",
+        stage: "complete",
+      });
+    }
+  }
+
+  return {
+    emit,
+    complete,
+    get value() {
+      return lastProgress;
+    },
+  };
+}
+
+function beginBacktestProgress() {
+  backtestProgressReporter = createStageProgressReporter(
+    BACKTEST_PROGRESS_SEGMENTS,
+  );
+  backtestProgressReporter.emit("init", 0, "準備執行回測...");
+  return backtestProgressReporter;
+}
+
+function getBacktestProgress() {
+  return backtestProgressReporter;
+}
+
+function clearBacktestProgress() {
+  backtestProgressReporter = null;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
@@ -2011,6 +2166,7 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
+  const progress = getBacktestProgress();
   const rangeFetchInfo = {
     provider: "netlify-blob-range",
     market: marketKey,
@@ -2277,12 +2433,12 @@ async function tryFetchRangeFromBlob({
     priceMode: getPriceModeKey(false),
   };
   setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
-
-  self.postMessage({
-    type: "progress",
-    progress: 38,
-    message: "Netlify Blob 範圍快取整理中...",
-  });
+  if (progress) {
+    progress.emit("blob-scan", 1, "命中 Netlify Blob 範圍快取...");
+    progress.emit("fetch", 1, "載入 Netlify Blob 範圍快取...");
+    progress.emit("normalize", 0.6, "整理 Netlify Blob 範圍資料...");
+    progress.emit("normalize", 1, "整理 Netlify Blob 範圍資料完成...");
+  }
 
   return {
     data: deduped,
@@ -2338,6 +2494,10 @@ async function fetchStockData(
     marketKey,
   );
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
+  const progress = getBacktestProgress();
+  if (progress) {
+    progress.emit("cache-scan", 0, "檢查快取...");
+  }
   const fetchDiagnostics = {
     stockNo,
     marketKey,
@@ -2362,11 +2522,9 @@ async function fetchStockData(
     if (workerLastMeta && typeof workerLastMeta === "object") {
       workerLastMeta = { ...workerLastMeta, diagnostics: cacheDiagnostics };
     }
-    self.postMessage({
-      type: "progress",
-      progress: 15,
-      message: "命中背景快取...",
-    });
+    if (progress) {
+      progress.emit("cache-scan", 1, "命中背景快取...");
+    }
     return {
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
@@ -2437,11 +2595,9 @@ async function fetchStockData(
       optionLookbackDays,
     });
     if (supersetResult) {
-      self.postMessage({
-        type: "progress",
-        progress: 6,
-        message: "命中年度 Superset 快取...",
-      });
+      if (progress) {
+        progress.emit("cache-scan", 0.6, "命中年度 Superset 快取...");
+      }
       return supersetResult;
     }
   }
@@ -2449,11 +2605,9 @@ async function fetchStockData(
   let blobRangeAttempted = false;
   if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
     blobRangeAttempted = true;
-    self.postMessage({
-      type: "progress",
-      progress: 8,
-      message: "檢查 Netlify Blob 範圍快取...",
-    });
+    if (progress) {
+      progress.emit("blob-scan", 0, "檢查 Netlify Blob 範圍快取...");
+    }
     const blobRangeResult = await tryFetchRangeFromBlob({
       stockNo,
       startDate,
@@ -2470,19 +2624,20 @@ async function fetchStockData(
     if (blobRangeResult) {
       return blobRangeResult;
     }
+    if (progress) {
+      progress.emit(
+        "blob-scan",
+        1,
+        "未命中 Netlify Blob 範圍快取，準備改用遠端數據...",
+      );
+    }
   }
 
   if (adjusted) {
-    self.postMessage({
-      type: "progress",
-      progress: 8,
-      message: "準備抓取還原股價...",
-    });
-    self.postMessage({
-      type: "progress",
-      progress: 18,
-      message: "呼叫還原股價服務...",
-    });
+    if (progress) {
+      progress.emit("remote-plan", 0, "準備抓取還原股價...");
+      progress.emit("remote-plan", 1, "呼叫還原股價服務...");
+    }
     const adjustedResult = await fetchAdjustedPriceRange(
       stockNo,
       startDate,
@@ -2490,6 +2645,10 @@ async function fetchStockData(
       marketKey,
       { splitAdjustment: split },
     );
+    if (progress) {
+      progress.emit("fetch", 1, "取得還原股價完成...");
+      progress.emit("normalize", 0.4, "整理還原後資料...");
+    }
     const adjustedRows = Array.isArray(adjustedResult?.data)
       ? adjustedResult.data
       : [];
@@ -2568,6 +2727,9 @@ async function fetchStockData(
       priceMode: getPriceModeKey(adjusted),
     };
     setWorkerCacheEntry(marketKey, cacheKey, adjustedEntry);
+    if (progress) {
+      progress.emit("normalize", 1, "整理還原後資料完成...");
+    }
     return {
       data: adjustedResult.data,
       dataSource: adjustedResult.dataSource,
@@ -2615,11 +2777,9 @@ async function fetchStockData(
     };
   }
 
-  self.postMessage({
-    type: "progress",
-    progress: blobRangeAttempted ? 12 : 5,
-    message: "準備抓取原始數據...",
-  });
+  if (progress) {
+    progress.emit("remote-plan", blobRangeAttempted ? 0.4 : 0, "準備抓取原始數據...");
+  }
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -2689,6 +2849,9 @@ async function fetchStockData(
     months: segment.months.map((month) => month.monthKey),
     size: segment.months.length,
   }));
+  if (progress) {
+    progress.emit("remote-plan", 1, "建立下載佇列...");
+  }
   const totalMonths = months.length;
   let completedMonths = 0;
 
@@ -2993,14 +3156,17 @@ async function fetchStockData(
       };
     } finally {
       completedMonths += 1;
-      const progress = 10 + Math.round((completedMonths / totalMonths) * 35);
-      const phaseLabel =
-        monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
-      self.postMessage({
-        type: "progress",
-        progress,
-        message: `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
-      });
+      if (progress) {
+        const ratio =
+          totalMonths > 0 ? clamp01(completedMonths / totalMonths) : 1;
+        const phaseLabel =
+          monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
+        progress.emit(
+          "fetch",
+          ratio,
+          `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
+        );
+      }
     }
   }
 
@@ -3051,7 +3217,10 @@ async function fetchStockData(
     fetchDiagnostics.forcedSources = Array.from(fetchForcedSources);
   }
 
-  self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
+  if (progress) {
+    progress.emit("fetch", 1, "下載歷史行情完成...");
+    progress.emit("normalize", 0.25, "整理數據...");
+  }
   const deduped = dedupeAndSortData(normalizedRows);
   const defaultRemoteLabel = isTpex
     ? adjusted
@@ -3154,6 +3323,10 @@ async function fetchStockData(
     );
   }
 
+  if (progress) {
+    progress.emit("normalize", 1, "資料整理完成...");
+  }
+
   return {
     data: deduped,
     dataSource: dataSourceLabel,
@@ -3184,12 +3357,10 @@ async function fetchTAIEXData(start, end) {
 
   // 注意：這裡需要實際的 TAIEX API，暫時使用模擬數據結構
   // 在實際實現中，應該調用適當的台灣加權指數 API
-
-  self.postMessage({
-    type: "progress",
-    progress: 25,
-    message: "獲取加權指數數據...",
-  });
+  const progress = getBacktestProgress();
+  if (progress) {
+    progress.emit("fetch", 0.5, "獲取加權指數數據...");
+  }
 
   // 實際實現時應該替換為真實的 TAIEX API 調用
   for (let i = 0; i < dates.length; i++) {
@@ -3646,11 +3817,10 @@ function calculateMaxDrawdown(values) {
 
 // --- 計算所有指標 ---
 function calculateAllIndicators(data, params) {
-  /* ... (程式碼與上次 Part 3 相同) ... */ self.postMessage({
-    type: "progress",
-    progress: 55,
-    message: "計算指標...",
-  });
+  const progress = getBacktestProgress();
+  if (progress) {
+    progress.emit("indicators", 0, "計算指標...");
+  }
   const closes = data.map((d) => d.close);
   const highs = data.map((d) => d.high);
   const lows = data.map((d) => d.low);
@@ -4014,11 +4184,9 @@ function calculateAllIndicators(data, params) {
     console.error("[Worker] Indicator calculation error:", calcError);
     throw new Error(`計算技術指標時發生錯誤: ${calcError.message}`);
   }
-  self.postMessage({
-    type: "progress",
-    progress: 65,
-    message: "指標計算完成...",
-  });
+  if (progress) {
+    progress.emit("indicators", 1, "指標計算完成...");
+  }
   return indic;
 }
 
@@ -4796,12 +4964,10 @@ function runStrategy(data, params) {
     throw new TypeError("傳遞給 runStrategy 的資料格式錯誤，必須是陣列。");
   }
   // --- 保護機制結束 ---
-
-  self.postMessage({
-    type: "progress",
-    progress: 70,
-    message: "回測模擬中...",
-  });
+  const progress = getBacktestProgress();
+  if (progress) {
+    progress.emit("backtest", 0, "回測模擬中...");
+  }
   const n = data.length;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
@@ -6353,8 +6519,10 @@ function runStrategy(data, params) {
       n > startIdx &&
       i % Math.floor((n - startIdx) / 20 || 1) === 0
     ) {
-      const p = 70 + Math.floor(((i - startIdx) / (n - startIdx)) * 25);
-      self.postMessage({ type: "progress", progress: Math.min(95, p) });
+      if (progress) {
+        const ratio = clamp01((i - startIdx) / Math.max(1, n - startIdx));
+        progress.emit("backtest", ratio, null);
+      }
     }
   } // --- End Loop ---
 
@@ -6475,11 +6643,9 @@ function runStrategy(data, params) {
       longTrailingStops: trailingLevels.longLevels,
       shortTrailingStops: trailingLevels.shortLevels,
     });
-    self.postMessage({
-      type: "progress",
-      progress: 95,
-      message: "計算最終結果...",
-    });
+    if (progress) {
+      progress.emit("finalize", 0, "計算最終結果...");
+    }
     portfolioVal[lastIdx] =
       initialCapital + (longPl[lastIdx] ?? 0) + (shortPl[lastIdx] ?? 0);
     strategyReturns[lastIdx] =
@@ -6872,7 +7038,9 @@ function runStrategy(data, params) {
       }
     }
 
-    self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    if (progress) {
+      progress.emit("finalize", 0.75, "彙整績效指標...");
+    }
     const visibleStartIdx = Math.max(0, effectiveStartIdx);
     const sliceArray = (arr) =>
       Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
@@ -7744,6 +7912,7 @@ self.onmessage = async function (e) {
     params?.startDate;
   try {
     if (type === "runBacktest") {
+      const progress = beginBacktestProgress();
       let dataToUse = null;
       let fetched = false;
       let outcome = null;
@@ -7763,6 +7932,10 @@ self.onmessage = async function (e) {
         console.log("[Worker] Using cached data for backtest.");
         dataToUse = cachedData;
         workerLastDataset = cachedData;
+        if (progress) {
+          progress.emit("cache-scan", 1, "使用主執行緒快取資料...");
+          progress.emit("normalize", 0.4, "整理主執行緒快取資料...");
+        }
         const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
         if (!existingEntry) {
           const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
@@ -7908,6 +8081,9 @@ self.onmessage = async function (e) {
             message: msg,
           },
         });
+        if (progress) {
+          progress.complete("查無資料");
+        }
         return;
       }
 
@@ -7935,7 +8111,14 @@ self.onmessage = async function (e) {
             message: msg,
           },
         });
+        if (progress) {
+          progress.complete("查無資料");
+        }
         return;
+      }
+
+      if (progress) {
+        progress.emit("normalize", 1, "資料整理完成...");
       }
 
       // 關鍵修正：
@@ -8057,6 +8240,9 @@ self.onmessage = async function (e) {
             ? params.marketType || params.market || "未知"
             : "快取",
         };
+      if (progress) {
+        progress.complete("回測完成");
+      }
       self.postMessage({
         type: "result",
         data: backtestResult,
@@ -8122,6 +8308,13 @@ self.onmessage = async function (e) {
           message: `Worker ${type} 錯誤: ${error.message || "未知錯誤"}`,
         },
       });
+    }
+    if (type === "runBacktest") {
+      clearBacktestProgress();
+    }
+  } finally {
+    if (type === "runBacktest") {
+      clearBacktestProgress();
     }
   }
 };

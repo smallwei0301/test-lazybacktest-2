@@ -1200,6 +1200,7 @@ function createProgressAnimator() {
     const AUTO_INTERVAL = 200;
     const AUTO_STEP = 1.8;
     const MAX_AUTO_PROGRESS = 99;
+    const AUTO_MAX_LEAD = 12;
     const MIN_DURATION = 320;
     const MAX_DURATION = 2400;
     const MS_PER_PERCENT = 45;
@@ -1344,8 +1345,8 @@ function createProgressAnimator() {
             let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
             const elapsed = startTimestamp ? now() - startTimestamp : 0;
             if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
-                if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
+              const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
+              if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
                     const fastRatio = normalizedTime / SHORT_FIRST_SEGMENT_TIME_RATIO;
                     const fastProgress = fastRatio * SHORT_FIRST_SEGMENT_PROGRESS;
                     nextCeiling = Math.max(nextCeiling, fastProgress);
@@ -1356,6 +1357,13 @@ function createProgressAnimator() {
                         + (remainingTimeRatio * SHORT_SECOND_SEGMENT_PROGRESS);
                     nextCeiling = Math.max(nextCeiling, slowProgress);
                 }
+            }
+            const allowedCeiling = Math.min(
+                MAX_AUTO_PROGRESS,
+                reportedValue + AUTO_MAX_LEAD,
+            );
+            if (nextCeiling > allowedCeiling) {
+                nextCeiling = allowedCeiling;
             }
             autoCeiling = Math.min(MAX_AUTO_PROGRESS, nextCeiling);
             if (autoCeiling > targetValue + 0.05) {
