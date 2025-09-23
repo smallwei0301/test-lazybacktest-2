@@ -503,29 +503,14 @@ function runBacktestInternal() {
                 const suggestionArea = document.getElementById('today-suggestion-area');
                 const suggestionText = document.getElementById('suggestion-text');
                 if(suggestionArea && suggestionText){
-                    const suggestion = data?.suggestion || null;
+                    suggestionText.textContent = data.suggestion || '無法取得建議';
                     suggestionArea.classList.remove('hidden', 'loading');
-                    const baseClass = 'my-4 p-4 border-l-4 rounded-md text-center';
-                    const styleMap = {
-                        'long-entry': 'bg-green-50 border-green-500 text-green-800',
-                        'long-hold': 'bg-green-50 border-green-500 text-green-800',
-                        'long-exit': 'bg-amber-50 border-amber-500 text-amber-800',
-                        'short-entry': 'bg-red-50 border-red-500 text-red-800',
-                        'short-hold': 'bg-red-50 border-red-500 text-red-800',
-                        'short-exit': 'bg-amber-50 border-amber-500 text-amber-800',
-                        flat: 'bg-slate-100 border-slate-400 text-slate-700',
-                        'hedged-hold': 'bg-sky-50 border-sky-500 text-sky-800',
-                        error: 'bg-red-100 border-red-500 text-red-700',
-                        default: 'bg-slate-100 border-slate-400 text-slate-700',
-                    };
-                    if (suggestion && typeof suggestion === 'object' && suggestion.message) {
-                        suggestionText.textContent = suggestion.message;
-                        const variant = suggestion.action && styleMap[suggestion.action] ? styleMap[suggestion.action] : styleMap.default;
-                        suggestionArea.className = `${baseClass} ${variant}`;
-                    } else {
-                        suggestionText.textContent = '無法取得建議';
-                        suggestionArea.className = `${baseClass} ${styleMap.default}`;
-                    }
+                     suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center'; // Base classes
+                    if (data.suggestion === '做多買入' || data.suggestion === '持有 (多)') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
+                    else if (data.suggestion === '做空賣出' || data.suggestion === '持有 (空)') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
+                    else if (data.suggestion === '做多賣出' || data.suggestion === '做空回補') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
+                    else if (data.suggestion === '等待') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
+                     else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
 
                     hideLoading();
                     showSuccess("回測完成！");
@@ -537,7 +522,7 @@ function runBacktestInternal() {
                 if(suggestionArea && suggestionText){
                     suggestionText.textContent = data.message || '計算建議時發生錯誤';
                     suggestionArea.classList.remove('hidden', 'loading');
-                    suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-red-100 border-red-500 text-red-700';
+                    suggestionArea.className = 'my-4 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md text-center';
                 }
                  hideLoading();
                  showError("回測完成，但計算建議時發生錯誤。");
