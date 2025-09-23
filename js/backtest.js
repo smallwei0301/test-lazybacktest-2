@@ -37,8 +37,8 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-// Patch Tag: LB-STRATEGY-STATUS-20250628A
-const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250628A';
+// Patch Tag: LB-STRATEGY-STATUS-20250629A
+const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250629A';
 const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
 const STRATEGY_STATUS_BADGE_VARIANTS = {
     positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
@@ -837,6 +837,20 @@ function formatPercentDiff(value) {
     return `${Math.abs(num).toFixed(2)} 個百分點`;
 }
 
+function splitSummaryIntoBulletLines(summary) {
+    if (typeof summary !== 'string') return [];
+    return summary
+        .split(/[；;]+/u)
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0)
+        .map((segment) => {
+            if (/[。！？]$/u.test(segment)) {
+                return segment;
+            }
+            return `${segment}。`;
+        });
+}
+
 function buildStrategyHealthSummary(result) {
     const thresholds = STRATEGY_HEALTH_THRESHOLDS;
     const highlights = [];
@@ -987,12 +1001,15 @@ function updateStrategyStatusCard(result) {
         badgeText = '策略加油';
         headlineText = '🛠️ 策略暫時落後';
         const bulletLines = [
-            `策略${metricLabel} ${formatPercentValue(strategyMetric)}。`,
-            `買入持有 ${formatPercentValue(buyHoldMetric)}。`,
-            `目前落後 ${formatPercentDiff(diff)}。`,
+            `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。`,
         ];
         if (healthSummary) {
-            bulletLines.push(healthSummary.endsWith('。') ? healthSummary : `${healthSummary}。`);
+            const healthLines = splitSummaryIntoBulletLines(healthSummary);
+            if (healthLines.length > 0) {
+                bulletLines.push(...healthLines);
+            } else {
+                bulletLines.push(healthSummary.endsWith('。') ? healthSummary : `${healthSummary}。`);
+            }
         }
         const bulletListHtml = bulletLines
             .map((line) => `<li>${escapeHtml(line)}</li>`)

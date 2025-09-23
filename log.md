@@ -1,3 +1,9 @@
+# 2025-06-29 — Patch LB-STRATEGY-STATUS-20250629A
+- **Issue recap**: 策略落後時的條列仍將多句診斷塞進同一行，讀起來像段落而非清晰的檢查清單，使用者難以逐項確認風險重點。
+- **Fix**: `updateStrategyStatusCard` 將勝負差距整併為單句要點，並利用 `splitSummaryIntoBulletLines` 把指標體檢依句拆成獨立項目呈現，維持每行一個提醒。
+- **UI**: 調整策略速報卡片的版本標記為 `LB-STRATEGY-STATUS-20250629A`，避免與舊版提示混淆。
+- **Testing**: 受限於容器無法連線回測 API 與啟動瀏覽器，尚未實際跑回測；需於可連線環境再驗證 console 無錯誤。
+
 # 2025-06-28 — Patch LB-STRATEGY-STATUS-20250628A
 - **Issue recap**: 落後狀態的提示集中在同一段落內，重點句與績效數據混在一起，不利於使用者快速掃描戰況與風險評語。
 - **Fix**: `updateStrategyStatusCard` 調整落後情境的內容結構，將「快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。」獨立為放大首句，後續績效差距與指標體檢改以條列呈現，每行一個句子。
