@@ -1,3 +1,9 @@
+# 2025-07-08 — Patch LB-BLOB-RANGE-20250708A
+- **Issue recap**: 台股／上櫃回測在暖身區間長時需逐月呼叫 Proxy，雖已調整佇列仍造成高並發請求；Netlify Blobs 範圍快取以實際起訖日為 key，日流量達萬人時容易寫入大量重複區間並推高回測等待時間。
+- **Fix**: Netlify `stock-range` 函式改以月份對齊的 canonical key 寫入 Blobs，僅保存完整月份序列並回傳 meta；Worker 在未調整股價時優先呼叫 Blob 範圍快取，命中即可直接整理回測資料並寫入背景快取，落空或覆蓋不足時再退回逐月 Proxy。
+- **Diagnostics**: `fetchDiagnostics.rangeFetch` 記錄 Blob 範圍快取命中、canonical key、覆蓋落差與耗時，並在資料源標籤中標示「Netlify Blob 範圍快取／組裝」；函式回應 meta 同步回傳 canonical 起訖與月數，便於監控 Blob 使用量與資料完整性。
+- **Testing**: 受限於容器無瀏覽器，僅完成程式層邏輯檢視；後續需在本機瀏覽器實機回測確認 Blob 快取命中與 console 無錯誤。
+
 # 2025-07-05 — Patch LB-COVERAGE-STREAM-20250705A
 - **Issue recap**: 暖身補抓會同時平行呼叫多個月份 Proxy，造成瞬時負載偏高且 `lastForcedReloadAt` 提前更新，仍可能沿用殘缺 coverage；資料快取也缺乏分市場 TTL，舊資料不易自動失效。
 - **Fix**: Worker 將 dataStartDate~effectiveStartDate 切成暖身佇列，逐段排程補抓並僅在成功填補缺口後更新 `lastForcedReloadAt`；主流程與優化流程導入記憶體＋`localStorage` 市場 TTL（台股 7 天、美股 3 天），逾期會同步清除兩層快取並更新索引。

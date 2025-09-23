@@ -1,7 +1,7 @@
 
 importScripts('shared-lookback.js');
 
-// --- Worker Data Acquisition & Cache (v11.6 - US Yahoo fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -13,7 +13,8 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
-const WORKER_DATA_VERSION = "v11.6";
+// Patch Tag: LB-BLOB-RANGE-20250708A
+const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -23,6 +24,13 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+
+function differenceInDays(laterDate, earlierDate) {
+  if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
+  if (!(earlierDate instanceof Date) || Number.isNaN(earlierDate.getTime())) return null;
+  const diff = laterDate.getTime() - earlierDate.getTime();
+  return Math.floor(diff / DAY_MS);
+}
 
 function getPrimaryForceSource(marketKey, adjusted) {
   if (adjusted) {
@@ -1479,6 +1487,228 @@ async function runWithConcurrency(items, limit, workerFn) {
   return results;
 }
 
+async function tryFetchRangeFromBlob({
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  startDateObj,
+  endDateObj,
+  optionEffectiveStart,
+  optionLookbackDays,
+  fetchDiagnostics,
+  cacheKey,
+  split,
+}) {
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") {
+    return null;
+  }
+
+  const rangeFetchInfo = {
+    provider: "netlify-blob-range",
+    market: marketKey,
+    status: "pending",
+    cacheHit: false,
+  };
+  fetchDiagnostics.rangeFetch = rangeFetchInfo;
+
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    marketType: marketKey,
+  });
+  const requestUrl = `/.netlify/functions/stock-range?${params.toString()}`;
+  const startedAt = Date.now();
+  let response;
+  try {
+    response = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+  } catch (error) {
+    rangeFetchInfo.status = "network-error";
+    rangeFetchInfo.error = error?.message || String(error);
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍請求失敗 (${stockNo})：`,
+      error,
+    );
+    return null;
+  }
+
+  rangeFetchInfo.httpStatus = response.status;
+  if (!response.ok) {
+    rangeFetchInfo.status = "http-error";
+    rangeFetchInfo.error = `HTTP ${response.status}`;
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍 HTTP ${response.status} (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    rangeFetchInfo.status = "parse-error";
+    rangeFetchInfo.error = error?.message || String(error);
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應解析失敗 (${stockNo})：`,
+      error,
+    );
+    return null;
+  }
+
+  if (!payload || !Array.isArray(payload.aaData)) {
+    rangeFetchInfo.status = "invalid-payload";
+    rangeFetchInfo.error = "Missing aaData";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應缺少 aaData (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const normalizedRows = payload.aaData
+    .map((row) =>
+      normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj),
+    )
+    .filter(Boolean);
+  if (normalizedRows.length === 0) {
+    rangeFetchInfo.status = "empty";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應為空 (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const deduped = dedupeAndSortData(normalizedRows);
+  if (deduped.length === 0) {
+    rangeFetchInfo.status = "empty";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍排序後仍無資料 (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const firstDate = deduped[0]?.date || null;
+  const lastDate = deduped[deduped.length - 1]?.date || null;
+  const firstDateObj = firstDate ? new Date(firstDate) : null;
+  const lastDateObj = lastDate ? new Date(lastDate) : null;
+  const startGapRaw = firstDateObj ? differenceInDays(firstDateObj, startDateObj) : null;
+  const endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+  const startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+  const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+
+  rangeFetchInfo.canonicalKey = payload?.meta?.canonicalKey || null;
+  rangeFetchInfo.canonicalStart = payload?.meta?.canonicalStart || null;
+  rangeFetchInfo.canonicalEnd = payload?.meta?.canonicalEnd || null;
+  rangeFetchInfo.rangeCacheKey = payload?.meta?.rangeCacheKey || null;
+  rangeFetchInfo.cacheHit = Boolean(payload?.meta?.rangeCacheHit);
+  rangeFetchInfo.monthCount = payload?.meta?.monthCount ?? null;
+  rangeFetchInfo.rowCount = deduped.length;
+  rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
+  rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
+  rangeFetchInfo.durationMs = Date.now() - startedAt;
+  rangeFetchInfo.dataSource = payload?.dataSource || null;
+
+  const startGapExceeded =
+    Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
+  const endGapExceeded =
+    Number.isFinite(endGap) && endGap > COVERAGE_GAP_TOLERANCE_DAYS;
+
+  if (startGapExceeded || endGapExceeded) {
+    rangeFetchInfo.status = "insufficient";
+    rangeFetchInfo.reason = startGapExceeded ? "start-gap" : "end-gap";
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料覆蓋不足 (startGap=${
+        startGap ?? "N/A"
+      }, endGap=${endGap ?? "N/A"})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  rangeFetchInfo.status = "success";
+
+  const dataStartDate = firstDate || startDate;
+  const dataSourceFlags = new Set();
+  if (typeof payload.dataSource === "string" && payload.dataSource.trim() !== "") {
+    dataSourceFlags.add(payload.dataSource);
+  }
+  dataSourceFlags.add(
+    rangeFetchInfo.cacheHit ? "Netlify Blob 範圍快取" : "Netlify Blob 範圍組裝",
+  );
+
+  const defaultRemoteLabel =
+    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+
+  const dataSourceLabel = summariseDataSourceFlags(dataSourceFlags, defaultRemoteLabel, {
+    market: marketKey,
+    adjusted: false,
+  });
+
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate,
+    endDate,
+  });
+
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+  if (Number.isFinite(overview?.firstValidCloseGapFromRequested)) {
+    fetchDiagnostics.firstValidCloseGapFromRequested =
+      overview.firstValidCloseGapFromRequested;
+  }
+  if (Number.isFinite(overview?.firstValidCloseGapFromEffective)) {
+    fetchDiagnostics.firstValidCloseGapFromEffective =
+      overview.firstValidCloseGapFromEffective;
+  }
+  fetchDiagnostics.usedCache = false;
+
+  const cacheEntry = {
+    data: deduped,
+    stockName: payload.stockName || stockNo,
+    dataSource: dataSourceLabel,
+    timestamp: Date.now(),
+    meta: {
+      stockNo,
+      startDate,
+      dataStartDate,
+      effectiveStartDate: optionEffectiveStart,
+      endDate,
+      priceMode: getPriceModeKey(false),
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
+      diagnostics: fetchDiagnostics,
+      rangeCache: payload?.meta || null,
+    },
+    priceMode: getPriceModeKey(false),
+  };
+  setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
+
+  self.postMessage({
+    type: "progress",
+    progress: 38,
+    message: "Netlify Blob 範圍快取整理中...",
+  });
+
+  return {
+    data: deduped,
+    dataSource: dataSourceLabel,
+    stockName: payload.stockName || stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    dataStartDate,
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
+  };
+}
+
 async function fetchStockData(
   stockNo,
   startDate,
@@ -1596,13 +1826,38 @@ async function fetchStockData(
     };
   }
 
-  self.postMessage({
-    type: "progress",
-    progress: adjusted ? 8 : 5,
-    message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
-  });
+  let blobRangeAttempted = false;
+  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+    blobRangeAttempted = true;
+    self.postMessage({
+      type: "progress",
+      progress: 8,
+      message: "檢查 Netlify Blob 範圍快取...",
+    });
+    const blobRangeResult = await tryFetchRangeFromBlob({
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+      startDateObj,
+      endDateObj,
+      optionEffectiveStart,
+      optionLookbackDays,
+      fetchDiagnostics,
+      cacheKey,
+      split,
+    });
+    if (blobRangeResult) {
+      return blobRangeResult;
+    }
+  }
 
   if (adjusted) {
+    self.postMessage({
+      type: "progress",
+      progress: 8,
+      message: "準備抓取還原股價...",
+    });
     self.postMessage({
       type: "progress",
       progress: 18,
@@ -1735,6 +1990,12 @@ async function fetchStockData(
       diagnostics: adjustedDiagnostics,
     };
   }
+
+  self.postMessage({
+    type: "progress",
+    progress: blobRangeAttempted ? 12 : 5,
+    message: "準備抓取原始數據...",
+  });
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {

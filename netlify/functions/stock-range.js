@@ -1,5 +1,6 @@
-﻿// netlify/functions/stock-range.js
+// netlify/functions/stock-range.js (v2.1 - canonical blob range cache)
 // Consolidated range endpoint to batch month-level fetches and cache merged results.
+// Patch Tag: LB-BLOB-RANGE-20250708A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -10,6 +11,31 @@ const RANGE_TTL_MS = 12 * 60 * 60 * 1000; // refresh merged cache every 12 hours
 const inFlightTwseMonthCache = new Map(); // per-invocation memoization to avoid duplicate fetches
 
 const isQuotaError = (error) => Boolean(error && (error.status === 402 || error.status === 429));
+
+function formatUTCDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getCanonicalRangeBounds(startDate, endDate) {
+    const canonicalStart = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+    const canonicalEndMonthStart = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
+    const canonicalEnd = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, 0));
+    const canonicalStartMonth = `${canonicalStart.getUTCFullYear()}${String(canonicalStart.getUTCMonth() + 1).padStart(2, '0')}`;
+    const canonicalEndMonth = `${canonicalEndMonthStart.getUTCFullYear()}${String(canonicalEndMonthStart.getUTCMonth() + 1).padStart(2, '0')}`;
+    return {
+        canonicalStart,
+        canonicalEnd,
+        canonicalStartMonth,
+        canonicalEndMonth,
+        canonicalStartISO: formatUTCDate(canonicalStart),
+        canonicalEndISO: formatUTCDate(canonicalEnd),
+        canonicalKey: `${canonicalStartMonth}_${canonicalEndMonth}`,
+    };
+}
 
 function normalizeMarketType(marketType = 'TWSE') {
     const upper = String(marketType).toUpperCase();
@@ -156,7 +182,8 @@ async function composeTwseRange(stockNo, startDate, endDate) {
     return {
         stockName,
         aaData: merged,
-        dataSource: 'TWSE (range)'
+        dataSource: 'TWSE (range)',
+        monthCount: months.length,
     };
 }
 
@@ -311,19 +338,31 @@ export default async (req) => {
         }
 
         const rangeStore = getStore('stock_range_cache_store');
-        const rangeKey = `${marketType}_${stockNo}_${startDateStr}_${endDateStr}`;
+        const canonical = getCanonicalRangeBounds(startDate, endDate);
+        const rangeKey = `${marketType}_${stockNo}_${canonical.canonicalKey}`;
 
         try {
             const cachedRange = await rangeStore.get(rangeKey, { type: 'json' });
             if (cachedRange && cachedRange.data && (Date.now() - cachedRange.timestamp < RANGE_TTL_MS)) {
                 const base = cachedRange.data;
+                const sourceAaData = Array.isArray(base.aaData) ? base.aaData : [];
+                const filteredAaData = filterAaDataByRange(sourceAaData, startDate, endDate);
                 const payload = {
                     stockNo: base.stockNo || stockNo,
                     stockName: base.stockName || stockNo,
-                    iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
-                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
-                    dataSource: `${base.dataSource || marketType} (cache)`,
-                    marketType: base.marketType || marketType
+                    iTotalRecords: filteredAaData.length,
+                    aaData: filteredAaData,
+                    dataSource: base.dataSource || marketType,
+                    marketType: base.marketType || marketType,
+                    meta: {
+                        canonicalStart: base.canonicalStart || canonical.canonicalStartISO,
+                        canonicalEnd: base.canonicalEnd || canonical.canonicalEndISO,
+                        canonicalKey: base.canonicalKey || canonical.canonicalKey,
+                        rangeCacheKey: rangeKey,
+                        rangeCacheHit: true,
+                        monthCount: base.monthCount ?? null,
+                        aggregatedAt: base.aggregatedAt || null,
+                    }
                 };
                 return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
             }
@@ -337,7 +376,7 @@ export default async (req) => {
         if (marketType === 'TPEX') {
             merged = await composeTpexRange(stockNo);
         } else {
-            merged = await composeTwseRange(stockNo, startDate, endDate);
+            merged = await composeTwseRange(stockNo, canonical.canonicalStart, canonical.canonicalEnd);
         }
 
         const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);
@@ -347,11 +386,32 @@ export default async (req) => {
             iTotalRecords: filteredAaData.length,
             aaData: filteredAaData,
             dataSource: merged.dataSource,
-            marketType
+            marketType,
+            meta: {
+                canonicalStart: canonical.canonicalStartISO,
+                canonicalEnd: canonical.canonicalEndISO,
+                canonicalKey: canonical.canonicalKey,
+                rangeCacheKey: rangeKey,
+                rangeCacheHit: false,
+                monthCount: merged.monthCount ?? null,
+                aggregatedAt: new Date().toISOString(),
+            }
         };
 
         try {
-            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: responsePayload });
+            const cachePayload = {
+                stockNo,
+                stockName: merged.stockName || stockNo,
+                aaData: merged.aaData,
+                dataSource: merged.dataSource,
+                marketType,
+                canonicalStart: canonical.canonicalStartISO,
+                canonicalEnd: canonical.canonicalEndISO,
+                canonicalKey: canonical.canonicalKey,
+                monthCount: merged.monthCount ?? null,
+                aggregatedAt: responsePayload.meta.aggregatedAt,
+            };
+            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: cachePayload });
         } catch (error) {
             if (!isQuotaError(error)) {
                 console.warn('[Range Endpoint] Failed to persist range cache:', error);
