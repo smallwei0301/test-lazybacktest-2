@@ -2967,6 +2967,10 @@ async function runStagingOptimization() {
         return;
     }
 
+    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
+        window.lazybacktestMultiStagePanel.open();
+    }
+
     const runButton = document.getElementById('stagingOptimizationBtn');
     const applyButton = document.getElementById('applyStagingOptimizationBtn');
     if (applyButton) applyButton.disabled = true;
@@ -3203,6 +3207,9 @@ function applyBestStagingRecommendation() {
     if (!best) {
         updateStagingOptimizationStatus('尚未產生推薦分段，請先執行分段優化。', true);
         return;
+    }
+    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
+        window.lazybacktestMultiStagePanel.open();
     }
     if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.setValues === 'function') {
         window.lazybacktestStagedEntry.setValues(best.combination.entry.values, { manual: true });

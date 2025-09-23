@@ -350,6 +350,81 @@ window.lazybacktestStagedExit = {
     clearManual: () => stagedExitControls.clearManual(),
 };
 
+const multiStagePanelController = (() => {
+    const state = {
+        container: null,
+        toggle: null,
+        icon: null,
+        content: null,
+        expanded: false,
+    };
+
+    const ensureElements = () => {
+        if (state.container && state.toggle && state.icon && state.content) {
+            return true;
+        }
+        state.container = document.getElementById('multiStagePanel');
+        state.toggle = document.getElementById('multiStageToggle');
+        state.icon = document.getElementById('multiStageToggleIcon');
+        state.content = document.getElementById('multiStageContent');
+        return Boolean(state.container && state.toggle && state.icon && state.content);
+    };
+
+    const applyState = () => {
+        if (!ensureElements()) return;
+        const expanded = Boolean(state.expanded);
+        state.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (expanded) {
+            state.content.classList.remove('hidden');
+            state.icon.textContent = '−';
+        } else {
+            state.content.classList.add('hidden');
+            state.icon.textContent = '+';
+        }
+    };
+
+    const setExpanded = (flag) => {
+        state.expanded = Boolean(flag);
+        applyState();
+    };
+
+    const toggle = () => {
+        setExpanded(!state.expanded);
+    };
+
+    const bindEvents = () => {
+        if (!ensureElements()) return;
+        state.toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggle();
+        });
+    };
+
+    const init = () => {
+        if (!ensureElements()) return;
+        state.expanded = state.toggle.getAttribute('aria-expanded') === 'true';
+        bindEvents();
+        applyState();
+    };
+
+    return {
+        init,
+        open: () => setExpanded(true),
+        close: () => setExpanded(false),
+        toggle,
+        isOpen: () => Boolean(state.expanded),
+        ensure: ensureElements,
+    };
+})();
+
+window.lazybacktestMultiStagePanel = {
+    init: () => multiStagePanelController.init(),
+    open: () => multiStagePanelController.open(),
+    close: () => multiStagePanelController.close(),
+    toggle: () => multiStagePanelController.toggle(),
+    isOpen: () => multiStagePanelController.isOpen(),
+};
+
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
     open: false,
@@ -2120,6 +2195,10 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
+
+        if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
+            window.lazybacktestMultiStagePanel.init();
+        }
 
         if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.init === 'function') {
             window.lazybacktestStagedEntry.init();
