@@ -40,15 +40,15 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-const DATA_CACHE_INDEX_KEY = 'LB_DATA_CACHE_INDEX_V20250705A';
-const DATA_CACHE_VERSION = 'LB-COVERAGE-STREAM-20250705A';
+const DATA_CACHE_INDEX_KEY = 'LB_DATA_CACHE_INDEX_V20250723A';
+const DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
 const TW_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const US_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3;
 const DEFAULT_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
-const SESSION_DATA_CACHE_VERSION = 'LB-CACHE-TIER-20250720A';
-const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250720A';
-const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250720A::';
+const SESSION_DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
+const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
+const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
 const YEAR_STORAGE_VERSION = 'LB-CACHE-TIER-20250720A';
@@ -279,6 +279,7 @@ function persistSessionDataCacheEntry(cacheKey, cacheEntry, options = {}) {
         coverage: Array.isArray(cacheEntry.coverage) ? cacheEntry.coverage : [],
         meta: {
             stockName: cacheEntry.stockName || null,
+            stockNo: cacheEntry.stockNo || null,
             market: options.market || null,
             dataSource: cacheEntry.dataSource || null,
             dataSources: Array.isArray(cacheEntry.dataSources) ? cacheEntry.dataSources : [],
@@ -293,6 +294,7 @@ function persistSessionDataCacheEntry(cacheKey, cacheEntry, options = {}) {
             priceSource: cacheEntry.priceSource || null,
             fetchRange: cacheEntry.fetchRange || null,
             fetchDiagnostics: cacheEntry.fetchDiagnostics || null,
+            coverageFingerprint: cacheEntry.coverageFingerprint || null,
         },
     };
     try {
@@ -383,6 +385,20 @@ function computeCoverageFromRows(rows) {
     }
     segments.push({ start: utcToISODate(segStart), end: utcToISODate(segEnd - MAIN_DAY_MS) });
     return segments;
+}
+
+function computeCoverageFingerprint(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    const parts = coverage
+        .map((range) => {
+            if (!range || (!range.start && !range.end)) return null;
+            const start = range.start || '';
+            const end = range.end || '';
+            return `${start}~${end}`;
+        })
+        .filter(Boolean);
+    if (parts.length === 0) return null;
+    return parts.join('|');
 }
 
 function persistYearStorageSlices(context, dataset, options = {}) {
@@ -651,7 +667,10 @@ function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
     return {
         data: payload.data,
         coverage: Array.isArray(payload.coverage) ? payload.coverage : [],
+        coverageFingerprint: computeCoverageFingerprint(payload.coverage),
         stockName: meta.stockName || context.stockNo || null,
+        stockNo: meta.stockNo || context.stockNo || null,
+        market: meta.market || context.market || null,
         dataSources: sourceLabels,
         dataSource: summariseSourceLabels(sourceLabels),
         fetchedAt: payload.cachedAt || Date.now(),
@@ -698,8 +717,11 @@ function loadYearDatasetForRange(context, startISO, endISO) {
     return {
         data: combined,
         coverage,
+        coverageFingerprint: computeCoverageFingerprint(coverage),
         fetchedAt: Number.isFinite(fetchedAt) ? fetchedAt : Date.now(),
         stockName: slices.find((slice) => slice.stockNo)?.stockNo || context.stockNo || null,
+        stockNo: context.stockNo || null,
+        market: context.market || null,
         dataSource: '瀏覽器年度快取',
         dataSources: ['瀏覽器年度快取'],
     };
@@ -719,8 +741,13 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
             stockNo: curSettings.stockNo,
             startDate: curSettings.dataStartDate || curSettings.startDate,
             endDate: curSettings.endDate,
+            market: normalizedMarket,
         });
         if (sessionEntry) {
+            sessionEntry.stockNo = sessionEntry.stockNo || curSettings.stockNo;
+            sessionEntry.market = sessionEntry.market || normalizedMarket;
+            sessionEntry.coverageFingerprint = sessionEntry.coverageFingerprint
+                || computeCoverageFingerprint(sessionEntry.coverage);
             applyCacheStartMetadata(cacheKey, sessionEntry, curSettings.effectiveStartDate || curSettings.startDate, {
                 toleranceDays: START_GAP_TOLERANCE_DAYS,
                 acknowledgeExcessGap: true,
@@ -732,6 +759,7 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
                 priceMode: sessionEntry.priceMode || resolvePriceMode(curSettings),
                 splitAdjustment: curSettings.splitAdjustment,
                 dataStartDate: sessionEntry.dataStartDate || curSettings.dataStartDate || curSettings.startDate,
+                coverageFingerprint: sessionEntry.coverageFingerprint || computeCoverageFingerprint(sessionEntry.coverage),
             });
             return sessionEntry;
         }
@@ -747,7 +775,10 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
         const entry = {
             data: yearDataset.data,
             coverage: yearDataset.coverage,
+            coverageFingerprint: yearDataset.coverageFingerprint,
             stockName: yearDataset.stockName || curSettings.stockNo,
+            stockNo: curSettings.stockNo,
+            market: normalizedMarket,
             dataSources: yearDataset.dataSources || [yearDataset.dataSource],
             dataSource: summariseSourceLabels(yearDataset.dataSources || [yearDataset.dataSource]),
             fetchedAt: yearDataset.fetchedAt,
@@ -775,11 +806,155 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
             priceMode,
             splitAdjustment: curSettings.splitAdjustment,
             dataStartDate: entry.dataStartDate,
+            coverageFingerprint: entry.coverageFingerprint || computeCoverageFingerprint(entry.coverage),
         });
         persistSessionDataCacheEntry(cacheKey, entry, { market: normalizedMarket });
         return entry;
     }
     return null;
+}
+
+function findSupersetDatasetCandidate(curSettings, options = {}) {
+    if (!curSettings || !(cachedDataStore instanceof Map)) return null;
+    const normalizedMarket = normalizeMarketKeyForCache(
+        curSettings.market || curSettings.marketType || currentMarket || 'TWSE',
+    );
+    const targetStockNo = (curSettings.stockNo || '').toUpperCase();
+    const targetRange = {
+        start: curSettings.dataStartDate || curSettings.startDate,
+        end: curSettings.endDate,
+    };
+    const priceMode = resolvePriceMode(curSettings);
+    const splitFlag = Boolean(curSettings.splitAdjustment);
+    let best = null;
+    cachedDataStore.forEach((entry, key) => {
+        if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) return;
+        const entryStock = (entry.stockNo || '').toUpperCase();
+        if (entryStock !== targetStockNo) return;
+        const entryMarket = normalizeMarketKeyForCache(entry.market || normalizedMarket);
+        if (entryMarket !== normalizedMarket) return;
+        const entryMode = resolvePriceMode(entry);
+        if ((entryMode === 'adjusted') !== (priceMode === 'adjusted')) return;
+        if (Boolean(entry.splitAdjustment) !== splitFlag) return;
+        if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return;
+        if (!coverageCoversRange(entry.coverage, targetRange)) return;
+        if (options.excludeKey && options.excludeKey === key) return;
+        if (!best || (Number(entry.fetchedAt) || 0) > (Number(best.entry.fetchedAt) || 0)) {
+            best = { key, entry };
+        }
+    });
+    return best;
+}
+
+function materializeSupersetCacheEntry(cacheKey, curSettings) {
+    if (!cacheKey || !curSettings || !(cachedDataStore instanceof Map)) return null;
+    const normalizedMarket = normalizeMarketKeyForCache(
+        curSettings.market || curSettings.marketType || currentMarket || 'TWSE',
+    );
+    const existing = cachedDataStore.get(cacheKey);
+    const targetRange = {
+        start: curSettings.dataStartDate || curSettings.startDate,
+        end: curSettings.endDate,
+    };
+    if (
+        existing &&
+        Array.isArray(existing.data) &&
+        existing.data.length > 0 &&
+        coverageCoversRange(existing.coverage, targetRange)
+    ) {
+        existing.stockNo = existing.stockNo || curSettings.stockNo;
+        existing.market = existing.market || normalizedMarket;
+        existing.coverageFingerprint = existing.coverageFingerprint
+            || computeCoverageFingerprint(existing.coverage);
+        return existing;
+    }
+    const candidate = findSupersetDatasetCandidate(curSettings, { excludeKey: cacheKey });
+    if (!candidate) return null;
+    const priceMode = resolvePriceMode(curSettings);
+    const sliceStart = curSettings.dataStartDate || curSettings.startDate;
+    const sliceEnd = curSettings.endDate;
+    const sliceRows = candidate.entry.data.filter((row) =>
+        row && row.date >= sliceStart && row.date <= sliceEnd,
+    );
+    if (sliceRows.length === 0) return null;
+    const coverage = computeCoverageFromRows(sliceRows);
+    if (!coverageCoversRange(coverage, targetRange)) return null;
+    const coverageFingerprint = computeCoverageFingerprint(coverage);
+    const sourceLabels = Array.isArray(candidate.entry.dataSources)
+        ? candidate.entry.dataSources.slice()
+        : candidate.entry.dataSource
+            ? [candidate.entry.dataSource]
+            : [];
+    const supersetEntry = {
+        data: sliceRows,
+        coverage,
+        coverageFingerprint,
+        stockName: candidate.entry.stockName || curSettings.stockNo,
+        stockNo: curSettings.stockNo,
+        market: normalizedMarket,
+        dataSources: sourceLabels,
+        dataSource: summariseSourceLabels(sourceLabels),
+        fetchedAt: Number.isFinite(candidate.entry.fetchedAt)
+            ? candidate.entry.fetchedAt
+            : Date.now(),
+        adjustedPrice: priceMode === 'adjusted',
+        splitAdjustment: Boolean(curSettings.splitAdjustment),
+        priceMode,
+        dataStartDate: sliceStart,
+        effectiveStartDate: curSettings.effectiveStartDate || curSettings.startDate,
+        lookbackDays: curSettings.lookbackDays || candidate.entry.lookbackDays || null,
+        fetchRange: { start: sliceStart, end: sliceEnd },
+        summary: candidate.entry.summary || null,
+        adjustments: Array.isArray(candidate.entry.adjustments)
+            ? candidate.entry.adjustments
+            : [],
+        debugSteps: Array.isArray(candidate.entry.debugSteps)
+            ? candidate.entry.debugSteps
+            : [],
+        priceSource: candidate.entry.priceSource || null,
+        splitDiagnostics: candidate.entry.splitDiagnostics || null,
+        finmindStatus: candidate.entry.finmindStatus || null,
+        adjustmentFallbackApplied: Boolean(candidate.entry.adjustmentFallbackApplied),
+        adjustmentDebugLog: Array.isArray(candidate.entry.adjustmentDebugLog)
+            ? candidate.entry.adjustmentDebugLog
+            : [],
+        adjustmentChecks: Array.isArray(candidate.entry.adjustmentChecks)
+            ? candidate.entry.adjustmentChecks
+            : [],
+        datasetDiagnostics: candidate.entry.datasetDiagnostics || null,
+        fetchDiagnostics: normaliseFetchDiagnosticsForCacheReplay(
+            candidate.entry.fetchDiagnostics || null,
+            {
+                source: 'main-superset-cache',
+                requestedRange: { start: sliceStart, end: sliceEnd },
+                coverage,
+            },
+        ),
+    };
+    applyCacheStartMetadata(cacheKey, supersetEntry, supersetEntry.effectiveStartDate, {
+        toleranceDays: START_GAP_TOLERANCE_DAYS,
+        acknowledgeExcessGap: true,
+    });
+    cachedDataStore.set(cacheKey, supersetEntry);
+    persistDataCacheIndexEntry(cacheKey, {
+        market: normalizedMarket,
+        fetchedAt: supersetEntry.fetchedAt,
+        priceMode,
+        splitAdjustment: curSettings.splitAdjustment,
+        dataStartDate: supersetEntry.dataStartDate,
+        coverageFingerprint,
+    });
+    persistSessionDataCacheEntry(cacheKey, supersetEntry, { market: normalizedMarket });
+    persistYearStorageSlices({
+        market: normalizedMarket,
+        stockNo: curSettings.stockNo,
+        priceMode,
+        splitAdjustment: curSettings.splitAdjustment,
+    }, supersetEntry.data);
+    console.log(
+        `[Main] 使用年度 Superset 快取回填 ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd})。`,
+    );
+    return supersetEntry;
 }
 
 function parseISODateToUTC(iso) {
@@ -904,6 +1079,7 @@ function loadPersistentDataCacheIndex() {
                 priceMode: record.priceMode || null,
                 splitAdjustment: Boolean(record.splitAdjustment),
                 dataStartDate: record.dataStartDate || null,
+                coverageFingerprint: record.coverageFingerprint || null,
             });
         });
         return map;
@@ -924,6 +1100,7 @@ function savePersistentDataCacheIndex() {
             priceMode: entry.priceMode || null,
             splitAdjustment: entry.splitAdjustment ? 1 : 0,
             dataStartDate: entry.dataStartDate || null,
+            coverageFingerprint: entry.coverageFingerprint || null,
         }));
         const payload = { version: DATA_CACHE_VERSION, records };
         window.localStorage.setItem(DATA_CACHE_INDEX_KEY, JSON.stringify(payload));
@@ -942,6 +1119,7 @@ function persistDataCacheIndexEntry(cacheKey, meta) {
         priceMode: meta.priceMode || null,
         splitAdjustment: Boolean(meta.splitAdjustment),
         dataStartDate: meta.dataStartDate || null,
+        coverageFingerprint: meta.coverageFingerprint || null,
     };
     persistentDataCacheIndex.set(cacheKey, record);
     prunePersistentDataCacheIndex({ save: false });
@@ -1030,6 +1208,7 @@ function ensureDatasetCacheEntryFresh(cacheKey, entry, market) {
                 priceMode: entry.priceMode || null,
                 splitAdjustment: Boolean(entry.splitAdjustment),
                 dataStartDate: entry.dataStartDate || null,
+                coverageFingerprint: entry.coverageFingerprint || null,
             });
             savePersistentDataCacheIndex();
         }
@@ -1128,6 +1307,7 @@ function runBacktestInternal() {
         };
         const cacheKey = buildCacheKey(curSettings);
         hydrateDatasetFromStorage(cacheKey, curSettings);
+        materializeSupersetCacheEntry(cacheKey, curSettings);
         let useCache=!needsDataFetch(curSettings);
         let cachedEntry = null;
         if (useCache) {
@@ -1270,9 +1450,12 @@ function runBacktestInternal() {
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
+                        stockNo: curSettings.stockNo,
+                        market: curSettings.market,
                         dataSources: sourceArray,
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                         coverage: mergedCoverage,
+                        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
@@ -1299,12 +1482,13 @@ function runBacktestInternal() {
                         acknowledgeExcessGap: true,
                     });
                      cachedDataStore.set(cacheKey, cacheEntry);
-                     persistDataCacheIndexEntry(cacheKey, {
+                    persistDataCacheIndexEntry(cacheKey, {
                         market: curSettings.market,
                         fetchedAt: cacheEntry.fetchedAt || Date.now(),
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                         dataStartDate: cacheEntry.dataStartDate || curSettings.startDate,
+                        coverageFingerprint: cacheEntry.coverageFingerprint || null,
                      });
                      persistSessionDataCacheEntry(cacheKey, cacheEntry, { market: curSettings.market });
                      persistYearStorageSlices({
@@ -1357,6 +1541,8 @@ function runBacktestInternal() {
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
+                        stockNo: curSettings.stockNo,
+                        market: curSettings.market,
                         dataSources: updatedArray,
                         dataSource: summariseSourceLabels(updatedArray),
                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
@@ -1379,6 +1565,7 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: updatedDiagnostics,
                         lastRemoteFetchDiagnostics: rawFetchDiagnostics,
+                        coverageFingerprint: computeCoverageFingerprint(updatedCoverage),
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -1391,6 +1578,7 @@ function runBacktestInternal() {
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                         dataStartDate: updatedEntry.dataStartDate || curSettings.startDate,
+                        coverageFingerprint: updatedEntry.coverageFingerprint || null,
                     });
                     persistSessionDataCacheEntry(cacheKey, updatedEntry, { market: curSettings.market });
                     persistYearStorageSlices({

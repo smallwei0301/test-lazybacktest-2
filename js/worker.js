@@ -17,6 +17,7 @@ importScripts('shared-lookback.js');
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
+const workerYearSupersetCache = new Map(); // Map<marketKey, Map<stockKey, Map<year, YearSupersetEntry>>>
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
@@ -102,6 +103,128 @@ function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = f
     marketCache.set(stockKey, new Map());
   }
   return marketCache.get(stockKey);
+}
+
+function ensureYearSupersetMarketCache(marketKey) {
+  if (!workerYearSupersetCache.has(marketKey)) {
+    workerYearSupersetCache.set(marketKey, new Map());
+  }
+  return workerYearSupersetCache.get(marketKey);
+}
+
+function getYearSupersetStockKey(stockNo, priceModeKey, split = false) {
+  const stockKey = (stockNo || "").toUpperCase();
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockKey}__${priceModeKey || "RAW"}__${splitFlag}`;
+}
+
+function ensureYearSupersetStockCache(
+  marketKey,
+  stockNo,
+  priceModeKey,
+  split = false,
+) {
+  const marketCache = ensureYearSupersetMarketCache(marketKey);
+  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+  if (!marketCache.has(stockKey)) {
+    marketCache.set(stockKey, new Map());
+  }
+  return marketCache.get(stockKey);
+}
+
+function getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split = false) {
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  if (!stockCache.has(year)) {
+    return null;
+  }
+  const entry = stockCache.get(year);
+  if (!entry) return null;
+  if (!Array.isArray(entry.data)) {
+    entry.data = [];
+  }
+  if (!Array.isArray(entry.coverage)) {
+    entry.coverage = [];
+  }
+  return entry;
+}
+
+function setYearSupersetEntry(
+  marketKey,
+  stockNo,
+  priceModeKey,
+  year,
+  entry,
+  split = false,
+) {
+  if (!entry) return;
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  stockCache.set(year, entry);
+}
+
+function mergeYearSupersetRows(existingEntry, rows) {
+  if (!existingEntry) return;
+  if (!Array.isArray(existingEntry.data)) {
+    existingEntry.data = [];
+  }
+  const map = new Map(existingEntry.data.map((row) => [row.date, row]));
+  rows.forEach((row) => {
+    if (row && row.date) {
+      map.set(row.date, row);
+    }
+  });
+  existingEntry.data = Array.from(map.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+  rebuildCoverageFromData(existingEntry);
+  existingEntry.lastUpdated = Date.now();
+}
+
+function recordYearSupersetSlices({
+  marketKey,
+  stockNo,
+  priceModeKey,
+  split = false,
+  rows,
+}) {
+  if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!row || typeof row.date !== "string") return;
+    const year = parseInt(row.date.slice(0, 4), 10);
+    if (!Number.isFinite(year)) return;
+    if (!grouped.has(year)) grouped.set(year, []);
+    grouped.get(year).push(row);
+  });
+  grouped.forEach((yearRows, year) => {
+    const entry =
+      getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split) ||
+      {
+        data: [],
+        coverage: [],
+        lastUpdated: 0,
+      };
+    mergeYearSupersetRows(entry, yearRows);
+    setYearSupersetEntry(
+      marketKey,
+      stockNo,
+      priceModeKey,
+      year,
+      entry,
+      split,
+    );
+  });
 }
 
 function rebuildCoverageFromData(entry) {
@@ -323,6 +446,74 @@ function addCoverage(entry, startISO, endISO) {
     : [];
   normalized.push(newRange);
   entry.coverage = mergeRangeBounds(normalized);
+}
+
+function ensureRangeFingerprints(entry) {
+  if (!entry) return [];
+  if (!Array.isArray(entry.rangeFingerprints)) {
+    entry.rangeFingerprints = [];
+  }
+  entry.rangeFingerprints = entry.rangeFingerprints
+    .map((fp) => {
+      if (!fp || typeof fp !== "object") return null;
+      if (!fp.start || !fp.end) return null;
+      return {
+        start: fp.start,
+        end: fp.end,
+        createdAt: Number.isFinite(fp.createdAt) ? fp.createdAt : Date.now(),
+      };
+    })
+    .filter(Boolean);
+  return entry.rangeFingerprints;
+}
+
+function pruneFingerprintsForRanges(entry, ranges) {
+  if (!entry || !Array.isArray(ranges) || ranges.length === 0) return;
+  const list = ensureRangeFingerprints(entry);
+  if (list.length === 0) return;
+  const isoRanges = ranges
+    .map((range) => {
+      if (!range || !Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+        return null;
+      }
+      const { startISO, endISO } = rangeBoundsToISO(range);
+      return { startISO, endISO };
+    })
+    .filter(Boolean);
+  if (isoRanges.length === 0) return;
+  entry.rangeFingerprints = list.filter((fp) =>
+    !isoRanges.some(
+      (isoRange) =>
+        fp.start <= isoRange.endISO && fp.end >= isoRange.startISO,
+    ),
+  );
+}
+
+function findFingerprintSuperset(entry, startISO, endISO) {
+  const list = ensureRangeFingerprints(entry);
+  return list.find((fp) => fp.start <= startISO && fp.end >= endISO) || null;
+}
+
+function addRangeFingerprint(entry, startISO, endISO) {
+  if (!entry || !startISO || !endISO) return;
+  const list = ensureRangeFingerprints(entry);
+  if (list.some((fp) => fp.start <= startISO && fp.end >= endISO)) {
+    return;
+  }
+  const now = Date.now();
+  const updated = list.filter(
+    (fp) => !(fp.start >= startISO && fp.end <= endISO),
+  );
+  updated.push({ start: startISO, end: endISO, createdAt: now });
+  updated.sort((a, b) => {
+    if (a.start === b.start) return a.end.localeCompare(b.end);
+    return a.start.localeCompare(b.start);
+  });
+  const MAX_FINGERPRINTS = 24;
+  while (updated.length > MAX_FINGERPRINTS) {
+    updated.shift();
+  }
+  entry.rangeFingerprints = updated;
 }
 
 function computeMissingRanges(existingCoverage, targetStartISO, targetEndISO) {
@@ -1648,6 +1839,161 @@ async function runWithConcurrency(items, limit, workerFn) {
   return results;
 }
 
+function tryResolveRangeFromYearSuperset({
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  split = false,
+  fetchDiagnostics,
+  cacheKey,
+  optionEffectiveStart,
+  optionLookbackDays,
+}) {
+  if (split) return null;
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") return null;
+  const priceModeKey = getPriceModeKey(false);
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  if (!stockCache || stockCache.size === 0) return null;
+  const startYear = parseInt(startDate.slice(0, 4), 10);
+  const endYear = parseInt(endDate.slice(0, 4), 10);
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+  const combinedRows = [];
+  const years = [];
+  for (let year = startYear; year <= endYear; year += 1) {
+    const entry = getYearSupersetEntry(
+      marketKey,
+      stockNo,
+      priceModeKey,
+      year,
+      split,
+    );
+    if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) {
+      return null;
+    }
+    const segmentStartISO =
+      year === startYear ? startDate : `${year}-01-01`;
+    const segmentEndISO =
+      year === endYear ? endDate : `${year}-12-31`;
+    const missing = computeMissingRanges(
+      entry.coverage,
+      segmentStartISO,
+      segmentEndISO,
+    );
+    if (missing.length > 0) {
+      return null;
+    }
+    entry.data
+      .filter(
+        (row) =>
+          row &&
+          row.date >= segmentStartISO &&
+          row.date <= segmentEndISO,
+      )
+      .forEach((row) => combinedRows.push(row));
+    years.push(year);
+  }
+  if (combinedRows.length === 0) return null;
+  const deduped = dedupeAndSortData(combinedRows);
+  if (deduped.length === 0) return null;
+
+  const rangeFetchInfo = {
+    provider: "worker-year-superset",
+    market: marketKey,
+    status: "hit",
+    cacheHit: true,
+    years,
+    yearKeys: years.map(
+      (year) => `${marketKey}|${stockNo.toUpperCase()}|${year}`,
+    ),
+    readOps: 0,
+    writeOps: 0,
+    rowCount: deduped.length,
+  };
+  fetchDiagnostics.rangeFetch = rangeFetchInfo;
+  fetchDiagnostics.usedCache = true;
+
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate: startDate,
+    endDate,
+  });
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+
+  const dataSourceFlags = new Set([
+    "Netlify 年度快取 (Worker Superset)",
+  ]);
+  const defaultRemoteLabel =
+    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+  const dataSourceLabel = summariseDataSourceFlags(
+    dataSourceFlags,
+    defaultRemoteLabel,
+    { market: marketKey, adjusted: false },
+  );
+
+  fetchDiagnostics.blob = {
+    provider: "worker-year-cache",
+    years,
+    yearKeys: rangeFetchInfo.yearKeys,
+    cacheHits: years.length,
+    cacheMisses: 0,
+    readOps: 0,
+    writeOps: 0,
+    operations: [],
+    cacheReplay: true,
+  };
+
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "worker-year-superset",
+    requestedRange: { start: startDate, end: endDate },
+    coverage: null,
+  });
+
+  const cacheEntry = {
+    data: deduped,
+    stockName: stockNo,
+    dataSource: dataSourceLabel,
+    timestamp: Date.now(),
+    meta: {
+      stockNo,
+      startDate,
+      dataStartDate: startDate,
+      effectiveStartDate: optionEffectiveStart,
+      endDate,
+      priceMode: priceModeKey,
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
+      diagnostics: cacheDiagnostics,
+      rangeCache: {
+        provider: "worker-year-superset",
+        years,
+      },
+    },
+    priceMode: priceModeKey,
+  };
+  setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
+
+  return {
+    data: deduped,
+    dataSource: dataSourceLabel,
+    stockName: stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    dataStartDate: startDate,
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
+  };
+}
+
 async function tryFetchRangeFromBlob({
   stockNo,
   startDate,
@@ -1903,6 +2249,13 @@ async function tryFetchRangeFromBlob({
     source: "netlify-blob-range",
     requestedRange: { start: startDate, end: endDate },
   });
+  recordYearSupersetSlices({
+    marketKey,
+    stockNo,
+    priceModeKey: getPriceModeKey(false),
+    split,
+    rows: deduped,
+  });
   const cacheEntry = {
     data: deduped,
     stockName: payload.stockName || stockNo,
@@ -2069,6 +2422,28 @@ async function fetchStockData(
       lookbackDays: cachedEntry?.meta?.lookbackDays || null,
       diagnostics: cacheDiagnostics,
     };
+  }
+
+  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+    const supersetResult = tryResolveRangeFromYearSuperset({
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+      split,
+      fetchDiagnostics,
+      cacheKey,
+      optionEffectiveStart,
+      optionLookbackDays,
+    });
+    if (supersetResult) {
+      self.postMessage({
+        type: "progress",
+        progress: 6,
+        message: "命中年度 Superset 快取...",
+      });
+      return supersetResult;
+    }
   }
 
   let blobRangeAttempted = false;
@@ -2344,6 +2719,7 @@ async function fetchStockData(
         );
       }
 
+      ensureRangeFingerprints(monthEntry);
       const existingCoverage = Array.isArray(monthEntry.coverage)
         ? monthEntry.coverage.map((range) => ({ ...range }))
         : [];
@@ -2367,16 +2743,34 @@ async function fetchStockData(
           `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
         );
       }
-      const missingRanges = computeMissingRanges(
-        coverageForComputation,
+      pruneFingerprintsForRanges(monthEntry, forcedRepairRanges);
+      const fingerprintSuperset = findFingerprintSuperset(
+        monthEntry,
         monthInfo.rangeStartISO,
         monthInfo.rangeEndISO,
       );
-      const coveredLengthBefore = getCoveredLength(
-        coverageForComputation,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-      );
+      let missingRanges;
+      let coveredLengthBefore;
+      if (fingerprintSuperset) {
+        missingRanges = [];
+        const targetStartUtc = isoToUTC(monthInfo.rangeStartISO);
+        const targetEndUtcExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+        coveredLengthBefore =
+          Number.isFinite(targetStartUtc) && Number.isFinite(targetEndUtcExclusive)
+            ? Math.max(0, targetEndUtcExclusive - targetStartUtc)
+            : 0;
+      } else {
+        missingRanges = computeMissingRanges(
+          coverageForComputation,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        coveredLengthBefore = getCoveredLength(
+          coverageForComputation,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+      }
       const forcedRangeKeys = new Set(
         forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
       );
@@ -2543,6 +2937,19 @@ async function fetchStockData(
           row.date >= monthInfo.rangeStartISO &&
           row.date <= monthInfo.rangeEndISO,
       );
+
+      const postMissing = computeMissingRanges(
+        monthEntry.coverage,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+      );
+      if (postMissing.length === 0) {
+        addRangeFingerprint(
+          monthEntry,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+      }
 
       monthCacheFlags.forEach((label) => {
         monthSourceFlags.add(label);
@@ -2713,6 +3120,13 @@ async function fetchStockData(
   const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
     source: "worker-proxy-cache",
     requestedRange: { start: startDate, end: endDate },
+  });
+  recordYearSupersetSlices({
+    marketKey,
+    stockNo,
+    priceModeKey: getPriceModeKey(adjusted),
+    split,
+    rows: deduped,
   });
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
