@@ -2563,6 +2563,26 @@ function dedupeStageCandidates(candidates) {
     return Array.from(map.values());
 }
 
+function isFullAllocationSingleStage(values, base) {
+    if (!Array.isArray(values) || values.length === 0) return false;
+    const sanitized = values
+        .map((val) => Number.parseFloat(val))
+        .filter((val) => Number.isFinite(val) && val > 0);
+    if (sanitized.length !== 1) return false;
+    const total = sanitized[0];
+    if (!Number.isFinite(total)) return false;
+    const target = Number.isFinite(base) && base > 0 ? base : total;
+    const tolerance = Math.max(0.1, target * 0.001);
+    return Math.abs(total - target) <= tolerance;
+}
+
+function resolveModesForCandidate(isSingleFull, options, preferredValue) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+    if (!isSingleFull) return options.slice();
+    const preferred = preferredValue ? options.find((opt) => opt && opt.value === preferredValue) : null;
+    return [preferred || options[0]];
+}
+
 function buildStagingOptimizationCombos(params) {
     const positionSize = Number.parseFloat(params.positionSize) || 100;
     const entryBase = Math.max(positionSize, 1);
@@ -2652,9 +2672,21 @@ function buildStagingOptimizationCombos(params) {
 
     const combos = [];
     dedupedEntry.forEach((entryCandidate) => {
+        const entryModes = resolveModesForCandidate(
+            isFullAllocationSingleStage(entryCandidate.values, entryBase),
+            entryModeOptions,
+            params.entryStagingMode || null,
+        );
+        if (!entryModes.length) return;
         dedupedExit.forEach((exitCandidate) => {
-            entryModeOptions.forEach((entryMode) => {
-                exitModeOptions.forEach((exitMode) => {
+            const exitModes = resolveModesForCandidate(
+                isFullAllocationSingleStage(exitCandidate.values, exitBase),
+                exitModeOptions,
+                params.exitStagingMode || null,
+            );
+            if (!exitModes.length) return;
+            entryModes.forEach((entryMode) => {
+                exitModes.forEach((exitMode) => {
                     combos.push({
                         entry: entryCandidate,
                         exit: exitCandidate,
