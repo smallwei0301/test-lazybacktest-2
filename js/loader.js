@@ -1,4 +1,5 @@
 // --- Loader Script ---
+// Patch Tag: LB-EQUITY-SEGMENT-20250624B
 document.addEventListener('DOMContentLoaded', function() {
      console.log("[Loader] DOMContentLoaded event fired.");
      if (typeof workerUrl === 'undefined' || workerUrl === null) {
@@ -15,17 +16,73 @@ document.addEventListener('DOMContentLoaded', function() {
             console.warn('[Loader] populateSavedStrategiesDropdown 尚未定義，略過初始化。');
         }
 
-        document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
-        document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
-        document.getElementById('optimizeEntryBtn').addEventListener('click', () => runOptimizationInternal('entry'));
-        document.getElementById('optimizeExitBtn').addEventListener('click', () => runOptimizationInternal('exit'));
-        document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));
-        document.getElementById('optimizeShortExitBtn').addEventListener('click', () => runOptimizationInternal('shortExit'));
-        document.getElementById('optimizeRiskBtn').addEventListener('click', () => runOptimizationInternal('risk'));
-        document.getElementById('resetBtn').addEventListener('click', resetSettings);
-        document.getElementById('randomizeBtn').addEventListener('click', randomizeSettings);
-        document.getElementById('stockNo').addEventListener('keypress', e=>{if(e.key==='Enter')runBacktestInternal();});
-        document.getElementById('stockNo').addEventListener('change', (e) => setDefaultFees(e.target.value));
+        const applyYearsBtn = document.getElementById('applyYearsBtn');
+        if (applyYearsBtn) applyYearsBtn.addEventListener('click', applyRecentYears);
+
+        const backtestBtn = document.getElementById('backtestBtn');
+        const stockInput = document.getElementById('stockNo');
+        let activeRunBacktestHandler = null;
+
+        const resolveRunBacktestHandler = () => {
+            if (typeof runBacktestInternal === 'function') return runBacktestInternal;
+            if (typeof window !== 'undefined' && typeof window.runBacktestInternal === 'function') {
+                return window.runBacktestInternal;
+            }
+            return null;
+        };
+
+        const updateRunBacktestBinding = (candidate) => {
+            if (typeof candidate === 'function') {
+                activeRunBacktestHandler = candidate;
+                console.log('[Loader] runBacktestInternal handler 已綁定。');
+                return true;
+            }
+            return false;
+        };
+
+        const triggerRunBacktest = () => {
+            if (typeof activeRunBacktestHandler === 'function') {
+                activeRunBacktestHandler();
+            } else {
+                console.warn('[Loader] runBacktestInternal 尚未就緒，忽略本次觸發。');
+            }
+        };
+
+        updateRunBacktestBinding(resolveRunBacktestHandler());
+
+        if (typeof window !== 'undefined' && !activeRunBacktestHandler) {
+            window.addEventListener('lazybacktest:runBacktestReady', (event) => {
+                if (!updateRunBacktestBinding(event?.detail?.handler)) {
+                    updateRunBacktestBinding(resolveRunBacktestHandler());
+                }
+            }, { once: true });
+        }
+
+        if (backtestBtn) backtestBtn.addEventListener('click', triggerRunBacktest);
+        if (stockInput) {
+            stockInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    triggerRunBacktest();
+                }
+            });
+            stockInput.addEventListener('change', (e) => setDefaultFees(e.target.value));
+        }
+
+        const optimizeEntryBtn = document.getElementById('optimizeEntryBtn');
+        if (optimizeEntryBtn) optimizeEntryBtn.addEventListener('click', () => runOptimizationInternal('entry'));
+        const optimizeExitBtn = document.getElementById('optimizeExitBtn');
+        if (optimizeExitBtn) optimizeExitBtn.addEventListener('click', () => runOptimizationInternal('exit'));
+        const optimizeShortEntryBtn = document.getElementById('optimizeShortEntryBtn');
+        if (optimizeShortEntryBtn) optimizeShortEntryBtn.addEventListener('click', () => runOptimizationInternal('shortEntry'));
+        const optimizeShortExitBtn = document.getElementById('optimizeShortExitBtn');
+        if (optimizeShortExitBtn) optimizeShortExitBtn.addEventListener('click', () => runOptimizationInternal('shortExit'));
+        const optimizeRiskBtn = document.getElementById('optimizeRiskBtn');
+        if (optimizeRiskBtn) optimizeRiskBtn.addEventListener('click', () => runOptimizationInternal('risk'));
+        const resetBtn = document.getElementById('resetBtn');
+        if (resetBtn) resetBtn.addEventListener('click', resetSettings);
+        const randomizeBtn = document.getElementById('randomizeBtn');
+        if (randomizeBtn) randomizeBtn.addEventListener('click', randomizeSettings);
 
         const entrySelect = document.getElementById('entryStrategy');
         const exitSelect = document.getElementById('exitStrategy');
@@ -66,12 +123,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 else if (targetInternalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod';
                 else if (targetInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod';
                 else if (targetInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod';
-                else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
-                else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
-                else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
-                else if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
-                else if ((internalKey === 'macd_cross_exit' || internalKey === 'macd_cross') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
-                else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
+                else if (targetInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
+                else if (targetInternalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
+                else if (targetInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
+                else if (targetInternalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
+                else if ((targetInternalKey === 'macd_cross_exit' || targetInternalKey === 'macd_cross') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
+                else if (targetInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
 
                 const targetId = `${targetType}${idSfx}`;
                 const targetInput = document.getElementById(targetId);
