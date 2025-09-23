@@ -158,6 +158,12 @@
 - **Diagnostics**: 資料來源測試卡可直接查看 FinMind 股利與備援序列的請求狀態與訊息，零金額快照提供原始欄位值與解析後數值，利於營運端比對。
 - **Testing**: `node tests/dividend-normalisation.test.mjs`。
 
+## 2025-06-30 — Patch LB-CACHE-FAST-20250630A
+- **Issue recap**: 主執行緒與 Worker 各自推算暖身視窗，快取 key 未納入緩衝起點與市場旗標，造成同檔股票在不同暖身需求下互相覆寫並反覆呼叫 Proxy。
+- **Fix**: 新增 `shared-lookback.resolveLookbackDays/resolveDataWindow/traceLookbackDecision`，主執行緒、批量優化與 Worker 統一採用共用暖身計算，並將快取 key 擴充為含市場別、暖身起點、使用者起點與 lookback；同步在 Worker 傳遞與快取中保留 `dataStartDate` 以供診斷與 7 日容忍檢查。
+- **Diagnostics**: 回傳結果與 `fetchDiagnostics` 皆帶回暖身起點，後續測試卡可直接檢視來源；`traceLookbackDecision` 提供暖身推導步驟供除錯。
+- **Testing**: 無法於容器啟動前端 UI 驗證，待本地瀏覽器環境實際回測確認 console 無錯誤。
+
 ## 2025-04-10 — Patch LB-ADJ-COMPOSER-20250410A / LB-DATASOURCE-20250410A / LB-ADJ-PIPE-20250410A
 - **Issue recap**: FinMind 備援成功回應仍難以判讀是 API 權限不足、Token 設定錯誤還是查詢參數造成無資料，使得營運端無法釐清除息事件未被還原的根本原因。
 - **Fix**: Netlify 還原函式記錄 FinMind 呼叫回應與狀態碼，分類權限不足、Token 異常、參數錯誤與查無資料等情境，並於摘要 `finmindStatus` 帶回 UI 與 Worker。

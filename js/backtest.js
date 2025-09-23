@@ -135,22 +135,65 @@ function runBacktestInternal() {
         if(!isValid) return;
 
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        const maxIndicatorPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        const windowOptions = {
+            minBars: 90,
+            multiplier: 2,
+            marginTradingDays: 12,
+            extraCalendarDays: 7,
+            minDate: sharedUtils?.MIN_DATA_DATE,
+            defaultStartDate: params.startDate,
+        };
+        let windowDecision = null;
+        if (sharedUtils && typeof sharedUtils.resolveDataWindow === 'function') {
+            windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
+        }
+        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
-        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
-            : Math.max(90, maxIndicatorPeriod * 2);
-        const effectiveStartDate = params.startDate;
-        let dataStartDate = effectiveStartDate;
-        if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
-            dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
-                minDate: sharedUtils.MIN_DATA_DATE,
-                marginTradingDays: 12,
-                extraCalendarDays: 7,
-            }) || effectiveStartDate;
+        const maxIndicatorPeriod = Number.isFinite(windowDecision?.maxIndicatorPeriod)
+            ? windowDecision.maxIndicatorPeriod
+            : fallbackMaxPeriod;
+        let lookbackDays = Number.isFinite(windowDecision?.lookbackDays)
+            ? windowDecision.lookbackDays
+            : null;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+                const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
+                if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
+                    lookbackDays = fallbackDecision.lookbackDays;
+                }
+                if (!Number.isFinite(windowDecision?.maxIndicatorPeriod) && Number.isFinite(fallbackDecision?.maxIndicatorPeriod)) {
+                    windowDecision = { ...(windowDecision || {}), maxIndicatorPeriod: fallbackDecision.maxIndicatorPeriod };
+                }
+            }
         }
-        if (!dataStartDate) dataStartDate = effectiveStartDate;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+                ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, maxIndicatorPeriod * 2);
+        }
+        let effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
+        const bufferTradingDays = Number.isFinite(windowDecision?.bufferTradingDays)
+            ? windowDecision.bufferTradingDays
+            : windowOptions.marginTradingDays;
+        const extraCalendarDays = Number.isFinite(windowDecision?.extraCalendarDays)
+            ? windowDecision.extraCalendarDays
+            : windowOptions.extraCalendarDays;
+        let dataStartDate = windowDecision?.dataStartDate || null;
+        if (!dataStartDate && effectiveStartDate) {
+            if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
+                dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+                    minDate: sharedUtils?.MIN_DATA_DATE,
+                    marginTradingDays: bufferTradingDays,
+                    extraCalendarDays,
+                }) || effectiveStartDate;
+            } else {
+                dataStartDate = effectiveStartDate;
+            }
+        }
+        if (!dataStartDate) {
+            dataStartDate = effectiveStartDate || sharedUtils?.MIN_DATA_DATE || windowOptions.minDate || params.startDate;
+        }
         params.effectiveStartDate = effectiveStartDate;
         params.dataStartDate = dataStartDate;
         params.lookbackDays = lookbackDays;
@@ -160,6 +203,7 @@ function runBacktestInternal() {
         const curSettings={
             stockNo:params.stockNo,
             startDate:dataStartDate,
+            dataStartDate:dataStartDate,
             endDate:params.endDate,
             effectiveStartDate,
             market:marketKey,
@@ -300,6 +344,7 @@ function runBacktestInternal() {
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
+                        dataStartDate: curSettings.dataStartDate || curSettings.startDate,
                         adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
@@ -374,6 +419,7 @@ function runBacktestInternal() {
                         adjustmentChecks: adjustmentChecksMeta,
                         fetchRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
                         effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                        dataStartDate: curSettings.dataStartDate || curSettings.startDate,
                         lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,

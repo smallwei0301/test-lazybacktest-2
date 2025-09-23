@@ -49,9 +49,22 @@ function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
 }
 
-function buildCacheKey(stockNo, startDate, endDate, adjusted = false, split = false) {
+function buildCacheKey(
+  stockNo,
+  startDate,
+  endDate,
+  adjusted = false,
+  split = false,
+  effectiveStartDate = null,
+  marketKey = "",
+) {
   const splitFlag = split ? "SPLIT" : "NOSPLIT";
-  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}__${splitFlag}`;
+  const priceModeKey = getPriceModeKey(adjusted);
+  const marketPrefix = marketKey ? `${marketKey}__` : "";
+  const dataKey = startDate || "START-";
+  const endKey = endDate || "END-";
+  const effectiveKey = effectiveStartDate || "E-";
+  return `${marketPrefix}${stockNo}__${dataKey}__${endKey}__${priceModeKey}__${splitFlag}__${effectiveKey}`;
 }
 
 function ensureMarketCache(marketKey) {
@@ -1436,7 +1449,15 @@ async function fetchStockData(
   const marketKey = getMarketKey(marketType);
   const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
   const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
-  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
+  const cacheKey = buildCacheKey(
+    stockNo,
+    startDate,
+    endDate,
+    adjusted,
+    split,
+    optionEffectiveStart,
+    marketKey,
+  );
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   const fetchDiagnostics = {
     stockNo,
@@ -1503,6 +1524,10 @@ async function fetchStockData(
       fetchRange:
         cachedEntry?.meta?.fetchRange ||
         { start: startDate, end: endDate },
+      dataStartDate:
+        cachedEntry?.meta?.dataStartDate ||
+        cachedEntry?.meta?.startDate ||
+        startDate,
       effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
       lookbackDays: cachedEntry?.meta?.lookbackDays || null,
       diagnostics: cachedEntry?.meta?.diagnostics || null,
@@ -1553,6 +1578,7 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        dataStartDate: startDate,
         effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
@@ -1641,6 +1667,7 @@ async function fetchStockData(
         ? adjustedResult.adjustmentChecks
         : [],
       fetchRange: { start: startDate, end: endDate },
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
       diagnostics: adjustedDiagnostics,
@@ -1665,6 +1692,7 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        dataStartDate: startDate,
         effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
@@ -1680,6 +1708,7 @@ async function fetchStockData(
       dataSource: marketKey,
       stockName,
       fetchRange: { start: startDate, end: endDate },
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
       diagnostics: fetchDiagnostics,
@@ -2079,6 +2108,7 @@ async function fetchStockData(
     meta: {
       stockNo,
       startDate,
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       endDate,
       priceMode: getPriceModeKey(adjusted),
@@ -2101,6 +2131,7 @@ async function fetchStockData(
     dataSource: dataSourceLabel,
     stockName: stockName || stockNo,
     fetchRange: { start: startDate, end: endDate },
+    dataStartDate: startDate,
     effectiveStartDate: optionEffectiveStart,
     lookbackDays: optionLookbackDays,
     diagnostics: fetchDiagnostics,
@@ -6623,21 +6654,45 @@ self.onmessage = async function (e) {
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
       : null;
+  const windowOptions = {
+    minBars: 90,
+    multiplier: 2,
+    marginTradingDays: 12,
+    extraCalendarDays: 7,
+    minDate: sharedUtils?.MIN_DATA_DATE,
+    defaultStartDate: params?.startDate,
+  };
+  let windowDecision = null;
+  if (sharedUtils && typeof sharedUtils.resolveDataWindow === "function") {
+    windowDecision = sharedUtils.resolveDataWindow(params || {}, windowOptions);
+  }
   const incomingLookback = Number.isFinite(e.data?.lookbackDays)
     ? e.data.lookbackDays
     : Number.isFinite(params?.lookbackDays)
       ? params.lookbackDays
-      : 0;
+      : null;
   const inferredMax =
     sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === "function"
       ? sharedUtils.getMaxIndicatorPeriod(params || {})
       : 0;
-  let lookbackDays = incomingLookback;
-  if (
-    (!Number.isFinite(lookbackDays) || lookbackDays <= 0) &&
-    sharedUtils &&
-    typeof sharedUtils.estimateLookbackBars === "function"
-  ) {
+  let lookbackDays = Number.isFinite(incomingLookback) && incomingLookback > 0
+    ? incomingLookback
+    : null;
+  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && Number.isFinite(windowDecision?.lookbackDays)) {
+    lookbackDays = windowDecision.lookbackDays;
+  }
+  if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+    if (sharedUtils && typeof sharedUtils.resolveLookbackDays === "function") {
+      const fallbackDecision = sharedUtils.resolveLookbackDays(params || {}, windowOptions);
+      if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
+        lookbackDays = fallbackDecision.lookbackDays;
+        if (!windowDecision) {
+          windowDecision = fallbackDecision;
+        }
+      }
+    }
+  }
+  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && sharedUtils && typeof sharedUtils.estimateLookbackBars === "function") {
     lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
       minBars: 90,
       multiplier: 2,
@@ -6647,9 +6702,18 @@ self.onmessage = async function (e) {
     lookbackDays = Math.max(90, inferredMax * 2);
   }
   const effectiveStartDate =
-    e.data?.effectiveStartDate || params?.effectiveStartDate || params?.startDate || null;
+    e.data?.effectiveStartDate ||
+    windowDecision?.effectiveStartDate ||
+    params?.effectiveStartDate ||
+    params?.startDate ||
+    windowDecision?.minDataDate ||
+    null;
   const dataStartDate =
-    e.data?.dataStartDate || params?.dataStartDate || effectiveStartDate || params?.startDate;
+    e.data?.dataStartDate ||
+    windowDecision?.dataStartDate ||
+    params?.dataStartDate ||
+    effectiveStartDate ||
+    params?.startDate;
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
@@ -6664,6 +6728,8 @@ self.onmessage = async function (e) {
         params.endDate,
         params.adjustedPrice,
         params.splitAdjustment,
+        effectiveStartDate,
+        marketKey,
       );
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");

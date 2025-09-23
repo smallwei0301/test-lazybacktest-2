@@ -1561,10 +1561,16 @@ const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
 function buildCacheKey(cur) {
     if (!cur) return '';
     const market = (cur.market || cur.marketType || 'TWSE').toUpperCase();
+    const stockNo = (cur.stockNo || '').toString().toUpperCase();
     const rawMode = (cur.priceMode || (cur.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const priceModeKey = rawMode === 'adjusted' ? 'ADJ' : 'RAW';
     const splitFlag = cur.splitAdjustment ? 'SPLIT' : 'NOSPLIT';
-    return `${market}|${cur.stockNo}|${priceModeKey}|${splitFlag}`;
+    const dataStart = cur.dataStartDate || cur.startDate || cur.effectiveStartDate || 'NA';
+    const effectiveStart = cur.effectiveStartDate || cur.startDate || 'NA';
+    const lookbackKey = Number.isFinite(cur.lookbackDays)
+        ? `LB${Math.round(cur.lookbackDays)}`
+        : 'LB-';
+    return `${market}|${stockNo}|${priceModeKey}|${splitFlag}|${dataStart}|${effectiveStart}|${lookbackKey}`;
 }
 
 function parseISOToUTC(iso) {
@@ -1664,13 +1670,14 @@ function summariseSourceLabels(labels) {
 }
 
 function needsDataFetch(cur) {
-    if (!cur || !cur.stockNo || !cur.startDate || !cur.endDate) return true;
+    if (!cur || !cur.stockNo || !(cur.startDate || cur.dataStartDate) || !cur.endDate) return true;
     const key = buildCacheKey(cur);
 
     const entry = cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
-    return !coverageCoversRange(entry.coverage, { start: cur.startDate, end: cur.endDate });
+    const rangeStart = cur.dataStartDate || cur.startDate;
+    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
@@ -1702,12 +1709,24 @@ function getSuggestion() {
     try {
         const params = getBacktestParams();
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        const maxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        let lookbackDecision = null;
+        if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+            lookbackDecision = sharedUtils.resolveLookbackDays(params, { minBars: 90, multiplier: 2 });
+        }
+        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
-        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
-            : Math.max(90, maxPeriod * 2);
+        const maxPeriod = Number.isFinite(lookbackDecision?.maxIndicatorPeriod)
+            ? lookbackDecision.maxIndicatorPeriod
+            : fallbackMaxPeriod;
+        let lookbackDays = Number.isFinite(lookbackDecision?.lookbackDays)
+            ? lookbackDecision.lookbackDays
+            : null;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+                ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, maxPeriod * 2);
+        }
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {
