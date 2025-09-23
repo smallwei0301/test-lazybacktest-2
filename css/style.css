@@ -24,6 +24,45 @@
 .trade-list::-webkit-scrollbar-thumb:hover { background: #aaa; }
 html, body { overflow-x: hidden; }
 
+/* 滾動測試 (Walk-Forward) 樣式 */
+.walkforward-input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--input);
+    color: var(--foreground);
+    font-size: 0.75rem;
+}
+
+.walkforward-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+.walkforward-input[readonly] {
+    background-color: color-mix(in srgb, var(--input) 80%, transparent);
+    cursor: not-allowed;
+}
+
+.walkforward-note {
+    background-color: color-mix(in srgb, var(--muted) 25%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+#walkforward-warning {
+    min-height: 1.5rem;
+    color: #b45309;
+}
+
+#walkforward-warning[data-state="error"] {
+    color: #b91c1c;
+    background-color: rgba(248, 113, 113, 0.12);
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+}
+
 /* Suggestion Area Style */
 #today-suggestion-area {
      margin-top: 1rem;

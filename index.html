@@ -976,6 +976,13 @@
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="walkforward"
+                                            >
+                                                <i data-lucide="rotate-ccw" class="lucide-sm inline mr-1"></i>滾動測試
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -1433,6 +1440,205 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Walk-Forward Testing Tab -->
+                            <div class="tab-content hidden" id="walkforward-tab">
+                                <div class="space-y-6">
+                                    <div class="card shadow-lg">
+                                        <div class="card-header">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="rotate-ccw" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                滾動測試設定
+                                            </h3>
+                                            <p class="card-description">建立滾動窗格 (Walk-Forward) 規畫，確保策略在不同市場階段的可用性。</p>
+                                        </div>
+                                        <div class="card-content space-y-6">
+                                            <div class="grid lg:grid-cols-2 gap-6">
+                                                <div class="rounded-lg border p-4 bg-background/80" style="border-color: var(--border); background-color: color-mix(in srgb, var(--background) 90%, transparent);">
+                                                    <h4 class="text-sm font-semibold mb-3" style="color: var(--foreground);">策略參數</h4>
+                                                    <ul class="space-y-2 text-xs leading-5" style="color: var(--muted-foreground);">
+                                                        <li>• 進場與出場策略沿用左側設定面板的選擇，例如：<code>ma_cross</code>、<code>trailing_stop</code>。</li>
+                                                        <li>• 參數優化範圍自動引用每個策略在系統內定義的範圍與步進值，不額外擴張搜尋空間。</li>
+                                                        <li>• 若啟用做空策略，滾動測試亦會同步優化並驗證對應的空方參數組合。</li>
+                                                    </ul>
+                                                </div>
+                                                <div class="rounded-lg border p-4 space-y-4" style="border-color: var(--border);">
+                                                    <div>
+                                                        <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">滾動窗格參數</h4>
+                                                        <div class="grid sm:grid-cols-2 gap-3 text-xs">
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="font-medium" style="color: var(--foreground);">學習期長度 (交易日)</span>
+                                                                <input id="walkforward-in-sample" type="number" min="60" max="1500" step="10" value="500" class="walkforward-input" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="font-medium" style="color: var(--foreground);">考試期長度 (交易日)</span>
+                                                                <input id="walkforward-out-sample" type="number" min="40" max="500" step="10" value="250" class="walkforward-input" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="font-medium" style="color: var(--foreground);">滾動步長 (交易日)</span>
+                                                                <input id="walkforward-step" type="number" min="40" max="500" step="10" value="250" class="walkforward-input" readonly />
+                                                            </label>
+                                                            <div class="flex flex-col gap-1">
+                                                                <span class="font-medium" style="color: var(--foreground);">目標測試參數</span>
+                                                                <div class="flex flex-wrap gap-3" id="walkforward-target-group">
+                                                                    <label class="inline-flex items-center gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                        <input type="radio" name="walkforward-target" value="return" checked />
+                                                                        報酬率
+                                                                    </label>
+                                                                    <label class="inline-flex items-center gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                        <input type="radio" name="walkforward-target" value="sharpe" />
+                                                                        夏普值
+                                                                    </label>
+                                                                    <label class="inline-flex items-center gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                        <input type="radio" name="walkforward-target" value="maxDrawdown" />
+                                                                        最小回撤
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="text-xs leading-5 rounded-md p-3 walkforward-note">
+                                                        <p class="font-medium" style="color: var(--foreground);">備註</p>
+                                                        <p id="walkforward-total-period" style="color: var(--muted-foreground);">
+                                                            依目前設定的回測期間，自動計算可用的總交易日數。
+                                                        </p>
+                                                        <p style="color: var(--muted-foreground);">
+                                                            若「學習期 + 考試期」長度超過總回測期間，系統將提示調整建議。
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                                                <div class="text-xs" id="walkforward-warning" aria-live="polite"></div>
+                                                <button id="walkforward-generate-plan" class="btn-primary px-6 py-2 rounded-md text-sm font-semibold self-start lg:self-auto">
+                                                    <i data-lucide="sparkles" class="lucide-sm mr-2"></i>
+                                                    開始滾動測試
+                                                </button>
+                                            </div>
+                                            <div class="rounded-lg border p-4 bg-muted/20" style="border-color: var(--border);">
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">規劃摘要</h4>
+                                                <p id="walkforward-plan-summary" class="text-xs leading-5" style="color: var(--muted-foreground);">
+                                                    請先按下「開始滾動測試」，系統會依序優化參數、執行各窗格回測並即時更新結果。
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="card shadow-lg">
+                                        <div class="card-header">
+                                            <h3 class="card-title">資料內容</h3>
+                                        </div>
+                                        <div class="card-content text-xs leading-6" style="color: var(--muted-foreground);">
+                                            <p class="mb-3">滾動測試全程依照您在回測設定所選的股票、指數或 ETF，於指定區間內載入完整的日線歷史資料：</p>
+                                            <ul class="list-disc pl-5 space-y-2">
+                                                <li>包含開盤價 (Open)、最高價 (High)、最低價 (Low)、收盤價 (Close)、成交量 (Volume) 五大欄位。</li>
+                                                <li>若啟用還原股價，將套用相同的調整係數，確保學習期與考試期使用一致的價格序列。</li>
+                                                <li>所有資料皆在主執行緒計算暖身後交由 Worker 優化及驗證，不會注入任何自訂或硬編碼資料。</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+
+                                    <div class="card shadow-lg">
+                                        <div class="card-header">
+                                            <h3 class="card-title">滾動測試流程</h3>
+                                        </div>
+                                        <div class="card-content text-xs leading-6 space-y-3" style="color: var(--muted-foreground);">
+                                            <ol class="list-decimal pl-5 space-y-2">
+                                                <li><strong>數據初始化與分割：</strong> 根據回測期間載入完整資料並依設定切出第一個學習期 (IS) 與考試期 (OOS)。</li>
+                                                <li><strong>優化：</strong> 在學習期內遍歷所有合法參數組合，依目標測試參數挑選最佳解。</li>
+                                                <li><strong>驗證：</strong> 使用最佳參數回測考試期，產出 OOS 淨值、交易紀錄與績效指標。</li>
+                                                <li><strong>滾動窗格：</strong> 以考試期長度為步長平移窗格，建立下一輪 IS/OOS 組合並重複優化與驗證。</li>
+                                                <li><strong>結果彙整：</strong> 串接所有 OOS 績效，計算模擬實戰淨值曲線與衰退指標，同步統計每輪最佳參數。</li>
+                                            </ol>
+                                            <p>任何一輪若資料不足，系統會自動停止後續窗格並提示調整建議。</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="card shadow-lg">
+                                        <div class="card-header flex items-center justify-between">
+                                            <div>
+                                                <h3 class="card-title">滾動測試輸出</h3>
+                                                <p class="card-description">彙整所有考試期結果，協助評估策略穩健度。</p>
+                                            </div>
+                                        </div>
+                                        <div class="card-content space-y-6 text-xs" style="color: var(--muted-foreground);">
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">滾動績效總覽表</h4>
+                                                <div class="overflow-x-auto">
+                                                    <table class="min-w-full text-xs divide-y" style="border-color: var(--border);">
+                                                        <thead class="bg-muted" style="background-color: var(--muted); color: var(--foreground);">
+                                                            <tr>
+                                                                <th class="px-3 py-2 text-left">核心指標</th>
+                                                                <th class="px-3 py-2 text-left">滾動測試 (OOS)</th>
+                                                                <th class="px-3 py-2 text-left">傳統回測 (IS)</th>
+                                                                <th class="px-3 py-2 text-left">穩健性分析</th>
+                                                                <th class="px-3 py-2 text-left">說明</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="walkforward-summary-body" class="divide-y" style="border-color: var(--border);">
+                                                            <tr>
+                                                                <td colspan="5" class="px-3 py-3 text-center">尚未執行滾動測試。</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">各週期績效分解表</h4>
+                                                <div class="overflow-x-auto">
+                                                    <table class="min-w-full text-xs divide-y" style="border-color: var(--border);">
+                                                        <thead class="bg-muted" style="background-color: var(--muted); color: var(--foreground);">
+                                                            <tr>
+                                                                <th class="px-3 py-2 text-left">考試期</th>
+                                                                <th class="px-3 py-2 text-left">期間</th>
+                                                                <th class="px-3 py-2 text-left">市場環境</th>
+                                                                <th class="px-3 py-2 text-left">年化報酬率</th>
+                                                                <th class="px-3 py-2 text-left">最大回撤</th>
+                                                                <th class="px-3 py-2 text-left">備註</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="walkforward-periods-body" class="divide-y" style="border-color: var(--border);">
+                                                            <tr>
+                                                                <td colspan="6" class="px-3 py-3 text-center">尚未建立滾動窗格。</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">參數穩定性軌跡</h4>
+                                                <div class="overflow-x-auto">
+                                                    <table class="min-w-full text-xs divide-y" style="border-color: var(--border);">
+                                                        <thead class="bg-muted" style="background-color: var(--muted); color: var(--foreground);">
+                                                            <tr>
+                                                                <th class="px-3 py-2 text-left">測試輪次</th>
+                                                                <th class="px-3 py-2 text-left">學習期</th>
+                                                                <th class="px-3 py-2 text-left">進場核心參數</th>
+                                                                <th class="px-3 py-2 text-left">出場核心參數</th>
+                                                                <th class="px-3 py-2 text-left">風控參數</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="walkforward-parameters-body" class="divide-y" style="border-color: var(--border);">
+                                                            <tr>
+                                                                <td colspan="5" class="px-3 py-3 text-center">等待滾動測試結果。</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">滾動淨值曲線</h4>
+                                                <div id="walkforward-equity-container" class="h-72 border border-dashed rounded-lg flex items-center justify-center text-xs text-center px-6" style="border-color: var(--border); color: var(--muted-foreground);">
+                                                    完成滾動測試後，將在此比較 OOS 拼接曲線、傳統回測曲線與買入持有基準。
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1502,6 +1708,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
+    <script src="js/walkforward.js"></script>
     
     <script>
         // Initialize Lucide icons
