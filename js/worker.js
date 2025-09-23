@@ -15,6 +15,7 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-TODAY-SUGGEST-20250623A
 // Patch Tag: LB-TODAY-SUGGEST-20250625A
 // Patch Tag: LB-TODAY-SUGGEST-20250627A
+// Patch Tag: LB-TODAY-CACHE-20250628A
 const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -305,6 +306,7 @@ function seedWorkerCachesForSuggestion(
       effectiveStartDate: effectiveStart,
       endDate: rangeEnd,
       priceMode: getPriceModeKey(adjustedFlag),
+      adjustedPrice: adjustedFlag,
       splitAdjustment: splitFlag,
       lookbackDays,
       fetchRange: { start: rangeStart, end: rangeEnd },
@@ -327,6 +329,11 @@ function seedWorkerCachesForSuggestion(
       adjustmentChecks: Array.isArray(meta.adjustmentChecks)
         ? meta.adjustmentChecks
         : [],
+      userStartDate:
+        meta.userStartDate || options.userStartDate || rangeStart,
+      userEndDate: meta.userEndDate || options.userEndDate || rangeEnd,
+      market: meta.market || options.market || marketKey,
+      marketKey: meta.marketKey || options.marketKey || marketKey,
     },
     priceMode: getPriceModeKey(adjustedFlag),
   };
@@ -843,12 +850,20 @@ function getWorkerCacheEntry(marketKey, cacheKey) {
   const entry = marketCache.get(cacheKey);
   if (entry && Array.isArray(entry.data)) {
     workerLastDataset = entry.data;
-    workerLastMeta = {
-      ...entry.meta,
+    const meta = {
+      ...(entry.meta || {}),
       marketKey,
+      market: entry.meta?.market || marketKey,
       dataSource: entry.dataSource,
       stockName: entry.stockName,
     };
+    if (!meta.userStartDate && entry.meta?.effectiveStartDate) {
+      meta.userStartDate = entry.meta.effectiveStartDate;
+    }
+    if (!meta.userEndDate && entry.meta?.fetchRange?.end) {
+      meta.userEndDate = entry.meta.fetchRange.end;
+    }
+    workerLastMeta = meta;
     return entry;
   }
   return null;
@@ -858,12 +873,20 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
   const marketCache = ensureMarketCache(marketKey);
   marketCache.set(cacheKey, entry);
   workerLastDataset = entry.data;
-  workerLastMeta = {
-    ...entry.meta,
+  const meta = {
+    ...(entry.meta || {}),
     marketKey,
+    market: entry.meta?.market || marketKey,
     dataSource: entry.dataSource,
     stockName: entry.stockName,
   };
+  if (!meta.userStartDate && entry.meta?.effectiveStartDate) {
+    meta.userStartDate = entry.meta.effectiveStartDate;
+  }
+  if (!meta.userEndDate && entry.meta?.fetchRange?.end) {
+    meta.userEndDate = entry.meta.fetchRange.end;
+  }
+  workerLastMeta = meta;
 }
 
 function pad2(value) {
@@ -6414,6 +6437,7 @@ self.onmessage = async function (e) {
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
+    preventRemoteFetch,
   } = e.data;
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
@@ -6552,6 +6576,17 @@ self.onmessage = async function (e) {
                 : null),
             lookbackDays,
             diagnostics: cachedMeta.diagnostics || null,
+            userStartDate: cachedMeta.userStartDate || params.startDate,
+            userEndDate: cachedMeta.userEndDate || params.endDate,
+            market: cachedMeta.market || marketKey,
+            adjustedPrice:
+              typeof cachedMeta.adjustedPrice === "boolean"
+                ? cachedMeta.adjustedPrice
+                : Boolean(params.adjustedPrice),
+            splitAdjustment:
+              typeof cachedMeta.splitAdjustment === "boolean"
+                ? cachedMeta.splitAdjustment
+                : Boolean(params.splitAdjustment),
           };
         }
       } else {
@@ -6853,7 +6888,7 @@ self.onmessage = async function (e) {
         "TWSE";
 
       const baseMeta =
-        cachedMeta && typeof cachedMeta === "object" ? cachedMeta : null;
+        cachedMeta && typeof cachedMeta === "object" ? { ...cachedMeta } : null;
       const providedCacheRows = Array.isArray(cachedData)
         ? dedupeAndSortData(cachedData)
         : [];
@@ -6869,6 +6904,52 @@ self.onmessage = async function (e) {
       }
 
       const marketKeyForSuggestion = getMarketKey(marketForSuggestion);
+      const metaAdjusted =
+        typeof baseMeta?.adjustedPrice === "boolean"
+          ? baseMeta.adjustedPrice
+          : typeof workerLastMeta?.adjustedPrice === "boolean"
+            ? workerLastMeta.adjustedPrice
+            : Boolean(suggestionParams.adjustedPrice);
+      const metaSplit =
+        typeof baseMeta?.splitAdjustment === "boolean"
+          ? baseMeta.splitAdjustment
+          : typeof workerLastMeta?.splitAdjustment === "boolean"
+            ? workerLastMeta.splitAdjustment
+            : Boolean(suggestionParams.splitAdjustment);
+      const metaUserStart =
+        baseMeta?.userStartDate || workerLastMeta?.userStartDate || suggestionParams.startDate;
+      const metaUserEnd =
+        baseMeta?.userEndDate || workerLastMeta?.userEndDate || suggestionParams.endDate;
+      const metaStockNo =
+        baseMeta?.stockNo || workerLastMeta?.stockNo || suggestionParams.stockNo;
+      const metaMarketKey = getMarketKey(
+        baseMeta?.market ||
+          baseMeta?.marketKey ||
+          workerLastMeta?.market ||
+          workerLastMeta?.marketKey ||
+          marketForSuggestion,
+      );
+
+      const datasetMatchesRequest =
+        metaStockNo === suggestionParams.stockNo &&
+        metaUserStart === suggestionParams.startDate &&
+        metaUserEnd === suggestionParams.endDate &&
+        metaAdjusted === Boolean(suggestionParams.adjustedPrice) &&
+        metaSplit === Boolean(suggestionParams.splitAdjustment) &&
+        metaMarketKey === marketKeyForSuggestion;
+
+      const avoidRemoteFetch = Boolean(preventRemoteFetch) || datasetMatchesRequest;
+
+      if (baseMeta) {
+        if (!baseMeta.stockNo) baseMeta.stockNo = suggestionParams.stockNo;
+        if (!baseMeta.userStartDate) baseMeta.userStartDate = metaUserStart;
+        if (!baseMeta.userEndDate) baseMeta.userEndDate = metaUserEnd;
+        if (typeof baseMeta.adjustedPrice !== "boolean") baseMeta.adjustedPrice = metaAdjusted;
+        if (typeof baseMeta.splitAdjustment !== "boolean") baseMeta.splitAdjustment = metaSplit;
+        if (!baseMeta.market) baseMeta.market = marketForSuggestion;
+        if (!baseMeta.marketKey) baseMeta.marketKey = marketKeyForSuggestion;
+      }
+
       if (suggestionDataset.length > 0) {
         seedWorkerCachesForSuggestion(
           suggestionParams.stockNo,
@@ -6888,6 +6969,10 @@ self.onmessage = async function (e) {
             split: suggestionParams.splitAdjustment,
             lookbackDays,
             meta: baseMeta,
+            userStartDate: suggestionParams.startDate,
+            userEndDate: suggestionParams.endDate,
+            market: marketForSuggestion,
+            marketKey: marketKeyForSuggestion,
           },
         );
       }
@@ -6902,26 +6987,38 @@ self.onmessage = async function (e) {
       const needsWarmup =
         suggestionDataset.length === 0 ||
         suggestionDataset[0].date > warmupStartISO;
-      if (needsWarmup) {
-        const warmupEnd =
-          suggestionDataset.length > 0
-            ? suggestionDataset[0].date
-            : todayISO;
-        const warmupFetch = await fetchStockData(
-          suggestionParams.stockNo,
-          warmupStartISO,
-          warmupEnd,
-          marketForSuggestion,
-          fetchOptions,
+      if (suggestionDataset.length === 0 && avoidRemoteFetch) {
+        throw new Error(
+          "本地快取尚未建立，請先於主畫面執行回測以生成今日建議資料。",
         );
-        const warmupRows = Array.isArray(warmupFetch?.data)
-          ? warmupFetch.data
-          : [];
-        if (warmupRows.length > 0) {
-          suggestionDataset = dedupeAndSortData([
-            ...suggestionDataset,
-            ...warmupRows,
-          ]);
+      }
+
+      if (needsWarmup) {
+        if (avoidRemoteFetch) {
+          console.warn(
+            "[Worker Suggestion] 暫停暖身資料的遠端抓取，沿用本地快取。",
+          );
+        } else {
+          const warmupEnd =
+            suggestionDataset.length > 0
+              ? suggestionDataset[0].date
+              : todayISO;
+          const warmupFetch = await fetchStockData(
+            suggestionParams.stockNo,
+            warmupStartISO,
+            warmupEnd,
+            marketForSuggestion,
+            fetchOptions,
+          );
+          const warmupRows = Array.isArray(warmupFetch?.data)
+            ? warmupFetch.data
+            : [];
+          if (warmupRows.length > 0) {
+            suggestionDataset = dedupeAndSortData([
+              ...suggestionDataset,
+              ...warmupRows,
+            ]);
+          }
         }
       }
 
@@ -6930,25 +7027,31 @@ self.onmessage = async function (e) {
           ? suggestionDataset[suggestionDataset.length - 1].date
           : null;
       if (!latestKnownDate || latestKnownDate < todayISO) {
-        const tailStart =
-          latestKnownDate && latestKnownDate >= warmupStartISO
-            ? latestKnownDate
-            : warmupStartISO;
-        const tailFetch = await fetchStockData(
-          suggestionParams.stockNo,
-          tailStart,
-          todayISO,
-          marketForSuggestion,
-          fetchOptions,
-        );
-        const tailRows = Array.isArray(tailFetch?.data)
-          ? tailFetch.data
-          : [];
-        if (tailRows.length > 0) {
-          suggestionDataset = dedupeAndSortData([
-            ...suggestionDataset,
-            ...tailRows,
-          ]);
+        if (avoidRemoteFetch) {
+          console.warn(
+            "[Worker Suggestion] 暫停補齊最新交易日的遠端抓取，沿用現有本地資料。",
+          );
+        } else {
+          const tailStart =
+            latestKnownDate && latestKnownDate >= warmupStartISO
+              ? latestKnownDate
+              : warmupStartISO;
+          const tailFetch = await fetchStockData(
+            suggestionParams.stockNo,
+            tailStart,
+            todayISO,
+            marketForSuggestion,
+            fetchOptions,
+          );
+          const tailRows = Array.isArray(tailFetch?.data)
+            ? tailFetch.data
+            : [];
+          if (tailRows.length > 0) {
+            suggestionDataset = dedupeAndSortData([
+              ...suggestionDataset,
+              ...tailRows,
+            ]);
+          }
         }
       }
 
@@ -6963,20 +7066,19 @@ self.onmessage = async function (e) {
       const finalRange = summariseDatasetRange(suggestionDataset);
       const finalMeta = {
         ...(baseMeta || {}),
+        stockNo: suggestionParams.stockNo,
+        market: marketForSuggestion,
+        marketKey: marketKeyForSuggestion,
         fetchRange:
           finalRange.start && finalRange.end
             ? { start: finalRange.start, end: finalRange.end }
             : baseMeta?.fetchRange || null,
         effectiveStartDate: effectiveStartISO,
-        adjustedPrice:
-          typeof baseMeta?.adjustedPrice === "boolean"
-            ? baseMeta.adjustedPrice
-            : suggestionParams.adjustedPrice,
-        splitAdjustment:
-          typeof baseMeta?.splitAdjustment === "boolean"
-            ? baseMeta.splitAdjustment
-            : suggestionParams.splitAdjustment,
+        adjustedPrice: metaAdjusted,
+        splitAdjustment: metaSplit,
         lookbackDays,
+        userStartDate: suggestionParams.startDate,
+        userEndDate: suggestionParams.endDate,
       };
       seedWorkerCachesForSuggestion(
         suggestionParams.stockNo,
@@ -6990,6 +7092,10 @@ self.onmessage = async function (e) {
           split: suggestionParams.splitAdjustment,
           lookbackDays,
           meta: finalMeta,
+          userStartDate: suggestionParams.startDate,
+          userEndDate: suggestionParams.endDate,
+          market: marketForSuggestion,
+          marketKey: marketKeyForSuggestion,
         },
       );
 

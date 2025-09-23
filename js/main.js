@@ -4,6 +4,7 @@
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-US-BACKTEST-20250621A
+// Patch Tag: LB-TODAY-CACHE-20250628A
 
 // 全局變量
 let stockChart = null;
@@ -1710,10 +1711,20 @@ function getSuggestion() {
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         const normalizedMarket = normalizeMarketValue(params.market || params.marketType || getCurrentMarketFromUI() || 'TWSE');
+        const sameCoreRequest =
+            lastFetchSettings &&
+            lastFetchSettings.stockNo === params.stockNo &&
+            lastFetchSettings.userStartDate === params.startDate &&
+            lastFetchSettings.userEndDate === params.endDate &&
+            Boolean(lastFetchSettings.adjustedPrice) === Boolean(params.adjustedPrice) &&
+            Boolean(lastFetchSettings.splitAdjustment) === Boolean(params.splitAdjustment) &&
+            normalizeMarketValue(lastFetchSettings.market || lastFetchSettings.marketType || normalizedMarket) === normalizedMarket;
+
         const suggestionMessage = {
             type: 'getSuggestion',
             params: params,
-            lookbackDays: lookbackDays
+            lookbackDays: lookbackDays,
+            preventRemoteFetch: sameCoreRequest,
         };
 
         if (Array.isArray(cachedStockData) && cachedStockData.length < lookbackDays) {
@@ -1769,8 +1780,17 @@ function getSuggestion() {
                     dividendDiagnostics: directCacheEntry?.dividendDiagnostics || null,
                     dividendEvents: Array.isArray(directCacheEntry?.dividendEvents) ? directCacheEntry.dividendEvents : [],
                     splitDiagnostics: directCacheEntry?.splitDiagnostics || null,
+                    userStartDate: lastFetchSettings.userStartDate || params.startDate,
+                    userEndDate: lastFetchSettings.userEndDate || params.endDate,
+                    market: normalizedMarket,
                 },
             };
+        }
+
+        if (cachedPayload && cachedPayload.meta) {
+            if (!cachedPayload.meta.userStartDate) cachedPayload.meta.userStartDate = lastFetchSettings?.userStartDate || params.startDate;
+            if (!cachedPayload.meta.userEndDate) cachedPayload.meta.userEndDate = lastFetchSettings?.userEndDate || params.endDate;
+            if (!cachedPayload.meta.market) cachedPayload.meta.market = normalizedMarket;
         }
 
         if (cachedPayload) {
@@ -1799,6 +1819,9 @@ function getSuggestion() {
                 dividendDiagnostics: meta.dividendDiagnostics || null,
                 dividendEvents: Array.isArray(meta.dividendEvents) ? meta.dividendEvents : [],
                 splitDiagnostics: meta.splitDiagnostics || null,
+                userStartDate: meta.userStartDate || params.startDate,
+                userEndDate: meta.userEndDate || params.endDate,
+                market: meta.market || normalizedMarket,
             };
             suggestionMessage.useCachedData = true;
         }

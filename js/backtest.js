@@ -1,5 +1,6 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-TODAY-CACHE-20250628A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -167,30 +168,73 @@ function runBacktestInternal() {
             splitAdjustment: params.splitAdjustment,
             priceMode: priceMode,
             lookbackDays,
+            userStartDate: params.startDate,
+            userEndDate: params.endDate,
         };
-        let useCache=!needsDataFetch(curSettings);
+        const sameCoreRequest =
+            lastFetchSettings &&
+            lastFetchSettings.stockNo === curSettings.stockNo &&
+            lastFetchSettings.userStartDate === params.startDate &&
+            lastFetchSettings.userEndDate === params.endDate &&
+            Boolean(lastFetchSettings.adjustedPrice) === Boolean(curSettings.adjustedPrice) &&
+            Boolean(lastFetchSettings.splitAdjustment) === Boolean(curSettings.splitAdjustment) &&
+            normalizeMarketValue(lastFetchSettings.market || lastFetchSettings.marketType || marketKey) === marketKey;
+
         const cacheKey = buildCacheKey(curSettings);
-        let cachedEntry = null;
-        if (useCache) {
-            cachedEntry = cachedDataStore.get(cacheKey);
-            if (cachedEntry && Array.isArray(cachedEntry.data)) {
-                const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
-                if (startCheck.shouldForce) {
-                    const gapText = Number.isFinite(startCheck.gapDays)
-                        ? `${startCheck.gapDays} 天`
-                        : '未知天數';
-                    const firstDateText = startCheck.firstEffectiveDate || '無';
+        let cachedEntry = cachedDataStore.get(cacheKey);
+        const hasDirectCache = cachedEntry && Array.isArray(cachedEntry.data) && cachedEntry.data.length > 0;
+        const fallbackCacheData = sameCoreRequest && Array.isArray(cachedStockData) && cachedStockData.length > 0
+            ? cachedStockData
+            : null;
+
+        let useCache = false;
+        if (hasDirectCache) {
+            const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
+            if (startCheck.shouldForce) {
+                const gapText = Number.isFinite(startCheck.gapDays)
+                    ? `${startCheck.gapDays} 天`
+                    : '未知天數';
+                const firstDateText = startCheck.firstEffectiveDate || '無';
+                if (sameCoreRequest) {
+                    console.warn(`[Main] 快取首筆有效日期 (${firstDateText}) 落後 ${gapText}，依使用者要求改以本地資料執行。`);
+                    useCache = true;
+                } else {
                     console.warn(`[Main] 快取首筆有效日期 (${firstDateText}) 較設定起點落後 ${gapText}，改為重新抓取。 start=${effectiveStartDate}`);
-                    useCache = false;
                     cachedEntry = null;
-                } else if (startCheck.acknowledged && Number.isFinite(startCheck.gapDays) && startCheck.gapDays > START_GAP_TOLERANCE_DAYS) {
-                    console.warn(`[Main] 快取首筆有效日期已落後 ${startCheck.gapDays} 天，已在近期確認資料缺口，暫時沿用快取資料。`);
                 }
             } else {
-                console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
-                useCache = false;
-                cachedEntry = null;
+                if (startCheck.acknowledged && Number.isFinite(startCheck.gapDays) && startCheck.gapDays > START_GAP_TOLERANCE_DAYS) {
+                    console.warn(`[Main] 快取首筆有效日期已落後 ${startCheck.gapDays} 天，已在近期確認資料缺口，暫時沿用快取資料。`);
+                }
+                useCache = true;
             }
+        }
+
+        if (!useCache && fallbackCacheData) {
+            console.info('[Main] 沿用上一筆回測資料進行本次計算，未重新抓取股票資訊。');
+            useCache = true;
+        }
+
+        if (!useCache) {
+            const needFetch = needsDataFetch(curSettings);
+            if (!needFetch) {
+                if (hasDirectCache || fallbackCacheData) {
+                    useCache = true;
+                }
+            }
+            if (!useCache && !needFetch) {
+                console.warn('[Main] 評估結果認定可使用快取，但未找到對應資料，將改為重新抓取。');
+            }
+            if (!useCache && needFetch) {
+                console.log('[Main] 快取不足，將重新抓取資料。');
+            }
+        }
+
+        if (useCache && !hasDirectCache && fallbackCacheData) {
+            cachedEntry = null;
+        } else if (useCache && !hasDirectCache && !fallbackCacheData) {
+            console.warn('[Main] 本地仍無可用資料，只能重新抓取。');
+            useCache = false;
         }
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
@@ -202,6 +246,15 @@ function runBacktestInternal() {
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
+        } else if (useCache && fallbackCacheData) {
+            const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
+            visibleStockData = extractRangeData(fallbackCacheData, sliceStart, curSettings.endDate);
+            cachedStockData = fallbackCacheData;
+            if (!sameCoreRequest) {
+                lastFetchSettings = { ...curSettings };
+            }
+            refreshPriceInspectorControls();
+            console.log('[Main] 使用上一筆回測的本地資料執行，不觸發遠端請求。');
         }
         clearPreviousResults(); // Clear previous results including suggestion
 
@@ -300,6 +353,9 @@ function runBacktestInternal() {
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
+                        userStartDate: params.startDate,
+                        userEndDate: params.endDate,
+                        market: marketKey,
                         adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
@@ -528,6 +584,30 @@ function runBacktestInternal() {
                     effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
                     lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                     diagnostics: cachedEntry.fetchDiagnostics || cachedEntry.datasetDiagnostics || null,
+                    userStartDate: cachedEntry.userStartDate || params.startDate,
+                    userEndDate: cachedEntry.userEndDate || params.endDate,
+                    market: cachedEntry.market || marketKey,
+                    priceMode: cachedEntry.priceMode || priceMode,
+                    adjustedPrice: typeof cachedEntry.adjustedPrice === 'boolean' ? cachedEntry.adjustedPrice : Boolean(params.adjustedPrice),
+                };
+            } else if (fallbackCacheData && lastFetchSettings) {
+                workerMsg.cachedMeta = {
+                    summary: null,
+                    adjustments: [],
+                    debugSteps: [],
+                    adjustmentFallbackApplied: false,
+                    priceSource: null,
+                    dataSource: '主執行緒快取',
+                    splitAdjustment: Boolean(lastFetchSettings.splitAdjustment),
+                    fetchRange: lastFetchSettings.fetchRange || { start: lastFetchSettings.startDate, end: lastFetchSettings.endDate },
+                    effectiveStartDate: lastFetchSettings.effectiveStartDate || effectiveStartDate,
+                    lookbackDays: lastFetchSettings.lookbackDays || lookbackDays,
+                    diagnostics: null,
+                    userStartDate: lastFetchSettings.userStartDate || params.startDate,
+                    userEndDate: lastFetchSettings.userEndDate || params.endDate,
+                    market: lastFetchSettings.market || marketKey,
+                    priceMode: lastFetchSettings.priceMode || priceMode,
+                    adjustedPrice: typeof lastFetchSettings.adjustedPrice === 'boolean' ? lastFetchSettings.adjustedPrice : Boolean(params.adjustedPrice),
                 };
             }
             console.log("[Main] Sending cached data to worker for backtest.");
