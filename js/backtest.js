@@ -1620,8 +1620,8 @@ function displayBacktestResult(result) {
                         </div>
                     </div>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs" style="border-color: var(--border); border-width: 1px; border-style: solid; border-radius: 0.75rem; overflow: hidden;">
+                <div class="overflow-x-auto" style="overflow-x: auto; overflow-y: visible;">
+                    <table class="w-full text-xs" style="border-color: var(--border); border-width: 1px; border-style: solid; border-radius: 0.75rem;">
                         <thead>
                             <tr class="bg-white/40" style="color: var(--muted-foreground);">
                                 <th class="px-3 py-2 text-left font-medium">參數</th>
@@ -1666,7 +1666,13 @@ function displayBacktestResult(result) {
                     <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                        <span class="tooltip">
+                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                            <span class="tooltiptext">平均漂移幅度 = 觀察參數 ±10% 兩個情境的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或執行 Walk-Forward 驗證。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                        </span>
+                    </div>
                     <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
                     <p class="text-xs" style="color: var(--muted-foreground);">參數 ±10% 時，回報率平均偏離</p>
                 </div>
