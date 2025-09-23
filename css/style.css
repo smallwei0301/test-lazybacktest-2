@@ -2,6 +2,11 @@
 .tooltip { position: relative; display: inline-flex; vertical-align: middle; overflow: visible; }
 .tooltip .tooltiptext { visibility: hidden; max-width: 320px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 9999; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 12px rgba(0,0,0,0.35); white-space: normal; word-break: break-word; }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+#backtest-result .tooltiptext { z-index: 10000; }
+.main-layout-shell, .main-grid, .left-panel, .right-panel { overflow: visible; }
+.left-panel { overflow-x: visible; }
+.right-panel { overflow-x: visible; }
+#backtest-result { position: relative; overflow: visible; }
 #chart-container { height: 500px; }
 @media (max-width: 768px) { #chart-container { height: 350px; } }
 .optimization-table th { position: sticky; top: 0; z-index: 1; background-color: #f9fafb; }
