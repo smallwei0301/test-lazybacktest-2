@@ -37,8 +37,8 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-// Patch Tag: LB-STRATEGY-STATUS-20250624A
-const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250624A';
+// Patch Tag: LB-STRATEGY-STATUS-20250627A
+const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250627A';
 const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
 const STRATEGY_STATUS_BADGE_VARIANTS = {
     positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
@@ -47,6 +47,13 @@ const STRATEGY_STATUS_BADGE_VARIANTS = {
     loading: 'bg-gray-100 text-gray-600 border-gray-300',
 };
 const STRATEGY_STATUS_DIFF_THRESHOLD = 0.5;
+const STRATEGY_HEALTH_THRESHOLDS = {
+    annualizedReturn: 8,
+    sharpeRatio: 1,
+    sortinoRatio: 1,
+    maxDrawdown: 25,
+    stabilityRatio: 0.5,
+};
 
 function parseISODateToUTC(iso) {
     if (!iso || typeof iso !== 'string') return NaN;
@@ -787,7 +794,7 @@ function resetStrategyStatusCard(mode = 'idle') {
             variant: 'loading',
             badgeText: '計算中',
             headlineText: '正在比對誰笑到最後…',
-            detailText: '演算小隊正翻找數據，請先喝口水稍候片刻。',
+            detailText: '演算小隊正翻找數據，等下就會送上戰況比分與指標體檢，請先喝口水稍候片刻。',
         });
         return;
     }
@@ -796,7 +803,7 @@ function resetStrategyStatusCard(mode = 'idle') {
         variant: 'loading',
         badgeText: '尚未開賽',
         headlineText: '執行回測後將揭曉策略戰況',
-        detailText: '回測一結束，我會立刻爆料策略和買入持有誰目前佔上風，讓你秒懂戰局。',
+        detailText: '回測一結束，我會立刻爆料策略與買入持有誰佔上風，還會順手端出指標體檢心得，讓你秒懂戰局體質。',
     });
 }
 
@@ -822,6 +829,96 @@ function formatPercentDiff(value) {
     const num = toFiniteNumber(value);
     if (num === null) return '0.00 個百分點';
     return `${Math.abs(num).toFixed(2)} 個百分點`;
+}
+
+function buildStrategyHealthSummary(result) {
+    const thresholds = STRATEGY_HEALTH_THRESHOLDS;
+    const highlights = [];
+    const cautions = [];
+
+    const annualized = toFiniteNumber(result && result.annualizedReturn);
+    if (annualized !== null) {
+        if (annualized >= thresholds.annualizedReturn) {
+            highlights.push(`年化報酬 ${annualized.toFixed(2)}%`);
+        } else {
+            cautions.push(`年化報酬只有 ${annualized.toFixed(2)}%，收益動能偏弱，建議檢視進出場節奏`);
+        }
+    }
+
+    const sharpeRaw = result && result.sharpeRatio;
+    if (typeof sharpeRaw === 'number' && !Number.isNaN(sharpeRaw)) {
+        if (Number.isFinite(sharpeRaw)) {
+            if (sharpeRaw >= thresholds.sharpeRatio) {
+                highlights.push(`夏普值 ${sharpeRaw.toFixed(2)}`);
+            } else {
+                cautions.push(`夏普值僅 ${sharpeRaw.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力`);
+            }
+        } else if (sharpeRaw > 0) {
+            highlights.push('夏普值趨近無窮大');
+        }
+    }
+
+    const sortinoRaw = result && result.sortinoRatio;
+    if (typeof sortinoRaw === 'number' && !Number.isNaN(sortinoRaw)) {
+        if (Number.isFinite(sortinoRaw)) {
+            if (sortinoRaw >= thresholds.sortinoRatio) {
+                highlights.push(`索提諾比率 ${sortinoRaw.toFixed(2)}`);
+            } else {
+                cautions.push(`索提諾比率只有 ${sortinoRaw.toFixed(2)}，下檔風險控制力道有限，記得設定停損`);
+            }
+        } else if (sortinoRaw > 0) {
+            highlights.push('索提諾比率極佳（趨近無窮大）');
+        }
+    }
+
+    const maxDrawdownRaw = toFiniteNumber(result && result.maxDrawdown);
+    if (maxDrawdownRaw !== null) {
+        const dd = Math.abs(maxDrawdownRaw);
+        if (dd <= thresholds.maxDrawdown) {
+            highlights.push(`最大回撤僅 ${dd.toFixed(2)}%`);
+        } else {
+            cautions.push(`最大回撤達 ${dd.toFixed(2)}%，部位可能經歷較大回檔，務必規劃資金緩衝`);
+        }
+    }
+
+    const annHalf1 = toFiniteNumber(result && result.annReturnHalf1);
+    const annHalf2 = toFiniteNumber(result && result.annReturnHalf2);
+    if (annHalf1 !== null && annHalf2 !== null && annHalf1 !== 0) {
+        const ratio = annHalf2 / annHalf1;
+        if (Number.isFinite(ratio)) {
+            if (ratio >= thresholds.stabilityRatio) {
+                highlights.push(`前後段報酬比 ${ratio.toFixed(2)}`);
+            } else {
+                cautions.push(`前後段報酬比僅 ${ratio.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證`);
+            }
+        }
+    }
+
+    const sharpeHalf1 = toFiniteNumber(result && result.sharpeHalf1);
+    const sharpeHalf2 = toFiniteNumber(result && result.sharpeHalf2);
+    if (sharpeHalf1 !== null && sharpeHalf2 !== null && sharpeHalf1 !== 0) {
+        const ratio = sharpeHalf2 / sharpeHalf1;
+        if (Number.isFinite(ratio)) {
+            if (ratio >= thresholds.stabilityRatio) {
+                highlights.push(`前後段夏普比 ${ratio.toFixed(2)}`);
+            } else {
+                cautions.push(`前後段夏普比只有 ${ratio.toFixed(2)}，可能存在過擬合，請留意驗證樣本`);
+            }
+        }
+    }
+
+    if (highlights.length === 0 && cautions.length === 0) {
+        return '指標巡檢資料不足，稍後重跑一次確認數據。';
+    }
+
+    if (cautions.length === 0) {
+        const highlightText = highlights.join('、');
+        return `指標巡檢全數過關：${highlightText}，這套策略目前可以被列為「非常好」，照表操課即可。`;
+    }
+
+    const cautionText = cautions.join('；');
+    const highlightTail = highlights.length > 0 ? `；另外 ${highlights.join('、')} 表現還算給力，記得把優勢守住` : '';
+    return `指標巡檢：${cautionText}${highlightTail}，請調整倉位或優化參數再上。`;
 }
 
 function updateStrategyStatusCard(result) {
@@ -869,19 +966,22 @@ function updateStrategyStatusCard(result) {
     let variant = 'neutral';
     let badgeText = '勝負未定';
     let headlineText = '🤝 暫時打成平手';
-    let detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
+    let baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
 
     if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'positive';
         badgeText = '策略領先';
         headlineText = '🎉 策略完勝買入持有';
-        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前領先 ${formatPercentDiff(diff)}。今晚可以替自己加菜，但風險控管還是不能鬆手。`;
+        baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前領先 ${formatPercentDiff(diff)}。今晚可以替自己加菜，但風險控管還是不能鬆手。`;
     } else if (diff < -STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'negative';
         badgeText = '策略加油';
         headlineText = '🛠️ 策略暫時落後';
-        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。`;
+        baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。`;
     }
+
+    const healthSummary = buildStrategyHealthSummary(result);
+    const detailText = healthSummary ? `${baseDetailText} ${healthSummary}` : baseDetailText;
 
     setStrategyStatusCardState({
         visible: true,
