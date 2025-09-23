@@ -51,14 +51,14 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const YEAR_STORAGE_VERSION = 'LB-CACHE-TIER-20250720A';
-const YEAR_STORAGE_PREFIX = 'LB_YEAR_DATA_CACHE_V20250720A';
+const YEAR_STORAGE_VERSION = 'LB-BLOB-QUIN-20250830A';
+const YEAR_STORAGE_PREFIX = 'LB_YEAR_DATA_CACHE_V20250830A';
 const YEAR_STORAGE_TW_TTL_MS = 1000 * 60 * 60 * 24 * 3;
 const YEAR_STORAGE_US_TTL_MS = 1000 * 60 * 60 * 24 * 1;
 const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 
-const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
-const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
+const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250830A';
+const BLOB_LEDGER_VERSION = 'LB-BLOB-QUIN-20250830A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
 function cloneArrayOfRanges(ranges) {
@@ -2120,6 +2120,10 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         renderDiagnosticsEntries('dataDiagnosticsSummary', []);
         renderDiagnosticsEntries('dataDiagnosticsName', []);
         renderDiagnosticsEntries('dataDiagnosticsWarmup', []);
+        const warmupNoteEl = document.getElementById('dataDiagnosticsWarmupNote');
+        if (warmupNoteEl) {
+            warmupNoteEl.textContent = '';
+        }
         renderDiagnosticsEntries('dataDiagnosticsBuyHold', []);
         renderDiagnosticsSamples('dataDiagnosticsInvalidSamples', []);
         renderDiagnosticsSamples('dataDiagnosticsBuyHoldSamples', []);
@@ -2175,6 +2179,40 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         { label: '設定 Lookback 天數', value: warmup.lookbackDays },
         { label: '距暖身起點天數', value: formatDiagnosticsGap(warmup.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromWarmup) },
     ]);
+    const warmupNoteEl = document.getElementById('dataDiagnosticsWarmupNote');
+    if (warmupNoteEl) {
+        const warmupStart = warmup.warmupStartDate || warmup.dataStartDate || dataset.warmupStartDate || null;
+        const userStart = dataset.requestedStart || warmup.requestedStart || diag.fetch?.requested?.start || null;
+        const longest = Number.isFinite(warmup.longestLookback) && warmup.longestLookback > 0
+            ? warmup.longestLookback
+            : null;
+        const lookbackDays = Number.isFinite(warmup.lookbackDays) && warmup.lookbackDays > 0
+            ? warmup.lookbackDays
+            : null;
+        const factors = [];
+        if (longest) {
+            factors.push(`最長指標需求 ${longest} 筆`);
+        }
+        if (lookbackDays) {
+            factors.push(`額外緩衝 ${lookbackDays} 天`);
+        }
+        const baseExplanation = factors.length > 0
+            ? `shared-lookback 會依 ${factors.join(' + ')} 回推暖身範圍`
+            : 'shared-lookback 會根據策略指標需求與緩衝設定回推暖身範圍';
+        let gapExplanation = '';
+        if (warmupStart && userStart) {
+            const warmupUtc = parseISODateToUTC(warmupStart);
+            const userUtc = parseISODateToUTC(userStart);
+            if (Number.isFinite(warmupUtc) && Number.isFinite(userUtc) && warmupUtc < userUtc) {
+                const diffDays = Math.round((userUtc - warmupUtc) / BACKTEST_DAY_MS);
+                if (diffDays > 0) {
+                    gapExplanation = `，與使用者起點相差約 ${diffDays} 天`;
+                }
+            }
+        }
+        const resolvedWarmupStart = warmupStart || '暖身起點未定';
+        warmupNoteEl.textContent = `${baseExplanation}，因此本次暖身起點落在 ${resolvedWarmupStart}${gapExplanation}。系統會先確認暖身區間內的有效收盤價後才交付回測計算。`;
+    }
     renderDiagnosticsEntries('dataDiagnosticsBuyHold', [
         { label: '首筆有效收盤索引', value: buyHold.firstValidPriceIdx },
         { label: '首筆有效收盤日期', value: buyHold.firstValidPriceDate || '—' },

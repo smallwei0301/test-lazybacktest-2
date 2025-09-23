@@ -1,12 +1,12 @@
-// netlify/functions/stock-range.js (v3.0 - yearly blob cache)
-// Patch Tag: LB-CACHE-TIER-20250720A
+// netlify/functions/stock-range.js (v3.1 - five-year blob cache)
+// Patch Tag: LB-BLOB-QUIN-20250830A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
 const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const YEAR_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-const YEAR_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const SEGMENT_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+const SEGMENT_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 const inFlightTwseMonthCache = new Map();
 
@@ -295,12 +295,30 @@ function buildYearList(startDate, endDate) {
     return years;
 }
 
-function getYearCacheKey(marketType, stockNo, year) {
-    return `${marketType}_${stockNo}_${year}`;
+function getFiveYearBucketStart(year) {
+    if (!Number.isFinite(year)) return year;
+    return Math.floor(year / 5) * 5;
 }
 
-function getYearCacheTtl(marketType) {
-    return marketType === 'TPEX' ? YEAR_CACHE_TPEX_MS : YEAR_CACHE_TWSE_MS;
+function buildFiveYearSegments(startDate, endDate) {
+    if (!startDate || !endDate) return [];
+    const startYear = startDate.getUTCFullYear();
+    const endYear = endDate.getUTCFullYear();
+    const segments = [];
+    const startBucket = getFiveYearBucketStart(startYear);
+    const endBucket = getFiveYearBucketStart(endYear);
+    for (let bucket = startBucket; bucket <= endBucket; bucket += 5) {
+        segments.push({ startYear: bucket, endYear: bucket + 4 });
+    }
+    return segments;
+}
+
+function getSegmentCacheKey(marketType, stockNo, startYear) {
+    return `${marketType}_${stockNo}_${startYear}_${startYear + 4}`;
+}
+
+function getSegmentCacheTtl(marketType) {
+    return marketType === 'TPEX' ? SEGMENT_CACHE_TPEX_MS : SEGMENT_CACHE_TWSE_MS;
 }
 
 function groupAaDataByYear(aaData) {
@@ -317,29 +335,30 @@ function groupAaDataByYear(aaData) {
     return groups;
 }
 
-async function persistYearSlice(store, cacheKey, payload, telemetry) {
+async function persistSegmentSlice(store, cacheKey, payload, telemetry) {
     if (!store || !payload) return;
     try {
         await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
         if (telemetry) telemetry.writeOps += 1;
     } catch (error) {
         if (!isQuotaError(error)) {
-            console.warn('[Year Cache] Failed to persist', cacheKey, error);
+            console.warn('[Five-Year Cache] Failed to persist', cacheKey, error);
         }
     }
 }
 
-async function fetchYearDataset({ store, stockNo, marketType, year, telemetry }) {
-    const yearKey = getYearCacheKey(marketType, stockNo, year);
-    telemetry.yearKeys.push(yearKey);
+async function fetchFiveYearDataset({ store, stockNo, marketType, segment, telemetry }) {
+    const { startYear, endYear } = segment;
+    const segmentKey = getSegmentCacheKey(marketType, stockNo, startYear);
+    telemetry.segmentKeys.push(segmentKey);
     let cached = null;
     if (store) {
         try {
             telemetry.readOps += 1;
-            cached = await store.get(yearKey, { type: 'json' });
-            if (cached && cached.data && (Date.now() - cached.timestamp < getYearCacheTtl(marketType))) {
+            cached = await store.get(segmentKey, { type: 'json' });
+            if (cached && cached.data && (Date.now() - cached.timestamp < getSegmentCacheTtl(marketType))) {
                 telemetry.cacheHits += 1;
-                telemetry.hitYearKeys.push(yearKey);
+                telemetry.hitSegmentKeys.push(segmentKey);
                 const base = cached.data;
                 return {
                     stockName: base.stockName || stockNo,
@@ -349,33 +368,50 @@ async function fetchYearDataset({ store, stockNo, marketType, year, telemetry })
             }
         } catch (error) {
             if (!isQuotaError(error)) {
-                console.warn('[Year Cache] Read failed', yearKey, error);
+                console.warn('[Five-Year Cache] Read failed', segmentKey, error);
             }
         }
     }
 
     telemetry.cacheMisses += 1;
-    telemetry.missYearKeys.push(yearKey);
-    const startDate = new Date(Date.UTC(year, 0, 1));
-    const endDate = new Date(Date.UTC(year, 11, 31));
+    telemetry.missSegmentKeys.push(segmentKey);
+    const startDate = new Date(Date.UTC(startYear, 0, 1));
+    const endDate = new Date(Date.UTC(endYear, 11, 31));
 
     if (marketType === 'TPEX') {
         const tpexData = await composeTpexRange(stockNo);
         const groups = groupAaDataByYear(tpexData.aaData);
+        const buckets = new Map();
+        groups.forEach((rows, yr) => {
+            const bucketStart = getFiveYearBucketStart(yr);
+            const key = getSegmentCacheKey(marketType, stockNo, bucketStart);
+            if (!buckets.has(key)) {
+                buckets.set(key, { startYear: bucketStart, rows: [] });
+            }
+            buckets.get(key).rows.push(...rows);
+        });
         if (store) {
-            for (const [yr, rows] of groups.entries()) {
-                const cachePayload = {
+            for (const [key, info] of buckets.entries()) {
+                const payload = {
                     stockName: tpexData.stockName || stockNo,
-                    aaData: rows,
+                    aaData: info.rows,
                     marketType,
+                    startYear: info.startYear,
+                    endYear: info.startYear + 4,
                 };
-                await persistYearSlice(store, getYearCacheKey(marketType, stockNo, yr), cachePayload, telemetry);
-                if (yr !== year) {
-                    telemetry.primedYearKeys.push(getYearCacheKey(marketType, stockNo, yr));
+                await persistSegmentSlice(store, key, payload, telemetry);
+                if (key !== segmentKey) {
+                    telemetry.primedSegmentKeys.push(key);
                 }
             }
         }
-        const aaData = groups.get(year) || [];
+        const aaData = [];
+        for (let yr = startYear; yr <= endYear; yr += 1) {
+            const rows = groups.get(yr);
+            if (Array.isArray(rows)) {
+                aaData.push(...rows);
+            }
+        }
         return {
             stockName: tpexData.stockName || stockNo,
             aaData,
@@ -389,8 +425,10 @@ async function fetchYearDataset({ store, stockNo, marketType, year, telemetry })
             stockName: twseData.stockName || stockNo,
             aaData: twseData.aaData,
             marketType,
+            startYear,
+            endYear,
         };
-        await persistYearSlice(store, yearKey, cachePayload, telemetry);
+        await persistSegmentSlice(store, segmentKey, cachePayload, telemetry);
     }
     return {
         stockName: twseData.stockName || stockNo,
@@ -418,38 +456,40 @@ export default async (req) => {
         }
 
         const years = buildYearList(startDate, endDate);
+        const segments = buildFiveYearSegments(startDate, endDate);
         const yearStore = getStore('stock_year_cache_store');
         const telemetry = {
-            provider: 'year-cache',
+            provider: 'five-year-cache',
             market: marketType,
-            yearKeys: [],
+            years,
+            segments,
+            segmentKeys: [],
             cacheHits: 0,
             cacheMisses: 0,
             readOps: 0,
             writeOps: 0,
-            years,
-            hitYearKeys: [],
-            missYearKeys: [],
-            primedYearKeys: [],
+            hitSegmentKeys: [],
+            missSegmentKeys: [],
+            primedSegmentKeys: [],
         };
 
-        const yearResults = [];
+        const segmentResults = [];
         let resolvedStockName = stockNo;
-        for (const year of years) {
-            const result = await fetchYearDataset({
+        for (const segment of segments) {
+            const result = await fetchFiveYearDataset({
                 store: yearStore,
                 stockNo,
                 marketType,
-                year,
+                segment,
                 telemetry,
             });
             if (result.stockName) resolvedStockName = result.stockName;
             if (Array.isArray(result.aaData)) {
-                yearResults.push(result.aaData);
+                segmentResults.push(result.aaData);
             }
         }
 
-        const mergedAaData = yearResults.flat();
+        const mergedAaData = segmentResults.flat();
         const filteredAaData = filterAaDataByRange(mergedAaData, startDate, endDate);
         telemetry.returnedRows = filteredAaData.length;
 
@@ -458,25 +498,34 @@ export default async (req) => {
             stockName: resolvedStockName,
             iTotalRecords: filteredAaData.length,
             aaData: filteredAaData,
-            dataSource: mergedAaData.length > 0 ? 'Blob Year Cache' : marketType,
+            dataSource: mergedAaData.length > 0 ? 'Blob Five-Year Cache' : marketType,
             marketType,
             meta: {
                 years,
+                segments: segments.map((segment) => ({
+                    startYear: segment.startYear,
+                    endYear: segment.endYear,
+                    key: getSegmentCacheKey(marketType, stockNo, segment.startYear),
+                })),
                 cacheHits: telemetry.cacheHits,
                 cacheMisses: telemetry.cacheMisses,
                 readOps: telemetry.readOps,
                 writeOps: telemetry.writeOps,
-                yearKeys: telemetry.yearKeys,
-                hitYearKeys: telemetry.hitYearKeys,
-                missYearKeys: telemetry.missYearKeys,
-                primedYearKeys: telemetry.primedYearKeys,
-                source: 'year-cache',
+                segmentKeys: telemetry.segmentKeys,
+                yearKeys: telemetry.segmentKeys,
+                hitSegmentKeys: telemetry.hitSegmentKeys,
+                hitYearKeys: telemetry.hitSegmentKeys,
+                missSegmentKeys: telemetry.missSegmentKeys,
+                missYearKeys: telemetry.missSegmentKeys,
+                primedSegmentKeys: telemetry.primedSegmentKeys,
+                primedYearKeys: telemetry.primedSegmentKeys,
+                source: 'five-year-cache',
             }
         };
 
         return new Response(JSON.stringify(responsePayload), { headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
-        console.error('[Year Range] Unexpected error:', error);
+        console.error('[Five-Year Range] Unexpected error:', error);
         return new Response(JSON.stringify({ error: error.message || 'Internal error' }), { status: 500 });
     }
 };

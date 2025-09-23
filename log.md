@@ -1,3 +1,9 @@
+# 2025-08-30 — Patch LB-BLOB-QUIN-20250830A
+- **Issue recap**: 年度 Blob 快取仍需逐年讀寫，長期 12～18 個月回測會累積大量操作；資料暖身診斷卡缺少暖身起點計算說明，營運難以向使用者解釋緩衝來源。
+- **Fix**: Netlify `stock-range` 改以 5 年切片讀寫 Blob，遠端回應同步回傳命中段資訊；Worker 與主執行緒更新 Telemetry 與資料來源標籤，並在暖身面板新增 shared-lookback 暖身推導說明。
+- **Diagnostics**: `fetchDiagnostics.blob` 顯示五年段 key、命中/補抓與 Primed 列表，Blob 監控卡改用「Netlify 五年快取」標籤；資料暖身卡說明最長指標視窗與 Lookback 緩衝如何回推暖身起點。
+- **Testing**: 受限於容器無瀏覽器與實際 API，僅進行程式碼檢視與資料流推演；需於本機瀏覽器執行 18 個月跨年度回測確認 Blob 計量下降且暖身說明正確呈現。
+
 # 2025-07-23 — Patch LB-SUPERSET-CACHE-20250723A
 - **Issue recap**: 年度 Blob 快取命中後仍會在同年度重複呼叫 Netlify/Proxy，主執行緒無法判斷既有快取是否涵蓋新區間，月度快取也會在暖身視窗微調時重新計算缺口並多次補抓。
 - **Fix**: Worker 建立 `market｜priceMode｜年度` Superset 快取並在呼叫 Blob/Proxy 後分拆寫入，回測前先嘗試以 Superset 切片回覆；主執行緒新增年度 Superset 尋找與切片機制，若快取已涵蓋新區間直接回播不再啟動 Worker；月度快取加入 coverage 指紋記錄，命中即可跳過缺口計算並避免重複補抓。

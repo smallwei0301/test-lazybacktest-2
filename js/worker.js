@@ -2012,12 +2012,14 @@ async function tryFetchRangeFromBlob({
   }
 
   const rangeFetchInfo = {
-    provider: "netlify-blob-range",
+    provider: "netlify-five-year-range",
     market: marketKey,
     status: "pending",
     cacheHit: false,
     years: [],
+    segments: [],
     yearKeys: [],
+    segmentKeys: [],
     readOps: 0,
     writeOps: 0,
   };
@@ -2114,11 +2116,37 @@ async function tryFetchRangeFromBlob({
   const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
   const blobMeta = payload?.meta || {};
+  const segmentKeys = Array.isArray(blobMeta.segmentKeys)
+    ? blobMeta.segmentKeys
+    : Array.isArray(blobMeta.yearKeys)
+      ? blobMeta.yearKeys
+      : [];
+  const hitSegmentKeys = Array.isArray(blobMeta.hitSegmentKeys)
+    ? blobMeta.hitSegmentKeys
+    : Array.isArray(blobMeta.hitYearKeys)
+      ? blobMeta.hitYearKeys
+      : [];
+  const missSegmentKeys = Array.isArray(blobMeta.missSegmentKeys)
+    ? blobMeta.missSegmentKeys
+    : Array.isArray(blobMeta.missYearKeys)
+      ? blobMeta.missYearKeys
+      : [];
+  const primedSegmentKeys = Array.isArray(blobMeta.primedSegmentKeys)
+    ? blobMeta.primedSegmentKeys
+    : Array.isArray(blobMeta.primedYearKeys)
+      ? blobMeta.primedYearKeys
+      : [];
   rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
-  rangeFetchInfo.yearKeys = Array.isArray(blobMeta.yearKeys) ? blobMeta.yearKeys : [];
+  rangeFetchInfo.segments = Array.isArray(blobMeta.segments)
+    ? blobMeta.segments
+    : [];
+  rangeFetchInfo.yearKeys = segmentKeys;
+  rangeFetchInfo.segmentKeys = segmentKeys;
   rangeFetchInfo.readOps = Number(blobMeta.readOps) || 0;
   rangeFetchInfo.writeOps = Number(blobMeta.writeOps) || 0;
-  rangeFetchInfo.cacheHit = Number(blobMeta.cacheMisses || 0) === 0;
+  const cacheMissCount = Number(blobMeta.cacheMisses);
+  rangeFetchInfo.cacheHit =
+    missSegmentKeys.length === 0 && (!Number.isFinite(cacheMissCount) || cacheMissCount === 0);
   rangeFetchInfo.rowCount = deduped.length;
   rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
@@ -2149,8 +2177,8 @@ async function tryFetchRangeFromBlob({
     dataSourceFlags.add(payload.dataSource);
   }
   const blobSourceLabel = rangeFetchInfo.cacheHit
-    ? "Netlify 年度快取 (Blob 命中)"
-    : "Netlify 年度快取 (Blob 補抓)";
+    ? "Netlify 五年快取 (Blob 命中)"
+    : "Netlify 五年快取 (Blob 補抓)";
   dataSourceFlags.add(blobSourceLabel);
 
   const defaultRemoteLabel =
@@ -2181,28 +2209,28 @@ async function tryFetchRangeFromBlob({
   }
   const blobOperations = [];
   const readMap = new Map();
-  if (Array.isArray(rangeFetchInfo.yearKeys)) {
-    rangeFetchInfo.yearKeys.forEach((yearKey) => {
-      readMap.set(yearKey, {
+  if (Array.isArray(rangeFetchInfo.segmentKeys)) {
+    rangeFetchInfo.segmentKeys.forEach((segmentKey) => {
+      readMap.set(segmentKey, {
         action: "read",
-        key: yearKey,
+        key: segmentKey,
         stockNo,
         market: marketKey,
         cacheHit: true,
         count: 1,
-        source: "netlify-year-cache",
+        source: "netlify-five-year-cache",
       });
     });
   }
-  if (Array.isArray(blobMeta.hitYearKeys)) {
-    blobMeta.hitYearKeys.forEach((key) => {
+  if (Array.isArray(hitSegmentKeys)) {
+    hitSegmentKeys.forEach((key) => {
       if (readMap.has(key)) {
         readMap.get(key).cacheHit = true;
       }
     });
   }
-  if (Array.isArray(blobMeta.missYearKeys)) {
-    blobMeta.missYearKeys.forEach((key) => {
+  if (Array.isArray(missSegmentKeys)) {
+    missSegmentKeys.forEach((key) => {
       if (readMap.has(key)) {
         readMap.get(key).cacheHit = false;
       } else {
@@ -2213,14 +2241,14 @@ async function tryFetchRangeFromBlob({
           market: marketKey,
           cacheHit: false,
           count: 1,
-          source: "netlify-year-cache",
+          source: "netlify-five-year-cache",
         });
       }
     });
   }
   blobOperations.push(...readMap.values());
-  if (Array.isArray(blobMeta.primedYearKeys)) {
-    blobMeta.primedYearKeys.forEach((key) => {
+  if (Array.isArray(primedSegmentKeys)) {
+    primedSegmentKeys.forEach((key) => {
       blobOperations.push({
         action: "write",
         key,
@@ -2228,25 +2256,30 @@ async function tryFetchRangeFromBlob({
         market: marketKey,
         cacheHit: false,
         count: 1,
-        source: "netlify-year-cache",
+        source: "netlify-five-year-cache",
       });
     });
   }
 
   fetchDiagnostics.usedCache = rangeFetchInfo.cacheHit;
   fetchDiagnostics.blob = {
-    provider: "netlify-year-cache",
+    provider: "netlify-five-year-cache",
     years: rangeFetchInfo.years,
+    segments: rangeFetchInfo.segments,
     yearKeys: rangeFetchInfo.yearKeys,
+    segmentKeys: rangeFetchInfo.segmentKeys,
     cacheHits: Number(blobMeta.cacheHits) || 0,
     cacheMisses: Number(blobMeta.cacheMisses) || 0,
     readOps: rangeFetchInfo.readOps,
     writeOps: rangeFetchInfo.writeOps,
+    hitSegmentKeys,
+    missSegmentKeys,
+    primedSegmentKeys,
     operations: blobOperations,
   };
 
   const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
-    source: "netlify-blob-range",
+    source: "netlify-five-year-range",
     requestedRange: { start: startDate, end: endDate },
   });
   recordYearSupersetSlices({
