@@ -12,6 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureTaiwanDirectoryReady({ forceRefresh: shouldForceRefresh }).catch((error) => {
         console.warn('[Taiwan Directory] 預載入失敗:', error);
     });
+    console.info(`[Main] Strategy status card patch loaded: ${STRATEGY_STATUS_PATCH_TAG}`);
+    resetStrategyStatusCard('idle');
 });
 
 let lastPriceDebug = {
@@ -35,6 +37,16 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
+// Patch Tag: LB-STRATEGY-STATUS-20250623A
+const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250623A';
+const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
+const STRATEGY_STATUS_BADGE_VARIANTS = {
+    positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    negative: 'bg-rose-100 text-rose-700 border-rose-300',
+    neutral: 'bg-blue-100 text-blue-700 border-blue-300',
+    loading: 'bg-gray-100 text-gray-600 border-gray-300',
+};
+const STRATEGY_STATUS_DIFF_THRESHOLD = 0.5;
 
 function parseISODateToUTC(iso) {
     if (!iso || typeof iso !== 'string') return NaN;
@@ -194,6 +206,7 @@ function runBacktestInternal() {
         }
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
+        resetStrategyStatusCard('loading');
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
@@ -476,6 +489,7 @@ function runBacktestInternal() {
                 hideLoading();
                 const suggestionArea = document.getElementById('today-suggestion-area');
                  if (suggestionArea) suggestionArea.classList.add('hidden');
+                 resetStrategyStatusCard('idle');
             }
         };
 
@@ -485,6 +499,7 @@ function runBacktestInternal() {
              hideLoading();
              const suggestionArea = document.getElementById('today-suggestion-area');
               if (suggestionArea) suggestionArea.classList.add('hidden');
+              resetStrategyStatusCard('idle');
         };
 
         const workerMsg={
@@ -527,6 +542,7 @@ function runBacktestInternal() {
         hideLoading();
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
+        resetStrategyStatusCard('idle');
         if(backtestWorker)backtestWorker.terminate(); backtestWorker = null;
     }
 }
@@ -562,6 +578,7 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    resetStrategyStatusCard('idle');
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -736,6 +753,143 @@ function formatDiagnosticsReasonCounts(reasons) {
         .sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return '—';
     return entries.map(([reason, count]) => `${reason}×${count}`).join('、');
+}
+
+function getStrategyStatusCardElements() {
+    const card = document.getElementById('strategy-status-card');
+    const headline = document.getElementById('strategy-status-headline');
+    const detail = document.getElementById('strategy-status-detail');
+    const badge = document.getElementById('strategy-status-badge');
+    if (!card || !headline || !detail || !badge) return null;
+    return { card, headline, detail, badge };
+}
+
+function setStrategyStatusCardState({ visible, variant, badgeText, headlineText, detailText }) {
+    const elements = getStrategyStatusCardElements();
+    if (!elements) return;
+    const { card, headline, detail, badge } = elements;
+    const variantClass = STRATEGY_STATUS_BADGE_VARIANTS[variant] || STRATEGY_STATUS_BADGE_VARIANTS.neutral;
+    badge.className = `${STRATEGY_STATUS_BADGE_BASE_CLASS} ${variantClass}`;
+    badge.textContent = badgeText;
+    headline.textContent = headlineText;
+    detail.textContent = detailText;
+    if (visible) {
+        card.classList.remove('hidden');
+    } else {
+        card.classList.add('hidden');
+    }
+}
+
+function resetStrategyStatusCard(mode = 'idle') {
+    if (mode === 'loading') {
+        setStrategyStatusCardState({
+            visible: true,
+            variant: 'loading',
+            badgeText: '分析中',
+            headlineText: '正在比較策略與買入持有...',
+            detailText: '系統正在更新策略績效，請稍候以獲得最新判讀。',
+        });
+        return;
+    }
+    setStrategyStatusCardState({
+        visible: false,
+        variant: 'loading',
+        badgeText: '尚未比較',
+        headlineText: '執行回測後將顯示策略狀態',
+        detailText: '完成回測後，我們會比較策略績效與買入持有基準，協助您快速掌握目前表現。',
+    });
+}
+
+function toFiniteNumber(value) {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function formatPercentValue(value) {
+    const num = toFiniteNumber(value);
+    if (num === null) return '—';
+    const prefix = num > 0 ? '+' : num < 0 ? '' : '';
+    return `${prefix}${num.toFixed(2)}%`;
+}
+
+function formatPercentDiff(value) {
+    const num = toFiniteNumber(value);
+    if (num === null) return '0.00 個百分點';
+    return `${Math.abs(num).toFixed(2)} 個百分點`;
+}
+
+function updateStrategyStatusCard(result) {
+    const elements = getStrategyStatusCardElements();
+    if (!elements) return;
+    const strategyTotalReturn = toFiniteNumber(result && result.returnRate);
+    let buyHoldTotalReturn = null;
+    if (Array.isArray(result && result.buyHoldReturns)) {
+        for (let idx = result.buyHoldReturns.length - 1; idx >= 0; idx -= 1) {
+            const candidate = toFiniteNumber(result.buyHoldReturns[idx]);
+            if (candidate !== null) {
+                buyHoldTotalReturn = candidate;
+                break;
+            }
+        }
+    }
+    const strategyAnnual = toFiniteNumber(result && result.annualizedReturn);
+    const buyHoldAnnual = toFiniteNumber(result && result.buyHoldAnnualizedReturn);
+
+    let metricLabel = '總報酬率';
+    let strategyMetric = strategyTotalReturn;
+    let buyHoldMetric = buyHoldTotalReturn;
+    let diff = strategyMetric !== null && buyHoldMetric !== null
+        ? strategyMetric - buyHoldMetric
+        : null;
+
+    if (diff === null && strategyAnnual !== null && buyHoldAnnual !== null) {
+        metricLabel = '年化報酬率';
+        strategyMetric = strategyAnnual;
+        buyHoldMetric = buyHoldAnnual;
+        diff = strategyMetric - buyHoldMetric;
+    }
+
+    if (diff === null || strategyMetric === null || buyHoldMetric === null) {
+        setStrategyStatusCardState({
+            visible: true,
+            variant: 'loading',
+            badgeText: '資料不足',
+            headlineText: '暫時無法比較策略與買入持有',
+            detailText: '近期數據或買入持有基準尚未就緒，請確認回測區間與資料品質後再試一次。',
+        });
+        return;
+    }
+
+    let variant = 'neutral';
+    let badgeText = '接近持平';
+    let headlineText = 'ℹ️ 策略接近買入持有';
+    let detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距僅 ${formatPercentDiff(diff)}。可利用策略優化與風險管理功能微調參數。`;
+
+    if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
+        variant = 'positive';
+        badgeText = '策略領先';
+        headlineText = '🎉 策略擊敗買入持有';
+        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，領先 ${formatPercentDiff(diff)}。恭喜散戶贏過基準，也別忘了持續留意風險控管。`;
+    } else if (diff < -STRATEGY_STATUS_DIFF_THRESHOLD) {
+        variant = 'negative';
+        badgeText = '落後基準';
+        headlineText = '⚠️ 策略落後買入持有';
+        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，落後 ${formatPercentDiff(diff)}。建議善用策略優化、停損停利等栖化功能調整設定。`;
+    }
+
+    setStrategyStatusCardState({
+        visible: true,
+        variant,
+        badgeText,
+        headlineText,
+        detailText,
+    });
 }
 
 function renderDiagnosticsEntries(containerId, entries) {
@@ -1307,6 +1461,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastOverallResult = null; lastSubPeriodResults = null;
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
+        resetStrategyStatusCard('idle');
         return;
     }
     try {
@@ -1317,6 +1472,7 @@ function handleBacktestResult(result, stockName, dataSource) {
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
+        updateStrategyStatusCard(result);
         displayTradeResults(result);
         renderChart(result);
         activateTab('summary');
@@ -1333,6 +1489,7 @@ function handleBacktestResult(result, stockName, dataSource) {
          showError(`處理回測結果時發生錯誤: ${error.message}`);
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
+         resetStrategyStatusCard('idle');
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
