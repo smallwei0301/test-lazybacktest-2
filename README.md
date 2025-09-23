@@ -1,5 +1,9 @@
 # LazyBacktest Netlify 部署與 Proxy 說明
 
+## 使用教學與操作指南
+
+- 前端完整操作說明請參考《[LazyBacktest 使用教學](./tutorial.html)》（版本碼：LB-USERGUIDE-20250623A），涵蓋基礎設定、策略組裝、資料診斷與優化流程。
+
 ## 1. Proxy 設定（Netlify Function）
 
 此專案使用多支 Netlify Function 作為 proxy，負責在伺服端整合台灣與美國市場的行情來源：

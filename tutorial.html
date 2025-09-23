@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyBacktest 使用教學｜台股與美股回測指南</title>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #1f2937;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --muted: #e5e7eb;
+            --muted-foreground: #4b5563;
+            --accent: #f59e0b;
+        }
+        body {
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background: radial-gradient(circle at top left, rgba(8,145,178,0.08), transparent 55%),
+                        radial-gradient(circle at bottom right, rgba(245,158,11,0.08), transparent 45%),
+                        #ffffff;
+            color: var(--foreground);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            border-radius: 9999px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background-color: rgba(8, 145, 178, 0.1);
+            color: #036672;
+        }
+        .toc-link {
+            color: var(--primary);
+        }
+        .toc-link:hover {
+            color: #0c4a6e;
+        }
+        .section-card {
+            background-color: rgba(255, 255, 255, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 1rem;
+            box-shadow: 0 20px 45px -25px rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(6px);
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <header class="border-b border-slate-200 bg-white/80 backdrop-blur">
+        <div class="max-w-6xl mx-auto px-6 py-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background-color: var(--primary); color: var(--primary-foreground);">
+                    <span class="text-lg font-bold">LB</span>
+                </div>
+                <div>
+                    <p class="text-xl font-bold">LazyBacktest 使用教學</p>
+                    <p class="text-sm text-slate-500">版本代碼：LB-USERGUIDE-20250623A</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3">
+                <a href="index.html" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-slate-300">
+                    <span aria-hidden="true">←</span>
+                    返回回測主頁
+                </a>
+                <a href="#workflow" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style="background-color: var(--primary); color: var(--primary-foreground);">
+                    快速上手流程
+                    <i data-lucide="zap" class="w-4 h-4"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-16">
+        <section class="section-card p-10 space-y-6">
+            <span class="badge"><i data-lucide="sparkles" class="w-4 h-4"></i>專為台灣投資人設計</span>
+            <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 leading-tight">完整掌握 LazyBacktest：從設定策略到讀懂診斷報告</h1>
+            <p class="text-lg leading-relaxed text-slate-600">
+                LazyBacktest 每日為 6,000+ 名活躍使用者提供台股與美股的歷史回測服務。本指南整理網站上的所有操作元件，協助你在正式回測前確認基礎設定、理解各種策略與風控選項，並善用資料診斷、參數優化與批量回測工具，確保每一次模擬都建立在可靠且可追蹤的資料基礎上。
+            </p>
+            <div class="grid gap-6 md:grid-cols-3">
+                <div class="rounded-xl border border-teal-200 bg-teal-50/70 px-5 py-4">
+                    <h2 class="text-base font-semibold text-teal-800">多市場支援</h2>
+                    <p class="text-sm text-teal-700 leading-relaxed">上市（TWSE）、上櫃（TPEX）與美股（US），自動判斷代碼來源並套用最佳資料來源與價格還原策略。</p>
+                </div>
+                <div class="rounded-xl border border-amber-200 bg-amber-50/70 px-5 py-4">
+                    <h2 class="text-base font-semibold text-amber-800">策略與風控組裝</h2>
+                    <p class="text-sm text-amber-700 leading-relaxed">多空策略、進出場條件、停損停利與部位控制一次完成，支援做多、做空與複合策略優化。</p>
+                </div>
+                <div class="rounded-xl border border-indigo-200 bg-indigo-50/70 px-5 py-4">
+                    <h2 class="text-base font-semibold text-indigo-800">診斷級資料治理</h2>
+                    <p class="text-sm text-indigo-700 leading-relaxed">暖身區間追蹤、資料來源測試、區間價格明細、買入持有校正與快取治理，協助快速定位資料缺口。</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-card p-10" aria-labelledby="toc">
+            <h2 id="toc" class="text-2xl font-bold mb-6">目錄</h2>
+            <div class="grid gap-3 text-sm md:grid-cols-2">
+                <a class="toc-link" href="#overview">1. 系統功能概覽</a>
+                <a class="toc-link" href="#prerequisites">2. 使用前準備</a>
+                <a class="toc-link" href="#basics">3. 基礎設定操作</a>
+                <a class="toc-link" href="#strategy">4. 策略與風險管理</a>
+                <a class="toc-link" href="#run-backtest">5. 執行回測的流程</a>
+                <a class="toc-link" href="#results">6. 閱讀回測結果</a>
+                <a class="toc-link" href="#diagnostics">7. 資料診斷與排錯</a>
+                <a class="toc-link" href="#optimization">8. 參數與批量優化</a>
+                <a class="toc-link" href="#workflow">9. 從零到一快速上手</a>
+                <a class="toc-link" href="#policy">10. 使用政策與資料來源</a>
+                <a class="toc-link" href="#faq">11. 常見問題</a>
+                <a class="toc-link" href="#support">12. 取得協助</a>
+            </div>
+        </section>
+
+        <section id="overview" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">1. 系統功能概覽</h2>
+            <p class="text-slate-600 leading-relaxed">LazyBacktest 的主要構成如下，了解資訊流有助於你判讀診斷結果：</p>
+            <ul class="list-disc pl-6 space-y-3 text-slate-600">
+                <li><strong>主執行緒：</strong>依策略推算暖身天數、決定資料抓取起點、維護快取並送出回測任務。</li>
+                <li><strong>Web Worker：</strong>從 Proxy 取得行情，整合股利／拆分調整，計算指標、回測績效與買入持有基準。</li>
+                <li><strong>前端 UI：</strong>呈現策略設定、圖表、績效表、交易明細、資料暖身診斷、價格檢視器及測試卡片。</li>
+                <li><strong>資料來源：</strong>台股優先採用 TWSE/TPEX 與 FinMind，必要時落回 Yahoo；美股優先 FinMind，失敗時使用 Yahoo 備援。</li>
+                <li><strong>快取治理：</strong>快取 key 會結合市場、股票代碼、暖身起點、是否還原價格等旗標，避免舊資料覆蓋新設定。</li>
+            </ul>
+        </section>
+
+        <section id="prerequisites" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">2. 使用前準備</h2>
+            <ul class="list-disc pl-6 space-y-3 text-slate-600">
+                <li><strong>瀏覽器建議：</strong>Chrome、Edge 或 Safari 最新版本。建議開啟「允許 clipboard」與「允許下載」，以便匯出結果。</li>
+                <li><strong>時間範圍：</strong>系統內建最早 1992 年交易日，若策略需更長歷史資料請先確認來源。</li>
+                <li><strong>FinMind Token：</strong>部署於 Netlify 的正式站已配置 Sponsor 等級 Token；若本地開發，請設定 <code>FINMIND_TOKEN</code> 環境變數。</li>
+                <li><strong>網路需求：</strong>回測時需能連線 TWSE/TPEX/FinMind/Yahoo。若代理被阻擋，請先執行資料來源測試確認狀態。</li>
+                <li><strong>最佳體驗：</strong>建議在桌面裝置操作，可完整顯示雙欄佈局；手機版會自動改為縱向排列。</li>
+            </ul>
+        </section>
+
+        <section id="basics" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">3. 基礎設定操作</h2>
+            <p class="text-slate-600">左側「基本設定」卡片定義資料來源與資金條件：</p>
+            <div class="space-y-5">
+                <div>
+                    <h3 class="text-lg font-semibold">3.1 股票與市場</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>股票/ETF/指數代碼：</strong>輸入台股 4～6 碼（可含 1 碼英數尾碼）或美股 1～6 碼（支援 <code>.US</code>、<code>-</code> 後綴）。</li>
+                        <li><strong>市場選擇：</strong>上市（TWSE）、上櫃（TPEX）、美股（US）。系統會依代碼建議市場，但你可手動鎖定。</li>
+                        <li><strong>名稱顯示：</strong>成功辨識後會顯示官方清單名稱與市場分類，並記錄於資料診斷中。</li>
+                        <li><strong>一鍵回測：</strong>頁面頂部「一鍵回測台積電」會自動填入 2330、最近一年區間並觸發回測。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">3.2 日期區間</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>開始／結束日期：</strong>選擇具體日期；變更任一欄位會重新計算暖身起點。</li>
+                        <li><strong>最近 N 年：</strong>輸入數值後按「套用」，系統會自動計算開始日期（最早不早於 1992-01-01）。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">3.3 價格模式</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>除權息還原股價：</strong>勾選後以「原始收盤 × 還原因子」呈現。</li>
+                        <li><strong>股票拆分還原：</strong>適用於拆股事件；美股市場預設停用以免重複折算。</li>
+                        <li><strong>價格檢視器：</strong>執行回測後可透過「查看區間價格」檢視原始價、還原價、還原因子與診斷資訊。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">3.4 初始資金與成本</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>初始本金：</strong>預設 100,000 元，可自由調整。</li>
+                        <li><strong>手續費／交易稅：</strong>預設會依市場填入（台股 0.1425%/0.4425%，ETF 0.1%/0.2%），可手動覆寫。</li>
+                        <li><strong>交易時間點：</strong>選擇在信號當日收盤（N）或次日開盤（N+1）執行。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="strategy" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">4. 策略與風險管理</h2>
+            <div class="space-y-5">
+                <div>
+                    <h3 class="text-lg font-semibold">4.1 部位與風控</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>部位大小計算：</strong>可選用初始本金或當前總資金作為基準，打造固定投入或複利策略。</li>
+                        <li><strong>部位百分比：</strong>設定每次進場投入的資金百分比（多空獨立計算）。</li>
+                        <li><strong>固定停損／停利：</strong>輸入百分比後系統會在達標時強制出場，優先於策略訊號。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">4.2 做多策略</h3>
+                    <p class="text-slate-600">從下拉選單選擇進場、出場策略，例如均線交叉、RSI、布林通道、威廉指標、海龜突破等。每項策略會自動帶出對應參數（期間、門檻、加減碼設定），可調整後新增到策略清單。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">4.3 做空策略</h3>
+                    <p class="text-slate-600">勾選「啟用做空交易」後，可為做空進場與回補設計獨立策略。停損、停利與部位設定會同時作用於多單與空單。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">4.4 策略管理工具</h3>
+                    <ul class="list-disc pl-6 space-y-2 text-slate-600">
+                        <li><strong>新增到清單：</strong>設定完成後加入策略列表。</li>
+                        <li><strong>複製、刪除、重設：</strong>可快速調整策略組合或恢復預設。</li>
+                        <li><strong>隨機參數：</strong>產生測試用參數組合，適合探索策略邊界。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="run-backtest" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">5. 執行回測的流程</h2>
+            <ol class="list-decimal pl-6 space-y-3 text-slate-600">
+                <li>確認左側每個卡片（基本設定、交易設定、風險管理、策略設定）已完成填寫。</li>
+                <li>檢查「快速結果」區塊是否顯示提示訊息，若有錯誤會在此顯示。</li>
+                <li>點擊「開始回測」。系統會顯示進度列，並在右側圖表區預留位置。</li>
+                <li>若為首次或參數變動，系統會自動擴展暖身區間、抓取資料並快取。</li>
+                <li>等待回測完成後，快速結果、圖表、各標籤頁會更新；同時資料診斷面板也會帶入最新的暖身與來源資訊。</li>
+            </ol>
+            <p class="text-slate-600">提示：若長時間無結果，請開啟「診斷資料暖身」與「測試資料來源」確認是否遇到 API 限制或資料缺口。</p>
+        </section>
+
+        <section id="results" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">6. 閱讀回測結果</h2>
+            <div class="space-y-5 text-slate-600">
+                <div>
+                    <h3 class="text-lg font-semibold">6.1 摘要標籤</h3>
+                    <p>顯示淨值曲線、報酬率、最大回撤、勝率、交易次數等核心指標。圖表支援拖曳、縮放以及回復初始範圍。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">6.2 績效分析</h3>
+                    <p>分月/分季績效、年化報酬、波動度、夏普值等指標，方便檢視策略在不同時間段的穩定性。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">6.3 交易記錄</h3>
+                    <p>完整的進場、出場、停損停利紀錄，包含持有天數、單筆損益。可搭配價格檢視器交叉比對。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">6.4 資料診斷</h3>
+                    <p>暖身起點、第一筆有效收盤、買入持有基準、月度抓取紀錄與手動測試指引都列在此。任何落後於使用者起點的情況都會標記。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">6.5 今日建議</h3>
+                    <p>回測完成後，系統會根據策略產生當日操作提示（若有條件符合），讓你快速比對實盤。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="diagnostics" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">7. 資料診斷與排錯</h2>
+            <div class="space-y-5 text-slate-600">
+                <div>
+                    <h3 class="text-lg font-semibold">7.1 資料暖身診斷面板</h3>
+                    <ul class="list-disc pl-6 space-y-2">
+                        <li>檢查暖身起點與使用者起點的距離，確認是否落後超過 7 個交易日。</li>
+                        <li>查看無效樣本統計、鄰近樣本預覽，判斷資料是否完整。</li>
+                        <li>掌握買入持有曲線是否已對齊第一筆有效收盤。</li>
+                        <li>檢視月度抓取紀錄與補抓來源，評估是否需要手動重抓。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">7.2 資料來源測試器</h3>
+                    <ul class="list-disc pl-6 space-y-2">
+                        <li>可立即呼叫 TWSE、TPEX、FinMind、Yahoo 等來源。</li>
+                        <li>顯示 HTTP 狀態碼、筆數與錯誤訊息，快速判斷是來源故障還是參數錯誤。</li>
+                        <li>測試結果會附帶還原流程檢查、零金額快照等細節。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">7.3 區間價格明細</h3>
+                    <p>透過「查看區間價格」可檢視原始價、還原價、還原因子與倉位狀態。用於驗證首日暖身是否就緒、策略是否在預期的交易日進出場。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">7.4 快取治理指引</h3>
+                    <p>若快取首筆有效日期落後超過容忍值，系統會自動放棄快取改抓遠端。你也可在資料診斷中查看是否曾強制補抓。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="optimization" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">8. 參數與批量優化</h2>
+            <div class="space-y-5 text-slate-600">
+                <div>
+                    <h3 class="text-lg font-semibold">8.1 參數優化面板</h3>
+                    <ul class="list-disc pl-6 space-y-2">
+                        <li>選擇目標（報酬、夏普、最大回撤等）與要優化的策略參數。</li>
+                        <li>系統會自動建立搜尋網格，顯示最佳組合與統計摘要。</li>
+                        <li>支援多單、做空、風控參數同時優化。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">8.2 批量優化</h3>
+                    <ul class="list-disc pl-6 space-y-2">
+                        <li>可定義多檔股票、不同策略組合，一次排程。</li>
+                        <li>結果表格可排序、篩選，並顯示個別測試的摘要指標。</li>
+                        <li>適合比較同策略在不同標的的表現，或建立投資組合前的篩選流程。</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">8.3 版本管理</h3>
+                    <p>每次優化記錄都會附上版本代碼與測試時間，建議將成功的組合記錄在外部文件，便於未來重現。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="workflow" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">9. 從零到一快速上手</h2>
+            <ol class="list-decimal pl-6 space-y-3 text-slate-600">
+                <li>在首頁輸入股票代碼（例如 2330）並確認市場自動辨識為上市（TWSE）。</li>
+                <li>設定開始日期為三年前、結束日期為今日，或直接輸入「最近 N 年」=3 後按「套用」。</li>
+                <li>勾選「除權息還原股價」，保留預設手續費與初始本金。</li>
+                <li>在策略設定中選擇「均線黃金交叉」作為做多進場，參數設定短期 20、長期 60，做多出場設定為「價格跌破均線」。</li>
+                <li>若想控管風險，設定固定停損 8%、停利 20%，部位大小 60%。</li>
+                <li>點擊「開始回測」，等待進度列完成並檢視摘要、交易紀錄與資料診斷。</li>
+                <li>如需確認資料完整度，開啟「診斷資料暖身」與「查看區間價格」核對第一筆有效資料。</li>
+                <li>需要最佳化進場參數時，切換到「參數優化」標籤，選擇報酬率為目標並執行優化，參考最佳組合後更新策略。</li>
+            </ol>
+        </section>
+
+        <section id="policy" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">10. 使用政策與資料來源</h2>
+            <ul class="list-disc pl-6 space-y-3 text-slate-600">
+                <li><strong>資料用途：</strong>LazyBacktest 僅供教育與研究使用，不提供投資建議。</li>
+                <li><strong>資料來源：</strong>台股資料整合 TWSE/TPEX 官方與 FinMind，必要時補足 Yahoo Finance；美股資料優先 FinMind，失敗時轉為 Yahoo 備援。</li>
+                <li><strong>還原邏輯：</strong>採用 FinMind <code>TaiwanStockDividendResult</code> 與拆分事件，並以原始價格乘上還原因子計算。</li>
+                <li><strong>快取管理：</strong>快取有效期與暖身資料會在診斷中揭露；若需重抓，可調整日期或清除瀏覽器快取。</li>
+                <li><strong>隱私保護：</strong>系統僅使用必要的 Cookie 與本地儲存來保存快取設定，不會收集個人身份資訊。</li>
+            </ul>
+        </section>
+
+        <section id="faq" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">11. 常見問題（FAQ）</h2>
+            <div class="space-y-5 text-slate-600">
+                <div>
+                    <h3 class="text-lg font-semibold">Q1：為什麼回測圖表的第一筆資料比我設定的日期晚？</h3>
+                    <p>請開啟「診斷資料暖身」，確認暖身起點與第一筆有效收盤是否落後。如果落後超過 7 個交易日，系統會重新抓取；若來源缺資料，請使用資料來源測試器確認 API 狀態或稍後再試。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">Q2：買入持有報酬與策略報酬差距過大時該怎麼檢查？</h3>
+                    <p>先確認資料診斷中的「買入持有檢查」，確保已找到第一筆有效收盤。若顯示落後，請查看價格明細與資料來源測試結果。</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold">Q3：怎麼快速比較多支股票的績效？</h3>
+                    <p>使用「批量優化」標籤，輸入多檔股票與策略組合，執行後即可取得排序與篩選功能，快速找出表現最佳的標的。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="support" class="section-card p-10 space-y-6">
+            <h2 class="text-2xl font-bold">12. 取得協助</h2>
+            <ul class="list-disc pl-6 space-y-3 text-slate-600">
+                <li><strong>Email：</strong><a class="text-sky-600 underline" href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a>（提供代碼、日期範圍、診斷截圖可加速排查）。</li>
+                <li><strong>資料回報建議：</strong>截圖「資料暖身診斷」面板與瀏覽器 Console 日誌，方便重現問題。</li>
+                <li><strong>版本代碼：</strong>回報時請附上本教學的版本碼 <code>LB-USERGUIDE-20250623A</code> 以及回測主頁顯示的近期版本資訊。</li>
+                <li><strong>更新紀錄：</strong>可於專案的 <code>log.md</code> 追蹤近期調整與測試紀錄。</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white/80 backdrop-blur">
+        <div class="max-w-6xl mx-auto px-6 py-8 text-center text-sm text-slate-500">
+            © 2025 LazyBacktest. 僅供教育與研究用途。
+        </div>
+    </footer>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+</html>
