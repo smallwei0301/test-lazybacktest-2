@@ -1,3 +1,9 @@
+# 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
+- **Issue recap**: 使用者反映敏感度摘要中的平均漂移提示仍提及不存在於前端的 Walk-Forward 測試，且表格內的 tooltip 於桌機截圖時會被卡片邊界遮擋。
+- **Fix**: 將判讀建議改為導引用戶使用現有的「批量優化」功能比對不同時間窗結果，並為敏感度卡片新增 `sensitivity-card`/`tooltiptext--sensitivity` 佈局與邊距設定，避免表格 tooltip 被裁切。
+- **Diagnostics**: 靜態檢閱產生的 DOM，確認敏感度卡片外層已套用新 class、tooltip 寬度收斂至 300px 以下且不再撞到容器邊界；平均漂移提示改為引用批量優化，不再提及未上線的 Walk-Forward。
+- **Testing**: 受限於容器無法連線回測 proxy，尚未執行實際回測；預計於 Netlify 預覽站驗證 hover 視覺與 console。
+
 # 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
 - **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
 - **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。

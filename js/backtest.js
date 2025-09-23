@@ -1551,7 +1551,7 @@ function displayBacktestResult(result) {
                     ${deltaText}
                     <span class="tooltip ml-1 align-middle">
                         <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                        <span class="tooltiptext">${ppTooltip}<br>正值代表調整後績效優於原設定，負值表示略遜於基準。</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${ppTooltip}<br>正值代表調整後績效優於原設定，負值表示略遜於基準。</span>
                     </span>
                 </p>
                 <p class="text-[11px]" style="color: var(--muted-foreground);">漂移 ${driftText}</p>
@@ -1559,7 +1559,7 @@ function displayBacktestResult(result) {
                     Sharpe ${sharpeText}
                     <span class="tooltip">
                         <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                        <span class="tooltiptext">${tooltip}</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${tooltip}</span>
                     </span>
                 </div>
             </div>`;
@@ -1603,7 +1603,7 @@ function displayBacktestResult(result) {
                     </td>
                 </tr>`;
             }).join('');
-            return `<div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+            return `<div class="sensitivity-card p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
                 <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                     <div>
                         <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(group.label)}</p>
@@ -1620,7 +1620,7 @@ function displayBacktestResult(result) {
                         </div>
                     </div>
                 </div>
-                <div class="overflow-x-auto" style="overflow-x: auto; overflow-y: visible;">
+                <div class="sensitivity-table-wrapper">
                     <table class="w-full text-xs" style="border-color: var(--border); border-width: 1px; border-style: solid; border-radius: 0.75rem;">
                         <thead>
                             <tr class="bg-white/40" style="color: var(--muted-foreground);">
@@ -1631,7 +1631,7 @@ function displayBacktestResult(result) {
                                         +10%
                                         <span class="tooltip">
                                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext">將此參數放大 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數放大 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
                                         </span>
                                     </span>
                                 </th>
@@ -1640,7 +1640,7 @@ function displayBacktestResult(result) {
                                         -10%
                                         <span class="tooltip">
                                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext">將此參數縮小 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數縮小 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
                                         </span>
                                     </span>
                                 </th>
@@ -1670,7 +1670,7 @@ function displayBacktestResult(result) {
                         <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                         <span class="tooltip">
                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext">平均漂移幅度 = 觀察參數 ±10% 兩個情境的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或執行 Walk-Forward 驗證。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 觀察參數 ±10% 兩個情境的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
                         </span>
                     </div>
                     <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>

@@ -27,6 +27,39 @@
 }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
 #backtest-result .tooltiptext { z-index: 10000; }
+.tooltiptext--sensitivity {
+    max-width: min(300px, calc(100vw - 48px));
+}
+.sensitivity-card {
+    position: relative;
+    overflow: visible;
+    isolation: isolate;
+}
+.sensitivity-card .sensitivity-table-wrapper {
+    position: relative;
+    overflow-x: visible;
+    overflow-y: visible;
+    margin: 0 -1rem;
+    padding: 0 1rem 0.75rem;
+}
+.sensitivity-card .sensitivity-table-wrapper table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+.sensitivity-card td,
+.sensitivity-card th {
+    position: relative;
+    overflow: visible;
+}
+@media (max-width: 768px) {
+    .sensitivity-card .sensitivity-table-wrapper {
+        overflow-x: auto;
+        padding-bottom: 1.25rem;
+    }
+    .sensitivity-card .sensitivity-table-wrapper::-webkit-scrollbar {
+        height: 6px;
+    }
+}
 .main-layout-shell, .main-grid, .left-panel, .right-panel { overflow: visible; }
 .left-panel { overflow-x: visible; }
 .right-panel { overflow-x: visible; }
