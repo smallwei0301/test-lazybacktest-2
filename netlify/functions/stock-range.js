@@ -1,6 +1,7 @@
-﻿// netlify/functions/stock-range.js
+// netlify/functions/stock-range.js
 // Consolidated range endpoint to batch month-level fetches and cache merged results.
-import { getStore } from '@netlify/blobs';
+// Patch Tag: LB-BLOB-MONITOR-20250624A
+import { obtainMonitoredStore } from '../lib/blob-monitor.js';
 import fetch from 'node-fetch';
 
 const TWSE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -141,8 +142,8 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
     }
 }
 
-async function composeTwseRange(stockNo, startDate, endDate) {
-    const store = getStore('twse_cache_store');
+async function composeTwseRange(stockNo, startDate, endDate, request) {
+    const store = obtainMonitoredStore({ name: 'twse_cache_store', source: 'stock-range', request });
     const months = buildMonthKeyList(startDate, endDate);
     const merged = [];
     let stockName = stockNo;
@@ -242,9 +243,9 @@ async function fetchFromFinMind(stockNo) {
     };
 }
 
-async function composeTpexRange(stockNo) {
+async function composeTpexRange(stockNo, request) {
     const symbol = `${stockNo}.TWO`;
-    const store = getStore('tpex_cache_store');
+    const store = obtainMonitoredStore({ name: 'tpex_cache_store', source: 'stock-range', request });
 
     try {
         const cached = await store.get(symbol, { type: 'json' });
@@ -310,7 +311,7 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: 'Invalid date range' }), { status: 400 });
         }
 
-        const rangeStore = getStore('stock_range_cache_store');
+        const rangeStore = obtainMonitoredStore({ name: 'stock_range_cache_store', source: 'stock-range', request: req });
         const rangeKey = `${marketType}_${stockNo}_${startDateStr}_${endDateStr}`;
 
         try {
@@ -338,9 +339,9 @@ export default async (req) => {
 
         let merged;
         if (marketType === 'TPEX') {
-            merged = await composeTpexRange(stockNo);
+            merged = await composeTpexRange(stockNo, req);
         } else {
-            merged = await composeTwseRange(stockNo, startDate, endDate);
+            merged = await composeTwseRange(stockNo, startDate, endDate, req);
         }
 
         const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);

@@ -1,3 +1,9 @@
+# 2025-06-24 — Patch LB-BLOB-MONITOR-20250624A
+- **Issue recap**: Blob 快取擴張後缺乏集中監控，無法辨識哪些 Function 發生大量讀寫、用戶端是否命中記憶體備援或 Blob 正常層；營運端也無法統計每日流量、最近錯誤或追蹤特定使用者的請求模式。
+- **Fix**: 新增共用 `blob-monitor` 模組，統一為 Netlify Blobs 建立記憶體 fallback + 讀寫監控代理，並建立 `blob_traffic_monitor_store` 儲存事件與摘要；所有 Proxy 與範圍快取函式皆改用監控包裝的 Store，並新增 `/api/blob-usage` 函式匯出每日/全域統計與最近事件清單。
+- **Diagnostics**: 監控摘要保留每個 store 的成功/錯誤/bytes、客戶端雜湊與快取層級（blob 或 memory），事件則揭露操作類型、耗時、命中狀態與來源 Function，可透過 `?date=`、`?limit=` 控制回傳內容；原有函式也會在回應中附上 `cacheStore` 或 `source` 區分記憶體/Blob 讀取。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/blob-usage.js').then(()=>console.log('blob-usage loaded'))"`, `node --input-type=module -e "import('./netlify/functions/stock-range.js').then(()=>console.log('stock-range loaded'))"`, `node --input-type=module -e "import('./netlify/functions/twse-proxy.js').then(()=>console.log('twse-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/tpex-proxy.js').then(()=>console.log('tpex-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(()=>console.log('us-proxy loaded'))"`, `node --input-type=module -e "import('./netlify/functions/taiwan-directory.js').then(()=>console.log('taiwan-directory loaded'))"`, `node --input-type=module -e "import('./netlify/lib/blob-monitor.js').then(()=>console.log('blob-monitor loaded'))"`
+
 # 2025-06-23 — Patch LB-RANGE-ACCEL-20250623A
 - **Issue recap**: 熱門標的回測需要逐月向 `/api/twse/`、`/api/tpex/` 發出多次請求，Proxy 雖有月度快取但前端仍需等待多個 HTTP 往返；遇到暖身期較長的參數時，等待時間超過 12 秒且難以追蹤實際來源。
 - **Fix**: 新增 `stock-range` 函式集中整併月度資料並把合併結果寫入 Netlify Blob `stock_range_cache_store`，Worker 端導入範圍快取檢查，優先呼叫 `/api/stock-range` 命中後直接回傳整段序列；若 Blob 未命中則保留舊有月度補抓流程與診斷資訊。

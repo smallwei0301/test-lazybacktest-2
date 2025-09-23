@@ -8,6 +8,7 @@
 - `netlify/functions/twse-proxy.js`：整合上市（TWSE）官網與 FinMind 備援資料，提供原始/還原股價與快取治理。
 - `netlify/functions/us-proxy.js`：優先透過 FinMind `USStockPrice`/`USStockInfo` 取得美股行情與名稱，若 FinMind 失敗或無資料則自動改用 Yahoo Finance 備援，並維持快取與錯誤分類訊息。
 - `netlify/functions/stock-range.js`：依指定區間批次整併多個月度資料，並透過 Netlify Blob (`stock_range_cache_store`) 快取合併結果，供前端一次取回整段歷史資料以縮短回測等待時間。
+- `netlify/functions/blob-usage.js`：彙整 Blob 讀寫流量，提供每日統計、全域累積與最近事件清單，協助追蹤快取命中與實際用量。
 
 `netlify.toml` 已針對上述來源設定 redirect：
 
@@ -15,10 +16,13 @@
 - `/api/twse/*` → `/.netlify/functions/twse-proxy`
 - `/api/us/*` → `/.netlify/functions/us-proxy`
 - `/api/stock-range/*` → `/.netlify/functions/stock-range`
+- `/api/blob-usage` → `/.netlify/functions/blob-usage`
 
 因此前端仍可透過 `/api/...` 路徑 fetch 所需資料，而不需關注實際後端來源。
 
 > **範圍快取（LB-RANGE-ACCEL-20250623A）**：Web Worker 在抓取原始股價時會先嘗試呼叫 `/api/stock-range`，由 Netlify Function 在伺服端一次整併需要的月度資料並寫入 Blob 快取。若命中範圍快取，可直接回傳整段歷史序列，避免前端逐月重複請求，熱門標的回測預期可縮短 30～50% 的等待時間；若範圍快取缺漏則回退至既有的月度補抓流程。
+
+> **Blob 流量監控（LB-BLOB-MONITOR-20250624A）**：`/api/blob-usage` 會回傳指定日期（預設為今日）的 Blob 讀寫次數、用量統計與最近 50 筆事件，包含來源 Function、操作類型、快取層級（Blob / 記憶體）與客戶端摘要；前端或營運端可據此評估快取命中率與 Blob 用量。`?date=2025-06-24&limit=20` 可指定日期與事件上限，回應另含全域累積統計，協助觀察長期趨勢。
 
 ## 2. 本地開發 Proxy
 
