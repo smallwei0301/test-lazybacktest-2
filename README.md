@@ -24,6 +24,8 @@
 
 > **Blob 流量監控（LB-BLOB-MONITOR-20250624A）**：`/api/blob-usage` 會回傳指定日期（預設為今日）的 Blob 讀寫次數、用量統計與最近 50 筆事件，包含來源 Function、操作類型、快取層級（Blob / 記憶體）與客戶端摘要；前端或營運端可據此評估快取命中率與 Blob 用量。`?date=2025-06-24&limit=20` 可指定日期與事件上限，回應另含全域累積統計，協助觀察長期趨勢。
 
+> **Blob 監控儀表板（LB-BLOB-DASHBOARD-20250625A）**：回測頁面的摘要分頁新增「Blob 流量監控」卡片，提供日期與事件上限篩選並即時呼叫 `/api/blob-usage`，呈現每日/全域統計、主要 Store、全域客戶端與最新事件列表，方便營運端在前台直接檢視 Blob 快取讀寫狀態。
+
 ## 2. 本地開發 Proxy
 
 建議用 [http-proxy-middleware](https://github.com/chimurai/http-proxy-middleware) 或 [vite](https://vitejs.dev/config/server-options.html#server-proxy) 來做本地 proxy。

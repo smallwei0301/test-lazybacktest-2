@@ -4,6 +4,7 @@
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-US-BACKTEST-20250621A
+// Patch Tag: LB-BLOB-DASHBOARD-20250625A
 
 // 全局變量
 let stockChart = null;
@@ -13,6 +14,7 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
+const BLOB_USAGE_UI_PATCH = 'LB-BLOB-DASHBOARD-20250625A';
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -1764,10 +1766,439 @@ function initBatchOptimizationFeature() {
     }
 }
 
+const blobMonitorNumberFormatter = new Intl.NumberFormat('zh-TW');
+const blobMonitorPercentFormatter = new Intl.NumberFormat('zh-TW', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+});
+const blobMonitorDateTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+});
+
+function blobTruncate(value, maxLength = 80) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    const text = String(value);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function formatBlobMonitorNumber(value) {
+    if (!Number.isFinite(value)) {
+        return '0';
+    }
+    return blobMonitorNumberFormatter.format(value);
+}
+
+function formatBlobMonitorPercent(value) {
+    if (!Number.isFinite(value)) {
+        return '0.0';
+    }
+    return blobMonitorPercentFormatter.format(value);
+}
+
+function formatBlobMonitorBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
+    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function formatBlobMonitorDuration(milliseconds) {
+    if (!Number.isFinite(milliseconds)) {
+        return '—';
+    }
+    if (milliseconds >= 1000) {
+        const seconds = milliseconds / 1000;
+        const digits = seconds >= 10 ? 1 : 2;
+        return `${seconds.toFixed(digits)} 秒`;
+    }
+    return `${milliseconds.toFixed(0)} 毫秒`;
+}
+
+function formatBlobMonitorTimestamp(timestamp) {
+    if (!timestamp) {
+        return '—';
+    }
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return String(timestamp);
+    }
+    try {
+        return blobMonitorDateTimeFormatter.format(date);
+    } catch (error) {
+        return date.toISOString();
+    }
+}
+
+function renderBlobMonitorTotals(container, totals) {
+    if (!container) return;
+    if (!totals) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚無統計資料</p>`;
+        return;
+    }
+    const successRate = totals.events > 0 ? (totals.success / totals.events) * 100 : null;
+    const items = [
+        { label: '事件總數', value: formatBlobMonitorNumber(totals.events) },
+        { label: '成功事件', value: formatBlobMonitorNumber(totals.success) },
+        { label: '錯誤事件', value: formatBlobMonitorNumber(totals.error) },
+        { label: '成功率', value: successRate === null ? '—' : `${formatBlobMonitorPercent(successRate)}%` },
+        { label: '讀取次數', value: formatBlobMonitorNumber(totals.reads) },
+        { label: '寫入次數', value: formatBlobMonitorNumber(totals.writes) },
+        { label: '讀取流量', value: formatBlobMonitorBytes(totals.bytesRead) },
+        { label: '寫入流量', value: formatBlobMonitorBytes(totals.bytesWrite) },
+    ];
+    container.innerHTML = items
+        .map((item) => `
+            <div>
+                <div class="text-[11px]" style="color: var(--muted-foreground);">${testerEscapeHtml(item.label)}</div>
+                <div class="font-semibold" style="color: var(--foreground);">${testerEscapeHtml(item.value)}</div>
+            </div>
+        `)
+        .join('');
+}
+
+function renderBlobMonitorStores(container, stores) {
+    if (!container) return;
+    const entries = Object.entries(stores || {});
+    if (entries.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚無 store 統計</p>`;
+        return;
+    }
+    entries.sort((a, b) => {
+        const aTotal = Number(a[1]?.total) || 0;
+        const bTotal = Number(b[1]?.total) || 0;
+        return bTotal - aTotal;
+    });
+    const topStores = entries.slice(0, 4);
+    container.innerHTML = topStores
+        .map(([name, stats]) => {
+            const total = Number(stats?.total) || 0;
+            const success = Number(stats?.success) || 0;
+            const rate = total > 0 ? `${formatBlobMonitorPercent((success / total) * 100)}%` : '—';
+            const layer = stats?.storageLayer === 'memory-fallback' ? 'memory' : stats?.storageLayer || 'blob';
+            const lastSeen = stats?.lastSeenIso ? formatBlobMonitorTimestamp(stats.lastSeenIso) : '—';
+            return `
+                <div class="rounded border px-3 py-2 bg-white/60" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium" style="color: var(--foreground);">${testerEscapeHtml(name)}</span>
+                        <span class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(layer)}</span>
+                    </div>
+                    <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">
+                        <span>事件 ${testerEscapeHtml(formatBlobMonitorNumber(total))}</span>
+                        <span>成功率 ${testerEscapeHtml(rate)}</span>
+                        <span>讀 ${testerEscapeHtml(formatBlobMonitorNumber(Number(stats?.reads) || 0))}</span>
+                        <span>寫 ${testerEscapeHtml(formatBlobMonitorNumber(Number(stats?.writes) || 0))}</span>
+                    </div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">最近：${testerEscapeHtml(lastSeen)}</div>
+                </div>
+            `;
+        })
+        .join('');
+}
+
+function renderBlobMonitorClients(container, clients) {
+    if (!container) return;
+    const entries = Object.entries(clients || {});
+    if (entries.length === 0) {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚無客戶端統計</p>`;
+        return;
+    }
+    entries.sort((a, b) => {
+        const aTotal = Number(a[1]?.total) || 0;
+        const bTotal = Number(b[1]?.total) || 0;
+        return bTotal - aTotal;
+    });
+    const topClients = entries.slice(0, 4);
+    container.innerHTML = topClients
+        .map(([hash, stats]) => {
+            const total = Number(stats?.total) || 0;
+            const success = Number(stats?.success) || 0;
+            const rate = total > 0 ? `${formatBlobMonitorPercent((success / total) * 100)}%` : '—';
+            const maskedIp = stats?.maskedIp ? testerEscapeHtml(stats.maskedIp) : '—';
+            const lastSource = stats?.lastSource ? testerEscapeHtml(stats.lastSource) : '—';
+            const lastSeen = stats?.lastSeenIso ? testerEscapeHtml(formatBlobMonitorTimestamp(stats.lastSeenIso)) : '—';
+            return `
+                <div class="rounded border px-3 py-2 bg-white/60" style="border-color: var(--border);">
+                    <div class="font-medium text-[11px]" style="color: var(--foreground);">${testerEscapeHtml(hash)}</div>
+                    <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">
+                        <span>IP ${maskedIp}</span>
+                        <span>事件 ${testerEscapeHtml(formatBlobMonitorNumber(total))}</span>
+                        <span>成功率 ${testerEscapeHtml(rate)}</span>
+                    </div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">來源：${lastSource}</div>
+                    <div class="text-[10px]" style="color: var(--muted-foreground);">最近：${lastSeen}</div>
+                </div>
+            `;
+        })
+        .join('');
+}
+
+function renderBlobMonitorEvents(container, events) {
+    if (!container) return;
+    if (!Array.isArray(events) || events.length === 0) {
+        container.innerHTML = `<div class="rounded border px-3 py-2 bg-white/60 text-[11px]" style="border-color: var(--border); color: var(--muted-foreground);">尚無事件紀錄</div>`;
+        return;
+    }
+    container.innerHTML = events
+        .map((event) => {
+            const status = event?.status === 'success' ? '成功' : '錯誤';
+            const statusBg = event?.status === 'success'
+                ? 'color-mix(in srgb, var(--primary) 15%, transparent)'
+                : 'color-mix(in srgb, var(--destructive) 15%, transparent)';
+            const statusColor = event?.status === 'success' ? 'var(--primary)' : 'var(--destructive)';
+            const direction = event?.direction === 'read' ? '讀取' : event?.direction === 'write' ? '寫入' : '其他';
+            const hitLabel = event?.hitType ? (event.hitType === 'hit' ? '命中' : '未命中') : '—';
+            const timestamp = testerEscapeHtml(formatBlobMonitorTimestamp(event?.timestamp));
+            const headerLine = `${testerEscapeHtml(event?.storeName || '未知 Store')} · ${testerEscapeHtml(event?.operation || '未知操作')} · ${testerEscapeHtml(direction)}`;
+            const metaPrimary = [
+                `來源：${testerEscapeHtml(event?.source || '未知')}`,
+                `層級：${testerEscapeHtml(event?.storageLayer || 'blob')}`,
+                `命中：${testerEscapeHtml(hitLabel)}`,
+                `流量：${testerEscapeHtml(formatBlobMonitorBytes(Number(event?.bytes) || 0))}`,
+                `耗時：${testerEscapeHtml(formatBlobMonitorDuration(Number(event?.durationMs)))}`,
+            ];
+            const metaSecondary = [];
+            if (event?.key) {
+                metaSecondary.push(`Key：${testerEscapeHtml(blobTruncate(event.key, 60))}`);
+            }
+            if (event?.clientHash) {
+                metaSecondary.push(`Client：${testerEscapeHtml(event.clientHash)}`);
+            }
+            if (event?.maskedIp) {
+                metaSecondary.push(`IP：${testerEscapeHtml(event.maskedIp)}`);
+            }
+            if (event?.referer) {
+                metaSecondary.push(`Ref：${testerEscapeHtml(blobTruncate(event.referer, 80))}`);
+            }
+            const errorLine = event?.errorMessage
+                ? `<div class="mt-1 text-[10px]" style="color: var(--destructive);">錯誤：${testerEscapeHtml(event.errorMessage)}</div>`
+                : '';
+            return `
+                <div class="rounded border px-3 py-2 bg-white/70 text-[11px]" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium" style="color: var(--foreground);">${timestamp}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px]" style="background-color: ${statusBg}; color: ${statusColor};">${testerEscapeHtml(status)}</span>
+                    </div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${headerLine}</div>
+                    <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">
+                        ${metaPrimary.map((segment) => `<span>${segment}</span>`).join('')}
+                    </div>
+                    ${metaSecondary.length > 0 ? `<div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">${metaSecondary.map((segment) => `<span>${segment}</span>`).join('')}</div>` : ''}
+                    ${errorLine}
+                </div>
+            `;
+        })
+        .join('');
+}
+
+function initBlobUsageDashboard() {
+    const card = document.getElementById('blob-usage-card');
+    if (!card) {
+        return;
+    }
+    const dateInput = document.getElementById('blob-usage-date');
+    const limitSelect = document.getElementById('blob-usage-limit');
+    const refreshButton = document.getElementById('blob-usage-refresh');
+    const resetButton = document.getElementById('blob-usage-reset');
+    const statusEl = document.getElementById('blob-usage-status');
+    const versionBadge = document.getElementById('blob-usage-version-badge');
+    const summaryWrapper = document.getElementById('blob-usage-summary');
+    const dailyTotalsEl = document.getElementById('blob-usage-daily-totals');
+    const globalTotalsEl = document.getElementById('blob-usage-global-totals');
+    const dailyUpdatedEl = document.getElementById('blob-usage-daily-updated');
+    const globalUpdatedEl = document.getElementById('blob-usage-global-updated');
+    const storeListEl = document.getElementById('blob-usage-store-list');
+    const clientListEl = document.getElementById('blob-usage-client-list');
+    const eventsContainer = document.getElementById('blob-usage-events');
+    const eventCountEl = document.getElementById('blob-usage-event-count');
+
+    if (!dateInput || !limitSelect || !refreshButton || !resetButton || !statusEl || !summaryWrapper) {
+        console.warn('[BlobMonitorUI] Blob usage dashboard elements missing.');
+        return;
+    }
+
+    function formatInputDate(date) {
+        const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+        return local.toISOString().slice(0, 10);
+    }
+
+    function setStatus(message, tone = 'info') {
+        if (!statusEl) return;
+        statusEl.textContent = message;
+        if (tone === 'error') {
+            statusEl.style.color = 'var(--destructive)';
+        } else if (tone === 'warning') {
+            statusEl.style.color = 'var(--secondary)';
+        } else if (tone === 'loading') {
+            statusEl.style.color = 'var(--foreground)';
+        } else {
+            statusEl.style.color = 'var(--muted-foreground)';
+        }
+    }
+
+    let activeRequestToken = 0;
+
+    async function loadSnapshot() {
+        const requestToken = ++activeRequestToken;
+        const params = new URLSearchParams();
+        const selectedDate = dateInput.value ? dateInput.value.trim() : '';
+        const limitValue = Number.parseInt(limitSelect.value, 10);
+
+        if (selectedDate) {
+            params.set('date', selectedDate);
+        }
+        if (Number.isFinite(limitValue) && limitValue > 0) {
+            params.set('limit', String(limitValue));
+        }
+
+        const query = params.toString();
+        const endpoint = query ? `/api/blob-usage?${query}` : '/api/blob-usage';
+
+        setStatus('載入中...', 'loading');
+        summaryWrapper.classList.add('hidden');
+
+        try {
+            console.log('[BlobMonitorUI] 讀取 Blob 使用量快照', endpoint);
+            const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            if (requestToken !== activeRequestToken) {
+                return;
+            }
+            if (payload?.status !== 'ok') {
+                throw new Error(payload?.message || '未知錯誤');
+            }
+
+            if (versionBadge) {
+                const badges = [];
+                if (payload?.monitorVersion) {
+                    badges.push(payload.monitorVersion);
+                }
+                badges.push(BLOB_USAGE_UI_PATCH);
+                versionBadge.textContent = badges.join(' ｜ ');
+            }
+
+            const snapshot = payload?.snapshot || {};
+            if (snapshot?.error) {
+                setStatus(`監控回傳錯誤：${snapshot.error}`, 'error');
+                summaryWrapper.classList.add('hidden');
+                return;
+            }
+
+            const dailySummary = snapshot?.daily || null;
+            const globalSummary = snapshot?.global || null;
+
+            if (!dailySummary && !globalSummary) {
+                setStatus('尚未產生監控紀錄，可稍後再試。', 'warning');
+                summaryWrapper.classList.add('hidden');
+                return;
+            }
+
+            const summaryDate = snapshot?.date || selectedDate || '—';
+            const generatedAt = formatBlobMonitorTimestamp(payload?.generatedAt || new Date().toISOString());
+            setStatus(`更新於 ${generatedAt}（監控日期 ${summaryDate}）`);
+
+            summaryWrapper.classList.remove('hidden');
+
+            if (dailySummary) {
+                renderBlobMonitorTotals(dailyTotalsEl, dailySummary.totals || null);
+                renderBlobMonitorStores(storeListEl, dailySummary.stores || {});
+                dailyUpdatedEl.textContent = dailySummary.updatedAt
+                    ? `最後更新 ${formatBlobMonitorTimestamp(dailySummary.updatedAt)}`
+                    : '尚無更新時間';
+            } else {
+                if (dailyTotalsEl) {
+                    dailyTotalsEl.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚無指定日期的統計</p>`;
+                }
+                if (storeListEl) {
+                    storeListEl.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">—</p>`;
+                }
+                if (dailyUpdatedEl) {
+                    dailyUpdatedEl.textContent = '沒有每日統計資料';
+                }
+            }
+
+            if (globalSummary) {
+                renderBlobMonitorTotals(globalTotalsEl, globalSummary.totals || null);
+                renderBlobMonitorClients(clientListEl, globalSummary.clients || {});
+                globalUpdatedEl.textContent = globalSummary.updatedAt
+                    ? `最後更新 ${formatBlobMonitorTimestamp(globalSummary.updatedAt)}`
+                    : '尚無更新時間';
+            } else {
+                if (globalTotalsEl) {
+                    globalTotalsEl.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚無全域統計</p>`;
+                }
+                if (clientListEl) {
+                    clientListEl.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">—</p>`;
+                }
+                if (globalUpdatedEl) {
+                    globalUpdatedEl.textContent = '沒有全域統計資料';
+                }
+            }
+
+            const events = Array.isArray(dailySummary?.recentEvents) ? dailySummary.recentEvents : [];
+            renderBlobMonitorEvents(eventsContainer, events);
+            if (eventCountEl) {
+                eventCountEl.textContent = `${formatBlobMonitorNumber(events.length)} 筆`;
+            }
+
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        } catch (error) {
+            if (requestToken !== activeRequestToken) {
+                return;
+            }
+            console.error('[BlobMonitorUI] Blob 使用量載入失敗', error);
+            setStatus(`載入失敗：${error.message || error}`, 'error');
+            summaryWrapper.classList.add('hidden');
+        }
+    }
+
+    refreshButton.addEventListener('click', () => {
+        loadSnapshot();
+    });
+    limitSelect.addEventListener('change', () => {
+        loadSnapshot();
+    });
+    dateInput.addEventListener('change', () => {
+        loadSnapshot();
+    });
+    resetButton.addEventListener('click', () => {
+        dateInput.value = formatInputDate(new Date());
+        loadSnapshot();
+    });
+
+    const today = formatInputDate(new Date());
+    if (!dateInput.value) {
+        dateInput.value = today;
+    }
+    dateInput.setAttribute('max', today);
+
+    loadSnapshot();
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
         // 初始化日期
         initDates();
@@ -1777,7 +2208,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        // 初始化 Blob 流量監控儀表板
+        initBlobUsageDashboard();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();

@@ -1,3 +1,9 @@
+# 2025-06-25 — Patch LB-BLOB-DASHBOARD-20250625A
+- **Issue recap**: Blob 監控 API 雖已提供每日摘要與事件清單，但前台缺乏可視化介面，營運端無法在 UI 直接檢視讀寫趨勢、快取層級或錯誤紀錄。
+- **Fix**: 回測摘要頁新增「Blob 流量監控」卡片，支援日期與事件上限篩選並串接 `/api/blob-usage`，呈現每日/全域統計、主要 Store、全域客戶端排行與最新事件時間軸；README 補充儀表板使用說明。
+- **Diagnostics**: 卡片顯示成功率、讀寫流量、命中狀態與事件耗時，事件列表附帶快取層級、來源 Function、鍵值與錯誤訊息，可快速定位異常請求。
+- **Testing**: `node --check js/main.js`、`node --input-type=module -e "import('./netlify/functions/blob-usage.js').then(() => console.log('blob-usage loaded'))"`
+
 # 2025-06-24 — Patch LB-BLOB-MONITOR-20250624A
 - **Issue recap**: Blob 快取擴張後缺乏集中監控，無法辨識哪些 Function 發生大量讀寫、用戶端是否命中記憶體備援或 Blob 正常層；營運端也無法統計每日流量、最近錯誤或追蹤特定使用者的請求模式。
 - **Fix**: 新增共用 `blob-monitor` 模組，統一為 Netlify Blobs 建立記憶體 fallback + 讀寫監控代理，並建立 `blob_traffic_monitor_store` 儲存事件與摘要；所有 Proxy 與範圍快取函式皆改用監控包裝的 Store，並新增 `/api/blob-usage` 函式匯出每日/全域統計與最近事件清單。
