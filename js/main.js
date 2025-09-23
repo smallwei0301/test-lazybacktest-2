@@ -1682,20 +1682,19 @@ function getSuggestion() {
 
     if (!cachedStockData || cachedStockData.length < 2) {
         suggestionText.textContent = "請先執行回測獲取數據";
-        suggestionArea.className = 'my-4 p-4 bg-gray-100 border-l-4 border-gray-400 text-gray-600 rounded-md text-center'; // Neutral color
+        suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-slate-100 border-slate-400 text-slate-700'; // Neutral color
         suggestionArea.classList.remove('hidden');
         return;
     }
 
     suggestionText.textContent = "計算中...";
     suggestionArea.classList.remove('hidden');
-    suggestionArea.className = 'my-4 p-4 bg-sky-50 border-l-4 border-sky-500 text-sky-800 rounded-md text-center loading'; // Loading style
+    suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-sky-50 border-sky-500 text-sky-800 loading'; // Loading style
 
     if (!workerUrl || !backtestWorker) {
         console.warn("[Suggestion] Worker not ready or busy.");
         suggestionText.textContent = "引擎未就緒或忙碌中";
-        suggestionArea.classList.remove('loading');
-        suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
+        suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-red-100 border-red-500 text-red-700';
         return;
     }
 
@@ -1712,8 +1711,7 @@ function getSuggestion() {
 
         if (cachedStockData.length < lookbackDays) {
             suggestionText.textContent = `數據不足 (${cachedStockData.length} < ${lookbackDays})`;
-            suggestionArea.classList.remove('loading');
-            suggestionArea.classList.add('bg-yellow-100', 'border-yellow-500', 'text-yellow-800');
+            suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-amber-50 border-amber-500 text-amber-800';
             console.warn(`[Suggestion] Insufficient cached data for lookback: ${cachedStockData.length} < ${lookbackDays}`);
             if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             return;
@@ -1728,15 +1726,13 @@ function getSuggestion() {
             });
         } else {
             suggestionText.textContent = "回測引擎未就緒";
-            suggestionArea.classList.remove('loading');
-            suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
+            suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-red-100 border-red-500 text-red-700';
         }
 
     } catch (error) {
         console.error("[Main] Error getting suggestion:", error);
         suggestionText.textContent = "計算建議時出錯";
-        suggestionArea.classList.remove('loading');
-        suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
+        suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-red-100 border-red-500 text-red-700';
         if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
