@@ -1673,7 +1673,12 @@ function needsDataFetch(cur) {
     if (!cur || !cur.stockNo || !(cur.startDate || cur.dataStartDate) || !cur.endDate) return true;
     const key = buildCacheKey(cur);
 
-    const entry = cachedDataStore.get(key);
+    const normalizedMarket = typeof normalizeMarketKeyForCache === 'function'
+        ? normalizeMarketKeyForCache(cur.market || cur.marketType || currentMarket || 'TWSE')
+        : normalizeMarketValue(cur.market || cur.marketType || currentMarket || 'TWSE');
+    const entry = typeof ensureDatasetCacheEntryFresh === 'function'
+        ? ensureDatasetCacheEntryFresh(key, cachedDataStore.get(key), normalizedMarket)
+        : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;

@@ -12,6 +12,7 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250527A
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
+// Patch Tag: LB-COVERAGE-STREAM-20250705A
 const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -736,6 +737,67 @@ function enumerateMonths(startDate, endDate) {
     cursor.setMonth(cursor.getMonth() + 1);
   }
   return months;
+}
+
+function buildMonthSegments(months, warmupCutoffISO, options = {}) {
+  if (!Array.isArray(months) || months.length === 0) {
+    return [];
+  }
+  const warmupGroupSize = Number.isFinite(options.warmupGroupSize)
+    ? Math.max(1, Math.floor(options.warmupGroupSize))
+    : 3;
+  const activeConcurrency = Number.isFinite(options.activeConcurrency)
+    ? Math.max(1, Math.floor(options.activeConcurrency))
+    : 1;
+  const warmupCutoffUTC = warmupCutoffISO ? isoToUTC(warmupCutoffISO) : NaN;
+  const segments = [];
+  let warmupBucket = [];
+
+  function flushWarmupBucket() {
+    if (warmupBucket.length === 0) return;
+    const firstLabel = warmupBucket[0]?.label || '';
+    const lastLabel = warmupBucket[warmupBucket.length - 1]?.label || firstLabel;
+    const segmentLabel = warmupBucket.length === 1 ? firstLabel : `${firstLabel}~${lastLabel}`;
+    segments.push({
+      type: 'warmup',
+      label: segmentLabel,
+      months: warmupBucket,
+      concurrency: 1,
+    });
+    warmupBucket = [];
+  }
+
+  months.forEach((monthInfo) => {
+    if (!monthInfo) return;
+    const monthStartUTC = isoToUTC(monthInfo.rangeStartISO);
+    const monthEndUTCExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+    const clonedInfo = { ...monthInfo };
+    const isWarmup =
+      Number.isFinite(warmupCutoffUTC) && Number.isFinite(monthStartUTC)
+        ? monthStartUTC < warmupCutoffUTC
+        : false;
+    if (isWarmup) {
+      clonedInfo.phase = 'warmup';
+      warmupBucket.push(clonedInfo);
+      if (
+        warmupBucket.length >= warmupGroupSize ||
+        (Number.isFinite(monthEndUTCExclusive) && monthEndUTCExclusive >= warmupCutoffUTC)
+      ) {
+        flushWarmupBucket();
+      }
+    } else {
+      flushWarmupBucket();
+      clonedInfo.phase = 'active';
+      segments.push({
+        type: 'active',
+        label: clonedInfo.label,
+        months: [clonedInfo],
+        concurrency: activeConcurrency,
+      });
+    }
+  });
+  flushWarmupBucket();
+  return segments;
 }
 
 function delay(ms) {
@@ -1720,282 +1782,316 @@ async function fetchStockData(
   const isTpex = marketKey === "TPEX";
   const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
-  let completed = 0;
-  const monthResults = await runWithConcurrency(
-    months,
-    concurrencyLimit,
-    async (monthInfo) => {
-      try {
-        let monthEntry = getMonthlyCacheEntry(
+  const segments = buildMonthSegments(months, optionEffectiveStart, {
+    warmupGroupSize: isUs ? 2 : 3,
+    activeConcurrency: concurrencyLimit,
+  });
+  if (segments.length === 0) {
+    segments.push({
+      type: "active",
+      label: months[0]?.label || "",
+      months: months.map((info) => ({ ...info, phase: "active" })),
+      concurrency: concurrencyLimit,
+    });
+  }
+  fetchDiagnostics.queuePlan = segments.map((segment) => ({
+    type: segment.type,
+    label: segment.label,
+    months: segment.months.map((month) => month.monthKey),
+    size: segment.months.length,
+  }));
+  const totalMonths = months.length;
+  let completedMonths = 0;
+
+  async function processMonth(monthInfo) {
+    try {
+      let monthEntry = getMonthlyCacheEntry(
+        marketKey,
+        stockNo,
+        monthInfo.monthKey,
+        adjusted,
+        split,
+      );
+      if (!monthEntry) {
+        monthEntry = {
+          data: [],
+          coverage: [],
+          sources: new Set(),
+          stockName: "",
+          lastUpdated: 0,
+        };
+        setMonthlyCacheEntry(
           marketKey,
           stockNo,
           monthInfo.monthKey,
+          monthEntry,
           adjusted,
           split,
         );
-        if (!monthEntry) {
-          monthEntry = {
-            data: [],
-            coverage: [],
-            sources: new Set(),
-            stockName: "",
-            lastUpdated: 0,
-          };
-          setMonthlyCacheEntry(
-            marketKey,
-            stockNo,
-            monthInfo.monthKey,
-            monthEntry,
-            adjusted,
-            split,
-          );
-        }
-
-        const existingCoverage = Array.isArray(monthEntry.coverage)
-          ? monthEntry.coverage.map((range) => ({ ...range }))
-          : [];
-        const forcedRepairRanges = detectCoverageGapsForMonth(
-          monthEntry,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-          { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
-        );
-        let coverageForComputation = existingCoverage;
-        if (forcedRepairRanges.length > 0) {
-          coverageForComputation = subtractRangeBounds(
-            existingCoverage,
-            forcedRepairRanges,
-          );
-          monthEntry.coverage = subtractRangeBounds(
-            monthEntry.coverage || [],
-            forcedRepairRanges,
-          );
-          monthEntry.lastForcedReloadAt = Date.now();
-          if (forcedRepairRanges.length > 0) {
-            console.warn(
-              `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
-            );
-          }
-        }
-        const missingRanges = computeMissingRanges(
-          coverageForComputation,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const coveredLengthBefore = getCoveredLength(
-          coverageForComputation,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const forcedRangeKeys = new Set(
-          forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
-        );
-        const monthSourceFlags = new Set(
-          monthEntry.sources instanceof Set
-            ? Array.from(monthEntry.sources)
-            : monthEntry.sources || [],
-        );
-        const monthCacheFlags = new Set();
-        const forcedSourceUsage = new Set();
-        let monthStockName = monthEntry.stockName || "";
-
-        if (missingRanges.length > 0) {
-          for (let i = 0; i < missingRanges.length; i += 1) {
-            const missingRange = missingRanges[i];
-            const { startISO, endISO } = rangeBoundsToISO(missingRange);
-            const rangeKey = `${missingRange.start}-${missingRange.end}`;
-            const shouldForceRange =
-              forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
-            const candidateSources = [];
-            if (shouldForceRange) {
-              if (primaryForceSource) candidateSources.push(primaryForceSource);
-              if (
-                fallbackForceSource &&
-                fallbackForceSource !== primaryForceSource
-              ) {
-                candidateSources.push(fallbackForceSource);
-              }
-            }
-            candidateSources.push(null);
-
-            let payload = null;
-            let lastError = null;
-            for (let c = 0; c < candidateSources.length; c += 1) {
-              const forceSource = candidateSources[c];
-              const params = new URLSearchParams({
-                stockNo,
-                month: monthInfo.monthKey,
-                start: startISO,
-                end: endISO,
-              });
-              if (adjusted) params.set("adjusted", "1");
-              if (forceSource) params.set("forceSource", forceSource);
-              if (shouldForceRange) {
-                params.set(
-                  "cacheBust",
-                  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                );
-              }
-              const url = `${proxyPath}?${params.toString()}`;
-              try {
-                const responsePayload = await fetchWithAdaptiveRetry(url, {
-                  headers: { Accept: "application/json" },
-                });
-                if (responsePayload?.error) {
-                  throw new Error(responsePayload.error);
-                }
-                payload = responsePayload;
-                if (forceSource) {
-                  forcedSourceUsage.add(forceSource);
-                  console.warn(
-                    `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
-                      responsePayload?.aaData,
-                    )
-                      ? responsePayload.aaData.length
-                      : Array.isArray(responsePayload?.data)
-                        ? responsePayload.data.length
-                        : 0} 筆資料。`,
-                  );
-                }
-                break;
-              } catch (error) {
-                lastError = error;
-                console.error(`[Worker] 抓取 ${url} 失敗:`, error);
-                payload = null;
-              }
-            }
-
-            if (!payload) {
-              if (lastError) {
-                console.error(
-                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
-                );
-              }
-              continue;
-            }
-
-            if (payload?.source === "blob") {
-              const cacheLabel = isTpex
-                ? "TPEX (快取)"
-                : isUs
-                  ? "US (快取)"
-                  : "TWSE (快取)";
-              monthCacheFlags.add(cacheLabel);
-              monthEntry.sources.add(cacheLabel);
-            } else if (payload?.source === "memory") {
-              const cacheLabel = isTpex
-                ? "TPEX (記憶體快取)"
-                : isUs
-                  ? "US (記憶體快取)"
-                  : "TWSE (記憶體快取)";
-              monthCacheFlags.add(cacheLabel);
-              monthEntry.sources.add(cacheLabel);
-            }
-            const rows = Array.isArray(payload?.aaData)
-              ? payload.aaData
-              : Array.isArray(payload?.data)
-                ? payload.data
-                : [];
-            const normalized = [];
-            rows.forEach((row) => {
-              const normalizedRow = normalizeProxyRow(
-                row,
-                isTpex,
-                startDateObj,
-                endDateObj,
-              );
-              if (normalizedRow) normalized.push(normalizedRow);
-            });
-            if (payload?.stockName) {
-              monthStockName = payload.stockName;
-            }
-            const sourceLabel =
-              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-            if (sourceLabel) {
-              monthSourceFlags.add(sourceLabel);
-              monthEntry.sources.add(sourceLabel);
-            }
-            if (Array.isArray(payload?.dataSources)) {
-              payload.dataSources
-                .filter((label) => typeof label === "string" && label.trim() !== "")
-                .forEach((label) => {
-                  monthSourceFlags.add(label);
-                  monthEntry.sources.add(label);
-                });
-            }
-            if (normalized.length > 0) {
-              mergeMonthlyData(monthEntry, normalized);
-              const sortedNormalized = normalized
-                .slice()
-                .sort((a, b) => a.date.localeCompare(b.date));
-              const coverageStart = sortedNormalized[0]?.date || null;
-              const coverageEnd =
-                sortedNormalized[sortedNormalized.length - 1]?.date || null;
-              if (coverageStart && coverageEnd) {
-                addCoverage(monthEntry, coverageStart, coverageEnd);
-              }
-              rebuildCoverageFromData(monthEntry);
-            }
-            monthEntry.lastUpdated = Date.now();
-            if (!monthEntry.stockName && monthStockName) {
-              monthEntry.stockName = monthStockName;
-            }
-          }
-        }
-
-        const rowsForRange = (monthEntry.data || []).filter(
-          (row) =>
-            row &&
-            row.date >= monthInfo.rangeStartISO &&
-            row.date <= monthInfo.rangeEndISO,
-        );
-
-        monthCacheFlags.forEach((label) => {
-          monthSourceFlags.add(label);
-        });
-
-        const usedCache =
-          missingRanges.length === 0 || coveredLengthBefore > 0;
-
-        const monthDiagnostics = {
-          monthKey: monthInfo.monthKey,
-          label: monthInfo.label,
-          requestedStart: monthInfo.rangeStartISO,
-          requestedEnd: monthInfo.rangeEndISO,
-          missingSegments: missingRanges.length,
-          forcedRepairs: forcedRepairRanges.length,
-          forcedRepairSamples: forcedRepairRanges
-            .slice(0, 3)
-            .map((range) => rangeBoundsToISO(range)),
-          cacheCoverageDaysBefore: Math.round(
-            coveredLengthBefore / DAY_MS,
-          ),
-          usedCache,
-          rowsReturned: rowsForRange.length,
-          firstRowDate: rowsForRange[0]?.date || null,
-          lastRowDate:
-            rowsForRange[rowsForRange.length - 1]?.date || null,
-          cacheSources: Array.from(monthSourceFlags),
-          forcedSources: Array.from(forcedSourceUsage),
-        };
-        return {
-          rows: rowsForRange,
-          sourceFlags: Array.from(monthSourceFlags),
-          stockName: monthStockName,
-          usedCache,
-          diagnostics: monthDiagnostics,
-        };
-      } finally {
-        completed += 1;
-        const progress = 10 + Math.round((completed / months.length) * 35);
-        self.postMessage({
-          type: "progress",
-          progress,
-          message: `處理 ${monthInfo.label} 數據...`,
-        });
       }
-    },
-  );
+
+      const existingCoverage = Array.isArray(monthEntry.coverage)
+        ? monthEntry.coverage.map((range) => ({ ...range }))
+        : [];
+      const forcedRepairRanges = detectCoverageGapsForMonth(
+        monthEntry,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+        { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
+      );
+      let coverageForComputation = existingCoverage;
+      if (forcedRepairRanges.length > 0) {
+        coverageForComputation = subtractRangeBounds(
+          existingCoverage,
+          forcedRepairRanges,
+        );
+        monthEntry.coverage = subtractRangeBounds(
+          monthEntry.coverage || [],
+          forcedRepairRanges,
+        );
+        console.warn(
+          `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
+        );
+      }
+      const missingRanges = computeMissingRanges(
+        coverageForComputation,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+      );
+      const coveredLengthBefore = getCoveredLength(
+        coverageForComputation,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+      );
+      const forcedRangeKeys = new Set(
+        forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
+      );
+      const monthSourceFlags = new Set(
+        monthEntry.sources instanceof Set
+          ? Array.from(monthEntry.sources)
+          : monthEntry.sources || [],
+      );
+      const monthCacheFlags = new Set();
+      const forcedSourceUsage = new Set();
+      let monthStockName = monthEntry.stockName || "";
+      let forcedReloadCompleted = false;
+
+      if (missingRanges.length > 0) {
+        for (let i = 0; i < missingRanges.length; i += 1) {
+          const missingRange = missingRanges[i];
+          const { startISO, endISO } = rangeBoundsToISO(missingRange);
+          const rangeKey = `${missingRange.start}-${missingRange.end}`;
+          const shouldForceRange =
+            forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+          const candidateSources = [];
+          if (shouldForceRange) {
+            if (primaryForceSource) candidateSources.push(primaryForceSource);
+            if (
+              fallbackForceSource &&
+              fallbackForceSource !== primaryForceSource
+            ) {
+              candidateSources.push(fallbackForceSource);
+            }
+          }
+          candidateSources.push(null);
+
+          let payload = null;
+          let lastError = null;
+          for (let c = 0; c < candidateSources.length; c += 1) {
+            const forceSource = candidateSources[c];
+            const params = new URLSearchParams({
+              stockNo,
+              month: monthInfo.monthKey,
+              start: startISO,
+              end: endISO,
+            });
+            if (adjusted) params.set("adjusted", "1");
+            if (forceSource) params.set("forceSource", forceSource);
+            if (shouldForceRange) {
+              params.set(
+                "cacheBust",
+                `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              );
+            }
+            const url = `${proxyPath}?${params.toString()}`;
+            try {
+              const responsePayload = await fetchWithAdaptiveRetry(url, {
+                headers: { Accept: "application/json" },
+              });
+              if (responsePayload?.error) {
+                throw new Error(responsePayload.error);
+              }
+              payload = responsePayload;
+              if (forceSource) {
+                forcedSourceUsage.add(forceSource);
+                console.warn(
+                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
+                    responsePayload?.aaData,
+                  )
+                    ? responsePayload.aaData.length
+                    : Array.isArray(responsePayload?.data)
+                      ? responsePayload.data.length
+                      : 0} 筆資料。`,
+                );
+              }
+              break;
+            } catch (error) {
+              lastError = error;
+              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+              payload = null;
+            }
+          }
+
+          if (!payload) {
+            if (lastError) {
+              console.error(
+                `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
+              );
+            }
+            continue;
+          }
+
+          if (payload?.source === "blob") {
+            const cacheLabel = isTpex
+              ? "TPEX (快取)"
+              : isUs
+                ? "US (快取)"
+                : "TWSE (快取)";
+            monthCacheFlags.add(cacheLabel);
+            monthEntry.sources.add(cacheLabel);
+          } else if (payload?.source === "memory") {
+            const cacheLabel = isTpex
+              ? "TPEX (記憶體快取)"
+              : isUs
+                ? "US (記憶體快取)"
+                : "TWSE (記憶體快取)";
+            monthCacheFlags.add(cacheLabel);
+            monthEntry.sources.add(cacheLabel);
+          }
+          const rows = Array.isArray(payload?.aaData)
+            ? payload.aaData
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : [];
+          const normalized = [];
+          rows.forEach((row) => {
+            const normalizedRow = normalizeProxyRow(
+              row,
+              isTpex,
+              startDateObj,
+              endDateObj,
+            );
+            if (normalizedRow) normalized.push(normalizedRow);
+          });
+          if (payload?.stockName) {
+            monthStockName = payload.stockName;
+          }
+          const sourceLabel =
+            payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+          if (sourceLabel) {
+            monthSourceFlags.add(sourceLabel);
+            monthEntry.sources.add(sourceLabel);
+          }
+          if (Array.isArray(payload?.dataSources)) {
+            payload.dataSources
+              .filter((label) => typeof label === "string" && label.trim() !== "")
+              .forEach((label) => {
+                monthSourceFlags.add(label);
+                monthEntry.sources.add(label);
+              });
+          }
+          if (normalized.length > 0) {
+            mergeMonthlyData(monthEntry, normalized);
+            const sortedNormalized = normalized
+              .slice()
+              .sort((a, b) => a.date.localeCompare(b.date));
+            const coverageStart = sortedNormalized[0]?.date || null;
+            const coverageEnd =
+              sortedNormalized[sortedNormalized.length - 1]?.date || null;
+            if (coverageStart && coverageEnd) {
+              addCoverage(monthEntry, coverageStart, coverageEnd);
+            }
+            rebuildCoverageFromData(monthEntry);
+            if (shouldForceRange) {
+              forcedReloadCompleted = true;
+            }
+          }
+          monthEntry.lastUpdated = Date.now();
+          if (!monthEntry.stockName && monthStockName) {
+            monthEntry.stockName = monthStockName;
+          }
+        }
+      }
+
+      const rowsForRange = (monthEntry.data || []).filter(
+        (row) =>
+          row &&
+          row.date >= monthInfo.rangeStartISO &&
+          row.date <= monthInfo.rangeEndISO,
+      );
+
+      monthCacheFlags.forEach((label) => {
+        monthSourceFlags.add(label);
+      });
+
+      if (forcedRepairRanges.length > 0 && forcedReloadCompleted) {
+        monthEntry.lastForcedReloadAt = Date.now();
+      }
+
+      const usedCache =
+        missingRanges.length === 0 || coveredLengthBefore > 0;
+
+      const monthDiagnostics = {
+        monthKey: monthInfo.monthKey,
+        label: monthInfo.label,
+        requestedStart: monthInfo.rangeStartISO,
+        requestedEnd: monthInfo.rangeEndISO,
+        missingSegments: missingRanges.length,
+        forcedRepairs: forcedRepairRanges.length,
+        forcedRepairSamples: forcedRepairRanges
+          .slice(0, 3)
+          .map((range) => rangeBoundsToISO(range)),
+        cacheCoverageDaysBefore: Math.round(
+          coveredLengthBefore / DAY_MS,
+        ),
+        usedCache,
+        rowsReturned: rowsForRange.length,
+        firstRowDate: rowsForRange[0]?.date || null,
+        lastRowDate:
+          rowsForRange[rowsForRange.length - 1]?.date || null,
+        cacheSources: Array.from(monthSourceFlags),
+        forcedSources: Array.from(forcedSourceUsage),
+        queuePhase: monthInfo.phase || "active",
+      };
+      return {
+        rows: rowsForRange,
+        sourceFlags: Array.from(monthSourceFlags),
+        stockName: monthStockName,
+        usedCache,
+        diagnostics: monthDiagnostics,
+      };
+    } finally {
+      completedMonths += 1;
+      const progress = 10 + Math.round((completedMonths / totalMonths) * 35);
+      const phaseLabel =
+        monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
+      self.postMessage({
+        type: "progress",
+        progress,
+        message: `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
+      });
+    }
+  }
+
+  const monthResults = [];
+  for (const segment of segments) {
+    const results = await runWithConcurrency(
+      segment.months,
+      segment.concurrency || 1,
+      processMonth,
+    );
+    monthResults.push(...results);
+  }
 
   const normalizedRows = [];
   const sourceFlags = new Set();
