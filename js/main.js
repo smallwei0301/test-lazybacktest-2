@@ -3,6 +3,7 @@
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-US-BACKTEST-20250621A
 
 // 全局變量
 let stockChart = null;
@@ -1500,7 +1501,60 @@ function getBacktestParams() {
         marketType: currentMarket,
     };
 }
-function validateBacktestParams(p) { if(!/^[0-9A-Z]{3,7}$/.test(p.stockNo)){showError("請輸入有效代碼");return false;} if(!p.startDate||!p.endDate){showError("請選擇日期");return false;} if(new Date(p.startDate)>=new Date(p.endDate)){showError("結束日期需晚於開始日期");return false;} if(p.initialCapital<=0){showError("本金需>0");return false;} if(p.positionSize<=0||p.positionSize>100){showError("部位大小1-100%");return false;} if(p.stopLoss<0||p.stopLoss>100){showError("停損0-100%");return false;} if(p.takeProfit<0){showError("停利>=0%");return false;} if (p.buyFee < 0) { showError("買入手續費不能小於 0%"); return false; } if (p.sellFee < 0) { showError("賣出手續費+稅不能小於 0%"); return false; } const chkP=(ps,t)=>{ if (!ps) return true; for(const k in ps){ if(typeof ps[k]!=='number'||isNaN(ps[k])){ if(Object.keys(ps).length > 0) { showError(`${t}策略的參數 ${k} 錯誤 (值: ${ps[k]})`); return false; } } } return true; }; if(!chkP(p.entryParams,'做多進場'))return false; if(!chkP(p.exitParams,'做多出場'))return false; if (p.enableShorting) { if(!chkP(p.shortEntryParams,'做空進場'))return false; if(!chkP(p.shortExitParams,'回補出場'))return false; } return true; }
+const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
+const US_STOCK_PATTERN = /^[A-Z0-9]{1,6}(?:[.-][A-Z0-9]{1,4})?$/;
+
+function validateStockNoByMarket(stockNo, market) {
+    if (!stockNo) {
+        showError('請輸入有效代碼');
+        return false;
+    }
+    const normalizedMarket = normalizeMarketValue(market || currentMarket || 'TWSE');
+    if (normalizedMarket === 'US') {
+        if (!US_STOCK_PATTERN.test(stockNo)) {
+            showError('美股代號需為 1～6 碼英數字，可加上「.」或「-」後綴，例如 AAPL、BRK.B、AAPL.US。');
+            return false;
+        }
+        return true;
+    }
+    if (!TAIWAN_STOCK_PATTERN.test(stockNo)) {
+        showError('台股代號需為四到六碼數字，可選擇性附上一碼英數後綴，例如 2330、1101B、00878。');
+        return false;
+    }
+    return true;
+}
+
+function validateBacktestParams(p) {
+    const normalizedMarket = normalizeMarketValue(p.market || p.marketType || currentMarket || 'TWSE');
+    if (!validateStockNoByMarket(p.stockNo, normalizedMarket)) return false;
+    if (!p.startDate || !p.endDate) { showError('請選擇日期'); return false; }
+    if (new Date(p.startDate) >= new Date(p.endDate)) { showError('結束日期需晚於開始日期'); return false; }
+    if (p.initialCapital <= 0) { showError('本金需>0'); return false; }
+    if (p.positionSize <= 0 || p.positionSize > 100) { showError('部位大小1-100%'); return false; }
+    if (p.stopLoss < 0 || p.stopLoss > 100) { showError('停損0-100%'); return false; }
+    if (p.takeProfit < 0) { showError('停利>=0%'); return false; }
+    if (p.buyFee < 0) { showError('買入手續費不能小於 0%'); return false; }
+    if (p.sellFee < 0) { showError('賣出手續費+稅不能小於 0%'); return false; }
+    const chkP = (ps, t) => {
+        if (!ps) return true;
+        for (const k in ps) {
+            if (typeof ps[k] !== 'number' || Number.isNaN(ps[k])) {
+                if (Object.keys(ps).length > 0) {
+                    showError(`${t}策略的參數 ${k} 錯誤 (值: ${ps[k]})`);
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    if (!chkP(p.entryParams, '做多進場')) return false;
+    if (!chkP(p.exitParams, '做多出場')) return false;
+    if (p.enableShorting) {
+        if (!chkP(p.shortEntryParams, '做空進場')) return false;
+        if (!chkP(p.shortExitParams, '回補出場')) return false;
+    }
+    return true;
+}
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
 
