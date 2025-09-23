@@ -1,6 +1,30 @@
 /* --- 自訂 CSS --- */
 .tooltip { position: relative; display: inline-flex; vertical-align: middle; overflow: visible; }
-.tooltip .tooltiptext { visibility: hidden; max-width: 320px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 9999; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 12px rgba(0,0,0,0.35); white-space: normal; word-break: break-word; }
+.tooltip .tooltiptext {
+    visibility: hidden;
+    display: inline-block;
+    min-width: min(220px, calc(100vw - 32px));
+    max-width: min(360px, calc(100vw - 32px));
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px 12px;
+    position: absolute;
+    z-index: 9999;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+    font-size: 13px;
+    line-height: 1.6;
+    pointer-events: none;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.25);
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
 #backtest-result .tooltiptext { z-index: 10000; }
 .main-layout-shell, .main-grid, .left-panel, .right-panel { overflow: visible; }

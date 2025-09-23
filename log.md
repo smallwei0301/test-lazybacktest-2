@@ -1,3 +1,9 @@
+# 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
+- **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
+- **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。
+- **Diagnostics**: 透過瀏覽器檢視產生的敏感度卡片與設定表單 DOM，確認計算後的泡泡寬度皆大於 200px，實際 hover 時可完整顯示分段說明，不再出現僅剩細長條的情況。
+- **Testing**: 受限於容器無法連線回測 proxy，未能啟動實際回測；已規劃於 Netlify 預覽站實測所有 tooltip hover 與 console 狀態。
+
 # 2025-06-25 — Patch LB-TOOLTIP-OVERFLOW-20250625A
 - **Issue recap**: 回測摘要、風險指標與設定面板的 tooltip 會被主版面 `overflow-hidden` 容器裁切，只剩細長的黑條，無法閱讀 QuantConnect 等平臺的門檻說明。
 - **Fix**: 將主內容容器、左右面板與結果區改為允許溢位顯示，補上 `main-layout-shell` 標記並提升 tooltip 的層級，確保 hover 時可以完整展開文字。
