@@ -3775,6 +3775,7 @@ function runStrategy(data, params) {
     buyFee,
     sellFee,
     positionBasis,
+    forceFinalLiquidation = true,
   } = params;
 
   if (!data || n === 0) throw new Error("回測數據無效");
@@ -5315,7 +5316,8 @@ function runStrategy(data, params) {
     const lastIdx = n - 1;
     const finalP =
       lastIdx >= 0 && check(closes[lastIdx]) ? closes[lastIdx] : null;
-    if (longPos === 1 && finalP !== null && longShares > 0) {
+    const shouldForceLiquidation = forceFinalLiquidation !== false;
+    if (shouldForceLiquidation && longPos === 1 && finalP !== null && longShares > 0) {
       const rev = longShares * finalP * (1 - sellFee / 100);
       const costB = longShares * lastBuyP * (1 + buyFee / 100);
       const prof = rev - costB;
@@ -5357,10 +5359,10 @@ function runStrategy(data, params) {
       console.log(
         `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
       );
-    } else if (longPos === 1) {
+    } else if (shouldForceLiquidation && longPos === 1) {
       longPl[lastIdx] = longPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
-    if (shortPos === 1 && finalP !== null && shortShares > 0) {
+    if (shouldForceLiquidation && shortPos === 1 && finalP !== null && shortShares > 0) {
       const shortProceeds = shortShares * lastShortP * (1 - sellFee / 100);
       const coverCostWithFee = shortShares * finalP * (1 + buyFee / 100);
       const prof = shortProceeds - coverCostWithFee;
@@ -5402,7 +5404,7 @@ function runStrategy(data, params) {
       console.log(
         `[Worker SHORT] Final Cover Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
       );
-    } else if (shortPos === 1) {
+    } else if (shouldForceLiquidation && shortPos === 1) {
       shortPl[lastIdx] = shortPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
     const trailingLevels = computeTrailingStopLevels(
@@ -6697,6 +6699,7 @@ self.onmessage = async function (e) {
         dataStartDate: warmupStartISO,
         endDate: todayISO,
         lookbackDays,
+        forceFinalLiquidation: false,
       };
 
       const extendedBacktest = runStrategy(
