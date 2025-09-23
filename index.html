@@ -681,21 +681,24 @@
                                             <input type="number" id="positionSize" value="100" min="1" max="100" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                         </div>
 
-                                        <div class="border border-border rounded-md" id="multiStagePanel" style="border-color: var(--border);">
-                                            <button
-                                                type="button"
-                                                id="multiStageToggle"
-                                                class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold transition-colors"
-                                                style="color: var(--foreground);"
-                                                aria-expanded="false"
-                                                aria-controls="multiStageContent"
-                                            >
-                                                <span>多次進出場</span>
-                                                <span id="multiStageToggleIcon" class="text-lg leading-none" aria-hidden="true">+</span>
-                                            </button>
+                                        <div class="space-y-2" id="multiStagePanel">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-medium text-foreground" style="color: var(--foreground);">多次進出場</span>
+                                                <button
+                                                    type="button"
+                                                    id="multiStageToggle"
+                                                    class="flex h-6 w-6 items-center justify-center rounded-full border border-border text-xs font-semibold leading-none transition-colors"
+                                                    style="border-color: var(--border); color: var(--foreground);"
+                                                    aria-label="切換多次進出場設定"
+                                                    aria-expanded="false"
+                                                    aria-controls="multiStageContent"
+                                                >
+                                                    <span id="multiStageToggleIcon" aria-hidden="true">+</span>
+                                                </button>
+                                            </div>
                                             <div
                                                 id="multiStageContent"
-                                                class="hidden border-t border-border px-3 py-3 space-y-3"
+                                                class="hidden space-y-3 border-t border-border pt-3"
                                                 style="border-color: var(--border);"
                                             >
                                                 <div class="space-y-3" id="stagedEntryContainer">
