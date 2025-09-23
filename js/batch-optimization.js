@@ -60,44 +60,19 @@ function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
     const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
     if (!sharedUtils) return params;
-    const windowOptions = {
-        minBars: 90,
-        multiplier: 2,
-        marginTradingDays: 12,
-        extraCalendarDays: 7,
-        minDate: sharedUtils?.MIN_DATA_DATE,
-        defaultStartDate: params.startDate,
-    };
-    let windowDecision = null;
-    if (typeof sharedUtils.resolveDataWindow === 'function') {
-        windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
-    }
-    const fallbackMaxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+    const maxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
         ? sharedUtils.getMaxIndicatorPeriod(params)
         : 0;
-    let lookbackDays = Number.isFinite(windowDecision?.lookbackDays)
-        ? windowDecision.lookbackDays
-        : null;
-    if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
-        if (typeof sharedUtils.resolveLookbackDays === 'function') {
-            const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
-            if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
-                lookbackDays = fallbackDecision.lookbackDays;
-            }
-        }
-    }
-    if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
-        lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
-            : Math.max(90, fallbackMaxPeriod * 2);
-    }
-    const effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
-    let dataStartDate = windowDecision?.dataStartDate || null;
-    if (!dataStartDate && effectiveStartDate && typeof sharedUtils.computeBufferedStartDate === 'function') {
+    const lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
+        ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+        : Math.max(90, maxPeriod * 2);
+    const effectiveStartDate = params.startDate;
+    let dataStartDate = effectiveStartDate;
+    if (typeof sharedUtils.computeBufferedStartDate === 'function') {
         dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
-            minDate: sharedUtils?.MIN_DATA_DATE,
-            marginTradingDays: windowDecision?.bufferTradingDays || windowOptions.marginTradingDays,
-            extraCalendarDays: windowDecision?.extraCalendarDays || windowOptions.extraCalendarDays,
+            minDate: sharedUtils.MIN_DATA_DATE,
+            marginTradingDays: 12,
+            extraCalendarDays: 7,
         }) || effectiveStartDate;
     }
     if (!dataStartDate) dataStartDate = effectiveStartDate;

@@ -1,14 +1,13 @@
-// netlify/functions/stock-range.js (v3.1 - five-year blob cache)
-// Patch Tag: LB-BLOB-QUIN-20250830A
+﻿// netlify/functions/stock-range.js
+// Consolidated range endpoint to batch month-level fetches and cache merged results.
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
-const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const SEGMENT_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
-const SEGMENT_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const TWSE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TPEX_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const RANGE_TTL_MS = 12 * 60 * 60 * 1000; // refresh merged cache every 12 hours
 
-const inFlightTwseMonthCache = new Map();
+const inFlightTwseMonthCache = new Map(); // per-invocation memoization to avoid duplicate fetches
 
 const isQuotaError = (error) => Boolean(error && (error.status === 402 || error.status === 429));
 
@@ -78,7 +77,7 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
     const resolver = (async () => {
         try {
             const cached = await store.get(cacheKey, { type: 'json' });
-            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
+            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_TTL_MS)) {
                 const base = cached.data;
                 return {
                     stockName: base.stockName || stockNo,
@@ -157,8 +156,7 @@ async function composeTwseRange(stockNo, startDate, endDate) {
     return {
         stockName,
         aaData: merged,
-        dataSource: 'TWSE (range)',
-        monthCount: months.length,
+        dataSource: 'TWSE (range)'
     };
 }
 
@@ -173,30 +171,40 @@ async function fetchFromYahoo(stockNo, symbol) {
 
     const quotes = result.indicators?.quote?.[0];
     const adjclose = result.indicators?.adjclose?.[0]?.adjclose;
-    const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
-    if (!quotes || !Array.isArray(quotes.close) || timestamps.length !== quotes.close.length) {
-        throw new Error('Yahoo response missing quote payload');
-    }
+    if (!quotes || !Array.isArray(adjclose)) throw new Error('Yahoo response missing indicators');
 
-    const rows = [];
-    for (let i = 0; i < timestamps.length; i += 1) {
-        const date = new Date(timestamps[i] * 1000);
-        if (Number.isNaN(date.getTime())) continue;
+    const formatted = result.timestamp.map((ts, index) => {
+        const adjClose = adjclose[index];
+        const open = quotes.open?.[index];
+        const high = quotes.high?.[index];
+        const low = quotes.low?.[index];
+        const close = quotes.close?.[index];
+        const volume = quotes.volume?.[index];
+        if (adjClose === null || adjClose === undefined || open === null || open === undefined) return null;
+        const date = new Date(ts * 1000);
         const rocYear = date.getFullYear() - 1911;
         const formattedDate = `${rocYear}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
-        const open = quotes.open?.[i] ?? null;
-        const high = quotes.high?.[i] ?? null;
-        const low = quotes.low?.[i] ?? null;
-        const close = quotes.close?.[i] ?? null;
-        const volume = quotes.volume?.[i] ?? null;
-        const spread = adjclose && Array.isArray(adjclose) ? adjclose[i] : null;
-        rows.push([formattedDate, stockNo, '', open, high, low, close, spread, volume]);
-    }
+        const baseClose = close === null || close === undefined ? open : close;
+        const scale = baseClose ? adjClose / baseClose : 1;
+        const prevAdjClose = index === 0 ? adjClose : adjclose[index - 1];
+        return [
+            formattedDate,
+            stockNo,
+            '',
+            open * scale,
+            (high === null || high === undefined) ? open * scale : high * scale,
+            (low === null || low === undefined) ? open * scale : low * scale,
+            adjClose,
+            adjClose - prevAdjClose,
+            volume ?? 0
+        ];
+    }).filter(Boolean);
 
     return {
-        stockName: stockNo,
-        aaData: rows,
-        dataSource: 'Yahoo Finance',
+        stockName: result.meta?.shortName || stockNo,
+        iTotalRecords: formatted.length,
+        aaData: formatted,
+        dataSource: 'Yahoo Finance'
     };
 }
 
@@ -240,7 +248,7 @@ async function composeTpexRange(stockNo) {
 
     try {
         const cached = await store.get(symbol, { type: 'json' });
-        if (cached && cached.data && (Date.now() - cached.timestamp < TPEX_PRIMARY_TTL_MS)) {
+        if (cached && cached.data && (Date.now() - cached.timestamp < TPEX_TTL_MS)) {
             const base = cached.data;
             return {
                 stockName: base.stockName || stockNo,
@@ -284,165 +292,6 @@ function filterAaDataByRange(aaData, startDate, endDate) {
     });
 }
 
-function buildYearList(startDate, endDate) {
-    const years = [];
-    let cursor = startDate.getUTCFullYear();
-    const endYear = endDate.getUTCFullYear();
-    while (cursor <= endYear) {
-        years.push(cursor);
-        cursor += 1;
-    }
-    return years;
-}
-
-function getFiveYearBucketStart(year) {
-    if (!Number.isFinite(year)) return year;
-    return Math.floor(year / 5) * 5;
-}
-
-function buildFiveYearSegments(startDate, endDate) {
-    if (!startDate || !endDate) return [];
-    const startYear = startDate.getUTCFullYear();
-    const endYear = endDate.getUTCFullYear();
-    const segments = [];
-    const startBucket = getFiveYearBucketStart(startYear);
-    const endBucket = getFiveYearBucketStart(endYear);
-    for (let bucket = startBucket; bucket <= endBucket; bucket += 5) {
-        segments.push({ startYear: bucket, endYear: bucket + 4 });
-    }
-    return segments;
-}
-
-function getSegmentCacheKey(marketType, stockNo, startYear) {
-    return `${marketType}_${stockNo}_${startYear}_${startYear + 4}`;
-}
-
-function getSegmentCacheTtl(marketType) {
-    return marketType === 'TPEX' ? SEGMENT_CACHE_TPEX_MS : SEGMENT_CACHE_TWSE_MS;
-}
-
-function groupAaDataByYear(aaData) {
-    const groups = new Map();
-    if (!Array.isArray(aaData)) return groups;
-    aaData.forEach((row) => {
-        const iso = formatRocDateToIso(row?.[0]);
-        if (!iso) return;
-        const year = parseInt(iso.slice(0, 4), 10);
-        if (!Number.isFinite(year)) return;
-        if (!groups.has(year)) groups.set(year, []);
-        groups.get(year).push(row);
-    });
-    return groups;
-}
-
-async function persistSegmentSlice(store, cacheKey, payload, telemetry) {
-    if (!store || !payload) return;
-    try {
-        await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
-        if (telemetry) {
-            telemetry.writeOps += 1;
-            if (Array.isArray(telemetry.primedSegmentKeys)) {
-                if (!telemetry.primedSegmentKeys.includes(cacheKey)) {
-                    telemetry.primedSegmentKeys.push(cacheKey);
-                }
-            }
-        }
-    } catch (error) {
-        if (!isQuotaError(error)) {
-            console.warn('[Five-Year Cache] Failed to persist', cacheKey, error);
-        }
-    }
-}
-
-async function fetchFiveYearDataset({ store, stockNo, marketType, segment, telemetry }) {
-    const { startYear, endYear } = segment;
-    const segmentKey = getSegmentCacheKey(marketType, stockNo, startYear);
-    telemetry.segmentKeys.push(segmentKey);
-    let cached = null;
-    if (store) {
-        try {
-            telemetry.readOps += 1;
-            cached = await store.get(segmentKey, { type: 'json' });
-            if (cached && cached.data && (Date.now() - cached.timestamp < getSegmentCacheTtl(marketType))) {
-                telemetry.cacheHits += 1;
-                telemetry.hitSegmentKeys.push(segmentKey);
-                const base = cached.data;
-                return {
-                    stockName: base.stockName || stockNo,
-                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
-                    dataSource: `${marketType} (cache)`
-                };
-            }
-        } catch (error) {
-            if (!isQuotaError(error)) {
-                console.warn('[Five-Year Cache] Read failed', segmentKey, error);
-            }
-        }
-    }
-
-    telemetry.cacheMisses += 1;
-    telemetry.missSegmentKeys.push(segmentKey);
-    const startDate = new Date(Date.UTC(startYear, 0, 1));
-    const endDate = new Date(Date.UTC(endYear, 11, 31));
-
-    if (marketType === 'TPEX') {
-        const tpexData = await composeTpexRange(stockNo);
-        const groups = groupAaDataByYear(tpexData.aaData);
-        const buckets = new Map();
-        groups.forEach((rows, yr) => {
-            if (!Number.isFinite(yr) || yr < startYear || yr > endYear) return;
-            const bucketStart = getFiveYearBucketStart(yr);
-            if (bucketStart < segment.startYear || bucketStart > segment.endYear) return;
-            const key = getSegmentCacheKey(marketType, stockNo, bucketStart);
-            if (!buckets.has(key)) {
-                buckets.set(key, { startYear: bucketStart, rows: [] });
-            }
-            buckets.get(key).rows.push(...rows);
-        });
-        if (store) {
-            for (const [key, info] of buckets.entries()) {
-                const payload = {
-                    stockName: tpexData.stockName || stockNo,
-                    aaData: info.rows,
-                    marketType,
-                    startYear: info.startYear,
-                    endYear: info.startYear + 4,
-                };
-                await persistSegmentSlice(store, key, payload, telemetry);
-            }
-        }
-        const aaData = [];
-        for (let yr = startYear; yr <= endYear; yr += 1) {
-            const rows = groups.get(yr);
-            if (Array.isArray(rows)) {
-                aaData.push(...rows);
-            }
-        }
-        return {
-            stockName: tpexData.stockName || stockNo,
-            aaData,
-            dataSource: tpexData.dataSource || 'TPEX',
-        };
-    }
-
-    const twseData = await composeTwseRange(stockNo, startDate, endDate);
-    if (store) {
-        const cachePayload = {
-            stockName: twseData.stockName || stockNo,
-            aaData: twseData.aaData,
-            marketType,
-            startYear,
-            endYear,
-        };
-        await persistSegmentSlice(store, segmentKey, cachePayload, telemetry);
-    }
-    return {
-        stockName: twseData.stockName || stockNo,
-        aaData: twseData.aaData,
-        dataSource: twseData.dataSource,
-    };
-}
-
 export default async (req) => {
     try {
         const params = new URL(req.url).searchParams;
@@ -461,93 +310,57 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: 'Invalid date range' }), { status: 400 });
         }
 
-        const years = buildYearList(startDate, endDate);
-        const segments = buildFiveYearSegments(startDate, endDate);
-        const yearStore = getStore('stock_year_cache_store');
-        const telemetry = {
-            provider: 'five-year-cache',
-            market: marketType,
-            years,
-            segments,
-            segmentKeys: [],
-            cacheHits: 0,
-            cacheMisses: 0,
-            readOps: 0,
-            writeOps: 0,
-            hitSegmentKeys: [],
-            missSegmentKeys: [],
-            primedSegmentKeys: [],
-        };
+        const rangeStore = getStore('stock_range_cache_store');
+        const rangeKey = `${marketType}_${stockNo}_${startDateStr}_${endDateStr}`;
 
-        const segmentResults = [];
-        let resolvedStockName = stockNo;
-        for (const segment of segments) {
-            const result = await fetchFiveYearDataset({
-                store: yearStore,
-                stockNo,
-                marketType,
-                segment,
-                telemetry,
-            });
-            if (result.stockName) resolvedStockName = result.stockName;
-            if (Array.isArray(result.aaData)) {
-                segmentResults.push(result.aaData);
+        try {
+            const cachedRange = await rangeStore.get(rangeKey, { type: 'json' });
+            if (cachedRange && cachedRange.data && (Date.now() - cachedRange.timestamp < RANGE_TTL_MS)) {
+                const base = cachedRange.data;
+                const payload = {
+                    stockNo: base.stockNo || stockNo,
+                    stockName: base.stockName || stockNo,
+                    iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
+                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
+                    dataSource: `${base.dataSource || marketType} (cache)`,
+                    marketType: base.marketType || marketType
+                };
+                return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
+            }
+        } catch (error) {
+            if (!isQuotaError(error)) {
+                console.warn('[Range Endpoint] Range cache lookup failed:', error);
             }
         }
 
-    const mergedAaData = segmentResults.flat();
-    const filteredAaData = filterAaDataByRange(mergedAaData, startDate, endDate);
-    telemetry.returnedRows = filteredAaData.length;
+        let merged;
+        if (marketType === 'TPEX') {
+            merged = await composeTpexRange(stockNo);
+        } else {
+            merged = await composeTwseRange(stockNo, startDate, endDate);
+        }
 
-    const canonicalStartDate = segments.length > 0
-        ? new Date(Date.UTC(segments[0].startYear, 0, 1))
-        : startDate;
-    const canonicalEndDate = segments.length > 0
-        ? new Date(Date.UTC(segments[segments.length - 1].endYear, 11, 31))
-        : endDate;
-    const canonicalRange = {
-        start: canonicalStartDate.toISOString().slice(0, 10),
-        end: canonicalEndDate.toISOString().slice(0, 10),
-    };
-
-    const responsePayload = {
-        stockNo,
-        stockName: resolvedStockName,
-        iTotalRecords: filteredAaData.length,
-        aaData: filteredAaData,
-        canonicalAaData: mergedAaData,
-        dataSource: mergedAaData.length > 0 ? 'Blob Five-Year Cache' : marketType,
-        marketType,
-        meta: {
-            years,
-            segments: segments.map((segment) => ({
-                    startYear: segment.startYear,
-                    endYear: segment.endYear,
-                    key: getSegmentCacheKey(marketType, stockNo, segment.startYear),
-                })),
-                cacheHits: telemetry.cacheHits,
-                cacheMisses: telemetry.cacheMisses,
-                readOps: telemetry.readOps,
-                writeOps: telemetry.writeOps,
-                segmentKeys: telemetry.segmentKeys,
-                yearKeys: telemetry.segmentKeys,
-                hitSegmentKeys: telemetry.hitSegmentKeys,
-                hitYearKeys: telemetry.hitSegmentKeys,
-                missSegmentKeys: telemetry.missSegmentKeys,
-                missYearKeys: telemetry.missSegmentKeys,
-                primedSegmentKeys: telemetry.primedSegmentKeys,
-                primedYearKeys: telemetry.primedSegmentKeys,
-                source: 'five-year-cache',
-                requestedRange: { start: startDateStr, end: endDateStr },
-                canonicalStart: canonicalRange.start,
-                canonicalEnd: canonicalRange.end,
-                canonicalRange,
-            }
+        const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);
+        const responsePayload = {
+            stockNo,
+            stockName: merged.stockName || stockNo,
+            iTotalRecords: filteredAaData.length,
+            aaData: filteredAaData,
+            dataSource: merged.dataSource,
+            marketType
         };
+
+        try {
+            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: responsePayload });
+        } catch (error) {
+            if (!isQuotaError(error)) {
+                console.warn('[Range Endpoint] Failed to persist range cache:', error);
+            }
+        }
 
         return new Response(JSON.stringify(responsePayload), { headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
-        console.error('[Five-Year Range] Unexpected error:', error);
-        return new Response(JSON.stringify({ error: error.message || 'Internal error' }), { status: 500 });
+        console.error('[Range Endpoint] Unexpected error:', error);
+        return new Response(JSON.stringify({ error: error.message || 'Unknown error' }), { status: 500 });
     }
 };

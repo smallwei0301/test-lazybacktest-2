@@ -2019,7 +2019,7 @@ async function tryFetchRangeFromBlob({
   }
 
   const rangeFetchInfo = {
-    provider: "netlify-five-year-range",
+    provider: "netlify-year-range",
     market: marketKey,
     status: "pending",
     cacheHit: false,
@@ -2262,7 +2262,7 @@ async function tryFetchRangeFromBlob({
         market: marketKey,
         cacheHit: true,
         count: 1,
-        source: "netlify-five-year-cache",
+      source: "netlify-year-cache",
       });
     });
   }
@@ -2285,7 +2285,7 @@ async function tryFetchRangeFromBlob({
           market: marketKey,
           cacheHit: false,
           count: 1,
-          source: "netlify-five-year-cache",
+          source: "netlify-year-cache",
         });
       }
     });
@@ -2300,14 +2300,14 @@ async function tryFetchRangeFromBlob({
         market: marketKey,
         cacheHit: false,
         count: 1,
-        source: "netlify-five-year-cache",
+        source: "netlify-year-cache",
       });
     });
   }
 
   fetchDiagnostics.usedCache = rangeFetchInfo.cacheHit;
   fetchDiagnostics.blob = {
-    provider: "netlify-five-year-cache",
+    provider: "netlify-year-cache",
     years: rangeFetchInfo.years,
     segments: rangeFetchInfo.segments,
     yearKeys: rangeFetchInfo.yearKeys,
@@ -2327,7 +2327,7 @@ async function tryFetchRangeFromBlob({
   };
 
   const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
-    source: "netlify-five-year-range",
+    source: "netlify-year-range",
     requestedRange: { start: startDate, end: endDate },
   });
   const supersetRows =
