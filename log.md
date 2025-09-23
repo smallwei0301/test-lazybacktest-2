@@ -1,3 +1,9 @@
+# 2025-07-24 — Patch LB-PROGRESS-REDESIGN-20250710A
+- **Issue recap**: 回測進度條在資料抓取與策略計算期間會靠自動補間直接跳到 100%，訊息也在未命中 Netlify Blob 範圍快取時持續停留於同一提示，造成使用者誤判流程已結束或卡在快取檢查。
+- **Fix**: 建立階段化進度控制器（暖身快取掃描 → Blob 檢查 → 資料抓取 → 整理 → 指標 → 模擬 → 彙整），所有回測子階段改以 `progress.emit(stage, ratio, message)` 回報；Blob 落空即切換為遠端抓取提示，主流程完成打包後才送出 100%。同時將 `createProgressAnimator` 的自動補間限制為最多領先回報值 12%，避免進度條超前。
+- **Diagnostics**: Worker progress payload 加入 `stage` 標籤，資訊面板可追蹤目前步驟；Blob 範圍命中會先顯示整理訊息後直接進入數據切片與指標計算。
+- **Testing**: 受限於容器無法啟動瀏覽器，僅透過程式碼檢閱與資料流推演驗證回報順序；後續需於本機實際執行 2330／2412／0050 回測，確認進度條依序顯示各階段且 console 無錯誤。
+
 # 2025-07-23 — Patch LB-SUPERSET-CACHE-20250723A
 - **Issue recap**: 年度 Blob 快取命中後仍會在同年度重複呼叫 Netlify/Proxy，主執行緒無法判斷既有快取是否涵蓋新區間，月度快取也會在暖身視窗微調時重新計算缺口並多次補抓。
 - **Fix**: Worker 建立 `market｜priceMode｜年度` Superset 快取並在呼叫 Blob/Proxy 後分拆寫入，回測前先嘗試以 Superset 切片回覆；主執行緒新增年度 Superset 尋找與切片機制，若快取已涵蓋新區間直接回播不再啟動 Worker；月度快取加入 coverage 指紋記錄，命中即可跳過缺口計算並避免重複補抓。
