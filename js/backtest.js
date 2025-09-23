@@ -1146,6 +1146,20 @@ function formatStageModeLabel(mode, type) {
     return '';
 }
 
+function resolveStageModeDisplay(stageCandidate, stageMode, type) {
+    if (stageCandidate && stageCandidate.isSingleFull) {
+        return '皆可';
+    }
+    const explicitLabel = stageMode && typeof stageMode === 'object' && typeof stageMode.label === 'string'
+        ? stageMode.label
+        : '';
+    const modeValue = stageMode && typeof stageMode === 'object' && stageMode.value !== undefined
+        ? stageMode.value
+        : stageMode;
+    const fallbackLabel = formatStageModeLabel(modeValue, type);
+    return explicitLabel || fallbackLabel || '—';
+}
+
 function renderStageStateCell(state, context) {
     if (!state || typeof state !== 'object') return '—';
     const type = context?.type === 'exit' ? 'exit' : 'entry';
@@ -2596,6 +2610,7 @@ function buildStagingOptimizationCombos(params) {
             label: '目前設定',
             values: normalizedEntry,
             display: formatStagePercentages(normalizedEntry),
+            isSingleFull: isFullAllocationSingleStage(normalizedEntry, entryBase),
         });
     }
     const entryProfiles = [
@@ -2615,6 +2630,7 @@ function buildStagingOptimizationCombos(params) {
             label: profile.label,
             values,
             display: formatStagePercentages(values),
+            isSingleFull: isFullAllocationSingleStage(values, entryBase),
         });
     });
     const dedupedEntry = dedupeStageCandidates(entryCandidates);
@@ -2627,6 +2643,7 @@ function buildStagingOptimizationCombos(params) {
             label: '目前設定',
             values: normalizedExit,
             display: formatStagePercentages(normalizedExit),
+            isSingleFull: isFullAllocationSingleStage(normalizedExit, exitBase),
         });
     }
     const exitProfiles = [
@@ -2645,6 +2662,7 @@ function buildStagingOptimizationCombos(params) {
             label: profile.label,
             values,
             display: formatStagePercentages(values),
+            isSingleFull: isFullAllocationSingleStage(values, exitBase),
         });
     });
     const dedupedExit = dedupeStageCandidates(exitCandidates);
@@ -2902,12 +2920,8 @@ function renderStagingOptimizationResults(results) {
         const sharpeText = Number.isFinite(metrics.sharpeRatio) ? metrics.sharpeRatio.toFixed(2) : 'N/A';
         const drawdownText = Number.isFinite(metrics.maxDrawdown) ? `${metrics.maxDrawdown.toFixed(2)}%` : 'N/A';
         const tradesText = Number.isFinite(metrics.tradesCount) ? metrics.tradesCount : (Number.isFinite(metrics.tradeCount) ? metrics.tradeCount : 'N/A');
-        const entryModeLabel = item.combination?.entryMode?.label
-            || formatStageModeLabel(item.combination?.entryMode?.value || item.combination?.entryMode, 'entry')
-            || '—';
-        const exitModeLabel = item.combination?.exitMode?.label
-            || formatStageModeLabel(item.combination?.exitMode?.value || item.combination?.exitMode, 'exit')
-            || '—';
+        const entryModeLabel = resolveStageModeDisplay(item.combination?.entry, item.combination?.entryMode, 'entry');
+        const exitModeLabel = resolveStageModeDisplay(item.combination?.exit, item.combination?.exitMode, 'exit');
         return `<tr class="${index === 0 ? 'bg-emerald-50 font-semibold' : 'hover:bg-muted/40'}">
             <td class="px-3 py-2">${index + 1}</td>
             <td class="px-3 py-2">${item.combination.entry.display}</td>
@@ -2927,12 +2941,8 @@ function renderStagingOptimizationResults(results) {
     const best = stagingOptimizationState.bestResult;
     if (best && best.metrics) {
         const metrics = best.metrics;
-        const entryModeLabel = best.combination?.entryMode?.label
-            || formatStageModeLabel(best.combination?.entryMode?.value || best.combination?.entryMode, 'entry')
-            || '—';
-        const exitModeLabel = best.combination?.exitMode?.label
-            || formatStageModeLabel(best.combination?.exitMode?.value || best.combination?.exitMode, 'exit')
-            || '—';
+        const entryModeLabel = resolveStageModeDisplay(best.combination?.entry, best.combination?.entryMode, 'entry');
+        const exitModeLabel = resolveStageModeDisplay(best.combination?.exit, best.combination?.exitMode, 'exit');
         summaryEl.innerHTML = `推薦組合：<strong>${best.combination.entry.display}</strong>（${entryModeLabel}） × <strong>${best.combination.exit.display}</strong>（${exitModeLabel}）。` +
             ` 年化報酬 <span class="${metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(metrics.annualizedReturn)}</span>` +
             ` ／ 夏普比率 ${formatNumber(metrics.sharpeRatio, 2)} ／ 最大回撤 <span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>。` +
@@ -3044,13 +3054,15 @@ async function runStagingOptimization() {
 
         for (const combo of combinations.combos) {
             index += 1;
+            const entryModeProgressLabel = resolveStageModeDisplay(combo.entry, combo.entryMode, 'entry');
+            const exitModeProgressLabel = resolveStageModeDisplay(combo.exit, combo.exitMode, 'exit');
             updateStagingOptimizationProgress(
                 index - 1,
                 total,
                 combo.entry.display,
                 combo.exit.display,
-                combo.entryMode?.label || formatStageModeLabel(combo.entryMode?.value || combo.entryMode, 'entry'),
-                combo.exitMode?.label || formatStageModeLabel(combo.exitMode?.value || combo.exitMode, 'exit')
+                entryModeProgressLabel === '—' ? '' : entryModeProgressLabel,
+                exitModeProgressLabel === '—' ? '' : exitModeProgressLabel
             );
 
             const candidateParams = {
@@ -3092,13 +3104,15 @@ async function runStagingOptimization() {
                 cachedMeta = buildCachedMetaFromEntry(updatedEntry, effectiveStartDate, lookbackDays);
             }
 
+            const entryModeCompleteLabel = resolveStageModeDisplay(combo.entry, combo.entryMode, 'entry');
+            const exitModeCompleteLabel = resolveStageModeDisplay(combo.exit, combo.exitMode, 'exit');
             updateStagingOptimizationProgress(
                 index,
                 total,
                 combo.entry.display,
                 combo.exit.display,
-                combo.entryMode?.label || formatStageModeLabel(combo.entryMode?.value || combo.entryMode, 'entry'),
-                combo.exitMode?.label || formatStageModeLabel(combo.exitMode?.value || combo.exitMode, 'exit')
+                entryModeCompleteLabel === '—' ? '' : entryModeCompleteLabel,
+                exitModeCompleteLabel === '—' ? '' : exitModeCompleteLabel
             );
 
             const metrics = {

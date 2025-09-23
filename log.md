@@ -1,3 +1,9 @@
+# 2025-06-29 — Patch LB-STAGING-LABEL-20250629A
+- **Issue recap**: 分段優化結果表在單段 100% 進場或出場時仍顯示特定觸發模式，與實際「價格/訊號皆可」的情境不符，造成使用者誤解建議條件。
+- **Fix**: 為候選分段標記單段滿倉／出清狀態，表格、摘要與進度提示在偵測到 100% 配置時統一以「皆可」呈現，維持建議說明與測試行為一致。
+- **Diagnostics**: 進度列與結果表可快速比對觸發標籤是否轉為「皆可」，便於確認單段情境下已正確跳過額外條件判讀。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
 # 2025-06-28 — Patch LB-STAGING-SKIP-20250628A
 - **Issue recap**: 分段優化在僅有單段 100% 進場或出場時，仍會強制測試價格回落與訊號再觸發兩組條件，徒增重複計算並拉長完成時間。
 - **Fix**: 建立單段滿倉／出清偵測邏輯，遇到 100% 分段時僅保留使用者指定或預設的一組觸發條件，避免重複排列組合；同時更新說明文字，提醒系統會自動略過無效條件以加快測試。
