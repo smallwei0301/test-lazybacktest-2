@@ -3755,7 +3755,10 @@ function runStrategy(data, params) {
       exitStrategy,
       entryParams,
       entryStages,
+      entryStagingMode,
       exitParams,
+      exitStages,
+      exitStagingMode,
       enableShorting,
       shortEntryStrategy,
       shortExitStrategy,
@@ -3776,6 +3779,20 @@ function runStrategy(data, params) {
     if (entryStagePercents.length === 0) {
       entryStagePercents.push(positionSize);
     }
+    const entryStageMode =
+      typeof entryStagingMode === "string" ? entryStagingMode : "signal_repeat";
+
+    const exitStagePercentsRaw = Array.isArray(exitStages)
+      ? exitStages.map((value) => Number(value))
+      : [];
+    const exitStagePercents = exitStagePercentsRaw.filter(
+      (value) => Number.isFinite(value) && value > 0,
+    );
+    if (exitStagePercents.length === 0) {
+      exitStagePercents.push(100);
+    }
+    const exitStageMode =
+      typeof exitStagingMode === "string" ? exitStagingMode : "signal_repeat";
 
   if (!data || n === 0) throw new Error("回測數據無效");
   const dates = data.map((d) => d.date);
@@ -4003,6 +4020,15 @@ function runStrategy(data, params) {
     let filledEntryStages = 0;
     let currentLongPositionId = null;
     let nextLongPositionId = 1;
+    let filledExitStages = 0;
+    let lastLongStagePrice = null;
+    let lastEntryStageTrigger = null;
+    let lastLongExitStagePrice = null;
+    let lastExitStageTrigger = null;
+    let currentLongExitPlan = null;
+    let resetExitPlanAfterCapture = false;
+    const longEntryStageStates = new Array(n).fill(null);
+    const longExitStageStates = new Array(n).fill(null);
   const buySigs = [];
   const sellSigs = [];
   const longPl = Array(n).fill(0);
@@ -4082,6 +4108,7 @@ function runStrategy(data, params) {
       kdValues,
       macdValues,
       indicatorValues,
+      trigger,
     }) => {
       if (!Number.isFinite(tradePrice) || tradePrice <= 0) {
         return { executed: false };
@@ -4147,6 +4174,9 @@ function runStrategy(data, params) {
         0,
       ) + stagePercent;
 
+      const stageTrigger =
+        typeof trigger === "string" ? trigger : "signal";
+
       const stageSnapshot = {
         type: "buy",
         date: tradeDate,
@@ -4160,6 +4190,14 @@ function runStrategy(data, params) {
         triggeringStrategy: strategyKey,
         simType: "long",
         positionId: currentLongPositionId,
+        stageTrigger,
+        originalShares: stageShares,
+        originalCost: stageCostWithFee,
+        originalCostWithoutFee: stageCostWithoutFee,
+        remainingShares: stageShares,
+        remainingCost: stageCostWithFee,
+        remainingCostWithoutFee: stageCostWithoutFee,
+        stageIndex: resolvedStageIndex,
       };
       if (kdValues) stageSnapshot.kdValues = kdValues;
       if (macdValues) stageSnapshot.macdValues = macdValues;
@@ -4174,6 +4212,13 @@ function runStrategy(data, params) {
       console.log(
         `[Worker LONG] Stage ${resolvedStageIndex + 1}/${entryStagePercents.length} Buy Executed: ${stageShares}@${tradePrice} on ${tradeDate}, Cap After: ${longCap.toFixed(0)}`,
       );
+
+      lastLongStagePrice = tradePrice;
+      lastEntryStageTrigger = stageTrigger;
+      filledExitStages = 0;
+      currentLongExitPlan = null;
+      lastLongExitStagePrice = null;
+      lastExitStageTrigger = null;
 
       return { executed: true, shares: stageShares, tradeData: stageSnapshot };
     };
@@ -4204,6 +4249,116 @@ function runStrategy(data, params) {
         positionId: currentLongPositionId,
       };
     };
+
+    const computeExitStagePlan = (totalShares) => {
+      if (!Number.isFinite(totalShares) || totalShares <= 0) return null;
+      const plan = [];
+      let allocated = 0;
+      for (let idx = 0; idx < exitStagePercents.length; idx += 1) {
+        if (idx === exitStagePercents.length - 1) {
+          plan.push(Math.max(totalShares - allocated, 0));
+          break;
+        }
+        let stageShare = Math.floor((totalShares * exitStagePercents[idx]) / 100);
+        const remainingStages = exitStagePercents.length - idx;
+        const remainingShares = totalShares - allocated;
+        if (stageShare <= 0 && remainingShares > remainingStages) {
+          stageShare = 1;
+        }
+        plan.push(stageShare);
+        allocated += stageShare;
+      }
+      if (plan.length < exitStagePercents.length) {
+        const lastShare = Math.max(totalShares - plan.reduce((sum, val) => sum + val, 0), 0);
+        plan.push(lastShare);
+      }
+      const sumShares = plan.reduce((sum, val) => sum + val, 0);
+      if (sumShares !== totalShares && plan.length > 0) {
+        plan[plan.length - 1] += totalShares - sumShares;
+      }
+      return plan;
+    };
+
+    const consumeEntryForShares = (sharesToConsume) => {
+      if (!Number.isFinite(sharesToConsume) || sharesToConsume <= 0) return null;
+      let remaining = sharesToConsume;
+      let totalCostWithFee = 0;
+      let totalCostWithoutFee = 0;
+      const stages = [];
+      for (const stage of currentLongEntryBreakdown) {
+        const availableShares = stage.remainingShares ?? stage.shares ?? 0;
+        if (!Number.isFinite(availableShares) || availableShares <= 0) continue;
+        const take = Math.min(availableShares, remaining);
+        if (take <= 0) continue;
+        const availableCost = stage.remainingCost ?? stage.cost ?? 0;
+        const availableCostWithoutFee = stage.remainingCostWithoutFee ?? stage.costWithoutFee ?? 0;
+        const costPerShareWithFee = availableShares > 0 ? availableCost / availableShares : 0;
+        const costPerShareWithoutFee = availableShares > 0 ? availableCostWithoutFee / availableShares : 0;
+        const consumedCostWithFee = costPerShareWithFee * take;
+        const consumedCostWithoutFee = costPerShareWithoutFee * take;
+        stage.remainingShares = availableShares - take;
+        stage.remainingCost = availableCost - consumedCostWithFee;
+        stage.remainingCostWithoutFee = availableCostWithoutFee - consumedCostWithoutFee;
+        totalCostWithFee += consumedCostWithFee;
+        totalCostWithoutFee += consumedCostWithoutFee;
+        stages.push({
+          date: stage.date,
+          price: stage.price,
+          shares: take,
+          cost: consumedCostWithFee,
+          costWithoutFee: consumedCostWithoutFee,
+          allocationPercent: stage.allocationPercent,
+          stageTrigger: stage.stageTrigger,
+          stageIndex: stage.stageIndex,
+        });
+        remaining -= take;
+        if (remaining <= 0) break;
+      }
+      const consumedShares = sharesToConsume - remaining;
+      return {
+        shares: consumedShares,
+        cost: totalCostWithFee,
+        costWithoutFee: totalCostWithoutFee,
+        averageEntryPrice:
+          consumedShares > 0 ? totalCostWithoutFee / consumedShares : 0,
+        stages,
+      };
+    };
+
+    const captureEntryStageState = () => ({
+      totalStages: entryStagePercents.length,
+      filledStages: filledEntryStages,
+      sharesHeld: longShares,
+      averageEntryPrice: longShares > 0 ? longAverageEntryPrice : null,
+      lastStagePrice: Number.isFinite(lastLongStagePrice)
+        ? lastLongStagePrice
+        : null,
+      lastTrigger: lastEntryStageTrigger || null,
+      mode: entryStageMode,
+      nextTriggerPrice:
+        entryStageMode === "price_pullback" &&
+        filledEntryStages < entryStagePercents.length &&
+        Number.isFinite(lastLongStagePrice)
+          ? lastLongStagePrice
+          : null,
+    });
+
+    const captureExitStageState = () => ({
+      totalStages: exitStagePercents.length,
+      executedStages: filledExitStages,
+      remainingShares: longShares,
+      lastStagePrice: Number.isFinite(lastLongExitStagePrice)
+        ? lastLongExitStagePrice
+        : null,
+      lastTrigger: lastExitStageTrigger || null,
+      mode: exitStageMode,
+      nextTriggerPrice:
+        exitStageMode === "price_rally" &&
+        filledExitStages < exitStagePercents.length &&
+        Number.isFinite(lastLongExitStagePrice)
+          ? lastLongExitStagePrice
+          : null,
+    });
   for (let i = startIdx; i < n; i++) {
     const curC = closes[i];
     const curH = highs[i];
@@ -4224,6 +4379,8 @@ function runStrategy(data, params) {
       longStateSeries[i] = longState;
       shortStateSeries[i] = shortState;
       positionStatesFull[i] = combinePositionLabel(longState, shortState);
+      longEntryStageStates[i] = captureEntryStageState();
+      longExitStageStates[i] = captureExitStageState();
       portfolioVal[i] = portfolioVal[i - 1] ?? initialCapital;
       strategyReturns[i] = strategyReturns[i - 1] ?? 0;
       continue;
@@ -4254,6 +4411,7 @@ function runStrategy(data, params) {
               kdValues: pendingTrade.kdValues,
               macdValues: pendingTrade.macdValues,
               indicatorValues: pendingTrade.indicatorValues,
+              trigger: pendingTrade.stageTrigger,
             });
             if (result.executed) {
               executedBuy = true;
@@ -4503,41 +4661,163 @@ function runStrategy(data, params) {
         if (!sellSignal && !slTrig && globalTP > 0 && lastBuyP > 0) {
           if (curC >= lastBuyP * (1 + globalTP / 100)) tpTrig = true;
         }
-        if (sellSignal || slTrig || tpTrig) {
+        const candidateExitPrice =
+          tradeTiming === "open" && canTradeOpen && check(nextO)
+            ? nextO
+            : curC;
+        let priceRallyTrigger = false;
+        if (
+          exitStageMode === "price_rally" &&
+          filledExitStages > 0 &&
+          filledExitStages < exitStagePercents.length &&
+          longPos === 1 &&
+          Number.isFinite(lastLongExitStagePrice) &&
+          check(candidateExitPrice) &&
+          candidateExitPrice > lastLongExitStagePrice
+        ) {
+          priceRallyTrigger = true;
+        }
+
+        if (sellSignal || slTrig || tpTrig || priceRallyTrigger) {
           tradePrice = null;
           tradeDate = dates[i];
-          if (tradeTiming === "close") tradePrice = curC;
-          else if (canTradeOpen) {
+          if (tradeTiming === "close") {
+            tradePrice = curC;
+          } else if (canTradeOpen) {
             tradePrice = nextO;
             tradeDate = dates[i + 1];
           } else if (tradeTiming === "open" && i === n - 1) {
             tradePrice = curC;
             tradeDate = dates[i];
           }
-            if (check(tradePrice) && tradePrice > 0 && longShares > 0) {
-              const rev = longShares * tradePrice * (1 - sellFee / 100);
-              const entryCostWithFee = longPositionCostWithFee;
-              const prof = rev - entryCostWithFee;
-              const profP =
-                entryCostWithFee > 0 ? (prof / entryCostWithFee) * 100 : 0;
-              longCap += rev;
+
+          if (check(tradePrice) && tradePrice > 0 && longShares > 0) {
+            let riskExit = false;
+            let exitTriggerLabel = null;
+            let sharesToSell = 0;
+            let stageIndexForPlan = Math.min(
+              filledExitStages,
+              exitStagePercents.length - 1,
+            );
+
+            if (slTrig || tpTrig) {
+              riskExit = true;
+              sharesToSell = longShares;
+              exitTriggerLabel = slTrig ? "stop_loss" : "take_profit";
+            } else {
+              if (
+                !Array.isArray(currentLongExitPlan) ||
+                currentLongExitPlan.length === 0 ||
+                filledExitStages === 0
+              ) {
+                currentLongExitPlan = computeExitStagePlan(longShares);
+              }
+              const plan = Array.isArray(currentLongExitPlan)
+                ? currentLongExitPlan
+                : null;
+              if (plan && plan.length > 0) {
+                stageIndexForPlan = Math.min(
+                  filledExitStages,
+                  plan.length - 1,
+                );
+                sharesToSell = plan[stageIndexForPlan];
+              }
+              if (!Number.isFinite(sharesToSell) || sharesToSell <= 0) {
+                sharesToSell = longShares;
+              }
+              sharesToSell = Math.min(Math.max(sharesToSell, 0), longShares);
+              exitTriggerLabel =
+                priceRallyTrigger && !sellSignal ? "price_rally" : "signal";
+            }
+
+            const consumption = consumeEntryForShares(sharesToSell);
+            const executedShares =
+              consumption && Number.isFinite(consumption.shares)
+                ? consumption.shares
+                : 0;
+            if (executedShares > 0) {
+              const revenue =
+                executedShares * tradePrice * (1 - sellFee / 100);
+              const entryCostWithFee = Number.isFinite(consumption.cost)
+                ? consumption.cost
+                : 0;
+              const entryCostWithoutFee = Number.isFinite(
+                consumption.costWithoutFee,
+              )
+                ? consumption.costWithoutFee
+                : 0;
+              const stageAverageEntryPrice =
+                executedShares > 0
+                  ? entryCostWithoutFee / executedShares
+                  : 0;
+              const profit = revenue - entryCostWithFee;
+              const profitPercent =
+                entryCostWithFee > 0 ? (profit / entryCostWithFee) * 100 : 0;
+
+              longCap += revenue;
+              longPositionCostWithFee = Math.max(
+                0,
+                longPositionCostWithFee - entryCostWithFee,
+              );
+              longPositionCostWithoutFee = Math.max(
+                0,
+                longPositionCostWithoutFee - entryCostWithoutFee,
+              );
+              longShares -= executedShares;
+              if (longShares < 0) longShares = 0;
+
+              if (longShares > 0 && longPositionCostWithoutFee > 0) {
+                longAverageEntryPrice = longPositionCostWithoutFee / longShares;
+                longPos = 1;
+                lastBuyP = longAverageEntryPrice;
+              } else {
+                longAverageEntryPrice = 0;
+              }
+
+              const stagePercent =
+                exitStagePercents[
+                  Math.min(
+                    stageIndexForPlan,
+                    exitStagePercents.length - 1,
+                  )
+                ] || 0;
+              const cumulativePercent = exitStagePercents
+                .slice(0, stageIndexForPlan + 1)
+                .reduce(
+                  (sum, value) =>
+                    sum + (Number.isFinite(value) ? value : 0),
+                  0,
+                );
+
               const tradeData = {
                 type: "sell",
                 date: tradeDate,
                 price: tradePrice,
-                shares: longShares,
-                revenue: rev,
-                profit: prof,
-                profitPercent: profP,
+                shares: executedShares,
+                revenue,
+                profit,
+                profitPercent,
                 capital_after: longCap,
                 triggeredByStopLoss: slTrig,
                 triggeredByTakeProfit: tpTrig,
                 triggeringStrategy: exitStrategy,
                 simType: "long",
                 entryCost: entryCostWithFee,
-                entryAveragePrice: longAverageEntryPrice,
+                entryAveragePrice: stageAverageEntryPrice,
                 stageCount: currentLongEntryBreakdown.length,
                 positionId: currentLongPositionId,
+                stageTrigger: exitTriggerLabel,
+                stageIndex: stageIndexForPlan,
+                allocationPercent: stagePercent,
+                cumulativeStagePercent: cumulativePercent,
+                plannedShares:
+                  Array.isArray(currentLongExitPlan) &&
+                  stageIndexForPlan < currentLongExitPlan.length
+                    ? currentLongExitPlan[stageIndexForPlan]
+                    : executedShares,
+                consumedEntryStages: Array.isArray(consumption?.stages)
+                  ? consumption.stages
+                  : [],
               };
               if (exitKDValues) tradeData.kdValues = exitKDValues;
               if (exitMACDValues) tradeData.macdValues = exitMACDValues;
@@ -4550,33 +4830,60 @@ function runStrategy(data, params) {
                 sellSigs.push({ date: dates[i + 1], index: i + 1 });
               }
               executedSell = true;
-              const aggregatedEntry = buildAggregatedLongEntry();
-              if (aggregatedEntry) {
+              lastLongExitStagePrice = tradePrice;
+              lastExitStageTrigger = exitTriggerLabel;
+              if (!riskExit) {
+                filledExitStages = Math.min(
+                  filledExitStages + 1,
+                  exitStagePercents.length,
+                );
+              } else {
+                filledExitStages = exitStagePercents.length;
+                currentLongExitPlan = null;
+              }
+
+              let aggregatedEntry = null;
+              if (longShares === 0) {
+                aggregatedEntry = buildAggregatedLongEntry();
+              }
+              if (aggregatedEntry && longShares === 0) {
                 longCompletedTrades.push({
                   entry: aggregatedEntry,
                   exit: tradeData,
-                  profit: prof,
-                  profitPercent: profP,
+                  profit,
+                  profitPercent,
                 });
-              } else {
+              } else if (longShares === 0 && !aggregatedEntry) {
                 console.warn(
                   `[Worker LONG] Sell @ ${tradeDate} could not rebuild aggregated entry.`,
                 );
               }
+
+              if (longShares === 0) {
+                longPos = 0;
+                lastBuyP = 0;
+                curPeakP = 0;
+                longPositionCostWithFee = 0;
+                longPositionCostWithoutFee = 0;
+                currentLongEntryBreakdown = [];
+                currentLongPositionId = null;
+                currentLongExitPlan = null;
+                filledEntryStages = 0;
+                lastLongStagePrice = null;
+                lastEntryStageTrigger = null;
+                resetExitPlanAfterCapture = true;
+                filledExitStages = exitStagePercents.length;
+              }
+
               console.log(
-                `[Worker LONG] Sell Executed: ${longShares}@${tradePrice} on ${tradeDate}, Profit: ${prof.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
+                `[Worker LONG] Stage Sell Executed: ${executedShares}@${tradePrice} on ${tradeDate}, Profit: ${profit.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
               );
-              longPos = 0;
-              longShares = 0;
-              lastBuyP = 0;
-              curPeakP = 0;
-              longAverageEntryPrice = 0;
-              longPositionCostWithFee = 0;
-              longPositionCostWithoutFee = 0;
-              currentLongEntryBreakdown = [];
-              filledEntryStages = 0;
-              currentLongPositionId = null;
             } else {
+              console.warn(
+                `[Worker LONG] Exit stage computed 0 shares on ${dates[i]} (requested ${sharesToSell}).`,
+              );
+            }
+          } else {
             console.warn(
               `[Worker LONG] Invalid trade price (${tradePrice}) or zero shares for Sell Signal on ${dates[i]}`,
             );
@@ -5050,10 +5357,34 @@ function runStrategy(data, params) {
           }
           break;
       }
+        let shouldEnterStage = false;
+        let stageTriggerType = null;
         if (buySignal) {
+          shouldEnterStage = true;
+          stageTriggerType = "signal";
+        }
+        if (
+          !shouldEnterStage &&
+          entryStageMode === "price_pullback" &&
+          filledEntryStages > 0 &&
+          filledEntryStages < entryStagePercents.length &&
+          longPos === 1 &&
+          Number.isFinite(lastLongStagePrice) &&
+          check(curC)
+        ) {
+          if (tradeTiming === "close" && curC < lastLongStagePrice) {
+            shouldEnterStage = true;
+            stageTriggerType = "price_pullback";
+          } else if (canTradeOpen && curC < lastLongStagePrice) {
+            shouldEnterStage = true;
+            stageTriggerType = "price_pullback";
+          }
+        }
+        if (shouldEnterStage) {
           tradePrice = null;
           tradeDate = dates[i];
           const stageIndex = filledEntryStages;
+          const triggerLabel = stageTriggerType || "signal";
           if (tradeTiming === "close") {
             tradePrice = curC;
             if (check(tradePrice) && tradePrice > 0 && longCap > 0) {
@@ -5071,6 +5402,7 @@ function runStrategy(data, params) {
                 kdValues: entryKDValues,
                 macdValues: entryMACDValues,
                 indicatorValues: entryIndicatorValues,
+                trigger: triggerLabel,
               });
               if (result.executed) {
                 executedBuy = true;
@@ -5081,9 +5413,9 @@ function runStrategy(data, params) {
             if (positionBasis === "totalCapital") {
               baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
             }
-          const maxInvestmentAllowed =
-            baseCapitalForSizing *
-            (entryStagePercents[Math.min(stageIndex, entryStagePercents.length - 1)] / 100);
+            const maxInvestmentAllowed =
+              baseCapitalForSizing *
+              (entryStagePercents[Math.min(stageIndex, entryStagePercents.length - 1)] / 100);
             const actualInvestmentLimit = Math.min(
               longCap,
               maxInvestmentAllowed,
@@ -5100,6 +5432,7 @@ function runStrategy(data, params) {
                 kdValues: entryKDValues,
                 macdValues: entryMACDValues,
                 indicatorValues: entryIndicatorValues,
+                stageTrigger: triggerLabel,
               };
             } else {
               console.warn(
@@ -5402,6 +5735,15 @@ function runStrategy(data, params) {
     shortStateSeries[i] = shortState;
     positionStatesFull[i] = combinePositionLabel(longState, shortState);
 
+    longEntryStageStates[i] = captureEntryStageState();
+    longExitStageStates[i] = captureExitStageState();
+    if (resetExitPlanAfterCapture) {
+      filledExitStages = 0;
+      lastLongExitStagePrice = null;
+      lastExitStageTrigger = null;
+      resetExitPlanAfterCapture = false;
+    }
+
     // --- STEP 3: Update Daily P/L AFTER all potential trades ---
     longPl[i] =
       longCap + (longPos === 1 ? longShares * curC : 0) - initialCapital;
@@ -5489,6 +5831,17 @@ function runStrategy(data, params) {
         longPositionCostWithoutFee = 0;
         currentLongEntryBreakdown = [];
         filledEntryStages = 0;
+        currentLongExitPlan = null;
+        filledExitStages = exitStagePercents.length;
+        lastLongExitStagePrice = finalP;
+        lastExitStageTrigger = "final_day";
+        lastLongStagePrice = null;
+        lastEntryStageTrigger = null;
+        longEntryStageStates[lastIdx] = captureEntryStageState();
+        longExitStageStates[lastIdx] = captureExitStageState();
+        filledExitStages = 0;
+        lastLongExitStagePrice = null;
+        lastExitStageTrigger = null;
         currentLongPositionId = null;
         console.log(
           `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
@@ -5977,6 +6330,8 @@ function runStrategy(data, params) {
       visibleStartIdx,
     );
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
+    const trimmedEntryStageStates = sliceArray(longEntryStageStates);
+    const trimmedExitStageStates = sliceArray(longExitStageStates);
     const runtimeDiagnostics = {
       dataset: datasetSummary,
       warmup: warmupSummary,
@@ -6022,7 +6377,10 @@ function runStrategy(data, params) {
         exitStrategy: params.exitStrategy,
         entryParams: params.entryParams,
         entryStages: entryStagePercents.slice(),
+        entryStagingMode: entryStageMode,
         exitParams: params.exitParams,
+        exitStages: exitStagePercents.slice(),
+        exitStagingMode: exitStageMode,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -6043,6 +6401,8 @@ function runStrategy(data, params) {
       subPeriodResults: subPeriodResults,
       priceIndicatorSeries: trimmedIndicatorDisplay,
       positionStates: trimmedPositionStates,
+      longEntryStageStates: trimmedEntryStageStates,
+      longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
     };
   } catch (finalError) {
