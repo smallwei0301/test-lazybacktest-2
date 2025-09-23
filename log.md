@@ -1,3 +1,9 @@
+# 2025-06-24 — Patch LB-ENTRY-STAGING-20250624B
+- **Issue recap**: LB-ENTRY-STAGING-20250623A 在 Worker 中遺留語法錯誤，導致 Web Worker 載入時出現「Unexpected end of input」，分段進場功能無法啟用。
+- **Fix**: 重新整理分段進場買入與出場流程，透過 `executeLongStage` 統一處理收盤/隔日掛單，出場時整併各段進場成本與交易明細，並確保結果回傳 `entryStages` 與分段資訊。
+- **Diagnostics**: Worker console 會標示每段進場序號、累計比率與隔日掛單狀態；完成交易紀錄帶回分段細節與平均成本，方便前端診斷。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`
+
 # 2025-06-23 — Patch LB-ENTRY-STAGING-20250623A
 - **Issue recap**: 分段進場 UI 與參數儲存已經就緒，但 Worker 僅完成部分買入流程，未能分批投入資金、整併交易紀錄，也未回傳分段設定；載入策略時還會強制進入手動模式。
 - **Fix**: 補齊 Worker `executeLongStage` 流程與隔日掛單，出場時以整併後的進場資訊配對交易，並在結果物件回傳 `entryStages`；調整 staged entry 控制器，載入單一預設分段時維持自動模式。
