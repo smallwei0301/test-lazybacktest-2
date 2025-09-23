@@ -504,6 +504,44 @@ function loadBlobUsageLedger() {
 }
 
 const blobUsageLedger = loadBlobUsageLedger();
+const blobUsageAccordionState = { overrides: {} };
+
+function isBlobUsageGroupExpanded(dateKey, defaultExpanded) {
+    if (!dateKey) return defaultExpanded;
+    if (Object.prototype.hasOwnProperty.call(blobUsageAccordionState.overrides, dateKey)) {
+        return Boolean(blobUsageAccordionState.overrides[dateKey]);
+    }
+    return defaultExpanded;
+}
+
+function setBlobUsageGroupExpanded(dateKey, expanded) {
+    if (!dateKey) return;
+    blobUsageAccordionState.overrides[dateKey] = Boolean(expanded);
+}
+
+function recordTaiwanDirectoryBlobUsage(cacheMeta) {
+    if (!cacheMeta || cacheMeta.store !== 'blob') return;
+    const operations = [
+        {
+            action: 'read',
+            cacheHit: Boolean(cacheMeta.hit),
+            key: 'taiwan-directory',
+            source: 'taiwan-directory',
+            count: 1,
+        },
+    ];
+    if (!cacheMeta.hit) {
+        operations.push({
+            action: 'write',
+            cacheHit: false,
+            key: 'taiwan-directory',
+            source: 'taiwan-directory',
+            count: 1,
+        });
+    }
+    recordBlobUsageEvents(operations, { source: 'taiwan-directory' });
+    renderBlobUsageCard();
+}
 
 function saveBlobUsageLedger() {
     if (typeof window === 'undefined' || !window.localStorage) return;
@@ -2000,27 +2038,66 @@ function renderBlobUsageCard() {
             .map((item) => `<div class="flex items-center justify-between"><span>${escapeHtml(item.stock)}</span><span style="color: var(--muted-foreground);">${item.count} 次${item.market ? `・${escapeHtml(item.market)}` : ''}</span></div>`)
             .join('')
         : '<div style="color: var(--muted-foreground);">尚無熱門查詢</div>';
-    const recentEvents = Array.isArray(monthRecord.events) ? monthRecord.events.slice(0, 6) : [];
-    const eventList = recentEvents.length > 0
-        ? recentEvents
-            .map((event) => {
-                const when = new Date(event.timestamp || Date.now());
-                const timeLabel = `${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
-                const badgeClass = event.action === 'write' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200';
-                const actionLabel = event.action === 'write' ? '寫入' : '讀取';
-                const hitLabel = event.cacheHit ? '命中' : '補抓';
+
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const events = Array.isArray(monthRecord.events) ? monthRecord.events : [];
+    const grouped = [];
+    const groupMap = new Map();
+    events.forEach((event) => {
+        const when = new Date(Number(event.timestamp) || Date.now());
+        const dateKey = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
+        if (!groupMap.has(dateKey)) {
+            groupMap.set(dateKey, {
+                key: dateKey,
+                label: `${when.getFullYear()}/${String(when.getMonth() + 1).padStart(2, '0')}/${String(when.getDate()).padStart(2, '0')}`,
+                rows: [],
+            });
+            grouped.push(groupMap.get(dateKey));
+        }
+        groupMap.get(dateKey).rows.push({ raw: event, when });
+    });
+
+    const eventsHtml = grouped.length > 0
+        ? grouped.map((group) => {
+            const defaultExpanded = group.key === todayKey;
+            const expanded = isBlobUsageGroupExpanded(group.key, defaultExpanded);
+            const indicator = expanded ? '－' : '＋';
+            const rowsHtml = group.rows.map((item) => {
+                const actionLabel = item.raw.action === 'write' ? '寫入' : '讀取';
+                const badgeClass = item.raw.action === 'write'
+                    ? 'bg-amber-100 text-amber-700 border-amber-200'
+                    : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                const statusLabel = item.raw.cacheHit ? '命中' : '補抓';
+                const timeLabel = `${String(item.when.getHours()).padStart(2, '0')}:${String(item.when.getMinutes()).padStart(2, '0')}`;
+                const infoParts = [];
+                if (item.raw.stockNo) infoParts.push(`<span>${escapeHtml(item.raw.stockNo)}</span>`);
+                if (item.raw.market) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.market)}</span>`);
+                if (item.raw.key) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.key)}</span>`);
+                if (item.raw.source) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.source)}</span>`);
+                infoParts.push(`<span style="color: var(--muted-foreground);">${statusLabel}</span>`);
+                infoParts.push(`<span style="color: var(--muted-foreground);">${timeLabel}</span>`);
                 return `<div class="border rounded px-3 py-2 text-[11px]" style="border-color: var(--border);">
                     <div class="flex flex-wrap items-center gap-2">
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${badgeClass}">${actionLabel}</span>
-                        <span>${escapeHtml(event.stockNo || '—')}</span>
-                        <span style="color: var(--muted-foreground);">${escapeHtml(event.key || '')}</span>
-                        <span style="color: var(--muted-foreground);">${hitLabel}</span>
-                        <span style="color: var(--muted-foreground);">${timeLabel}</span>
+                        ${infoParts.join(' ')}
                     </div>
                 </div>`;
-            })
-            .join('')
-        : '<div style="color: var(--muted-foreground);">尚未記錄近期操作。</div>';
+            }).join('');
+            return `<div class="border rounded-md" data-blob-group="${group.key}" style="border-color: var(--border); background-color: color-mix(in srgb, var(--background) 96%, transparent);">
+                <button type="button" class="w-full flex items-center justify-between px-3 py-2 text-left text-[11px] font-medium" data-blob-group-toggle="${group.key}" aria-expanded="${expanded ? 'true' : 'false'}" style="color: var(--foreground);">
+                    <span>${group.label}</span>
+                    <span class="flex items-center gap-2" style="color: var(--muted-foreground);">
+                        <span>${group.rows.length} 筆</span>
+                        <span data-blob-group-indicator="${group.key}" aria-hidden="true">${indicator}</span>
+                    </span>
+                </button>
+                <div class="space-y-2 px-3 pb-3 ${expanded ? '' : 'hidden'}" data-blob-group-body="${group.key}">
+                    ${rowsHtml}
+                </div>
+            </div>`;
+        }).join('')
+        : '<div style="color: var(--muted-foreground);">尚未記錄近期操作</div>';
+
     container.innerHTML = `
         <div class="grid grid-cols-2 gap-3 text-[11px]">
             <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
@@ -2040,9 +2117,28 @@ function renderBlobUsageCard() {
         </div>
         <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
             <div class="font-medium mb-1" style="color: var(--foreground);">近期操作</div>
-            <div class="space-y-2">${eventList}</div>
+            <div class="space-y-2" style="max-height: 16rem; overflow-y: auto; padding-right: 0.25rem;">${eventsHtml}</div>
         </div>
     `;
+
+    if (grouped.length > 0) {
+        const toggles = container.querySelectorAll('[data-blob-group-toggle]');
+        toggles.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const dateKey = btn.getAttribute('data-blob-group-toggle');
+                const body = container.querySelector(`[data-blob-group-body="${dateKey}"]`);
+                const indicator = container.querySelector(`[data-blob-group-indicator="${dateKey}"]`);
+                if (!body) return;
+                const currentlyExpanded = !body.classList.contains('hidden');
+                const nextState = !currentlyExpanded;
+                body.classList.toggle('hidden', !nextState);
+                btn.setAttribute('aria-expanded', nextState ? 'true' : 'false');
+                if (indicator) indicator.textContent = nextState ? '－' : '＋';
+                setBlobUsageGroupExpanded(dateKey, nextState);
+            });
+        });
+    }
+
     if (updatedAtEl) {
         updatedAtEl.textContent = blobUsageLedger.updatedAt
             ? `更新於 ${new Date(blobUsageLedger.updatedAt).toLocaleString('zh-TW')}`
@@ -4421,6 +4517,7 @@ async function preloadTaiwanDirectory(options = {}) {
             },
             { seedCache: options.seedCache !== false },
         );
+        recordTaiwanDirectoryBlobUsage(payload.cache || null);
     } catch (error) {
         taiwanDirectoryState.lastError = error;
         console.warn('[Taiwan Directory] 載入失敗:', error);

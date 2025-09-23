@@ -397,7 +397,112 @@
 
                             <!-- Settings Cards -->
                             <div class="space-y-6">
+                                <!-- Developer Area Card -->
+                                <div class="card" id="developerAreaCard">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="wrench" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            開發者區域
+                                        </h3>
+                                        <p class="card-description">診斷資料流程、測試來源與 Blob 用量</p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div class="space-y-2" id="dataSourceTesterContainer">
+                                            <button
+                                                id="toggleDataSourceTester"
+                                                type="button"
+                                                class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                            >
+                                                <i data-lucide="radar" class="lucide w-4 h-4"></i>
+                                                測試資料來源
+                                            </button>
+                                            <div id="dataSourceTester" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
+                                                    <div class="text-[11px] font-medium" id="dataSourceTesterMode" style="color: var(--foreground);"></div>
+                                                    <button id="closeDataSourceTester" type="button" class="text-[11px] text-muted-foreground hover:text-foreground transition-colors" style="color: var(--muted-foreground);">關閉</button>
+                                                </div>
+                                                <div class="px-3 py-3 space-y-3">
+                                                    <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
+                                                    <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
+                                                    <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2" id="dataDiagnosticsContainer">
+                                            <button
+                                                id="toggleDataDiagnostics"
+                                                type="button"
+                                                class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                            >
+                                                <i data-lucide="bug" class="lucide w-4 h-4"></i>
+                                                診斷資料暖身
+                                            </button>
+                                            <div id="dataDiagnosticsPanel" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
+                                                    <div class="text-[11px] font-medium" id="dataDiagnosticsTitle" style="color: var(--foreground);">資料暖身診斷</div>
+                                                    <button id="closeDataDiagnostics" type="button" class="text-[11px] text-muted-foreground hover:text-foreground transition-colors" style="color: var(--muted-foreground);">關閉</button>
+                                                </div>
+                                                <div class="px-3 py-3 space-y-3 text-[11px]" id="dataDiagnosticsBody">
+                                                    <div id="dataDiagnosticsHint" class="text-[11px]" style="color: var(--muted-foreground);">請先執行回測後，再查看暖身與快取診斷資訊。</div>
+                                                    <div id="dataDiagnosticsContent" class="hidden space-y-3">
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">名稱與清單資訊</h5>
+                                                            <div id="dataDiagnosticsName" class="space-y-1"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">資料摘要</h5>
+                                                            <div id="dataDiagnosticsSummary" class="space-y-1"></div>
+                                                            <div id="dataDiagnosticsInvalidSamples" class="space-y-1 mt-2"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">暖身與指標設定</h5>
+                                                            <div id="dataDiagnosticsWarmup" class="space-y-1"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">使用者起點鄰近樣本</h5>
+                                                            <div id="dataDiagnosticsPreview" class="space-y-1"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">買入持有檢查</h5>
+                                                            <div id="dataDiagnosticsBuyHold" class="space-y-1"></div>
+                                                            <div id="dataDiagnosticsBuyHoldSamples" class="space-y-1 mt-2"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">月度抓取紀錄</h5>
+                                                            <div id="dataDiagnosticsFetchSummary" class="space-y-1"></div>
+                                                            <div id="dataDiagnosticsFetchMonths" class="space-y-2 mt-2"></div>
+                                                        </div>
+                                                        <div>
+                                                            <h5 class="font-medium mb-1" style="color: var(--foreground);">手動測試指引</h5>
+                                                            <div id="dataDiagnosticsTesting" class="space-y-1"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="database" class="lucide w-4 h-4"></i>
+                                                    Blob 使用監控
+                                                </div>
+                                                <div id="blobUsageUpdatedAt" class="text-[11px]" style="color: var(--muted-foreground);"></div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div id="blobUsageContent" class="px-3 py-3 space-y-3 text-[11px]" style="color: var(--foreground);">
+                                                    <div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">
+                                                        尚未累積 Blob 用量統計，執行回測後將在此顯示本月操作數與熱門查詢。
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Basic Settings Card -->
+                                <div class="card">
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
@@ -461,100 +566,6 @@
                                                 class="mt-1 hidden space-y-1"
                                                 style="color: var(--muted-foreground);"
                                             ></div>
-                                            <!-- Patch Tag: LB-DATASOURCE-20241005A -->
-                                            <div class="mt-3 space-y-2" id="dataSourceTesterContainer">
-                                                <button
-                                                    id="toggleDataSourceTester"
-                                                    type="button"
-                                                    class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
-                                                    style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
-                                                >
-                                                    <i data-lucide="radar" class="lucide w-4 h-4"></i>
-                                                    測試資料來源
-                                                </button>
-                                                <div id="dataSourceTester" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
-                                                    <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
-                                                        <div class="text-[11px] font-medium" id="dataSourceTesterMode" style="color: var(--foreground);"></div>
-                                                        <button id="closeDataSourceTester" type="button" class="text-[11px] text-muted-foreground hover:text-foreground transition-colors" style="color: var(--muted-foreground);">關閉</button>
-                                                    </div>
-                                                    <div class="px-3 py-3 space-y-3">
-                                                        <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
-                                                        <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
-                                                        <div id="dataSourceTesterResult" class="text-xs hidden"></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="mt-3 space-y-2" id="dataDiagnosticsContainer">
-                                                <button
-                                                    id="toggleDataDiagnostics"
-                                                    type="button"
-                                                    class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
-                                                    style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
-                                                >
-                                                    <i data-lucide="bug" class="lucide w-4 h-4"></i>
-                                                    診斷資料暖身
-                                                </button>
-                                                <div id="dataDiagnosticsPanel" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
-                                                    <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
-                                                        <div class="text-[11px] font-medium" id="dataDiagnosticsTitle" style="color: var(--foreground);">資料暖身診斷</div>
-                                                        <button id="closeDataDiagnostics" type="button" class="text-[11px] text-muted-foreground hover:text-foreground transition-colors" style="color: var(--muted-foreground);">關閉</button>
-                                                    </div>
-                                                    <div class="px-3 py-3 space-y-3 text-[11px]" id="dataDiagnosticsBody">
-                                                        <div id="dataDiagnosticsHint" class="text-[11px]" style="color: var(--muted-foreground);">請先執行回測後，再查看暖身與快取診斷資訊。</div>
-                                                        <div id="dataDiagnosticsContent" class="hidden space-y-3">
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">名稱與清單資訊</h5>
-                                                                <div id="dataDiagnosticsName" class="space-y-1"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">資料摘要</h5>
-                                                                <div id="dataDiagnosticsSummary" class="space-y-1"></div>
-                                                                <div id="dataDiagnosticsInvalidSamples" class="space-y-1 mt-2"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">暖身與指標設定</h5>
-                                                                <div id="dataDiagnosticsWarmup" class="space-y-1"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">使用者起點鄰近樣本</h5>
-                                                                <div id="dataDiagnosticsPreview" class="space-y-1"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">買入持有檢查</h5>
-                                                                <div id="dataDiagnosticsBuyHold" class="space-y-1"></div>
-                                                                <div id="dataDiagnosticsBuyHoldSamples" class="space-y-1 mt-2"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">月度抓取紀錄</h5>
-                                                                <div id="dataDiagnosticsFetchSummary" class="space-y-1"></div>
-                                                                <div id="dataDiagnosticsFetchMonths" class="space-y-2 mt-2"></div>
-                                                            </div>
-                                                            <div>
-                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">手動測試指引</h5>
-                                                                <div id="dataDiagnosticsTesting" class="space-y-1"></div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="mt-3">
-                                                <div class="card">
-                                                    <div class="card-header flex items-center justify-between">
-                                                        <div class="card-title flex items-center gap-2">
-                                                            <i data-lucide="database" class="lucide w-4 h-4"></i>
-                                                            Blob 使用監控
-                                                        </div>
-                                                        <div id="blobUsageUpdatedAt" class="text-[11px]" style="color: var(--muted-foreground);"></div>
-                                                    </div>
-                                                    <div class="card-content">
-                                                        <div id="blobUsageContent" class="space-y-3 text-[11px]" style="color: var(--foreground);">
-                                                            <div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">
-                                                                尚未累積 Blob 用量統計，執行回測後將在此顯示本月操作數與熱門查詢。
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
                             </div>
                             <!-- Patch Tag: LB-ADJ-SWITCH-20240922A -->
                                         <!-- Patch Tag: LB-ADJ-SPLIT-20250518A -->
