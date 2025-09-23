@@ -339,7 +339,14 @@ async function persistSegmentSlice(store, cacheKey, payload, telemetry) {
     if (!store || !payload) return;
     try {
         await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
-        if (telemetry) telemetry.writeOps += 1;
+        if (telemetry) {
+            telemetry.writeOps += 1;
+            if (Array.isArray(telemetry.primedSegmentKeys)) {
+                if (!telemetry.primedSegmentKeys.includes(cacheKey)) {
+                    telemetry.primedSegmentKeys.push(cacheKey);
+                }
+            }
+        }
     } catch (error) {
         if (!isQuotaError(error)) {
             console.warn('[Five-Year Cache] Failed to persist', cacheKey, error);
@@ -383,7 +390,9 @@ async function fetchFiveYearDataset({ store, stockNo, marketType, segment, telem
         const groups = groupAaDataByYear(tpexData.aaData);
         const buckets = new Map();
         groups.forEach((rows, yr) => {
+            if (!Number.isFinite(yr) || yr < startYear || yr > endYear) return;
             const bucketStart = getFiveYearBucketStart(yr);
+            if (bucketStart < segment.startYear || bucketStart > segment.endYear) return;
             const key = getSegmentCacheKey(marketType, stockNo, bucketStart);
             if (!buckets.has(key)) {
                 buckets.set(key, { startYear: bucketStart, rows: [] });
@@ -400,9 +409,6 @@ async function fetchFiveYearDataset({ store, stockNo, marketType, segment, telem
                     endYear: info.startYear + 4,
                 };
                 await persistSegmentSlice(store, key, payload, telemetry);
-                if (key !== segmentKey) {
-                    telemetry.primedSegmentKeys.push(key);
-                }
             }
         }
         const aaData = [];
@@ -489,20 +495,32 @@ export default async (req) => {
             }
         }
 
-        const mergedAaData = segmentResults.flat();
-        const filteredAaData = filterAaDataByRange(mergedAaData, startDate, endDate);
-        telemetry.returnedRows = filteredAaData.length;
+    const mergedAaData = segmentResults.flat();
+    const filteredAaData = filterAaDataByRange(mergedAaData, startDate, endDate);
+    telemetry.returnedRows = filteredAaData.length;
 
-        const responsePayload = {
-            stockNo,
-            stockName: resolvedStockName,
-            iTotalRecords: filteredAaData.length,
-            aaData: filteredAaData,
-            dataSource: mergedAaData.length > 0 ? 'Blob Five-Year Cache' : marketType,
-            marketType,
-            meta: {
-                years,
-                segments: segments.map((segment) => ({
+    const canonicalStartDate = segments.length > 0
+        ? new Date(Date.UTC(segments[0].startYear, 0, 1))
+        : startDate;
+    const canonicalEndDate = segments.length > 0
+        ? new Date(Date.UTC(segments[segments.length - 1].endYear, 11, 31))
+        : endDate;
+    const canonicalRange = {
+        start: canonicalStartDate.toISOString().slice(0, 10),
+        end: canonicalEndDate.toISOString().slice(0, 10),
+    };
+
+    const responsePayload = {
+        stockNo,
+        stockName: resolvedStockName,
+        iTotalRecords: filteredAaData.length,
+        aaData: filteredAaData,
+        canonicalAaData: mergedAaData,
+        dataSource: mergedAaData.length > 0 ? 'Blob Five-Year Cache' : marketType,
+        marketType,
+        meta: {
+            years,
+            segments: segments.map((segment) => ({
                     startYear: segment.startYear,
                     endYear: segment.endYear,
                     key: getSegmentCacheKey(marketType, stockNo, segment.startYear),
@@ -520,6 +538,10 @@ export default async (req) => {
                 primedSegmentKeys: telemetry.primedSegmentKeys,
                 primedYearKeys: telemetry.primedSegmentKeys,
                 source: 'five-year-cache',
+                requestedRange: { start: startDateStr, end: endDateStr },
+                canonicalStart: canonicalRange.start,
+                canonicalEnd: canonicalRange.end,
+                canonicalRange,
             }
         };
 

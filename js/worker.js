@@ -33,6 +33,13 @@ function differenceInDays(laterDate, earlierDate) {
   return Math.floor(diff / DAY_MS);
 }
 
+function safeParseISODate(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
 function getPrimaryForceSource(marketKey, adjusted) {
   if (adjusted) {
     if (marketKey === "US") return null;
@@ -2140,6 +2147,41 @@ async function tryFetchRangeFromBlob({
   rangeFetchInfo.segments = Array.isArray(blobMeta.segments)
     ? blobMeta.segments
     : [];
+  const canonicalRangeMeta =
+    blobMeta && typeof blobMeta.canonicalRange === "object"
+      ? blobMeta.canonicalRange
+      : null;
+  const canonicalStartISO =
+    (canonicalRangeMeta && typeof canonicalRangeMeta.start === "string"
+      ? canonicalRangeMeta.start
+      : null) ||
+    (typeof blobMeta.canonicalStart === "string" ? blobMeta.canonicalStart : null) ||
+    (rangeFetchInfo.segments.length > 0
+      ? `${rangeFetchInfo.segments[0].startYear}-01-01`
+      : startDate);
+  const canonicalEndISO =
+    (canonicalRangeMeta && typeof canonicalRangeMeta.end === "string"
+      ? canonicalRangeMeta.end
+      : null) ||
+    (typeof blobMeta.canonicalEnd === "string" ? blobMeta.canonicalEnd : null) ||
+    (rangeFetchInfo.segments.length > 0
+      ? `${
+          rangeFetchInfo.segments[rangeFetchInfo.segments.length - 1].endYear
+        }-12-31`
+      : endDate);
+  const canonicalStartObj = safeParseISODate(canonicalStartISO) || startDateObj;
+  const canonicalEndObj = safeParseISODate(canonicalEndISO) || endDateObj;
+  const canonicalSourceRows =
+    Array.isArray(payload.canonicalAaData) && payload.canonicalAaData.length > 0
+      ? payload.canonicalAaData
+      : payload.aaData;
+  const canonicalNormalizedRows = canonicalSourceRows
+    .map((row) =>
+      normalizeProxyRow(row, marketKey === "TPEX", canonicalStartObj, canonicalEndObj),
+    )
+    .filter(Boolean);
+  const canonicalDeduped =
+    canonicalNormalizedRows.length > 0 ? dedupeAndSortData(canonicalNormalizedRows) : deduped;
   rangeFetchInfo.yearKeys = segmentKeys;
   rangeFetchInfo.segmentKeys = segmentKeys;
   rangeFetchInfo.readOps = Number(blobMeta.readOps) || 0;
@@ -2152,6 +2194,8 @@ async function tryFetchRangeFromBlob({
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
   rangeFetchInfo.durationMs = Date.now() - startedAt;
   rangeFetchInfo.dataSource = payload?.dataSource || null;
+  rangeFetchInfo.canonicalStart = canonicalStartISO;
+  rangeFetchInfo.canonicalEnd = canonicalEndISO;
 
   const startGapExceeded =
     Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
@@ -2276,18 +2320,24 @@ async function tryFetchRangeFromBlob({
     missSegmentKeys,
     primedSegmentKeys,
     operations: blobOperations,
+    canonicalRange: {
+      start: canonicalStartISO,
+      end: canonicalEndISO,
+    },
   };
 
   const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
     source: "netlify-five-year-range",
     requestedRange: { start: startDate, end: endDate },
   });
+  const supersetRows =
+    Array.isArray(canonicalDeduped) && canonicalDeduped.length > 0 ? canonicalDeduped : deduped;
   recordYearSupersetSlices({
     marketKey,
     stockNo,
     priceModeKey: getPriceModeKey(false),
     split,
-    rows: deduped,
+    rows: supersetRows,
   });
   const cacheEntry = {
     data: deduped,

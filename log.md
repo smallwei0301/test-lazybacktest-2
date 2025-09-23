@@ -1,3 +1,9 @@
+# 2025-09-03 — Patch LB-BLOB-SUPERSET-20250903A
+- **Issue recap**: Blob 範圍快取雖以五年段儲存，但 Worker 僅保留當次請求的切片資料，使用者調整起訖日仍會再次呼叫 Netlify；新股票初次補抓未顯示寫入紀錄，且上櫃資料會意外觸發 2005–2009 等早期段落的寫入。Blob 監控卡也未揭露僅限本裝置紀錄，易誤判為跨裝置同步。
+- **Fix**: Netlify `stock-range` 回傳完整五年段資料與 `canonicalRange`，Worker 以該資料更新年度 Superset 快取，後續在同段落延長起迄時即能就地切片；同步修正 TPEX 寫入僅限請求段落並於 Telemetry 中標記所有寫入 key，Blob 監控遂能顯示補抓紀錄。UI 新增「僅記錄本裝置」說明避免誤會。
+- **Diagnostics**: `fetchDiagnostics.blob` 與 `rangeFetchInfo` 新增 `canonicalRange`，Blob Ledger 事件仍可見實際讀寫段落但不再重複出現，也能分辨 Superset 回播未增加雲端計量。
+- **Testing**: 容器無瀏覽器與實際 API，僅完成程式碼檢視；需於本機瀏覽器測試調整暖身起點、切換股票與觀察 Blob 監控是否停留在首次補抓紀錄。
+
 # 2025-08-30 — Patch LB-BLOB-QUIN-20250830A
 - **Issue recap**: 年度 Blob 快取仍需逐年讀寫，長期 12～18 個月回測會累積大量操作；資料暖身診斷卡缺少暖身起點計算說明，營運難以向使用者解釋緩衝來源。
 - **Fix**: Netlify `stock-range` 改以 5 年切片讀寫 Blob，遠端回應同步回傳命中段資訊；Worker 與主執行緒更新 Telemetry 與資料來源標籤，並在暖身面板新增 shared-lookback 暖身推導說明。
