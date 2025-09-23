@@ -1,3 +1,9 @@
+# 2025-07-09 — Patch LB-STATIC-PAGES-20240709A
+- **Issue recap**: 現有頁面缺乏完整的隱私政策、免責聲明與 FAQ 導覽，頁尾連結無法引導使用者查看實際內容，亦缺少行動版導覽與 SEO 結構化資料。
+- **Fix**: 新增 `privacy.html`、`disclaimer.html`、`faq.html` 靜態頁，補齊資料來源、Cookie/追蹤工具、教育用途聲明與圖文教學；更新 `index.html` 導覽與頁尾連結並加上行動版選單；建立 `js/site-navigation.js` 統一管理導覽切換。
+- **Diagnostics**: 新頁面包含 Netlify Proxy 資料來源說明、版本代碼標註與 FAQPage JSON-LD，確保營運端可追蹤內容版本並提升搜尋友善度。
+- **Testing**: 以本地靜態檔案檢視確認導覽、連結與版面在桌機/行動裝置寬度下皆可正常操作（此環境無法啟動瀏覽器進行實測，後續於部署環境進行全站驗證）。
+
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
 - **Fix**: 導入美股名稱 `localStorage` 永續快取（3 天 TTL），頁面載入時回灌記憶體 Map；快取寫入時以「市場｜代碼」為 key，同步清理過期項目並與台股快取共用 4096 筆上限，確保重複輸入常用代號可立即命中。
