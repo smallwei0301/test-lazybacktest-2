@@ -882,30 +882,6 @@
                                 </div>
                             </div>
 
-                            <!-- Strategy vs Buy & Hold Insight -->
-                            <div class="card hidden" id="strategy-status-card">
-                                <div class="card-header">
-                                    <h3 class="card-title flex items-center gap-2">
-                                        <i data-lucide="trophy" class="lucide text-accent" style="color: var(--accent);"></i>
-                                        策略狀態速報
-                                    </h3>
-                                </div>
-                                <div class="card-content space-y-3">
-                                    <div class="flex items-center gap-2">
-                                        <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150 bg-gray-100 text-gray-600 border-gray-300">
-                                            尚未比較
-                                        </span>
-                                        <span class="text-xs font-medium" style="color: var(--muted-foreground);">版本碼：LB-STRATEGY-STATUS-20250623A</span>
-                                    </div>
-                                    <div id="strategy-status-headline" class="text-base font-semibold" style="color: var(--foreground);">
-                                        執行回測後將顯示策略狀態
-                                    </div>
-                                    <div id="strategy-status-detail" class="text-sm text-muted" style="color: var(--muted-foreground);">
-                                        完成回測後，我們會比較策略績效與買入持有基準，協助您快速掌握目前表現。
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Loading/Progress -->
                             <div class="card hidden" id="loading">
                                 <div class="card-header">
@@ -1022,7 +998,31 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
+                                <!-- Strategy vs Buy & Hold Insight -->
+                                <div class="card hidden mb-8" id="strategy-status-card">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="trophy" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            策略狀態速報
+                                        </h3>
+                                    </div>
+                                    <div class="card-content space-y-3">
+                                        <div class="flex items-center gap-2">
+                                            <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150 bg-gray-100 text-gray-600 border-gray-300">
+                                                尚未開賽
+                                            </span>
+                                            <span class="text-xs font-medium" style="color: var(--muted-foreground);">版本碼：LB-STRATEGY-STATUS-20250624A</span>
+                                        </div>
+                                        <div id="strategy-status-headline" class="text-base font-semibold" style="color: var(--foreground);">
+                                            執行回測後將揭曉策略戰況
+                                        </div>
+                                        <div id="strategy-status-detail" class="text-sm text-muted" style="color: var(--muted-foreground);">
+                                            回測一結束，我會立刻爆料策略和買入持有誰目前佔上風，讓你秒懂戰局。
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Summary Results -->
                                 <div class="card shadow-lg">
                                     <div class="card-header">

@@ -37,8 +37,8 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-// Patch Tag: LB-STRATEGY-STATUS-20250623A
-const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250623A';
+// Patch Tag: LB-STRATEGY-STATUS-20250624A
+const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250624A';
 const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
 const STRATEGY_STATUS_BADGE_VARIANTS = {
     positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
@@ -785,18 +785,18 @@ function resetStrategyStatusCard(mode = 'idle') {
         setStrategyStatusCardState({
             visible: true,
             variant: 'loading',
-            badgeText: '分析中',
-            headlineText: '正在比較策略與買入持有...',
-            detailText: '系統正在更新策略績效，請稍候以獲得最新判讀。',
+            badgeText: '計算中',
+            headlineText: '正在比對誰笑到最後…',
+            detailText: '演算小隊正翻找數據，請先喝口水稍候片刻。',
         });
         return;
     }
     setStrategyStatusCardState({
         visible: false,
         variant: 'loading',
-        badgeText: '尚未比較',
-        headlineText: '執行回測後將顯示策略狀態',
-        detailText: '完成回測後，我們會比較策略績效與買入持有基準，協助您快速掌握目前表現。',
+        badgeText: '尚未開賽',
+        headlineText: '執行回測後將揭曉策略戰況',
+        detailText: '回測一結束，我會立刻爆料策略和買入持有誰目前佔上風，讓你秒懂戰局。',
     });
 }
 
@@ -859,28 +859,28 @@ function updateStrategyStatusCard(result) {
         setStrategyStatusCardState({
             visible: true,
             variant: 'loading',
-            badgeText: '資料不足',
-            headlineText: '暫時無法比較策略與買入持有',
-            detailText: '近期數據或買入持有基準尚未就緒，請確認回測區間與資料品質後再試一次。',
+            badgeText: '資料補眠',
+            headlineText: '😴 資料還在補眠',
+            detailText: '近期資料或買入持有基準還在路上，請檢查區間設定或稍後再跑一次。',
         });
         return;
     }
 
     let variant = 'neutral';
-    let badgeText = '接近持平';
-    let headlineText = 'ℹ️ 策略接近買入持有';
-    let detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距僅 ${formatPercentDiff(diff)}。可利用策略優化與風險管理功能微調參數。`;
+    let badgeText = '勝負未定';
+    let headlineText = '🤝 暫時打成平手';
+    let detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
 
     if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'positive';
         badgeText = '策略領先';
-        headlineText = '🎉 策略擊敗買入持有';
-        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，領先 ${formatPercentDiff(diff)}。恭喜散戶贏過基準，也別忘了持續留意風險控管。`;
+        headlineText = '🎉 策略完勝買入持有';
+        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前領先 ${formatPercentDiff(diff)}。今晚可以替自己加菜，但風險控管還是不能鬆手。`;
     } else if (diff < -STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'negative';
-        badgeText = '落後基準';
-        headlineText = '⚠️ 策略落後買入持有';
-        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，落後 ${formatPercentDiff(diff)}。建議善用策略優化、停損停利等栖化功能調整設定。`;
+        badgeText = '策略加油';
+        headlineText = '🛠️ 策略暫時落後';
+        detailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。`;
     }
 
     setStrategyStatusCardState({
