@@ -680,6 +680,20 @@
                                             </label>
                                             <input type="number" id="positionSize" value="100" min="1" max="100" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                         </div>
+                                        <div class="space-y-2" id="stagedEntryContainer">
+                                            <div class="flex items-center justify-between">
+                                                <label class="block text-xs font-medium" style="color: var(--foreground);">
+                                                    分段進場 (%)
+                                                </label>
+                                                <button type="button" id="addEntryStageButton" class="text-xs font-medium px-2 py-1 rounded border transition-colors" style="border-color: var(--border); color: var(--accent);">
+                                                    新增分段
+                                                </button>
+                                            </div>
+                                            <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
+                                                預設與上方部位大小同步。新增分段後可依序設定不同百分比，例如 50%、60%，系統將依照觸發順序分批投入。
+                                            </p>
+                                            <div id="entryStageList" class="space-y-2"></div>
+                                        </div>
                                         <div>
                                             <label for="stopLoss" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
                                                 固定停損 (%)
