@@ -13,6 +13,7 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TODAY-SUGGEST-20250623A
+// Patch Tag: LB-TODAY-SUGGEST-20250625A
 const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -683,6 +684,14 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
 
 function pad2(value) {
   return String(value).padStart(2, "0");
+}
+
+function getTodayUTCISODate() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = pad2(now.getUTCMonth() + 1);
+  const day = pad2(now.getUTCDate());
+  return `${year}-${month}-${day}`;
 }
 
 function formatTWDateWorker(twDate) {
@@ -6612,20 +6621,133 @@ self.onmessage = async function (e) {
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
       console.log("[Worker] Received getSuggestion request.");
-      if (!workerLastDataset) {
-        throw new Error("Worker 中無可用快取數據，請先執行回測。");
+      const suggestionParams = params || {};
+      if (!suggestionParams.stockNo) {
+        throw new Error("缺少股票代號，無法計算今日建議。");
       }
-      if (workerLastDataset.length < lookbackDays) {
+
+      const todayISO = getTodayUTCISODate();
+      const warmupStartISO =
+        (workerLastMeta?.fetchRange && workerLastMeta.fetchRange.start) ||
+        workerLastMeta?.dataStartDate ||
+        dataStartDate ||
+        suggestionParams.dataStartDate ||
+        suggestionParams.startDate ||
+        null;
+
+      if (!warmupStartISO) {
+        throw new Error("無法推導策略暖身起點，請重新執行回測。");
+      }
+
+      if (todayISO < warmupStartISO) {
+        const suggestionPayload = {
+          action: "error",
+          message: `策略起始日（${warmupStartISO}）尚未到達，今日無需執行。`,
+          date: todayISO,
+          position: "空手",
+          price: null,
+        };
+        self.postMessage({
+          type: "suggestionResult",
+          data: { suggestion: suggestionPayload },
+        });
+        return;
+      }
+
+      const effectiveStartISO =
+        workerLastMeta?.effectiveStartDate ||
+        suggestionParams.effectiveStartDate ||
+        suggestionParams.startDate ||
+        warmupStartISO;
+
+      const marketForSuggestion =
+        suggestionParams.marketType ||
+        suggestionParams.market ||
+        workerLastMeta?.marketKey ||
+        "TWSE";
+
+      const suggestionFetch = await fetchStockData(
+        suggestionParams.stockNo,
+        warmupStartISO,
+        todayISO,
+        marketForSuggestion,
+        {
+          adjustedPrice: suggestionParams.adjustedPrice,
+          splitAdjustment: suggestionParams.splitAdjustment,
+          effectiveStartDate: effectiveStartISO,
+          lookbackDays,
+        },
+      );
+
+      const suggestionDataset = Array.isArray(suggestionFetch?.data)
+        ? suggestionFetch.data
+        : [];
+
+      if (suggestionDataset.length === 0) {
         throw new Error(
-          `Worker 快取數據不足 (${workerLastDataset.length})，無法回看 ${lookbackDays} 天。`,
+          `指定策略於 ${warmupStartISO} 至 ${todayISO} 無可用交易資料。`,
         );
       }
 
-      const recentData = workerLastDataset.slice(-lookbackDays);
+      const suggestionStrategyParams = {
+        ...suggestionParams,
+        originalStartDate: suggestionParams.startDate,
+        startDate: effectiveStartISO,
+        effectiveStartDate: effectiveStartISO,
+        dataStartDate: warmupStartISO,
+        endDate: todayISO,
+        lookbackDays,
+      };
+
+      const extendedBacktest = runStrategy(
+        suggestionDataset,
+        suggestionStrategyParams,
+      );
+
+      const extendedState = {
+        stockNo: suggestionParams.stockNo,
+        dates: Array.isArray(extendedBacktest.dates)
+          ? extendedBacktest.dates.slice()
+          : [],
+        positionStates: Array.isArray(extendedBacktest.positionStates)
+          ? extendedBacktest.positionStates.slice()
+          : [],
+        chartBuySignals: Array.isArray(extendedBacktest.chartBuySignals)
+          ? extendedBacktest.chartBuySignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartSellSignals: Array.isArray(extendedBacktest.chartSellSignals)
+          ? extendedBacktest.chartSellSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartShortSignals: Array.isArray(extendedBacktest.chartShortSignals)
+          ? extendedBacktest.chartShortSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartCoverSignals: Array.isArray(extendedBacktest.chartCoverSignals)
+          ? extendedBacktest.chartCoverSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+      };
+
+      const recentWindowSize = Math.max(1, lookbackDays);
+      const recentData =
+        suggestionDataset.length > recentWindowSize
+          ? suggestionDataset.slice(-recentWindowSize)
+          : suggestionDataset.slice();
+
       const suggestionTextResult = runSuggestionSimulation(
-        params,
+        suggestionStrategyParams,
         recentData,
-        workerLastBacktestState,
+        extendedState,
       );
       self.postMessage({
         type: "suggestionResult",

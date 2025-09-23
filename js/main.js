@@ -1710,11 +1710,7 @@ function getSuggestion() {
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {
-            suggestionText.textContent = `數據不足 (${cachedStockData.length} < ${lookbackDays})`;
-            suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-amber-50 border-amber-500 text-amber-800';
-            console.warn(`[Suggestion] Insufficient cached data for lookback: ${cachedStockData.length} < ${lookbackDays}`);
-            if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
-            return;
+            console.warn(`[Suggestion] 快取僅有 ${cachedStockData.length} 筆 (< ${lookbackDays})，將由 worker 補抓至最新交易日。`);
         }
 
         // 檢查 worker 是否可用
