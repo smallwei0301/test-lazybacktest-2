@@ -998,7 +998,24 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
+                                <div class="card shadow-lg mb-8" id="trend-segmentation-card">
+                                    <div class="card-header space-y-2">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="waves" class="lucide-sm" style="color: var(--primary);"></i>
+                                            趨勢區間評估
+                                        </h3>
+                                        <p class="card-description text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            參考量化回測常見的 20 日斜率／波動判別法：計算最近 20 個交易日的淨值曲線累積漲幅，以及同窗期日報酬標準差 σ。當漲幅 ≥ max(1.5%, 0.75×σ×√20) 判定為「起漲」，跌幅 ≥ 該門檻視為「回落」，介於門檻內則標記為「盤整」。
+                                        </p>
+                                    </div>
+                                    <div class="card-content">
+                                        <div id="trend-segmentation-summary" class="grid md:grid-cols-3 gap-4 text-sm" style="color: var(--muted-foreground);">
+                                            <p class="text-xs text-center col-span-full py-4" style="color: var(--muted-foreground);">執行回測後將顯示各趨勢區間的報酬與統計。</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Summary Results -->
                                 <div class="card shadow-lg">
                                     <div class="card-header">

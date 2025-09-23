@@ -1,5 +1,6 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-EQUITY-SEGMENT-20250623A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -13,6 +14,104 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('[Taiwan Directory] 預載入失敗:', error);
     });
 });
+
+const EQUITY_TREND_DEFAULTS = {
+    lookback: 20,
+    minTrendStrength: 0.015,
+    volatilityMultiplier: 0.75,
+};
+
+const TREND_SEGMENT_META = {
+    rally: {
+        label: '起漲',
+        icon: 'trending-up',
+        surface: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.05) 100%)',
+        badgeBackground: 'rgba(16, 185, 129, 0.18)',
+        badgeColor: '#047857',
+        titleColor: '#047857',
+        description: '20 日淨值斜率明顯向上',
+        positiveColor: '#047857',
+        negativeColor: '#b91c1c',
+    },
+    sideways: {
+        label: '盤整',
+        icon: 'activity',
+        surface: 'linear-gradient(135deg, rgba(148, 163, 184, 0.14) 0%, rgba(148, 163, 184, 0.05) 100%)',
+        badgeBackground: 'rgba(148, 163, 184, 0.25)',
+        badgeColor: '#475569',
+        titleColor: '#475569',
+        description: '變動幅度落在門檻內',
+        positiveColor: '#334155',
+        negativeColor: '#b91c1c',
+    },
+    selloff: {
+        label: '回落',
+        icon: 'trending-down',
+        surface: 'linear-gradient(135deg, rgba(248, 113, 113, 0.14) 0%, rgba(248, 113, 113, 0.05) 100%)',
+        badgeBackground: 'rgba(248, 113, 113, 0.22)',
+        badgeColor: '#b91c1c',
+        titleColor: '#b91c1c',
+        description: '20 日淨值斜率明顯向下',
+        positiveColor: '#047857',
+        negativeColor: '#b91c1c',
+    },
+};
+
+const TREND_BACKGROUND_COLORS = {
+    rally: 'rgba(16, 185, 129, 0.12)',
+    sideways: 'rgba(148, 163, 184, 0.10)',
+    selloff: 'rgba(248, 113, 113, 0.12)',
+};
+
+const EQUITY_TREND_PLUGIN_ID = 'equityTrendBackground';
+let trendBackgroundPluginRegistered = false;
+
+const equityTrendBackgroundPlugin = {
+    id: EQUITY_TREND_PLUGIN_ID,
+    beforeDraw(chart, args, options) {
+        const segments = Array.isArray(options?.segments) ? options.segments : [];
+        if (segments.length === 0) return;
+        const datasetIndex = Number.isInteger(options?.datasetIndex)
+            ? options.datasetIndex
+            : Math.max(0, chart.data.datasets.length - 1);
+        const meta = chart.getDatasetMeta(datasetIndex);
+        if (!meta || !meta.data || meta.data.length === 0) return;
+        const { ctx, chartArea } = chart;
+        if (!chartArea) return;
+        const { top, bottom, left, right } = chartArea;
+        const colorMap = options?.colorMap || {};
+        ctx.save();
+        segments.forEach((segment) => {
+            if (!segment || typeof segment.startIndex !== 'number' || typeof segment.endIndex !== 'number') return;
+            const startIndex = Math.max(0, Math.min(segment.startIndex, meta.data.length - 1));
+            const endIndex = Math.max(0, Math.min(segment.endIndex, meta.data.length - 1));
+            const startEl = meta.data[startIndex];
+            const endEl = meta.data[endIndex];
+            if (!startEl || !endEl) return;
+            const startX = startEl.x;
+            const endX = endEl.x;
+            if (!Number.isFinite(startX) || !Number.isFinite(endX)) return;
+            const prevEl = startIndex > 0 ? meta.data[startIndex - 1] : null;
+            const nextEl = endIndex < meta.data.length - 1 ? meta.data[endIndex + 1] : null;
+            const leftBoundary = Number.isFinite(prevEl?.x) ? (prevEl.x + startX) / 2 : left;
+            const rightBoundary = Number.isFinite(nextEl?.x) ? (nextEl.x + endX) / 2 : right;
+            const x0 = Math.max(left, leftBoundary);
+            const x1 = Math.min(right, rightBoundary);
+            if (!(x1 > x0)) return;
+            const fillStyle = colorMap[segment.type] || 'rgba(148, 163, 184, 0.08)';
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(x0, top, x1 - x0, bottom - top);
+        });
+        ctx.restore();
+    },
+};
+
+function ensureEquityTrendPluginRegistered() {
+    if (trendBackgroundPluginRegistered) return;
+    if (typeof Chart === 'undefined' || !Chart || typeof Chart.register !== 'function') return;
+    Chart.register(equityTrendBackgroundPlugin);
+    trendBackgroundPluginRegistered = true;
+}
 
 let lastPriceDebug = {
     steps: [],
@@ -31,6 +130,7 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+let lastTrendSegmentation = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
@@ -554,6 +654,9 @@ function clearPreviousResults() {
     lastIndicatorSeries = null;
     lastPositionStates = [];
     lastDatasetDiagnostics = null;
+    lastTrendSegmentation = null;
+
+    renderTrendSummary(null);
 
     const suggestionArea = document.getElementById('today-suggestion-area');
     const suggestionText = document.getElementById('suggestion-text');
@@ -820,6 +923,236 @@ function renderDiagnosticsPreview(containerId, rows) {
             </div>`;
         })
         .join('');
+}
+
+function calculateStandardDeviation(values) {
+    if (!Array.isArray(values) || values.length === 0) return 0;
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
+    return Math.sqrt(Math.max(variance, 0));
+}
+
+function formatTrendPercentage(value, fractionDigits = 2, options = {}) {
+    const { includeSign = true } = options;
+    if (!Number.isFinite(value)) return '—';
+    const sign = includeSign && value > 0 ? '+' : '';
+    return `${sign}${value.toFixed(fractionDigits)}%`;
+}
+
+function computeEquityTrendSegments(dates, strategyReturns, options = {}) {
+    const config = { ...EQUITY_TREND_DEFAULTS, ...options };
+    const series = Array.isArray(strategyReturns) ? strategyReturns : [];
+    if (series.length === 0) {
+        return {
+            segments: [],
+            classification: [],
+            aggregates: {
+                rally: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+                sideways: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+                selloff: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+            },
+            normalized: [],
+            totalValidDays: 0,
+        };
+    }
+
+    const normalized = series.map((value) => (Number.isFinite(value) ? 1 + value / 100 : null));
+    const classification = new Array(normalized.length).fill(null);
+    const windowIndices = [];
+    const lookbackPoints = Math.max(1, config.lookback);
+
+    for (let i = 0; i < normalized.length; i += 1) {
+        const current = normalized[i];
+        if (!Number.isFinite(current) || current <= 0) {
+            windowIndices.length = 0;
+            classification[i] = null;
+            continue;
+        }
+        windowIndices.push(i);
+        while (windowIndices.length > lookbackPoints + 1) {
+            windowIndices.shift();
+        }
+        if (windowIndices.length < lookbackPoints + 1) {
+            classification[i] = 'sideways';
+            continue;
+        }
+
+        const startIdx = windowIndices[0];
+        const endIdx = windowIndices[windowIndices.length - 1];
+        const startVal = normalized[startIdx];
+        const endVal = normalized[endIdx];
+        if (!Number.isFinite(startVal) || !Number.isFinite(endVal) || startVal <= 0) {
+            classification[i] = 'sideways';
+            continue;
+        }
+
+        const changeRate = endVal / startVal - 1;
+        const windowReturns = [];
+        for (let w = 1; w < windowIndices.length; w += 1) {
+            const prevIdx = windowIndices[w - 1];
+            const currIdx = windowIndices[w];
+            const prevVal = normalized[prevIdx];
+            const currVal = normalized[currIdx];
+            if (Number.isFinite(prevVal) && Number.isFinite(currVal) && prevVal > 0) {
+                windowReturns.push(currVal / prevVal - 1);
+            }
+        }
+
+        if (windowReturns.length < lookbackPoints) {
+            classification[i] = 'sideways';
+            continue;
+        }
+
+        const std = calculateStandardDeviation(windowReturns);
+        const dynamicThreshold = Math.max(
+            config.minTrendStrength,
+            std * Math.sqrt(lookbackPoints) * config.volatilityMultiplier,
+        );
+
+        let state = 'sideways';
+        if (changeRate >= dynamicThreshold) {
+            state = 'rally';
+        } else if (changeRate <= -dynamicThreshold) {
+            state = 'selloff';
+        }
+        classification[i] = state;
+    }
+
+    const segments = [];
+    let currentType = null;
+    let currentStart = null;
+    for (let i = 0; i < classification.length; i += 1) {
+        const state = classification[i];
+        if (!state) {
+            if (currentType !== null && currentStart !== null) {
+                segments.push({ startIndex: currentStart, endIndex: i - 1, type: currentType });
+            }
+            currentType = null;
+            currentStart = null;
+            continue;
+        }
+        if (currentType === null) {
+            currentType = state;
+            currentStart = i;
+        } else if (state !== currentType) {
+            segments.push({ startIndex: currentStart, endIndex: i - 1, type: currentType });
+            currentType = state;
+            currentStart = i;
+        }
+    }
+    if (currentType !== null && currentStart !== null) {
+        segments.push({ startIndex: currentStart, endIndex: classification.length - 1, type: currentType });
+    }
+
+    const aggregates = {
+        rally: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+        sideways: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+        selloff: { compoundedReturn: 1, segments: 0, validDays: 0, totalBars: 0 },
+    };
+
+    segments.forEach((segment) => {
+        const agg = aggregates[segment.type];
+        if (!agg) return;
+        agg.segments += 1;
+        const bars = Math.max(0, segment.endIndex - segment.startIndex);
+        agg.totalBars += bars;
+        let transitions = 0;
+        for (let idx = segment.startIndex + 1; idx <= segment.endIndex; idx += 1) {
+            const prevVal = normalized[idx - 1];
+            const currVal = normalized[idx];
+            if (!Number.isFinite(prevVal) || !Number.isFinite(currVal) || prevVal <= 0) {
+                continue;
+            }
+            const ratio = currVal / prevVal;
+            if (ratio > 0) {
+                agg.compoundedReturn *= ratio;
+                transitions += 1;
+            }
+        }
+        agg.validDays += transitions;
+    });
+
+    const totalValidDays = Object.values(aggregates).reduce((sum, agg) => sum + agg.validDays, 0);
+
+    return {
+        segments,
+        classification,
+        aggregates,
+        normalized,
+        totalValidDays,
+    };
+}
+
+function renderTrendSummary(trendAnalysis) {
+    const container = document.getElementById('trend-segmentation-summary');
+    if (!container) return;
+
+    if (!trendAnalysis || !trendAnalysis.aggregates) {
+        container.innerHTML = `<p class="text-xs text-center col-span-full py-4" style="color: var(--muted-foreground);">尚未找到足夠的趨勢區段資料。</p>`;
+        if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+            lucide.createIcons();
+        }
+        return;
+    }
+
+    const totalDays = trendAnalysis.totalValidDays || 0;
+    const blocks = Object.entries(TREND_SEGMENT_META).map(([key, meta]) => {
+        const stats = trendAnalysis.aggregates[key];
+        const hasDays = stats && stats.validDays > 0;
+        const returnPercent = hasDays ? (stats.compoundedReturn - 1) * 100 : null;
+        const avgDailyPercent = hasDays && stats.validDays > 0
+            ? (Math.pow(stats.compoundedReturn, 1 / stats.validDays) - 1) * 100
+            : null;
+        const coveragePercent = hasDays && totalDays > 0
+            ? (stats.validDays / totalDays) * 100
+            : null;
+        const tradingDaysText = hasDays ? `${stats.validDays} 日` : '0 日';
+        const segmentsText = stats && stats.segments > 0 ? `${stats.segments} 段` : '—';
+        const returnColor = hasDays
+            ? (returnPercent >= 0 ? meta.positiveColor : meta.negativeColor)
+            : 'var(--muted-foreground)';
+
+        return `
+            <div class="rounded-xl border p-4 flex flex-col gap-4" style="border-color: var(--border); background: ${meta.surface};">
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full" style="background-color: ${meta.badgeBackground}; color: ${meta.badgeColor};">
+                        <i data-lucide="${meta.icon}" class="lucide w-4 h-4"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-semibold" style="color: ${meta.titleColor};">${meta.label}</p>
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">${meta.description}</p>
+                    </div>
+                </div>
+                <div>
+                    <p class="text-[11px]" style="color: var(--muted-foreground);">累積報酬</p>
+                    <p class="text-2xl font-bold" style="color: ${returnColor};">${formatTrendPercentage(returnPercent, 2)}</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-[11px]" style="color: var(--muted-foreground);">
+                    <div>
+                        <p class="font-semibold" style="color: var(--foreground);">${tradingDaysText}</p>
+                        <p>涵蓋交易日</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold" style="color: var(--foreground);">${segmentsText}</p>
+                        <p>區間數</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold" style="color: var(--foreground);">${formatTrendPercentage(avgDailyPercent, 3)}</p>
+                        <p>平均日報酬</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold" style="color: var(--foreground);">${formatTrendPercentage(coveragePercent, 1, { includeSign: false })}</p>
+                        <p>覆蓋比例</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = blocks;
+    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+        lucide.createIcons();
+    }
 }
 
 function renderDiagnosticsTestingGuidance(diag) {
@@ -1818,6 +2151,8 @@ function renderChart(result) {
     const chartElement = document.getElementById('chart');
     if (!chartElement) {
         console.error("[Main] Failed to create chart canvas element");
+        lastTrendSegmentation = null;
+        renderTrendSummary(null);
         return;
     }
     const ctx = chartElement.getContext('2d');
@@ -1849,12 +2184,16 @@ function renderChart(result) {
     const coverSigs = filterSignals(result.chartCoverSignals);
     const stratData = result.strategyReturns.map(v => check(v) ? parseFloat(v) : null);
     const bhData = result.buyHoldReturns.map(v => check(v) ? parseFloat(v) : null);
-    
+
+    const trendAnalysis = computeEquityTrendSegments(dates, stratData, EQUITY_TREND_DEFAULTS);
+    lastTrendSegmentation = trendAnalysis;
+    ensureEquityTrendPluginRegistered();
+
     const datasets = [
         { label: '買入並持有 %', data: bhData, borderColor: '#6b7280', borderWidth: 1.5, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true },
         { label: '策略 %', data: stratData, borderColor: '#3b82f6', borderWidth: 2, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true }
     ];
-    
+
     if (buySigs.length > 0) {
         datasets.push({ type:'scatter', label:'買入', data:buySigs, backgroundColor:'#ef4444', radius:6, pointStyle:'triangle', rotation:0, yAxisID:'y' });
     }
@@ -1897,6 +2236,11 @@ function renderChart(result) {
                 tooltip: {
                     mode: 'index',
                     intersect: false
+                },
+                [EQUITY_TREND_PLUGIN_ID]: {
+                    segments: trendAnalysis.segments,
+                    colorMap: TREND_BACKGROUND_COLORS,
+                    datasetIndex: datasets.length > 1 ? 1 : 0,
                 },
                 zoom: {
                     pan: {
@@ -1945,7 +2289,9 @@ function renderChart(result) {
             }
         }
     });
-    
+
+    renderTrendSummary(trendAnalysis);
+
     // 自定義拖曳事件處理，支援左鍵和右鍵
     const canvas = stockChart.canvas;
     let isPanning = false;

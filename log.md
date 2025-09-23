@@ -1,3 +1,9 @@
+# 2025-06-23 — Patch LB-EQUITY-SEGMENT-20250623A
+- **Issue recap**: 淨值曲線缺乏趨勢色塊提示與分區報酬統計，用戶難以快速判讀策略在不同市場節奏（起漲／盤整／回落）的表現。缺少清楚的趨勢判斷規則說明與分區績效摘要。
+- **Fix**: 依據量化平台常用的 20 日淨值斜率 × 波動度門檻建立趨勢分類，於圖表底色上標示起漲、盤整、回落區間，同步在摘要卡片顯示各區間的複利報酬、涵蓋交易日、區間數與平均日報酬。新增 `equityTrendBackground` Chart.js 插件與 `renderTrendSummary`，並在 UI 說明判別規則。
+- **Diagnostics**: `renderTrendSummary` 會輸出三類型區間的統計，背景著色採用 `TREND_BACKGROUND_COLORS`，調整值可在前端 console 透過 `lastTrendSegmentation` 檢視。
+- **Testing**: 受限於容器無瀏覽器，未能執行實際回測；已透過程式碼檢視確認趨勢分析函式與 Chart 插件註冊流程。
+
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
 - **Fix**: 導入美股名稱 `localStorage` 永續快取（3 天 TTL），頁面載入時回灌記憶體 Map；快取寫入時以「市場｜代碼」為 key，同步清理過期項目並與台股快取共用 4096 筆上限，確保重複輸入常用代號可立即命中。
