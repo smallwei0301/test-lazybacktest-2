@@ -3430,10 +3430,7 @@ function formatStockNameDisplay(info, options = {}) {
 
 function composeStockNameText(display, fallback = '') {
     if (!display) return fallback;
-    if (display.sourceLabel) {
-        return `${display.text} ｜ 來源：${display.sourceLabel}`;
-    }
-    return display.text;
+    return display.text || fallback;
 }
 
 // 初始化市場切換功能
