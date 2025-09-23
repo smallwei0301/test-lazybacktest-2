@@ -1,3 +1,9 @@
+# 2025-06-27 — Patch LB-STAGING-OPTIMIZER-20250627A
+- **Issue recap**: 分段出場設定分散在策略卡片中，使用者難以一眼掌握進出場資金配置；也缺乏自動化工具協助比較不同分段組合，需逐一手動調整、回測後再對照。
+- **Fix**: 將分段出場設定與分段進場集中於「風險管理」卡片，維持單一視覺脈絡；新增「分段優化」分頁與一鍵優化功能，針對多種進出場分段組合（單段滿倉、金字塔、梯形出場等）依年化報酬、夏普值與回撤排序，並提供一鍵套用推薦組合。
+- **Diagnostics**: 優化過程即時顯示目前測試進度與進出場組合，完成後列出前十名組合與評估指標；套用推薦時會於狀態欄與提示訊息提醒重新回測驗證。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`
+
 # 2025-06-26 — Patch LB-STAGED-ENTRY-EXIT-20250626A
 - **Issue recap**: 分段進場僅支援訊號或價格回落的加碼，長線多單在策略重複觸發或價格走高時仍會一次性全數出場，價格表也缺乏分段持倉追蹤資訊。
 - **Fix**: 新增分段出場模式，支援「訊號重複」與「價格走高」兩種觸發方式，並以 `consumeEntryForShares` 依比例扣減每段持倉，保留分段成本、觸發來源與剩餘股數；結果物件同步回傳 `entryStagingMode`、`exitStages`、`exitStagingMode` 及每日分段狀態，前端價格表可完整顯示多段持倉歷程。

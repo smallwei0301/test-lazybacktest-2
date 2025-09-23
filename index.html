@@ -711,6 +711,38 @@
                                                     「價格回落加碼」會在首次進場後、收盤價跌破前一段的成交價時自動投入下一段；「策略訊號再觸發」則需策略條件再次成立才會加碼。
                                                 </p>
                                             </div>
+                                            <div class="space-y-3" id="stagedExitContainer">
+                                                <div class="space-y-2">
+                                                    <div class="flex items-center justify-between">
+                                                        <label class="block text-xs font-medium" style="color: var(--foreground);">
+                                                            分段出場 (%)
+                                                        </label>
+                                                        <button type="button" id="addExitStageButton" class="text-xs font-medium px-2 py-1 rounded border transition-colors" style="border-color: var(--border); color: var(--accent);">
+                                                            新增分段
+                                                        </button>
+                                                    </div>
+                                                    <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
+                                                        預設一次出清。新增分段後可依序設定部分獲利，例如 40%、30%、30%，系統會按照觸發順序分批出場。
+                                                    </p>
+                                                    <div id="exitStageList" class="space-y-2"></div>
+                                                </div>
+                                                <div class="space-y-1.5">
+                                                    <label for="exitStagingMode" class="block text-xs font-medium" style="color: var(--foreground);">
+                                                        分段出場條件
+                                                    </label>
+                                                    <select
+                                                        id="exitStagingMode"
+                                                        class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    >
+                                                        <option value="signal_repeat">策略訊號再觸發（有條件賣）</option>
+                                                        <option value="price_rally">價格走高分批出場（更貴賣）</option>
+                                                    </select>
+                                                    <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
+                                                        「價格走高分批出場」會在首次賣出後、收盤價突破前一段的成交價時自動出清下一段；「策略訊號再觸發」則需策略條件再次成立才會續賣。
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div>
                                             <label for="stopLoss" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
@@ -787,38 +819,6 @@
                                                     <option value="fixed_stop_loss">(由風險管理控制)</option>
                                                 </select>
                                                 <div id="exitParams" class="mt-4 space-y-3"></div>
-                                                <div class="space-y-3" id="stagedExitContainer">
-                                                    <div class="space-y-2">
-                                                        <div class="flex items-center justify-between">
-                                                            <label class="block text-xs font-medium" style="color: var(--foreground);">
-                                                                分段出場 (%)
-                                                            </label>
-                                                            <button type="button" id="addExitStageButton" class="text-xs font-medium px-2 py-1 rounded border transition-colors" style="border-color: var(--border); color: var(--accent);">
-                                                                新增分段
-                                                            </button>
-                                                        </div>
-                                                        <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
-                                                            預設一次出清。新增分段後可依序設定部分獲利，例如 40%、30%、30%，系統會按照觸發順序分批出場。
-                                                        </p>
-                                                        <div id="exitStageList" class="space-y-2"></div>
-                                                    </div>
-                                                    <div class="space-y-1.5">
-                                                        <label for="exitStagingMode" class="block text-xs font-medium" style="color: var(--foreground);">
-                                                            分段出場條件
-                                                        </label>
-                                                        <select
-                                                            id="exitStagingMode"
-                                                            class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
-                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
-                                                        >
-                                                            <option value="signal_repeat">策略訊號再觸發（有條件賣）</option>
-                                                            <option value="price_rally">價格走高分批出場（更貴賣）</option>
-                                                        </select>
-                                                        <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
-                                                            「價格走高分批出場」會在首次賣出後、收盤價突破前一段的成交價時自動出清下一段；「策略訊號再觸發」則需策略條件再次成立才會續賣。
-                                                        </p>
-                                                    </div>
-                                                </div>
                                             </div>
                                         </div>
 
@@ -1015,6 +1015,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="staging-optimizer"
+                                            >
+                                                <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="performance"
                                             >
                                                 <i data-lucide="bar-chart-3" class="lucide-sm inline mr-1"></i>績效分析
@@ -1076,6 +1083,81 @@
                                         >
                                             執行回測後將顯示詳細結果
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Staging Optimizer Tab -->
+                            <div class="tab-content hidden" id="staging-optimizer-tab">
+                                <div class="card shadow-lg mb-6">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="sparkles" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            分段優化助手
+                                        </h3>
+                                        <p class="card-description">自動評估多組進場與出場分段，尋找較佳的資金配置方式</p>
+                                    </div>
+                                    <div class="card-content space-y-5">
+                                        <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            系統會針對目前策略參數依序測試不同的進出場分段組合，使用年化報酬、夏普比率與最大回撤做為評估依據，協助您快速找出較穩健的資金調度節奏。
+                                        </p>
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <button
+                                                id="stagingOptimizationBtn"
+                                                class="btn-primary flex items-center gap-2 text-sm px-4 py-2 rounded-md font-semibold"
+                                            >
+                                                <i data-lucide="play-circle" class="lucide-sm"></i>
+                                                一鍵優化分段策略
+                                            </button>
+                                            <button
+                                                id="applyStagingOptimizationBtn"
+                                                class="btn-outline flex items-center gap-2 text-sm px-4 py-2 rounded-md font-medium"
+                                                disabled
+                                            >
+                                                <i data-lucide="check" class="lucide-sm"></i>
+                                                套用推薦分段
+                                            </button>
+                                            <span class="text-[11px]" style="color: var(--muted-foreground);">
+                                                建議先執行一次回測或確認參數無誤，再啟動自動優化。
+                                            </span>
+                                        </div>
+                                        <div id="staging-optimization-status" class="text-sm" style="color: var(--muted-foreground);">
+                                            尚未執行分段優化。
+                                        </div>
+                                        <div id="staging-optimization-progress" class="hidden space-y-2">
+                                            <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                                <div id="staging-optimization-progress-bar" class="bg-accent h-2 rounded-full transition-all duration-300" style="width: 0%; background-color: var(--accent);"></div>
+                                            </div>
+                                        </div>
+                                        <div id="staging-optimization-results" class="hidden space-y-4">
+                                            <div id="staging-optimization-summary" class="text-sm" style="color: var(--foreground);"></div>
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full divide-y divide-border text-sm" style="border-color: var(--border);">
+                                                    <thead class="bg-muted" style="background-color: var(--muted);">
+                                                        <tr>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">排名</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">進場分段 (%)</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">出場分段 (%)</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">最大回撤</th>
+                                                            <th class="px-3 py-2 text-left font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">交易次數</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="staging-optimization-table-body" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card border border-dashed" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                                    <div class="card-header pb-3">
+                                        <h4 class="card-title text-sm font-semibold">評估邏輯與建議</h4>
+                                    </div>
+                                    <div class="card-content space-y-3 text-sm" style="color: var(--muted-foreground);">
+                                        <p>• 進場測試覆蓋單段滿倉、兩段拉回加碼、三段金字塔與倒金字塔等常見配置，出場則評估等分分批、前重後輕與梯形獲利方式。</p>
+                                        <p>• 排序以年化報酬為主、夏普比率為次、最大回撤為輔，若報酬相近會優先推薦回撤較小且風險調整後報酬較佳的組合。</p>
+                                        <p>• 套用推薦分段後仍可再微調百分比或切換「價格回落 / 訊號再觸發」條件，建議重新回測驗證與個人風險承受度是否一致。</p>
                                     </div>
                                 </div>
                             </div>
