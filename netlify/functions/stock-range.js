@@ -323,7 +323,10 @@ export default async (req) => {
                     iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
                     aaData: Array.isArray(base.aaData) ? base.aaData : [],
                     dataSource: `${base.dataSource || marketType} (cache)`,
-                    marketType: base.marketType || marketType
+                    marketType: base.marketType || marketType,
+                    cacheStatus: 'range-cache-hit',
+                    cacheKey: rangeKey,
+                    cacheTimestamp: cachedRange.timestamp
                 };
                 return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
             }
@@ -341,17 +344,21 @@ export default async (req) => {
         }
 
         const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);
+        const now = Date.now();
         const responsePayload = {
             stockNo,
             stockName: merged.stockName || stockNo,
             iTotalRecords: filteredAaData.length,
             aaData: filteredAaData,
             dataSource: merged.dataSource,
-            marketType
+            marketType,
+            cacheStatus: 'range-cache-miss',
+            cacheKey: rangeKey,
+            cacheTimestamp: now
         };
 
         try {
-            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: responsePayload });
+            await rangeStore.setJSON(rangeKey, { timestamp: now, data: responsePayload });
         } catch (error) {
             if (!isQuotaError(error)) {
                 console.warn('[Range Endpoint] Failed to persist range cache:', error);

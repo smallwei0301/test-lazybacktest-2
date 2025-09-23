@@ -1,7 +1,7 @@
 
 importScripts('shared-lookback.js');
 
-// --- Worker Data Acquisition & Cache (v11.6 - US Yahoo fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.7 - Range endpoint acceleration with Netlify Blobs) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -12,7 +12,8 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250527A
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
-const WORKER_DATA_VERSION = "v11.6";
+// Patch Tag: LB-RANGE-ACCEL-20250623A
+const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -1434,6 +1435,8 @@ async function fetchStockData(
     throw new Error("開始日期需早於結束日期");
   }
   const marketKey = getMarketKey(marketType);
+  const isTpex = marketKey === "TPEX";
+  const isUs = marketKey === "US";
   const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
   const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
@@ -1448,6 +1451,7 @@ async function fetchStockData(
     lookbackDays: optionLookbackDays,
     dataStartDate: startDate,
     months: [],
+    rangeEndpoint: null,
     usedCache: Boolean(cachedEntry),
   };
   if (cachedEntry) {
@@ -1647,6 +1651,169 @@ async function fetchStockData(
     };
   }
 
+  const canUseRangeEndpoint = !adjusted && !split && !isUs;
+  if (canUseRangeEndpoint) {
+    self.postMessage({
+      type: "progress",
+      progress: 22,
+      message: "查詢範圍快取...",
+    });
+    try {
+      const rangeParams = new URLSearchParams({
+        stockNo,
+        startDate,
+        endDate,
+        market: marketKey,
+        marketType: marketKey,
+      });
+      if (
+        optionEffectiveStart &&
+        optionEffectiveStart !== startDate &&
+        typeof optionEffectiveStart === "string"
+      ) {
+        rangeParams.set("effectiveStartDate", optionEffectiveStart);
+      }
+      const rangeUrl = `/api/stock-range?${rangeParams.toString()}`;
+      const rangePayload = await fetchWithAdaptiveRetry(rangeUrl, {
+        headers: { Accept: "application/json" },
+      });
+      const rangeRows = Array.isArray(rangePayload?.aaData)
+        ? rangePayload.aaData
+        : Array.isArray(rangePayload?.data)
+          ? rangePayload.data
+          : [];
+      const normalizedRangeRows = [];
+      rangeRows.forEach((row) => {
+        const normalized = normalizeProxyRow(
+          row,
+          isTpex,
+          startDateObj,
+          endDateObj,
+        );
+        if (normalized) normalizedRangeRows.push(normalized);
+      });
+      const dedupedRange = dedupeAndSortData(normalizedRangeRows);
+      const rawRangeSource =
+        typeof rangePayload?.dataSource === "string"
+          ? rangePayload.dataSource.trim()
+          : "";
+      const rangeSourceFlags = new Set();
+      if (rawRangeSource) {
+        rangeSourceFlags.add(rawRangeSource);
+      }
+      if (Array.isArray(rangePayload?.dataSources)) {
+        rangePayload.dataSources
+          .filter((label) => typeof label === "string" && label.trim() !== "")
+          .forEach((label) => rangeSourceFlags.add(label.trim()));
+      }
+      const rangeEndpointLabel = isTpex
+        ? "TPEX Range 端點"
+        : "TWSE Range 端點";
+      rangeSourceFlags.add(rangeEndpointLabel);
+      const cacheStatus = rangePayload?.cacheStatus || null;
+      const rangeCacheHit =
+        cacheStatus === "range-cache-hit" ||
+        /快取|cache/i.test(rawRangeSource);
+      const rangeDiagnostics = {
+        endpoint: "/api/stock-range",
+        used: true,
+        cacheStatus:
+          cacheStatus || (rangeCacheHit ? "range-cache-hit" : "range-cache-miss"),
+        rows: dedupedRange.length,
+        dataSource: rawRangeSource || null,
+        marketType: rangePayload?.marketType || marketKey,
+        cacheTimestamp: rangePayload?.cacheTimestamp || null,
+        cacheKey: rangePayload?.cacheKey || null,
+        cacheHit: rangeCacheHit,
+      };
+      if (dedupedRange.length > 0) {
+        const defaultRemoteLabel = isTpex
+          ? "FinMind (主來源)"
+          : "TWSE (主來源)";
+        const dataSourceLabel = summariseDataSourceFlags(
+          rangeSourceFlags,
+          defaultRemoteLabel,
+          { market: marketKey, adjusted: false },
+        );
+        const overview = summariseDatasetRows(dedupedRange, {
+          requestedStart: optionEffectiveStart || startDate,
+          effectiveStartDate: optionEffectiveStart || startDate,
+          warmupStartDate: startDate,
+          dataStartDate: startDate,
+          endDate,
+        });
+        fetchDiagnostics.overview = overview;
+        fetchDiagnostics.usedCache = rangeCacheHit;
+        fetchDiagnostics.rangeEndpoint = rangeDiagnostics;
+        fetchDiagnostics.months.push({
+          monthKey: "range",
+          label: "範圍快取",
+          requestedStart: startDate,
+          requestedEnd: endDate,
+          missingSegments: 0,
+          forcedRepairs: 0,
+          forcedRepairSamples: [],
+          cacheCoverageDaysBefore: null,
+          usedCache: rangeCacheHit,
+          rowsReturned: dedupedRange.length,
+          firstRowDate: dedupedRange[0]?.date || null,
+          lastRowDate: dedupedRange[dedupedRange.length - 1]?.date || null,
+          cacheSources: Array.from(rangeSourceFlags),
+          forcedSources: [],
+          rangeCacheKey: rangeDiagnostics.cacheKey || null,
+        });
+        self.postMessage({
+          type: "progress",
+          progress: 55,
+          message: "整理數據...",
+        });
+        const rangeStockName = rangePayload?.stockName || stockNo;
+        setWorkerCacheEntry(marketKey, cacheKey, {
+          data: dedupedRange,
+          stockName: rangeStockName,
+          dataSource: dataSourceLabel,
+          timestamp: Date.now(),
+          meta: {
+            stockNo,
+            startDate,
+            effectiveStartDate: optionEffectiveStart,
+            endDate,
+            priceMode: getPriceModeKey(adjusted),
+            splitAdjustment: split,
+            lookbackDays: optionLookbackDays,
+            fetchRange: { start: startDate, end: endDate },
+            diagnostics: fetchDiagnostics,
+          },
+          priceMode: getPriceModeKey(adjusted),
+        });
+        return {
+          data: dedupedRange,
+          dataSource: dataSourceLabel,
+          stockName: rangeStockName,
+          fetchRange: { start: startDate, end: endDate },
+          effectiveStartDate: optionEffectiveStart,
+          lookbackDays: optionLookbackDays,
+          diagnostics: fetchDiagnostics,
+        };
+      }
+      fetchDiagnostics.rangeEndpoint = {
+        ...rangeDiagnostics,
+        empty: true,
+      };
+    } catch (error) {
+      console.warn(
+        `[Worker] 範圍端點抓取失敗 (${stockNo} ${startDate}~${endDate}):`,
+        error,
+      );
+      fetchDiagnostics.rangeEndpoint = {
+        endpoint: "/api/stock-range",
+        used: false,
+        error: error?.message || String(error),
+        cacheHit: false,
+      };
+    }
+  }
+
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
     fetchDiagnostics.usedCache = false;
@@ -1688,8 +1855,6 @@ async function fetchStockData(
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
   else if (marketKey === "US") proxyPath = "/api/us/";
-  const isTpex = marketKey === "TPEX";
-  const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
   let completed = 0;
   const monthResults = await runWithConcurrency(

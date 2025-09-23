@@ -1,3 +1,9 @@
+# 2025-06-23 — Patch LB-RANGE-ACCEL-20250623A
+- **Issue recap**: 熱門標的回測需要逐月向 `/api/twse/`、`/api/tpex/` 發出多次請求，Proxy 雖有月度快取但前端仍需等待多個 HTTP 往返；遇到暖身期較長的參數時，等待時間超過 12 秒且難以追蹤實際來源。
+- **Fix**: 新增 `stock-range` 函式集中整併月度資料並把合併結果寫入 Netlify Blob `stock_range_cache_store`，Worker 端導入範圍快取檢查，優先呼叫 `/api/stock-range` 命中後直接回傳整段序列；若 Blob 未命中則保留舊有月度補抓流程與診斷資訊。
+- **Diagnostics**: Worker `fetchDiagnostics` 增加 `rangeEndpoint` 詳細紀錄（cache status、cache key、timestamp），月份診斷亦會顯示 `rangeCacheKey`，方便比對是否命中範圍快取並追蹤 Blob 儲存狀態。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/stock-range.js').then(() => console.log('stock-range loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`、`node --check js/worker.js`
+
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
 - **Fix**: 導入美股名稱 `localStorage` 永續快取（3 天 TTL），頁面載入時回灌記憶體 Map；快取寫入時以「市場｜代碼」為 key，同步清理過期項目並與台股快取共用 4096 筆上限，確保重複輸入常用代號可立即命中。

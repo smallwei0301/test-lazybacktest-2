@@ -25,3 +25,9 @@
   to = "/.netlify/functions/us-proxy"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/api/stock-range/*"
+  to = "/.netlify/functions/stock-range"
+  status = 200
+  force = true
