@@ -701,6 +701,76 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
   };
 }
 
+function cloneCoverageRanges(ranges) {
+  if (!Array.isArray(ranges)) return undefined;
+  return ranges
+    .map((range) => {
+      if (!range || typeof range !== "object") return null;
+      return {
+        start: range.start || null,
+        end: range.end || null,
+      };
+    })
+    .filter((range) => range !== null);
+}
+
+function prepareDiagnosticsForCacheReplay(diagnostics, options = {}) {
+  const base = diagnostics && typeof diagnostics === "object" ? diagnostics : {};
+  const requested = options.requestedRange || base.requested || null;
+  const sourceLabel = options.source || base.replaySource || base.source || "cache-replay";
+  const sanitized = {
+    ...base,
+    source: sourceLabel,
+    replaySource: sourceLabel,
+    cacheReplay: true,
+    usedCache: true,
+    replayedAt: Date.now(),
+  };
+  sanitized.requested = {
+    start: requested?.start || null,
+    end: requested?.end || null,
+  };
+  const coverage = options.coverage || base.coverage || null;
+  if (coverage) {
+    sanitized.coverage = cloneCoverageRanges(coverage);
+  }
+  if (sanitized.rangeFetch && typeof sanitized.rangeFetch === "object") {
+    const rangeFetch = { ...sanitized.rangeFetch };
+    rangeFetch.cacheReplay = true;
+    rangeFetch.readOps = 0;
+    rangeFetch.writeOps = 0;
+    if (Array.isArray(rangeFetch.operations)) {
+      rangeFetch.operations = [];
+    }
+    if (typeof rangeFetch.status === "string" && !/cache/i.test(rangeFetch.status)) {
+      rangeFetch.status = `${rangeFetch.status}-cache`;
+    }
+    sanitized.rangeFetch = rangeFetch;
+  }
+  const blobInfo = base.blob && typeof base.blob === "object" ? { ...base.blob } : {};
+  blobInfo.operations = [];
+  blobInfo.readOps = 0;
+  blobInfo.writeOps = 0;
+  blobInfo.cacheReplay = true;
+  if (!blobInfo.provider && sourceLabel) {
+    blobInfo.provider = sourceLabel;
+  }
+  sanitized.blob = blobInfo;
+  if (Array.isArray(base.months)) {
+    sanitized.months = base.months.map((month) => ({
+      ...(typeof month === "object" ? month : {}),
+      operations: [],
+      cacheReplay: true,
+      readOps: 0,
+      writeOps: 0,
+    }));
+  }
+  if (Array.isArray(sanitized.operations)) {
+    sanitized.operations = [];
+  }
+  return sanitized;
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -1738,6 +1808,10 @@ async function tryFetchRangeFromBlob({
     operations: blobOperations,
   };
 
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "netlify-blob-range",
+    requestedRange: { start: startDate, end: endDate },
+  });
   const cacheEntry = {
     data: deduped,
     stockName: payload.stockName || stockNo,
@@ -1753,7 +1827,7 @@ async function tryFetchRangeFromBlob({
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
-      diagnostics: fetchDiagnostics,
+      diagnostics: cacheDiagnostics,
       rangeCache: blobMeta || null,
     },
     priceMode: getPriceModeKey(false),
@@ -1833,6 +1907,17 @@ async function fetchStockData(
     usedCache: Boolean(cachedEntry),
   };
   if (cachedEntry) {
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
+      cachedEntry?.meta?.diagnostics || null,
+      {
+        source: "worker-cache",
+        requestedRange: { start: startDate, end: endDate },
+        coverage: cachedEntry?.meta?.coverage || cachedEntry.coverage,
+      },
+    );
+    if (workerLastMeta && typeof workerLastMeta === "object") {
+      workerLastMeta = { ...workerLastMeta, diagnostics: cacheDiagnostics };
+    }
     self.postMessage({
       type: "progress",
       progress: 15,
@@ -1891,7 +1976,7 @@ async function fetchStockData(
         startDate,
       effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
       lookbackDays: cachedEntry?.meta?.lookbackDays || null,
-      diagnostics: cachedEntry?.meta?.diagnostics || null,
+      diagnostics: cacheDiagnostics,
     };
   }
 
@@ -1955,6 +2040,10 @@ async function fetchStockData(
       overview: adjustedOverview,
       usedCache: false,
     };
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(adjustedDiagnostics, {
+      source: "worker-adjusted-cache",
+      requestedRange: { start: startDate, end: endDate },
+    });
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
@@ -2008,7 +2097,7 @@ async function fetchStockData(
         adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
           ? adjustedResult.adjustmentChecks
           : [],
-        diagnostics: adjustedDiagnostics,
+        diagnostics: cacheDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -2076,6 +2165,10 @@ async function fetchStockData(
       dataStartDate: startDate,
       endDate,
     });
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+      source: "worker-empty-cache",
+      requestedRange: { start: startDate, end: endDate },
+    });
     const entry = {
       data: [],
       stockName: stockNo,
@@ -2090,7 +2183,7 @@ async function fetchStockData(
         priceMode: getPriceModeKey(adjusted),
         lookbackDays: optionLookbackDays,
         fetchRange: { start: startDate, end: endDate },
-        diagnostics: fetchDiagnostics,
+        diagnostics: cacheDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -2526,6 +2619,10 @@ async function fetchStockData(
     }
   }
 
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "worker-proxy-cache",
+    requestedRange: { start: startDate, end: endDate },
+  });
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
     stockName: stockName || stockNo,
@@ -2541,7 +2638,7 @@ async function fetchStockData(
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
-      diagnostics: fetchDiagnostics,
+      diagnostics: cacheDiagnostics,
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -7163,6 +7260,17 @@ self.onmessage = async function (e) {
         workerLastDataset = cachedData;
         const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
         if (!existingEntry) {
+          const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
+            cachedMeta?.diagnostics || null,
+            {
+              source: "main-thread-cache",
+              requestedRange: {
+                start: dataStartDate || params.startDate,
+                end: params.endDate,
+              },
+              coverage: cachedMeta?.coverage,
+            },
+          );
           setWorkerCacheEntry(marketKey, cacheKey, {
             data: cachedData,
             stockName: params.stockNo,
@@ -7196,12 +7304,23 @@ self.onmessage = async function (e) {
                 (dataStartDate
                   ? { start: dataStartDate, end: params.endDate }
                   : null),
-              diagnostics: cachedMeta?.diagnostics || null,
+              diagnostics: cacheDiagnostics,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
         }
         if (cachedMeta) {
+          const replayDiagnostics = prepareDiagnosticsForCacheReplay(
+            cachedMeta.diagnostics || workerLastMeta?.diagnostics || null,
+            {
+              source: "main-thread-cache",
+              requestedRange: {
+                start: dataStartDate || params.startDate,
+                end: params.endDate,
+              },
+              coverage: cachedMeta?.coverage,
+            },
+          );
           workerLastMeta = {
             ...(workerLastMeta || {}),
             stockNo: params.stockNo,
@@ -7246,7 +7365,7 @@ self.onmessage = async function (e) {
                 ? { start: dataStartDate, end: params.endDate }
                 : null),
             lookbackDays,
-            diagnostics: cachedMeta.diagnostics || null,
+            diagnostics: replayDiagnostics,
           };
         }
       } else {

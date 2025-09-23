@@ -61,6 +61,78 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
+function cloneArrayOfRanges(ranges) {
+    if (!Array.isArray(ranges)) return undefined;
+    return ranges
+        .map((range) => {
+            if (!range || typeof range !== 'object') return null;
+            return {
+                start: range.start || null,
+                end: range.end || null,
+            };
+        })
+        .filter((range) => range !== null);
+}
+
+function normaliseFetchDiagnosticsForCacheReplay(diagnostics, options = {}) {
+    const base = diagnostics && typeof diagnostics === 'object' ? diagnostics : {};
+    const requestedRange = options.requestedRange || base.requested || null;
+    const requestedStart = requestedRange?.start || null;
+    const requestedEnd = requestedRange?.end || null;
+    const coverageRanges = options.coverage || base.coverage || null;
+    const sourceLabel = options.source || base.replaySource || base.source || 'cache-replay';
+    const sanitized = {
+        ...base,
+        source: sourceLabel,
+        replaySource: sourceLabel,
+        cacheReplay: true,
+        usedCache: true,
+        replayedAt: Date.now(),
+    };
+    sanitized.requested = {
+        start: requestedStart,
+        end: requestedEnd,
+    };
+    if (coverageRanges) {
+        sanitized.coverage = cloneArrayOfRanges(coverageRanges);
+    }
+    if (sanitized.rangeFetch && typeof sanitized.rangeFetch === 'object') {
+        const rangeFetch = { ...sanitized.rangeFetch };
+        rangeFetch.cacheReplay = true;
+        rangeFetch.readOps = 0;
+        rangeFetch.writeOps = 0;
+        if (Array.isArray(rangeFetch.operations)) {
+            rangeFetch.operations = [];
+        }
+        if (typeof rangeFetch.status === 'string' && !/cache/i.test(rangeFetch.status)) {
+            rangeFetch.status = `${rangeFetch.status}-cache`;
+        }
+        sanitized.rangeFetch = rangeFetch;
+    }
+    const blobInfo = base.blob && typeof base.blob === 'object' ? { ...base.blob } : {};
+    blobInfo.operations = [];
+    blobInfo.readOps = 0;
+    blobInfo.writeOps = 0;
+    blobInfo.cacheReplay = true;
+    if (!blobInfo.provider && sourceLabel) {
+        blobInfo.provider = sourceLabel;
+    }
+    sanitized.blob = blobInfo;
+    if (Array.isArray(base.months)) {
+        sanitized.months = base.months.map((month) => ({
+            ...(typeof month === 'object' ? month : {}),
+            operations: [],
+            cacheReplay: true,
+            readOps: 0,
+            writeOps: 0,
+        }));
+    }
+    if (Array.isArray(sanitized.operations)) {
+        sanitized.operations = [];
+    }
+    return sanitized;
+}
+
 function normalizeMarketKeyForCache(market) {
     const normalized = (market || 'TWSE').toString().toUpperCase();
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
@@ -527,6 +599,17 @@ function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
     const sourceLabels = Array.isArray(meta.dataSources) && meta.dataSources.length > 0
         ? meta.dataSources
         : [dataSourceLabel];
+    const requestedRange = meta.fetchRange && typeof meta.fetchRange === 'object'
+        ? { start: meta.fetchRange.start || null, end: meta.fetchRange.end || null }
+        : {
+            start: context.startDate || meta.dataStartDate || null,
+            end: context.endDate || null,
+        };
+    const replayDiagnostics = normaliseFetchDiagnosticsForCacheReplay(meta.fetchDiagnostics || null, {
+        source: 'session-storage-cache',
+        requestedRange,
+        coverage: payload.coverage,
+    });
     return {
         data: payload.data,
         coverage: Array.isArray(payload.coverage) ? payload.coverage : [],
@@ -545,7 +628,7 @@ function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
         debugSteps: Array.isArray(meta.debugSteps) ? meta.debugSteps : [],
         priceSource: meta.priceSource || null,
         fetchRange: meta.fetchRange || null,
-        fetchDiagnostics: meta.fetchDiagnostics || null,
+        fetchDiagnostics: replayDiagnostics,
     };
 }
 
@@ -594,7 +677,11 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
     const normalizedMarket = normalizeMarketKeyForCache(curSettings.market || curSettings.marketType || currentMarket || 'TWSE');
     const sessionPayload = getSessionDataCacheEntry(cacheKey);
     if (sessionPayload) {
-        const sessionEntry = rebuildCacheEntryFromSessionPayload(sessionPayload, { stockNo: curSettings.stockNo });
+        const sessionEntry = rebuildCacheEntryFromSessionPayload(sessionPayload, {
+            stockNo: curSettings.stockNo,
+            startDate: curSettings.dataStartDate || curSettings.startDate,
+            endDate: curSettings.endDate,
+        });
         if (sessionEntry) {
             applyCacheStartMetadata(cacheKey, sessionEntry, curSettings.effectiveStartDate || curSettings.startDate, {
                 toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -633,11 +720,11 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
             effectiveStartDate: curSettings.effectiveStartDate || curSettings.startDate,
             lookbackDays: curSettings.lookbackDays || null,
             fetchRange: { start: curSettings.dataStartDate || curSettings.startDate, end: curSettings.endDate },
-            fetchDiagnostics: {
+            fetchDiagnostics: normaliseFetchDiagnosticsForCacheReplay(null, {
                 source: 'browser-year-cache',
+                requestedRange: { start: curSettings.dataStartDate || curSettings.startDate, end: curSettings.endDate },
                 coverage: yearDataset.coverage,
-                usedCache: true,
-            },
+            }),
         };
         applyCacheStartMetadata(cacheKey, entry, curSettings.effectiveStartDate || curSettings.startDate, {
             toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -1029,6 +1116,18 @@ function runBacktestInternal() {
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
+            const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(
+                cachedEntry.fetchDiagnostics || null,
+                {
+                    source: 'main-memory-cache',
+                    requestedRange: {
+                        start: curSettings.dataStartDate || curSettings.startDate,
+                        end: curSettings.endDate,
+                    },
+                    coverage: cachedEntry.coverage,
+                }
+            );
+            cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
             cachedStockData = cachedEntry.data;
@@ -1124,6 +1223,12 @@ function runBacktestInternal() {
                     const resolvedLookback = Number.isFinite(data?.rawMeta?.lookbackDays)
                         ? data.rawMeta.lookbackDays
                         : lookbackDays;
+                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null;
+                    const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
+                        source: 'main-memory-cache',
+                        requestedRange: fetchedRange,
+                        coverage: mergedCoverage,
+                    });
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
@@ -1148,7 +1253,8 @@ function runBacktestInternal() {
                         effectiveStartDate: rawEffectiveStart,
                         lookbackDays: resolvedLookback,
                         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
-                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+                        fetchDiagnostics: cacheDiagnostics,
+                        lastRemoteFetchDiagnostics: rawFetchDiagnostics,
                     };
                      applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -1203,6 +1309,13 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
+                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
+                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
+                        source: 'main-memory-cache',
+                        requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
+                        coverage: updatedCoverage,
+                    });
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
@@ -1226,7 +1339,8 @@ function runBacktestInternal() {
                         dataStartDate: curSettings.dataStartDate || curSettings.startDate,
                         lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
-                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,
+                        fetchDiagnostics: updatedDiagnostics,
+                        lastRemoteFetchDiagnostics: rawFetchDiagnostics,
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -1302,12 +1416,18 @@ function runBacktestInternal() {
                     lastDatasetDiagnostics = null;
                 }
                 refreshDataDiagnosticsPanel(lastDatasetDiagnostics);
-                const blobOps = data?.datasetDiagnostics?.fetch?.blob?.operations;
-                if (Array.isArray(blobOps) && blobOps.length > 0) {
+                const fetchDiagnostics = data?.datasetDiagnostics?.fetch || null;
+                const blobOps = Array.isArray(fetchDiagnostics?.blob?.operations)
+                    ? fetchDiagnostics.blob.operations
+                    : [];
+                const shouldRecordBlob =
+                    !fetchDiagnostics?.cacheReplay &&
+                    blobOps.length > 0;
+                if (shouldRecordBlob) {
                     recordBlobUsageEvents(blobOps, {
                         stockNo: params?.stockNo || curSettings.stockNo,
                         market: params?.marketType || params?.market || curSettings.market,
-                        source: data?.datasetDiagnostics?.fetch?.blob?.source || null,
+                        source: fetchDiagnostics?.blob?.source || fetchDiagnostics?.blob?.provider || null,
                     });
                     renderBlobUsageCard();
                 }
