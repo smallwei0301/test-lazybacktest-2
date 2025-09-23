@@ -1,41 +1,16 @@
-// netlify/functions/stock-range.js (v2.1 - canonical blob range cache)
-// Consolidated range endpoint to batch month-level fetches and cache merged results.
-// Patch Tag: LB-BLOB-RANGE-20250708A
+// netlify/functions/stock-range.js (v3.0 - yearly blob cache)
+// Patch Tag: LB-CACHE-TIER-20250720A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
-const TWSE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const TPEX_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const RANGE_TTL_MS = 12 * 60 * 60 * 1000; // refresh merged cache every 12 hours
+const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const YEAR_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+const YEAR_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
-const inFlightTwseMonthCache = new Map(); // per-invocation memoization to avoid duplicate fetches
+const inFlightTwseMonthCache = new Map();
 
 const isQuotaError = (error) => Boolean(error && (error.status === 402 || error.status === 429));
-
-function formatUTCDate(date) {
-    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-function getCanonicalRangeBounds(startDate, endDate) {
-    const canonicalStart = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
-    const canonicalEndMonthStart = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
-    const canonicalEnd = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, 0));
-    const canonicalStartMonth = `${canonicalStart.getUTCFullYear()}${String(canonicalStart.getUTCMonth() + 1).padStart(2, '0')}`;
-    const canonicalEndMonth = `${canonicalEndMonthStart.getUTCFullYear()}${String(canonicalEndMonthStart.getUTCMonth() + 1).padStart(2, '0')}`;
-    return {
-        canonicalStart,
-        canonicalEnd,
-        canonicalStartMonth,
-        canonicalEndMonth,
-        canonicalStartISO: formatUTCDate(canonicalStart),
-        canonicalEndISO: formatUTCDate(canonicalEnd),
-        canonicalKey: `${canonicalStartMonth}_${canonicalEndMonth}`,
-    };
-}
 
 function normalizeMarketType(marketType = 'TWSE') {
     const upper = String(marketType).toUpperCase();
@@ -103,7 +78,7 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
     const resolver = (async () => {
         try {
             const cached = await store.get(cacheKey, { type: 'json' });
-            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_TTL_MS)) {
+            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
                 const base = cached.data;
                 return {
                     stockName: base.stockName || stockNo,
@@ -198,40 +173,30 @@ async function fetchFromYahoo(stockNo, symbol) {
 
     const quotes = result.indicators?.quote?.[0];
     const adjclose = result.indicators?.adjclose?.[0]?.adjclose;
-    if (!quotes || !Array.isArray(adjclose)) throw new Error('Yahoo response missing indicators');
+    const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+    if (!quotes || !Array.isArray(quotes.close) || timestamps.length !== quotes.close.length) {
+        throw new Error('Yahoo response missing quote payload');
+    }
 
-    const formatted = result.timestamp.map((ts, index) => {
-        const adjClose = adjclose[index];
-        const open = quotes.open?.[index];
-        const high = quotes.high?.[index];
-        const low = quotes.low?.[index];
-        const close = quotes.close?.[index];
-        const volume = quotes.volume?.[index];
-        if (adjClose === null || adjClose === undefined || open === null || open === undefined) return null;
-        const date = new Date(ts * 1000);
+    const rows = [];
+    for (let i = 0; i < timestamps.length; i += 1) {
+        const date = new Date(timestamps[i] * 1000);
+        if (Number.isNaN(date.getTime())) continue;
         const rocYear = date.getFullYear() - 1911;
         const formattedDate = `${rocYear}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
-        const baseClose = close === null || close === undefined ? open : close;
-        const scale = baseClose ? adjClose / baseClose : 1;
-        const prevAdjClose = index === 0 ? adjClose : adjclose[index - 1];
-        return [
-            formattedDate,
-            stockNo,
-            '',
-            open * scale,
-            (high === null || high === undefined) ? open * scale : high * scale,
-            (low === null || low === undefined) ? open * scale : low * scale,
-            adjClose,
-            adjClose - prevAdjClose,
-            volume ?? 0
-        ];
-    }).filter(Boolean);
+        const open = quotes.open?.[i] ?? null;
+        const high = quotes.high?.[i] ?? null;
+        const low = quotes.low?.[i] ?? null;
+        const close = quotes.close?.[i] ?? null;
+        const volume = quotes.volume?.[i] ?? null;
+        const spread = adjclose && Array.isArray(adjclose) ? adjclose[i] : null;
+        rows.push([formattedDate, stockNo, '', open, high, low, close, spread, volume]);
+    }
 
     return {
-        stockName: result.meta?.shortName || stockNo,
-        iTotalRecords: formatted.length,
-        aaData: formatted,
-        dataSource: 'Yahoo Finance'
+        stockName: stockNo,
+        aaData: rows,
+        dataSource: 'Yahoo Finance',
     };
 }
 
@@ -275,7 +240,7 @@ async function composeTpexRange(stockNo) {
 
     try {
         const cached = await store.get(symbol, { type: 'json' });
-        if (cached && cached.data && (Date.now() - cached.timestamp < TPEX_TTL_MS)) {
+        if (cached && cached.data && (Date.now() - cached.timestamp < TPEX_PRIMARY_TTL_MS)) {
             const base = cached.data;
             return {
                 stockName: base.stockName || stockNo,
@@ -319,6 +284,121 @@ function filterAaDataByRange(aaData, startDate, endDate) {
     });
 }
 
+function buildYearList(startDate, endDate) {
+    const years = [];
+    let cursor = startDate.getUTCFullYear();
+    const endYear = endDate.getUTCFullYear();
+    while (cursor <= endYear) {
+        years.push(cursor);
+        cursor += 1;
+    }
+    return years;
+}
+
+function getYearCacheKey(marketType, stockNo, year) {
+    return `${marketType}_${stockNo}_${year}`;
+}
+
+function getYearCacheTtl(marketType) {
+    return marketType === 'TPEX' ? YEAR_CACHE_TPEX_MS : YEAR_CACHE_TWSE_MS;
+}
+
+function groupAaDataByYear(aaData) {
+    const groups = new Map();
+    if (!Array.isArray(aaData)) return groups;
+    aaData.forEach((row) => {
+        const iso = formatRocDateToIso(row?.[0]);
+        if (!iso) return;
+        const year = parseInt(iso.slice(0, 4), 10);
+        if (!Number.isFinite(year)) return;
+        if (!groups.has(year)) groups.set(year, []);
+        groups.get(year).push(row);
+    });
+    return groups;
+}
+
+async function persistYearSlice(store, cacheKey, payload, telemetry) {
+    if (!store || !payload) return;
+    try {
+        await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
+        if (telemetry) telemetry.writeOps += 1;
+    } catch (error) {
+        if (!isQuotaError(error)) {
+            console.warn('[Year Cache] Failed to persist', cacheKey, error);
+        }
+    }
+}
+
+async function fetchYearDataset({ store, stockNo, marketType, year, telemetry }) {
+    const yearKey = getYearCacheKey(marketType, stockNo, year);
+    telemetry.yearKeys.push(yearKey);
+    let cached = null;
+    if (store) {
+        try {
+            telemetry.readOps += 1;
+            cached = await store.get(yearKey, { type: 'json' });
+            if (cached && cached.data && (Date.now() - cached.timestamp < getYearCacheTtl(marketType))) {
+                telemetry.cacheHits += 1;
+                telemetry.hitYearKeys.push(yearKey);
+                const base = cached.data;
+                return {
+                    stockName: base.stockName || stockNo,
+                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
+                    dataSource: `${marketType} (cache)`
+                };
+            }
+        } catch (error) {
+            if (!isQuotaError(error)) {
+                console.warn('[Year Cache] Read failed', yearKey, error);
+            }
+        }
+    }
+
+    telemetry.cacheMisses += 1;
+    telemetry.missYearKeys.push(yearKey);
+    const startDate = new Date(Date.UTC(year, 0, 1));
+    const endDate = new Date(Date.UTC(year, 11, 31));
+
+    if (marketType === 'TPEX') {
+        const tpexData = await composeTpexRange(stockNo);
+        const groups = groupAaDataByYear(tpexData.aaData);
+        if (store) {
+            for (const [yr, rows] of groups.entries()) {
+                const cachePayload = {
+                    stockName: tpexData.stockName || stockNo,
+                    aaData: rows,
+                    marketType,
+                };
+                await persistYearSlice(store, getYearCacheKey(marketType, stockNo, yr), cachePayload, telemetry);
+                if (yr !== year) {
+                    telemetry.primedYearKeys.push(getYearCacheKey(marketType, stockNo, yr));
+                }
+            }
+        }
+        const aaData = groups.get(year) || [];
+        return {
+            stockName: tpexData.stockName || stockNo,
+            aaData,
+            dataSource: tpexData.dataSource || 'TPEX',
+        };
+    }
+
+    const twseData = await composeTwseRange(stockNo, startDate, endDate);
+    if (store) {
+        const cachePayload = {
+            stockName: twseData.stockName || stockNo,
+            aaData: twseData.aaData,
+            marketType,
+        };
+        await persistYearSlice(store, yearKey, cachePayload, telemetry);
+    }
+    return {
+        stockName: twseData.stockName || stockNo,
+        aaData: twseData.aaData,
+        dataSource: twseData.dataSource,
+    };
+}
+
 export default async (req) => {
     try {
         const params = new URL(req.url).searchParams;
@@ -337,90 +417,66 @@ export default async (req) => {
             return new Response(JSON.stringify({ error: 'Invalid date range' }), { status: 400 });
         }
 
-        const rangeStore = getStore('stock_range_cache_store');
-        const canonical = getCanonicalRangeBounds(startDate, endDate);
-        const rangeKey = `${marketType}_${stockNo}_${canonical.canonicalKey}`;
+        const years = buildYearList(startDate, endDate);
+        const yearStore = getStore('stock_year_cache_store');
+        const telemetry = {
+            provider: 'year-cache',
+            market: marketType,
+            yearKeys: [],
+            cacheHits: 0,
+            cacheMisses: 0,
+            readOps: 0,
+            writeOps: 0,
+            years,
+            hitYearKeys: [],
+            missYearKeys: [],
+            primedYearKeys: [],
+        };
 
-        try {
-            const cachedRange = await rangeStore.get(rangeKey, { type: 'json' });
-            if (cachedRange && cachedRange.data && (Date.now() - cachedRange.timestamp < RANGE_TTL_MS)) {
-                const base = cachedRange.data;
-                const sourceAaData = Array.isArray(base.aaData) ? base.aaData : [];
-                const filteredAaData = filterAaDataByRange(sourceAaData, startDate, endDate);
-                const payload = {
-                    stockNo: base.stockNo || stockNo,
-                    stockName: base.stockName || stockNo,
-                    iTotalRecords: filteredAaData.length,
-                    aaData: filteredAaData,
-                    dataSource: base.dataSource || marketType,
-                    marketType: base.marketType || marketType,
-                    meta: {
-                        canonicalStart: base.canonicalStart || canonical.canonicalStartISO,
-                        canonicalEnd: base.canonicalEnd || canonical.canonicalEndISO,
-                        canonicalKey: base.canonicalKey || canonical.canonicalKey,
-                        rangeCacheKey: rangeKey,
-                        rangeCacheHit: true,
-                        monthCount: base.monthCount ?? null,
-                        aggregatedAt: base.aggregatedAt || null,
-                    }
-                };
-                return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
-            }
-        } catch (error) {
-            if (!isQuotaError(error)) {
-                console.warn('[Range Endpoint] Range cache lookup failed:', error);
+        const yearResults = [];
+        let resolvedStockName = stockNo;
+        for (const year of years) {
+            const result = await fetchYearDataset({
+                store: yearStore,
+                stockNo,
+                marketType,
+                year,
+                telemetry,
+            });
+            if (result.stockName) resolvedStockName = result.stockName;
+            if (Array.isArray(result.aaData)) {
+                yearResults.push(result.aaData);
             }
         }
 
-        let merged;
-        if (marketType === 'TPEX') {
-            merged = await composeTpexRange(stockNo);
-        } else {
-            merged = await composeTwseRange(stockNo, canonical.canonicalStart, canonical.canonicalEnd);
-        }
+        const mergedAaData = yearResults.flat();
+        const filteredAaData = filterAaDataByRange(mergedAaData, startDate, endDate);
+        telemetry.returnedRows = filteredAaData.length;
 
-        const filteredAaData = filterAaDataByRange(merged.aaData, startDate, endDate);
         const responsePayload = {
             stockNo,
-            stockName: merged.stockName || stockNo,
+            stockName: resolvedStockName,
             iTotalRecords: filteredAaData.length,
             aaData: filteredAaData,
-            dataSource: merged.dataSource,
+            dataSource: mergedAaData.length > 0 ? 'Blob Year Cache' : marketType,
             marketType,
             meta: {
-                canonicalStart: canonical.canonicalStartISO,
-                canonicalEnd: canonical.canonicalEndISO,
-                canonicalKey: canonical.canonicalKey,
-                rangeCacheKey: rangeKey,
-                rangeCacheHit: false,
-                monthCount: merged.monthCount ?? null,
-                aggregatedAt: new Date().toISOString(),
+                years,
+                cacheHits: telemetry.cacheHits,
+                cacheMisses: telemetry.cacheMisses,
+                readOps: telemetry.readOps,
+                writeOps: telemetry.writeOps,
+                yearKeys: telemetry.yearKeys,
+                hitYearKeys: telemetry.hitYearKeys,
+                missYearKeys: telemetry.missYearKeys,
+                primedYearKeys: telemetry.primedYearKeys,
+                source: 'year-cache',
             }
         };
 
-        try {
-            const cachePayload = {
-                stockNo,
-                stockName: merged.stockName || stockNo,
-                aaData: merged.aaData,
-                dataSource: merged.dataSource,
-                marketType,
-                canonicalStart: canonical.canonicalStartISO,
-                canonicalEnd: canonical.canonicalEndISO,
-                canonicalKey: canonical.canonicalKey,
-                monthCount: merged.monthCount ?? null,
-                aggregatedAt: responsePayload.meta.aggregatedAt,
-            };
-            await rangeStore.setJSON(rangeKey, { timestamp: Date.now(), data: cachePayload });
-        } catch (error) {
-            if (!isQuotaError(error)) {
-                console.warn('[Range Endpoint] Failed to persist range cache:', error);
-            }
-        }
-
         return new Response(JSON.stringify(responsePayload), { headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
-        console.error('[Range Endpoint] Unexpected error:', error);
-        return new Response(JSON.stringify({ error: error.message || 'Unknown error' }), { status: 500 });
+        console.error('[Year Range] Unexpected error:', error);
+        return new Response(JSON.stringify({ error: error.message || 'Internal error' }), { status: 500 });
     }
 };

@@ -1509,6 +1509,10 @@ async function tryFetchRangeFromBlob({
     market: marketKey,
     status: "pending",
     cacheHit: false,
+    years: [],
+    yearKeys: [],
+    readOps: 0,
+    writeOps: 0,
   };
   fetchDiagnostics.rangeFetch = rangeFetchInfo;
 
@@ -1602,12 +1606,12 @@ async function tryFetchRangeFromBlob({
   const startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
   const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
-  rangeFetchInfo.canonicalKey = payload?.meta?.canonicalKey || null;
-  rangeFetchInfo.canonicalStart = payload?.meta?.canonicalStart || null;
-  rangeFetchInfo.canonicalEnd = payload?.meta?.canonicalEnd || null;
-  rangeFetchInfo.rangeCacheKey = payload?.meta?.rangeCacheKey || null;
-  rangeFetchInfo.cacheHit = Boolean(payload?.meta?.rangeCacheHit);
-  rangeFetchInfo.monthCount = payload?.meta?.monthCount ?? null;
+  const blobMeta = payload?.meta || {};
+  rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
+  rangeFetchInfo.yearKeys = Array.isArray(blobMeta.yearKeys) ? blobMeta.yearKeys : [];
+  rangeFetchInfo.readOps = Number(blobMeta.readOps) || 0;
+  rangeFetchInfo.writeOps = Number(blobMeta.writeOps) || 0;
+  rangeFetchInfo.cacheHit = Number(blobMeta.cacheMisses || 0) === 0;
   rangeFetchInfo.rowCount = deduped.length;
   rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
@@ -1637,9 +1641,10 @@ async function tryFetchRangeFromBlob({
   if (typeof payload.dataSource === "string" && payload.dataSource.trim() !== "") {
     dataSourceFlags.add(payload.dataSource);
   }
-  dataSourceFlags.add(
-    rangeFetchInfo.cacheHit ? "Netlify Blob 範圍快取" : "Netlify Blob 範圍組裝",
-  );
+  const blobSourceLabel = rangeFetchInfo.cacheHit
+    ? "Netlify 年度快取 (cache)"
+    : "Netlify 年度快取 (補抓)";
+  dataSourceFlags.add(blobSourceLabel);
 
   const defaultRemoteLabel =
     marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
@@ -1667,7 +1672,71 @@ async function tryFetchRangeFromBlob({
     fetchDiagnostics.firstValidCloseGapFromEffective =
       overview.firstValidCloseGapFromEffective;
   }
-  fetchDiagnostics.usedCache = false;
+  const blobOperations = [];
+  const readMap = new Map();
+  if (Array.isArray(rangeFetchInfo.yearKeys)) {
+    rangeFetchInfo.yearKeys.forEach((yearKey) => {
+      readMap.set(yearKey, {
+        action: "read",
+        key: yearKey,
+        stockNo,
+        market: marketKey,
+        cacheHit: true,
+        count: 1,
+        source: "netlify-year-cache",
+      });
+    });
+  }
+  if (Array.isArray(blobMeta.hitYearKeys)) {
+    blobMeta.hitYearKeys.forEach((key) => {
+      if (readMap.has(key)) {
+        readMap.get(key).cacheHit = true;
+      }
+    });
+  }
+  if (Array.isArray(blobMeta.missYearKeys)) {
+    blobMeta.missYearKeys.forEach((key) => {
+      if (readMap.has(key)) {
+        readMap.get(key).cacheHit = false;
+      } else {
+        readMap.set(key, {
+          action: "read",
+          key,
+          stockNo,
+          market: marketKey,
+          cacheHit: false,
+          count: 1,
+          source: "netlify-year-cache",
+        });
+      }
+    });
+  }
+  blobOperations.push(...readMap.values());
+  if (Array.isArray(blobMeta.primedYearKeys)) {
+    blobMeta.primedYearKeys.forEach((key) => {
+      blobOperations.push({
+        action: "write",
+        key,
+        stockNo,
+        market: marketKey,
+        cacheHit: false,
+        count: 1,
+        source: "netlify-year-cache",
+      });
+    });
+  }
+
+  fetchDiagnostics.usedCache = rangeFetchInfo.cacheHit;
+  fetchDiagnostics.blob = {
+    provider: "netlify-year-cache",
+    years: rangeFetchInfo.years,
+    yearKeys: rangeFetchInfo.yearKeys,
+    cacheHits: Number(blobMeta.cacheHits) || 0,
+    cacheMisses: Number(blobMeta.cacheMisses) || 0,
+    readOps: rangeFetchInfo.readOps,
+    writeOps: rangeFetchInfo.writeOps,
+    operations: blobOperations,
+  };
 
   const cacheEntry = {
     data: deduped,
@@ -1685,7 +1754,7 @@ async function tryFetchRangeFromBlob({
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
       diagnostics: fetchDiagnostics,
-      rangeCache: payload?.meta || null,
+      rangeCache: blobMeta || null,
     },
     priceMode: getPriceModeKey(false),
   };
