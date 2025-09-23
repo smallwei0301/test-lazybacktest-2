@@ -2629,12 +2629,39 @@ function buildStagingOptimizationCombos(params) {
     });
     const dedupedExit = dedupeStageCandidates(exitCandidates);
 
+    const entryModeOptionsRaw = [
+        { value: 'price_pullback', label: formatStageModeLabel('price_pullback', 'entry') || '價格回落加碼' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'entry') || '策略訊號再觸發' },
+    ];
+    const exitModeOptionsRaw = [
+        { value: 'price_rally', label: formatStageModeLabel('price_rally', 'exit') || '價格走高分批出場' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'exit') || '策略訊號再觸發' },
+    ];
+
+    const sortModeOptions = (options, targetValue) => {
+        if (!targetValue) return options.slice();
+        return options.slice().sort((a, b) => {
+            if (a.value === targetValue) return -1;
+            if (b.value === targetValue) return 1;
+            return 0;
+        });
+    };
+
+    const entryModeOptions = sortModeOptions(entryModeOptionsRaw, params.entryStagingMode || null);
+    const exitModeOptions = sortModeOptions(exitModeOptionsRaw, params.exitStagingMode || null);
+
     const combos = [];
     dedupedEntry.forEach((entryCandidate) => {
         dedupedExit.forEach((exitCandidate) => {
-            combos.push({
-                entry: entryCandidate,
-                exit: exitCandidate,
+            entryModeOptions.forEach((entryMode) => {
+                exitModeOptions.forEach((exitMode) => {
+                    combos.push({
+                        entry: entryCandidate,
+                        exit: exitCandidate,
+                        entryMode,
+                        exitMode,
+                    });
+                });
             });
         });
     });
@@ -2779,7 +2806,7 @@ function updateStagingOptimizationStatus(message, isError = false) {
     statusEl.classList.toggle('font-semibold', Boolean(isError));
 }
 
-function updateStagingOptimizationProgress(currentIndex, total, entryLabel, exitLabel) {
+function updateStagingOptimizationProgress(currentIndex, total, entryLabel, exitLabel, entryModeLabel, exitModeLabel) {
     const progressWrapper = document.getElementById('staging-optimization-progress');
     const progressBar = document.getElementById('staging-optimization-progress-bar');
     if (progressWrapper) {
@@ -2791,7 +2818,9 @@ function updateStagingOptimizationProgress(currentIndex, total, entryLabel, exit
     }
     const entryText = entryLabel || '—';
     const exitText = exitLabel || '—';
-    updateStagingOptimizationStatus(`測試第 ${currentIndex} / ${total} 組：進場 ${entryText}，出場 ${exitText}`);
+    const entryModeText = entryModeLabel ? `（${entryModeLabel}）` : '';
+    const exitModeText = exitModeLabel ? `（${exitModeLabel}）` : '';
+    updateStagingOptimizationStatus(`測試第 ${currentIndex} / ${total} 組：進場 ${entryText}${entryModeText}，出場 ${exitText}${exitModeText}`);
 }
 
 function formatPercent(value) {
@@ -2841,10 +2870,18 @@ function renderStagingOptimizationResults(results) {
         const sharpeText = Number.isFinite(metrics.sharpeRatio) ? metrics.sharpeRatio.toFixed(2) : 'N/A';
         const drawdownText = Number.isFinite(metrics.maxDrawdown) ? `${metrics.maxDrawdown.toFixed(2)}%` : 'N/A';
         const tradesText = Number.isFinite(metrics.tradesCount) ? metrics.tradesCount : (Number.isFinite(metrics.tradeCount) ? metrics.tradeCount : 'N/A');
+        const entryModeLabel = item.combination?.entryMode?.label
+            || formatStageModeLabel(item.combination?.entryMode?.value || item.combination?.entryMode, 'entry')
+            || '—';
+        const exitModeLabel = item.combination?.exitMode?.label
+            || formatStageModeLabel(item.combination?.exitMode?.value || item.combination?.exitMode, 'exit')
+            || '—';
         return `<tr class="${index === 0 ? 'bg-emerald-50 font-semibold' : 'hover:bg-muted/40'}">
             <td class="px-3 py-2">${index + 1}</td>
             <td class="px-3 py-2">${item.combination.entry.display}</td>
+            <td class="px-3 py-2">${entryModeLabel}</td>
             <td class="px-3 py-2">${item.combination.exit.display}</td>
+            <td class="px-3 py-2">${exitModeLabel}</td>
             <td class="px-3 py-2 ${annCls}">${formatPercent(metrics.annualizedReturn)}</td>
             <td class="px-3 py-2">${sharpeText}</td>
             <td class="px-3 py-2 ${drawCls}">${drawdownText}</td>
@@ -2858,9 +2895,16 @@ function renderStagingOptimizationResults(results) {
     const best = stagingOptimizationState.bestResult;
     if (best && best.metrics) {
         const metrics = best.metrics;
-        summaryEl.innerHTML = `推薦組合：<strong>${best.combination.entry.display}</strong> × <strong>${best.combination.exit.display}</strong>。` +
+        const entryModeLabel = best.combination?.entryMode?.label
+            || formatStageModeLabel(best.combination?.entryMode?.value || best.combination?.entryMode, 'entry')
+            || '—';
+        const exitModeLabel = best.combination?.exitMode?.label
+            || formatStageModeLabel(best.combination?.exitMode?.value || best.combination?.exitMode, 'exit')
+            || '—';
+        summaryEl.innerHTML = `推薦組合：<strong>${best.combination.entry.display}</strong>（${entryModeLabel}） × <strong>${best.combination.exit.display}</strong>（${exitModeLabel}）。` +
             ` 年化報酬 <span class="${metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(metrics.annualizedReturn)}</span>` +
-            ` ／ 夏普比率 ${formatNumber(metrics.sharpeRatio, 2)} ／ 最大回撤 <span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>。`;
+            ` ／ 夏普比率 ${formatNumber(metrics.sharpeRatio, 2)} ／ 最大回撤 <span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>。` +
+            `<br><span class="text-xs" style="color: var(--muted-foreground);">共完成 ${sorted.length} 組測試。</span>`;
     } else {
         summaryEl.textContent = '未找到適合的分段組合。';
     }
@@ -2968,14 +3012,21 @@ async function runStagingOptimization() {
 
         for (const combo of combinations.combos) {
             index += 1;
-            updateStagingOptimizationProgress(index - 1, total, combo.entry.display, combo.exit.display);
+            updateStagingOptimizationProgress(
+                index - 1,
+                total,
+                combo.entry.display,
+                combo.exit.display,
+                combo.entryMode?.label || formatStageModeLabel(combo.entryMode?.value || combo.entryMode, 'entry'),
+                combo.exitMode?.label || formatStageModeLabel(combo.exitMode?.value || combo.exitMode, 'exit')
+            );
 
             const candidateParams = {
                 ...baseParams,
                 entryStages: combo.entry.values.slice(),
                 exitStages: combo.exit.values.slice(),
-                entryStagingMode: baseParams.entryStagingMode,
-                exitStagingMode: baseParams.exitStagingMode,
+                entryStagingMode: combo.entryMode?.value || combo.entryMode || baseParams.entryStagingMode,
+                exitStagingMode: combo.exitMode?.value || combo.exitMode || baseParams.exitStagingMode,
             };
 
             const runOptions = {
@@ -3009,7 +3060,14 @@ async function runStagingOptimization() {
                 cachedMeta = buildCachedMetaFromEntry(updatedEntry, effectiveStartDate, lookbackDays);
             }
 
-            updateStagingOptimizationProgress(index, total, combo.entry.display, combo.exit.display);
+            updateStagingOptimizationProgress(
+                index,
+                total,
+                combo.entry.display,
+                combo.exit.display,
+                combo.entryMode?.label || formatStageModeLabel(combo.entryMode?.value || combo.entryMode, 'entry'),
+                combo.exitMode?.label || formatStageModeLabel(combo.exitMode?.value || combo.exitMode, 'exit')
+            );
 
             const metrics = {
                 annualizedReturn: Number.isFinite(result?.annualizedReturn) ? result.annualizedReturn : null,
@@ -3105,6 +3163,16 @@ function applyBestStagingRecommendation() {
     }
     if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.setValues === 'function') {
         window.lazybacktestStagedExit.setValues(best.combination.exit.values, { manual: true });
+    }
+    const entryModeSelect = document.getElementById('entryStagingMode');
+    if (entryModeSelect && best.combination.entryMode) {
+        entryModeSelect.value = best.combination.entryMode.value || best.combination.entryMode;
+        entryModeSelect.dispatchEvent(new Event('change'));
+    }
+    const exitModeSelect = document.getElementById('exitStagingMode');
+    if (exitModeSelect && best.combination.exitMode) {
+        exitModeSelect.value = best.combination.exitMode.value || best.combination.exitMode;
+        exitModeSelect.dispatchEvent(new Event('change'));
     }
     updateStagingOptimizationStatus('已套用推薦分段，請重新執行回測確認績效。', false);
     showSuccess('已套用推薦分段設定，建議重新回測以確認績效表現。');

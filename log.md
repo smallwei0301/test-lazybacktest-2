@@ -1,3 +1,9 @@
+# 2025-06-27 — Patch LB-STAGING-MODES-20250627B
+- **Issue recap**: 分段優化僅沿用單一進出場條件測試 42 組分段，無法比較「價格回落 / 訊號再觸發」等不同加碼與出清邏輯，使用者也看不出推薦組合對應的觸發方式。
+- **Fix**: 將既有 42 組進出場分段全面搭配「價格回落加碼 / 策略訊號再觸發」與「價格走高分批 / 策略訊號再觸發」條件，總計評估 4 × 42 組組合；結果表新增進出場條件欄位，套用推薦時同步更新對應模式。
+- **Diagnostics**: 優化進度與摘要會顯示目前測試的分段與條件，摘要列出完成的總組數，表格可直接辨識價格或訊號觸發，便於交叉比對。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
 # 2025-06-27 — Patch LB-STAGING-OPTIMIZER-20250627A
 - **Issue recap**: 分段出場設定分散在策略卡片中，使用者難以一眼掌握進出場資金配置；也缺乏自動化工具協助比較不同分段組合，需逐一手動調整、回測後再對照。
 - **Fix**: 將分段出場設定與分段進場集中於「風險管理」卡片，維持單一視覺脈絡；新增「分段優化」分頁與一鍵優化功能，針對多種進出場分段組合（單段滿倉、金字塔、梯形出場等）依年化報酬、夏普值與回撤排序，並提供一鍵套用推薦組合。
