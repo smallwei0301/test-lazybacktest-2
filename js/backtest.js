@@ -2814,17 +2814,21 @@ let isAutoSwitching = false; // 防止無限重複切換
 let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動辨識
 let manualOverrideCodeSnapshot = ''; // 紀錄觸發鎖定時的股票代碼
 let isFetchingName = false; // 防止重複查詢股票名稱
+// Patch Tag: LB-US-NAMECACHE-20250622A
 const stockNameLookupCache = new Map(); // Map<cacheKey, { info, cachedAt }>
 const STOCK_NAME_CACHE_LIMIT = 4096;
 const STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 小時記憶體快取
 const LOCAL_STOCK_NAME_CACHE_KEY = 'LB_TW_NAME_CACHE_V20250620A';
 const LOCAL_STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 台股名稱保留 7 天
+const LOCAL_US_NAME_CACHE_KEY = 'LB_US_NAME_CACHE_V20250622A';
+const LOCAL_US_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 美股名稱保留 3 天
 const TAIWAN_DIRECTORY_CACHE_KEY = 'LB_TW_DIRECTORY_CACHE_V20250620A';
 const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單 24 小時過期
 const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
 const persistentTaiwanNameCache = loadPersistentTaiwanNameCache();
+const persistentUSNameCache = loadPersistentUSNameCache();
 const taiwanDirectoryState = {
     ready: false,
     loading: false,
@@ -2838,6 +2842,7 @@ const taiwanDirectoryState = {
 };
 let taiwanDirectoryReadyPromise = null;
 hydrateTaiwanNameCache();
+hydrateUSNameCache();
 preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
     console.warn('[Taiwan Directory] 本地清單預載失敗:', error);
 });
@@ -2885,6 +2890,41 @@ function loadPersistentTaiwanNameCache() {
     }
 }
 
+function loadPersistentUSNameCache() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return new Map();
+    }
+    try {
+        const raw = window.localStorage.getItem(LOCAL_US_NAME_CACHE_KEY);
+        if (!raw) return new Map();
+        const parsed = JSON.parse(raw);
+        const now = Date.now();
+        const map = new Map();
+        if (Array.isArray(parsed)) {
+            for (const entry of parsed) {
+                if (!entry || typeof entry !== 'object') continue;
+                const { key, info, cachedAt } = entry;
+                if (!key || !info || !info.name) continue;
+                const stampedAt = typeof cachedAt === 'number' ? cachedAt : now;
+                if (now - stampedAt > LOCAL_US_NAME_CACHE_TTL_MS) continue;
+                map.set(key, { info, cachedAt: stampedAt });
+            }
+        } else if (parsed && typeof parsed === 'object') {
+            for (const [key, value] of Object.entries(parsed)) {
+                if (!value || typeof value !== 'object') continue;
+                if (!value.info || !value.info.name) continue;
+                const stampedAt = typeof value.cachedAt === 'number' ? value.cachedAt : now;
+                if (now - stampedAt > LOCAL_US_NAME_CACHE_TTL_MS) continue;
+                map.set(key, { info: value.info, cachedAt: stampedAt });
+            }
+        }
+        return map;
+    } catch (error) {
+        console.warn('[Stock Name] 無法載入美股名稱快取:', error);
+        return new Map();
+    }
+}
+
 function hydrateTaiwanNameCache() {
     if (!(persistentTaiwanNameCache instanceof Map)) return;
     if (persistentTaiwanNameCache.size === 0) return;
@@ -2910,6 +2950,31 @@ function hydrateTaiwanNameCache() {
     }
 }
 
+function hydrateUSNameCache() {
+    if (!(persistentUSNameCache instanceof Map)) return;
+    if (persistentUSNameCache.size === 0) return;
+    let removed = false;
+    const now = Date.now();
+    for (const [key, entry] of persistentUSNameCache.entries()) {
+        if (!entry || !entry.info || !entry.info.name) {
+            persistentUSNameCache.delete(key);
+            removed = true;
+            continue;
+        }
+        if (now - (entry.cachedAt || 0) > LOCAL_US_NAME_CACHE_TTL_MS) {
+            persistentUSNameCache.delete(key);
+            removed = true;
+            continue;
+        }
+        if (!stockNameLookupCache.has(key)) {
+            stockNameLookupCache.set(key, { info: entry.info, cachedAt: entry.cachedAt });
+        }
+    }
+    if (removed) {
+        savePersistentUSNameCache();
+    }
+}
+
 function savePersistentTaiwanNameCache() {
     if (typeof window === 'undefined' || !window.localStorage) return;
     if (!(persistentTaiwanNameCache instanceof Map)) return;
@@ -2922,6 +2987,21 @@ function savePersistentTaiwanNameCache() {
         window.localStorage.setItem(LOCAL_STOCK_NAME_CACHE_KEY, JSON.stringify(payload));
     } catch (error) {
         console.warn('[Stock Name] 無法寫入台股名稱快取:', error);
+    }
+}
+
+function savePersistentUSNameCache() {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (!(persistentUSNameCache instanceof Map)) return;
+    try {
+        const payload = Array.from(persistentUSNameCache.entries()).map(([key, value]) => ({
+            key,
+            info: value.info,
+            cachedAt: value.cachedAt,
+        }));
+        window.localStorage.setItem(LOCAL_US_NAME_CACHE_KEY, JSON.stringify(payload));
+    } catch (error) {
+        console.warn('[Stock Name] 無法寫入美股名稱快取:', error);
     }
 }
 
@@ -2951,12 +3031,54 @@ function prunePersistentTaiwanNameCache() {
     }
 }
 
+function prunePersistentUSNameCache() {
+    if (!(persistentUSNameCache instanceof Map)) return;
+    const now = Date.now();
+    let mutated = false;
+    for (const [key, entry] of persistentUSNameCache.entries()) {
+        if (!entry || !entry.info || !entry.info.name) {
+            persistentUSNameCache.delete(key);
+            mutated = true;
+            continue;
+        }
+        if (now - (entry.cachedAt || 0) > LOCAL_US_NAME_CACHE_TTL_MS) {
+            persistentUSNameCache.delete(key);
+            mutated = true;
+        }
+    }
+    while (persistentUSNameCache.size > STOCK_NAME_CACHE_LIMIT) {
+        const oldest = persistentUSNameCache.keys().next().value;
+        if (!oldest) break;
+        persistentUSNameCache.delete(oldest);
+        mutated = true;
+    }
+    if (mutated) {
+        savePersistentUSNameCache();
+    }
+}
+
 function persistTaiwanNameCacheEntry(key, entry) {
     if (!(persistentTaiwanNameCache instanceof Map)) return;
     if (!key || !entry || !entry.info || !entry.info.name) return;
     persistentTaiwanNameCache.set(key, entry);
     prunePersistentTaiwanNameCache();
     savePersistentTaiwanNameCache();
+}
+
+function persistUSNameCacheEntry(key, entry) {
+    if (!(persistentUSNameCache instanceof Map)) return;
+    if (!key || !entry || !entry.info || !entry.info.name) return;
+    persistentUSNameCache.set(key, entry);
+    prunePersistentUSNameCache();
+    savePersistentUSNameCache();
+}
+
+function removePersistentUSNameCacheEntry(key) {
+    if (!(persistentUSNameCache instanceof Map)) return;
+    if (!key) return;
+    if (persistentUSNameCache.delete(key)) {
+        savePersistentUSNameCache();
+    }
 }
 
 function createStockNameCacheKey(market, stockCode) {
@@ -3012,8 +3134,11 @@ function storeStockNameCacheEntry(market, stockCode, info, options = {}) {
         if (!oldest) break;
         stockNameLookupCache.delete(oldest);
     }
-    if (isTaiwanMarket(market) && options.persist !== false) {
+    const normalizedMarket = normalizeMarketValue(market);
+    if (isTaiwanMarket(normalizedMarket) && options.persist !== false) {
         persistTaiwanNameCacheEntry(key, entry);
+    } else if (normalizedMarket === 'US' && options.persist !== false) {
+        persistUSNameCacheEntry(key, entry);
     }
 }
 
@@ -3288,16 +3413,23 @@ function findStockNameCacheEntry(stockCode, markets) {
         if (!key) continue;
         const entry = stockNameLookupCache.get(key);
         if (entry && entry.info && entry.info.name) {
-            const ttl = isTaiwanMarket(market) ? LOCAL_STOCK_NAME_CACHE_TTL_MS : STOCK_NAME_CACHE_TTL_MS;
+            const normalizedMarket = normalizeMarketValue(market);
+            const ttl = isTaiwanMarket(normalizedMarket)
+                ? LOCAL_STOCK_NAME_CACHE_TTL_MS
+                : normalizedMarket === 'US'
+                    ? LOCAL_US_NAME_CACHE_TTL_MS
+                    : STOCK_NAME_CACHE_TTL_MS;
             if (!isStockNameCacheEntryFresh(entry, ttl)) {
                 stockNameLookupCache.delete(key);
-                if (isTaiwanMarket(market) && persistentTaiwanNameCache instanceof Map) {
+                if (isTaiwanMarket(normalizedMarket) && persistentTaiwanNameCache instanceof Map) {
                     persistentTaiwanNameCache.delete(key);
                     savePersistentTaiwanNameCache();
+                } else if (normalizedMarket === 'US') {
+                    removePersistentUSNameCacheEntry(key);
                 }
                 continue;
             }
-            return { market: normalizeMarketValue(market), info: entry.info, cachedAt: entry.cachedAt };
+            return { market: normalizedMarket, info: entry.info, cachedAt: entry.cachedAt };
         }
     }
     return null;
