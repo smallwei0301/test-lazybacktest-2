@@ -1,6 +1,6 @@
 // netlify/functions/blob-usage.js
 // Blob traffic dashboard endpoint consolidating usage summaries and recent events.
-// Patch Tag: LB-BLOB-MONITOR-20250624A
+// Patch Tag: LB-BLOB-MONITOR-20250627B
 import { BLOB_MONITOR_VERSION, loadBlobUsageSnapshot } from '../lib/blob-monitor.js';
 
 function parseLimit(value, fallback) {

@@ -1,7 +1,7 @@
 import { getStore } from '@netlify/blobs';
 import crypto from 'crypto';
 
-export const BLOB_MONITOR_VERSION = 'LB-BLOB-MONITOR-20250624A';
+export const BLOB_MONITOR_VERSION = 'LB-BLOB-MONITOR-20250627B';
 
 const MONITOR_STORE_NAME = 'blob_traffic_monitor_store_v1';
 const EVENT_PREFIX = 'events/';
@@ -372,15 +372,95 @@ function applyEventToSummary(summary, record) {
     return summary;
 }
 
+async function readSummaryDocument(store, key) {
+    try {
+        const document = await store.get(key, { type: 'json' });
+        return document ?? null;
+    } catch (error) {
+        const status = error?.status ?? error?.statusCode;
+        const notFound = status === 404 || error?.name === 'BlobNotFoundError';
+        if (notFound || /not.?found/i.test(error?.message || '')) {
+            return null;
+        }
+        throw error;
+    }
+}
+
 async function updateSummaryDocument(store, key, record) {
     try {
-        const existing = await store.get(key, { type: 'json' });
         const summaryDate = key === GLOBAL_SUMMARY_KEY ? 'global' : record.summaryDate;
-        const next = applyEventToSummary(existing ?? createDefaultSummary(summaryDate), record);
+        const existing = await readSummaryDocument(store, key);
+        const base = existing ?? createDefaultSummary(summaryDate);
+        const next = applyEventToSummary(base, record);
         await store.setJSON(key, next);
     } catch (error) {
         console.warn('[BlobMonitor] 無法更新摘要:', error);
     }
+}
+
+async function rebuildDailySummaryFromEvents(store, date) {
+    const prefix = `${EVENT_PREFIX}${date}/`;
+    try {
+        const listing = await store.list({ prefix });
+        const blobs = Array.isArray(listing?.blobs) ? [...listing.blobs] : [];
+        if (blobs.length === 0) {
+            return null;
+        }
+        blobs.sort((a, b) => a.key.localeCompare(b.key));
+        let summary = createDefaultSummary(date);
+        for (const blob of blobs) {
+            try {
+                const record = await store.get(blob.key, { type: 'json' });
+                if (record) {
+                    summary = applyEventToSummary(summary, record);
+                }
+            } catch (eventError) {
+                console.warn('[BlobMonitor] 無法讀取事件紀錄以重建摘要:', {
+                    key: blob.key,
+                    error: eventError,
+                });
+            }
+        }
+        if (summary.updatedAt) {
+            await store.setJSON(`${SUMMARY_PREFIX}${date}.json`, summary);
+            return summary;
+        }
+    } catch (error) {
+        console.warn('[BlobMonitor] 重建每日摘要失敗:', { date, error });
+    }
+    return null;
+}
+
+async function rebuildGlobalSummaryFromEvents(store) {
+    try {
+        const listing = await store.list({ prefix: EVENT_PREFIX });
+        const blobs = Array.isArray(listing?.blobs) ? [...listing.blobs] : [];
+        if (blobs.length === 0) {
+            return null;
+        }
+        blobs.sort((a, b) => a.key.localeCompare(b.key));
+        let summary = createDefaultSummary('global');
+        for (const blob of blobs) {
+            try {
+                const record = await store.get(blob.key, { type: 'json' });
+                if (record) {
+                    summary = applyEventToSummary(summary, record);
+                }
+            } catch (eventError) {
+                console.warn('[BlobMonitor] 無法讀取事件紀錄以重建全域摘要:', {
+                    key: blob.key,
+                    error: eventError,
+                });
+            }
+        }
+        if (summary.updatedAt) {
+            await store.setJSON(GLOBAL_SUMMARY_KEY, summary);
+            return summary;
+        }
+    } catch (error) {
+        console.warn('[BlobMonitor] 重建全域摘要失敗:', error);
+    }
+    return null;
 }
 
 export async function recordBlobUsage(details) {
@@ -519,10 +599,15 @@ export async function loadBlobUsageSnapshot(options = {}) {
     const limit = Number.isFinite(options.limit) ? options.limit : RECENT_EVENT_LIMIT;
     try {
         const store = getMonitorStore();
-        const [daily, global] = await Promise.all([
-            store.get(`${SUMMARY_PREFIX}${targetDate}.json`, { type: 'json' }).catch(() => null),
-            store.get(GLOBAL_SUMMARY_KEY, { type: 'json' }).catch(() => null),
-        ]);
+        const dailyKey = `${SUMMARY_PREFIX}${targetDate}.json`;
+        let daily = await readSummaryDocument(store, dailyKey);
+        if (!daily) {
+            daily = await rebuildDailySummaryFromEvents(store, targetDate);
+        }
+        let global = await readSummaryDocument(store, GLOBAL_SUMMARY_KEY);
+        if (!global) {
+            global = await rebuildGlobalSummaryFromEvents(store);
+        }
         const dailySummary = daily ? { ...daily, recentEvents: (daily.recentEvents || []).slice(0, limit) } : null;
         return {
             version: BLOB_MONITOR_VERSION,

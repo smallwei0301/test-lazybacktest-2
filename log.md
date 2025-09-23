@@ -1,3 +1,9 @@
+# 2025-06-27 — Patch LB-BLOB-MONITOR-20250627B
+- **Issue recap**: Blob 監控記錄寫入成功，但在首次建立摘要時 `store.get` 404 會直接拋出錯誤，導致每日/全域統計文件未生成，儀表板僅顯示「尚未產生監控紀錄」。既有事件紀錄也缺乏補建機制。 
+- **Fix**: 更新 `blob-monitor` 在摘要寫入時容忍 404，必要時自動建構初始文件；`/api/blob-usage` 載入時若找不到摘要會掃描事件紀錄，重建指定日期與全域統計並回存 Blob，確保舊事件也能顯示。 
+- **Diagnostics**: 儀表板立即顯示最新的每日統計與全域累積事件，若 Blob 環境缺失仍會落回記憶體快取；維運可透過版本標籤 `LB-BLOB-MONITOR-20250627B` 確認修補已部署。 
+- **Testing**: `node --input-type=module -e "import('./netlify/lib/blob-monitor.js').then(()=>console.log('blob-monitor loaded'))"`
+
 # 2025-06-25 — Patch LB-BLOB-DASHBOARD-20250625A
 - **Issue recap**: Blob 監控 API 雖已提供每日摘要與事件清單，但前台缺乏可視化介面，營運端無法在 UI 直接檢視讀寫趨勢、快取層級或錯誤紀錄。
 - **Fix**: 回測摘要頁新增「Blob 流量監控」卡片，支援日期與事件上限篩選並串接 `/api/blob-usage`，呈現每日/全域統計、主要 Store、全域客戶端排行與最新事件時間軸；README 補充儀表板使用說明。
