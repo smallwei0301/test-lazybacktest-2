@@ -1,4 +1,4 @@
-
+﻿
 importScripts('shared-lookback.js');
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -2330,14 +2330,12 @@ async function tryFetchRangeFromBlob({
     source: "netlify-year-range",
     requestedRange: { start: startDate, end: endDate },
   });
-  const supersetRows =
-    Array.isArray(canonicalDeduped) && canonicalDeduped.length > 0 ? canonicalDeduped : deduped;
   recordYearSupersetSlices({
     marketKey,
     stockNo,
     priceModeKey: getPriceModeKey(false),
     split,
-    rows: supersetRows,
+    rows: deduped,
   });
   const cacheEntry = {
     data: deduped,

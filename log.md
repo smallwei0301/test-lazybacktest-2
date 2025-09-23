@@ -4,6 +4,25 @@
 - **Diagnostics**: `fetchDiagnostics.rangeFetch` 新增 `worker-year-superset` 狀態，Superset 命中會標示 `Netlify 年度快取 (Worker Superset)`；主執行緒快取索引與 Session/YEAR 快取皆寫入 coverage 指紋，方便檢核 Superset 命中狀況。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢視與資料流推演；後續需於本機瀏覽器以 2330、2412、0050 等案例實測 18 個月跨年回測，確認 Blob 計量僅記錄年度切片且 console 無錯誤。
 
+# 2025-07-22 — Patch LB-DEV-BLOB-20250722A
+- **Issue recap**: 開發工具按鈕與 Blob 監控散落在基本設定卡片中，快取來源標籤仍顯示「(快取)/(部分快取)」，Blob 用量僅保留 6 筆記錄且未追蹤台股清單服務是否讀寫 Blob。
+- **Fix**: 建立「開發者區域」獨立卡片整合測試資料來源、資料暖身診斷與 Blob 使用監控；重構來源彙總邏輯以顯示「本地快取／Proxy 快取／Blob 快取」分類；Blob 用量卡改為日期群組並可折疊非當日紀錄。
+- **Diagnostics**: Blob ledger 現在完整保留當月紀錄並支援滾動檢視，非當日區段預設收合且點擊即可展開；顯示 Netlify 年度快取命中/補抓、台股清單目錄使用 Blob 的讀寫次數。
+- **Testing**: 受限於容器無法開啟瀏覽器，透過靜態程式檢閱與資料流程推演驗證 UI 重構與 Blob 計量更新；需於本機瀏覽器實測輸入 2330 等案例確認台股清單快取命中時 Blob 監控同步增加紀錄且 console 無錯誤。
+
+# 2025-07-21 — Patch LB-CACHE-REPLAY-20250721A
+- **Issue recap**: 使用者重新整理或在同一工作階段重複回測時，Worker 仍回傳先前遠端抓取的 Blob telemetry，主執行緒因此重複累計 Blob 讀寫次數，無法判斷實際是否命中瀏覽器快取。
+- **Fix**: 新增 `normalise/prepareDiagnosticsForCacheReplay`，將主執行緒與 Worker 在快取重播時的 `fetchDiagnostics` 統一標記 `cacheReplay`、清空 `operations` 並維持覆蓋範圍；所有快取寫入（Session、Year、Worker Memory、主執行緒快取回寫）都使用去操作量版本，Worker 也會在使用快取時更新 `workerLastMeta`。
+- **Diagnostics**: Cached run 的 `datasetDiagnostics.fetch` 會標示 `cacheReplay=true` 與來源（主執行緒快取／Worker 快取等），Blob 用量儀表板僅在遠端實際讀寫時累積數值，可明確辨識本地重播。
+- **Testing**: 受限於容器無法執行瀏覽器回測，僅進行程式邏輯檢視與資料流推演；後續需於本機跑 2330 等熱門股，確認重新整理後 Blob 計數不再增加且 console 無錯誤。
+
+# 2025-07-20 — Patch LB-CACHE-TIER-20250720A
+- **Issue recap**: Blob 月度範圍快取因 key 過於細碎導致高讀寫量，前端同一區間仍會重複呼叫 Proxy，且缺乏實際用量監控。
+- **Fix**: 將 Netlify `stock-range` 改為年度快取單位，Worker 記錄年度操作並回傳主執行緒統計；前端導入 sessionStorage + localStorage 雙層快取及 Blob 用量儀表板。
+- **Diagnostics**: UI 新增「Blob 使用監控」卡片，顯示本月讀寫次數、命中率與熱門查詢；`fetchDiagnostics.blob` 提供年度快取 telemetry。
+- **Operations**: 新增排程 `cache-warmer` 函式，每日預熱熱門台股過去五年的年度資料，確保遠端 Blob 快取維持命中率。
+- **Testing**: 待本地瀏覽器環境實際回測，確認 session/localStorage 快取落地及 Blob 儀表板更新正常。
+
 # 2025-07-08 — Patch LB-BLOB-RANGE-20250708A
 - **Issue recap**: 台股／上櫃回測在暖身區間長時需逐月呼叫 Proxy，雖已調整佇列仍造成高並發請求；Netlify Blobs 範圍快取以實際起訖日為 key，日流量達萬人時容易寫入大量重複區間並推高回測等待時間。
 - **Fix**: Netlify `stock-range` 函式改以月份對齊的 canonical key 寫入 Blobs，僅保存完整月份序列並回傳 meta；Worker 在未調整股價時優先呼叫 Blob 範圍快取，命中即可直接整理回測資料並寫入背景快取，落空或覆蓋不足時再退回逐月 Proxy。
