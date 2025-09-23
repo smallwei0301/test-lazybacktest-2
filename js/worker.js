@@ -1,7 +1,7 @@
 
 importScripts('shared-lookback.js');
 
-// --- Worker Data Acquisition & Cache (v11.5 - Split adjustment propagation fix) ---
+// --- Worker Data Acquisition & Cache (v11.6 - US Yahoo fallback integration) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -10,7 +10,9 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250320A
 // Patch Tag: LB-ADJ-PIPE-20250410A
 // Patch Tag: LB-ADJ-PIPE-20250527A
-const WORKER_DATA_VERSION = "v11.5";
+// Patch Tag: LB-US-MARKET-20250612A
+// Patch Tag: LB-US-YAHOO-20250613A
+const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
@@ -22,19 +24,25 @@ const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 
 function getPrimaryForceSource(marketKey, adjusted) {
-  if (adjusted) return "yahoo";
-  if (marketKey === "TPEX") return "finmind";
-  return "twse";
+  if (adjusted) {
+    if (marketKey === "US") return null;
+    return "yahoo";
+  }
+  if (marketKey === "TPEX" || marketKey === "US") return "finmind";
+  if (marketKey === "TWSE") return "twse";
+  return null;
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
   if (adjusted) return null;
-  if (marketKey === "TPEX") return null;
+  if (marketKey === "TPEX" || marketKey === "US") return null;
   return "finmind";
 }
 
 function getMarketKey(marketType) {
-  return (marketType || "TWSE").toUpperCase();
+  const normalized = (marketType || "TWSE").toUpperCase();
+  if (normalized === "NASDAQ" || normalized === "NYSE") return "US";
+  return normalized;
 }
 
 function getPriceModeKey(adjusted) {
@@ -1359,7 +1367,9 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
       ? 'Yahoo Finance (還原)'
       : options.market === 'TPEX'
         ? 'FinMind (主來源)'
-        : defaultLabel || 'TWSE (主來源)');
+        : options.market === 'US'
+          ? 'FinMind (主來源)'
+          : defaultLabel || 'TWSE (主來源)');
   const uniqueRemote = Array.from(new Set(remoteLabels));
   if (uniqueRemote.length === 0) {
     if (cacheLabels.length > 0) {
@@ -1675,8 +1685,11 @@ async function fetchStockData(
       diagnostics: fetchDiagnostics,
     };
   }
-  const proxyPath = marketKey === "TPEX" ? "/api/tpex/" : "/api/twse/";
+  let proxyPath = "/api/twse/";
+  if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  else if (marketKey === "US") proxyPath = "/api/us/";
   const isTpex = marketKey === "TPEX";
+  const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
   let completed = 0;
   const monthResults = await runWithConcurrency(
@@ -1835,13 +1848,17 @@ async function fetchStockData(
             if (payload?.source === "blob") {
               const cacheLabel = isTpex
                 ? "TPEX (快取)"
-                : "TWSE (快取)";
+                : isUs
+                  ? "US (快取)"
+                  : "TWSE (快取)";
               monthCacheFlags.add(cacheLabel);
               monthEntry.sources.add(cacheLabel);
             } else if (payload?.source === "memory") {
               const cacheLabel = isTpex
                 ? "TPEX (記憶體快取)"
-                : "TWSE (記憶體快取)";
+                : isUs
+                  ? "US (記憶體快取)"
+                  : "TWSE (記憶體快取)";
               monthCacheFlags.add(cacheLabel);
               monthEntry.sources.add(cacheLabel);
             }
@@ -1868,6 +1885,14 @@ async function fetchStockData(
             if (sourceLabel) {
               monthSourceFlags.add(sourceLabel);
               monthEntry.sources.add(sourceLabel);
+            }
+            if (Array.isArray(payload?.dataSources)) {
+              payload.dataSources
+                .filter((label) => typeof label === "string" && label.trim() !== "")
+                .forEach((label) => {
+                  monthSourceFlags.add(label);
+                  monthEntry.sources.add(label);
+                });
             }
             if (normalized.length > 0) {
               mergeMonthlyData(monthEntry, normalized);
@@ -1986,13 +2011,17 @@ async function fetchStockData(
     ? adjusted
       ? "Yahoo Finance (還原)"
       : "FinMind (主來源)"
-    : adjusted
-      ? "Yahoo Finance (還原)"
-      : "TWSE (主來源)";
+    : isUs
+      ? adjusted
+        ? "Yahoo Finance (還原)"
+        : "FinMind (主來源)"
+      : adjusted
+        ? "Yahoo Finance (還原)"
+        : "TWSE (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     defaultRemoteLabel,
-    { market: isTpex ? "TPEX" : "TWSE", adjusted },
+    { market: isTpex ? "TPEX" : isUs ? "US" : "TWSE", adjusted },
   );
 
   const overview = summariseDatasetRows(deduped, {

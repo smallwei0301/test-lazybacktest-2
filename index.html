@@ -413,22 +413,29 @@
                                         <div>
                                             <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">股票/ETF/指數代碼</label>
                                             <div class="flex gap-2 items-center">
-                                                <input 
-                                                    id="stockNo" 
-                                                    type="text" 
-                                                    value="2330" 
-                                                    placeholder="例如: 2330, 0050, TAIEX" 
+                                                <input
+                                                    id="stockNo"
+                                                    type="text"
+                                                    value="2330"
+                                                    placeholder="例如: 2330, 0050, TAIEX"
                                                     class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                     style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                 />
                                                 <div class="flex items-center gap-2 text-xs">
                                                     <span class="text-muted-foreground" style="color: var(--muted-foreground);">市場:</span>
-                                                    <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" id="marketSwitch" class="sr-only peer">
-                                                        <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                                        <span id="marketLabel" class="ml-2 text-xs font-medium text-foreground" style="color: var(--foreground);">上市</span>
-                                                    </label>
+                                                    <select
+                                                        id="marketSelect"
+                                                        class="px-2 py-1 border border-border rounded-md text-xs bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    >
+                                                        <option value="TWSE">上市 (TWSE)</option>
+                                                        <option value="TPEX">上櫃 (TPEX)</option>
+                                                        <option value="US">美股 (US)</option>
+                                                    </select>
                                                 </div>
+                                            </div>
+                                            <div id="marketAdjustedHint" class="mt-1 text-[11px] text-amber-600 hidden">
+                                                美股回測目前採用原始股價，已自動停用除權息還原與拆分選項。
                                             </div>
                                             <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
                                                 <!-- 股票名稱和市場切換提示將顯示在這裡 -->
@@ -495,6 +502,10 @@
                                                     <div class="px-3 py-3 space-y-3 text-[11px]" id="dataDiagnosticsBody">
                                                         <div id="dataDiagnosticsHint" class="text-[11px]" style="color: var(--muted-foreground);">請先執行回測後，再查看暖身與快取診斷資訊。</div>
                                                         <div id="dataDiagnosticsContent" class="hidden space-y-3">
+                                                            <div>
+                                                                <h5 class="font-medium mb-1" style="color: var(--foreground);">名稱與清單資訊</h5>
+                                                                <div id="dataDiagnosticsName" class="space-y-1"></div>
+                                                            </div>
                                                             <div>
                                                                 <h5 class="font-medium mb-1" style="color: var(--foreground);">資料摘要</h5>
                                                                 <div id="dataDiagnosticsSummary" class="space-y-1"></div>

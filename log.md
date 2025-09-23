@@ -1,3 +1,57 @@
+# 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
+- **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
+- **Fix**: 導入美股名稱 `localStorage` 永續快取（3 天 TTL），頁面載入時回灌記憶體 Map；快取寫入時以「市場｜代碼」為 key，同步清理過期項目並與台股快取共用 4096 筆上限，確保重複輸入常用代號可立即命中。
+- **Diagnostics**: 名稱查詢 console 會標示快取命中市場與時間戳，過期項目會同時從記憶體與本地儲存移除，避免舊名錄殘留造成誤判。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-22 — Patch LB-NAME-DISPLAY-20250622A
+- **Issue recap**: Stock Name 區塊顯示結果會附加「來源」「清單版本」等標籤，與使用者預期僅需看到股票名稱的需求相悖，容易造成視覺干擾。
+- **Fix**: 調整名稱組字函式，僅輸出名稱及市場分類，移除來源／清單版本附註；README 與 agent 手冊同步記錄顯示策略調整，避免後續維運混淆。
+- **Diagnostics**: UI 仍可透過資料暖身診斷卡檢視名稱來源與清單版本，確保維運資訊完整但不干擾一般使用者操作。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-21 — Patch LB-US-BACKTEST-20250621A
+- **Issue recap**: 雖然已導入美股資料代理，前端回測仍沿用台股 3～7 碼代碼驗證，導致一字元或附帶 `.US` 後綴的美股代碼無法送出；若誤將 2330 等代號切換為美股市場，也可能把台股請求送往 FinMind US 路徑。
+- **Fix**: 新增市場感知的代碼驗證邏輯，美股接受 1～6 碼英數字並支援 `.US`／`-` 後綴，台股限定 4～6 碼數字並允許一碼英數尾碼，同步在 README 與 agent 手冊註記行為；維持 FinMind 為美股主來源、Yahoo 為備援。
+- **Diagnostics**: 驗證錯誤會即時顯示具體格式說明，價格診斷與測試卡仍可辨識 FinMind/Yahoo 來源，防止市場誤選造成快取與來源標籤混淆。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-20 — Patch LB-TW-DIRECTORY-20250620A
+- **Issue recap**: TWSE/TPEX 名稱查詢仍仰賴逐次 API 呼叫與手工對照表，無法穩定判斷上市／上櫃市場別；測試卡片與診斷面板也缺乏名稱來源與清單版本資訊，維運難以確認是否命中官方名錄。
+- **Fix**: 新增 `taiwan-directory` Netlify 函式快取 FinMind `TaiwanStockInfo`，前端開站即預載清單並寫入記憶體與 `localStorage` 快取，名稱查詢優先回傳官方清單並補上 `matchStrategy`／`directoryVersion`；資料診斷面板與測試卡提示會顯示名稱來源與清單版本。
+- **Diagnostics**: 資料暖身診斷新增「名稱與清單資訊」區塊，資料來源測試卡同步顯示台股官方清單版本與更新時間。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-16 — Patch LB-TW-NAMELOCK-20250616A / LB-TW-NAMECACHE-20250616A
+- **Issue recap**: 數字開頭的代號仍會落入美股名稱備援，導致 2330 這類台股顯示英文公司名；上市櫃名稱快取僅存在記憶體且無法跨頁面延續，ETF 判斷也無法覆蓋 0050、006208、00878 等五到六碼代號。
+- **Fix**: 只要代號前四碼為數字即限制在上市／上櫃資料源查詢與自動切換，並在寫入快取時同步儲存至 `localStorage`，下次載入仍能快速顯示中文名稱；ETF 辨識支援 4～6 位數及末碼字母的 00 系列代號。
+- **Diagnostics**: 名稱查詢日誌會顯示「TWSE/TPEX 限定」標記與快取命中時間戳，利於確認是否命中本地快取或需要重新發送請求。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-15 — Patch LB-NAME-GATE-20250615A / LB-MARKET-OVERRIDE-20250615A
+- **Issue recap**: 4 字元防抖機制套用在所有代碼，美股僅輸入 1~3 字母即被阻擋；同時 `1101B` 等前四碼為數字的台股被判定為美股並顯示英文名稱，用戶手動調整市場後也會被自動切回其他市場。
+- **Fix**: 只對開頭數字代碼套用 4 碼門檻，並以首四碼為台股優先順序抓取上市/上櫃中文名稱；新增使用者手動選擇市場的鎖定旗標，直到重新輸入代碼前不再自動切換市場或引用跨市場快取。
+- **Diagnostics**: Console 日誌會標示觸發數字門檻的實際位數與是否因手動鎖定而略過自動切換，市場切換提示維持手動轉換按鈕供用戶決定是否改查其他市場。
+- **Testing**: 受限於容器無法啟動瀏覽器，已以靜態程式檢查與 `node --input-type=module -e "import('./netlify/functions/us-proxy.js')"` 確認代理模組仍可載入；後續需在前端實機輸入 AAPL、1101B 等案例驗證互動流程。
+
+# 2025-06-14 — Patch LB-US-NAMEFIX-20250614A / LB-NAME-CACHE-20250614A
+- **Issue recap**: 美股代號 AAPL 會被 FinMind USStockInfo 回傳的第一筆資料覆蓋成 Agilent，UI 無法分辨上市/上櫃/美股/ETF，且名稱查詢每輸入一個字便觸發請求，導致辨識錯誤與效能下降。
+- **Fix**: US proxy 重新比對 `stock_id`、`ticker`、`.US` 後綴並回傳 `marketCategory`/`securityType`，快取正確的股票名稱來源；前端新增名稱快取、最小 4 字元觸發、跨市場優先序判斷與 ETF 推測，顯示「美股・NASDAQ」等分類並在自動切換時沿用快取結果。
+- **Diagnostics**: 名稱欄位會標示來源、快取與切換提示，避免再將錯誤名稱寫回 UI；proxy 另帶回 `matchStrategy` 協助後續排查 FinMind 回應格式。
+- **Testing**: `node --input-type=module -e "import('./netlify/functions/us-proxy.js').then(() => console.log('us-proxy loaded')).catch(err => { console.error('load failed', err); process.exit(1); });"`
+
+# 2025-06-13 — Patch LB-US-YAHOO-20250613A
+- **Issue recap**: FinMind 失敗或 Token 未設定時，美股回測無備援資料；資料來源測試卡僅顯示 `aaData` 筆數，導致 FinMind 測試結果固定為 0 筆且無法檢視 Yahoo 備援。
+- **Fix**: `us-proxy` 新增 Yahoo Finance 備援流程與 `forceSource` 參數，依來源獨立快取並回傳 `dataSources`/`fallback` 診斷；前端測試卡同步提供 FinMind、Yahoo 按鈕並支援美股 `/api/us/` 來源。
+- **Diagnostics**: 測試卡會顯示實際筆數、涵蓋區間與備援原因，提示使用者 FinMind 為主來源、Yahoo 為備援來源，協助營運端交叉檢查資料命中情況。
+- **Testing**: 受限於容器無法連線外部 API，透過程式碼審閱與 `us-proxy` 匯入檢查邏輯正確性，後續需在具備網路的環境進行實際 API 驗證。
+
+# 2025-06-12 — Patch LB-US-MARKET-20250612A
+- **Issue recap**: 使用者需要在網頁版回測器中新增美股市場，且股價與代碼必須透過 FinMind API 取得；現有流程僅支援上市/上櫃資料與 TWSE/TPEX 代理。
+- **Fix**: 新增 `us-proxy` Netlify 函式整合 FinMind `USStockPrice/USStockInfo`，Worker 與前端導入 `US` 市場路徑、快取標籤與資料來源提示，並在 UI 改為下拉選單且自動停用美股的還原選項與手續費預設；`us-proxy` 亦補上 `stock_id` 名稱查詢備援與 FinMind 等級錯誤提示，避免 Sponsor 未啟用時難以診斷。
+- **Diagnostics**: 資料來源測試卡顯示 FinMind 為唯一來源並提示 Token 等級；市場切換提示會針對上市/上櫃/美股顯示動態建議，Stock Name 查詢也改為跨市場搜尋與自動切換。
+- **Testing**: 受限於容器無法連線 FinMind API，僅透過程式碼審閱與邏輯驗證確認路由、快取與 UI 狀態切換無誤。
+
 # 2025-06-09 — Patch LB-CACHE-START-20250609A
 - **Issue recap**: 買入持有基準修正後，快取檢查會因首筆有效日期落後 7 天而在每次回測都強制重抓，熱門股票回測等待時間明顯拉長。
 - **Fix**: 主執行緒於快取項目記錄首筆有效交易日、落後天數與確認時間，僅於首次或超過等待期限時才重新抓取，其餘情境沿用快取並保留警示。

@@ -19,3 +19,9 @@
   to = "/.netlify/functions/calculateAdjustedPrice"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/api/us/*"
+  to = "/.netlify/functions/us-proxy"
+  status = 200
+  force = true
