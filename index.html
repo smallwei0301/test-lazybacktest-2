@@ -996,6 +996,20 @@
                                                 <p>執行回測後將顯示淨值曲線</p>
                                             </div>
                                         </div>
+                                        <div id="trend-color-hints" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-[11px]" style="color: var(--muted-foreground);">
+                                            <div class="flex items-center gap-2">
+                                                <span class="inline-flex w-3 h-3 rounded" style="background-color: rgba(16, 185, 129, 0.35);"></span>
+                                                <span>綠色底：起漲區段</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="inline-flex w-3 h-3 rounded" style="background-color: rgba(148, 163, 184, 0.35);"></span>
+                                                <span>灰色底：盤整區段</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="inline-flex w-3 h-3 rounded" style="background-color: rgba(248, 113, 113, 0.35);"></span>
+                                                <span>紅色底：跌落區段</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1006,10 +1020,33 @@
                                             趨勢區間評估
                                         </h3>
                                         <p class="card-description text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                            參考量化回測常見的 20 日斜率／波動判別法：計算最近 20 個交易日的淨值曲線累積漲幅，以及同窗期日報酬標準差 σ。當漲幅 ≥ max(1.5%, 0.75×σ×√20) 判定為「起漲」，跌幅 ≥ 該門檻視為「回落」，介於門檻內則標記為「盤整」。
+                                            參考量化回測常見的 20 日斜率／波動判別法：計算最近 20 個交易日的淨值曲線累積漲幅，以及同窗期日報酬標準差 σ。當漲幅 ≥ max(1.5%, 0.75×σ×√20) 判定為「起漲」，跌幅 ≥ 該門檻視為「回落」，介於門檻內則標記為「盤整」。可利用下方滑桿微調門檻靈敏度。
                                         </p>
                                     </div>
                                     <div class="card-content">
+                                        <div id="trend-sensitivity-control" class="mb-6 space-y-2">
+                                            <div class="flex items-center justify-between text-xs font-medium" style="color: var(--foreground);">
+                                                <span>趨勢靈敏度</span>
+                                                <span id="trend-sensitivity-label" class="text-[11px]" style="color: var(--muted-foreground);">5 ｜ 門檻 ×1.00（標準）</span>
+                                            </div>
+                                            <input
+                                                type="range"
+                                                id="trend-sensitivity-slider"
+                                                min="0"
+                                                max="10"
+                                                step="1"
+                                                value="5"
+                                                class="w-full accent-emerald-500"
+                                                aria-describedby="trend-sensitivity-footnote"
+                                            />
+                                            <div class="flex justify-between text-[11px]" style="color: var(--muted-foreground);">
+                                                <span>細</span>
+                                                <span>粗</span>
+                                            </div>
+                                            <p id="trend-sensitivity-footnote" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                往右拖曳會同步放寬 20 日斜率門檻，使盤整段縮小、更多區間判定為起漲或跌落，並即時更新統計。
+                                            </p>
+                                        </div>
                                         <div id="trend-segmentation-summary" class="grid md:grid-cols-3 gap-4 text-sm" style="color: var(--muted-foreground);">
                                             <p class="text-xs text-center col-span-full py-4" style="color: var(--muted-foreground);">執行回測後將顯示各趨勢區間的報酬與統計。</p>
                                         </div>

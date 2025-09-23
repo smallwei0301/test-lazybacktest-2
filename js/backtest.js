@@ -15,10 +15,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+document.addEventListener('DOMContentLoaded', initializeTrendSensitivityControl);
+
 const EQUITY_TREND_DEFAULTS = {
     lookback: 20,
     minTrendStrength: 0.015,
     volatilityMultiplier: 0.75,
+};
+
+const TREND_SENSITIVITY_SETTINGS = {
+    min: 0,
+    max: 10,
+    default: 5,
+    fineScale: 1.4,
+    coarseScale: 0.45,
 };
 
 const TREND_SEGMENT_META = {
@@ -131,6 +141,9 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 let lastTrendSegmentation = null;
+let lastTrendInput = null;
+let currentTrendSensitivity = TREND_SENSITIVITY_SETTINGS.default;
+let stockChart = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
@@ -655,6 +668,7 @@ function clearPreviousResults() {
     lastPositionStates = [];
     lastDatasetDiagnostics = null;
     lastTrendSegmentation = null;
+    lastTrendInput = null;
 
     renderTrendSummary(null);
 
@@ -930,6 +944,112 @@ function calculateStandardDeviation(values) {
     const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
     const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
     return Math.sqrt(Math.max(variance, 0));
+}
+
+function clampNumber(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    if (min > max) return min;
+    return Math.min(Math.max(value, min), max);
+}
+
+function resolveTrendSensitivityConfig(value) {
+    const settings = TREND_SENSITIVITY_SETTINGS;
+    const clamped = clampNumber(value, settings.min, settings.max);
+    const range = settings.max - settings.min;
+    const ratio = range > 0 ? (clamped - settings.min) / range : 0;
+    const thresholdScale = settings.fineScale - (settings.fineScale - settings.coarseScale) * ratio;
+    return {
+        lookback: EQUITY_TREND_DEFAULTS.lookback,
+        minTrendStrength: EQUITY_TREND_DEFAULTS.minTrendStrength * thresholdScale,
+        volatilityMultiplier: EQUITY_TREND_DEFAULTS.volatilityMultiplier * thresholdScale,
+        sliderValue: clamped,
+        thresholdScale,
+    };
+}
+
+function formatTrendSensitivityLabel(config) {
+    if (!config) return '';
+    const value = Number.isFinite(config.sliderValue) ? config.sliderValue : TREND_SENSITIVITY_SETTINGS.default;
+    const scaleText = Number.isFinite(config.thresholdScale) ? config.thresholdScale.toFixed(2) : '1.00';
+    const range = TREND_SENSITIVITY_SETTINGS.max - TREND_SENSITIVITY_SETTINGS.min;
+    const ratio = range > 0 ? (value - TREND_SENSITIVITY_SETTINGS.min) / range : 0;
+    let descriptor = '標準';
+    if (ratio <= 0.2) {
+        descriptor = '偏細';
+    } else if (ratio >= 0.8) {
+        descriptor = '偏粗';
+    }
+    return `${Math.round(value)} ｜ 門檻 ×${scaleText}（${descriptor}）`;
+}
+
+function updateTrendSensitivityLabel(config) {
+    const label = document.getElementById('trend-sensitivity-label');
+    if (!label) return;
+    const resolved = typeof config === 'number'
+        ? resolveTrendSensitivityConfig(config)
+        : config;
+    const text = formatTrendSensitivityLabel(resolved);
+    if (text) {
+        label.textContent = text;
+    }
+    const slider = document.getElementById('trend-sensitivity-slider');
+    if (slider && resolved && Number.isFinite(resolved.sliderValue)) {
+        const sliderValue = Math.round(resolved.sliderValue);
+        if (slider.value !== String(sliderValue)) {
+            slider.value = String(sliderValue);
+        }
+    }
+}
+
+function applyTrendSegmentationToChart(trendAnalysis) {
+    if (!stockChart || !stockChart.options || !stockChart.options.plugins) return;
+    const pluginOptions = stockChart.options.plugins[EQUITY_TREND_PLUGIN_ID] || {};
+    pluginOptions.segments = Array.isArray(trendAnalysis?.segments) ? trendAnalysis.segments : [];
+    pluginOptions.colorMap = TREND_BACKGROUND_COLORS;
+    if (typeof pluginOptions.datasetIndex !== 'number') {
+        const datasets = Array.isArray(stockChart.data?.datasets) ? stockChart.data.datasets : [];
+        pluginOptions.datasetIndex = datasets.length > 1 ? 1 : 0;
+    }
+    stockChart.options.plugins[EQUITY_TREND_PLUGIN_ID] = pluginOptions;
+    stockChart.update('none');
+}
+
+function applyTrendSensitivity(rawValue, options = {}) {
+    const config = resolveTrendSensitivityConfig(rawValue);
+    currentTrendSensitivity = config.sliderValue;
+    updateTrendSensitivityLabel(config);
+
+    if (options.recompute === false) {
+        return config;
+    }
+
+    if (!lastTrendInput || !Array.isArray(lastTrendInput.strategyReturns) || lastTrendInput.strategyReturns.length === 0) {
+        return config;
+    }
+
+    const trendAnalysis = computeEquityTrendSegments(
+        lastTrendInput.dates,
+        lastTrendInput.strategyReturns,
+        config,
+    );
+    lastTrendSegmentation = trendAnalysis;
+    applyTrendSegmentationToChart(trendAnalysis);
+    renderTrendSummary(trendAnalysis);
+    return config;
+}
+
+function initializeTrendSensitivityControl() {
+    const slider = document.getElementById('trend-sensitivity-slider');
+    if (!slider) return;
+    slider.min = TREND_SENSITIVITY_SETTINGS.min;
+    slider.max = TREND_SENSITIVITY_SETTINGS.max;
+    slider.step = 1;
+    slider.value = currentTrendSensitivity;
+    applyTrendSensitivity(currentTrendSensitivity, { recompute: false });
+    slider.addEventListener('input', (event) => {
+        const value = Number(event.target.value);
+        applyTrendSensitivity(Number.isFinite(value) ? value : TREND_SENSITIVITY_SETTINGS.default);
+    });
 }
 
 function formatTrendPercentage(value, fractionDigits = 2, options = {}) {
@@ -2185,9 +2305,12 @@ function renderChart(result) {
     const stratData = result.strategyReturns.map(v => check(v) ? parseFloat(v) : null);
     const bhData = result.buyHoldReturns.map(v => check(v) ? parseFloat(v) : null);
 
-    const trendAnalysis = computeEquityTrendSegments(dates, stratData, EQUITY_TREND_DEFAULTS);
+    lastTrendInput = { dates, strategyReturns: stratData };
+    const sensitivityConfig = resolveTrendSensitivityConfig(currentTrendSensitivity);
+    const trendAnalysis = computeEquityTrendSegments(dates, stratData, sensitivityConfig);
     lastTrendSegmentation = trendAnalysis;
     ensureEquityTrendPluginRegistered();
+    updateTrendSensitivityLabel(sensitivityConfig);
 
     const datasets = [
         { label: '買入並持有 %', data: bhData, borderColor: '#6b7280', borderWidth: 1.5, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true },
@@ -2290,6 +2413,7 @@ function renderChart(result) {
         }
     });
 
+    applyTrendSegmentationToChart(trendAnalysis);
     renderTrendSummary(trendAnalysis);
 
     // 自定義拖曳事件處理，支援左鍵和右鍵
