@@ -25,7 +25,3 @@
   to = "/.netlify/functions/us-proxy"
   status = 200
   force = true
-
-[[scheduled_functions]]
-  name = "cache-warmer"
-  cron = "0 18 * * *"

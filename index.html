@@ -397,14 +397,17 @@
 
                             <!-- Settings Cards -->
                             <div class="space-y-6">
-                                <!-- Developer Area Card -->
-                                <div class="card" id="developerAreaCard">
+                                <!-- Basic Settings Card -->
+                                <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="wrench" class="lucide text-primary" style="color: var(--primary);"></i>
-                                            開發者區域
+                                            <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <span class="tooltip">
+                                                基本設定
+                                                <span class="tooltiptext">更改代碼或日期範圍會觸發重新獲取數據。</span>
+                                            </span>
                                         </h3>
-                                        <p class="card-description">診斷資料流程、測試來源與 Blob 用量</p>
+                                        <p class="card-description">設定股票代碼、時間範圍和初始資金</p>
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div class="space-y-2" id="dataSourceTesterContainer">

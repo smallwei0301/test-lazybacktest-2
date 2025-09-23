@@ -1,4 +1,4 @@
-
+﻿
 importScripts('shared-lookback.js');
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -31,6 +31,13 @@ function differenceInDays(laterDate, earlierDate) {
   if (!(earlierDate instanceof Date) || Number.isNaN(earlierDate.getTime())) return null;
   const diff = laterDate.getTime() - earlierDate.getTime();
   return Math.floor(diff / DAY_MS);
+}
+
+function safeParseISODate(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 function getPrimaryForceSource(marketKey, adjusted) {
@@ -1789,9 +1796,114 @@ function summariseSourceDescriptors(parsed) {
   return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
 }
 
+function parseSourceLabelDescriptor(label) {
+  const original = (label || '').toString().trim();
+  if (!original) return null;
+  let base = original;
+  let extra = null;
+  const match = original.match(/\(([^)]+)\)\s*$/);
+  if (match) {
+    extra = match[1].trim();
+    base = original.slice(0, match.index).trim() || base;
+  }
+  const normalizedAll = original.toLowerCase();
+  const typeOrder = [
+    { pattern: /(瀏覽器|browser|session|local|記憶體|memory)/, type: '本地快取' },
+    { pattern: /(netlify|blob)/, type: 'Blob 快取' },
+    { pattern: /(proxy)/, type: 'Proxy 快取' },
+    { pattern: /(cache|快取)/, type: 'Proxy 快取' },
+  ];
+  let resolvedType = null;
+  for (let i = 0; i < typeOrder.length && !resolvedType; i += 1) {
+    if (typeOrder[i].pattern.test(normalizedAll)) {
+      resolvedType = typeOrder[i].type;
+    }
+  }
+  if (!resolvedType && extra && /(cache|快取)/i.test(extra)) {
+    resolvedType = 'Proxy 快取';
+  }
+  return {
+    base: base || original,
+    extra,
+    type: resolvedType,
+    original,
+  };
+}
+
+function decorateSourceBase(descriptor) {
+  if (!descriptor) return '';
+  const base = descriptor.base || descriptor.original || '';
+  if (!base) return '';
+  if (descriptor.extra && !/^(?:cache|快取)$/i.test(descriptor.extra)) {
+    return `${base}｜${descriptor.extra}`;
+  }
+  return base;
+}
+
+function summariseSourceDescriptors(parsed) {
+  if (!Array.isArray(parsed) || parsed.length === 0) return '';
+  const baseOrder = [];
+  const baseSeen = new Set();
+  parsed.forEach((item) => {
+    const decorated = decorateSourceBase(item);
+    if (decorated && !baseSeen.has(decorated)) {
+      baseSeen.add(decorated);
+      baseOrder.push(decorated);
+    }
+  });
+
+  const remoteOrder = [];
+  const remoteSeen = new Set();
+  parsed.forEach((item) => {
+    const decorated = decorateSourceBase(item);
+    if (!decorated || remoteSeen.has(decorated)) return;
+    const normalizedBase = (item.base || '').toLowerCase();
+    const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+    const isBlob = /(netlify|blob)/.test(normalizedBase);
+    const isProxy = item.type === 'Proxy 快取';
+    if (!isLocal && (!item.type || isProxy) && !isBlob) {
+      remoteSeen.add(decorated);
+      remoteOrder.push(decorated);
+    }
+  });
+
+  const suffixMap = new Map();
+  parsed.forEach((item) => {
+    if (!item.type) return;
+    let descriptor = item.type;
+    if (item.extra && !/^(?:cache|快取)$/i.test(item.extra)) {
+      descriptor = `${descriptor}｜${item.extra}`;
+    }
+    if (!suffixMap.has(descriptor)) {
+      suffixMap.set(descriptor, true);
+    }
+  });
+
+  const primaryOrder = remoteOrder.length > 0 ? remoteOrder : baseOrder;
+  if (primaryOrder.length === 0) return '';
+  const suffixes = Array.from(suffixMap.keys());
+  if (suffixes.length === 0) {
+    return primaryOrder.join(' + ');
+  }
+  return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
+}
+
 function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
   const entries =
     flags instanceof Set ? Array.from(flags) : Array.isArray(flags) ? flags : [];
+  const parsed = entries
+    .map((label) => parseSourceLabelDescriptor(label))
+    .filter((item) => item && (item.base || item.original));
+
+  const hasRemote = parsed.some((item) => {
+    const normalizedBase = (item.base || '').toLowerCase();
+    const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+    const isBlob = /(netlify|blob)/.test(normalizedBase);
+    const isProxy = item.type === 'Proxy 快取';
+    return !isLocal && (!item.type || isProxy) && !isBlob;
+  });
+
+  const fallbackLabel =
   const parsed = entries
     .map((label) => parseSourceLabelDescriptor(label))
     .filter((item) => item && (item.base || item.original));
@@ -1818,7 +1930,14 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
   const combined = parsed.slice();
   if (!hasRemote && fallbackDescriptor) {
     combined.push(fallbackDescriptor);
+
+  const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
+  const combined = parsed.slice();
+  if (!hasRemote && fallbackDescriptor) {
+    combined.push(fallbackDescriptor);
   }
+  const summary = summariseSourceDescriptors(combined);
+  return summary || (fallbackDescriptor ? summariseSourceDescriptors([fallbackDescriptor]) : '');
   const summary = summariseSourceDescriptors(combined);
   return summary || (fallbackDescriptor ? summariseSourceDescriptors([fallbackDescriptor]) : '');
 }
@@ -2012,12 +2131,14 @@ async function tryFetchRangeFromBlob({
   }
 
   const rangeFetchInfo = {
-    provider: "netlify-blob-range",
+    provider: "netlify-year-range",
     market: marketKey,
     status: "pending",
     cacheHit: false,
     years: [],
+    segments: [],
     yearKeys: [],
+    segmentKeys: [],
     readOps: 0,
     writeOps: 0,
   };
@@ -2114,16 +2235,79 @@ async function tryFetchRangeFromBlob({
   const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
   const blobMeta = payload?.meta || {};
+  const segmentKeys = Array.isArray(blobMeta.segmentKeys)
+    ? blobMeta.segmentKeys
+    : Array.isArray(blobMeta.yearKeys)
+      ? blobMeta.yearKeys
+      : [];
+  const hitSegmentKeys = Array.isArray(blobMeta.hitSegmentKeys)
+    ? blobMeta.hitSegmentKeys
+    : Array.isArray(blobMeta.hitYearKeys)
+      ? blobMeta.hitYearKeys
+      : [];
+  const missSegmentKeys = Array.isArray(blobMeta.missSegmentKeys)
+    ? blobMeta.missSegmentKeys
+    : Array.isArray(blobMeta.missYearKeys)
+      ? blobMeta.missYearKeys
+      : [];
+  const primedSegmentKeys = Array.isArray(blobMeta.primedSegmentKeys)
+    ? blobMeta.primedSegmentKeys
+    : Array.isArray(blobMeta.primedYearKeys)
+      ? blobMeta.primedYearKeys
+      : [];
   rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
-  rangeFetchInfo.yearKeys = Array.isArray(blobMeta.yearKeys) ? blobMeta.yearKeys : [];
+  rangeFetchInfo.segments = Array.isArray(blobMeta.segments)
+    ? blobMeta.segments
+    : [];
+  const canonicalRangeMeta =
+    blobMeta && typeof blobMeta.canonicalRange === "object"
+      ? blobMeta.canonicalRange
+      : null;
+  const canonicalStartISO =
+    (canonicalRangeMeta && typeof canonicalRangeMeta.start === "string"
+      ? canonicalRangeMeta.start
+      : null) ||
+    (typeof blobMeta.canonicalStart === "string" ? blobMeta.canonicalStart : null) ||
+    (rangeFetchInfo.segments.length > 0
+      ? `${rangeFetchInfo.segments[0].startYear}-01-01`
+      : startDate);
+  const canonicalEndISO =
+    (canonicalRangeMeta && typeof canonicalRangeMeta.end === "string"
+      ? canonicalRangeMeta.end
+      : null) ||
+    (typeof blobMeta.canonicalEnd === "string" ? blobMeta.canonicalEnd : null) ||
+    (rangeFetchInfo.segments.length > 0
+      ? `${
+          rangeFetchInfo.segments[rangeFetchInfo.segments.length - 1].endYear
+        }-12-31`
+      : endDate);
+  const canonicalStartObj = safeParseISODate(canonicalStartISO) || startDateObj;
+  const canonicalEndObj = safeParseISODate(canonicalEndISO) || endDateObj;
+  const canonicalSourceRows =
+    Array.isArray(payload.canonicalAaData) && payload.canonicalAaData.length > 0
+      ? payload.canonicalAaData
+      : payload.aaData;
+  const canonicalNormalizedRows = canonicalSourceRows
+    .map((row) =>
+      normalizeProxyRow(row, marketKey === "TPEX", canonicalStartObj, canonicalEndObj),
+    )
+    .filter(Boolean);
+  const canonicalDeduped =
+    canonicalNormalizedRows.length > 0 ? dedupeAndSortData(canonicalNormalizedRows) : deduped;
+  rangeFetchInfo.yearKeys = segmentKeys;
+  rangeFetchInfo.segmentKeys = segmentKeys;
   rangeFetchInfo.readOps = Number(blobMeta.readOps) || 0;
   rangeFetchInfo.writeOps = Number(blobMeta.writeOps) || 0;
-  rangeFetchInfo.cacheHit = Number(blobMeta.cacheMisses || 0) === 0;
+  const cacheMissCount = Number(blobMeta.cacheMisses);
+  rangeFetchInfo.cacheHit =
+    missSegmentKeys.length === 0 && (!Number.isFinite(cacheMissCount) || cacheMissCount === 0);
   rangeFetchInfo.rowCount = deduped.length;
   rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
   rangeFetchInfo.durationMs = Date.now() - startedAt;
   rangeFetchInfo.dataSource = payload?.dataSource || null;
+  rangeFetchInfo.canonicalStart = canonicalStartISO;
+  rangeFetchInfo.canonicalEnd = canonicalEndISO;
 
   const startGapExceeded =
     Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
@@ -2149,8 +2333,8 @@ async function tryFetchRangeFromBlob({
     dataSourceFlags.add(payload.dataSource);
   }
   const blobSourceLabel = rangeFetchInfo.cacheHit
-    ? "Netlify 年度快取 (Blob 命中)"
-    : "Netlify 年度快取 (Blob 補抓)";
+    ? "Netlify 五年快取 (Blob 命中)"
+    : "Netlify 五年快取 (Blob 補抓)";
   dataSourceFlags.add(blobSourceLabel);
 
   const defaultRemoteLabel =
@@ -2181,28 +2365,28 @@ async function tryFetchRangeFromBlob({
   }
   const blobOperations = [];
   const readMap = new Map();
-  if (Array.isArray(rangeFetchInfo.yearKeys)) {
-    rangeFetchInfo.yearKeys.forEach((yearKey) => {
-      readMap.set(yearKey, {
+  if (Array.isArray(rangeFetchInfo.segmentKeys)) {
+    rangeFetchInfo.segmentKeys.forEach((segmentKey) => {
+      readMap.set(segmentKey, {
         action: "read",
-        key: yearKey,
+        key: segmentKey,
         stockNo,
         market: marketKey,
         cacheHit: true,
         count: 1,
-        source: "netlify-year-cache",
+      source: "netlify-year-cache",
       });
     });
   }
-  if (Array.isArray(blobMeta.hitYearKeys)) {
-    blobMeta.hitYearKeys.forEach((key) => {
+  if (Array.isArray(hitSegmentKeys)) {
+    hitSegmentKeys.forEach((key) => {
       if (readMap.has(key)) {
         readMap.get(key).cacheHit = true;
       }
     });
   }
-  if (Array.isArray(blobMeta.missYearKeys)) {
-    blobMeta.missYearKeys.forEach((key) => {
+  if (Array.isArray(missSegmentKeys)) {
+    missSegmentKeys.forEach((key) => {
       if (readMap.has(key)) {
         readMap.get(key).cacheHit = false;
       } else {
@@ -2219,8 +2403,8 @@ async function tryFetchRangeFromBlob({
     });
   }
   blobOperations.push(...readMap.values());
-  if (Array.isArray(blobMeta.primedYearKeys)) {
-    blobMeta.primedYearKeys.forEach((key) => {
+  if (Array.isArray(primedSegmentKeys)) {
+    primedSegmentKeys.forEach((key) => {
       blobOperations.push({
         action: "write",
         key,
@@ -2237,16 +2421,25 @@ async function tryFetchRangeFromBlob({
   fetchDiagnostics.blob = {
     provider: "netlify-year-cache",
     years: rangeFetchInfo.years,
+    segments: rangeFetchInfo.segments,
     yearKeys: rangeFetchInfo.yearKeys,
+    segmentKeys: rangeFetchInfo.segmentKeys,
     cacheHits: Number(blobMeta.cacheHits) || 0,
     cacheMisses: Number(blobMeta.cacheMisses) || 0,
     readOps: rangeFetchInfo.readOps,
     writeOps: rangeFetchInfo.writeOps,
+    hitSegmentKeys,
+    missSegmentKeys,
+    primedSegmentKeys,
     operations: blobOperations,
+    canonicalRange: {
+      start: canonicalStartISO,
+      end: canonicalEndISO,
+    },
   };
 
   const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
-    source: "netlify-blob-range",
+    source: "netlify-year-range",
     requestedRange: { start: startDate, end: endDate },
   });
   recordYearSupersetSlices({

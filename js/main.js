@@ -1561,16 +1561,10 @@ const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
 function buildCacheKey(cur) {
     if (!cur) return '';
     const market = (cur.market || cur.marketType || 'TWSE').toUpperCase();
-    const stockNo = (cur.stockNo || '').toString().toUpperCase();
     const rawMode = (cur.priceMode || (cur.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const priceModeKey = rawMode === 'adjusted' ? 'ADJ' : 'RAW';
     const splitFlag = cur.splitAdjustment ? 'SPLIT' : 'NOSPLIT';
-    const dataStart = cur.dataStartDate || cur.startDate || cur.effectiveStartDate || 'NA';
-    const effectiveStart = cur.effectiveStartDate || cur.startDate || 'NA';
-    const lookbackKey = Number.isFinite(cur.lookbackDays)
-        ? `LB${Math.round(cur.lookbackDays)}`
-        : 'LB-';
-    return `${market}|${stockNo}|${priceModeKey}|${splitFlag}|${dataStart}|${effectiveStart}|${lookbackKey}`;
+    return `${market}|${cur.stockNo}|${priceModeKey}|${splitFlag}`;
 }
 
 function parseISOToUTC(iso) {
@@ -1651,118 +1645,32 @@ function extractRangeData(data, startISO, endISO) {
     return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
 }
 
-function parseSourceLabelDescriptor(label) {
-    const original = (label || '').toString().trim();
-    if (!original) return null;
-    let base = original;
-    let extra = null;
-    const match = original.match(/\(([^)]+)\)\s*$/);
-    if (match) {
-        extra = match[1].trim();
-        base = original.slice(0, match.index).trim() || base;
-    }
-    const normalizedAll = original.toLowerCase();
-    const typeOrder = [
-        { pattern: /(瀏覽器|browser|session|local|記憶體|memory)/, type: '本地快取' },
-        { pattern: /(netlify|blob)/, type: 'Blob 快取' },
-        { pattern: /(proxy)/, type: 'Proxy 快取' },
-        { pattern: /(cache|快取)/, type: 'Proxy 快取' },
-    ];
-    let resolvedType = null;
-    for (let i = 0; i < typeOrder.length && !resolvedType; i += 1) {
-        if (typeOrder[i].pattern.test(normalizedAll)) {
-            resolvedType = typeOrder[i].type;
-        }
-    }
-    if (!resolvedType && extra && /(cache|快取)/i.test(extra)) {
-        resolvedType = 'Proxy 快取';
-    }
-    return {
-        base: base || original,
-        extra,
-        type: resolvedType,
-        original,
-    };
-}
-
-function decorateSourceBase(descriptor) {
-    if (!descriptor) return '';
-    const base = descriptor.base || descriptor.original || '';
-    if (!base) return '';
-    if (descriptor.extra && !/^(?:cache|快取)$/i.test(descriptor.extra)) {
-        return `${base}｜${descriptor.extra}`;
-    }
-    return base;
-}
-
 function summariseSourceLabels(labels) {
     if (!Array.isArray(labels) || labels.length === 0) return '';
-    const parsed = labels
-        .map((label) => parseSourceLabelDescriptor(label))
-        .filter((item) => item && (item.base || item.original));
-    if (parsed.length === 0) return '';
-
-    const baseOrder = [];
-    const baseSeen = new Set();
-    parsed.forEach((item) => {
-        const decorated = decorateSourceBase(item);
-        if (decorated && !baseSeen.has(decorated)) {
-            baseSeen.add(decorated);
-            baseOrder.push(decorated);
-        }
-    });
-
-    const remoteOrder = [];
-    const remoteSeen = new Set();
-    parsed.forEach((item) => {
-        const decorated = decorateSourceBase(item);
-        if (!decorated || remoteSeen.has(decorated)) return;
-        const normalizedBase = (item.base || '').toLowerCase();
-        const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
-        const isBlob = /(netlify|blob)/.test(normalizedBase);
-        const isProxy = item.type === 'Proxy 快取';
-        if (!isLocal && (!item.type || isProxy) && !isBlob) {
-            remoteSeen.add(decorated);
-            remoteOrder.push(decorated);
-        }
-    });
-
-    const suffixMap = new Map();
-    parsed.forEach((item) => {
-        if (!item.type) return;
-        let descriptor = item.type;
-        if (item.extra && !/^(?:cache|快取)$/i.test(item.extra)) {
-            descriptor = `${descriptor}｜${item.extra}`;
-        }
-        if (!suffixMap.has(descriptor)) {
-            suffixMap.set(descriptor, true);
-        }
-    });
-
-    const primaryOrder = remoteOrder.length > 0 ? remoteOrder : baseOrder;
-    if (primaryOrder.length === 0) return '';
-
-    const suffixes = Array.from(suffixMap.keys());
-    if (suffixes.length === 0) {
-        return primaryOrder.join(' + ');
+    const unique = Array.from(new Set(labels.filter((label) => !!label)));
+    if (unique.length === 0) return '';
+    if (unique.length === 1) return unique[0];
+    const hasCache = unique.some((label) => /快取|cache/i.test(label));
+    const hasRemote = unique.some((label) => !/快取|cache/i.test(label));
+    if (hasRemote && hasCache) {
+        const primary = unique.find((label) => !/快取|cache/i.test(label)) || unique[0];
+        return `${primary} (部分快取)`;
     }
-    return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
+    if (hasCache) {
+        return `${unique[0]} (快取)`;
+    }
+    return unique.join(' / ');
+
 }
 
 function needsDataFetch(cur) {
-    if (!cur || !cur.stockNo || !(cur.startDate || cur.dataStartDate) || !cur.endDate) return true;
+    if (!cur || !cur.stockNo || !cur.startDate || !cur.endDate) return true;
     const key = buildCacheKey(cur);
 
-    const normalizedMarket = typeof normalizeMarketKeyForCache === 'function'
-        ? normalizeMarketKeyForCache(cur.market || cur.marketType || currentMarket || 'TWSE')
-        : normalizeMarketValue(cur.market || cur.marketType || currentMarket || 'TWSE');
-    const entry = typeof ensureDatasetCacheEntryFresh === 'function'
-        ? ensureDatasetCacheEntryFresh(key, cachedDataStore.get(key), normalizedMarket)
-        : cachedDataStore.get(key);
+    const entry = cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
-    const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    return !coverageCoversRange(entry.coverage, { start: cur.startDate, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
@@ -1794,24 +1702,12 @@ function getSuggestion() {
     try {
         const params = getBacktestParams();
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        let lookbackDecision = null;
-        if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
-            lookbackDecision = sharedUtils.resolveLookbackDays(params, { minBars: 90, multiplier: 2 });
-        }
-        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        const maxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
-        const maxPeriod = Number.isFinite(lookbackDecision?.maxIndicatorPeriod)
-            ? lookbackDecision.maxIndicatorPeriod
-            : fallbackMaxPeriod;
-        let lookbackDays = Number.isFinite(lookbackDecision?.lookbackDays)
-            ? lookbackDecision.lookbackDays
-            : null;
-        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
-            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-                ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
-                : Math.max(90, maxPeriod * 2);
-        }
+        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxPeriod * 2);
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {
