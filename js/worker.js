@@ -7951,7 +7951,7 @@ function runStrategy(data, params, options = {}) {
         );
       }
     }
-    return {
+    const result = {
 
       stockNo: params.stockNo,
       initialCapital: initialCapital,

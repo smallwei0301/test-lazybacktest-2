@@ -1,3 +1,20 @@
+# 2025-10-01 — Patch LB-PERFORMANCE-TABS-20251001A
+- **Issue recap**: 使用者回報回測完成後僅摘要分頁有內容，期間績效分頁仍停留在「請先執行回測」的占位訊息，分段績效表無法讀取。
+- **Fix**: 新增 `renderPerformanceTable` 函式統一渲染分段績效，於 `handleBacktestResult` 與 `activateTab('performance')` 觸發時更新表格，並補強資料不足時的提醒訊息。
+- **Diagnostics**: 透過模擬呼叫 `renderPerformanceTable(lastSubPeriodResults)` 檢查 DOM 內容，確認回傳的期間列表、報酬對比與 Sharpe/Sortino/最大回撤欄位皆正確呈現，並顯示統計區間摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((p)=>{const code=fs.readFileSync(p,'utf8');new vm.Script(code,{filename:p});});console.log('scripts compile');NODE`
+
+# 2025-09-30 — Patch LB-TODAY-ACTION-20250930A
+- **Issue recap**: 今日建議卡片出現「回測資料不足以推導今日建議」，主因是 `runStrategy` 在回傳主流程物件時提前 `return`，導致 `finalEvaluation` 永遠為空值，評估函式無法接續產生今日操作。
+- **Fix**: 將 `runStrategy` 的輸出改為先建立 `result` 物件，再於 `captureFinalState` 分支補上 `finalEvaluation`，最後統一 `return result`，確保策略結果攜帶最新倉位與價格資訊供今日建議與測試卡片使用。
+- **Diagnostics**: 以含多空進出場的策略重跑回測並檢視 Web Worker console，確認 `finalEvaluation` 內含日期、倉位、股數與策略報酬，同時 UI 今日建議卡片可正確顯示操作建議與資料延伸天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((p)=>{const code=fs.readFileSync(p,'utf8');new vm.Script(code,{filename:p});});console.log('scripts compile');NODE`
+
+# 2025-09-29 — Patch LB-STRATEGY-STATUS-20250929A
+- **Issue recap**: 回測畫面顯示 `STRATEGY_STATUS_VERSION is not defined`，導致策略速報卡片無法載入版本碼並中斷後續戰況評分公式。
+- **Fix**: 建立 `STRATEGY_STATUS_VERSION` 常數並標記版本代碼，確保 `resetStrategyStatusCard` 與 `updateStrategyStatusCard` 能順利渲染預設文案與差距分析結果。
+- **Diagnostics**: 確認 DOMContentLoaded 仍會呼叫 `resetStrategyStatusCard('idle')`，並檢視卡片版本欄位可顯示最新代碼，公式邏輯保持既有差距與穩定度條列輸出。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
 
 # 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
 - **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。

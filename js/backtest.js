@@ -5,6 +5,8 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-STRATEGY-STATUS-20250929A
+// Patch Tag: LB-PERFORMANCE-TABS-20251001A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -283,6 +285,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250929A';
 
 const TREND_ANALYSIS_VERSION = 'LB-TREND-REGRESSION-20250903A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
@@ -3947,6 +3950,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayBacktestResult(result);
         updateStrategyStatusCard(result);
         displayTradeResults(result);
+        renderPerformanceTable(lastSubPeriodResults);
         renderChart(result);
         updateChartTrendOverlay();
         activateTab('summary');
@@ -4788,10 +4792,189 @@ const formatMACDParams = (macdValues) => {
         return '<div class="mt-1 text-xs" style="color: #dc2626;">(MACD值格式錯誤)</div>'; 
     } 
 };
-function displayTradeResults(result) { 
-    console.log("[Main] displayTradeResults called"); 
+function renderPerformanceTable(subPeriodResults) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) {
+        console.error('[Main] performance-table-container not found');
+        return;
+    }
+
+    if (!lastOverallResult) {
+        container.innerHTML = `<p class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>`;
+        return;
+    }
+
+    const resolvedSubPeriods =
+        (subPeriodResults && typeof subPeriodResults === 'object' && !Array.isArray(subPeriodResults))
+            ? subPeriodResults
+            : (lastSubPeriodResults && typeof lastSubPeriodResults === 'object' && !Array.isArray(lastSubPeriodResults))
+                ? lastSubPeriodResults
+                : (lastOverallResult.subPeriodResults && typeof lastOverallResult.subPeriodResults === 'object'
+                    ? lastOverallResult.subPeriodResults
+                    : null);
+
+    if (!resolvedSubPeriods || Object.keys(resolvedSubPeriods).length === 0) {
+        container.innerHTML = `
+            <div class="p-6 text-xs text-center" style="color: var(--muted-foreground);">
+                尚未取得可用的分段績效資料，請確認回測期間至少涵蓋一個月以上的有效交易日。
+            </div>`;
+        return;
+    }
+
+    const periodOrder = {
+        '1M': 1,
+        '6M': 2,
+        '1Y': 3,
+        '2Y': 4,
+        '3Y': 5,
+        '4Y': 6,
+        '5Y': 7,
+        '6Y': 8,
+        '7Y': 9,
+        '8Y': 10,
+        '9Y': 11,
+        '10Y': 12,
+    };
+
+    const sortedPeriods = Object.keys(resolvedSubPeriods)
+        .sort((a, b) => (periodOrder[a] || 999) - (periodOrder[b] || 999));
+
+    const formatPercentCell = (value, options = {}) => {
+        if (!Number.isFinite(value)) {
+            return {
+                text: options.fallbackText || '—',
+                className: 'text-muted-foreground',
+            };
+        }
+        const digits = Number.isFinite(options.digits) ? options.digits : 2;
+        const raw = options.absolute ? Math.abs(value) : value;
+        const magnitude = Math.abs(raw);
+        const prefix = options.signed ? (value > 0 ? '+' : value < 0 ? '-' : '') : '';
+        const formatted = `${prefix}${magnitude.toFixed(digits)}%`;
+        let className = 'text-foreground font-semibold';
+        if (options.risk) {
+            className = 'text-rose-600 font-semibold';
+        } else if (value > 0) {
+            className = 'text-emerald-600 font-semibold';
+        } else if (value < 0) {
+            className = 'text-rose-600 font-semibold';
+        }
+        return { text: formatted, className };
+    };
+
+    const formatRatioCell = (value) => {
+        if (value === Infinity) {
+            return { text: '∞', className: 'text-emerald-600 font-semibold' };
+        }
+        if (!Number.isFinite(value)) {
+            return { text: '—', className: 'text-muted-foreground' };
+        }
+        const className = value >= 0 ? 'text-foreground font-semibold' : 'text-rose-600 font-semibold';
+        return { text: value.toFixed(2), className };
+    };
+
+    const resolveFinalValue = (series) => {
+        if (!Array.isArray(series) || series.length === 0) return null;
+        for (let i = series.length - 1; i >= 0; i -= 1) {
+            const candidate = series[i];
+            if (Number.isFinite(candidate)) return candidate;
+        }
+        return null;
+    };
+
+    const rowsHtml = sortedPeriods.map((period) => {
+        const data = resolvedSubPeriods[period];
+        const label = escapeHtml(period);
+        if (!data || typeof data !== 'object') {
+            return `
+                <tr class="border-b" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                    <td class="px-4 py-3 text-xs font-medium" style="color: var(--muted-foreground);">${label}</td>
+                    <td class="px-4 py-3 text-xs text-muted-foreground italic" colspan="5">
+                        分段樣本不足或期間尚未涵蓋完整交易資料。
+                    </td>
+                </tr>`;
+        }
+
+        const strategyReturn = formatPercentCell(data.totalReturn, { signed: true });
+        const buyHoldReturn = formatPercentCell(data.totalBuyHoldReturn, { signed: true });
+        const sharpe = formatRatioCell(data.sharpeRatio);
+        const sortino = formatRatioCell(data.sortinoRatio);
+        const maxDD = formatPercentCell(data.maxDrawdown, { digits: 2, fallbackText: '—', risk: true });
+
+        return `
+            <tr class="border-b transition-colors" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                <td class="px-4 py-3 text-xs font-medium" style="color: var(--muted-foreground);">${label}</td>
+                <td class="px-4 py-3 text-xs ${strategyReturn.className}">${strategyReturn.text}</td>
+                <td class="px-4 py-3 text-xs ${buyHoldReturn.className}">${buyHoldReturn.text}</td>
+                <td class="px-4 py-3 text-xs ${sharpe.className}">${sharpe.text}</td>
+                <td class="px-4 py-3 text-xs ${sortino.className}">${sortino.text}</td>
+                <td class="px-4 py-3 text-xs ${maxDD.className}">${maxDD.text}</td>
+            </tr>`;
+    }).join('');
+
+    const overallStrategyReturn = formatPercentCell(lastOverallResult.returnRate, { signed: true });
+    const overallBuyHold = formatPercentCell(resolveFinalValue(lastOverallResult.buyHoldReturns), { signed: true });
+    const overallSharpe = formatRatioCell(lastOverallResult.sharpeRatio);
+    const overallSortino = formatRatioCell(lastOverallResult.sortinoRatio);
+    const overallMaxDD = formatPercentCell(lastOverallResult.maxDrawdown, { digits: 2, fallbackText: '—', risk: true });
+
+    const overallRow = `
+        <tr class="bg-muted/60 border-t" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+            <td class="px-4 py-3 text-xs font-semibold" style="color: var(--foreground);">總計</td>
+            <td class="px-4 py-3 text-xs ${overallStrategyReturn.className}">${overallStrategyReturn.text}</td>
+            <td class="px-4 py-3 text-xs ${overallBuyHold.className}">${overallBuyHold.text}</td>
+            <td class="px-4 py-3 text-xs ${overallSharpe.className}">${overallSharpe.text}</td>
+            <td class="px-4 py-3 text-xs ${overallSortino.className}">${overallSortino.text}</td>
+            <td class="px-4 py-3 text-xs ${overallMaxDD.className}">${overallMaxDD.text}</td>
+        </tr>`;
+
+    const summaryTextParts = [];
+    const firstDate = Array.isArray(lastOverallResult.dates) && lastOverallResult.dates.length > 0
+        ? lastOverallResult.dates[0]
+        : null;
+    const lastDate = Array.isArray(lastOverallResult.dates) && lastOverallResult.dates.length > 0
+        ? lastOverallResult.dates[lastOverallResult.dates.length - 1]
+        : null;
+    if (firstDate && lastDate) {
+        summaryTextParts.push(`統計區間 ${firstDate} ~ ${lastDate}`);
+    }
+    summaryTextParts.push(`共 ${sortedPeriods.length} 組期間指標`);
+
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                    <h4 class="text-sm font-semibold" style="color: var(--foreground);">分段績效追蹤</h4>
+                    <p class="text-xs" style="color: var(--muted-foreground);">${summaryTextParts.join('｜')}</p>
+                </div>
+                <div class="text-xs" style="color: var(--muted-foreground);">
+                    指標涵蓋策略累積報酬、買入持有對照、Sharpe / Sortino 與最大回撤，用於辨識不同期間的穩健度落差。
+                </div>
+            </div>
+            <div class="overflow-x-auto rounded-lg border" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); background-color: color-mix(in srgb, var(--card) 94%, transparent);">
+                <table class="min-w-full text-xs">
+                    <thead style="background-color: color-mix(in srgb, var(--muted) 30%, transparent); color: var(--muted-foreground);">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-semibold">期間</th>
+                            <th class="px-4 py-3 text-left font-semibold">策略累積報酬</th>
+                            <th class="px-4 py-3 text-left font-semibold">買入持有報酬</th>
+                            <th class="px-4 py-3 text-left font-semibold">Sharpe</th>
+                            <th class="px-4 py-3 text-left font-semibold">Sortino</th>
+                            <th class="px-4 py-3 text-left font-semibold">最大回撤</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color: var(--foreground);">
+                        ${rowsHtml}
+                        ${overallRow}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+}
+function displayTradeResults(result) {
+    console.log("[Main] displayTradeResults called");
     const tradeResultsEl = document.getElementById("trade-results");
-    
+
     if (!tradeResultsEl) {
         console.error("[Main] Element 'trade-results' not found");
         return;
@@ -6502,7 +6685,7 @@ function activateTab(tabId) {
     }); 
     
     // Show corresponding content
-    contents.forEach(content => { 
+    contents.forEach(content => {
         const isTargetTab = content.id === `${tabId}-tab`;
         if (isTargetTab) {
             content.classList.remove('hidden');
@@ -6511,7 +6694,10 @@ function activateTab(tabId) {
             content.classList.add('hidden');
             content.classList.remove('active');
         }
-    }); 
+    });
+    if (tabId === 'performance') {
+        renderPerformanceTable(lastSubPeriodResults);
+    }
 }
 function setDefaultFees(stockNo) {
     const buyFeeInput = document.getElementById('buyFee');
