@@ -1,3 +1,9 @@
+## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+- **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
+- **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
+- **Diagnostics**: 手機寬度下逐一比對績效、風險、交易統計與策略卡片皆兩欄呈現且不再被截斷；敏感度卡改為堆疊卡片後，+10%/-10%、漂移與穩定度指標無需橫向捲動即可閱讀，tooltip 仍保持對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('summary scripts compile');NODE`
+
 ## 2025-07-09 — Patch LB-UI-LAYOUT-20250709A / LB-SUMMARY-20250709A
 - **Issue recap**: 開發者區域搬移後，桌機版左右欄版型失衡，摘要卡片落在主操作區之下，footer 也失去原有的結構。回測摘要的績效指標僅能單列顯示，桌機版視覺資訊密度不足。
 - **Fix**: 重構主要版面為 `main` 直向骨架並以 `main-grid` 控制 2 欄排版，確保「執行回測」之後的結果卡固定顯示於右欄，footer 恢復黏附頁面底部。摘要卡使用自訂 `summary-metrics-grid` 版型，桌機自動排出雙欄以上的績效卡並改善間距。

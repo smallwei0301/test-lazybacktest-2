@@ -3045,28 +3045,64 @@ function displayBacktestResult(result) {
                 : null;
             const strategyKey = group.strategy || '';
             const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
-            const rows = params.map((param) => {
+            const rowPairs = params.map((param) => {
                 const plusScenario = Array.isArray(param.scenarios)
                     ? param.scenarios.find((s) => s.label === '+10%')
                     : null;
                 const minusScenario = Array.isArray(param.scenarios)
                     ? param.scenarios.find((s) => s.label === '-10%')
                     : null;
-                return `<tr class="border-t" style="border-color: var(--border);">
+                const driftCls = driftClass(param.averageDriftPercent);
+                const driftValue = formatPercentMagnitude(param.averageDriftPercent, 1);
+                const scoreCls = scoreClass(param.stabilityScore);
+                const scoreValue = formatScore(param.stabilityScore);
+                const baseValueText = formatParamValue(param.baseValue);
+                const tableRow = `<tr class="border-t" style="border-color: var(--border);">
                     <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(param.name)}</td>
-                    <td class="px-3 py-2 text-center" style="color: var(--foreground);">${formatParamValue(param.baseValue)}</td>
+                    <td class="px-3 py-2 text-center" style="color: var(--foreground);">${baseValueText}</td>
                     <td class="px-3 py-2">${renderScenario(plusScenario)}</td>
                     <td class="px-3 py-2">${renderScenario(minusScenario)}</td>
                     <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${driftClass(param.averageDriftPercent)}">${formatPercentMagnitude(param.averageDriftPercent, 1)}</span>
+                        <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
                         <p class="text-[11px]" style="color: var(--muted-foreground);">漂移幅度</p>
                     </td>
                     <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${scoreClass(param.stabilityScore)}">${formatScore(param.stabilityScore)}</span>
+                        <span class="text-sm font-semibold ${scoreCls}">${scoreValue}</span>
                         <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
                     </td>
                 </tr>`;
-            }).join('');
+                const mobileRow = `<div class="sensitivity-mobile-row">
+                    <div class="sensitivity-mobile-header">
+                        <span class="sensitivity-mobile-param">${escapeHtml(param.name)}</span>
+                        <span class="sensitivity-mobile-base">基準值 ${baseValueText}</span>
+                    </div>
+                    <div class="sensitivity-mobile-scenarios">
+                        <div>
+                            <p class="sensitivity-mobile-label">+10%</p>
+                            ${renderScenario(plusScenario)}
+                        </div>
+                        <div>
+                            <p class="sensitivity-mobile-label">-10%</p>
+                            ${renderScenario(minusScenario)}
+                        </div>
+                    </div>
+                    <div class="sensitivity-mobile-metrics">
+                        <div>
+                            <p class="sensitivity-mobile-label">漂移幅度</p>
+                            <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">±10% 平均</p>
+                        </div>
+                        <div>
+                            <p class="sensitivity-mobile-label">穩定度</p>
+                            <span class="text-sm font-semibold ${scoreCls}">${scoreValue}</span>
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
+                        </div>
+                    </div>
+                </div>`;
+                return { tableRow, mobileRow };
+            });
+            const tableRows = rowPairs.map((row) => row.tableRow).join('');
+            const mobileRows = rowPairs.map((row) => row.mobileRow).join('');
             return `<div class="sensitivity-card p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
                 <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
                     <div>
@@ -3085,7 +3121,7 @@ function displayBacktestResult(result) {
                     </div>
                 </div>
                 <div class="sensitivity-table-wrapper">
-                    <table class="w-full text-xs" style="border-color: var(--border); border-width: 1px; border-style: solid; border-radius: 0.75rem;">
+                    <table class="sensitivity-table-desktop w-full text-xs">
                         <thead>
                             <tr class="bg-white/40" style="color: var(--muted-foreground);">
                                 <th class="px-3 py-2 text-left font-medium">參數</th>
@@ -3112,8 +3148,11 @@ function displayBacktestResult(result) {
                                 <th class="px-3 py-2 text-center font-medium">穩定度</th>
                             </tr>
                         </thead>
-                        <tbody>${rows}</tbody>
+                        <tbody>${tableRows}</tbody>
                     </table>
+                    <div class="sensitivity-table-mobile">
+                        ${mobileRows}
+                    </div>
                 </div>
             </div>`;
         };
@@ -3123,7 +3162,7 @@ function displayBacktestResult(result) {
         const baselineAnnual = data?.baseline?.annualizedReturn ?? null;
         const baselineSharpe = data?.baseline?.sharpeRatio ?? null;
         const summaryCards = `
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
                     <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
                     <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
@@ -3179,7 +3218,8 @@ function displayBacktestResult(result) {
     let tradeStatsHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">交易統計</h4>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+            <div class="summary-metrics-grid summary-metrics-grid--trade">
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">勝率</p>
@@ -3191,7 +3231,8 @@ function displayBacktestResult(result) {
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${winR}%</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">(${winTrades}/${totalTrades})</p>
                     </div>
-                </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">總交易次數</p>
@@ -3203,13 +3244,15 @@ function displayBacktestResult(result) {
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${totalTrades}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
                     </div>
-                </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">平均交易盈虧</p>
                         <p class="text-2xl font-bold ${avgP>=0?'text-emerald-600':'text-rose-600'}">${avgP>=0?'+':''}${Math.round(avgP).toLocaleString()}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">元</p>
                     </div>
-                </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">最大連虧次數</p>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${maxCL}</p>
@@ -3221,7 +3264,8 @@ function displayBacktestResult(result) {
     let strategySettingsHtml = `
         <div>
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">策略設定</h4>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
+            <div class="summary-metrics-grid summary-metrics-grid--strategy">
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">📈 進場策略</p>
@@ -3243,7 +3287,8 @@ function displayBacktestResult(result) {
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${exitDesc.name}</p>
                     </div>
-                </div> ${ result.enableShorting && shortEntryDesc && shortExitDesc ? `                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
+                </div>
+                ${ result.enableShorting && shortEntryDesc && shortExitDesc ? `                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">📉 做空策略</p>
@@ -3304,7 +3349,9 @@ function displayBacktestResult(result) {
                         <p class="text-sm text-yellow-600 font-medium mb-3">🏆 最終資產</p>
                         <p class="text-base font-semibold text-gray-800">${Math.round(finalValue).toLocaleString()}元</p>
                     </div>
-                </div> </div> </div>`;
+                </div>
+            </div>
+        </div>`;
 
         // 將四個區塊垂直排列，並添加適當的間距
         el.innerHTML = `
