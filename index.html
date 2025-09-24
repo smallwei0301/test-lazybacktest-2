@@ -508,6 +508,52 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Rolling Test Tab -->
+                            <div class="tab-content hidden" id="rolling-test-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="clock-3" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            滾動測試報告
+                                        </h3>
+                                        <p class="card-description">依據 Walk-Forward Analysis（WFA）流程評估不同測試窗的穩健度與通過率。</p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div id="rolling-test-placeholder" class="rolling-placeholder text-sm" style="color: var(--muted-foreground);">
+                                            執行回測後將產生滾動測試評分與視窗明細。
+                                        </div>
+                                        <div id="rolling-test-report" class="space-y-6 hidden"></div>
+                                    </div>
+                                </div>
+                                <div class="card border border-dashed" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                                    <div class="card-header pb-3">
+                                        <h4 class="card-title flex items-center gap-2 text-sm font-semibold">
+                                            <i data-lucide="book-open-check" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            Walk-Forward 方法與評分準則
+                                        </h4>
+                                    </div>
+                                    <div class="card-content space-y-4 text-sm" style="color: var(--muted-foreground);">
+                                        <div class="space-y-2">
+                                            <p>• 參考多數 CTA、Prop Trading Desk 與大型量化平台（如 MultiCharts、QuantConnect、Amibroker）的 Walk-Forward Analysis 流程，以滾動訓練／檢驗視窗驗證策略在未知資料下的穩健度。</p>
+                                            <ol class="list-decimal pl-5 space-y-2">
+                                                <li>訓練／檢驗視窗組合涵蓋 36→6、24→6、18→3、12→3 等常用設定，僅在回測期間足夠時啟用，並以測試窗步長逐窗向前滾動。</li>
+                                                <li>每個測試窗僅使用訓練窗外的資料計算年化報酬（CAGR）、Sharpe、Sortino、最大回撤與正報酬日比例；無風險利率假設 1%（近年台灣一年期定存均值），符合投顧與基金評估慣例。</li>
+                                                <li>步長預設為測試窗長度或其一半，避免高度重疊，確保每個視窗皆為獨立的 out-of-sample 驗證區間。</li>
+                                            </ol>
+                                        </div>
+                                        <div class="space-y-2">
+                                            <h5 class="font-semibold text-foreground text-sm" style="color: var(--foreground);">評分構成與門檻</h5>
+                                            <ul class="list-disc pl-5 space-y-2">
+                                                <li>綜合評分（滿分 100）= 年化報酬 30% + Sharpe 30% + 最大回撤 25% + 正報酬日比例 15%。</li>
+                                                <li>單一視窗通過條件：年化 ≥ 5%、Sharpe ≥ 0.6、最大回撤 ≤ 25%，正報酬日比例 ≥ 50% 亦視為穩健。</li>
+                                                <li>整體判讀：平均分數 ≥ 70 為 Walk-Forward 合格區間；55～69 建議延長樣本或調整策略；&lt; 55 應視為高風險，需重新校準策略或風控。</li>
+                                                <li>合格率（Pass Rate）≥ 70% 為多數機構核准部署的常用門檻；介於 50%～69% 需進一步檢視策略設定或市場 regime。</li>
+                                            </ul>
+                                        </div>
+                                        <p>• 報告同時顯示最佳訓練／測試窗組合、涵蓋期間與平均 Sharpe，協助使用者比照專業 Walk-Forward 報告快速判斷策略是否可部署。</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1115,6 +1161,13 @@
                                                 data-tab="batch-optimization"
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="rolling-test"
+                                            >
+                                                <i data-lucide="clock-3" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
                                         </nav>
                                     </div>

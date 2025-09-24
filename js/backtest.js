@@ -38,6 +38,7 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+let lastRollingAnalysis = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
@@ -62,6 +63,8 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
+const ROLLING_TEST_VERSION = 'LB-ROLLING-20240705A';
+const ROLLING_RISK_FREE_RATE = 0.01; // 1% annual risk-free baseline for Sharpe/Sortino
 
 function cloneArrayOfRanges(ranges) {
     if (!Array.isArray(ranges)) return undefined;
@@ -1783,6 +1786,17 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    const rollingPlaceholder = document.getElementById('rolling-test-placeholder');
+    const rollingReport = document.getElementById('rolling-test-report');
+    if (rollingPlaceholder) {
+        rollingPlaceholder.textContent = '執行回測後將產生滾動測試評分與視窗明細。';
+        rollingPlaceholder.classList.remove('hidden');
+    }
+    if (rollingReport) {
+        rollingReport.classList.add('hidden');
+        rollingReport.innerHTML = '';
+    }
+    lastRollingAnalysis = null;
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -2776,6 +2790,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
+        renderRollingTestReport(result);
         renderChart(result);
         activateTab('summary');
 
@@ -3753,6 +3768,999 @@ function renderChart(result) {
         e.preventDefault();
     });
 }
+
+// --- Rolling Test Analysis ---
+const ROLLING_CONFIG_PRESETS = [
+    { id: '36-6', trainMonths: 36, testMonths: 6 },
+    { id: '24-6', trainMonths: 24, testMonths: 6 },
+    { id: '18-3', trainMonths: 18, testMonths: 3 },
+    { id: '12-3', trainMonths: 12, testMonths: 3 },
+];
+const ROLLING_PASS_THRESHOLDS = {
+    cagr: 0.05,
+    sharpe: 0.6,
+    maxDrawdown: 0.25,
+    positiveRatio: 0.5,
+};
+const ROLLING_SCORE_WEIGHTS = {
+    cagr: 0.3,
+    sharpe: 0.3,
+    maxDrawdown: 0.25,
+    positiveRatio: 0.15,
+};
+const ROLLING_SCORE_POINTS = {
+    cagr: [
+        { value: -0.2, score: 0 },
+        { value: 0, score: 10 },
+        { value: 0.05, score: 50 },
+        { value: 0.1, score: 70 },
+        { value: 0.2, score: 90 },
+        { value: 0.3, score: 100 },
+    ],
+    sharpe: [
+        { value: -1, score: 0 },
+        { value: 0, score: 10 },
+        { value: 0.6, score: 60 },
+        { value: 1, score: 80 },
+        { value: 1.5, score: 95 },
+        { value: 2, score: 100 },
+    ],
+    maxDrawdown: [
+        { value: 0, score: 100 },
+        { value: 0.1, score: 90 },
+        { value: 0.2, score: 70 },
+        { value: 0.25, score: 60 },
+        { value: 0.35, score: 30 },
+        { value: 0.5, score: 5 },
+        { value: 0.7, score: 0 },
+    ],
+    positiveRatio: [
+        { value: 0, score: 0 },
+        { value: 0.4, score: 20 },
+        { value: 0.5, score: 60 },
+        { value: 0.55, score: 75 },
+        { value: 0.6, score: 85 },
+        { value: 0.65, score: 95 },
+        { value: 0.7, score: 100 },
+    ],
+};
+
+function renderRollingTestReport(result) {
+    const placeholder = document.getElementById('rolling-test-placeholder');
+    const reportContainer = document.getElementById('rolling-test-report');
+    if (!placeholder || !reportContainer) {
+        return;
+    }
+
+    const analysis = computeRollingAnalysis(result);
+    lastRollingAnalysis = analysis;
+
+    if (!analysis || analysis.status !== 'ok') {
+        const message = analysis?.message || '滾動測試僅支援完成回測後的資料。';
+        placeholder.textContent = message;
+        placeholder.classList.remove('hidden');
+        reportContainer.classList.add('hidden');
+        reportContainer.innerHTML = '';
+        return;
+    }
+
+    placeholder.classList.add('hidden');
+    reportContainer.classList.remove('hidden');
+
+    const sections = [
+        buildRollingSummarySection(analysis),
+        buildRollingConfigCards(analysis),
+        buildRollingTableSection(analysis),
+    ].filter(Boolean);
+
+    reportContainer.innerHTML = sections.join('');
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
+
+function computeRollingAnalysis(result) {
+    if (!result || !Array.isArray(result.dates) || !Array.isArray(result.strategyReturns)) {
+        return {
+            status: 'empty',
+            message: '滾動測試僅在完成回測後可用。',
+        };
+    }
+
+    const dates = result.dates;
+    const returnsSeries = result.strategyReturns;
+    const minLength = Math.min(dates.length, returnsSeries.length);
+    if (minLength === 0) {
+        return {
+            status: 'empty',
+            message: '未找到可用的報酬序列，請先執行回測。',
+        };
+    }
+
+    const initialCapital = Number.isFinite(result.initialCapital) && result.initialCapital > 0
+        ? Number(result.initialCapital)
+        : 100000;
+
+    const series = [];
+    for (let i = 0; i < minLength; i += 1) {
+        const iso = dates[i];
+        const raw = returnsSeries[i];
+        if (iso === null || iso === undefined) continue;
+        const parsed = Number.parseFloat(raw);
+        if (!Number.isFinite(parsed)) continue;
+        const dateObj = new Date(iso);
+        if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) continue;
+        const equity = initialCapital * (1 + parsed / 100);
+        if (!Number.isFinite(equity) || equity <= 0) continue;
+        series.push({
+            iso: iso,
+            date: dateObj,
+            equity: equity,
+            returnPercent: parsed,
+        });
+    }
+
+    if (series.length < 32) {
+        return {
+            status: 'insufficient',
+            message: '資料點不足，滾動測試需至少涵蓋一年以上資料。',
+            dataset: series.length > 0
+                ? { start: series[0].iso, end: series[series.length - 1].iso, tradingDays: series.length }
+                : null,
+        };
+    }
+
+    series.sort((a, b) => a.date - b.date);
+    const datasetStart = series[0].date;
+    const datasetEnd = series[series.length - 1].date;
+    const tradingDays = series.length;
+    const totalMonths = countMonthsBetween(datasetStart, datasetEnd);
+    const dataset = {
+        start: series[0].iso,
+        end: series[series.length - 1].iso,
+        tradingDays: tradingDays,
+        totalMonths: totalMonths,
+        totalYears: Math.max(0, (datasetEnd - datasetStart) / BACKTEST_DAY_MS) / 365.25,
+    };
+
+    const configResults = ROLLING_CONFIG_PRESETS.map((preset) => evaluateRollingConfig(series, preset, dataset));
+    const validConfigs = configResults.filter((config) => !config.insufficient && Array.isArray(config.windows) && config.windows.length > 0);
+
+    if (validConfigs.length === 0) {
+        const message = '回測期間不足以建立任何訓練/測試視窗。請延長回測區間（建議至少 3 年）。';
+        return {
+            status: 'insufficient',
+            message,
+            dataset,
+            configs: configResults,
+            windows: [],
+        };
+    }
+
+    let recommendedConfig = validConfigs[0];
+    for (let i = 1; i < validConfigs.length; i += 1) {
+        const candidate = validConfigs[i];
+        if (candidate.passRate > recommendedConfig.passRate + 0.0001) {
+            recommendedConfig = candidate;
+            continue;
+        }
+        if (Math.abs(candidate.passRate - recommendedConfig.passRate) < 0.0001 &&
+            (candidate.averageScore || 0) > (recommendedConfig.averageScore || 0)) {
+            recommendedConfig = candidate;
+        }
+    }
+
+    const allWindows = [];
+    let globalIndex = 1;
+    for (const config of configResults) {
+        if (!Array.isArray(config.windows)) continue;
+        for (const window of config.windows) {
+            allWindows.push({
+                ...window,
+                globalIndex,
+                configId: config.id,
+                configLabel: config.label,
+            });
+            globalIndex += 1;
+        }
+    }
+
+    const bestWindow = allWindows.reduce((best, current) => {
+        if (!current) return best;
+        if (!best) return current;
+        if ((current.score?.overall || 0) > (best.score?.overall || 0) + 0.0001) {
+            return current;
+        }
+        if (Math.abs((current.score?.overall || 0) - (best.score?.overall || 0)) < 0.0001) {
+            if (current.status === 'pass' && best.status !== 'pass') return current;
+            if (current.status === best.status) {
+                const curSharpe = Number.isFinite(current.metrics?.sharpe)
+                    ? current.metrics.sharpe
+                    : current.metrics?.sharpe === Infinity
+                        ? Number.POSITIVE_INFINITY
+                        : Number.NEGATIVE_INFINITY;
+                const bestSharpe = Number.isFinite(best.metrics?.sharpe)
+                    ? best.metrics.sharpe
+                    : best.metrics?.sharpe === Infinity
+                        ? Number.POSITIVE_INFINITY
+                        : Number.NEGATIVE_INFINITY;
+                if (curSharpe > bestSharpe) return current;
+            }
+        }
+        return best;
+    }, null);
+
+    const summary = {
+        recommendedConfigId: recommendedConfig.id,
+        recommendedLabel: recommendedConfig.label,
+        overallScore: recommendedConfig.averageScore,
+        grade: recommendedConfig.grade,
+        passRate: recommendedConfig.passRate,
+        passedWindows: recommendedConfig.passedWindows,
+        totalWindows: recommendedConfig.windows.length,
+        coverage: recommendedConfig.coverage,
+        averageSharpe: recommendedConfig.averageSharpe,
+        averageMaxDrawdown: recommendedConfig.averageMaxDrawdown,
+        averagePositiveRatio: recommendedConfig.averagePositiveRatio,
+        bestWindow,
+        dataset,
+        thresholdText: '年化 ≥5%、Sharpe ≥0.6、最大回撤 ≤25%、正報酬日 ≥50%',
+        generatedAt: new Date().toISOString(),
+    };
+
+    return {
+        status: 'ok',
+        configs: configResults,
+        summary,
+        windows: allWindows,
+        dataset,
+        message: null,
+    };
+}
+
+function evaluateRollingConfig(series, preset, dataset) {
+    const stepMonths = Number.isFinite(preset.stepMonths) && preset.stepMonths > 0
+        ? Math.floor(preset.stepMonths)
+        : Math.max(1, Math.floor(preset.testMonths / 2));
+    const label = `訓練 ${preset.trainMonths} 個月 → 測試 ${preset.testMonths} 個月`;
+    const totalMonths = dataset?.totalMonths ?? countMonthsBetween(series[0].date, series[series.length - 1].date);
+    const minMonthsRequired = preset.trainMonths + preset.testMonths;
+    if (totalMonths < minMonthsRequired) {
+        return {
+            id: preset.id,
+            label,
+            trainMonths: preset.trainMonths,
+            testMonths: preset.testMonths,
+            stepMonths,
+            windows: [],
+            insufficient: true,
+            reason: `資料僅約 ${totalMonths} 個月，需至少 ${minMonthsRequired} 個月才能建立視窗。`,
+            passRate: 0,
+            averageScore: null,
+            averageSharpe: null,
+            averageMaxDrawdown: null,
+            averagePositiveRatio: null,
+            grade: resolveRollingGrade(null),
+            coverage: null,
+            passedWindows: 0,
+        };
+    }
+
+    const windows = [];
+    let startIdx = 0;
+    let safetyCounter = 0;
+    const maxIterations = 720;
+
+    while (startIdx < series.length - 2 && safetyCounter < maxIterations) {
+        safetyCounter += 1;
+        const trainStart = series[startIdx];
+        const trainEndBoundary = addMonthsSafely(trainStart.date, preset.trainMonths);
+        const trainEndIdx = findLastIndexBefore(series, trainEndBoundary);
+        if (trainEndIdx <= startIdx) {
+            break;
+        }
+
+        const testStartIdx = trainEndIdx + 1;
+        if (testStartIdx >= series.length - 1) {
+            break;
+        }
+
+        const testStart = series[testStartIdx];
+        const testEndBoundary = addMonthsSafely(testStart.date, preset.testMonths);
+        let testEndIdx = findLastIndexBefore(series, testEndBoundary);
+        if (testEndIdx < testStartIdx) {
+            testEndIdx = series.length - 1;
+        }
+
+        const testSlice = series.slice(testStartIdx, testEndIdx + 1);
+        if (testSlice.length < Math.max(20, preset.testMonths * 15)) {
+            const nextTrainStartDate = addMonthsSafely(trainStart.date, stepMonths);
+            const nextIdx = findFirstIndexOnOrAfter(series, nextTrainStartDate);
+            if (nextIdx === -1 || nextIdx <= startIdx) break;
+            startIdx = nextIdx;
+            continue;
+        }
+
+        const metrics = computeRollingWindowMetrics(testSlice, ROLLING_RISK_FREE_RATE);
+        if (!metrics) {
+            const nextTrainStartDate = addMonthsSafely(trainStart.date, stepMonths);
+            const nextIdx = findFirstIndexOnOrAfter(series, nextTrainStartDate);
+            if (nextIdx === -1 || nextIdx <= startIdx) break;
+            startIdx = nextIdx;
+            continue;
+        }
+
+        const score = computeRollingScore(metrics);
+        const criteria = evaluateRollingCriteria(metrics);
+        const status = resolveRollingWindowStatus(criteria, score.overall);
+        const grade = resolveRollingGrade(score.overall);
+
+        windows.push({
+            configId: preset.id,
+            configLabel: label,
+            configTrainMonths: preset.trainMonths,
+            configTestMonths: preset.testMonths,
+            index: windows.length + 1,
+            trainRange: {
+                start: series[startIdx].iso,
+                end: series[trainEndIdx].iso,
+            },
+            testRange: {
+                start: series[testStartIdx].iso,
+                end: series[testEndIdx].iso,
+                tradingDays: testSlice.length,
+            },
+            metrics,
+            score,
+            criteria,
+            status,
+            grade,
+        });
+
+        const nextTrainStartDate = addMonthsSafely(trainStart.date, stepMonths);
+        const nextIdx = findFirstIndexOnOrAfter(series, nextTrainStartDate);
+        if (nextIdx === -1 || nextIdx <= startIdx) {
+            break;
+        }
+        startIdx = nextIdx;
+    }
+
+    if (windows.length === 0) {
+        return {
+            id: preset.id,
+            label,
+            trainMonths: preset.trainMonths,
+            testMonths: preset.testMonths,
+            stepMonths,
+            windows: [],
+            insufficient: true,
+            reason: '無法建立有效測試窗，請延長資料期間或放寬視窗設定。',
+            passRate: 0,
+            averageScore: null,
+            averageSharpe: null,
+            averageMaxDrawdown: null,
+            averagePositiveRatio: null,
+            grade: resolveRollingGrade(null),
+            coverage: null,
+            passedWindows: 0,
+        };
+    }
+
+    const passCount = windows.filter((w) => w.status === 'pass').length;
+    const averageScore = windows.reduce((sum, w) => sum + (w.score?.overall || 0), 0) / windows.length;
+    const averageSharpe = averageMetric(windows, (w) => w.metrics?.sharpe, { allowInfinity: true, infinityValue: 3 });
+    const averageMaxDrawdown = averageMetric(windows, (w) => w.metrics?.maxDrawdown, {});
+    const averagePositiveRatio = averageMetric(windows, (w) => w.metrics?.positiveRatio, {});
+
+    return {
+        id: preset.id,
+        label,
+        trainMonths: preset.trainMonths,
+        testMonths: preset.testMonths,
+        stepMonths,
+        windows,
+        insufficient: false,
+        reason: null,
+        passRate: passCount / windows.length,
+        averageScore,
+        averageSharpe,
+        averageMaxDrawdown,
+        averagePositiveRatio,
+        grade: resolveRollingGrade(averageScore),
+        coverage: {
+            start: windows[0].testRange.start,
+            end: windows[windows.length - 1].testRange.end,
+        },
+        passedWindows: passCount,
+    };
+}
+
+function computeRollingWindowMetrics(testSlice, riskFreeRate) {
+    if (!Array.isArray(testSlice) || testSlice.length < 2) {
+        return null;
+    }
+    const equities = testSlice.map((item) => item.equity);
+    const startEquity = equities[0];
+    const endEquity = equities[equities.length - 1];
+    if (!Number.isFinite(startEquity) || startEquity <= 0 || !Number.isFinite(endEquity) || endEquity <= 0) {
+        return null;
+    }
+
+    const totalReturn = startEquity !== 0 ? endEquity / startEquity - 1 : 0;
+    const startDate = testSlice[0].date;
+    const endDate = testSlice[testSlice.length - 1].date;
+    const daySpan = Math.max(1, Math.round((endDate - startDate) / BACKTEST_DAY_MS));
+    const years = daySpan / 365.25;
+    const cagr = years > 0 ? Math.pow(1 + totalReturn, 1 / years) - 1 : totalReturn;
+
+    const dailyReturns = [];
+    let positiveDays = 0;
+    let negativeDays = 0;
+    for (let i = 1; i < equities.length; i += 1) {
+        const prev = equities[i - 1];
+        const curr = equities[i];
+        if (!Number.isFinite(prev) || prev <= 0 || !Number.isFinite(curr) || curr <= 0) continue;
+        const daily = curr / prev - 1;
+        dailyReturns.push(daily);
+        if (daily > 0) positiveDays += 1;
+        else if (daily < 0) negativeDays += 1;
+    }
+
+    const returnCount = dailyReturns.length;
+    const positiveRatio = returnCount > 0 ? positiveDays / returnCount : 0;
+    const dailyRiskFree = Math.pow(1 + riskFreeRate, 1 / 252) - 1;
+
+    let sharpe = null;
+    let sortino = null;
+    if (returnCount > 0) {
+        const mean = dailyReturns.reduce((sum, val) => sum + val, 0) / returnCount;
+        const variance = returnCount > 1
+            ? dailyReturns.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (returnCount - 1)
+            : 0;
+        const stdDev = Math.sqrt(Math.max(variance, 0));
+        if (stdDev > 0) {
+            sharpe = ((mean - dailyRiskFree) / stdDev) * Math.sqrt(252);
+        } else if (mean - dailyRiskFree > 0) {
+            sharpe = Number.POSITIVE_INFINITY;
+        } else {
+            sharpe = 0;
+        }
+
+        const downsideDiffs = dailyReturns
+            .filter((val) => val < dailyRiskFree)
+            .map((val) => Math.pow(val - dailyRiskFree, 2));
+        if (downsideDiffs.length > 0) {
+            const downsideVar = downsideDiffs.reduce((sum, val) => sum + val, 0) / downsideDiffs.length;
+            const downsideDev = Math.sqrt(Math.max(downsideVar, 0));
+            if (downsideDev > 0) {
+                sortino = ((mean - dailyRiskFree) / downsideDev) * Math.sqrt(252);
+            } else if (mean - dailyRiskFree > 0) {
+                sortino = Number.POSITIVE_INFINITY;
+            } else {
+                sortino = 0;
+            }
+        } else if (mean - dailyRiskFree > 0) {
+            sortino = Number.POSITIVE_INFINITY;
+        } else {
+            sortino = 0;
+        }
+    }
+
+    const maxDrawdown = calculateMaxDrawdownFromEquity(equities);
+
+    return {
+        totalReturn,
+        totalReturnPercent: totalReturn * 100,
+        cagr,
+        sharpe,
+        sortino,
+        maxDrawdown,
+        positiveRatio,
+        positiveDays,
+        negativeDays,
+        tradingDays: testSlice.length,
+        returnCount,
+        daySpan,
+        years,
+    };
+}
+
+function computeRollingScore(metrics) {
+    const cagrValue = Number.isFinite(metrics?.cagr) ? metrics.cagr : -0.5;
+    const sharpeValue = Number.isFinite(metrics?.sharpe)
+        ? metrics.sharpe
+        : metrics?.sharpe === Infinity
+            ? 3
+            : -1;
+    const drawdownValue = Number.isFinite(metrics?.maxDrawdown) ? metrics.maxDrawdown : 1;
+    const positiveValue = Number.isFinite(metrics?.positiveRatio) ? metrics.positiveRatio : 0;
+
+    const cagrScore = interpolateScore(cagrValue, ROLLING_SCORE_POINTS.cagr);
+    const sharpeScore = interpolateScore(sharpeValue, ROLLING_SCORE_POINTS.sharpe);
+    const drawdownScore = interpolateScore(drawdownValue, ROLLING_SCORE_POINTS.maxDrawdown);
+    const positiveScore = interpolateScore(positiveValue, ROLLING_SCORE_POINTS.positiveRatio);
+
+    const overall = clampScore(
+        cagrScore * ROLLING_SCORE_WEIGHTS.cagr +
+        sharpeScore * ROLLING_SCORE_WEIGHTS.sharpe +
+        drawdownScore * ROLLING_SCORE_WEIGHTS.maxDrawdown +
+        positiveScore * ROLLING_SCORE_WEIGHTS.positiveRatio,
+    );
+
+    return {
+        overall,
+        components: {
+            cagr: cagrScore,
+            sharpe: sharpeScore,
+            maxDrawdown: drawdownScore,
+            positiveRatio: positiveScore,
+        },
+    };
+}
+
+function evaluateRollingCriteria(metrics) {
+    const sharpeValue = Number.isFinite(metrics?.sharpe)
+        ? metrics.sharpe
+        : metrics?.sharpe === Infinity
+            ? Number.POSITIVE_INFINITY
+            : Number.NEGATIVE_INFINITY;
+    return {
+        cagr: Number.isFinite(metrics?.cagr) && metrics.cagr >= ROLLING_PASS_THRESHOLDS.cagr,
+        sharpe: sharpeValue >= ROLLING_PASS_THRESHOLDS.sharpe,
+        maxDrawdown: Number.isFinite(metrics?.maxDrawdown) && metrics.maxDrawdown <= ROLLING_PASS_THRESHOLDS.maxDrawdown,
+        positiveRatio: Number.isFinite(metrics?.positiveRatio) && metrics.positiveRatio >= ROLLING_PASS_THRESHOLDS.positiveRatio,
+    };
+}
+
+function resolveRollingWindowStatus(criteria, overallScore) {
+    if (criteria.cagr && criteria.sharpe && criteria.maxDrawdown && criteria.positiveRatio) {
+        return 'pass';
+    }
+    if (Number.isFinite(overallScore) && overallScore >= 55) {
+        return 'watch';
+    }
+    return 'fail';
+}
+
+function resolveRollingGrade(score) {
+    if (!Number.isFinite(score)) {
+        return { letter: 'NA', label: '資料不足', chipClass: 'grade-NA' };
+    }
+    const scale = [
+        { min: 85, letter: 'A', label: '部署推薦', chipClass: 'grade-A' },
+        { min: 70, letter: 'B', label: '合格', chipClass: 'grade-B' },
+        { min: 55, letter: 'C', label: '需優化', chipClass: 'grade-C' },
+        { min: 40, letter: 'D', label: '高風險', chipClass: 'grade-D' },
+        { min: 0, letter: 'E', label: '不建議', chipClass: 'grade-E' },
+    ];
+    for (const entry of scale) {
+        if (score >= entry.min) {
+            return entry;
+        }
+    }
+    return scale[scale.length - 1];
+}
+
+function buildRollingSummarySection(analysis) {
+    if (!analysis || analysis.status !== 'ok' || !analysis.summary) {
+        return '';
+    }
+    const summary = analysis.summary;
+    const grade = summary.grade || resolveRollingGrade(summary.overallScore);
+    const overallScoreText = Number.isFinite(summary.overallScore) ? summary.overallScore.toFixed(1) : '—';
+    const passRateText = Number.isFinite(summary.passRate) ? formatPercent(summary.passRate * 100) : 'N/A';
+    const chipClass = grade?.chipClass || 'grade-NA';
+    const best = summary.bestWindow || null;
+    const dataset = summary.dataset || analysis.dataset || null;
+    const coverageLine = summary.coverage
+        ? `${escapeHtml(summary.coverage.start)} ~ ${escapeHtml(summary.coverage.end)}`
+        : dataset
+            ? `${escapeHtml(dataset.start)} ~ ${escapeHtml(dataset.end)}`
+            : '—';
+    const datasetLine = dataset
+        ? `${Number.isFinite(dataset.totalMonths) ? dataset.totalMonths : '—'} 個月・${dataset.tradingDays || '—'} 個交易日`
+        : '—';
+    const bestSharpeText = best ? formatRollingSharpe(best.metrics?.sharpe) : '—';
+    const bestCagrText = best ? formatPercent((best.metrics?.cagr || 0) * 100) : 'N/A';
+    const bestDrawdownText = best ? formatPercent((best.metrics?.maxDrawdown || 0) * 100) : 'N/A';
+    const bestPositiveText = best ? formatPercent((best.metrics?.positiveRatio || 0) * 100) : 'N/A';
+    const averageSharpeText = Number.isFinite(summary.averageSharpe) ? summary.averageSharpe.toFixed(2) : '—';
+    const averageDrawdownText = Number.isFinite(summary.averageMaxDrawdown)
+        ? formatPercent(summary.averageMaxDrawdown * 100)
+        : 'N/A';
+    const averagePositiveText = Number.isFinite(summary.averagePositiveRatio)
+        ? formatPercent(summary.averagePositiveRatio * 100)
+        : 'N/A';
+    const bestStatusMeta = best ? resolveRollingStatusMeta(best.status) : null;
+    const bestStatus = bestStatusMeta
+        ? `<span class="${bestStatusMeta.className}">${bestStatusMeta.label}</span>`
+        : '';
+
+    return `
+        <section class="space-y-4">
+            <div class="rolling-summary-grid">
+                <div class="rolling-summary-card">
+                    <div class="rolling-summary-header">
+                        <div>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">Walk-Forward 綜合評分</p>
+                            <h4 class="text-xl font-semibold" style="color: var(--foreground);">${escapeHtml(summary.recommendedLabel || '—')}</h4>
+                        </div>
+                        <span class="rolling-version-badge">${escapeHtml(ROLLING_TEST_VERSION)}</span>
+                    </div>
+                    <div class="rolling-score-wrapper">
+                        <span class="rolling-score-value" style="color: var(--primary);">${overallScoreText}</span>
+                        <div class="rolling-score-bar">
+                            <div class="rolling-score-bar-fill" style="width: ${Math.max(0, Math.min(100, Number.isFinite(summary.overallScore) ? summary.overallScore : 0))}%;"></div>
+                        </div>
+                    </div>
+                    <div class="rolling-score-caption">
+                        <span class="rolling-chip ${chipClass}">${grade.letter} ｜ ${escapeHtml(grade.label)}</span>
+                        <span class="ml-2">通過率 ${passRateText}（${summary.passedWindows || 0}/${summary.totalWindows || 0}）</span>
+                    </div>
+                    <p class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(summary.thresholdText || '年化 ≥5%、Sharpe ≥0.6、最大回撤 ≤25%、正報酬日 ≥50%')}</p>
+                </div>
+                <div class="rolling-summary-card">
+                    <div class="rolling-summary-header">
+                        <div>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">最佳測試窗</p>
+                            <h4 class="text-lg font-semibold" style="color: var(--foreground);">${best ? `視窗 #${best.index}` : '—'}</h4>
+                        </div>
+                        ${bestStatus}
+                    </div>
+                    <div>
+                        <p class="text-sm" style="color: var(--muted-foreground);">${best ? escapeHtml(best.configLabel) : '尚未取得合格視窗。'}</p>
+                        <p class="text-sm font-medium" style="color: var(--foreground);">${best ? `${escapeHtml(best.testRange.start)} ~ ${escapeHtml(best.testRange.end)}` : ''}</p>
+                    </div>
+                    <div class="text-sm space-y-1" style="color: var(--muted-foreground);">
+                        <p>年化 ${bestCagrText} ／ Sharpe ${bestSharpeText}</p>
+                        <p>最大回撤 ${bestDrawdownText} ／ 正報酬日 ${bestPositiveText}</p>
+                    </div>
+                </div>
+                <div class="rolling-summary-card">
+                    <div class="rolling-summary-header">
+                        <div>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">資料覆蓋與穩健度</p>
+                            <h4 class="text-lg font-semibold" style="color: var(--foreground);">期間 ${datasetLine}</h4>
+                        </div>
+                        <i data-lucide="bar-chart-3" class="lucide w-5 h-5" style="color: var(--muted-foreground);"></i>
+                    </div>
+                    <p class="text-sm font-medium" style="color: var(--foreground);">${coverageLine}</p>
+                    <div class="text-sm space-y-1" style="color: var(--muted-foreground);">
+                        <p>平均 Sharpe ${averageSharpeText} ／ 平均回撤 ${averageDrawdownText}</p>
+                        <p>正報酬日比例 ${averagePositiveText}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    `;
+}
+
+function buildRollingConfigCards(analysis) {
+    if (!analysis || !Array.isArray(analysis.configs)) {
+        return '';
+    }
+    const summary = analysis.summary || {};
+    const recommendedId = summary.recommendedConfigId || null;
+    const cards = analysis.configs.map((config) => {
+        const header = `
+            <div class="rolling-config-header">
+                <div>
+                    <h4 class="text-base font-semibold" style="color: var(--foreground);">${escapeHtml(config.label)}</h4>
+                    <p class="rolling-config-meta">訓練 ${config.trainMonths} 個月 → 測試 ${config.testMonths} 個月，步長 ${config.stepMonths} 個月</p>
+                </div>
+                <span class="rolling-chip ${(config.grade && config.grade.chipClass) || 'grade-NA'}">${config.grade ? `${config.grade.letter} ｜ ${escapeHtml(config.grade.label)}` : 'NA'}</span>
+            </div>`;
+        if (config.insufficient) {
+            return `
+                <div class="rolling-config-card">
+                    ${header}
+                    <p class="text-sm" style="color: var(--muted-foreground);">${escapeHtml(config.reason || '資料不足，無法建立視窗。')}</p>
+                </div>
+            `;
+        }
+        const highlightAttrs = config.id === recommendedId
+            ? ' style="border-color: color-mix(in srgb, var(--primary) 45%, transparent); box-shadow: 0 18px 36px -22px rgba(37, 99, 235, 0.45);"'
+            : '';
+        const recommendationTag = config.id === recommendedId
+            ? '<span class="rolling-score-pill">推薦組合</span>'
+            : '';
+        const passRateText = formatPercent((config.passRate || 0) * 100);
+        const avgScoreText = Number.isFinite(config.averageScore) ? config.averageScore.toFixed(1) : '—';
+        const avgSharpeText = Number.isFinite(config.averageSharpe) ? config.averageSharpe.toFixed(2) : '—';
+        const avgDrawdownText = Number.isFinite(config.averageMaxDrawdown)
+            ? formatPercent(config.averageMaxDrawdown * 100)
+            : 'N/A';
+        const avgPositiveText = Number.isFinite(config.averagePositiveRatio)
+            ? formatPercent(config.averagePositiveRatio * 100)
+            : 'N/A';
+        const coverageLine = config.coverage
+            ? `${escapeHtml(config.coverage.start)} ~ ${escapeHtml(config.coverage.end)}`
+            : '—';
+        return `
+            <div class="rolling-config-card"${highlightAttrs}>
+                ${header}
+                <div class="flex items-center justify-between">
+                    ${recommendationTag}
+                    <span class="rolling-config-meta">視窗數 ${config.windows.length} 個</span>
+                </div>
+                <div class="rolling-config-stats">
+                    <div><strong>平均分數</strong><br>${avgScoreText}</div>
+                    <div><strong>通過率</strong><br>${passRateText}（${config.passedWindows || 0}/${config.windows.length}）</div>
+                    <div><strong>平均 Sharpe</strong><br>${avgSharpeText}</div>
+                    <div><strong>平均最大回撤</strong><br>${avgDrawdownText}</div>
+                    <div><strong>正報酬日比例</strong><br>${avgPositiveText}</div>
+                </div>
+                <p class="rolling-config-meta flex items-center gap-2"><i data-lucide="calendar-range" class="lucide w-4 h-4"></i>${coverageLine}</p>
+            </div>
+        `;
+    });
+    if (cards.length === 0) {
+        return '';
+    }
+    return `
+        <section class="space-y-4">
+            <h4 class="text-base font-semibold" style="color: var(--foreground);">視窗組合評估</h4>
+            <div class="space-y-3">
+                ${cards.join('')}
+            </div>
+        </section>
+    `;
+}
+
+function buildRollingTableSection(analysis) {
+    if (!analysis || !Array.isArray(analysis.windows)) {
+        return '';
+    }
+    const summary = analysis.summary || {};
+    const thresholdText = summary.thresholdText || '門檻：年化 ≥5%、Sharpe ≥0.6、最大回撤 ≤25%、正報酬日 ≥50%';
+    if (analysis.windows.length === 0) {
+        return `
+            <section class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <h4 class="text-base font-semibold" style="color: var(--foreground);">測試窗明細</h4>
+                    <span class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(thresholdText)}</span>
+                </div>
+                <div class="rolling-table-wrapper">
+                    <table class="rolling-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>視窗組合</th>
+                                <th>測試期間</th>
+                                <th>年化報酬</th>
+                                <th>Sharpe</th>
+                                <th>Sortino</th>
+                                <th>最大回撤</th>
+                                <th>正報酬日</th>
+                                <th>Score</th>
+                                <th>結果</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="10" style="text-align: center; padding: 1rem; color: var(--muted-foreground);">尚無有效的滾動測試視窗。</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        `;
+    }
+
+    const recommendedId = summary.recommendedConfigId || null;
+    const rows = analysis.windows.map((window, index) => {
+        const scoreText = Number.isFinite(window.score?.overall) ? window.score.overall.toFixed(1) : '—';
+        const cagrText = formatPercent((window.metrics?.cagr || 0) * 100);
+        const sharpeText = formatRollingSharpe(window.metrics?.sharpe);
+        const sortinoText = formatRollingSharpe(window.metrics?.sortino);
+        const drawdownText = formatPercent((window.metrics?.maxDrawdown || 0) * 100);
+        const positiveText = formatPercent((window.metrics?.positiveRatio || 0) * 100);
+        const statusMeta = resolveRollingStatusMeta(window.status);
+        const tooltip = buildRollingCriteriaTooltip(window.criteria);
+        const highlight = window.configId === recommendedId
+            ? ' style="background-color: color-mix(in srgb, var(--primary) 6%, transparent);"'
+            : '';
+        return `
+            <tr${highlight}>
+                <td>${index + 1}</td>
+                <td>
+                    <div class="font-semibold" style="color: var(--foreground);">${escapeHtml(window.configLabel)}</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">視窗 #${window.index} ｜ 訓練 ${window.configTrainMonths}M → 測試 ${window.configTestMonths}M</div>
+                </td>
+                <td>
+                    <div style="color: var(--foreground);">${escapeHtml(window.testRange.start)} ~ ${escapeHtml(window.testRange.end)}</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">訓練：${escapeHtml(window.trainRange.start)} ~ ${escapeHtml(window.trainRange.end)}</div>
+                </td>
+                <td>${cagrText}</td>
+                <td>${sharpeText}</td>
+                <td>${sortinoText}</td>
+                <td>${drawdownText}</td>
+                <td>${positiveText}</td>
+                <td>${scoreText}</td>
+                <td><span class="${statusMeta.className}" title="${escapeHtml(tooltip)}">${statusMeta.label}</span></td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <section class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h4 class="text-base font-semibold" style="color: var(--foreground);">測試窗明細</h4>
+                <span class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(thresholdText)}</span>
+            </div>
+            <div class="rolling-table-wrapper">
+                <table class="rolling-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>視窗組合</th>
+                            <th>測試期間</th>
+                            <th>年化報酬</th>
+                            <th>Sharpe</th>
+                            <th>Sortino</th>
+                            <th>最大回撤</th>
+                            <th>正報酬日</th>
+                            <th>Score</th>
+                            <th>結果</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    `;
+}
+
+function buildRollingCriteriaTooltip(criteria) {
+    if (!criteria) {
+        return '無法評估門檻';
+    }
+    const parts = [
+        `年化 ${criteria.cagr ? '✓' : '✗'}（≥ 5%）`,
+        `Sharpe ${criteria.sharpe ? '✓' : '✗'}（≥ 0.6）`,
+        `回撤 ${criteria.maxDrawdown ? '✓' : '✗'}（≤ 25%）`,
+        `正報酬 ${criteria.positiveRatio ? '✓' : '✗'}（≥ 50%）`,
+    ];
+    return parts.join(' / ');
+}
+
+function formatRollingSharpe(value) {
+    if (value === null || value === undefined) return '—';
+    if (value === Infinity) return '∞';
+    if (value === -Infinity) return '−∞';
+    if (!Number.isFinite(value)) return '—';
+    return value.toFixed(2);
+}
+
+function resolveRollingStatusMeta(status) {
+    if (status === 'pass') return { label: '通過', className: 'rolling-pass' };
+    if (status === 'watch') return { label: '觀察', className: 'rolling-watch' };
+    return { label: '未通過', className: 'rolling-fail' };
+}
+
+function addMonthsSafely(date, months) {
+    const result = new Date(date.getTime());
+    const originalDay = result.getDate();
+    result.setMonth(result.getMonth() + months);
+    if (result.getDate() < originalDay) {
+        result.setDate(0);
+    }
+    return result;
+}
+
+function findFirstIndexOnOrAfter(series, targetDate) {
+    const target = targetDate.getTime();
+    let left = 0;
+    let right = series.length - 1;
+    let found = -1;
+    while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        const value = series[mid].date.getTime();
+        if (value >= target) {
+            found = mid;
+            right = mid - 1;
+        } else {
+            left = mid + 1;
+        }
+    }
+    return found;
+}
+
+function findLastIndexBefore(series, targetDate) {
+    const target = targetDate.getTime();
+    let left = 0;
+    let right = series.length - 1;
+    let found = -1;
+    while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        const value = series[mid].date.getTime();
+        if (value < target) {
+            found = mid;
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    return found;
+}
+
+function countMonthsBetween(startDate, endDate) {
+    if (!(startDate instanceof Date) || !(endDate instanceof Date)) {
+        return 0;
+    }
+    let months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+    if (endDate.getDate() >= startDate.getDate()) {
+        months += 1;
+    }
+    return Math.max(0, months);
+}
+
+function calculateMaxDrawdownFromEquity(equities) {
+    let peak = -Infinity;
+    let maxDrawdown = 0;
+    for (const value of equities) {
+        if (!Number.isFinite(value) || value <= 0) continue;
+        peak = Math.max(peak, value);
+        if (peak <= 0) continue;
+        const drawdown = (peak - value) / peak;
+        if (drawdown > maxDrawdown) {
+            maxDrawdown = drawdown;
+        }
+    }
+    return maxDrawdown;
+}
+
+function averageMetric(items, accessor, options = {}) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return null;
+    }
+    const allowInfinity = Boolean(options.allowInfinity);
+    const infinityValue = Number.isFinite(options.infinityValue) ? options.infinityValue : 3;
+    const values = [];
+    for (const item of items) {
+        const raw = accessor(item);
+        if (Number.isFinite(raw)) {
+            values.push(raw);
+        } else if (allowInfinity && raw === Infinity) {
+            values.push(infinityValue);
+        }
+    }
+    if (values.length === 0) {
+        return null;
+    }
+    const sum = values.reduce((acc, val) => acc + val, 0);
+    return sum / values.length;
+}
+
+function clampScore(value) {
+    if (!Number.isFinite(value)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(100, value));
+}
+
+function interpolateScore(value, points) {
+    if (!Array.isArray(points) || points.length === 0) {
+        return 0;
+    }
+    const sorted = points.slice().sort((a, b) => a.value - b.value);
+    if (value <= sorted[0].value) {
+        return sorted[0].score;
+    }
+    for (let i = 1; i < sorted.length; i += 1) {
+        const prev = sorted[i - 1];
+        const current = sorted[i];
+        if (value <= current.value) {
+            const range = current.value - prev.value || 1;
+            const ratio = (value - prev.value) / range;
+            return prev.score + ratio * (current.score - prev.score);
+        }
+    }
+    return sorted[sorted.length - 1].score;
+}
+// 優化專用進度顯示函數
 // 優化專用進度顯示函數
 function showOptimizationProgress(message) {
     console.log('[Main] showOptimizationProgress 被調用:', message);

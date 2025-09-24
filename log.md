@@ -1,3 +1,9 @@
+## 2025-07-30 — Patch LB-ROLLING-20240705A
+- **Issue recap**: 滾動測試分頁僅有靜態 placeholder，缺少實際 Walk-Forward 分析、評分與視窗明細，無法提供部署門檻。
+- **Fix**: 在 `backtest.js` 建立 `computeRollingAnalysis`、`renderRollingTestReport` 等函式，依 36→6／24→6／18→3／12→3 月視窗進行 Walk-Forward 計算、門檻判讀與評分，並輸出摘要卡、組合統計與視窗表格。
+- **Diagnostics**: 回測後切換至「滾動測試」分頁可看到綜合評分、最佳視窗、資料覆蓋卡片，並列出各視窗門檻達成狀態與分數；資料不足時 placeholder 會顯示說明文字。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(file=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});console.log(file+' syntax ok');});console.log('scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
