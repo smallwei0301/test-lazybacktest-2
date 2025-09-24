@@ -1,4 +1,10 @@
 
+# 2025-09-29 — Patch LB-STRATEGY-STATUS-20250929A
+- **Issue recap**: 回測畫面顯示 `STRATEGY_STATUS_VERSION is not defined`，導致策略速報卡片無法載入版本碼並中斷後續戰況評分公式。
+- **Fix**: 建立 `STRATEGY_STATUS_VERSION` 常數並標記版本代碼，確保 `resetStrategyStatusCard` 與 `updateStrategyStatusCard` 能順利渲染預設文案與差距分析結果。
+- **Diagnostics**: 確認 DOMContentLoaded 仍會呼叫 `resetStrategyStatusCard('idle')`，並檢視卡片版本欄位可顯示最新代碼，公式邏輯保持既有差距與穩定度條列輸出。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 # 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
 - **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
 - **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
