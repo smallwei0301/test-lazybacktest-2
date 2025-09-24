@@ -1363,7 +1363,10 @@ function displayBacktestResult(result) {
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`; 
         return; 
     } 
-    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
+    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; const sensitivityData =
+        result.parameterSensitivity && typeof result.parameterSensitivity === 'object'
+            ? result.parameterSensitivity
+            : null; let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1477,6 +1480,253 @@ function displayBacktestResult(result) {
                 </div>
             </div>
         </div>`;
+    const sensitivityHtml = (() => {
+        const data =
+            sensitivityData && Array.isArray(sensitivityData.groups) && sensitivityData.groups.length > 0
+                ? sensitivityData
+                : null;
+        const tooltipContent =
+            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的報酬漂移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
+        const headerHtml = `
+        <div class="flex items-center mb-6">
+            <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
+            <span class="tooltip ml-2">
+                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                <span class="tooltiptext">${tooltipContent}</span>
+            </span>
+        </div>`;
+        if (!data) {
+            return `
+        <div class="mb-8">
+            ${headerHtml}
+            <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <p class="text-sm" style="color: var(--muted-foreground);">此策略的參數未提供可量化的敏感度資訊，或計算時發生例外，暫無結果可顯示。</p>
+            </div>
+        </div>`;
+        }
+        const formatPercentSigned = (value, digits = 2) => {
+            if (!Number.isFinite(value)) return '—';
+            return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}%`;
+        };
+        const formatPercentMagnitude = (value, digits = 1) => {
+            if (!Number.isFinite(value)) return '—';
+            return `${Math.abs(value).toFixed(digits)}%`;
+        };
+        const formatDelta = (value) => {
+            if (!Number.isFinite(value)) return '—';
+            return `${value >= 0 ? '+' : ''}${value.toFixed(2)}pp`;
+        };
+        const formatSharpeDelta = (value) => {
+            if (!Number.isFinite(value)) return '—';
+            return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+        };
+        const formatScore = (value) => {
+            if (!Number.isFinite(value)) return '—';
+            return Math.round(value);
+        };
+        const formatParamValue = (value) => {
+            if (!Number.isFinite(value)) return '—';
+            if (Number.isInteger(value)) return value.toString();
+            return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
+        };
+        const scoreClass = (value) => {
+            if (!Number.isFinite(value)) return 'text-muted-foreground';
+            if (value >= 80) return 'text-emerald-600';
+            if (value >= 60) return 'text-amber-500';
+            return 'text-rose-600';
+        };
+        const driftClass = (value) => {
+            if (!Number.isFinite(value)) return 'text-muted-foreground';
+            const abs = Math.abs(value);
+            if (abs <= 20) return 'text-emerald-600';
+            if (abs <= 40) return 'text-amber-500';
+            return 'text-rose-600';
+        };
+        const baselineMetrics = {
+            returnRate: Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null,
+            sharpeRatio: Number.isFinite(data?.baseline?.sharpeRatio) ? data.baseline.sharpeRatio : null,
+        };
+        const renderScenario = (scenario) => {
+            if (!scenario || scenario.run === null) {
+                return `<div class="text-xs" style="color: var(--muted-foreground);">—</div>`;
+            }
+            const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
+            const deltaText = formatDelta(scenario.deltaReturn);
+            const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
+            const driftCls = driftClass(scenario.driftPercent);
+            const returnText = formatPercentSigned(scenario.run?.returnRate ?? NaN, 2);
+            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${formatPercentSigned(baselineMetrics.returnRate, 2)})。`;
+            const tooltip = `調整值：${formatParamValue(scenario.value)}<br>回報：${returnText}<br>${ppTooltip}<br>Sharpe Δ：${sharpeText}${
+                Number.isFinite(baselineMetrics.sharpeRatio)
+                    ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
+                    : ''
+            }<br>漂移：${driftText}（回報與基準的偏移幅度）`;
+            return `<div class="space-y-1 text-center">
+                <p class="text-sm font-semibold ${driftCls}">
+                    ${deltaText}
+                    <span class="tooltip ml-1 align-middle">
+                        <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${ppTooltip}<br>正值代表調整後績效優於原設定，負值表示略遜於基準。</span>
+                    </span>
+                </p>
+                <p class="text-[11px]" style="color: var(--muted-foreground);">漂移 ${driftText}</p>
+                <div class="flex items-center justify-center gap-1 text-[11px]" style="color: var(--muted-foreground);">
+                    Sharpe ${sharpeText}
+                    <span class="tooltip">
+                        <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${tooltip}</span>
+                    </span>
+                </div>
+            </div>`;
+        };
+        const renderGroup = (group) => {
+            const params = Array.isArray(group.parameters) ? group.parameters : [];
+            if (params.length === 0) return '';
+            const groupDriftValues = params
+                .map((item) => (Number.isFinite(item.averageDriftPercent) ? item.averageDriftPercent : null))
+                .filter((value) => value !== null);
+            const groupAvgDrift = groupDriftValues.length > 0
+                ? groupDriftValues.reduce((sum, cur) => sum + cur, 0) / groupDriftValues.length
+                : null;
+            const scoreValues = params
+                .map((item) => (Number.isFinite(item.stabilityScore) ? item.stabilityScore : null))
+                .filter((value) => value !== null);
+            const groupScore = scoreValues.length > 0
+                ? scoreValues.reduce((sum, cur) => sum + cur, 0) / scoreValues.length
+                : null;
+            const strategyKey = group.strategy || '';
+            const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
+            const rows = params.map((param) => {
+                const plusScenario = Array.isArray(param.scenarios)
+                    ? param.scenarios.find((s) => s.label === '+10%')
+                    : null;
+                const minusScenario = Array.isArray(param.scenarios)
+                    ? param.scenarios.find((s) => s.label === '-10%')
+                    : null;
+                return `<tr class="border-t" style="border-color: var(--border);">
+                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(param.name)}</td>
+                    <td class="px-3 py-2 text-center" style="color: var(--foreground);">${formatParamValue(param.baseValue)}</td>
+                    <td class="px-3 py-2">${renderScenario(plusScenario)}</td>
+                    <td class="px-3 py-2">${renderScenario(minusScenario)}</td>
+                    <td class="px-3 py-2 text-center">
+                        <span class="text-sm font-semibold ${driftClass(param.averageDriftPercent)}">${formatPercentMagnitude(param.averageDriftPercent, 1)}</span>
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">漂移幅度</p>
+                    </td>
+                    <td class="px-3 py-2 text-center">
+                        <span class="text-sm font-semibold ${scoreClass(param.stabilityScore)}">${formatScore(param.stabilityScore)}</span>
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
+                    </td>
+                </tr>`;
+            }).join('');
+            return `<div class="sensitivity-card p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                    <div>
+                        <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(group.label)}</p>
+                        <p class="text-xs" style="color: var(--muted-foreground);">策略：${escapeHtml(strategyInfo.name || String(strategyKey || 'N/A'))}</p>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div class="text-right">
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
+                            <p class="text-base font-semibold ${driftClass(groupAvgDrift)}">${formatPercentMagnitude(groupAvgDrift, 1)}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均穩定度</p>
+                            <p class="text-base font-semibold ${scoreClass(groupScore)}">${formatScore(groupScore)}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="sensitivity-table-wrapper">
+                    <table class="w-full text-xs" style="border-color: var(--border); border-width: 1px; border-style: solid; border-radius: 0.75rem;">
+                        <thead>
+                            <tr class="bg-white/40" style="color: var(--muted-foreground);">
+                                <th class="px-3 py-2 text-left font-medium">參數</th>
+                                <th class="px-3 py-2 text-center font-medium">基準值</th>
+                                <th class="px-3 py-2 text-center font-medium">
+                                    <span class="inline-flex items-center justify-center gap-1">
+                                        +10%
+                                        <span class="tooltip">
+                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數放大 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
+                                        </span>
+                                    </span>
+                                </th>
+                                <th class="px-3 py-2 text-center font-medium">
+                                    <span class="inline-flex items-center justify-center gap-1">
+                                        -10%
+                                        <span class="tooltip">
+                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數縮小 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
+                                        </span>
+                                    </span>
+                                </th>
+                                <th class="px-3 py-2 text-center font-medium">平均漂移</th>
+                                <th class="px-3 py-2 text-center font-medium">穩定度</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+        };
+        const overallScore = data?.summary?.stabilityScore ?? null;
+        const overallDrift = data?.summary?.averageDriftPercent ?? null;
+        const baselineReturn = data?.baseline?.returnRate ?? null;
+        const baselineAnnual = data?.baseline?.annualizedReturn ?? null;
+        const baselineSharpe = data?.baseline?.sharpeRatio ?? null;
+        const summaryCards = `
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
+                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                    <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健</p>
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                        <span class="tooltip">
+                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 觀察參數 ±10% 兩個情境的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                        </span>
+                    </div>
+                    <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">參數 ±10% 時，回報率平均偏離</p>
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">基準績效 (±10% 視窗)</p>
+                    <p class="text-base font-semibold" style="color: var(--foreground);">報酬 ${formatPercentSigned(baselineReturn, 2)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">年化 ${formatPercentSigned(baselineAnnual, 2)} ・ Sharpe ${Number.isFinite(baselineSharpe) ? baselineSharpe.toFixed(2) : '—'}</p>
+                </div>
+            </div>`;
+        const interpretationHint = `
+            <div class="p-4 rounded-xl border" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                <div class="flex items-start gap-3">
+                    <span class="info-icon inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full" style="background-color: var(--primary); color: var(--primary-foreground);">i</span>
+                    <div>
+                        <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
+                        <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
+                            <li><strong>PP（百分點）</strong>：調整後報酬率與原始回測報酬率的差異，正值代表績效提升，負值代表下滑。</li>
+                            <li><strong>+10% / -10%</strong>：以基準參數為中心，上調或下調 10% 後重新回測的結果。</li>
+                            <li><strong>漂移幅度</strong>：兩個調整案例的報酬偏移平均值，越小代表策略對參數較不敏感。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，約等於 100 − 平均漂移，≥ 70 為穩健；40 ~ 69 需再驗證；< 40 需謹慎。</li>
+                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值，可觀察風險調整後報酬的改變。</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>`;
+        const groupsHtml = data.groups.map((group) => renderGroup(group)).filter(Boolean).join('');
+        const groupSection = groupsHtml || `<div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <p class="text-sm" style="color: var(--muted-foreground);">偵測到的參數皆為非數值型或結果不完整，暫無敏感度表格可供顯示。</p>
+            </div>`;
+        return `
+        <div class="mb-8">
+            ${headerHtml}
+            ${summaryCards}
+            ${interpretationHint}
+            <div class="space-y-4">
+                ${groupSection}
+            </div>
+        </div>`;
+    })();
     let tradeStatsHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">交易統計</h4>
@@ -1612,6 +1862,7 @@ function displayBacktestResult(result) {
             <div class="space-y-8">
                 ${performanceHtml}
                 ${riskHtml}
+                ${sensitivityHtml}
                 ${tradeStatsHtml}
                 ${strategySettingsHtml}
             </div>
