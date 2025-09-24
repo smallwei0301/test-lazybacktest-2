@@ -120,6 +120,12 @@
 - **Diagnostics**: `fetchDiagnostics.rangeFetch` 新增 `worker-year-superset` 狀態，Superset 命中會標示 `Netlify 年度快取 (Worker Superset)`；主執行緒快取索引與 Session/YEAR 快取皆寫入 coverage 指紋，方便檢核 Superset 命中狀況。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢視與資料流推演；後續需於本機瀏覽器以 2330、2412、0050 等案例實測 18 個月跨年回測，確認 Blob 計量僅記錄年度切片且 console 無錯誤。
 
+# 2025-08-02 — Patch LB-BLOB-CURRENT-20250802B
+- **Issue recap**: Blob 範圍快取雖能偵測當月落後，但直接改走逐月 Proxy 補抓導致整個暖身排程被打斷，當日僅缺少 1~2 筆資料時仍需重跑全月。
+- **Fix**: `tryFetchRangeFromBlob` 在標記 `current-month-gap` 後改以 `fetchCurrentMonthGapPatch` 僅補抓缺漏日期，透過 proxy 月分 API 逐段合併資料並重新計算覆蓋狀態，同步記錄補抓診斷資訊。
+- **Diagnostics**: Blob 診斷新增 `patch` 區塊揭露嘗試月份、來源與筆數，回填後會更新 `lastDate`、`currentMonthGapDays` 與覆蓋落差；若補抓仍失敗則維持 `current-month-stale` 供前端顯示警示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'),{filename:'worker.js'});console.log('worker.js compiles');NODE`
+
 # 2025-07-30 — Patch LB-BLOB-CURRENT-20250730A
 - **Issue recap**: Netlify Blob 範圍快取若在月中寫入，隔日回測仍沿用舊快取，導致使用者以當日結束日期回測時僅看到前一交易日的最後一筆資料。
 - **Fix**: `tryFetchRangeFromBlob` 新增「當月資料新鮮度」檢查，當回測結束日在當月且 Blob 回應的最後日期落後於應到日期時，標記為 `current-month-gap` 並退回逐月 Proxy 補抓，確保快取不會卡在寫入日。
