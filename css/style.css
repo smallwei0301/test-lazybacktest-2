@@ -293,37 +293,66 @@
 .trade-list::-webkit-scrollbar-thumb:hover { background: #aaa; }
 html, body { overflow-x: hidden; }
 
-/* Suggestion Area Style */
-#today-suggestion-area {
-     margin-top: 1rem;
-     margin-bottom: 1rem;
-     padding: 1rem;
-     background-color: #fffbeb; /* bg-yellow-50 */
-     border-left-width: 4px;
-     border-color: #f59e0b; /* border-yellow-500 */
-     color: #92400e; /* text-yellow-800 */
-     border-radius: 0.375rem; /* rounded-md */
-     text-align: center;
- }
- #today-suggestion-area.loading {
-     background-color: #f0f9ff; /* bg-sky-50 */
-     border-color: #0ea5e9; /* border-sky-500 */
-     color: #0369a1; /* text-sky-800 */
- }
- #today-suggestion-area h4 {
-      font-weight: 600;
-      font-size: 1.125rem; /* text-lg */
-      line-height: 1.75rem;
-      margin-bottom: 0.25rem; /* mb-1 */
-  }
- #suggestion-text {
-     font-size: 1.25rem; /* text-xl */
-     line-height: 1.75rem;
-     font-weight: 700; /* font-bold */
- }
- #today-suggestion-area.hidden {
-     display: none;
- }
+/* Today Suggestion Card */
+#today-suggestion-area.hidden {
+    display: none;
+}
+
+.today-suggestion-highlight {
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    padding: 0.875rem 1rem;
+    background: color-mix(in srgb, var(--muted) 6%, var(--background));
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.today-suggestion-highlight.is-bullish {
+    background: linear-gradient(135deg, color-mix(in srgb, #16a34a 10%, var(--background)) 0%, color-mix(in srgb, #16a34a 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #16a34a 35%, transparent);
+    color: #065f46;
+}
+
+.today-suggestion-highlight.is-bearish {
+    background: linear-gradient(135deg, color-mix(in srgb, #dc2626 10%, var(--background)) 0%, color-mix(in srgb, #dc2626 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #dc2626 35%, transparent);
+    color: #7f1d1d;
+}
+
+.today-suggestion-highlight.is-exit {
+    background: linear-gradient(135deg, color-mix(in srgb, #f97316 10%, var(--background)) 0%, color-mix(in srgb, #f97316 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #f97316 35%, transparent);
+    color: #9a3412;
+}
+
+.today-suggestion-highlight.is-info {
+    background: linear-gradient(135deg, color-mix(in srgb, #0284c7 10%, var(--background)) 0%, color-mix(in srgb, #0284c7 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #0ea5e9 35%, transparent);
+    color: #0b4f75;
+}
+
+.today-suggestion-highlight.is-warning {
+    background: linear-gradient(135deg, color-mix(in srgb, #eab308 10%, var(--background)) 0%, color-mix(in srgb, #eab308 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #facc15 35%, transparent);
+    color: #854d0e;
+}
+
+.today-suggestion-highlight.is-error {
+    background: linear-gradient(135deg, color-mix(in srgb, #ef4444 10%, var(--background)) 0%, color-mix(in srgb, #ef4444 4%, var(--background)) 100%);
+    border-color: color-mix(in srgb, #f87171 35%, transparent);
+    color: #7f1d1d;
+}
+
+.today-suggestion-highlight.is-neutral {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 12%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%);
+    border-color: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.today-suggestion-stats div {
+    background: color-mix(in srgb, var(--muted) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+}
 
 /* 批量策略優化樣式 */
 .batch-optimization-tab {

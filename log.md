@@ -1,3 +1,9 @@
+## 2025-07-26 — Patch LB-TODAY-ACTION-20250726A
+- **Issue recap**: 今日建議卡片尚未對準最新交易日，Worker 仍沿用舊版 `runSuggestionSimulation` 並在回測結束日強制平倉，導致實際持倉狀態與操作訊號容易脫鉤。
+- **Fix**: 移除舊版模擬函式，改以 `runStrategy` 的 `finalEvaluation` 對今日資料延伸評估，產出多空持倉、最新價格與具體行動；同時補齊主執行緒快取 coverage 後灌入 Worker，確保建議計算命中現有資料並沿用最新 meta。
+- **Diagnostics**: 今日建議回傳載明延伸至今日的資料日期、倉位摘要與 lag 天數，若策略起始日尚未到達亦會顯示提示訊息；Worker 快取保留 coverage fingerprint，後續重播時可比對資料區間。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。

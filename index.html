@@ -1003,7 +1003,7 @@
                             </div>
 
                             <!-- Today Suggestion -->
-                            <div class="card hidden" id="today-suggestion-area">
+                            <div class="card hidden" id="today-suggestion-area" aria-live="polite">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2">
                                         <i data-lucide="lightbulb" class="lucide text-accent" style="color: var(--accent);"></i>
@@ -1011,7 +1011,37 @@
                                     </h3>
                                 </div>
                                 <div class="card-content">
-                                    <div id="suggestion-text" class="text-sm text-muted" style="color: var(--muted-foreground);">基於您的策略，今日操作建議將在這裡顯示</div>
+                                    <div id="today-suggestion-empty" class="text-xs text-center" style="color: var(--muted-foreground);">
+                                        執行回測後將顯示策略的最新操作建議
+                                    </div>
+                                    <div id="today-suggestion-body" class="space-y-4 hidden">
+                                        <div id="today-suggestion-banner" class="today-suggestion-highlight">
+                                            <div class="flex items-center justify-between gap-3">
+                                                <span id="today-suggestion-label" class="text-sm font-semibold" style="color: var(--foreground);">計算中</span>
+                                                <span id="today-suggestion-date" class="text-xs" style="color: var(--muted-foreground);">—</span>
+                                            </div>
+                                            <div id="today-suggestion-price" class="text-xs" style="color: var(--muted-foreground);">—</div>
+                                        </div>
+                                        <dl class="today-suggestion-stats grid grid-cols-2 gap-3 text-xs">
+                                            <div>
+                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">多單狀態</dt>
+                                                <dd id="today-suggestion-long" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            </div>
+                                            <div>
+                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">空單狀態</dt>
+                                                <dd id="today-suggestion-short" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            </div>
+                                            <div>
+                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">部位概況</dt>
+                                                <dd id="today-suggestion-position" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            </div>
+                                            <div>
+                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">模擬資金</dt>
+                                                <dd id="today-suggestion-portfolio" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            </div>
+                                        </dl>
+                                        <ul id="today-suggestion-notes" class="text-[11px] space-y-1 list-disc pl-5" style="color: var(--muted-foreground);"></ul>
+                                    </div>
                                 </div>
                             </div>
 
