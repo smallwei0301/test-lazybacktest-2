@@ -2,6 +2,7 @@
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
+// Patch Tag: LB-SENSITIVITY-RENDER-20250801A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -3356,6 +3357,7 @@ function displayBacktestResult(result) {
             <div class="space-y-8">
                 ${performanceHtml}
                 ${riskHtml}
+                ${sensitivityHtml}
                 ${tradeStatsHtml}
                 ${strategySettingsHtml}
             </div>

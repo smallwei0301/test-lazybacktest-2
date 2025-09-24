@@ -1,3 +1,10 @@
+## 2025-08-01 — Patch LB-SENSITIVITY-RENDER-20250801A
+- **Issue recap**: 回測摘要中雖生成敏感度分析 HTML，但結果容器未插入該卡片，導致使用者看不到穩定度分數與 ±10% 場景表格。
+- **Fix**: 將 `sensitivityHtml` 納入摘要版面佈局，確保與績效、風險、交易統計並列顯示。
+- **Diagnostics**: 靜態檢視回測摘要產生的 DOM，確認敏感度卡片與提示卡會出現在績效與交易統計之間，含桌機表格與手機堆疊視圖。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('summary scripts compile');NODE`
+
+
 ## 2025-07-30 — Patch LB-SENSITIVITY-RESPONSIVE-20250730A
 - **Issue recap**: 手機寬度 375px 以下時，敏感度卡片雖已改為雙欄堆疊仍需微幅橫向捲動，基準值標籤也會被擠到 tooltip 之下影響判讀。
 - **Fix**: 讓手機堆疊卡支援自動換行 header、平均漂移/穩定度區塊以 `auto-fit` 網格填滿可用寬度，並在 380px 以下改為單欄堆疊以免被壓縮；同時調整基準值排版與 tooltip 容器，使資訊能在窄螢幕保持齊整對齊。
