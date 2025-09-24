@@ -1,3 +1,4 @@
+
 # 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
 - **Issue recap**: 使用者反映敏感度摘要中的平均漂移提示仍提及不存在於前端的 Walk-Forward 測試，且表格內的 tooltip 於桌機截圖時會被卡片邊界遮擋。
 - **Fix**: 將判讀建議改為導引用戶使用現有的「批量優化」功能比對不同時間窗結果，並為敏感度卡片新增 `sensitivity-card`/`tooltiptext--sensitivity` 佈局與邊距設定，避免表格 tooltip 被裁切。
@@ -33,6 +34,99 @@
 - **Fix**: Worker 於回傳結果時新增 ±10% 參數重跑並計算報酬漂移、Sharpe 變化與穩定度分數；前端回測摘要插入「敏感度分析」卡片，顯示整體穩定度、平均漂移與各參數細項，並提供 tooltip 說明國外平臺常用判讀門檻。
 - **Diagnostics**: Tooltip 列出 QuantConnect／Portfolio123 等平臺建議的分數區間，表格亦顯示每個參數在 +10%／-10% 調整時的報酬差異與漂移幅度，可快速截圖協助用戶與營運端討論參數穩健性。
 - **Testing**: 受限於環境無法啟動前端與實際回測，已透過程式靜態檢閱與重跑 Worker 函式確保敏感度計算不影響原有流程；後續需在具資料來源的環境實際回測驗證 console 無錯誤。
+
+
+# 2025-07-01 — Patch LB-STAGING-TOGGLE-20250701A
+- **Issue recap**: 多次進出場設定以卡片樣式呈現，標題字級與旁邊欄位不一致且需整塊點擊，導致視覺重量過高、用戶難以辨識點擊焦點。
+- **Fix**: 讓「多次進出場」標籤沿用風險管理卡片的小標樣式，並改用圓框加號按鈕控制面板開闔，維持原有自動展開邏輯同時提升易讀性與可用性。
+- **Diagnostics**: Toggle 按鈕仍透過 `aria-expanded` 揭露狀態，加號會在展開後改為減號，可在檢查工具中驗證按鈕焦點與鍵盤操作是否正常。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-06-30 — Patch LB-STAGING-PANEL-20250630A
+- **Issue recap**: 風險管理卡片的分段進出場設定佔據大量版面，用戶若尚未啟用多次進出場也必須捲動操作；分段優化執行或套用推薦後亦無法自動揭示相關設定。
+- **Fix**: 將分段進/出場說明與設定收納至「多次進出場」摺疊面板，預設維持收起；新增控制器統一管理開合狀態與加號/減號符號，並在啟動分段優化或套用推薦時自動展開。
+- **Diagnostics**: 面板開合狀態同步 `aria-expanded` 與圖示文字，可透過前端檢視確認狀態是否一致，開啟後即能看到最新套用的分段百分比與觸發條件。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-06-29 — Patch LB-STAGING-LABEL-20250629A
+- **Issue recap**: 分段優化結果表在單段 100% 進場或出場時仍顯示特定觸發模式，與實際「價格/訊號皆可」的情境不符，造成使用者誤解建議條件。
+- **Fix**: 為候選分段標記單段滿倉／出清狀態，表格、摘要與進度提示在偵測到 100% 配置時統一以「皆可」呈現，維持建議說明與測試行為一致。
+- **Diagnostics**: 進度列與結果表可快速比對觸發標籤是否轉為「皆可」，便於確認單段情境下已正確跳過額外條件判讀。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-06-28 — Patch LB-STAGING-SKIP-20250628A
+- **Issue recap**: 分段優化在僅有單段 100% 進場或出場時，仍會強制測試價格回落與訊號再觸發兩組條件，徒增重複計算並拉長完成時間。
+- **Fix**: 建立單段滿倉／出清偵測邏輯，遇到 100% 分段時僅保留使用者指定或預設的一組觸發條件，避免重複排列組合；同時更新說明文字，提醒系統會自動略過無效條件以加快測試。
+- **Diagnostics**: 分段優化進度與結果表會直接反映實際測試組數，遇到單段情境時僅呈現對應條件，方便核對是否跳過額外排列。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-06-27 — Patch LB-STAGING-MODES-20250627B
+- **Issue recap**: 分段優化僅沿用單一進出場條件測試 42 組分段，無法比較「價格回落 / 訊號再觸發」等不同加碼與出清邏輯，使用者也看不出推薦組合對應的觸發方式。
+- **Fix**: 將既有 42 組進出場分段全面搭配「價格回落加碼 / 策略訊號再觸發」與「價格走高分批 / 策略訊號再觸發」條件，總計評估 4 × 42 組組合；結果表新增進出場條件欄位，套用推薦時同步更新對應模式。
+- **Diagnostics**: 優化進度與摘要會顯示目前測試的分段與條件，摘要列出完成的總組數，表格可直接辨識價格或訊號觸發，便於交叉比對。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-06-27 — Patch LB-STAGING-OPTIMIZER-20250627A
+- **Issue recap**: 分段出場設定分散在策略卡片中，使用者難以一眼掌握進出場資金配置；也缺乏自動化工具協助比較不同分段組合，需逐一手動調整、回測後再對照。
+- **Fix**: 將分段出場設定與分段進場集中於「風險管理」卡片，維持單一視覺脈絡；新增「分段優化」分頁與一鍵優化功能，針對多種進出場分段組合（單段滿倉、金字塔、梯形出場等）依年化報酬、夏普值與回撤排序，並提供一鍵套用推薦組合。
+- **Diagnostics**: 優化過程即時顯示目前測試進度與進出場組合，完成後列出前十名組合與評估指標；套用推薦時會於狀態欄與提示訊息提醒重新回測驗證。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`
+
+# 2025-06-26 — Patch LB-STAGED-ENTRY-EXIT-20250626A
+- **Issue recap**: 分段進場僅支援訊號或價格回落的加碼，長線多單在策略重複觸發或價格走高時仍會一次性全數出場，價格表也缺乏分段持倉追蹤資訊。
+- **Fix**: 新增分段出場模式，支援「訊號重複」與「價格走高」兩種觸發方式，並以 `consumeEntryForShares` 依比例扣減每段持倉，保留分段成本、觸發來源與剩餘股數；結果物件同步回傳 `entryStagingMode`、`exitStages`、`exitStagingMode` 及每日分段狀態，前端價格表可完整顯示多段持倉歷程。
+- **Diagnostics**: Worker console 會在每次分段賣出時列出交易股數、觸發類型與累計比例，`longExitStageStates` 提供剩餘股數、最新觸發價與下一段目標價，便於追蹤價格走勢與加減碼節奏。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+
+# 2025-06-24 — Patch LB-ENTRY-STAGING-20250624B
+- **Issue recap**: LB-ENTRY-STAGING-20250623A 在 Worker 中遺留語法錯誤，導致 Web Worker 載入時出現「Unexpected end of input」，分段進場功能無法啟用。
+- **Fix**: 重新整理分段進場買入與出場流程，透過 `executeLongStage` 統一處理收盤/隔日掛單，出場時整併各段進場成本與交易明細，並確保結果回傳 `entryStages` 與分段資訊。
+- **Diagnostics**: Worker console 會標示每段進場序號、累計比率與隔日掛單狀態；完成交易紀錄帶回分段細節與平均成本，方便前端診斷。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`
+
+# 2025-06-23 — Patch LB-ENTRY-STAGING-20250623A
+- **Issue recap**: 分段進場 UI 與參數儲存已經就緒，但 Worker 僅完成部分買入流程，未能分批投入資金、整併交易紀錄，也未回傳分段設定；載入策略時還會強制進入手動模式。
+- **Fix**: 補齊 Worker `executeLongStage` 流程與隔日掛單，出場時以整併後的進場資訊配對交易，並在結果物件回傳 `entryStages`；調整 staged entry 控制器，載入單一預設分段時維持自動模式。
+- **Diagnostics**: 多單成交 console 會顯示分段次序與累計比率，零投資額的隔日掛單會輸出警示；完成交易清單帶回分段明細與成本，方便前端診斷。
+- **Testing**: 受限於容器無法執行實際回測，已針對 Worker 分段買入/出場與結果結構進行靜態邏輯檢閱，確認資金重置與配對流程一致。
+
+# 2025-07-23 — Patch LB-SUPERSET-CACHE-20250723A
+- **Issue recap**: 年度 Blob 快取命中後仍會在同年度重複呼叫 Netlify/Proxy，主執行緒無法判斷既有快取是否涵蓋新區間，月度快取也會在暖身視窗微調時重新計算缺口並多次補抓。
+- **Fix**: Worker 建立 `market｜priceMode｜年度` Superset 快取並在呼叫 Blob/Proxy 後分拆寫入，回測前先嘗試以 Superset 切片回覆；主執行緒新增年度 Superset 尋找與切片機制，若快取已涵蓋新區間直接回播不再啟動 Worker；月度快取加入 coverage 指紋記錄，命中即可跳過缺口計算並避免重複補抓。
+- **Diagnostics**: `fetchDiagnostics.rangeFetch` 新增 `worker-year-superset` 狀態，Superset 命中會標示 `Netlify 年度快取 (Worker Superset)`；主執行緒快取索引與 Session/YEAR 快取皆寫入 coverage 指紋，方便檢核 Superset 命中狀況。
+- **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢視與資料流推演；後續需於本機瀏覽器以 2330、2412、0050 等案例實測 18 個月跨年回測，確認 Blob 計量僅記錄年度切片且 console 無錯誤。
+
+# 2025-07-22 — Patch LB-DEV-BLOB-20250722A
+- **Issue recap**: 開發工具按鈕與 Blob 監控散落在基本設定卡片中，快取來源標籤仍顯示「(快取)/(部分快取)」，Blob 用量僅保留 6 筆記錄且未追蹤台股清單服務是否讀寫 Blob。
+- **Fix**: 建立「開發者區域」獨立卡片整合測試資料來源、資料暖身診斷與 Blob 使用監控；重構來源彙總邏輯以顯示「本地快取／Proxy 快取／Blob 快取」分類；Blob 用量卡改為日期群組並可折疊非當日紀錄。
+- **Diagnostics**: Blob ledger 現在完整保留當月紀錄並支援滾動檢視，非當日區段預設收合且點擊即可展開；顯示 Netlify 年度快取命中/補抓、台股清單目錄使用 Blob 的讀寫次數。
+- **Testing**: 受限於容器無法開啟瀏覽器，透過靜態程式檢閱與資料流程推演驗證 UI 重構與 Blob 計量更新；需於本機瀏覽器實測輸入 2330 等案例確認台股清單快取命中時 Blob 監控同步增加紀錄且 console 無錯誤。
+
+# 2025-07-21 — Patch LB-CACHE-REPLAY-20250721A
+- **Issue recap**: 使用者重新整理或在同一工作階段重複回測時，Worker 仍回傳先前遠端抓取的 Blob telemetry，主執行緒因此重複累計 Blob 讀寫次數，無法判斷實際是否命中瀏覽器快取。
+- **Fix**: 新增 `normalise/prepareDiagnosticsForCacheReplay`，將主執行緒與 Worker 在快取重播時的 `fetchDiagnostics` 統一標記 `cacheReplay`、清空 `operations` 並維持覆蓋範圍；所有快取寫入（Session、Year、Worker Memory、主執行緒快取回寫）都使用去操作量版本，Worker 也會在使用快取時更新 `workerLastMeta`。
+- **Diagnostics**: Cached run 的 `datasetDiagnostics.fetch` 會標示 `cacheReplay=true` 與來源（主執行緒快取／Worker 快取等），Blob 用量儀表板僅在遠端實際讀寫時累積數值，可明確辨識本地重播。
+- **Testing**: 受限於容器無法執行瀏覽器回測，僅進行程式邏輯檢視與資料流推演；後續需於本機跑 2330 等熱門股，確認重新整理後 Blob 計數不再增加且 console 無錯誤。
+
+# 2025-07-20 — Patch LB-CACHE-TIER-20250720A
+- **Issue recap**: Blob 月度範圍快取因 key 過於細碎導致高讀寫量，前端同一區間仍會重複呼叫 Proxy，且缺乏實際用量監控。
+- **Fix**: 將 Netlify `stock-range` 改為年度快取單位，Worker 記錄年度操作並回傳主執行緒統計；前端導入 sessionStorage + localStorage 雙層快取及 Blob 用量儀表板。
+- **Diagnostics**: UI 新增「Blob 使用監控」卡片，顯示本月讀寫次數、命中率與熱門查詢；`fetchDiagnostics.blob` 提供年度快取 telemetry。
+- **Operations**: 新增排程 `cache-warmer` 函式，每日預熱熱門台股過去五年的年度資料，確保遠端 Blob 快取維持命中率。
+- **Testing**: 待本地瀏覽器環境實際回測，確認 session/localStorage 快取落地及 Blob 儀表板更新正常。
+
+# 2025-07-08 — Patch LB-BLOB-RANGE-20250708A
+- **Issue recap**: 台股／上櫃回測在暖身區間長時需逐月呼叫 Proxy，雖已調整佇列仍造成高並發請求；Netlify Blobs 範圍快取以實際起訖日為 key，日流量達萬人時容易寫入大量重複區間並推高回測等待時間。
+- **Fix**: Netlify `stock-range` 函式改以月份對齊的 canonical key 寫入 Blobs，僅保存完整月份序列並回傳 meta；Worker 在未調整股價時優先呼叫 Blob 範圍快取，命中即可直接整理回測資料並寫入背景快取，落空或覆蓋不足時再退回逐月 Proxy。
+- **Diagnostics**: `fetchDiagnostics.rangeFetch` 記錄 Blob 範圍快取命中、canonical key、覆蓋落差與耗時，並在資料源標籤中標示「Netlify Blob 範圍快取／組裝」；函式回應 meta 同步回傳 canonical 起訖與月數，便於監控 Blob 使用量與資料完整性。
+- **Testing**: 受限於容器無瀏覽器，僅完成程式層邏輯檢視；後續需在本機瀏覽器實機回測確認 Blob 快取命中與 console 無錯誤。
+
+# 2025-07-05 — Patch LB-COVERAGE-STREAM-20250705A
+- **Issue recap**: 暖身補抓會同時平行呼叫多個月份 Proxy，造成瞬時負載偏高且 `lastForcedReloadAt` 提前更新，仍可能沿用殘缺 coverage；資料快取也缺乏分市場 TTL，舊資料不易自動失效。
+- **Fix**: Worker 將 dataStartDate~effectiveStartDate 切成暖身佇列，逐段排程補抓並僅在成功填補缺口後更新 `lastForcedReloadAt`；主流程與優化流程導入記憶體＋`localStorage` 市場 TTL（台股 7 天、美股 3 天），逾期會同步清除兩層快取並更新索引。
+- **Diagnostics**: `fetchDiagnostics.queuePlan` 揭露暖身與正式區間的排程，月度診斷新增 `queuePhase`；快取索引記錄市場、資料起點與抓取時間，重設設定時一併清除。
+- **Testing**: 受限於容器無法啟動瀏覽器，僅進行程式邏輯檢視；後續需在本機瀏覽器實機跑回測確認 console 無錯誤。
 
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
@@ -193,6 +287,12 @@
 - **Fix**: Netlify 還原函式將 400 視為可拆分狀態並記錄請求 `responseLog`，於 fallback 摘要中傳回；同時擴充零金額快照的原始欄位預覽，前端測試卡新增 FinMind 請求紀錄區塊與欄位預覽。
 - **Diagnostics**: 資料來源測試卡可直接查看 FinMind 股利與備援序列的請求狀態與訊息，零金額快照提供原始欄位值與解析後數值，利於營運端比對。
 - **Testing**: `node tests/dividend-normalisation.test.mjs`。
+
+## 2025-06-30 — Patch LB-CACHE-FAST-20250630A
+- **Issue recap**: 主執行緒與 Worker 各自推算暖身視窗，快取 key 未納入緩衝起點與市場旗標，造成同檔股票在不同暖身需求下互相覆寫並反覆呼叫 Proxy。
+- **Fix**: 新增 `shared-lookback.resolveLookbackDays/resolveDataWindow/traceLookbackDecision`，主執行緒、批量優化與 Worker 統一採用共用暖身計算，並將快取 key 擴充為含市場別、暖身起點、使用者起點與 lookback；同步在 Worker 傳遞與快取中保留 `dataStartDate` 以供診斷與 7 日容忍檢查。
+- **Diagnostics**: 回傳結果與 `fetchDiagnostics` 皆帶回暖身起點，後續測試卡可直接檢視來源；`traceLookbackDecision` 提供暖身推導步驟供除錯。
+- **Testing**: 無法於容器啟動前端 UI 驗證，待本地瀏覽器環境實際回測確認 console 無錯誤。
 
 ## 2025-04-10 — Patch LB-ADJ-COMPOSER-20250410A / LB-DATASOURCE-20250410A / LB-ADJ-PIPE-20250410A
 - **Issue recap**: FinMind 備援成功回應仍難以判讀是 API 權限不足、Token 設定錯誤還是查詢參數造成無資料，使得營運端無法釐清除息事件未被還原的根本原因。
