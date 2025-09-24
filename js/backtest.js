@@ -39,6 +39,219 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+const todaySuggestionUI = (() => {
+    const area = document.getElementById('today-suggestion-area');
+    const body = document.getElementById('today-suggestion-body');
+    const empty = document.getElementById('today-suggestion-empty');
+    const banner = document.getElementById('today-suggestion-banner');
+    const labelEl = document.getElementById('today-suggestion-label');
+    const dateEl = document.getElementById('today-suggestion-date');
+    const priceEl = document.getElementById('today-suggestion-price');
+    const longEl = document.getElementById('today-suggestion-long');
+    const shortEl = document.getElementById('today-suggestion-short');
+    const positionEl = document.getElementById('today-suggestion-position');
+    const portfolioEl = document.getElementById('today-suggestion-portfolio');
+    const notesEl = document.getElementById('today-suggestion-notes');
+    const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
+    const numberFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
+    const integerFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
+    const toneMap = {
+        bullish: 'is-bullish',
+        bear: 'is-bearish',
+        bearish: 'is-bearish',
+        exit: 'is-exit',
+        neutral: 'is-neutral',
+        info: 'is-info',
+        warning: 'is-warning',
+        error: 'is-error',
+    };
+    const priceTypeLabel = {
+        close: '收盤',
+        open: '開盤',
+        high: '最高',
+        low: '最低',
+    };
+
+    function ensureAreaVisible() {
+        if (area) area.classList.remove('hidden');
+    }
+
+    function showBodyContent() {
+        if (body) body.classList.remove('hidden');
+        if (empty) empty.classList.add('hidden');
+    }
+
+    function showPlaceholderContent() {
+        if (body) body.classList.add('hidden');
+        if (empty) empty.classList.remove('hidden');
+    }
+
+    function setTone(tone) {
+        if (!banner) return;
+        toneClasses.forEach((cls) => banner.classList.remove(cls));
+        const resolved = toneMap[tone] || toneMap.neutral;
+        banner.classList.add(resolved);
+    }
+
+    function setText(el, text) {
+        if (!el) return;
+        el.textContent = text ?? '—';
+    }
+
+    function formatPriceValue(value, type) {
+        if (!Number.isFinite(value)) return null;
+        const formatted = numberFormatter.format(value);
+        if (!type) return formatted;
+        const label = priceTypeLabel[type] || '價格';
+        return `${label} ${formatted}`;
+    }
+
+    function formatShares(shares) {
+        if (!Number.isFinite(shares) || shares <= 0) return null;
+        return `${integerFormatter.format(shares)} 股`;
+    }
+
+    function formatCurrency(value) {
+        if (!Number.isFinite(value)) return null;
+        return `${numberFormatter.format(value)} 元`;
+    }
+
+    function describePosition(info) {
+        if (!info) return '—';
+        const parts = [];
+        if (info.state && info.state !== '空手') {
+            parts.push(info.state);
+        }
+        const shareText = formatShares(info.shares);
+        if (shareText) parts.push(shareText);
+        if (Number.isFinite(info.averagePrice)) {
+            parts.push(`均價 ${numberFormatter.format(info.averagePrice)}`);
+        }
+        if (Number.isFinite(info.marketValue)) {
+            parts.push(`市值 ${numberFormatter.format(info.marketValue)}`);
+        }
+        if (parts.length === 0) return '空手';
+        return parts.join('，');
+    }
+
+    function setNotes(notes) {
+        if (!notesEl) return;
+        notesEl.innerHTML = '';
+        if (!Array.isArray(notes) || notes.length === 0) {
+            notesEl.style.display = 'none';
+            return;
+        }
+        notesEl.style.display = 'block';
+        notes.forEach((note) => {
+            if (!note) return;
+            const li = document.createElement('li');
+            li.textContent = note;
+            notesEl.appendChild(li);
+        });
+    }
+
+    function applyResultPayload(payload) {
+        const priceText = payload.price?.text
+            || formatPriceValue(payload.price?.value, payload.price?.type)
+            || payload.message
+            || '—';
+        setText(labelEl, payload.label || '—');
+        setText(dateEl, payload.latestDate || '—');
+        setText(priceEl, priceText);
+        setText(longEl, describePosition(payload.longPosition));
+        setText(shortEl, describePosition(payload.shortPosition));
+        setText(positionEl, payload.positionSummary || '—');
+        if (portfolioEl) {
+            const portfolioText = formatCurrency(payload.evaluation?.portfolioValue);
+            setText(portfolioEl, portfolioText || '—');
+        }
+        setNotes(payload.notes);
+    }
+
+    return {
+        reset() {
+            if (!area) return;
+            ensureAreaVisible();
+            showPlaceholderContent();
+            setTone('neutral');
+            setText(labelEl, '尚未取得建議');
+            setText(dateEl, '—');
+            setText(priceEl, '—');
+            setText(longEl, '—');
+            setText(shortEl, '—');
+            setText(positionEl, '—');
+            if (portfolioEl) setText(portfolioEl, '—');
+            setNotes([]);
+        },
+        showLoading() {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            setTone('info');
+            setText(labelEl, '計算今日建議中...');
+            setText(dateEl, '—');
+            setText(priceEl, '資料計算中，請稍候');
+            setText(longEl, '—');
+            setText(shortEl, '—');
+            setText(positionEl, '—');
+            if (portfolioEl) setText(portfolioEl, '—');
+            setNotes([]);
+        },
+        showResult(payload = {}) {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            const status = payload.status || 'ok';
+            if (status !== 'ok') {
+                const fallbackNotes = [];
+                if (payload.message) fallbackNotes.push(payload.message);
+                if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
+                setTone(status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral');
+                applyResultPayload({
+                    label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
+                    latestDate: payload.latestDate || '—',
+                    price: { text: payload.price?.text || payload.message || '—' },
+                    longPosition: { state: '空手' },
+                    shortPosition: { state: '空手' },
+                    positionSummary: '—',
+                    notes: fallbackNotes,
+                    evaluation: {},
+                });
+                return;
+            }
+            setTone(payload.tone || 'neutral');
+            applyResultPayload(payload);
+        },
+        showError(message) {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            setTone('error');
+            applyResultPayload({
+                label: '計算失敗',
+                latestDate: '—',
+                price: { text: message || '計算建議時發生錯誤' },
+                longPosition: { state: '空手' },
+                shortPosition: { state: '空手' },
+                positionSummary: '—',
+                notes: message ? [message] : [],
+                evaluation: {},
+            });
+        },
+        showPlaceholder() {
+            if (!area) return;
+            ensureAreaVisible();
+            showPlaceholderContent();
+        },
+    };
+})();
+
+window.lazybacktestTodaySuggestion = todaySuggestionUI;
+
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
@@ -1664,39 +1877,27 @@ function runBacktestInternal() {
                 getSuggestion();
 
             } else if(type==='suggestionResult'){
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                const suggestionText = document.getElementById('suggestion-text');
-                if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.suggestion || '無法取得建議';
-                    suggestionArea.classList.remove('hidden', 'loading');
-                     suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center'; // Base classes
-                    if (data.suggestion === '做多買入' || data.suggestion === '持有 (多)') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
-                    else if (data.suggestion === '做空賣出' || data.suggestion === '持有 (空)') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
-                    else if (data.suggestion === '做多賣出' || data.suggestion === '做空回補') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
-                    else if (data.suggestion === '等待') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
-                     else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
-
-                    hideLoading();
-                    showSuccess("回測完成！");
-                    if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showResult === 'function') {
+                    window.lazybacktestTodaySuggestion.showResult(data || {});
                 }
+                hideLoading();
+                showSuccess("回測完成！");
+                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='suggestionError'){
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                const suggestionText = document.getElementById('suggestion-text');
-                if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.message || '計算建議時發生錯誤';
-                    suggestionArea.classList.remove('hidden', 'loading');
-                    suggestionArea.className = 'my-4 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md text-center';
+                const message = data?.message || '計算建議時發生錯誤';
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+                    window.lazybacktestTodaySuggestion.showError(message);
                 }
-                 hideLoading();
-                 showError("回測完成，但計算建議時發生錯誤。");
-                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+                hideLoading();
+                showError("回測完成，但計算建議時發生錯誤。");
+                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
                 showError(data?.message||'回測過程錯誤');
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                 if (suggestionArea) suggestionArea.classList.add('hidden');
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+                    window.lazybacktestTodaySuggestion.showError(data?.message || '回測過程錯誤');
+                }
             }
         };
 
@@ -1776,12 +1977,11 @@ function clearPreviousResults() {
     lastPositionStates = [];
     lastDatasetDiagnostics = null;
 
-    const suggestionArea = document.getElementById('today-suggestion-area');
-    const suggestionText = document.getElementById('suggestion-text');
-    if (suggestionArea && suggestionText) {
-        suggestionArea.classList.add('hidden');
-        suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
-        suggestionText.textContent = "-";
+    if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.reset === 'function') {
+        window.lazybacktestTodaySuggestion.reset();
+    } else {
+        const suggestionArea = document.getElementById('today-suggestion-area');
+        if (suggestionArea) suggestionArea.classList.add('hidden');
     }
     visibleStockData = [];
     renderPricePipelineSteps();
