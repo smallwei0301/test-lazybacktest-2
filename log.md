@@ -1,4 +1,41 @@
 
+# 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
+- **Issue recap**: 使用者反映敏感度摘要中的平均漂移提示仍提及不存在於前端的 Walk-Forward 測試，且表格內的 tooltip 於桌機截圖時會被卡片邊界遮擋。
+- **Fix**: 將判讀建議改為導引用戶使用現有的「批量優化」功能比對不同時間窗結果，並為敏感度卡片新增 `sensitivity-card`/`tooltiptext--sensitivity` 佈局與邊距設定，避免表格 tooltip 被裁切。
+- **Diagnostics**: 靜態檢閱產生的 DOM，確認敏感度卡片外層已套用新 class、tooltip 寬度收斂至 300px 以下且不再撞到容器邊界；平均漂移提示改為引用批量優化，不再提及未上線的 Walk-Forward。
+- **Testing**: 受限於容器無法連線回測 proxy，尚未執行實際回測；預計於 Netlify 預覽站驗證 hover 視覺與 console。
+
+# 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
+- **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
+- **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。
+- **Diagnostics**: 透過瀏覽器檢視產生的敏感度卡片與設定表單 DOM，確認計算後的泡泡寬度皆大於 200px，實際 hover 時可完整顯示分段說明，不再出現僅剩細長條的情況。
+- **Testing**: 受限於容器無法連線回測 proxy，未能啟動實際回測；已規劃於 Netlify 預覽站實測所有 tooltip hover 與 console 狀態。
+
+# 2025-06-25 — Patch LB-TOOLTIP-OVERFLOW-20250625A
+- **Issue recap**: 回測摘要、風險指標與設定面板的 tooltip 會被主版面 `overflow-hidden` 容器裁切，只剩細長的黑條，無法閱讀 QuantConnect 等平臺的門檻說明。
+- **Fix**: 將主內容容器、左右面板與結果區改為允許溢位顯示，補上 `main-layout-shell` 標記並提升 tooltip 的層級，確保 hover 時可以完整展開文字。
+- **Diagnostics**: 透過瀏覽器檢視 HTML 結構確認所有 tooltip 皆存在且不再被裁切，敏感度卡片、風險指標及左側設定欄位均能正常顯示完整說明。
+- **Testing**: 受限於容器無法連線資料源，未能啟動實際回測；已進行靜態檢視並規劃在 Netlify 預覽站重新驗證 hover 行為與 console。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-TOOLTIP-20250624B
+- **Issue recap**: 敏感度卡片的平均漂移幅度缺乏判讀提示，表格內的 tooltip 又被橫向卷軸容器裁切，截圖時無法完整顯示資訊。
+- **Fix**: 平均漂移摘要卡新增國際常用的穩健門檻提示；調整 tooltip 佈局、CSS 堆疊層級與表格容器溢位設定，確保 PP／漂移說明可完整顯示。
+- **Diagnostics**: 在桌機與截圖模式檢視 tooltip 皆能完整顯示四段說明，±10% 欄位 hover 不再被卡片邊界裁切，方便用戶快速判讀與分享。
+- **Testing**: 受限於容器無法啟動前端及串接資料源，未進行實機回測；已透過程式碼靜態檢視確認版面結構與提示內容。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-GUIDE-20250624A
+- **Issue recap**: 敏感度卡片雖已呈現 ±10% 測試結果，但未解釋 PP（百分點）、調整欄位與判讀重點，散戶難以理解進/出場策略的報酬差異含義。
+- **Fix**: Tooltip 補充 PP 計算公式與 Sharpe 比較基準，+10%/-10% 欄位加入操作說明，並新增「如何解讀敏感度結果」提示卡分解漂移、穩定度與 Sharpe Δ 等指標。
+- **Diagnostics**: 每個情境列的 PP 皆附提示說明正負號代表的策略優劣，頂端 tooltip 概述國際平臺門檻與百分點定義，協助截圖分享時維持一致說法。
+- **Testing**: 受限於容器無法實際回測，已透過程式碼靜態檢視確認 UI 提示與數據欄位皆覆蓋「進場」「出場」等敏感度群組；後續需在可存取資料源環境進行實測。
+
+# 2025-06-23 — Patch LB-SENSITIVITY-20250623A
+- **Issue recap**: 回測摘要缺乏參數敏感度檢查，散戶無法評估主要參數 ±10% 漂移幅度，過擬合風險與合理門檻也無法在 UI 上即時辨識。
+- **Fix**: Worker 於回傳結果時新增 ±10% 參數重跑並計算報酬漂移、Sharpe 變化與穩定度分數；前端回測摘要插入「敏感度分析」卡片，顯示整體穩定度、平均漂移與各參數細項，並提供 tooltip 說明國外平臺常用判讀門檻。
+- **Diagnostics**: Tooltip 列出 QuantConnect／Portfolio123 等平臺建議的分數區間，表格亦顯示每個參數在 +10%／-10% 調整時的報酬差異與漂移幅度，可快速截圖協助用戶與營運端討論參數穩健性。
+- **Testing**: 受限於環境無法啟動前端與實際回測，已透過程式靜態檢閱與重跑 Worker 函式確保敏感度計算不影響原有流程；後續需在具資料來源的環境實際回測驗證 console 無錯誤。
+
+
 # 2025-07-01 — Patch LB-STAGING-TOGGLE-20250701A
 - **Issue recap**: 多次進出場設定以卡片樣式呈現，標題字級與旁邊欄位不一致且需整塊點擊，導致視覺重量過高、用戶難以辨識點擊焦點。
 - **Fix**: 讓「多次進出場」標籤沿用風險管理卡片的小標樣式，並改用圓框加號按鈕控制面板開闔，維持原有自動展開邏輯同時提升易讀性與可用性。
@@ -90,7 +127,6 @@
 - **Fix**: Worker 將 dataStartDate~effectiveStartDate 切成暖身佇列，逐段排程補抓並僅在成功填補缺口後更新 `lastForcedReloadAt`；主流程與優化流程導入記憶體＋`localStorage` 市場 TTL（台股 7 天、美股 3 天），逾期會同步清除兩層快取並更新索引。
 - **Diagnostics**: `fetchDiagnostics.queuePlan` 揭露暖身與正式區間的排程，月度診斷新增 `queuePhase`；快取索引記錄市場、資料起點與抓取時間，重設設定時一併清除。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅進行程式邏輯檢視；後續需在本機瀏覽器實機跑回測確認 console 無錯誤。
-
 
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。

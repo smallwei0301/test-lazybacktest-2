@@ -4788,6 +4788,237 @@ function combinePositionLabel(longState, shortState) {
 }
 
 // --- 運行策略回測 (修正年化報酬率計算) ---
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function cloneParamsForSensitivity(baseParams) {
+  try {
+    return JSON.parse(JSON.stringify(baseParams));
+  } catch (error) {
+    console.warn(
+      "[Worker Sensitivity] Failed to clone params with JSON, fallback to shallow copy.",
+      error,
+    );
+    return { ...baseParams };
+  }
+}
+
+function adjustNumericParameter(baseValue, factor) {
+  if (!Number.isFinite(baseValue)) return null;
+  let adjusted = baseValue * factor;
+  if (Number.isInteger(baseValue)) {
+    adjusted = Math.round(adjusted);
+    if (adjusted === baseValue) {
+      adjusted = factor > 1 ? baseValue + 1 : Math.max(1, baseValue - 1);
+    }
+  } else {
+    adjusted = parseFloat(adjusted.toFixed(4));
+  }
+  if (!Number.isFinite(adjusted)) return null;
+  if (baseValue > 0 && adjusted <= 0) {
+    adjusted = Number.isInteger(baseValue) ? 1 : Math.max(0.0001, Math.abs(adjusted));
+  }
+  return adjusted;
+}
+
+function computeReturnDriftPercent(baseValue, variantValue) {
+  if (!Number.isFinite(baseValue) || !Number.isFinite(variantValue)) return null;
+  const diff = variantValue - baseValue;
+  if (Math.abs(baseValue) < 1e-6) {
+    return Math.abs(diff);
+  }
+  return (diff / Math.abs(baseValue)) * 100;
+}
+
+function computeStabilityScore(driftValues) {
+  const valid = driftValues
+    .map((v) => (Number.isFinite(v) ? Math.abs(v) : null))
+    .filter((v) => v !== null);
+  if (valid.length === 0) return null;
+  const avg = valid.reduce((sum, cur) => sum + cur, 0) / valid.length;
+  const capped = Math.min(100, avg);
+  return Math.max(0, 100 - capped);
+}
+
+function computeParameterSensitivity(data, baseParams, baseMetrics) {
+  try {
+    if (!isPlainObject(baseParams)) return null;
+    const sensitivityGroups = [];
+    const groupConfigs = [
+      {
+        key: "entryParams",
+        label: "進場策略",
+        strategyKey: baseParams.entryStrategy,
+      },
+      {
+        key: "exitParams",
+        label: "出場策略",
+        strategyKey: baseParams.exitStrategy,
+      },
+    ];
+    if (baseParams.enableShorting) {
+      groupConfigs.push(
+        {
+          key: "shortEntryParams",
+          label: "做空進場",
+          strategyKey: baseParams.shortEntryStrategy,
+        },
+        {
+          key: "shortExitParams",
+          label: "回補出場",
+          strategyKey: baseParams.shortExitStrategy,
+        },
+      );
+    }
+
+    const adjustments = [
+      { label: "+10%", factor: 1.1 },
+      { label: "-10%", factor: 0.9 },
+    ];
+
+    const processedParameters = [];
+
+    for (const groupConfig of groupConfigs) {
+      const paramsObject = baseParams[groupConfig.key];
+      if (!isPlainObject(paramsObject)) continue;
+      const parameterEntries = Object.entries(paramsObject).filter(([, value]) =>
+        Number.isFinite(Number(value)),
+      );
+      if (parameterEntries.length === 0) continue;
+
+      const paramResults = [];
+
+      for (const [paramName, rawValue] of parameterEntries) {
+        const baseValue = Number(rawValue);
+        const scenarioResults = [];
+        for (const adjustment of adjustments) {
+          const adjustedValue = adjustNumericParameter(baseValue, adjustment.factor);
+          if (adjustedValue === null || adjustedValue === baseValue) {
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: null,
+              driftPercent: null,
+            });
+            continue;
+          }
+          const mutatedParams = cloneParamsForSensitivity(baseParams);
+          mutatedParams.skipSensitivity = true;
+          mutatedParams.suppressProgress = true;
+          if (!isPlainObject(mutatedParams[groupConfig.key])) {
+            mutatedParams[groupConfig.key] = {};
+          }
+          mutatedParams[groupConfig.key][paramName] = adjustedValue;
+          try {
+            const outcome = runStrategy(data, mutatedParams);
+            const variantReturn = Number.isFinite(outcome?.returnRate)
+              ? outcome.returnRate
+              : null;
+            const driftPercent = Number.isFinite(baseMetrics.returnRate)
+              ? computeReturnDriftPercent(baseMetrics.returnRate, variantReturn)
+              : null;
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: {
+                returnRate: variantReturn,
+                annualizedReturn: Number.isFinite(outcome?.annualizedReturn)
+                  ? outcome.annualizedReturn
+                  : null,
+                sharpeRatio: Number.isFinite(outcome?.sharpeRatio)
+                  ? outcome.sharpeRatio
+                  : null,
+              },
+              driftPercent,
+              deltaReturn:
+                Number.isFinite(variantReturn) && Number.isFinite(baseMetrics.returnRate)
+                  ? variantReturn - baseMetrics.returnRate
+                  : null,
+              deltaSharpe:
+                Number.isFinite(outcome?.sharpeRatio) && Number.isFinite(baseMetrics.sharpeRatio)
+                  ? outcome.sharpeRatio - baseMetrics.sharpeRatio
+                  : null,
+            });
+          } catch (error) {
+            console.warn(
+              `[Worker Sensitivity] Failed to evaluate ${groupConfig.key}.${paramName} 調整 ${adjustment.label}:`,
+              error,
+            );
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: null,
+              driftPercent: null,
+              deltaReturn: null,
+              deltaSharpe: null,
+            });
+          }
+        }
+
+        const driftValues = scenarioResults
+          .map((item) => (Number.isFinite(item.driftPercent) ? Math.abs(item.driftPercent) : null))
+          .filter((value) => value !== null);
+        const avgDrift =
+          driftValues.length > 0
+            ? driftValues.reduce((sum, cur) => sum + cur, 0) / driftValues.length
+            : null;
+        const stabilityScore = computeStabilityScore(driftValues);
+        paramResults.push({
+          name: paramName,
+          baseValue,
+          scenarios: scenarioResults,
+          averageDriftPercent: avgDrift,
+          stabilityScore,
+        });
+        processedParameters.push({ avgDrift, stabilityScore });
+      }
+
+      if (paramResults.length > 0) {
+        sensitivityGroups.push({
+          label: groupConfig.label,
+          strategy: groupConfig.strategyKey,
+          parameters: paramResults,
+        });
+      }
+    }
+
+    if (sensitivityGroups.length === 0) return null;
+
+    const flattened = processedParameters.filter((item) => item.avgDrift !== null);
+    const avgDriftAll =
+      flattened.length > 0
+        ? flattened.reduce((sum, cur) => sum + Math.abs(cur.avgDrift || 0), 0) / flattened.length
+        : null;
+    const overallScore = computeStabilityScore(
+      processedParameters
+        .map((item) => item.avgDrift)
+        .filter((value) => Number.isFinite(value)),
+    );
+
+    return {
+      baseline: {
+        returnRate: baseMetrics.returnRate,
+        annualizedReturn: baseMetrics.annualizedReturn,
+        sharpeRatio: baseMetrics.sharpeRatio,
+      },
+      groups: sensitivityGroups,
+      summary: {
+        averageDriftPercent: avgDriftAll,
+        stabilityScore: overallScore,
+      },
+      window: "±10%",
+    };
+  } catch (error) {
+    console.warn("[Worker Sensitivity] Unexpected error computing parameter sensitivity", error);
+    return null;
+  }
+}
+
 function runStrategy(data, params) {
   // --- 新增的保護機制 ---
   if (!Array.isArray(data)) {
@@ -4797,11 +5028,16 @@ function runStrategy(data, params) {
   }
   // --- 保護機制結束 ---
 
-  self.postMessage({
-    type: "progress",
-    progress: 70,
-    message: "回測模擬中...",
-  });
+  const skipSensitivity = params?.skipSensitivity === true;
+  const suppressProgress = params?.suppressProgress === true;
+
+  if (!suppressProgress) {
+    self.postMessage({
+      type: "progress",
+      progress: 70,
+      message: "回測模擬中...",
+    });
+  }
   const n = data.length;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
@@ -7372,7 +7608,9 @@ function runStrategy(data, params) {
       }
     }
 
-    self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    if (!suppressProgress) {
+      self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    }
     const visibleStartIdx = Math.max(0, effectiveStartIdx);
     const sliceArray = (arr) =>
       Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
@@ -7409,6 +7647,14 @@ function runStrategy(data, params) {
       console.log("[Worker] Warmup summary", warmupSummary);
       console.log("[Worker] BuyHold summary", buyHoldSummary);
     }
+    const parameterSensitivity =
+      skipSensitivity
+        ? null
+        : computeParameterSensitivity(data, params, {
+            returnRate: returnR,
+            annualizedReturn: annualR,
+            sharpeRatio: sharpeR,
+          });
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -7463,6 +7709,7 @@ function runStrategy(data, params) {
       longEntryStageStates: trimmedEntryStageStates,
       longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
+      parameterSensitivity,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);
@@ -7576,6 +7823,8 @@ async function runOptimization(
       message: `測試 ${optParamName}=${curVal}`,
     });
     const testParams = JSON.parse(JSON.stringify(baseParams));
+    testParams.skipSensitivity = true;
+    testParams.suppressProgress = true;
     if (optimizeTargetStrategy === "risk") {
       if (optParamName === "stopLoss" || optParamName === "takeProfit") {
         testParams[optParamName] = curVal;
