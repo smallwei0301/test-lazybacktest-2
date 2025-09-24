@@ -14,6 +14,8 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-BLOB-CURRENT-20250730A
+// Patch Tag: LB-BLOB-CURRENT-20250802B
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -1994,6 +1996,182 @@ function tryResolveRangeFromYearSuperset({
   };
 }
 
+function addDaysIso(isoDate, days) {
+  if (!isoDate || typeof isoDate !== "string") return null;
+  const base = new Date(isoDate);
+  if (Number.isNaN(base.getTime())) return null;
+  const copy = new Date(base);
+  copy.setDate(copy.getDate() + days);
+  return copy.toISOString().split("T")[0];
+}
+
+async function fetchCurrentMonthGapPatch({
+  stockNo,
+  marketKey,
+  gapStartISO,
+  gapEndISO,
+  startDateObj,
+  endDateObj,
+  primaryForceSource,
+  fallbackForceSource,
+}) {
+  const patchInfo = {
+    status: "skipped",
+    start: gapStartISO,
+    end: gapEndISO,
+    months: [],
+    sources: [],
+    attempts: [],
+    rows: 0,
+  };
+  if (!gapStartISO || !gapEndISO) {
+    patchInfo.status = "invalid-range";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  const startObj = new Date(gapStartISO);
+  const endObj = new Date(gapEndISO);
+  if (
+    Number.isNaN(startObj.getTime()) ||
+    Number.isNaN(endObj.getTime()) ||
+    startObj > endObj
+  ) {
+    patchInfo.status = "invalid-range";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  const months = enumerateMonths(startObj, endObj);
+  if (!Array.isArray(months) || months.length === 0) {
+    patchInfo.status = "no-month";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  let proxyPath = "/api/twse/";
+  if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  const isTpex = marketKey === "TPEX";
+  const aggregatedRows = [];
+  const aggregatedSources = new Set();
+  patchInfo.status = "pending";
+  const startedAt = Date.now();
+
+  for (let m = 0; m < months.length; m += 1) {
+    const monthInfo = months[m];
+    const monthStartISO = monthInfo.rangeStartISO > gapStartISO
+      ? monthInfo.rangeStartISO
+      : gapStartISO;
+    const monthEndISO = monthInfo.rangeEndISO < gapEndISO
+      ? monthInfo.rangeEndISO
+      : gapEndISO;
+    patchInfo.months.push({
+      month: monthInfo.monthKey,
+      start: monthStartISO,
+      end: monthEndISO,
+    });
+
+    const candidateSources = [null];
+    if (primaryForceSource) candidateSources.push(primaryForceSource);
+    if (
+      fallbackForceSource &&
+      fallbackForceSource !== primaryForceSource
+    ) {
+      candidateSources.push(fallbackForceSource);
+    }
+
+    let payload = null;
+    let lastError = null;
+    for (let c = 0; c < candidateSources.length; c += 1) {
+      const forceSource = candidateSources[c];
+      const params = new URLSearchParams({
+        stockNo,
+        month: monthInfo.monthKey,
+        start: monthStartISO,
+        end: monthEndISO,
+      });
+      if (forceSource) {
+        params.set("forceSource", forceSource);
+        params.set(
+          "cacheBust",
+          `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        );
+      }
+      const attempt = {
+        month: monthInfo.monthKey,
+        source: forceSource || "auto",
+        url: `${proxyPath}?${params.toString()}`,
+        success: false,
+        error: null,
+      };
+      try {
+        const responsePayload = await fetchWithAdaptiveRetry(attempt.url, {
+          headers: { Accept: "application/json" },
+        });
+        if (responsePayload?.error) {
+          throw new Error(responsePayload.error);
+        }
+        payload = responsePayload;
+        attempt.success = true;
+        if (forceSource) {
+          aggregatedSources.add(`force:${forceSource}`);
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        attempt.error = error?.message || String(error);
+        payload = null;
+      } finally {
+        patchInfo.attempts.push(attempt);
+      }
+    }
+
+    if (!payload) {
+      if (lastError) {
+        console.warn(
+          `[Worker] ${stockNo} ${monthInfo.monthKey} ${monthStartISO}~${monthEndISO} 當月缺口補抓失敗：`,
+          lastError,
+        );
+      }
+      // 若該月份缺口抓取失敗，進入下一個月份
+      continue;
+    }
+
+    if (payload?.stockName) {
+      aggregatedSources.add(`name:${payload.stockName}`);
+    }
+    const rows = Array.isArray(payload?.aaData)
+      ? payload.aaData
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+    rows.forEach((row) => {
+      const normalized = normalizeProxyRow(
+        row,
+        isTpex,
+        startDateObj,
+        endDateObj,
+      );
+      if (
+        normalized &&
+        normalized.date &&
+        normalized.date >= gapStartISO &&
+        normalized.date <= gapEndISO
+      ) {
+        aggregatedRows.push(normalized);
+      }
+    });
+    if (typeof payload?.dataSource === "string" && payload.dataSource) {
+      aggregatedSources.add(payload.dataSource);
+    }
+  }
+
+  const dedupedRows = dedupeAndSortData(aggregatedRows);
+  patchInfo.rows = dedupedRows.length;
+  patchInfo.sources = Array.from(aggregatedSources);
+  patchInfo.durationMs = Date.now() - startedAt;
+  patchInfo.status = dedupedRows.length > 0 ? "success" : "no-data";
+
+  return { diagnostics: patchInfo, rows: dedupedRows };
+}
+
 async function tryFetchRangeFromBlob({
   stockNo,
   startDate,
@@ -2003,6 +2181,8 @@ async function tryFetchRangeFromBlob({
   endDateObj,
   optionEffectiveStart,
   optionLookbackDays,
+  primaryForceSource,
+  fallbackForceSource,
   fetchDiagnostics,
   cacheKey,
   split,
@@ -2094,7 +2274,7 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  const deduped = dedupeAndSortData(normalizedRows);
+  let deduped = dedupeAndSortData(normalizedRows);
   if (deduped.length === 0) {
     rangeFetchInfo.status = "empty";
     rangeFetchInfo.durationMs = Date.now() - startedAt;
@@ -2104,14 +2284,16 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  const firstDate = deduped[0]?.date || null;
-  const lastDate = deduped[deduped.length - 1]?.date || null;
-  const firstDateObj = firstDate ? new Date(firstDate) : null;
-  const lastDateObj = lastDate ? new Date(lastDate) : null;
-  const startGapRaw = firstDateObj ? differenceInDays(firstDateObj, startDateObj) : null;
-  const endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
-  const startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
-  const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+  let firstDate = deduped[0]?.date || null;
+  let lastDate = deduped[deduped.length - 1]?.date || null;
+  let firstDateObj = firstDate ? new Date(firstDate) : null;
+  let lastDateObj = lastDate ? new Date(lastDate) : null;
+  let startGapRaw = firstDateObj
+    ? differenceInDays(firstDateObj, startDateObj)
+    : null;
+  let endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+  let startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+  let endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
   const blobMeta = payload?.meta || {};
   rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
@@ -2124,6 +2306,104 @@ async function tryFetchRangeFromBlob({
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
   rangeFetchInfo.durationMs = Date.now() - startedAt;
   rangeFetchInfo.dataSource = payload?.dataSource || null;
+  rangeFetchInfo.firstDate = firstDate;
+  rangeFetchInfo.lastDate = lastDate;
+
+  const now = new Date();
+  const todayUtcYear = now.getUTCFullYear();
+  const todayUtcMonth = now.getUTCMonth();
+  const todayUtcDate = now.getUTCDate();
+  const todayUtcMs = Date.UTC(todayUtcYear, todayUtcMonth, todayUtcDate);
+  const endUtcYear = endDateObj.getUTCFullYear();
+  const endUtcMonth = endDateObj.getUTCMonth();
+  const isCurrentMonthRequest =
+    endUtcYear === todayUtcYear && endUtcMonth === todayUtcMonth;
+  let targetLatestISO = null;
+  let currentMonthGapDays = null;
+  if (isCurrentMonthRequest) {
+    const targetLatestMs = Math.min(endDateObj.getTime(), todayUtcMs);
+    const targetLatestDate = new Date(targetLatestMs);
+    targetLatestISO = targetLatestDate.toISOString().split("T")[0];
+    if (lastDate) {
+      if (lastDate < targetLatestISO) {
+        const targetLatestObj = new Date(targetLatestISO);
+        const lastDateObjForGap = new Date(lastDate);
+        const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+        currentMonthGapDays = Number.isFinite(gapDays) ? Math.max(0, gapDays) : null;
+      } else {
+        currentMonthGapDays = 0;
+      }
+    }
+  }
+  let normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+    ? currentMonthGapDays
+    : null;
+  rangeFetchInfo.currentMonthGuard = isCurrentMonthRequest;
+  rangeFetchInfo.targetLatestDate = targetLatestISO;
+  rangeFetchInfo.currentMonthGapDays = normalizedCurrentMonthGap;
+
+  if (
+    isCurrentMonthRequest &&
+    Number.isFinite(normalizedCurrentMonthGap) &&
+    normalizedCurrentMonthGap > 0
+  ) {
+    const patchStartISO = lastDate ? addDaysIso(lastDate, 1) : targetLatestISO;
+    const patchResult = await fetchCurrentMonthGapPatch({
+      stockNo,
+      marketKey,
+      gapStartISO: patchStartISO,
+      gapEndISO: targetLatestISO,
+      startDateObj,
+      endDateObj,
+      primaryForceSource,
+      fallbackForceSource,
+    });
+    rangeFetchInfo.patch = patchResult.diagnostics || {
+      status: "unknown",
+      start: patchStartISO,
+      end: targetLatestISO,
+    };
+    fetchDiagnostics.patch = rangeFetchInfo.patch;
+    if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
+      deduped = dedupeAndSortData(deduped.concat(patchResult.rows));
+      firstDate = deduped[0]?.date || null;
+      lastDate = deduped[deduped.length - 1]?.date || null;
+      firstDateObj = firstDate ? new Date(firstDate) : null;
+      lastDateObj = lastDate ? new Date(lastDate) : null;
+      startGapRaw = firstDateObj
+        ? differenceInDays(firstDateObj, startDateObj)
+        : null;
+      endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+      startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+      endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+      if (targetLatestISO && lastDate) {
+        if (lastDate < targetLatestISO) {
+          const targetLatestObj = new Date(targetLatestISO);
+          const lastDateObjForGap = new Date(lastDate);
+          const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+          currentMonthGapDays = Number.isFinite(gapDays)
+            ? Math.max(0, gapDays)
+            : null;
+        } else {
+          currentMonthGapDays = 0;
+        }
+      }
+      normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+        ? currentMonthGapDays
+        : null;
+      rangeFetchInfo.rowCount = deduped.length;
+      rangeFetchInfo.firstDate = firstDate;
+      rangeFetchInfo.lastDate = lastDate;
+      rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
+      rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
+    }
+  } else {
+    rangeFetchInfo.patch = { status: "not-required" };
+    fetchDiagnostics.patch = rangeFetchInfo.patch;
+  }
+
+  rangeFetchInfo.currentMonthGapDays = normalizedCurrentMonthGap;
+  rangeFetchInfo.durationMs = Date.now() - startedAt;
 
   const startGapExceeded =
     Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
@@ -2141,7 +2421,22 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  rangeFetchInfo.status = "success";
+  if (
+    isCurrentMonthRequest &&
+    Number.isFinite(normalizedCurrentMonthGap) &&
+    normalizedCurrentMonthGap > 0
+  ) {
+    rangeFetchInfo.status = "current-month-stale";
+    rangeFetchInfo.reason = "current-month-gap";
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
+        lastDate || "N/A"
+      } < expected=${targetLatestISO})，等待當日補齊。`,
+    );
+  } else {
+    rangeFetchInfo.status = "success";
+    delete rangeFetchInfo.reason;
+  }
 
   const dataStartDate = firstDate || startDate;
   const dataSourceFlags = new Set();
@@ -2463,6 +2758,8 @@ async function fetchStockData(
       endDateObj,
       optionEffectiveStart,
       optionLookbackDays,
+      primaryForceSource,
+      fallbackForceSource,
       fetchDiagnostics,
       cacheKey,
       split,
