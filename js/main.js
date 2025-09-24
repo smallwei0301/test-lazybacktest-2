@@ -4,6 +4,7 @@
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-US-BACKTEST-20250621A
+// Patch Tag: LB-DEVELOPER-HERO-20250711A
 
 // 全局變量
 let stockChart = null;
@@ -1569,6 +1570,38 @@ function initDataSourceTester() {
     window.applyMarketPreset = applyMarketPreset;
 }
 
+function initDeveloperAreaToggle() {
+    const toggleBtn = document.getElementById('developerAreaToggle');
+    const wrapper = document.getElementById('developerAreaWrapper');
+    if (!toggleBtn || !wrapper) return;
+
+    let expanded = false;
+
+    const applyState = (open) => {
+        expanded = Boolean(open);
+        wrapper.classList.toggle('hidden', !expanded);
+        wrapper.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        toggleBtn.classList.toggle('developer-toggle-active', expanded);
+    };
+
+    applyState(false);
+
+    toggleBtn.addEventListener('click', () => {
+        applyState(!expanded);
+        if (expanded) {
+            wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && expanded) {
+            applyState(false);
+            toggleBtn.focus();
+        }
+    });
+}
+
 function showLoading(m="⌛ 處理中...") {
     const el = document.getElementById("loading");
     const loadingText = document.getElementById('loadingText');
@@ -2314,6 +2347,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化資料來源測試面板
         initDataSourceTester();
+
+        // 初始化開發者區域切換
+        initDeveloperAreaToggle();
 
         // 初始化頁籤功能
         initTabs();

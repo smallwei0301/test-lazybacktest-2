@@ -64,8 +64,39 @@
 .left-panel { overflow-x: visible; }
 .right-panel { overflow-x: visible; }
 #backtest-result { position: relative; overflow: visible; }
+.developer-area-wrapper { width: 100%; }
+.developer-area-wrapper:not(.hidden) .hero-developer-card { animation: fadeIn 0.3s ease-in-out; }
+.developer-toggle-active { border-color: var(--primary) !important; color: var(--primary) !important; background-color: color-mix(in srgb, var(--primary) 12%, var(--input)) !important; box-shadow: 0 8px 20px rgba(8, 145, 178, 0.15); }
+.summary-card { width: 100%; max-width: 100%; }
+.summary-card .card-header { padding-left: 1.5rem; padding-right: 1.5rem; }
+.summary-card .card-content { padding: 1.5rem; }
+.summary-result-container { width: 100%; color: var(--foreground); }
+.summary-result-container > * { width: 100%; }
+.summary-result-container table { width: 100%; }
+.summary-result-container { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.summary-result-container::-webkit-scrollbar { height: 6px; }
+.summary-result-container::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 9999px; }
+.backtest-result-placeholder {
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border: 2px dashed var(--card);
+    border-radius: calc(var(--radius) + 2px);
+    color: var(--muted-foreground);
+    background-color: color-mix(in srgb, var(--muted) 6%, transparent);
+    padding: 1.5rem;
+}
 #chart-container { height: 500px; }
 @media (max-width: 768px) { #chart-container { height: 350px; } }
+.summary-card .card-header { padding-top: 1.5rem; padding-bottom: 0; }
+.summary-card .card-content { padding-top: 1.5rem; }
+@media (max-width: 640px) {
+    .summary-card .card-header { padding: 1.25rem 1rem 0 1rem; }
+    .summary-card .card-content { padding: 1.25rem 1rem 1.5rem 1rem; }
+    .backtest-result-placeholder { padding: 1.5rem 1.25rem; }
+}
 .optimization-table th { position: sticky; top: 0; z-index: 1; background-color: #f9fafb; }
 .optimization-table th.sortable-header { cursor: pointer; position: relative; padding-right: 1.5rem; }
 .optimization-table th.sortable-header::after { content: ''; position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); border: 4px solid transparent; opacity: 0.3; transition: opacity 0.2s; }

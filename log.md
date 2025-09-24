@@ -1,3 +1,9 @@
+# 2025-07-11 — Patch LB-DEVELOPER-HERO-20250711A
+- **Issue recap**: 開發者區域需要納入 Hero 區域並改為按鈕開闔，同時回測摘要卡在手機版仍會被擠壓成窄幅視窗，使用者難以閱讀完整結果。
+- **Fix**: 將原本位於左欄的開發者卡片搬移至 Hero，下方新增切換按鈕與動畫顯示；重構回測摘要卡的 placeholder 與 CSS，讓結果容器在小尺寸螢幕可自適應寬度並保留捲軸。
+- **Diagnostics**: 靜態檢視 DOM 確認左側設定仍維持原先卡片順序，Hero 按鈕 aria 狀態隨切換更新；回測摘要容器移除 flex 限制後，模擬手機寬度檢查不再橫向截斷。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
 # 2025-07-24 — Patch LB-UI-DEDUP-20250724A
 - **Issue recap**: 首頁下方（Footer 前）殘留舊版配置，重複出現策略管理、快速結果、執行回測卡片及摘要/績效分析等分頁導覽，造成內容冗長並讓使用者誤以為需要再次設定。
 - **Fix**: 移除左側面板重複的交易設定、風險管理、策略卡片，以及右側結果分頁的重複區塊，僅保留新版含分段優化導覽的版本以維持資訊結構一致。
