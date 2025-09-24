@@ -1,4 +1,78 @@
 
+# 2025-06-29 — Patch LB-STRATEGY-STATUS-20250629A
+- **Issue recap**: 策略落後時的條列仍將多句診斷塞進同一行，讀起來像段落而非清晰的檢查清單，使用者難以逐項確認風險重點。
+- **Fix**: `updateStrategyStatusCard` 將勝負差距整併為單句要點，並利用 `splitSummaryIntoBulletLines` 把指標體檢依句拆成獨立項目呈現，維持每行一個提醒。
+- **UI**: 調整策略速報卡片的版本標記為 `LB-STRATEGY-STATUS-20250629A`，避免與舊版提示混淆。
+- **Testing**: 受限於容器無法連線回測 API 與啟動瀏覽器，尚未實際跑回測；需於可連線環境再驗證 console 無錯誤。
+
+# 2025-06-28 — Patch LB-STRATEGY-STATUS-20250628A
+- **Issue recap**: 落後狀態的提示集中在同一段落內，重點句與績效數據混在一起，不利於使用者快速掃描戰況與風險評語。
+- **Fix**: `updateStrategyStatusCard` 調整落後情境的內容結構，將「快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。」獨立為放大首句，後續績效差距與指標體檢改以條列呈現，每行一個句子。
+- **UI**: `setStrategyStatusCardState` 支援 `detailHTML`，允許策略速報卡片在特定情境渲染強調段落與列表；摘要頁同步更新顯示版本碼為 `LB-STRATEGY-STATUS-20250628A`。
+- **Testing**: 受限於容器無法連線回測 API 與啟動瀏覽器，尚未實際跑回測；需於可連線環境再驗證 console 無錯誤。
+
+# 2025-06-27 — Patch LB-STRATEGY-STATUS-20250627A
+- **Issue recap**: 策略狀態速報僅提供與買入持有的勝負比較，無法同步提醒使用者回測摘要中的關鍵指標是否健康，錯過即時風險提示。
+- **Fix**: `updateStrategyStatusCard` 導入績效體檢邏輯，依年化報酬、夏普值、索提諾、最大回撤與前後段穩定比等指標分級，全部過關時給予「非常好」評語，任一失衡就直言風險重點並建議調整；卡片預設文案同步提示將提供戰況與體檢雙報告，版本碼更新為 `LB-STRATEGY-STATUS-20250627A`。
+- **Diagnostics**: 新增 `buildStrategyHealthSummary` 將指標以單句口語化摘要串接，並保留原有差距判讀，方便追蹤訊息來源與語氣切換。
+- **Testing**: 受限於容器無法連線回測 API 與啟動瀏覽器，僅透過程式碼審閱確認指標門檻、文案與狀態轉換；後續需在可執行回測的環境實機驗證。
+
+# 2025-06-24 — Patch LB-STRATEGY-STATUS-20250624A
+- **Issue recap**: 策略狀態卡片位於左側設定區塊，與回測結果主要資訊分離；文案語氣偏中性，無法在摘要頁快速、幽默地提醒使用者策略戰況。
+- **Fix**: 將卡片移至摘要頁「淨值曲線」與「回測摘要」之間，並以更口語詼諧的語氣呈現領先、落後、持平與資料不足等狀態，預設文案同步更新。
+- **Diagnostics**: 更新版本碼為 `LB-STRATEGY-STATUS-20250624A`，`updateStrategyStatusCard` 針對各狀態輸出新的徽章文案與 headline，維持差距計算與重置流程。
+- **Testing**: 受限於容器無法啟動瀏覽器與回測 API，僅以程式碼審閱確認 DOM 位置調整與狀態切換文案；待可連線環境實機驗證互動體驗。
+
+# 2025-06-23 — Patch LB-STRATEGY-STATUS-20250623A
+- **Issue recap**: 今日建議卡片僅呈現進出場文字，無法讓使用者立即判斷策略相對買入持有的勝負，缺乏行動導向的提醒。
+- **Fix**: 新增「策略狀態速報」卡片，回測完成後即比較策略報酬與買入持有基準，依差距切換領先／落後／持平三種語氣並搭配徽章色彩；回測啟動、錯誤或資料不足時會自動重設狀態，避免舊資訊殘留。
+- **Diagnostics**: 於 DOMContentLoaded 記錄版本碼 `LB-STRATEGY-STATUS-20250623A`，卡片細節透過 `updateStrategyStatusCard` 與 badge variant 類別顯示差距來源，缺資料時會顯示提示文案協助排查。
+- **Testing**: 受限於容器無法啟動瀏覽器與外部 API，透過程式碼審閱與邏輯檢查確認狀態轉換、差距計算與錯誤重設流程無誤；待可連線環境實機回測驗證視覺呈現。
+
+# 2025-07-24 — Patch LB-UI-DEDUP-20250724A
+- **Issue recap**: 首頁下方（Footer 前）殘留舊版配置，重複出現策略管理、快速結果、執行回測卡片及摘要/績效分析等分頁導覽，造成內容冗長並讓使用者誤以為需要再次設定。
+- **Fix**: 移除左側面板重複的交易設定、風險管理、策略卡片，以及右側結果分頁的重複區塊，僅保留新版含分段優化導覽的版本以維持資訊結構一致。
+- **Diagnostics**: 透過原始碼檢視確認 `策略管理`、`快速結果` 與 `right-panel` 僅剩單一實例，版面在 Footer 前即結束主要內容，無額外重複卡片。
+- **Testing**: 受限於容器無法連線實際回測代理，未能進行瀏覽器端回測；後續將於 Netlify 預覽站確認版面滾動與 console 狀態。
+
+
+# 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
+- **Issue recap**: 使用者反映敏感度摘要中的平均漂移提示仍提及不存在於前端的 Walk-Forward 測試，且表格內的 tooltip 於桌機截圖時會被卡片邊界遮擋。
+- **Fix**: 將判讀建議改為導引用戶使用現有的「批量優化」功能比對不同時間窗結果，並為敏感度卡片新增 `sensitivity-card`/`tooltiptext--sensitivity` 佈局與邊距設定，避免表格 tooltip 被裁切。
+- **Diagnostics**: 靜態檢閱產生的 DOM，確認敏感度卡片外層已套用新 class、tooltip 寬度收斂至 300px 以下且不再撞到容器邊界；平均漂移提示改為引用批量優化，不再提及未上線的 Walk-Forward。
+- **Testing**: 受限於容器無法連線回測 proxy，尚未執行實際回測；預計於 Netlify 預覽站驗證 hover 視覺與 console。
+
+# 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
+- **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
+- **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。
+- **Diagnostics**: 透過瀏覽器檢視產生的敏感度卡片與設定表單 DOM，確認計算後的泡泡寬度皆大於 200px，實際 hover 時可完整顯示分段說明，不再出現僅剩細長條的情況。
+- **Testing**: 受限於容器無法連線回測 proxy，未能啟動實際回測；已規劃於 Netlify 預覽站實測所有 tooltip hover 與 console 狀態。
+
+# 2025-06-25 — Patch LB-TOOLTIP-OVERFLOW-20250625A
+- **Issue recap**: 回測摘要、風險指標與設定面板的 tooltip 會被主版面 `overflow-hidden` 容器裁切，只剩細長的黑條，無法閱讀 QuantConnect 等平臺的門檻說明。
+- **Fix**: 將主內容容器、左右面板與結果區改為允許溢位顯示，補上 `main-layout-shell` 標記並提升 tooltip 的層級，確保 hover 時可以完整展開文字。
+- **Diagnostics**: 透過瀏覽器檢視 HTML 結構確認所有 tooltip 皆存在且不再被裁切，敏感度卡片、風險指標及左側設定欄位均能正常顯示完整說明。
+- **Testing**: 受限於容器無法連線資料源，未能啟動實際回測；已進行靜態檢視並規劃在 Netlify 預覽站重新驗證 hover 行為與 console。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-TOOLTIP-20250624B
+- **Issue recap**: 敏感度卡片的平均漂移幅度缺乏判讀提示，表格內的 tooltip 又被橫向卷軸容器裁切，截圖時無法完整顯示資訊。
+- **Fix**: 平均漂移摘要卡新增國際常用的穩健門檻提示；調整 tooltip 佈局、CSS 堆疊層級與表格容器溢位設定，確保 PP／漂移說明可完整顯示。
+- **Diagnostics**: 在桌機與截圖模式檢視 tooltip 皆能完整顯示四段說明，±10% 欄位 hover 不再被卡片邊界裁切，方便用戶快速判讀與分享。
+- **Testing**: 受限於容器無法啟動前端及串接資料源，未進行實機回測；已透過程式碼靜態檢視確認版面結構與提示內容。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-GUIDE-20250624A
+- **Issue recap**: 敏感度卡片雖已呈現 ±10% 測試結果，但未解釋 PP（百分點）、調整欄位與判讀重點，散戶難以理解進/出場策略的報酬差異含義。
+- **Fix**: Tooltip 補充 PP 計算公式與 Sharpe 比較基準，+10%/-10% 欄位加入操作說明，並新增「如何解讀敏感度結果」提示卡分解漂移、穩定度與 Sharpe Δ 等指標。
+- **Diagnostics**: 每個情境列的 PP 皆附提示說明正負號代表的策略優劣，頂端 tooltip 概述國際平臺門檻與百分點定義，協助截圖分享時維持一致說法。
+- **Testing**: 受限於容器無法實際回測，已透過程式碼靜態檢視確認 UI 提示與數據欄位皆覆蓋「進場」「出場」等敏感度群組；後續需在可存取資料源環境進行實測。
+
+# 2025-06-23 — Patch LB-SENSITIVITY-20250623A
+- **Issue recap**: 回測摘要缺乏參數敏感度檢查，散戶無法評估主要參數 ±10% 漂移幅度，過擬合風險與合理門檻也無法在 UI 上即時辨識。
+- **Fix**: Worker 於回傳結果時新增 ±10% 參數重跑並計算報酬漂移、Sharpe 變化與穩定度分數；前端回測摘要插入「敏感度分析」卡片，顯示整體穩定度、平均漂移與各參數細項，並提供 tooltip 說明國外平臺常用判讀門檻。
+- **Diagnostics**: Tooltip 列出 QuantConnect／Portfolio123 等平臺建議的分數區間，表格亦顯示每個參數在 +10%／-10% 調整時的報酬差異與漂移幅度，可快速截圖協助用戶與營運端討論參數穩健性。
+- **Testing**: 受限於環境無法啟動前端與實際回測，已透過程式靜態檢閱與重跑 Worker 函式確保敏感度計算不影響原有流程；後續需在具資料來源的環境實際回測驗證 console 無錯誤。
+
+
 # 2025-07-01 — Patch LB-STAGING-TOGGLE-20250701A
 - **Issue recap**: 多次進出場設定以卡片樣式呈現，標題字級與旁邊欄位不一致且需整塊點擊，導致視覺重量過高、用戶難以辨識點擊焦點。
 - **Fix**: 讓「多次進出場」標籤沿用風險管理卡片的小標樣式，並改用圓框加號按鈕控制面板開闔，維持原有自動展開邏輯同時提升易讀性與可用性。
@@ -90,7 +164,6 @@
 - **Fix**: Worker 將 dataStartDate~effectiveStartDate 切成暖身佇列，逐段排程補抓並僅在成功填補缺口後更新 `lastForcedReloadAt`；主流程與優化流程導入記憶體＋`localStorage` 市場 TTL（台股 7 天、美股 3 天），逾期會同步清除兩層快取並更新索引。
 - **Diagnostics**: `fetchDiagnostics.queuePlan` 揭露暖身與正式區間的排程，月度診斷新增 `queuePhase`；快取索引記錄市場、資料起點與抓取時間，重設設定時一併清除。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅進行程式邏輯檢視；後續需在本機瀏覽器實機跑回測確認 console 無錯誤。
-
 
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
