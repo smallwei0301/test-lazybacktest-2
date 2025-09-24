@@ -4787,8 +4787,435 @@ function combinePositionLabel(longState, shortState) {
   return parts.join("｜");
 }
 
+const SENSITIVITY_STRATEGY_LABEL_OVERRIDES = {
+  "k_d_cross:thresholdx": "D值上限(X)",
+  "k_d_cross_exit:thresholdy": "D值下限(Y)",
+  "short_k_d_cross:thresholdy": "D值下限(Y)",
+  "cover_k_d_cross:thresholdx": "D值上限(X)",
+  "macd_cross:shortperiod": "DI短EMA(n)",
+  "macd_cross:longperiod": "DI長EMA(m)",
+  "macd_cross:signalperiod": "DEA週期(x)",
+  "macd_cross_exit:signalperiod": "DEA週期(x)",
+  "short_macd_cross:shortperiod": "DI短EMA(n)",
+  "short_macd_cross:longperiod": "DI長EMA(m)",
+  "short_macd_cross:signalperiod": "DEA週期(x)",
+  "cover_macd_cross:shortperiod": "DI短EMA(n)",
+  "cover_macd_cross:longperiod": "DI長EMA(m)",
+  "cover_macd_cross:signalperiod": "DEA週期(x)",
+  "turtle_stop_loss:stoplossperiod": "停損週期",
+  "short_turtle_stop_loss:stoplossperiod": "觀察週期",
+  "cover_turtle_breakout:breakoutperiod": "突破週期",
+  "cover_trailing_stop:percentage": "百分比(%)",
+};
+
+const SENSITIVITY_GENERIC_LABELS = {
+  period: "週期",
+  shortperiod: "短期週期",
+  longperiod: "長期週期",
+  threshold: "閾值",
+  thresholdx: "閾值 X",
+  thresholdy: "閾值 Y",
+  signalperiod: "信號週期",
+  deviations: "標準差",
+  multiplier: "倍數",
+  percentage: "百分比(%)",
+  breakoutperiod: "突破週期",
+  stoplossperiod: "停損週期",
+};
+
+const SENSITIVITY_RISK_LABELS = {
+  stopLoss: "停損 (%)",
+  takeProfit: "停利 (%)",
+};
+
+function cloneParamsForSensitivity(params) {
+  if (!params) return {};
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(params);
+    }
+  } catch (error) {
+    console.warn("[Worker] structuredClone 失敗，改用 JSON 方式複製敏感度參數。", error);
+  }
+  try {
+    return JSON.parse(JSON.stringify(params));
+  } catch (err) {
+    console.error("[Worker] 複製敏感度參數失敗:", err);
+    return {};
+  }
+}
+
+function resolveSensitivityParamMeta(role, strategyKey, paramKey, baseValue) {
+  const normalizedStrategy = (strategyKey || "").toString();
+  const normalizedKey = (paramKey || "").toString();
+  const strategyLookup = normalizedStrategy.toLowerCase();
+  const keyLookup = normalizedKey.toLowerCase();
+  const overrideLabel =
+    SENSITIVITY_STRATEGY_LABEL_OVERRIDES[`${strategyLookup}:${keyLookup}`];
+  const baseStrategy = strategyLookup
+    .replace(/^short_/, "")
+    .replace(/^cover_/, "")
+    .replace(/_exit$/, "");
+  let label = overrideLabel || SENSITIVITY_GENERIC_LABELS[keyLookup] || normalizedKey;
+  if (role === "risk" && SENSITIVITY_RISK_LABELS[paramKey]) {
+    label = SENSITIVITY_RISK_LABELS[paramKey];
+  } else if (!overrideLabel) {
+    if (
+      (baseStrategy === "ma_cross" || baseStrategy === "ema_cross") &&
+      keyLookup === "shortperiod"
+    ) {
+      label = "短期均線";
+    } else if (
+      (baseStrategy === "ma_cross" || baseStrategy === "ema_cross") &&
+      keyLookup === "longperiod"
+    ) {
+      label = "長期均線";
+    } else if (
+      (baseStrategy === "ma_above" || baseStrategy === "ma_below") &&
+      keyLookup === "period"
+    ) {
+      label = "SMA週期";
+    }
+  }
+
+  const meta = {
+    label,
+    integer: Number.isInteger(baseValue),
+    minValue: Number.isInteger(baseValue) ? 1 : 0,
+    allowZero: true,
+  };
+
+  if (role === "risk") {
+    meta.integer = false;
+    meta.minValue = 0;
+  }
+
+  if (
+    keyLookup.includes("percentage") ||
+    keyLookup.includes("multiplier") ||
+    keyLookup.includes("threshold")
+  ) {
+    meta.integer = false;
+    meta.minValue = 0;
+  }
+
+  if (keyLookup.includes("deviation")) {
+    meta.integer = false;
+    meta.minValue = 0;
+  }
+
+  return meta;
+}
+
+function adjustSensitivityValue(baseValue, multiplier, meta) {
+  if (!Number.isFinite(baseValue)) return null;
+  if (!meta) meta = {};
+  const minValue = Number.isFinite(meta.minValue)
+    ? meta.minValue
+    : Number.isInteger(baseValue)
+    ? 1
+    : 0;
+
+  if (meta.integer || Number.isInteger(baseValue)) {
+    let candidate =
+      multiplier >= 1
+        ? Math.ceil(baseValue * multiplier)
+        : Math.floor(baseValue * multiplier);
+    if (!Number.isFinite(candidate)) return null;
+    if (candidate === baseValue) {
+      candidate += multiplier >= 1 ? 1 : -1;
+    }
+    if (candidate < minValue) {
+      candidate = minValue;
+    }
+    return candidate;
+  }
+
+  let candidate = baseValue * multiplier;
+  if (!Number.isFinite(candidate)) return null;
+  candidate = parseFloat(candidate.toFixed(4));
+  if (candidate < minValue) {
+    candidate = minValue;
+  }
+  return candidate;
+}
+
+function applySensitivityValue(targetParams, role, key, value) {
+  if (!targetParams || typeof targetParams !== "object") return;
+  if (role === "entry") {
+    if (!targetParams.entryParams || typeof targetParams.entryParams !== "object") {
+      targetParams.entryParams = {};
+    }
+    targetParams.entryParams[key] = value;
+  } else if (role === "exit") {
+    if (!targetParams.exitParams || typeof targetParams.exitParams !== "object") {
+      targetParams.exitParams = {};
+    }
+    targetParams.exitParams[key] = value;
+  } else if (role === "shortEntry") {
+    if (!targetParams.shortEntryParams || typeof targetParams.shortEntryParams !== "object") {
+      targetParams.shortEntryParams = {};
+    }
+    targetParams.shortEntryParams[key] = value;
+  } else if (role === "shortExit") {
+    if (!targetParams.shortExitParams || typeof targetParams.shortExitParams !== "object") {
+      targetParams.shortExitParams = {};
+    }
+    targetParams.shortExitParams[key] = value;
+  } else if (role === "risk") {
+    targetParams[key] = value;
+  }
+}
+
+function computeParameterSensitivity(
+  baseData,
+  baseParams,
+  baselineMetrics,
+  execOptions = {},
+) {
+  if (!Array.isArray(baseData) || !baseParams) return null;
+
+  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+    ? baselineMetrics.returnRate
+    : null;
+  const baselineAnnual = Number.isFinite(baselineMetrics?.annualizedReturn)
+    ? baselineMetrics.annualizedReturn
+    : null;
+  const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
+    ? baselineMetrics.sharpeRatio
+    : null;
+
+  const groupConfigs = [
+    {
+      role: "entry",
+      label: "進場策略",
+      strategy: baseParams.entryStrategy,
+      params: baseParams.entryParams,
+    },
+    {
+      role: "exit",
+      label: "出場策略",
+      strategy: baseParams.exitStrategy,
+      params: baseParams.exitParams,
+    },
+  ];
+
+  if (baseParams.enableShorting) {
+    groupConfigs.push(
+      {
+        role: "shortEntry",
+        label: "做空進場",
+        strategy: baseParams.shortEntryStrategy,
+        params: baseParams.shortEntryParams,
+      },
+      {
+        role: "shortExit",
+        label: "做空回補",
+        strategy: baseParams.shortExitStrategy,
+        params: baseParams.shortExitParams,
+      },
+    );
+  }
+
+  const riskParams = {};
+  if (Number.isFinite(baseParams.stopLoss) && baseParams.stopLoss > 0) {
+    riskParams.stopLoss = baseParams.stopLoss;
+  }
+  if (Number.isFinite(baseParams.takeProfit) && baseParams.takeProfit > 0) {
+    riskParams.takeProfit = baseParams.takeProfit;
+  }
+  if (Object.keys(riskParams).length > 0) {
+    groupConfigs.push({
+      role: "risk",
+      label: "風險控制",
+      strategy: "risk",
+      params: riskParams,
+    });
+  }
+
+  const adjustments = [
+    { label: "+10%", multiplier: 1.1 },
+    { label: "-10%", multiplier: 0.9 },
+  ];
+
+  const groups = [];
+
+  groupConfigs.forEach((group) => {
+    const rawParams =
+      group.params && typeof group.params === "object"
+        ? Object.entries(group.params)
+        : [];
+    const parameters = [];
+
+    rawParams.forEach(([paramKey, baseValue]) => {
+      if (!Number.isFinite(baseValue)) return;
+      if (group.role === "risk" && baseValue <= 0) return;
+
+      const meta = resolveSensitivityParamMeta(
+        group.role,
+        group.strategy,
+        paramKey,
+        baseValue,
+      );
+
+      const scenarios = [];
+      adjustments.forEach((adj) => {
+        const adjustedValue = adjustSensitivityValue(baseValue, adj.multiplier, meta);
+        if (!Number.isFinite(adjustedValue)) {
+          scenarios.push({
+            label: adj.label,
+            value: null,
+            run: null,
+            driftPercent: null,
+            deltaReturn: null,
+            deltaSharpe: null,
+          });
+          return;
+        }
+
+        if (Math.abs(adjustedValue - baseValue) < 1e-8) {
+          scenarios.push({
+            label: adj.label,
+            value: adjustedValue,
+            run: null,
+            driftPercent: null,
+            deltaReturn: null,
+            deltaSharpe: null,
+          });
+          return;
+        }
+
+        const mutatedParams = cloneParamsForSensitivity(baseParams);
+        applySensitivityValue(mutatedParams, group.role, paramKey, adjustedValue);
+
+        let scenarioResult = null;
+        try {
+          scenarioResult = runStrategy(baseData, mutatedParams, {
+            ...execOptions,
+            skipSensitivity: true,
+            silent: true,
+          });
+        } catch (error) {
+          console.error(
+            `[Worker] 敏感度分析重跑失敗 (${group.role}.${paramKey} @ ${adj.label}):`,
+            error,
+          );
+        }
+
+        if (
+          scenarioResult &&
+          typeof scenarioResult === "object" &&
+          Number.isFinite(scenarioResult.returnRate)
+        ) {
+          const scenarioReturn = Number(scenarioResult.returnRate);
+          const scenarioAnnual = Number.isFinite(scenarioResult.annualizedReturn)
+            ? scenarioResult.annualizedReturn
+            : null;
+          const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
+            ? scenarioResult.sharpeRatio
+            : null;
+          const deltaReturn =
+            baselineReturn !== null ? scenarioReturn - baselineReturn : null;
+          const driftPercent = deltaReturn;
+          const deltaSharpe =
+            baselineSharpe !== null && scenarioSharpe !== null
+              ? scenarioSharpe - baselineSharpe
+              : null;
+
+          scenarios.push({
+            label: adj.label,
+            value: adjustedValue,
+            run: {
+              returnRate: scenarioReturn,
+              annualizedReturn: scenarioAnnual,
+              sharpeRatio: scenarioSharpe,
+            },
+            driftPercent,
+            deltaReturn,
+            deltaSharpe,
+          });
+        } else {
+          scenarios.push({
+            label: adj.label,
+            value: adjustedValue,
+            run: null,
+            driftPercent: null,
+            deltaReturn: null,
+            deltaSharpe: null,
+          });
+        }
+      });
+
+      const validDrifts = scenarios
+        .map((scenario) =>
+          Number.isFinite(scenario.driftPercent)
+            ? Math.abs(scenario.driftPercent)
+            : null,
+        )
+        .filter((value) => value !== null);
+      const averageDriftPercent =
+        validDrifts.length > 0
+          ? validDrifts.reduce((sum, cur) => sum + cur, 0) / validDrifts.length
+          : null;
+      const stabilityScore = Number.isFinite(averageDriftPercent)
+        ? Math.max(0, Math.min(100, 100 - averageDriftPercent))
+        : null;
+
+      parameters.push({
+        key: paramKey,
+        name: meta.label,
+        baseValue,
+        averageDriftPercent,
+        stabilityScore,
+        scenarios,
+      });
+    });
+
+    if (parameters.length > 0) {
+      groups.push({
+        label: group.label,
+        strategy: group.strategy || "",
+        parameters,
+      });
+    }
+  });
+
+  if (groups.length === 0) {
+    return null;
+  }
+
+  const driftValues = [];
+  groups.forEach((group) => {
+    group.parameters.forEach((param) => {
+      if (Number.isFinite(param.averageDriftPercent)) {
+        driftValues.push(param.averageDriftPercent);
+      }
+    });
+  });
+  const averageDrift =
+    driftValues.length > 0
+      ? driftValues.reduce((sum, cur) => sum + cur, 0) / driftValues.length
+      : null;
+  const stabilityOverall = Number.isFinite(averageDrift)
+    ? Math.max(0, Math.min(100, 100 - averageDrift))
+    : null;
+
+  return {
+    baseline: {
+      returnRate: baselineReturn,
+      annualizedReturn: baselineAnnual,
+      sharpeRatio: baselineSharpe,
+    },
+    summary: {
+      averageDriftPercent: averageDrift,
+      stabilityScore: stabilityOverall,
+    },
+    groups,
+  };
+}
+
 // --- 運行策略回測 (修正年化報酬率計算) ---
-function runStrategy(data, params) {
+function runStrategy(data, params, execOptions = {}) {
   // --- 新增的保護機制 ---
   if (!Array.isArray(data)) {
     // 如果傳進來的不是陣列，就拋出一個更明確的錯誤
@@ -4796,12 +5223,15 @@ function runStrategy(data, params) {
     throw new TypeError("傳遞給 runStrategy 的資料格式錯誤，必須是陣列。");
   }
   // --- 保護機制結束 ---
+  const silent = Boolean(execOptions?.silent);
 
-  self.postMessage({
-    type: "progress",
-    progress: 70,
-    message: "回測模擬中...",
-  });
+  if (!silent) {
+    self.postMessage({
+      type: "progress",
+      progress: 70,
+      message: "回測模擬中...",
+    });
+  }
   const n = data.length;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
@@ -6830,7 +7260,9 @@ function runStrategy(data, params) {
       i % Math.floor((n - startIdx) / 20 || 1) === 0
     ) {
       const p = 70 + Math.floor(((i - startIdx) / (n - startIdx)) * 25);
-      self.postMessage({ type: "progress", progress: Math.min(95, p) });
+      if (!silent) {
+        self.postMessage({ type: "progress", progress: Math.min(95, p) });
+      }
     }
   } // --- End Loop ---
 
@@ -6975,11 +7407,13 @@ function runStrategy(data, params) {
       longTrailingStops: trailingLevels.longLevels,
       shortTrailingStops: trailingLevels.shortLevels,
     });
-    self.postMessage({
-      type: "progress",
-      progress: 95,
-      message: "計算最終結果...",
-    });
+    if (!silent) {
+      self.postMessage({
+        type: "progress",
+        progress: 95,
+        message: "計算最終結果...",
+      });
+    }
     portfolioVal[lastIdx] =
       initialCapital + (longPl[lastIdx] ?? 0) + (shortPl[lastIdx] ?? 0);
     strategyReturns[lastIdx] =
@@ -7372,7 +7806,9 @@ function runStrategy(data, params) {
       }
     }
 
-    self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    if (!silent) {
+      self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    }
     const visibleStartIdx = Math.max(0, effectiveStartIdx);
     const sliceArray = (arr) =>
       Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
@@ -7408,6 +7844,23 @@ function runStrategy(data, params) {
       console.log("[Worker] Dataset summary", datasetSummary);
       console.log("[Worker] Warmup summary", warmupSummary);
       console.log("[Worker] BuyHold summary", buyHoldSummary);
+    }
+    let sensitivityAnalysis = null;
+    if (!execOptions?.skipSensitivity) {
+      try {
+        sensitivityAnalysis = computeParameterSensitivity(
+          data,
+          params,
+          {
+            returnRate: returnR,
+            annualizedReturn: annualR,
+            sharpeRatio: sharpeR,
+          },
+          execOptions,
+        );
+      } catch (error) {
+        console.error("[Worker] 敏感度分析計算失敗:", error);
+      }
     }
     return {
       stockNo: params.stockNo,
@@ -7463,6 +7916,7 @@ function runStrategy(data, params) {
       longEntryStageStates: trimmedEntryStageStates,
       longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
+      sensitivityAnalysis,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);
@@ -7621,7 +8075,10 @@ async function runOptimization(
       }
     }
     try {
-      const result = runStrategy(stockData, testParams);
+      const result = runStrategy(stockData, testParams, {
+        skipSensitivity: true,
+        silent: true,
+      });
       if (result) {
         results.push({
           paramValue: curVal,

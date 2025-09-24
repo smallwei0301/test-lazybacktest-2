@@ -1,3 +1,9 @@
+## 2025-08-05 — Patch LB-SENSITIVITY-COMPUTE-20250805A
+- **Issue recap**: 回測摘要敏感度卡片僅顯示「未提供可量化資訊」，Worker 缺乏 ±10% 參數重跑與基準績效比對流程，導致前端無法取得穩定度分數與 PP 指標。
+- **Fix**: Worker 端新增 `computeParameterSensitivity`，針對進出場與風控數值參數複製原始設定後分別進行 ±10% 靜默回測，計算報酬漂移、Sharpe Δ 與穩定度分數，並將基準績效與各參數情境一併回傳 `sensitivityAnalysis`。
+- **Diagnostics**: 透過靜態程式檢閱確認 `runStrategy` 在主要回測完成後附加敏感度結果且避免遞迴重算，並驗證批量優化改採 `skipSensitivity`/`silent` 旗標後仍只輸出單一進度訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('summary scripts compile');NODE`
+
 ## 2025-08-01 — Patch LB-SENSITIVITY-RENDER-20250801A
 - **Issue recap**: 回測摘要中雖生成敏感度分析 HTML，但結果容器未插入該卡片，導致使用者看不到穩定度分數與 ±10% 場景表格。
 - **Fix**: 將 `sensitivityHtml` 納入摘要版面佈局，確保與績效、風險、交易統計並列顯示。
