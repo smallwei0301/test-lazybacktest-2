@@ -1,4 +1,10 @@
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+## 2025-07-15 — Patch LB-SENSITIVITY-GRID-20250715A / LB-SENSITIVITY-UX-20250715B
+- **Issue recap**: ±10% 單點敏感度無法覆蓋均線等整數參數的小幅調整，前端表格也僅能呈現兩個情境，無法顯示多點擾動與方向性資訊。
+- **Fix**: Worker 改為依策略參數型別生成 ±5%、±10%、±20% 與整數步階擾動，回傳多點平均漂移、最大偏移、方向偏移與樣本數；前端敏感度卡片改為動態網格與條列式指標，新增方向偏移卡、樣本統計與迷你圖例，手機版改為卡片堆疊呈現。
+- **Diagnostics**: 透過靜態輸出確認 `parameterSensitivity.summary` 帶有 `scenarioCount/maxDriftPercent/positiveDriftPercent/negativeDriftPercent`，前端卡片與 tooltip 改為敘述擾動網格與多點漂移；桌機與手機版皆不再出現固定 ±10% 欄位。
+- **Testing**: 受限於容器無法啟動實際回測代理，僅以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 確認語法正確，後續部署至 Netlify 預覽站再以真實策略驗證 console 與 UI 行為。
+
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
 - **Diagnostics**: 手機寬度下逐一比對績效、風險、交易統計與策略卡片皆兩欄呈現且不再被截斷；敏感度卡改為堆疊卡片後，+10%/-10%、漂移與穩定度指標無需橫向捲動即可閱讀，tooltip 仍保持對齊。
