@@ -65,7 +65,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250817A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250823A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
@@ -76,8 +76,18 @@ const TREND_BASE_THRESHOLDS = {
 const TREND_SENSITIVITY_MIN = 1;
 const TREND_SENSITIVITY_MAX = 100;
 const TREND_SENSITIVITY_DEFAULT = 40;
-const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.02;
+const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.0063;
 const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
+const TREND_SENSITIVITY_EQUIVALENT_MIN = 70;
+const TREND_SENSITIVITY_EQUIVALENT_MAX = 100;
+const TREND_SENSITIVITY_ORIGINAL_MIN = 1;
+const TREND_SENSITIVITY_ORIGINAL_MAX = 100;
+const TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED =
+    (TREND_SENSITIVITY_EQUIVALENT_MIN - TREND_SENSITIVITY_ORIGINAL_MIN)
+    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
+const TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED =
+    (TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_ORIGINAL_MIN)
+    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
 
 const TREND_STYLE_MAP = {
     uptrend: {
@@ -164,17 +174,39 @@ function computeTrendThresholds(sensitivity) {
     let safe = Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT;
     if (safe < min) safe = min;
     if (safe > max) safe = max;
-    const normalized = (safe - min) / span;
+    const sliderNormalized = span > 0 ? (safe - min) / span : 0;
+    const effectiveNormalized = TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED
+        + sliderNormalized * (TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED);
     const multiplierSpan = TREND_SENSITIVITY_MAX_MULTIPLIER - TREND_SENSITIVITY_MIN_MULTIPLIER;
-    const multiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - normalized * multiplierSpan;
+    const rawMultiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - effectiveNormalized * multiplierSpan;
     const clampedMultiplier = Math.max(
         TREND_SENSITIVITY_MIN_MULTIPLIER,
-        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplier),
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, rawMultiplier),
     );
+    const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
+    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + sliderNormalized * equivalentSpan;
+    const multiplierAtMinRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
+        - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED * multiplierSpan;
+    const multiplierAtMaxRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
+        - TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED * multiplierSpan;
+    const multiplierAtMin = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMinRaw),
+    );
+    const multiplierAtMax = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMaxRaw),
+    );
+    let ratio = null;
+    if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMax > 0) {
+        ratio = multiplierAtMin / multiplierAtMax;
+    }
     return {
         windowSize: TREND_WINDOW_SIZE,
         sensitivity: safe,
-        normalizedSensitivity: normalized,
+        sliderNormalized,
+        normalizedSensitivity: effectiveNormalized,
+        equivalentSensitivity,
         multiplier: clampedMultiplier,
         upSharpe: TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
         downSharpe: -TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
@@ -183,8 +215,11 @@ function computeTrendThresholds(sensitivity) {
         range: {
             min,
             max,
-            minMultiplier: TREND_SENSITIVITY_MIN_MULTIPLIER,
-            maxMultiplier: TREND_SENSITIVITY_MAX_MULTIPLIER,
+            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
+            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
+            multiplierAtMin,
+            multiplierAtMax,
+            ratio,
         },
     };
 }
@@ -192,6 +227,14 @@ function computeTrendThresholds(sensitivity) {
 function formatPercentPlain(value, digits = 1) {
     if (!Number.isFinite(value)) return '—';
     return `${value.toFixed(digits)}%`;
+}
+
+function formatTrendMultiplier(value) {
+    if (!Number.isFinite(value)) return '—';
+    if (value >= 1) return value.toFixed(1);
+    if (value >= 0.1) return value.toFixed(2);
+    if (value >= 0.01) return value.toFixed(3);
+    return value.toFixed(4);
 }
 
 function computeTrendAnalysisFromResult(result, thresholds) {
@@ -390,12 +433,19 @@ function renderTrendSummary() {
         const downSharpe = thresholds.downSharpe.toFixed(2);
         const slopePct = (Math.exp(thresholds.slopeFloor) - 1) * 100;
         const volPct = thresholds.volFloor * 100;
-        const multiplier = thresholds.multiplier.toFixed(2);
-        const rangeMax = thresholds.range?.maxMultiplier ?? TREND_SENSITIVITY_MAX_MULTIPLIER;
-        const rangeMin = thresholds.range?.minMultiplier ?? TREND_SENSITIVITY_MIN_MULTIPLIER;
-        const maxMultiplier = rangeMax.toFixed(2);
-        const minMultiplier = rangeMin.toFixed(2);
-        const ratio = rangeMin > 0 ? rangeMax / rangeMin : null;
+        const multiplierText = formatTrendMultiplier(thresholds.multiplier);
+        const rangeInfo = thresholds.range || {};
+        const rangeMaxValue = Number.isFinite(rangeInfo.multiplierAtMin)
+            ? rangeInfo.multiplierAtMin
+            : TREND_SENSITIVITY_MAX_MULTIPLIER;
+        const rangeMinValue = Number.isFinite(rangeInfo.multiplierAtMax)
+            ? rangeInfo.multiplierAtMax
+            : TREND_SENSITIVITY_MIN_MULTIPLIER;
+        const maxMultiplier = formatTrendMultiplier(rangeMaxValue);
+        const minMultiplier = formatTrendMultiplier(rangeMinValue);
+        let ratio = Number.isFinite(rangeInfo.ratio) && rangeInfo.ratio > 0
+            ? rangeInfo.ratio
+            : (rangeMinValue > 0 ? rangeMaxValue / rangeMinValue : null);
         let ratioText = '—';
         if (Number.isFinite(ratio) && ratio > 0) {
             if (ratio >= 100) {
@@ -406,10 +456,23 @@ function renderTrendSummary() {
                 ratioText = ratio.toFixed(1);
             }
         }
+        const equivalentMin = Number.isFinite(rangeInfo.minEquivalent)
+            ? Math.round(rangeInfo.minEquivalent)
+            : null;
+        const equivalentMax = Number.isFinite(rangeInfo.maxEquivalent)
+            ? Math.round(rangeInfo.maxEquivalent)
+            : null;
+        const equivalentCurrent = Number.isFinite(thresholds.equivalentSensitivity)
+            ? Math.round(thresholds.equivalentSensitivity)
+            : null;
+        const sliderMappingText = (equivalentMin !== null && equivalentMax !== null)
+            ? `滑桿 1→100 ≈ 舊版 ${equivalentMin}→${equivalentMax}`
+            : '滑桿 1→100';
+        const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
         thresholdTextEl.innerHTML = `
             <span class="font-semibold">判別公式：</span>20 日平均對數淨值斜率 ÷ 同期波動度。<br>
             起漲：比值 ≥ ${upSharpe}，跌落：比值 ≤ ${downSharpe}。<br>
-            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplier}（滑桿 1→100 對應 ${maxMultiplier} → ${minMultiplier} 倍，上下限相差 ${ratioText} 倍，倍率越小越靈敏）。
+            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，倍率越小越靈敏）。
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');

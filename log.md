@@ -1,3 +1,9 @@
+## 2025-08-23 — Patch LB-TREND-SENSITIVITY-20250823A
+- **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。 
+- **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。 
+- **Diagnostics**: 確認趨勢卡說明顯示「滑桿 1→100 ≈ 舊版 70→100」與新的倍率差距，拖曳滑桿時可看到目前等效級距與倍率即時刷新。 
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-08-17 — Patch LB-TREND-SENSITIVITY-20250817A
 - **Issue recap**: 靈敏度滑桿雖已擴充為 1-100 級距，但倍率縮放僅有 1.00→0.20，將滑桿推至 100 時仍難以明顯放大起漲／跌落分區。
 - **Fix**: 維持 1-100 級距但將倍率範圍拓展至 1.00→0.02（上下限差 50 倍），同步更新趨勢卡說明與倍率比值提示，確保高靈敏度時盤整區段明顯收斂。
