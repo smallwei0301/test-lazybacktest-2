@@ -63,7 +63,7 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
-const ROLLING_TEST_VERSION = 'LB-ROLLING-20240707A';
+const ROLLING_TEST_VERSION = 'LB-ROLLING-20240709A';
 const ROLLING_RISK_FREE_RATE = 0.01; // 1% annual risk-free baseline for Sharpe/Sortino
 
 function cloneArrayOfRanges(ranges) {
@@ -3770,11 +3770,18 @@ function renderChart(result) {
 }
 
 // --- Rolling Test Analysis ---
-const ROLLING_CONFIG_PRESETS = [
+const ROLLING_PRIMARY_CONFIGS = [
     { id: '36-6', trainMonths: 36, testMonths: 6 },
     { id: '24-6', trainMonths: 24, testMonths: 6 },
     { id: '18-3', trainMonths: 18, testMonths: 3 },
     { id: '12-3', trainMonths: 12, testMonths: 3 },
+];
+const ROLLING_ADAPTIVE_CONFIGS = [
+    { id: '9-3', trainMonths: 9, testMonths: 3, stepMonths: 2 },
+    { id: '8-2', trainMonths: 8, testMonths: 2, stepMonths: 2 },
+    { id: '6-2', trainMonths: 6, testMonths: 2, stepMonths: 2 },
+    { id: '4-2', trainMonths: 4, testMonths: 2, stepMonths: 1 },
+    { id: '3-1', trainMonths: 3, testMonths: 1, stepMonths: 1 },
 ];
 const ROLLING_PASS_THRESHOLDS = {
     cagr: 0.05,
@@ -3921,7 +3928,7 @@ function buildRollingFallbackSection(analysis) {
         }
     }
 
-    const requirementList = ROLLING_CONFIG_PRESETS
+    const requirementList = ROLLING_PRIMARY_CONFIGS
         .map((preset) => {
             const minMonths = preset.trainMonths + preset.testMonths;
             return `<li>訓練 ${preset.trainMonths} 個月 → 測試 ${preset.testMonths} 個月（至少 ${minMonths} 個月資料）</li>`;
@@ -3968,6 +3975,24 @@ function buildRollingFallbackSection(analysis) {
             ${guidanceSection}
         </section>
     `;
+}
+
+function resolveRollingConfigPresets(totalMonths) {
+    const normalizedMonths = Number.isFinite(totalMonths) ? totalMonths : 0;
+    const primaryPresets = ROLLING_PRIMARY_CONFIGS.map((preset) => ({ ...preset, isAdaptive: false }));
+    const hasViablePrimary = primaryPresets.some((preset) => normalizedMonths >= (preset.trainMonths + preset.testMonths));
+    if (hasViablePrimary) {
+        return { presets: primaryPresets, hasAdaptivePresets: false };
+    }
+
+    const adaptivePresets = ROLLING_ADAPTIVE_CONFIGS
+        .filter((preset) => normalizedMonths >= (preset.trainMonths + preset.testMonths))
+        .map((preset) => ({ ...preset, isAdaptive: true }));
+
+    return {
+        presets: [...primaryPresets, ...adaptivePresets],
+        hasAdaptivePresets: adaptivePresets.length > 0,
+    };
 }
 
 function computeRollingAnalysis(result) {
@@ -4034,11 +4059,14 @@ function computeRollingAnalysis(result) {
         totalYears: Math.max(0, (datasetEnd - datasetStart) / BACKTEST_DAY_MS) / 365.25,
     };
 
-    const configResults = ROLLING_CONFIG_PRESETS.map((preset) => evaluateRollingConfig(series, preset, dataset));
+    const { presets, hasAdaptivePresets } = resolveRollingConfigPresets(dataset.totalMonths);
+    const configResults = presets.map((preset) => evaluateRollingConfig(series, preset, dataset));
     const validConfigs = configResults.filter((config) => !config.insufficient && Array.isArray(config.windows) && config.windows.length > 0);
 
     if (validConfigs.length === 0) {
-        const message = '回測期間不足以建立任何訓練/測試視窗。請延長回測區間（建議至少 3 年）。';
+        const message = hasAdaptivePresets
+            ? '即使改用較短的滾動視窗，資料量仍不足以建立 Walk-Forward 測試。建議延長回測區間或改用較長期間的歷史資料。'
+            : '回測期間不足以建立任何訓練/測試視窗。請延長回測區間（建議至少 3 年）。';
         return {
             status: 'insufficient',
             message,
@@ -4048,6 +4076,8 @@ function computeRollingAnalysis(result) {
         };
     }
 
+    const usesAdaptivePresets = validConfigs.some((config) => config.isAdaptive);
+
     let recommendedConfig = validConfigs[0];
     for (let i = 1; i < validConfigs.length; i += 1) {
         const candidate = validConfigs[i];
@@ -4055,9 +4085,22 @@ function computeRollingAnalysis(result) {
             recommendedConfig = candidate;
             continue;
         }
-        if (Math.abs(candidate.passRate - recommendedConfig.passRate) < 0.0001 &&
-            (candidate.averageScore || 0) > (recommendedConfig.averageScore || 0)) {
+        const passRateClose = Math.abs(candidate.passRate - recommendedConfig.passRate) < 0.0001;
+        const candidateScore = candidate.averageScore || 0;
+        const currentScore = recommendedConfig.averageScore || 0;
+        if (passRateClose && candidateScore > currentScore + 0.0001) {
             recommendedConfig = candidate;
+            continue;
+        }
+        if (passRateClose && Math.abs(candidateScore - currentScore) < 0.0001) {
+            if (recommendedConfig.isAdaptive && !candidate.isAdaptive) {
+                recommendedConfig = candidate;
+                continue;
+            }
+            if (candidate.isAdaptive === recommendedConfig.isAdaptive &&
+                (candidate.averageSharpe || 0) > (recommendedConfig.averageSharpe || 0) + 0.0001) {
+                recommendedConfig = candidate;
+            }
         }
     }
 
@@ -4071,6 +4114,7 @@ function computeRollingAnalysis(result) {
                 globalIndex,
                 configId: config.id,
                 configLabel: config.label,
+                isAdaptive: Boolean(config.isAdaptive),
             });
             globalIndex += 1;
         }
@@ -4117,6 +4161,10 @@ function computeRollingAnalysis(result) {
         dataset,
         thresholdText: '年化 ≥5%、Sharpe ≥0.6、最大回撤 ≤25%、正報酬日 ≥50%',
         generatedAt: new Date().toISOString(),
+        usesAdaptivePresets,
+        recommendedIsAdaptive: Boolean(recommendedConfig.isAdaptive),
+        availablePrimaryConfigs: configResults.filter((config) => !config.isAdaptive && !config.insufficient && Array.isArray(config.windows) && config.windows.length > 0).length,
+        availableAdaptiveConfigs: configResults.filter((config) => config.isAdaptive && !config.insufficient && Array.isArray(config.windows) && config.windows.length > 0).length,
     };
 
     return {
@@ -4125,6 +4173,7 @@ function computeRollingAnalysis(result) {
         summary,
         windows: allWindows,
         dataset,
+        usedAdaptivePresets: usesAdaptivePresets,
         message: null,
     };
 }
@@ -4134,6 +4183,7 @@ function evaluateRollingConfig(series, preset, dataset) {
         ? Math.floor(preset.stepMonths)
         : Math.max(1, Math.floor(preset.testMonths / 2));
     const label = `訓練 ${preset.trainMonths} 個月 → 測試 ${preset.testMonths} 個月`;
+    const isAdaptive = Boolean(preset.isAdaptive);
     const totalMonths = dataset?.totalMonths ?? countMonthsBetween(series[0].date, series[series.length - 1].date);
     const minMonthsRequired = preset.trainMonths + preset.testMonths;
     if (totalMonths < minMonthsRequired) {
@@ -4154,6 +4204,7 @@ function evaluateRollingConfig(series, preset, dataset) {
             grade: resolveRollingGrade(null),
             coverage: null,
             passedWindows: 0,
+            isAdaptive,
         };
     }
 
@@ -4226,6 +4277,7 @@ function evaluateRollingConfig(series, preset, dataset) {
             criteria,
             status,
             grade,
+            isAdaptive,
         });
 
         const nextTrainStartDate = addMonthsSafely(trainStart.date, stepMonths);
@@ -4283,6 +4335,7 @@ function evaluateRollingConfig(series, preset, dataset) {
             end: windows[windows.length - 1].testRange.end,
         },
         passedWindows: passCount,
+        isAdaptive,
     };
 }
 
@@ -4486,6 +4539,15 @@ function buildRollingSummarySection(analysis) {
     const bestStatus = bestStatusMeta
         ? `<span class="${bestStatusMeta.className}">${bestStatusMeta.label}</span>`
         : '';
+    const adaptiveBadge = summary.recommendedIsAdaptive
+        ? '<span class="rolling-score-pill rolling-score-pill--caution">短期視窗</span>'
+        : '';
+    const datasetMonthsText = dataset && Number.isFinite(dataset.totalMonths)
+        ? `${dataset.totalMonths} 個月`
+        : '有限';
+    const adaptiveNote = summary.usesAdaptivePresets
+        ? `<div class="rolling-summary-note"><i data-lucide="alert-triangle" class="lucide w-4 h-4"></i><span>資料僅約 ${escapeHtml(datasetMonthsText)}，系統已改用短期訓練/測試視窗（${summary.availableAdaptiveConfigs || 0} 組）產生評分，建議延長樣本後再確認 Walk-Forward 穩健度。</span></div>`
+        : '';
 
     return `
         <section class="space-y-4">
@@ -4506,9 +4568,11 @@ function buildRollingSummarySection(analysis) {
                     </div>
                     <div class="rolling-score-caption">
                         <span class="rolling-chip ${chipClass}">${grade.letter} ｜ ${escapeHtml(grade.label)}</span>
+                        ${adaptiveBadge ? `<span class="ml-2">${adaptiveBadge}</span>` : ''}
                         <span class="ml-2">通過率 ${passRateText}（${summary.passedWindows || 0}/${summary.totalWindows || 0}）</span>
                     </div>
                     <p class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(summary.thresholdText || '年化 ≥5%、Sharpe ≥0.6、最大回撤 ≤25%、正報酬日 ≥50%')}</p>
+                    ${adaptiveNote}
                 </div>
                 <div class="rolling-summary-card">
                     <div class="rolling-summary-header">
@@ -4575,6 +4639,10 @@ function buildRollingConfigCards(analysis) {
         const recommendationTag = config.id === recommendedId
             ? '<span class="rolling-score-pill">推薦組合</span>'
             : '';
+        const cautionTag = config.isAdaptive
+            ? '<span class="rolling-score-pill rolling-score-pill--caution">短期樣本</span>'
+            : '';
+        const badgeGroup = [recommendationTag, cautionTag].filter(Boolean).join('');
         const passRateText = formatPercent((config.passRate || 0) * 100);
         const avgScoreText = Number.isFinite(config.averageScore) ? config.averageScore.toFixed(1) : '—';
         const avgSharpeText = Number.isFinite(config.averageSharpe) ? config.averageSharpe.toFixed(2) : '—';
@@ -4591,7 +4659,7 @@ function buildRollingConfigCards(analysis) {
             <div class="rolling-config-card"${highlightAttrs}>
                 ${header}
                 <div class="flex items-center justify-between">
-                    ${recommendationTag}
+                    <div class="flex items-center gap-2">${badgeGroup}</div>
                     <span class="rolling-config-meta">視窗數 ${config.windows.length} 個</span>
                 </div>
                 <div class="rolling-config-stats">
@@ -4671,11 +4739,14 @@ function buildRollingTableSection(analysis) {
         const highlight = window.configId === recommendedId
             ? ' style="background-color: color-mix(in srgb, var(--primary) 6%, transparent);"'
             : '';
+        const adaptiveTag = window.isAdaptive
+            ? '<span class="rolling-score-pill rolling-score-pill--caution ml-2">短期視窗</span>'
+            : '';
         return `
             <tr${highlight}>
                 <td>${index + 1}</td>
                 <td>
-                    <div class="font-semibold" style="color: var(--foreground);">${escapeHtml(window.configLabel)}</div>
+                    <div class="font-semibold" style="color: var(--foreground);">${escapeHtml(window.configLabel)}${adaptiveTag}</div>
                     <div class="text-xs" style="color: var(--muted-foreground);">視窗 #${window.index} ｜ 訓練 ${window.configTrainMonths}M → 測試 ${window.configTestMonths}M</div>
                 </td>
                 <td>

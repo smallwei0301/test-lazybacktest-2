@@ -1,3 +1,9 @@
+## 2025-07-29 — Patch LB-ROLLING-20240709A
+- **Issue recap**: 預設一年的回測區間不足以觸發 12→3 以上的 Walk-Forward 視窗，分頁長期停留在 fallback 卡片，被使用者視為「沒有顯示內容」。
+- **Fix**: 調整 `computeRollingAnalysis` 依資料涵蓋月數動態套用短期訓練/測試視窗（9→3、6→2 等）並標記為自適應模式，優先保留機構常用視窗且在僅剩短期視窗時給予提示；推薦與表格列會顯示「短期視窗」徽章。 
+- **Diagnostics**: 摘要卡新增告警列出可用視窗組數與資料月數，配置卡、明細表格亦會以橘色徽章標記短期樣本，協助營運端判斷是否需延長區間。 
+- **Testing**: `node tests/rolling-adaptive-check.js`
+
 ## 2025-07-27 — Patch LB-ROLLING-20240707A
 - **Issue recap**: 使用者於資料不足或尚未回測時僅看到 placeholder，Walk-Forward 無法計算時缺乏指引與資料摘要，導致「滾動測試分頁沒有顯示內容」的抱怨。
 - **Fix**: 更新 `ROLLING_TEST_VERSION` 至 `LB-ROLLING-20240707A`，並為 `renderRollingTestReport` 加入 `buildRollingFallbackSection`，在資料不足、尚未執行或異常時輸出專用卡片，列出現有資料涵蓋、預設視窗需求與排除步驟。

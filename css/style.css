@@ -478,6 +478,29 @@ html, body { overflow-x: hidden; }
     color: var(--primary);
 }
 
+.rolling-score-pill--caution {
+    background-color: rgba(245, 158, 11, 0.22);
+    color: #b45309;
+    border: 1px solid color-mix(in srgb, var(--secondary) 55%, transparent);
+}
+
+.rolling-summary-note {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: calc(var(--radius) + 2px);
+    background-color: color-mix(in srgb, var(--secondary) 12%, transparent);
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.rolling-summary-note .lucide {
+    color: var(--secondary);
+}
+
 .rolling-pass { color: #047857; font-weight: 600; }
 .rolling-watch { color: #b45309; font-weight: 600; }
 .rolling-fail { color: #b91c1c; font-weight: 600; }
