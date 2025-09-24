@@ -12,11 +12,14 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250527A
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
+// Patch Tag: LB-TODAY-SUGGEST-20250623A
+// Patch Tag: LB-TODAY-SUGGEST-20250625A
 const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 let workerLastDataset = null;
 let workerLastMeta = null;
+let workerLastBacktestState = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -681,6 +684,14 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
 
 function pad2(value) {
   return String(value).padStart(2, "0");
+}
+
+function getTodayUTCISODate() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = pad2(now.getUTCMonth() + 1);
+  const day = pad2(now.getUTCDate());
+  return `${year}-${month}-${day}`;
 }
 
 function formatTWDateWorker(twDate) {
@@ -4000,6 +4011,7 @@ function runStrategy(data, params) {
     buyFee,
     sellFee,
     positionBasis,
+    forceFinalLiquidation = true,
   } = params;
 
   if (!data || n === 0) throw new Error("回測數據無效");
@@ -5540,7 +5552,8 @@ function runStrategy(data, params) {
     const lastIdx = n - 1;
     const finalP =
       lastIdx >= 0 && check(closes[lastIdx]) ? closes[lastIdx] : null;
-    if (longPos === 1 && finalP !== null && longShares > 0) {
+    const shouldForceLiquidation = forceFinalLiquidation !== false;
+    if (shouldForceLiquidation && longPos === 1 && finalP !== null && longShares > 0) {
       const rev = longShares * finalP * (1 - sellFee / 100);
       const costB = longShares * lastBuyP * (1 + buyFee / 100);
       const prof = rev - costB;
@@ -5582,10 +5595,10 @@ function runStrategy(data, params) {
       console.log(
         `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
       );
-    } else if (longPos === 1) {
+    } else if (shouldForceLiquidation && longPos === 1) {
       longPl[lastIdx] = longPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
-    if (shortPos === 1 && finalP !== null && shortShares > 0) {
+    if (shouldForceLiquidation && shortPos === 1 && finalP !== null && shortShares > 0) {
       const shortProceeds = shortShares * lastShortP * (1 - sellFee / 100);
       const coverCostWithFee = shortShares * finalP * (1 + buyFee / 100);
       const prof = shortProceeds - coverCostWithFee;
@@ -5627,7 +5640,7 @@ function runStrategy(data, params) {
       console.log(
         `[Worker SHORT] Final Cover Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
       );
-    } else if (shortPos === 1) {
+    } else if (shouldForceLiquidation && shortPos === 1) {
       shortPl[lastIdx] = shortPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
     const trailingLevels = computeTrailingStopLevels(
@@ -6345,517 +6358,116 @@ async function runOptimization(
 }
 
 // --- 執行策略建議模擬 (修正建議邏輯) ---
-function runSuggestionSimulation(params, recentData) {
+function runSuggestionSimulation(params, recentData, lastBacktestState) {
   console.log("[Worker Suggestion] Starting simulation for suggestion...");
-  const n = recentData.length;
-  if (!recentData || n === 0) {
+  const totalRows = Array.isArray(recentData) ? recentData.length : 0;
+  if (totalRows === 0) {
     console.error("[Worker Suggestion] No recent data provided.");
-    return "數據不足無法產生建議";
+    return {
+      action: "error",
+      message: "今日資料不足，請重新執行回測。",
+      date: null,
+      position: null,
+      price: null,
+    };
   }
-  const {
-    entryStrategy,
-    exitStrategy,
-    entryParams,
-    exitParams,
-    enableShorting,
-    shortEntryStrategy,
-    shortExitStrategy,
-    shortEntryParams,
-    shortExitParams,
-    stopLoss: globalSL,
-    takeProfit: globalTP,
-  } = params; // tradeTiming not needed for signal check
-  const dates = recentData.map((d) => d.date);
-  const opens = recentData.map((d) => d.open);
-  const highs = recentData.map((d) => d.high);
-  const lows = recentData.map((d) => d.low);
-  const closes = recentData.map((d) => d.close);
-  const volumes = recentData.map((d) => d.volume);
-  let indicators;
-  try {
-    indicators = calculateAllIndicators(recentData, params);
-  } catch (e) {
-    console.error("[Worker Suggestion] Error calculating indicators:", e);
-    return `指標計算錯誤: ${e.message}`;
-  }
-  const check = (v) => v !== null && !isNaN(v) && isFinite(v);
 
-  let minLookbackSuggestion = 1;
-  const checkParamLookback = (pObj) => {
-    Object.values(pObj || {}).forEach((v) => {
-      if (typeof v === "number" && !isNaN(v) && v > minLookbackSuggestion)
-        minLookbackSuggestion = v;
-    });
-  };
-  checkParamLookback(entryParams);
-  checkParamLookback(exitParams);
-  if (enableShorting) {
-    checkParamLookback(shortEntryParams);
-    checkParamLookback(shortExitParams);
-  }
+  const latestRow = recentData[totalRows - 1] || {};
+  const latestDate =
+    typeof latestRow.date === "string"
+      ? latestRow.date
+      : Array.isArray(lastBacktestState?.dates) &&
+        lastBacktestState.dates.length > 0
+        ? lastBacktestState.dates[lastBacktestState.dates.length - 1]
+        : null;
+  const closeVal = Number(latestRow?.close);
+  const closeText = Number.isFinite(closeVal) ? closeVal.toFixed(2) : null;
+
   if (
-    entryStrategy.includes("macd") ||
-    exitStrategy.includes("macd") ||
-    (enableShorting &&
-      (shortEntryStrategy.includes("macd") ||
-        shortExitStrategy.includes("macd")))
-  )
-    minLookbackSuggestion = Math.max(
-      minLookbackSuggestion,
-      (entryParams?.longPeriod || 26) + (entryParams?.signalPeriod || 9),
-    );
-  if (
-    entryStrategy.includes("k_d") ||
-    exitStrategy.includes("k_d") ||
-    (enableShorting &&
-      (shortEntryStrategy.includes("k_d") || shortExitStrategy.includes("k_d")))
-  )
-    minLookbackSuggestion = Math.max(
-      minLookbackSuggestion,
-      entryParams?.period || 9,
-    );
-  if (
-    entryStrategy.includes("turtle") ||
-    exitStrategy.includes("turtle") ||
-    (enableShorting &&
-      (shortEntryStrategy.includes("turtle") ||
-        shortExitStrategy.includes("turtle")))
-  )
-    minLookbackSuggestion = Math.max(
-      minLookbackSuggestion,
-      entryParams?.breakoutPeriod || 20,
-      exitParams?.stopLossPeriod || 10,
-    );
-
-  if (n <= minLookbackSuggestion) {
-    console.warn(
-      `[Worker Suggestion] Data length ${n} <= minLookback ${minLookbackSuggestion}`,
-    );
-    return "近期數據不足";
+    !lastBacktestState ||
+    !Array.isArray(lastBacktestState.dates) ||
+    lastBacktestState.dates.length === 0
+  ) {
+    const prefix = latestDate ? `今日（${latestDate}）` : "今日";
+    return {
+      action: "error",
+      message: `${prefix}尚未取得策略狀態，請重新執行回測。`,
+      date: latestDate || null,
+      position: null,
+      price: closeText,
+    };
   }
 
-  let longPos = 0;
-  let shortPos = 0;
-  let lastBuyP = 0;
-  let lastShortP = 0;
-  let curPeakP = 0;
-  let currentLowSinceShort = Infinity;
+  const lastIndex = lastBacktestState.dates.length - 1;
+  const displayDate =
+    typeof latestDate === "string"
+      ? latestDate
+      : lastBacktestState.dates[lastIndex];
+  const positionLabel =
+    Array.isArray(lastBacktestState.positionStates) &&
+    lastBacktestState.positionStates.length > lastIndex
+      ? lastBacktestState.positionStates[lastIndex] || "空手"
+      : "空手";
 
-  const i = n - 1;
-  const curC = closes[i];
-  const curH = highs[i];
-  const curL = lows[i];
-  const prevC = i > 0 ? closes[i - 1] : null;
+  const hasLongState = /多單/.test(positionLabel);
+  const hasShortState = /空單/.test(positionLabel);
 
-  let buySignal = false,
-    sellSignal = false,
-    shortSignal = false,
-    coverSignal = false;
-  let slTrig = false,
-    tpTrig = false,
-    shortSlTrig = false,
-    shortTpTrig = false;
+  const hasBuySignal =
+    Array.isArray(lastBacktestState.chartBuySignals) &&
+    lastBacktestState.chartBuySignals.some((sig) => sig.index === lastIndex);
+  const hasSellSignal =
+    Array.isArray(lastBacktestState.chartSellSignals) &&
+    lastBacktestState.chartSellSignals.some((sig) => sig.index === lastIndex);
+  const hasShortSignal =
+    Array.isArray(lastBacktestState.chartShortSignals) &&
+    lastBacktestState.chartShortSignals.some((sig) => sig.index === lastIndex);
+  const hasCoverSignal =
+    Array.isArray(lastBacktestState.chartCoverSignals) &&
+    lastBacktestState.chartCoverSignals.some((sig) => sig.index === lastIndex);
 
-  switch (entryStrategy) {
-    case "ma_cross":
-    case "ema_cross":
-      buySignal =
-        check(indicators.maShort[i]) &&
-        check(indicators.maLong[i]) &&
-        check(indicators.maShort[i - 1]) &&
-        check(indicators.maLong[i - 1]) &&
-        indicators.maShort[i] > indicators.maLong[i] &&
-        indicators.maShort[i - 1] <= indicators.maLong[i - 1];
-      break;
-    case "ma_above":
-      buySignal =
-        check(indicators.maExit[i]) &&
-        check(prevC) &&
-        check(indicators.maExit[i - 1]) &&
-        curC > indicators.maExit[i] &&
-        prevC <= indicators.maExit[i - 1];
-      break;
-    case "rsi_oversold":
-      const rE = indicators.rsiEntry[i],
-        rPE = indicators.rsiEntry[i - 1],
-        rThE = entryParams.threshold || 30;
-      buySignal = check(rE) && check(rPE) && rE > rThE && rPE <= rThE;
-      break;
-    case "macd_cross":
-      const difE = indicators.macdEntry[i],
-        deaE = indicators.macdSignalEntry[i],
-        difPE = indicators.macdEntry[i - 1],
-        deaPE = indicators.macdSignalEntry[i - 1];
-      buySignal =
-        check(difE) &&
-        check(deaE) &&
-        check(difPE) &&
-        check(deaPE) &&
-        difE > deaE &&
-        difPE <= deaPE;
-      break;
-    case "bollinger_breakout":
-      buySignal =
-        check(indicators.bollingerUpperEntry[i]) &&
-        check(prevC) &&
-        check(indicators.bollingerUpperEntry[i - 1]) &&
-        curC > indicators.bollingerUpperEntry[i] &&
-        prevC <= indicators.bollingerUpperEntry[i - 1];
-      break;
-    case "k_d_cross":
-      const kE = indicators.kEntry[i],
-        dE = indicators.dEntry[i],
-        kPE = indicators.kEntry[i - 1],
-        dPE = indicators.dEntry[i - 1],
-        thX = entryParams.thresholdX || 30;
-      buySignal =
-        check(kE) &&
-        check(dE) &&
-        check(kPE) &&
-        check(dPE) &&
-        kE > dE &&
-        kPE <= dPE &&
-        dE < thX;
-      break;
-    case "volume_spike":
-      const vAE = indicators.volumeAvgEntry[i],
-        vME = entryParams.multiplier || 2;
-      buySignal = check(vAE) && check(volumes[i]) && volumes[i] > vAE * vME;
-      break;
-    case "price_breakout":
-      const bpE = entryParams.period || 20;
-      if (i >= bpE) {
-        const hsE = highs.slice(i - bpE, i).filter((h) => check(h));
-        if (hsE.length > 0) {
-          const periodHigh = Math.max(...hsE);
-          buySignal = check(curC) && curC > periodHigh;
-        }
-      }
-      break;
-    case "williams_oversold":
-      const wrE = indicators.williamsEntry[i],
-        wrPE = indicators.williamsEntry[i - 1],
-        wrThE = entryParams.threshold || -80;
-      buySignal = check(wrE) && check(wrPE) && wrE > wrThE && wrPE <= wrThE;
-      break;
-    case "turtle_breakout":
-      const tpE = entryParams.breakoutPeriod || 20;
-      if (i >= tpE) {
-        const hsT = highs.slice(i - tpE, i).filter((h) => check(h));
-        if (hsT.length > 0) {
-          const periodHighT = Math.max(...hsT);
-          buySignal = check(curC) && curC > periodHighT;
-        }
-      }
-      break;
-  }
-  if (enableShorting) {
-    switch (shortEntryStrategy) {
-      case "short_ma_cross":
-      case "short_ema_cross":
-        shortSignal =
-          check(indicators.maShortShortEntry[i]) &&
-          check(indicators.maLongShortEntry[i]) &&
-          check(indicators.maShortShortEntry[i - 1]) &&
-          check(indicators.maLongShortEntry[i - 1]) &&
-          indicators.maShortShortEntry[i] < indicators.maLongShortEntry[i] &&
-          indicators.maShortShortEntry[i - 1] >=
-            indicators.maLongShortEntry[i - 1];
-        break;
-      case "short_ma_below":
-        shortSignal =
-          check(indicators.maExit[i]) &&
-          check(prevC) &&
-          check(indicators.maExit[i - 1]) &&
-          curC < indicators.maExit[i] &&
-          prevC >= indicators.maExit[i - 1];
-        break;
-      case "short_rsi_overbought":
-        const rSE = indicators.rsiShortEntry[i],
-          rPSE = indicators.rsiShortEntry[i - 1],
-          rThSE = shortEntryParams.threshold || 70;
-        shortSignal = check(rSE) && check(rPSE) && rSE < rThSE && rPSE >= rThSE;
-        break;
-      case "short_macd_cross":
-        const difSE = indicators.macdShortEntry[i],
-          deaSE = indicators.macdSignalShortEntry[i],
-          difPSE = indicators.macdShortEntry[i - 1],
-          deaPSE = indicators.macdSignalShortEntry[i - 1];
-        shortSignal =
-          check(difSE) &&
-          check(deaSE) &&
-          check(difPSE) &&
-          check(deaPSE) &&
-          difSE < deaSE &&
-          difPSE >= deaSE;
-        break;
-      case "short_bollinger_reversal":
-        const midSE = indicators.bollingerMiddleShortEntry[i];
-        const midPSE = indicators.bollingerMiddleShortEntry[i - 1];
-        shortSignal =
-          check(midSE) &&
-          check(prevC) &&
-          check(midPSE) &&
-          curC < midSE &&
-          prevC >= midPSE;
-        break;
-      case "short_k_d_cross":
-        const kSE = indicators.kShortEntry[i],
-          dSE = indicators.dShortEntry[i],
-          kPSE = indicators.kShortEntry[i - 1],
-          dPSE = indicators.dShortEntry[i - 1],
-          thY = shortEntryParams.thresholdY || 70;
-        shortSignal =
-          check(kSE) &&
-          check(dSE) &&
-          check(kPSE) &&
-          check(dPSE) &&
-          kSE < dSE &&
-          kPSE >= dPSE &&
-          dSE > thY;
-        break;
-      case "short_price_breakdown":
-        const bpSE = shortEntryParams.period || 20;
-        if (i >= bpSE) {
-          const lsSE = lows.slice(i - bpSE, i).filter((l) => check(l));
-          if (lsSE.length > 0) {
-            const periodLowS = Math.min(...lsSE);
-            shortSignal = check(curC) && curC < periodLowS;
-          }
-        }
-        break;
-      case "short_williams_overbought":
-        const wrSE = indicators.williamsShortEntry[i],
-          wrPSE = indicators.williamsShortEntry[i - 1],
-          wrThSE = shortEntryParams.threshold || -20;
-        shortSignal =
-          check(wrSE) && check(wrPSE) && wrSE < wrThSE && wrPSE >= wrThSE;
-        break;
-      case "short_turtle_stop_loss":
-        const slPSE = shortEntryParams.stopLossPeriod || 10;
-        if (i >= slPSE) {
-          const lowsT = lows.slice(i - slPSE, i).filter((l) => check(l));
-          if (lowsT.length > 0) {
-            const periodLowST = Math.min(...lowsT);
-            shortSignal = check(curC) && curC < periodLowST;
-          }
-        }
-        break;
-    }
+  const prefix = displayDate ? `今日（${displayDate}）` : "今日";
+  const priceSentence = closeText ? `收盤價約為 ${closeText}。` : "";
+  let action = "flat";
+  let message = "";
+
+  if (hasSellSignal) {
+    action = "long-exit";
+    message = `${prefix}觸發多單出場訊號，請平倉多單（狀態：${positionLabel}）。${priceSentence}`;
+  } else if (hasCoverSignal) {
+    action = "short-exit";
+    message = `${prefix}觸發空單回補訊號，請回補空單（狀態：${positionLabel}）。${priceSentence}`;
+  } else if (hasBuySignal) {
+    action = "long-entry";
+    message = `${prefix}出現做多進場訊號，建議建立多單（狀態：${positionLabel}）。${priceSentence}`;
+  } else if (hasShortSignal) {
+    action = "short-entry";
+    message = `${prefix}出現做空進場訊號，建議建立空單（狀態：${positionLabel}）。${priceSentence}`;
+  } else if (hasLongState && hasShortState) {
+    action = "hedged-hold";
+    message = `${prefix}同時維持多單與空單部位（狀態：${positionLabel}），請依策略控管風險。${priceSentence}`;
+  } else if (hasLongState) {
+    action = "long-hold";
+    message = `${prefix}建議維持多單部位（狀態：${positionLabel}），尚未觸發出場條件。${priceSentence}`;
+  } else if (hasShortState) {
+    action = "short-hold";
+    message = `${prefix}建議維持空單部位（狀態：${positionLabel}），尚未觸發回補條件。${priceSentence}`;
+  } else {
+    action = "flat";
+    message = `${prefix}策略未建立持倉，請維持空手（狀態：${positionLabel}）。${priceSentence}`;
   }
 
-  switch (exitStrategy) {
-    case "ma_cross":
-    case "ema_cross":
-      sellSignal =
-        check(indicators.maShortExit[i]) &&
-        check(indicators.maLongExit[i]) &&
-        check(indicators.maShortExit[i - 1]) &&
-        check(indicators.maLongExit[i - 1]) &&
-        indicators.maShortExit[i] < indicators.maLongExit[i] &&
-        indicators.maShortExit[i - 1] >= indicators.maLongExit[i - 1];
-      break;
-    case "ma_below":
-      sellSignal =
-        check(indicators.maExit[i]) &&
-        check(prevC) &&
-        check(indicators.maExit[i - 1]) &&
-        curC < indicators.maExit[i] &&
-        prevC >= indicators.maExit[i - 1];
-      break;
-    case "rsi_overbought":
-      const rX = indicators.rsiExit[i],
-        rPX = indicators.rsiExit[i - 1],
-        rThX = exitParams.threshold || 70;
-      sellSignal = check(rX) && check(rPX) && rX < rThX && rPX >= rThX;
-      break;
-    case "macd_cross":
-      const difX = indicators.macdExit[i],
-        deaX = indicators.macdSignalExit[i],
-        difPX = indicators.macdExit[i - 1],
-        deaPX = indicators.macdSignalExit[i - 1];
-      sellSignal =
-        check(difX) &&
-        check(deaX) &&
-        check(difPX) &&
-        check(deaPX) &&
-        difX < deaX &&
-        difPX >= deaPX;
-      break;
-    case "bollinger_reversal":
-      const midX = indicators.bollingerMiddleExit[i];
-      const midPX = indicators.bollingerMiddleExit[i - 1];
-      sellSignal =
-        check(midX) &&
-        check(prevC) &&
-        check(midPX) &&
-        curC < midX &&
-        prevC >= midPX;
-      break;
-    case "k_d_cross":
-      const kX = indicators.kExit[i],
-        dX = indicators.dExit[i],
-        kPX = indicators.kExit[i - 1],
-        dPX = indicators.dExit[i - 1],
-        thY = exitParams.thresholdY || 70;
-      sellSignal =
-        check(kX) &&
-        check(dX) &&
-        check(kPX) &&
-        check(dPX) &&
-        kX < dX &&
-        kPX >= dPX &&
-        dX > thY;
-      break;
-    case "trailing_stop":
-      sellSignal = false;
-      break;
-    case "price_breakdown":
-      const bpX = exitParams.period || 20;
-      if (i >= bpX) {
-        const lsX = lows.slice(i - bpX, i).filter((l) => check(l));
-        if (lsX.length > 0) {
-          const periodLow = Math.min(...lsX);
-          sellSignal = check(curC) && curC < periodLow;
-        }
-      }
-      break;
-    case "williams_overbought":
-      const wrX = indicators.williamsExit[i],
-        wrPX = indicators.williamsExit[i - 1],
-        wrThX = exitParams.threshold || -20;
-      sellSignal = check(wrX) && check(wrPX) && wrX < wrThX && wrPX >= wrThX;
-      break;
-    case "turtle_stop_loss":
-      const slP = exitParams.stopLossPeriod || 10;
-      if (i >= slP) {
-        const lowsT = lows.slice(i - slP, i).filter((l) => check(l));
-        if (lowsT.length > 0) {
-          const periodLowT = Math.min(...lowsT);
-          sellSignal = check(curC) && curC < periodLowT;
-        }
-      }
-      break;
-    case "fixed_stop_loss":
-      sellSignal = false;
-      break;
-  }
-  if (enableShorting) {
-    switch (shortExitStrategy) {
-      case "cover_ma_cross":
-      case "cover_ema_cross":
-        coverSignal =
-          check(indicators.maShortCover[i]) &&
-          check(indicators.maLongCover[i]) &&
-          check(indicators.maShortCover[i - 1]) &&
-          check(indicators.maLongCover[i - 1]) &&
-          indicators.maShortCover[i] > indicators.maLongCover[i] &&
-          indicators.maShortCover[i - 1] <= indicators.maLongCover[i - 1];
-        break;
-      case "cover_ma_above":
-        coverSignal =
-          check(indicators.maExit[i]) &&
-          check(prevC) &&
-          check(indicators.maExit[i - 1]) &&
-          curC > indicators.maExit[i] &&
-          prevC <= indicators.maExit[i - 1];
-        break;
-      case "cover_rsi_oversold":
-        const rC = indicators.rsiCover[i],
-          rPC = indicators.rsiCover[i - 1],
-          rThC = shortExitParams.threshold || 30;
-        coverSignal = check(rC) && check(rPC) && rC > rThC && rPC <= rThC;
-        break;
-      case "cover_macd_cross":
-        const difC = indicators.macdCover[i],
-          deaC = indicators.macdSignalCover[i],
-          difPC = indicators.macdCover[i - 1],
-          deaPC = indicators.macdSignalCover[i - 1];
-        coverSignal =
-          check(difC) &&
-          check(deaC) &&
-          check(difPC) &&
-          check(deaPC) &&
-          difC > deaC &&
-          difPC <= deaPC;
-        break;
-      case "cover_bollinger_breakout":
-        const upperC = indicators.bollingerUpperCover[i];
-        const upperPC = indicators.bollingerUpperCover[i - 1];
-        coverSignal =
-          check(upperC) &&
-          check(prevC) &&
-          check(upperPC) &&
-          curC > upperC &&
-          prevC <= upperPC;
-        break;
-      case "cover_k_d_cross":
-        const kC = indicators.kCover[i],
-          dC = indicators.dCover[i],
-          kPC = indicators.kCover[i - 1],
-          dPC = indicators.dCover[i - 1],
-          thXC = shortExitParams.thresholdX || 30;
-        coverSignal =
-          check(kC) &&
-          check(dC) &&
-          check(kPC) &&
-          check(dPC) &&
-          kC > dC &&
-          kPC <= dPC &&
-          dC < thXC;
-        break;
-      case "cover_price_breakout":
-        const bpC = shortExitParams.period || 20;
-        if (i >= bpC) {
-          const hsC = highs.slice(i - bpC, i).filter((h) => check(h));
-          if (hsC.length > 0) {
-            const periodHighC = Math.max(...hsC);
-            coverSignal = check(curC) && curC > periodHighC;
-          }
-        }
-        break;
-      case "cover_williams_oversold":
-        const wrC = indicators.williamsCover[i],
-          wrPC = indicators.williamsCover[i - 1],
-          wrThC = shortExitParams.threshold || -80;
-        coverSignal = check(wrC) && check(wrPC) && wrC > wrThC && wrPC <= wrThC;
-        break;
-      case "cover_turtle_breakout":
-        const tpC = shortExitParams.breakoutPeriod || 20;
-        if (i >= tpC) {
-          const hsCT = highs.slice(i - tpC, i).filter((h) => check(h));
-          if (hsCT.length > 0) {
-            const periodHighCT = Math.max(...hsCT);
-            coverSignal = check(curC) && curC > periodHighCT;
-          }
-        }
-        break;
-      case "cover_trailing_stop":
-        coverSignal = false;
-        break;
-      case "cover_fixed_stop_loss":
-        coverSignal = false;
-        break;
-    }
-  }
-
-  let suggestion = "等待";
-  if (buySignal) {
-    suggestion = "做多買入";
-  } else if (shortSignal) {
-    suggestion = "做空賣出";
-  } else if (sellSignal) {
-    suggestion = "做多賣出";
-  } else if (coverSignal) {
-    suggestion = "做空回補";
-  }
-
+  const normalizedMessage = message.trim();
   console.log(
-    `[Worker Suggestion] Last Point Analysis: buy=${buySignal}, sell=${sellSignal}, short=${shortSignal}, cover=${coverSignal}. Suggestion: ${suggestion}`,
+    `[Worker Suggestion] Derived action=${action}, position=${positionLabel}, date=${displayDate}`,
   );
-  return suggestion;
+  return {
+    action,
+    message: normalizedMessage,
+    date: displayDate || null,
+    position: positionLabel,
+    price: closeText,
+  };
 }
-
 // --- Worker 消息處理 ---
 self.onmessage = async function (e) {
   const {
@@ -6901,6 +6513,7 @@ self.onmessage = async function (e) {
     e.data?.dataStartDate || params?.dataStartDate || effectiveStartDate || params?.startDate;
   try {
     if (type === "runBacktest") {
+      workerLastBacktestState = null;
       let dataToUse = null;
       let fetched = false;
       let outcome = null;
@@ -7105,6 +6718,40 @@ self.onmessage = async function (e) {
           ? workerLastMeta.debugSteps
           : [];
 
+      workerLastBacktestState = {
+        stockNo: params.stockNo,
+        dates: Array.isArray(backtestResult.dates)
+          ? backtestResult.dates.slice()
+          : [],
+        positionStates: Array.isArray(backtestResult.positionStates)
+          ? backtestResult.positionStates.slice()
+          : [],
+        chartBuySignals: Array.isArray(backtestResult.chartBuySignals)
+          ? backtestResult.chartBuySignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartSellSignals: Array.isArray(backtestResult.chartSellSignals)
+          ? backtestResult.chartSellSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartShortSignals: Array.isArray(backtestResult.chartShortSignals)
+          ? backtestResult.chartShortSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartCoverSignals: Array.isArray(backtestResult.chartCoverSignals)
+          ? backtestResult.chartCoverSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+      };
+
       backtestResult.dataDebug = {
         summary: outcome?.summary || workerLastMeta?.summary || null,
         adjustments: Array.isArray(outcome?.adjustments)
@@ -7225,17 +6872,135 @@ self.onmessage = async function (e) {
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
       console.log("[Worker] Received getSuggestion request.");
-      if (!workerLastDataset) {
-        throw new Error("Worker 中無可用快取數據，請先執行回測。");
+      const suggestionParams = params || {};
+      if (!suggestionParams.stockNo) {
+        throw new Error("缺少股票代號，無法計算今日建議。");
       }
-      if (workerLastDataset.length < lookbackDays) {
+
+      const todayISO = getTodayUTCISODate();
+      const warmupStartISO =
+        (workerLastMeta?.fetchRange && workerLastMeta.fetchRange.start) ||
+        workerLastMeta?.dataStartDate ||
+        dataStartDate ||
+        suggestionParams.dataStartDate ||
+        suggestionParams.startDate ||
+        null;
+
+      if (!warmupStartISO) {
+        throw new Error("無法推導策略暖身起點，請重新執行回測。");
+      }
+
+      if (todayISO < warmupStartISO) {
+        const suggestionPayload = {
+          action: "error",
+          message: `策略起始日（${warmupStartISO}）尚未到達，今日無需執行。`,
+          date: todayISO,
+          position: "空手",
+          price: null,
+        };
+        self.postMessage({
+          type: "suggestionResult",
+          data: { suggestion: suggestionPayload },
+        });
+        return;
+      }
+
+      const effectiveStartISO =
+        workerLastMeta?.effectiveStartDate ||
+        suggestionParams.effectiveStartDate ||
+        suggestionParams.startDate ||
+        warmupStartISO;
+
+      const marketForSuggestion =
+        suggestionParams.marketType ||
+        suggestionParams.market ||
+        workerLastMeta?.marketKey ||
+        "TWSE";
+
+      const suggestionFetch = await fetchStockData(
+        suggestionParams.stockNo,
+        warmupStartISO,
+        todayISO,
+        marketForSuggestion,
+        {
+          adjustedPrice: suggestionParams.adjustedPrice,
+          splitAdjustment: suggestionParams.splitAdjustment,
+          effectiveStartDate: effectiveStartISO,
+          lookbackDays,
+        },
+      );
+
+      const suggestionDataset = Array.isArray(suggestionFetch?.data)
+        ? suggestionFetch.data
+        : [];
+
+      if (suggestionDataset.length === 0) {
         throw new Error(
-          `Worker 快取數據不足 (${workerLastDataset.length})，無法回看 ${lookbackDays} 天。`,
+          `指定策略於 ${warmupStartISO} 至 ${todayISO} 無可用交易資料。`,
         );
       }
 
-      const recentData = workerLastDataset.slice(-lookbackDays);
-      const suggestionTextResult = runSuggestionSimulation(params, recentData);
+      const suggestionStrategyParams = {
+        ...suggestionParams,
+        originalStartDate: suggestionParams.startDate,
+        startDate: effectiveStartISO,
+        effectiveStartDate: effectiveStartISO,
+        dataStartDate: warmupStartISO,
+        endDate: todayISO,
+        lookbackDays,
+        forceFinalLiquidation: false,
+      };
+
+      const extendedBacktest = runStrategy(
+        suggestionDataset,
+        suggestionStrategyParams,
+      );
+
+      const extendedState = {
+        stockNo: suggestionParams.stockNo,
+        dates: Array.isArray(extendedBacktest.dates)
+          ? extendedBacktest.dates.slice()
+          : [],
+        positionStates: Array.isArray(extendedBacktest.positionStates)
+          ? extendedBacktest.positionStates.slice()
+          : [],
+        chartBuySignals: Array.isArray(extendedBacktest.chartBuySignals)
+          ? extendedBacktest.chartBuySignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartSellSignals: Array.isArray(extendedBacktest.chartSellSignals)
+          ? extendedBacktest.chartSellSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartShortSignals: Array.isArray(extendedBacktest.chartShortSignals)
+          ? extendedBacktest.chartShortSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+        chartCoverSignals: Array.isArray(extendedBacktest.chartCoverSignals)
+          ? extendedBacktest.chartCoverSignals.map((sig) => ({
+              index: sig.index,
+              date: sig.date,
+            }))
+          : [],
+      };
+
+      const recentWindowSize = Math.max(1, lookbackDays);
+      const recentData =
+        suggestionDataset.length > recentWindowSize
+          ? suggestionDataset.slice(-recentWindowSize)
+          : suggestionDataset.slice();
+
+      const suggestionTextResult = runSuggestionSimulation(
+        suggestionStrategyParams,
+        recentData,
+        extendedState,
+      );
       self.postMessage({
         type: "suggestionResult",
         data: { suggestion: suggestionTextResult },
