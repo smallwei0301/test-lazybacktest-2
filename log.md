@@ -59,7 +59,6 @@
 - **Diagnostics**: Tooltip 列出 QuantConnect／Portfolio123 等平臺建議的分數區間，表格亦顯示每個參數在 +10%／-10% 調整時的報酬差異與漂移幅度，可快速截圖協助用戶與營運端討論參數穩健性。
 - **Testing**: 受限於環境無法啟動前端與實際回測，已透過程式靜態檢閱與重跑 Worker 函式確保敏感度計算不影響原有流程；後續需在具資料來源的環境實際回測驗證 console 無錯誤。
 
-
 # 2025-07-01 — Patch LB-STAGING-TOGGLE-20250701A
 - **Issue recap**: 多次進出場設定以卡片樣式呈現，標題字級與旁邊欄位不一致且需整塊點擊，導致視覺重量過高、用戶難以辨識點擊焦點。
 - **Fix**: 讓「多次進出場」標籤沿用風險管理卡片的小標樣式，並改用圓框加號按鈕控制面板開闔，維持原有自動展開邏輯同時提升易讀性與可用性。
@@ -151,6 +150,7 @@
 - **Fix**: Worker 將 dataStartDate~effectiveStartDate 切成暖身佇列，逐段排程補抓並僅在成功填補缺口後更新 `lastForcedReloadAt`；主流程與優化流程導入記憶體＋`localStorage` 市場 TTL（台股 7 天、美股 3 天），逾期會同步清除兩層快取並更新索引。
 - **Diagnostics**: `fetchDiagnostics.queuePlan` 揭露暖身與正式區間的排程，月度診斷新增 `queuePhase`；快取索引記錄市場、資料起點與抓取時間，重設設定時一併清除。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅進行程式邏輯檢視；後續需在本機瀏覽器實機跑回測確認 console 無錯誤。
+
 
 # 2025-06-22 — Patch LB-US-NAMECACHE-20250622A
 - **Issue recap**: 美股名稱雖已修正為正確來源，但僅存於記憶體快取；重新整理頁面或再次輸入 AAPL 仍需重新呼叫 proxy，導致名稱顯示延遲且增加 FinMind/Yahoo 請求量。
