@@ -16,6 +16,7 @@ importScripts('config.js');
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -28,6 +29,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -7507,6 +7509,30 @@ function runStrategy(data, params, options = {}) {
   }
 }
 
+function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
+  if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
+    return {
+      score: null,
+      driftPenalty: null,
+      sharpePenalty: null,
+    };
+  }
+  const driftPenalty = Number.isFinite(averageDrift)
+    ? Math.max(0, averageDrift)
+    : 0;
+  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
+    ? Math.max(0, averageSharpeDrop) * 100
+    : 0;
+  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
+  const baseScore = 100 - driftPenalty - sharpePenalty;
+  const score = Math.max(0, Math.min(100, baseScore));
+  return {
+    score,
+    driftPenalty,
+    sharpePenalty,
+  };
+}
+
 function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   if (!Array.isArray(data) || data.length === 0 || !baseParams) {
     return null;
@@ -7527,6 +7553,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     driftValues: [],
     positive: [],
     negative: [],
+    sharpeDrops: [],
+    sharpeGains: [],
     scenarioCount: 0,
   };
 
@@ -7566,10 +7594,22 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       ? summaryAccumulator.negative.reduce((sum, val) => sum + val, 0) /
         summaryAccumulator.negative.length
       : null;
+  const summarySharpeDrop =
+    summaryAccumulator.sharpeDrops.length > 0
+      ? summaryAccumulator.sharpeDrops.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.sharpeDrops.length
+      : null;
+  const summarySharpeGain =
+    summaryAccumulator.sharpeGains.length > 0
+      ? summaryAccumulator.sharpeGains.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.sharpeGains.length
+      : null;
 
-  const stabilityScore = Number.isFinite(summaryAverage)
-    ? Math.max(0, Math.min(100, 100 - summaryAverage))
-    : null;
+  const stabilityComponents = evaluateSensitivityStability(
+    summaryAverage,
+    summarySharpeDrop,
+  );
+  const stabilityScore = stabilityComponents.score;
 
   return {
     version: SENSITIVITY_GRID_VERSION,
@@ -7583,8 +7623,15 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       averageDriftPercent: summaryAverage,
       maxDriftPercent: summaryMax,
       stabilityScore,
+      stabilityComponents: {
+        version: SENSITIVITY_SCORE_VERSION,
+        driftPenalty: stabilityComponents.driftPenalty,
+        sharpePenalty: stabilityComponents.sharpePenalty,
+      },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
+      averageSharpeDrop: summarySharpeDrop,
+      averageSharpeGain: summarySharpeGain,
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
@@ -7639,13 +7686,6 @@ function buildSensitivityGroup({
     validAvg.length > 0
       ? validAvg.reduce((sum, val) => sum + val, 0) / validAvg.length
       : null;
-  const validScores = parameters
-    .map((p) => (Number.isFinite(p.stabilityScore) ? p.stabilityScore : null))
-    .filter((value) => value !== null);
-  const groupScore =
-    validScores.length > 0
-      ? validScores.reduce((sum, val) => sum + val, 0) / validScores.length
-      : null;
   const validMax = parameters
     .map((p) => (Number.isFinite(p.maxDriftPercent) ? p.maxDriftPercent : null))
     .filter((value) => value !== null);
@@ -7669,6 +7709,30 @@ function buildSensitivityGroup({
     validNegative.length > 0
       ? validNegative.reduce((sum, val) => sum + val, 0) / validNegative.length
       : null;
+  const validSharpeDrop = parameters
+    .map((p) =>
+      Number.isFinite(p.averageSharpeDrop) ? p.averageSharpeDrop : null,
+    )
+    .filter((value) => value !== null);
+  const groupSharpeDrop =
+    validSharpeDrop.length > 0
+      ? validSharpeDrop.reduce((sum, val) => sum + val, 0) / validSharpeDrop.length
+      : null;
+  const validSharpeGain = parameters
+    .map((p) =>
+      Number.isFinite(p.averageSharpeGain) ? p.averageSharpeGain : null,
+    )
+    .filter((value) => value !== null);
+  const groupSharpeGain =
+    validSharpeGain.length > 0
+      ? validSharpeGain.reduce((sum, val) => sum + val, 0) /
+        validSharpeGain.length
+      : null;
+  const groupStabilityComponents = evaluateSensitivityStability(
+    groupAverage,
+    groupSharpeDrop,
+  );
+  const groupScore = groupStabilityComponents.score;
 
   return {
     key: context.key,
@@ -7683,6 +7747,13 @@ function buildSensitivityGroup({
     maxDriftPercent: groupMax,
     positiveDriftPercent: groupPositive,
     negativeDriftPercent: groupNegative,
+    averageSharpeDrop: groupSharpeDrop,
+    averageSharpeGain: groupSharpeGain,
+    stabilityComponents: {
+      version: SENSITIVITY_SCORE_VERSION,
+      driftPenalty: groupStabilityComponents.driftPenalty,
+      sharpePenalty: groupStabilityComponents.sharpePenalty,
+    },
     parameters,
   };
 }
@@ -7709,6 +7780,8 @@ function evaluateSensitivityParameter({
   const absoluteDrifts = [];
   const positiveDeltas = [];
   const negativeDeltas = [];
+  const sharpeDrops = [];
+  const sharpeGains = [];
   const scenarios = [];
 
   adjustments.forEach((adjustment) => {
@@ -7766,6 +7839,16 @@ function evaluateSensitivityParameter({
           summaryAccumulator.negative.push(deltaReturn);
         }
       }
+      if (Number.isFinite(deltaSharpe)) {
+        if (deltaSharpe >= 0) {
+          sharpeGains.push(deltaSharpe);
+          summaryAccumulator.sharpeGains.push(deltaSharpe);
+        } else {
+          const sharpeDrop = Math.abs(deltaSharpe);
+          sharpeDrops.push(sharpeDrop);
+          summaryAccumulator.sharpeDrops.push(sharpeDrop);
+        }
+      }
 
       scenarios.push({
         label: adjustment.label,
@@ -7821,9 +7904,19 @@ function evaluateSensitivityParameter({
       ? negativeDeltas.reduce((sum, val) => sum + val, 0) /
         negativeDeltas.length
       : null;
-  const stabilityScore = Number.isFinite(avgDrift)
-    ? Math.max(0, Math.min(100, 100 - avgDrift))
-    : null;
+  const avgSharpeDrop =
+    sharpeDrops.length > 0
+      ? sharpeDrops.reduce((sum, val) => sum + val, 0) / sharpeDrops.length
+      : null;
+  const avgSharpeGain =
+    sharpeGains.length > 0
+      ? sharpeGains.reduce((sum, val) => sum + val, 0) / sharpeGains.length
+      : null;
+  const stabilityComponents = evaluateSensitivityStability(
+    avgDrift,
+    avgSharpeDrop,
+  );
+  const stabilityScore = stabilityComponents.score;
 
   return {
     key: paramName,
@@ -7835,7 +7928,14 @@ function evaluateSensitivityParameter({
     maxDriftPercent: maxDrift,
     positiveDriftPercent: positiveBias,
     negativeDriftPercent: negativeBias,
+    averageSharpeDrop: avgSharpeDrop,
+    averageSharpeGain: avgSharpeGain,
     stabilityScore,
+    stabilityComponents: {
+      version: SENSITIVITY_SCORE_VERSION,
+      driftPenalty: stabilityComponents.driftPenalty,
+      sharpePenalty: stabilityComponents.sharpePenalty,
+    },
   };
 }
 

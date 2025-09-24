@@ -3064,31 +3064,46 @@ function displayBacktestResult(result) {
             const groupAvgDriftValues = params
                 .map((item) => (Number.isFinite(item.averageDriftPercent) ? item.averageDriftPercent : null))
                 .filter((value) => value !== null);
-            const groupAvgDrift = groupAvgDriftValues.length > 0
+            const computedGroupAvgDrift = groupAvgDriftValues.length > 0
                 ? groupAvgDriftValues.reduce((sum, cur) => sum + cur, 0) / groupAvgDriftValues.length
                 : null;
             const groupScoreValues = params
                 .map((item) => (Number.isFinite(item.stabilityScore) ? item.stabilityScore : null))
                 .filter((value) => value !== null);
-            const groupScore = groupScoreValues.length > 0
+            const computedGroupScore = groupScoreValues.length > 0
                 ? groupScoreValues.reduce((sum, cur) => sum + cur, 0) / groupScoreValues.length
                 : null;
             const groupMaxValues = params
                 .map((item) => (Number.isFinite(item.maxDriftPercent) ? item.maxDriftPercent : null))
                 .filter((value) => value !== null);
-            const groupMaxDrift = groupMaxValues.length > 0 ? Math.max(...groupMaxValues) : null;
+            const computedGroupMaxDrift = groupMaxValues.length > 0 ? Math.max(...groupMaxValues) : null;
             const groupPositiveValues = params
                 .map((item) => (Number.isFinite(item.positiveDriftPercent) ? item.positiveDriftPercent : null))
                 .filter((value) => value !== null);
-            const groupPositive = groupPositiveValues.length > 0
+            const computedGroupPositive = groupPositiveValues.length > 0
                 ? groupPositiveValues.reduce((sum, cur) => sum + cur, 0) / groupPositiveValues.length
                 : null;
             const groupNegativeValues = params
                 .map((item) => (Number.isFinite(item.negativeDriftPercent) ? item.negativeDriftPercent : null))
                 .filter((value) => value !== null);
-            const groupNegative = groupNegativeValues.length > 0
+            const computedGroupNegative = groupNegativeValues.length > 0
                 ? groupNegativeValues.reduce((sum, cur) => sum + cur, 0) / groupNegativeValues.length
                 : null;
+            const groupAvgDrift = Number.isFinite(group.averageDriftPercent)
+                ? group.averageDriftPercent
+                : computedGroupAvgDrift;
+            const groupScore = Number.isFinite(group.stabilityScore)
+                ? group.stabilityScore
+                : computedGroupScore;
+            const groupMaxDrift = Number.isFinite(group.maxDriftPercent)
+                ? group.maxDriftPercent
+                : computedGroupMaxDrift;
+            const groupPositive = Number.isFinite(group.positiveDriftPercent)
+                ? group.positiveDriftPercent
+                : computedGroupPositive;
+            const groupNegative = Number.isFinite(group.negativeDriftPercent)
+                ? group.negativeDriftPercent
+                : computedGroupNegative;
             const scenarioSamples = params.reduce((sum, param) => sum + (param.scenarioCount || 0), 0);
             const strategyKey = group.strategy || '';
             const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
@@ -3227,15 +3242,105 @@ function displayBacktestResult(result) {
         const overallPositive = data?.summary?.positiveDriftPercent ?? null;
         const overallNegative = data?.summary?.negativeDriftPercent ?? null;
         const overallSamples = data?.summary?.scenarioCount ?? null;
-        const baselineReturn = data?.baseline?.returnRate ?? null;
-        const baselineAnnual = data?.baseline?.annualizedReturn ?? null;
-        const baselineSharpe = data?.baseline?.sharpeRatio ?? null;
+        const summarySharpeDrop = Number.isFinite(data?.summary?.averageSharpeDrop)
+            ? data.summary.averageSharpeDrop
+            : null;
+        const summarySharpeGain = Number.isFinite(data?.summary?.averageSharpeGain)
+            ? data.summary.averageSharpeGain
+            : null;
+        const stabilityComponents = data?.summary?.stabilityComponents || null;
+        const stabilityDriftPenalty = Number.isFinite(stabilityComponents?.driftPenalty)
+            ? stabilityComponents.driftPenalty
+            : null;
+        const stabilitySharpePenalty = Number.isFinite(stabilityComponents?.sharpePenalty)
+            ? stabilityComponents.sharpePenalty
+            : null;
+        const stabilityTooltipLines = [
+            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            Number.isFinite(stabilityDriftPenalty)
+                ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
+                : null,
+            Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
+                ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
+                : Number.isFinite(summarySharpeDrop)
+                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
+                    : null,
+            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
+        ].filter(Boolean);
+        const stabilityTooltip = stabilityTooltipLines.join('<br>');
+        const directionAdvice = (() => {
+            const safeThreshold = 10;
+            const warnThreshold = 15;
+            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
+            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
+            if (positiveAbs === null && negativeAbs === null) {
+                return '需更多樣本才能評估調高／調低方向的敏感度。';
+            }
+            const dominantDirection = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs)
+                ? '調高'
+                : '調低';
+            const dominantAbs = dominantDirection === '調高' ? positiveAbs : negativeAbs;
+            if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
+                ? (negativeAbs === null || negativeAbs <= safeThreshold)
+                : (positiveAbs === null || positiveAbs <= safeThreshold))) {
+                return '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+            }
+            if (dominantAbs !== null && dominantAbs > warnThreshold) {
+                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
+            }
+            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
+        })();
+        const summarySentence = (() => {
+            const parts = [];
+            if (Number.isFinite(overallDrift)) {
+                parts.push(`平均漂移 ${formatPercentMagnitude(overallDrift, 1)}`);
+            }
+            if (Number.isFinite(overallMaxDrift)) {
+                parts.push(`最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}`);
+            }
+            if (Number.isFinite(summarySharpeDrop) && Number.isFinite(summarySharpeGain)) {
+                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}／下調 -${summarySharpeDrop.toFixed(2)}`);
+            } else if (Number.isFinite(summarySharpeDrop)) {
+                parts.push(`Sharpe Δ 下調 -${summarySharpeDrop.toFixed(2)}`);
+            } else if (Number.isFinite(summarySharpeGain)) {
+                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}`);
+            }
+            const safeThreshold = 10;
+            const warnThreshold = 15;
+            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
+            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
+            if (positiveAbs !== null || negativeAbs !== null) {
+                const usePositive = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs);
+                const focusLabel = usePositive
+                    ? `調高方向 ${formatDelta(overallPositive)}`
+                    : `調低方向 ${formatDelta(overallNegative)}`;
+                const focusAbs = usePositive ? positiveAbs : negativeAbs;
+                if (Number.isFinite(focusAbs)) {
+                    if (focusAbs > warnThreshold) {
+                        parts.push(`${focusLabel}，超過 15pp 建議優先檢視`);
+                    } else if (focusAbs > safeThreshold) {
+                        parts.push(`${focusLabel}，落在 10～15pp 建議再驗證`);
+                    } else {
+                        parts.push(`${focusLabel}，雙側仍在 ±10pp 內`);
+                    }
+                } else {
+                    parts.push(focusLabel);
+                }
+            }
+            return parts.join('，') || '敏感度樣本不足，建議重新執行擾動測試。';
+        })();
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                    <div class="flex items-start justify-between gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                        <span class="tooltip">
+                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                            <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
+                        </span>
+                    </div>
                     <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健；Sharpe 下滑會同步扣分</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
                     <div class="flex items-center gap-2">
@@ -3257,12 +3362,12 @@ function displayBacktestResult(result) {
                         <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
                         <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
                     </div>
-                    <p class="text-xs" style="color: var(--muted-foreground);">正值代表擾動後績效優於原設定，負值代表績效下滑。</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">指標 = 多點擾動後的報酬差異平均值；絕對值 ≤ 10pp 為常見穩健區間。</p>
+                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">${directionAdvice}</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">基準績效 (±10% 視窗)</p>
-                    <p class="text-base font-semibold" style="color: var(--foreground);">報酬 ${formatPercentSigned(baselineReturn, 2)}</p>
-                    <p class="text-xs" style="color: var(--muted-foreground);">年化 ${formatPercentSigned(baselineAnnual, 2)} ・ Sharpe ${Number.isFinite(baselineSharpe) ? baselineSharpe.toFixed(2) : '—'}</p>
+                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
+                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
                 </div>
             </div>`;
         const interpretationHint = `
@@ -3276,8 +3381,9 @@ function displayBacktestResult(result) {
                             <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
                             <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
                             <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，約等於 100 − 平均漂移，≥ 70 為穩健；40 ~ 69 需再驗證；< 40 需謹慎。</li>
-                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值，可觀察風險調整後報酬的改變。</li>
+                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
+                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
                         </ul>
                     </div>
                 </div>
