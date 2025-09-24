@@ -361,3 +361,9 @@
 - **Testing**: `node tests/dividend-normalisation.test.mjs`（新增調整係數驗證）。
 
 > 後續若再出現無法調整的案例，先在前台檢視「還原套用」步驟的略過原因與備援標記，再對照 `log.md` 上次修復時的調整內容。
+# 2025-07-24 — Patch LB-SENSITIVITY-RENDER-20250724A
+- **Issue recap**: 導入多點敏感度後僅在 Worker 與資料層回傳資訊，但回測摘要最終排版仍未插入敏感度卡片，造成使用者無法在結果頁看到新的穩定度與漂移指標。
+- **Fix**: 於 `displayBacktestResult` 的摘要版面中加入敏感度卡片段落，無論資料完整或缺漏都會顯示對應卡片，確保穩定度分數、平均漂移與各參數網格能與績效、風險指標並列呈現。
+- **Diagnostics**: 靜態檢視渲染函式確認敏感度段落掛載在績效、風險指標之後，回傳空集合時仍會顯示「暫無結果」卡片，避免再度被版面忽略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+

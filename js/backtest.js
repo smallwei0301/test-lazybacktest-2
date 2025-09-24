@@ -2927,6 +2927,7 @@ function displayBacktestResult(result) {
             </div>
         </div>`;
 
+    // Patch Tag: LB-SENSITIVITY-RENDER-20250724A
     const sensitivityHtml = (() => {
         const data =
             sensitivityData && Array.isArray(sensitivityData.groups) && sensitivityData.groups.length > 0
@@ -3438,6 +3439,7 @@ function displayBacktestResult(result) {
             <div class="space-y-8">
                 ${performanceHtml}
                 ${riskHtml}
+                ${sensitivityHtml}
                 ${tradeStatsHtml}
                 ${strategySettingsHtml}
             </div>
