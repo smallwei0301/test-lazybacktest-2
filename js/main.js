@@ -1709,103 +1709,17 @@ function getSuggestion() {
             : Math.max(90, maxPeriod * 2);
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
-        const normalizedMarket = normalizeMarketValue(params.market || params.marketType || getCurrentMarketFromUI() || 'TWSE');
-        const suggestionMessage = {
-            type: 'getSuggestion',
-            params: params,
-            lookbackDays: lookbackDays
-        };
-
-        if (Array.isArray(cachedStockData) && cachedStockData.length < lookbackDays) {
+        if (cachedStockData.length < lookbackDays) {
             console.warn(`[Suggestion] 快取僅有 ${cachedStockData.length} 筆 (< ${lookbackDays})，將由 worker 補抓至最新交易日。`);
-        }
-
-        const cacheKey = buildCacheKey({
-            stockNo: params.stockNo,
-            market: normalizedMarket,
-            adjustedPrice: params.adjustedPrice,
-            splitAdjustment: params.splitAdjustment,
-        });
-        const directCacheEntry = cachedDataStore.get(cacheKey);
-        let cachedPayload = null;
-
-        if (directCacheEntry && Array.isArray(directCacheEntry.data) && directCacheEntry.data.length > 0) {
-            cachedPayload = {
-                data: directCacheEntry.data,
-                meta: directCacheEntry,
-            };
-        } else if (
-            Array.isArray(cachedStockData) && cachedStockData.length > 0 &&
-            lastFetchSettings &&
-            lastFetchSettings.stockNo === params.stockNo &&
-            normalizeMarketValue(lastFetchSettings.market || lastFetchSettings.marketType || normalizedMarket) === normalizedMarket &&
-            Boolean(lastFetchSettings.adjustedPrice) === Boolean(params.adjustedPrice) &&
-            Boolean(lastFetchSettings.splitAdjustment) === Boolean(params.splitAdjustment)
-        ) {
-            cachedPayload = {
-                data: cachedStockData,
-                meta: {
-                    stockName: directCacheEntry?.stockName || params.stockNo,
-                    dataSource: '主執行緒快取',
-                    fetchRange: {
-                        start: lastFetchSettings.startDate,
-                        end: lastFetchSettings.endDate,
-                    },
-                    effectiveStartDate: lastFetchSettings.effectiveStartDate || params.startDate,
-                    lookbackDays,
-                    priceMode: params.adjustedPrice ? 'adjusted' : 'raw',
-                    adjustedPrice: params.adjustedPrice,
-                    splitAdjustment: params.splitAdjustment,
-                    coverage: directCacheEntry?.coverage || null,
-                    summary: directCacheEntry?.summary || null,
-                    adjustments: Array.isArray(directCacheEntry?.adjustments) ? directCacheEntry.adjustments : [],
-                    debugSteps: Array.isArray(directCacheEntry?.debugSteps) ? directCacheEntry.debugSteps : [],
-                    finmindStatus: directCacheEntry?.finmindStatus || null,
-                    adjustmentFallbackApplied: Boolean(directCacheEntry?.adjustmentFallbackApplied),
-                    adjustmentFallbackInfo: directCacheEntry?.adjustmentFallbackInfo || null,
-                    adjustmentDebugLog: Array.isArray(directCacheEntry?.adjustmentDebugLog) ? directCacheEntry.adjustmentDebugLog : [],
-                    adjustmentChecks: Array.isArray(directCacheEntry?.adjustmentChecks) ? directCacheEntry.adjustmentChecks : [],
-                    priceSource: directCacheEntry?.priceSource || null,
-                    dividendDiagnostics: directCacheEntry?.dividendDiagnostics || null,
-                    dividendEvents: Array.isArray(directCacheEntry?.dividendEvents) ? directCacheEntry.dividendEvents : [],
-                    splitDiagnostics: directCacheEntry?.splitDiagnostics || null,
-                },
-            };
-        }
-
-        if (cachedPayload) {
-            suggestionMessage.cachedData = cachedPayload.data;
-            const meta = cachedPayload.meta || {};
-            suggestionMessage.cachedMeta = {
-                stockName: meta.stockName || null,
-                dataSource: meta.dataSource || null,
-                fetchedAt: meta.fetchedAt || null,
-                fetchRange: meta.fetchRange || null,
-                effectiveStartDate: meta.effectiveStartDate || params.startDate,
-                lookbackDays: Number.isFinite(meta.lookbackDays) ? meta.lookbackDays : lookbackDays,
-                priceMode: meta.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw'),
-                adjustedPrice: typeof meta.adjustedPrice === 'boolean' ? meta.adjustedPrice : Boolean(params.adjustedPrice),
-                splitAdjustment: typeof meta.splitAdjustment === 'boolean' ? meta.splitAdjustment : Boolean(params.splitAdjustment),
-                coverage: Array.isArray(meta.coverage) ? meta.coverage : null,
-                summary: meta.summary || null,
-                adjustments: Array.isArray(meta.adjustments) ? meta.adjustments : [],
-                debugSteps: Array.isArray(meta.debugSteps) ? meta.debugSteps : [],
-                finmindStatus: meta.finmindStatus || null,
-                adjustmentFallbackApplied: Boolean(meta.adjustmentFallbackApplied),
-                adjustmentFallbackInfo: meta.adjustmentFallbackInfo || null,
-                adjustmentDebugLog: Array.isArray(meta.adjustmentDebugLog) ? meta.adjustmentDebugLog : [],
-                adjustmentChecks: Array.isArray(meta.adjustmentChecks) ? meta.adjustmentChecks : [],
-                priceSource: meta.priceSource || null,
-                dividendDiagnostics: meta.dividendDiagnostics || null,
-                dividendEvents: Array.isArray(meta.dividendEvents) ? meta.dividendEvents : [],
-                splitDiagnostics: meta.splitDiagnostics || null,
-            };
-            suggestionMessage.useCachedData = true;
         }
 
         // 檢查 worker 是否可用
         if (backtestWorker && workerUrl) {
-            backtestWorker.postMessage(suggestionMessage);
+            backtestWorker.postMessage({
+                type: 'getSuggestion',
+                params: params,
+                lookbackDays: lookbackDays
+            });
         } else {
             suggestionText.textContent = "回測引擎未就緒";
             suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center bg-red-100 border-red-500 text-red-700';

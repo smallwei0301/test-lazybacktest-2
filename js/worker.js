@@ -14,7 +14,6 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TODAY-SUGGEST-20250623A
 // Patch Tag: LB-TODAY-SUGGEST-20250625A
-// Patch Tag: LB-TODAY-SUGGEST-20250627A
 const WORKER_DATA_VERSION = "v11.6";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -154,189 +153,6 @@ function setMonthlyCacheEntry(marketKey, stockNo, monthKey, entry, adjusted = fa
     entry.data = [];
   }
   stockCache.set(monthKey, entry);
-}
-
-function summariseDatasetRange(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return { start: null, end: null };
-  }
-  let minDate = null;
-  let maxDate = null;
-  rows.forEach((row) => {
-    if (!row || typeof row.date !== "string") return;
-    if (!minDate || row.date < minDate) minDate = row.date;
-    if (!maxDate || row.date > maxDate) maxDate = row.date;
-  });
-  return { start: minDate, end: maxDate };
-}
-
-function seedMonthlyCacheFromRows(
-  marketKey,
-  stockNo,
-  rows,
-  options = {},
-) {
-  if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) return;
-  const grouped = new Map();
-  rows.forEach((row) => {
-    if (!row || typeof row.date !== "string") return;
-    const [y, m] = row.date.split("-");
-    if (!y || !m) return;
-    const monthKey = `${y}${m}`;
-    if (!grouped.has(monthKey)) {
-      grouped.set(monthKey, []);
-    }
-    grouped.get(monthKey).push(row);
-  });
-  const adjusted = Boolean(options.adjusted);
-  const split = Boolean(options.split);
-  grouped.forEach((monthRows, monthKey) => {
-    if (!Array.isArray(monthRows) || monthRows.length === 0) return;
-    const existingEntry =
-      getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted, split) ||
-      {
-        data: [],
-        coverage: [],
-        sources: new Set(),
-        stockName: options.stockName || stockNo,
-        lastUpdated: 0,
-      };
-    const mergedData = dedupeAndSortData([
-      ...(Array.isArray(existingEntry.data) ? existingEntry.data : []),
-      ...monthRows,
-    ]);
-    const newCoverageSegments = mergedData
-      .map((row) => {
-        const utc = isoToUTC(row?.date);
-        return Number.isFinite(utc)
-          ? { start: utc, end: utc + DAY_MS }
-          : null;
-      })
-      .filter(Boolean);
-    existingEntry.data = mergedData;
-    existingEntry.coverage = mergeRangeBounds([
-      ...(Array.isArray(existingEntry.coverage)
-        ? existingEntry.coverage
-        : []),
-      ...newCoverageSegments,
-    ]);
-    existingEntry.lastUpdated = Date.now();
-    if (!(existingEntry.sources instanceof Set)) {
-      existingEntry.sources = new Set(existingEntry.sources || []);
-    }
-    existingEntry.sources.add(options.sourceLabel || "主執行緒快取");
-    if (!existingEntry.stockName) {
-      existingEntry.stockName = options.stockName || stockNo;
-    }
-    setMonthlyCacheEntry(
-      marketKey,
-      stockNo,
-      monthKey,
-      existingEntry,
-      adjusted,
-      split,
-    );
-  });
-}
-
-function seedWorkerCachesForSuggestion(
-  stockNo,
-  marketKey,
-  rows,
-  options = {},
-) {
-  if (!stockNo || !marketKey || !Array.isArray(rows) || rows.length === 0)
-    return;
-  const normalizedRows = dedupeAndSortData(rows);
-  if (normalizedRows.length === 0) return;
-  const meta = options.meta || {};
-  const adjustedFlag =
-    typeof options.adjusted === "boolean"
-      ? options.adjusted
-      : typeof meta.adjustedPrice === "boolean"
-        ? meta.adjustedPrice
-        : typeof meta.priceMode === "string"
-          ? meta.priceMode.toLowerCase() === "adjusted" ||
-            meta.priceMode.toUpperCase() === "ADJ"
-          : false;
-  const splitFlag =
-    typeof options.split === "boolean"
-      ? options.split
-      : typeof meta.splitAdjustment === "boolean"
-        ? meta.splitAdjustment
-        : false;
-  const derivedRange = summariseDatasetRange(normalizedRows);
-  const rangeStart =
-    options.startDate ||
-    meta?.fetchRange?.start ||
-    meta?.startDate ||
-    derivedRange.start;
-  const rangeEnd =
-    options.endDate ||
-    meta?.fetchRange?.end ||
-    meta?.endDate ||
-    derivedRange.end;
-  if (!rangeStart || !rangeEnd) return;
-  const effectiveStart =
-    options.effectiveStartDate ||
-    meta.effectiveStartDate ||
-    rangeStart;
-  const lookbackDays = Number.isFinite(options.lookbackDays)
-    ? options.lookbackDays
-    : Number.isFinite(meta.lookbackDays)
-      ? meta.lookbackDays
-      : null;
-
-  const cacheKey = buildCacheKey(
-    stockNo,
-    rangeStart,
-    rangeEnd,
-    adjustedFlag,
-    splitFlag,
-  );
-  const entry = {
-    data: normalizedRows,
-    stockName: meta.stockName || options.stockName || stockNo,
-    dataSource: meta.dataSource || options.sourceLabel || "主執行緒快取",
-    timestamp: Date.now(),
-    meta: {
-      stockNo,
-      startDate: rangeStart,
-      effectiveStartDate: effectiveStart,
-      endDate: rangeEnd,
-      priceMode: getPriceModeKey(adjustedFlag),
-      splitAdjustment: splitFlag,
-      lookbackDays,
-      fetchRange: { start: rangeStart, end: rangeEnd },
-      diagnostics: meta.diagnostics || null,
-      summary: meta.summary || null,
-      adjustments: Array.isArray(meta.adjustments) ? meta.adjustments : [],
-      priceSource: meta.priceSource || null,
-      debugSteps: Array.isArray(meta.debugSteps) ? meta.debugSteps : [],
-      finmindStatus: meta.finmindStatus || null,
-      adjustmentFallbackApplied: Boolean(meta.adjustmentFallbackApplied),
-      adjustmentFallbackInfo: meta.adjustmentFallbackInfo || null,
-      dividendDiagnostics: meta.dividendDiagnostics || null,
-      dividendEvents: Array.isArray(meta.dividendEvents)
-        ? meta.dividendEvents
-        : [],
-      splitDiagnostics: meta.splitDiagnostics || null,
-      adjustmentDebugLog: Array.isArray(meta.adjustmentDebugLog)
-        ? meta.adjustmentDebugLog
-        : [],
-      adjustmentChecks: Array.isArray(meta.adjustmentChecks)
-        ? meta.adjustmentChecks
-        : [],
-    },
-    priceMode: getPriceModeKey(adjustedFlag),
-  };
-  setWorkerCacheEntry(marketKey, cacheKey, entry);
-  seedMonthlyCacheFromRows(marketKey, stockNo, normalizedRows, {
-    adjusted: adjustedFlag,
-    split: splitFlag,
-    stockName: entry.stockName,
-    sourceLabel: entry.dataSource,
-  });
 }
 
 function isoToUTC(iso) {
@@ -6852,152 +6668,26 @@ self.onmessage = async function (e) {
         workerLastMeta?.marketKey ||
         "TWSE";
 
-      const baseMeta =
-        cachedMeta && typeof cachedMeta === "object" ? cachedMeta : null;
-      const providedCacheRows = Array.isArray(cachedData)
-        ? dedupeAndSortData(cachedData)
-        : [];
-      const memoryRows = Array.isArray(workerLastDataset)
-        ? dedupeAndSortData(workerLastDataset)
-        : [];
-      let suggestionDataset = [];
-      if (providedCacheRows.length > 0 || memoryRows.length > 0) {
-        suggestionDataset = dedupeAndSortData([
-          ...memoryRows,
-          ...providedCacheRows,
-        ]);
-      }
-
-      const marketKeyForSuggestion = getMarketKey(marketForSuggestion);
-      if (suggestionDataset.length > 0) {
-        seedWorkerCachesForSuggestion(
-          suggestionParams.stockNo,
-          marketKeyForSuggestion,
-          suggestionDataset,
-          {
-            startDate:
-              baseMeta?.fetchRange?.start ||
-              baseMeta?.startDate ||
-              suggestionDataset[0].date,
-            endDate:
-              baseMeta?.fetchRange?.end ||
-              baseMeta?.endDate ||
-              suggestionDataset[suggestionDataset.length - 1].date,
-            effectiveStartDate: effectiveStartISO,
-            adjusted: suggestionParams.adjustedPrice,
-            split: suggestionParams.splitAdjustment,
-            lookbackDays,
-            meta: baseMeta,
-          },
-        );
-      }
-
-      const fetchOptions = {
-        adjustedPrice: suggestionParams.adjustedPrice,
-        splitAdjustment: suggestionParams.splitAdjustment,
-        effectiveStartDate: effectiveStartISO,
-        lookbackDays,
-      };
-
-      const needsWarmup =
-        suggestionDataset.length === 0 ||
-        suggestionDataset[0].date > warmupStartISO;
-      if (needsWarmup) {
-        const warmupEnd =
-          suggestionDataset.length > 0
-            ? suggestionDataset[0].date
-            : todayISO;
-        const warmupFetch = await fetchStockData(
-          suggestionParams.stockNo,
-          warmupStartISO,
-          warmupEnd,
-          marketForSuggestion,
-          fetchOptions,
-        );
-        const warmupRows = Array.isArray(warmupFetch?.data)
-          ? warmupFetch.data
-          : [];
-        if (warmupRows.length > 0) {
-          suggestionDataset = dedupeAndSortData([
-            ...suggestionDataset,
-            ...warmupRows,
-          ]);
-        }
-      }
-
-      let latestKnownDate =
-        suggestionDataset.length > 0
-          ? suggestionDataset[suggestionDataset.length - 1].date
-          : null;
-      if (!latestKnownDate || latestKnownDate < todayISO) {
-        const tailStart =
-          latestKnownDate && latestKnownDate >= warmupStartISO
-            ? latestKnownDate
-            : warmupStartISO;
-        const tailFetch = await fetchStockData(
-          suggestionParams.stockNo,
-          tailStart,
-          todayISO,
-          marketForSuggestion,
-          fetchOptions,
-        );
-        const tailRows = Array.isArray(tailFetch?.data)
-          ? tailFetch.data
-          : [];
-        if (tailRows.length > 0) {
-          suggestionDataset = dedupeAndSortData([
-            ...suggestionDataset,
-            ...tailRows,
-          ]);
-        }
-      }
-
-      if (!Array.isArray(suggestionDataset) || suggestionDataset.length === 0) {
-        throw new Error(
-          `指定策略於 ${warmupStartISO} 至 ${todayISO} 無可用交易資料。`,
-        );
-      }
-
-      workerLastDataset = suggestionDataset.slice();
-
-      const finalRange = summariseDatasetRange(suggestionDataset);
-      const finalMeta = {
-        ...(baseMeta || {}),
-        fetchRange:
-          finalRange.start && finalRange.end
-            ? { start: finalRange.start, end: finalRange.end }
-            : baseMeta?.fetchRange || null,
-        effectiveStartDate: effectiveStartISO,
-        adjustedPrice:
-          typeof baseMeta?.adjustedPrice === "boolean"
-            ? baseMeta.adjustedPrice
-            : suggestionParams.adjustedPrice,
-        splitAdjustment:
-          typeof baseMeta?.splitAdjustment === "boolean"
-            ? baseMeta.splitAdjustment
-            : suggestionParams.splitAdjustment,
-        lookbackDays,
-      };
-      seedWorkerCachesForSuggestion(
+      const suggestionFetch = await fetchStockData(
         suggestionParams.stockNo,
-        marketKeyForSuggestion,
-        suggestionDataset,
+        warmupStartISO,
+        todayISO,
+        marketForSuggestion,
         {
-          startDate: finalRange.start || warmupStartISO,
-          endDate: finalRange.end || todayISO,
+          adjustedPrice: suggestionParams.adjustedPrice,
+          splitAdjustment: suggestionParams.splitAdjustment,
           effectiveStartDate: effectiveStartISO,
-          adjusted: suggestionParams.adjustedPrice,
-          split: suggestionParams.splitAdjustment,
           lookbackDays,
-          meta: finalMeta,
         },
       );
 
-      latestKnownDate =
-        suggestionDataset[suggestionDataset.length - 1]?.date || todayISO;
-      if (latestKnownDate && latestKnownDate < todayISO) {
-        console.warn(
-          `[Worker Suggestion] 最新資料僅至 ${latestKnownDate}，仍以該日倉位輸出今日建議。`,
+      const suggestionDataset = Array.isArray(suggestionFetch?.data)
+        ? suggestionFetch.data
+        : [];
+
+      if (suggestionDataset.length === 0) {
+        throw new Error(
+          `指定策略於 ${warmupStartISO} 至 ${todayISO} 無可用交易資料。`,
         );
       }
 
@@ -7007,7 +6697,7 @@ self.onmessage = async function (e) {
         startDate: effectiveStartISO,
         effectiveStartDate: effectiveStartISO,
         dataStartDate: warmupStartISO,
-        endDate: latestKnownDate || todayISO,
+        endDate: todayISO,
         lookbackDays,
         forceFinalLiquidation: false,
       };
