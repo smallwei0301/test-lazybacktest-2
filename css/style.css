@@ -54,25 +54,28 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .sensitivity-mobile-param {
     font-size: 0.95rem;
     font-weight: 600;
     color: var(--foreground);
+    flex: 1 1 auto;
 }
 
 .sensitivity-mobile-base {
     font-size: 0.75rem;
     color: var(--muted-foreground);
-    white-space: nowrap;
+    text-align: right;
+    flex: 1 1 auto;
 }
 
 .sensitivity-mobile-scenarios,
 .sensitivity-mobile-metrics {
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .sensitivity-mobile-scenarios > div,
@@ -89,6 +92,20 @@
     font-weight: 600;
     color: var(--muted-foreground);
     text-align: center;
+}
+
+@media (max-width: 480px) {
+    .sensitivity-mobile-base {
+        text-align: left;
+        flex-basis: 100%;
+    }
+}
+
+@media (max-width: 380px) {
+    .sensitivity-mobile-scenarios,
+    .sensitivity-mobile-metrics {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (min-width: 640px) {

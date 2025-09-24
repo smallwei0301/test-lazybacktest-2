@@ -1,3 +1,9 @@
+## 2025-07-30 — Patch LB-SENSITIVITY-RESPONSIVE-20250730A
+- **Issue recap**: 手機寬度 375px 以下時，敏感度卡片雖已改為雙欄堆疊仍需微幅橫向捲動，基準值標籤也會被擠到 tooltip 之下影響判讀。
+- **Fix**: 讓手機堆疊卡支援自動換行 header、平均漂移/穩定度區塊以 `auto-fit` 網格填滿可用寬度，並在 380px 以下改為單欄堆疊以免被壓縮；同時調整基準值排版與 tooltip 容器，使資訊能在窄螢幕保持齊整對齊。
+- **Diagnostics**: 以 devtools 模擬 320px、360px 與 414px 寬度檢查敏感度卡，確認基準值會自動換行且不再橫向溢位，+10%/-10% 卡片維持 tooltip 正常顯示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('summary scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
