@@ -7,6 +7,7 @@
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-STRATEGY-STATUS-20250929A
 // Patch Tag: LB-PERFORMANCE-TABS-20251001A
+// Patch Tag: LB-PERFORMANCE-TABS-20251001B
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -2600,11 +2601,32 @@ function runBacktestInternal() {
     }
 }
 
+function setPerformanceContainerState(state, container = document.getElementById('performance-table-container')) {
+    if (!container) return;
+
+    const placeholderClasses = ['flex', 'items-center', 'justify-center', 'border-dashed'];
+    const dataClasses = ['block', 'border-solid'];
+
+    if (state === 'data') {
+        placeholderClasses.forEach((cls) => container.classList.remove(cls));
+        dataClasses.forEach((cls) => container.classList.add(cls));
+        container.style.borderColor = 'var(--border)';
+    } else {
+        dataClasses.forEach((cls) => container.classList.remove(cls));
+        placeholderClasses.forEach((cls) => container.classList.add(cls));
+        container.style.borderColor = 'var(--card)';
+    }
+}
+
 function clearPreviousResults() {
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    const performanceContainer = document.getElementById("performance-table-container");
+    if (performanceContainer) {
+        performanceContainer.innerHTML = `<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+        setPerformanceContainerState('placeholder', performanceContainer);
+    }
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -4800,6 +4822,7 @@ function renderPerformanceTable(subPeriodResults) {
     }
 
     if (!lastOverallResult) {
+        setPerformanceContainerState('placeholder', container);
         container.innerHTML = `<p class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>`;
         return;
     }
@@ -4814,6 +4837,7 @@ function renderPerformanceTable(subPeriodResults) {
                     : null);
 
     if (!resolvedSubPeriods || Object.keys(resolvedSubPeriods).length === 0) {
+        setPerformanceContainerState('placeholder', container);
         container.innerHTML = `
             <div class="p-6 text-xs text-center" style="color: var(--muted-foreground);">
                 尚未取得可用的分段績效資料，請確認回測期間至少涵蓋一個月以上的有效交易日。
@@ -4911,6 +4935,8 @@ function renderPerformanceTable(subPeriodResults) {
                 <td class="px-4 py-3 text-xs ${maxDD.className}">${maxDD.text}</td>
             </tr>`;
     }).join('');
+
+    setPerformanceContainerState('data', container);
 
     const overallStrategyReturn = formatPercentCell(lastOverallResult.returnRate, { signed: true });
     const overallBuyHold = formatPercentCell(resolveFinalValue(lastOverallResult.buyHoldReturns), { signed: true });

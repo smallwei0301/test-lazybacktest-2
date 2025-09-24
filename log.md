@@ -1,3 +1,9 @@
+# 2025-10-01 — Patch LB-PERFORMANCE-TABS-20251001B
+- **Issue recap**: 分段績效表雖能填入資料，但容器仍保留占位樣式，導致績效分頁維持虛線框與置中排版，使用者誤以為卡片未載入，其它分頁也隨之顯得空白。
+- **Fix**: 建立 `setPerformanceContainerState` 切換占位與實際資料狀態，當收到回測結果時移除 `flex/justify-center/border-dashed` 並改用實心邊框，回復績效表正常卡片版型；清除結果或資料不足時則恢復占位樣式。
+- **Diagnostics**: 於本地載入頁面後呼叫 `handleBacktestResult` 注入測試結果，確認績效分頁顯示完整表格、其餘分頁卡片仍維持佈局，並於清除時恢復提示樣式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((p)=>{const code=fs.readFileSync(p,'utf8');new vm.Script(code,{filename:p});});console.log('scripts compile');NODE`
+
 # 2025-10-01 — Patch LB-PERFORMANCE-TABS-20251001A
 - **Issue recap**: 使用者回報回測完成後僅摘要分頁有內容，期間績效分頁仍停留在「請先執行回測」的占位訊息，分段績效表無法讀取。
 - **Fix**: 新增 `renderPerformanceTable` 函式統一渲染分段績效，於 `handleBacktestResult` 與 `activateTab('performance')` 觸發時更新表格，並補強資料不足時的提醒訊息。
