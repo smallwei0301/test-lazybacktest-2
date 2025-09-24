@@ -1,3 +1,9 @@
+# 2025-09-30 — Patch LB-TODAY-ACTION-20250930A
+- **Issue recap**: 今日建議卡片出現「回測資料不足以推導今日建議」，主因是 `runStrategy` 在回傳主流程物件時提前 `return`，導致 `finalEvaluation` 永遠為空值，評估函式無法接續產生今日操作。
+- **Fix**: 將 `runStrategy` 的輸出改為先建立 `result` 物件，再於 `captureFinalState` 分支補上 `finalEvaluation`，最後統一 `return result`，確保策略結果攜帶最新倉位與價格資訊供今日建議與測試卡片使用。
+- **Diagnostics**: 以含多空進出場的策略重跑回測並檢視 Web Worker console，確認 `finalEvaluation` 內含日期、倉位、股數與策略報酬，同時 UI 今日建議卡片可正確顯示操作建議與資料延伸天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((p)=>{const code=fs.readFileSync(p,'utf8');new vm.Script(code,{filename:p});});console.log('scripts compile');NODE`
+
 
 # 2025-09-29 — Patch LB-STRATEGY-STATUS-20250929A
 - **Issue recap**: 回測畫面顯示 `STRATEGY_STATUS_VERSION is not defined`，導致策略速報卡片無法載入版本碼並中斷後續戰況評分公式。
