@@ -14,6 +14,7 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-BLOB-CURRENT-20250730A
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -2124,6 +2125,57 @@ async function tryFetchRangeFromBlob({
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
   rangeFetchInfo.durationMs = Date.now() - startedAt;
   rangeFetchInfo.dataSource = payload?.dataSource || null;
+  rangeFetchInfo.firstDate = firstDate;
+  rangeFetchInfo.lastDate = lastDate;
+
+  const now = new Date();
+  const todayUtcYear = now.getUTCFullYear();
+  const todayUtcMonth = now.getUTCMonth();
+  const todayUtcDate = now.getUTCDate();
+  const todayUtcMs = Date.UTC(todayUtcYear, todayUtcMonth, todayUtcDate);
+  const endUtcYear = endDateObj.getUTCFullYear();
+  const endUtcMonth = endDateObj.getUTCMonth();
+  const isCurrentMonthRequest =
+    endUtcYear === todayUtcYear && endUtcMonth === todayUtcMonth;
+  let targetLatestISO = null;
+  let currentMonthGapDays = null;
+  if (isCurrentMonthRequest) {
+    const targetLatestMs = Math.min(endDateObj.getTime(), todayUtcMs);
+    const targetLatestDate = new Date(targetLatestMs);
+    targetLatestISO = targetLatestDate.toISOString().split("T")[0];
+    if (lastDate) {
+      if (lastDate < targetLatestISO) {
+        const targetLatestObj = new Date(targetLatestISO);
+        const lastDateObjForGap = new Date(lastDate);
+        const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+        currentMonthGapDays = Number.isFinite(gapDays) ? Math.max(0, gapDays) : null;
+      } else {
+        currentMonthGapDays = 0;
+      }
+    }
+  }
+  const normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+    ? currentMonthGapDays
+    : null;
+  rangeFetchInfo.currentMonthGuard = isCurrentMonthRequest;
+  rangeFetchInfo.targetLatestDate = targetLatestISO;
+  rangeFetchInfo.currentMonthGapDays = normalizedCurrentMonthGap;
+
+  if (
+    isCurrentMonthRequest &&
+    Number.isFinite(normalizedCurrentMonthGap) &&
+    normalizedCurrentMonthGap > 0
+  ) {
+    rangeFetchInfo.status = "current-month-stale";
+    rangeFetchInfo.reason = "current-month-gap";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料未覆蓋當月最新日期 (last=${
+        lastDate || "N/A"
+      } < expected=${targetLatestISO}), 改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
 
   const startGapExceeded =
     Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;

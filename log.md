@@ -120,6 +120,12 @@
 - **Diagnostics**: `fetchDiagnostics.rangeFetch` 新增 `worker-year-superset` 狀態，Superset 命中會標示 `Netlify 年度快取 (Worker Superset)`；主執行緒快取索引與 Session/YEAR 快取皆寫入 coverage 指紋，方便檢核 Superset 命中狀況。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢視與資料流推演；後續需於本機瀏覽器以 2330、2412、0050 等案例實測 18 個月跨年回測，確認 Blob 計量僅記錄年度切片且 console 無錯誤。
 
+# 2025-07-30 — Patch LB-BLOB-CURRENT-20250730A
+- **Issue recap**: Netlify Blob 範圍快取若在月中寫入，隔日回測仍沿用舊快取，導致使用者以當日結束日期回測時僅看到前一交易日的最後一筆資料。
+- **Fix**: `tryFetchRangeFromBlob` 新增「當月資料新鮮度」檢查，當回測結束日在當月且 Blob 回應的最後日期落後於應到日期時，標記為 `current-month-gap` 並退回逐月 Proxy 補抓，確保快取不會卡在寫入日。
+- **Diagnostics**: Blob 診斷新增 `firstDate`、`lastDate`、`targetLatestDate` 與 `currentMonthGapDays` 欄位，可於資料暖身診斷卡確認是否觸發當月回補並追蹤差距天數。
+- **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢閱與資料流程推演；後續需在本機以 2330、2412 等標的實測今日結束日回測，確認 Blob 命中時會在當月落後即回退 Proxy 且 console 無錯誤。
+
 # 2025-07-22 — Patch LB-DEV-BLOB-20250722A
 - **Issue recap**: 開發工具按鈕與 Blob 監控散落在基本設定卡片中，快取來源標籤仍顯示「(快取)/(部分快取)」，Blob 用量僅保留 6 筆記錄且未追蹤台股清單服務是否讀寫 Blob。
 - **Fix**: 建立「開發者區域」獨立卡片整合測試資料來源、資料暖身診斷與 Blob 使用監控；重構來源彙總邏輯以顯示「本地快取／Proxy 快取／Blob 快取」分類；Blob 用量卡改為日期群組並可折疊非當日紀錄。
