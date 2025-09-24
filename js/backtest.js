@@ -2,6 +2,7 @@
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
+// Patch Tag: LB-TREND-SENSITIVITY-20250726A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -63,7 +64,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SEGMENT-20250714A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250726A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
@@ -71,7 +72,11 @@ const TREND_BASE_THRESHOLDS = {
     slope: 0.0012,
     volatility: 0.0045,
 };
-const TREND_SENSITIVITY_STEP = 0.06;
+const TREND_SENSITIVITY_MIN = 1;
+const TREND_SENSITIVITY_MAX = 100;
+const TREND_SENSITIVITY_DEFAULT = 40;
+const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.2;
+const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
 
 const TREND_STYLE_MAP = {
     uptrend: {
@@ -96,7 +101,7 @@ const TREND_STYLE_MAP = {
 
 const trendAnalysisState = {
     version: TREND_ANALYSIS_VERSION,
-    sensitivity: 5,
+    sensitivity: TREND_SENSITIVITY_DEFAULT,
     thresholds: null,
     segments: [],
     summary: null,
@@ -152,16 +157,34 @@ if (typeof Chart !== 'undefined' && Chart.register) {
 }
 
 function computeTrendThresholds(sensitivity) {
-    const safe = Number.isFinite(sensitivity) ? Math.max(0, Math.min(10, sensitivity)) : 0;
-    const multiplier = 1 - TREND_SENSITIVITY_STEP * safe;
+    const min = TREND_SENSITIVITY_MIN;
+    const max = TREND_SENSITIVITY_MAX;
+    const span = Math.max(1, max - min);
+    let safe = Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT;
+    if (safe < min) safe = min;
+    if (safe > max) safe = max;
+    const normalized = (safe - min) / span;
+    const multiplierSpan = TREND_SENSITIVITY_MAX_MULTIPLIER - TREND_SENSITIVITY_MIN_MULTIPLIER;
+    const multiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - normalized * multiplierSpan;
+    const clampedMultiplier = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplier),
+    );
     return {
         windowSize: TREND_WINDOW_SIZE,
         sensitivity: safe,
-        multiplier,
-        upSharpe: TREND_BASE_THRESHOLDS.sharpe * multiplier,
-        downSharpe: -TREND_BASE_THRESHOLDS.sharpe * multiplier,
-        slopeFloor: TREND_BASE_THRESHOLDS.slope * multiplier,
-        volFloor: TREND_BASE_THRESHOLDS.volatility * multiplier,
+        normalizedSensitivity: normalized,
+        multiplier: clampedMultiplier,
+        upSharpe: TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
+        downSharpe: -TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
+        slopeFloor: TREND_BASE_THRESHOLDS.slope * clampedMultiplier,
+        volFloor: TREND_BASE_THRESHOLDS.volatility * clampedMultiplier,
+        range: {
+            min,
+            max,
+            minMultiplier: TREND_SENSITIVITY_MIN_MULTIPLIER,
+            maxMultiplier: TREND_SENSITIVITY_MAX_MULTIPLIER,
+        },
     };
 }
 
@@ -366,10 +389,13 @@ function renderTrendSummary() {
         const downSharpe = thresholds.downSharpe.toFixed(2);
         const slopePct = (Math.exp(thresholds.slopeFloor) - 1) * 100;
         const volPct = thresholds.volFloor * 100;
+        const multiplier = thresholds.multiplier.toFixed(2);
+        const maxMultiplier = (thresholds.range?.maxMultiplier ?? TREND_SENSITIVITY_MAX_MULTIPLIER).toFixed(2);
+        const minMultiplier = (thresholds.range?.minMultiplier ?? TREND_SENSITIVITY_MIN_MULTIPLIER).toFixed(2);
         thresholdTextEl.innerHTML = `
             <span class="font-semibold">判別公式：</span>20 日平均對數淨值斜率 ÷ 同期波動度。<br>
             起漲：比值 ≥ ${upSharpe}，跌落：比值 ≤ ${downSharpe}。<br>
-            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = 1 − 0.06 × 靈敏度。
+            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplier}（靈敏度於 ${maxMultiplier} → ${minMultiplier} 間線性縮放，數值越低代表越靈敏）。
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');
@@ -424,6 +450,7 @@ function renderTrendSummary() {
 
 function recomputeTrendAnalysis(options = {}) {
     trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
     if (trendAnalysisState.result) {
         const analysis = computeTrendAnalysisFromResult(trendAnalysisState.result, trendAnalysisState.thresholds);
         trendAnalysisState.segments = analysis.segments;
@@ -445,12 +472,13 @@ function initialiseTrendControls() {
         slider.addEventListener('input', (event) => {
             const value = Number.parseInt(event.target.value, 10);
             if (Number.isFinite(value)) {
-                trendAnalysisState.sensitivity = Math.max(0, Math.min(10, value));
+                trendAnalysisState.sensitivity = Math.max(TREND_SENSITIVITY_MIN, Math.min(TREND_SENSITIVITY_MAX, value));
                 recomputeTrendAnalysis();
             }
         });
     }
     trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
     renderTrendSummary();
 }
 

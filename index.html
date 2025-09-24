@@ -1160,7 +1160,7 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SEGMENT-20250714A</span>
+                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20250726A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
                                             參考多數量化平台以 20 日淨值斜率搭配波動度評估多空趨勢，並以滑桿調整靈敏度以取得更細緻或更粗獷的分區判斷。
@@ -1170,11 +1170,11 @@
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">趨勢靈敏度</label>
-                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">5</span>
+                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">40</span>
                                             </div>
                                             <div class="flex items-center gap-3">
                                                 <span class="text-[11px]" style="color: var(--muted-foreground);">細</span>
-                                                <input type="range" id="trendSensitivitySlider" min="0" max="10" step="1" value="5" class="flex-1 trend-slider">
+                                                <input type="range" id="trendSensitivitySlider" min="1" max="100" step="1" value="40" class="flex-1 trend-slider">
                                                 <span class="text-[11px]" style="color: var(--muted-foreground);">粗</span>
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">

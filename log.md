@@ -1,3 +1,9 @@
+## 2025-07-26 — Patch LB-TREND-SENSITIVITY-20250726A
+- **Issue recap**: 使用者反映趨勢靈敏度滑桿僅有 0-10 級距，調整後仍難以顯示底色分段，盤整區塊覆蓋過大。
+- **Fix**: 將滑桿範圍放大至 1-100，改以線性內插 1.00→0.20 的門檻倍率縮放，更新趨勢版本代碼與公式說明，確保高靈敏度時起漲／跌落段能明顯放大。
+- **Diagnostics**: 手動調整滑桿確認數值顯示同步更新、趨勢卡描述出現新倍率區間，並檢查 Chart.js 插件背景確實依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`；待 Netlify 預覽站實際回測驗證 console 無錯誤。
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 淨值曲線缺乏趨勢分區與滑桿調節，使用者無法快速判讀起漲／盤整／跌落區段的績效差異，回測摘要也沒有提供分區報酬率。
 - **Fix**: 新增版本代碼 `LB-TREND-SEGMENT-20250714A`，在圖表套用 20 日淨值斜率／波動度判別並以底色標示各趨勢，摘要頁插入「趨勢區間評估」卡片與靈敏度滑桿，可即時重新計算起漲、盤整、跌落區段的複利報酬與覆蓋比例。
