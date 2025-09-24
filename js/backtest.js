@@ -742,8 +742,8 @@ function loadYearDatasetForRange(context, startISO, endISO) {
         stockName: slices.find((slice) => slice.stockNo)?.stockNo || context.stockNo || null,
         stockNo: context.stockNo || null,
         market: context.market || null,
-        dataSource: '?汗?典僑摨血翰??,
-        dataSources: ['?汗?典僑摨血翰??],
+        dataSource: 'Year superset cache',
+        dataSources: ['Year superset cache'],
     };
 }
 
