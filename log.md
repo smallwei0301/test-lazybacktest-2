@@ -1,3 +1,34 @@
+
+## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
+- **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
+- **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
+- **Diagnostics**: 檢查趨勢卡公式說明是否顯示線性回歸條件、R² 與雙訊噪閾值，拖曳滑桿確認斜率門檻與訊噪數值會隨靈敏度同步刷新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-08-23 — Patch LB-TREND-SENSITIVITY-20250823A
+- **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。
+- **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。
+- **Diagnostics**: 確認趨勢卡說明顯示「滑桿 1→100 ≈ 舊版 70→100」與新的倍率差距，拖曳滑桿時可看到目前等效級距與倍率即時刷新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-08-17 — Patch LB-TREND-SENSITIVITY-20250817A
+- **Issue recap**: 靈敏度滑桿雖已擴充為 1-100 級距，但倍率縮放僅有 1.00→0.20，將滑桿推至 100 時仍難以明顯放大起漲／跌落分區。
+- **Fix**: 維持 1-100 級距但將倍率範圍拓展至 1.00→0.02（上下限差 50 倍），同步更新趨勢卡說明與倍率比值提示，確保高靈敏度時盤整區段明顯收斂。
+- **Diagnostics**: 手動檢視趨勢卡門檻說明顯示 50 倍差距、滑桿拖曳後倍率讀值同步刷新，並確認 Chart.js 底色插件會依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-07-26 — Patch LB-TREND-SENSITIVITY-20250726A
+- **Issue recap**: 使用者反映趨勢靈敏度滑桿僅有 0-10 級距，調整後仍難以顯示底色分段，盤整區塊覆蓋過大。
+- **Fix**: 將滑桿範圍放大至 1-100，改以線性內插 1.00→0.20 的門檻倍率縮放，更新趨勢版本代碼與公式說明，確保高靈敏度時起漲／跌落段能明顯放大。
+- **Diagnostics**: 手動調整滑桿確認數值顯示同步更新、趨勢卡描述出現新倍率區間，並檢查 Chart.js 插件背景確實依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`；待 Netlify 預覽站實際回測驗證 console 無錯誤。
+
+## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+- **Issue recap**: 淨值曲線缺乏趨勢分區與滑桿調節，使用者無法快速判讀起漲／盤整／跌落區段的績效差異，回測摘要也沒有提供分區報酬率。
+- **Fix**: 新增版本代碼 `LB-TREND-SEGMENT-20250714A`，在圖表套用 20 日淨值斜率／波動度判別並以底色標示各趨勢，摘要頁插入「趨勢區間評估」卡片與靈敏度滑桿，可即時重新計算起漲、盤整、跌落區段的複利報酬與覆蓋比例。
+- **Diagnostics**: 透過 DOM 檢視確認卡片顯示門檻公式、滑桿更新後重新渲染統計，Chart.js 插件背景亦會隨趨勢分段同步刷新；滑桿調至最大時盤整區縮小、起漲/跌落段落增加。
+- **Testing**: 受限於容器無法啟動實際回測代理，已以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE` 驗證腳本語法，後續將於 Netlify 預覽站執行回測確認 console 無錯誤。
+
 ## 2025-07-26 — Patch LB-TODAY-ACTION-20250726A
 - **Issue recap**: 今日建議卡片尚未對準最新交易日，Worker 仍沿用舊版 `runSuggestionSimulation` 並在回測結束日強制平倉，導致實際持倉狀態與操作訊號容易脫鉤。
 - **Fix**: 移除舊版模擬函式，改以 `runStrategy` 的 `finalEvaluation` 對今日資料延伸評估，產出多空持倉、最新價格與具體行動；同時補齊主執行緒快取 coverage 後灌入 Worker，確保建議計算命中現有資料並沿用最新 meta。
@@ -10,6 +41,7 @@
 - **Fix**: Worker 改為依策略參數型別生成 ±5%、±10%、±20% 與整數步階擾動，回傳多點平均漂移、最大偏移、方向偏移與樣本數；前端敏感度卡片改為動態網格與條列式指標，新增方向偏移卡、樣本統計與迷你圖例，手機版改為卡片堆疊呈現。
 - **Diagnostics**: 透過靜態輸出確認 `parameterSensitivity.summary` 帶有 `scenarioCount/maxDriftPercent/positiveDriftPercent/negativeDriftPercent`，前端卡片與 tooltip 改為敘述擾動網格與多點漂移；桌機與手機版皆不再出現固定 ±10% 欄位。
 - **Testing**: 受限於容器無法啟動實際回測代理，僅以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 確認語法正確，後續部署至 Netlify 預覽站再以真實策略驗證 console 與 UI 行為。
+
 
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。

@@ -224,6 +224,55 @@
 .left-panel { overflow-x: visible; }
 .right-panel { overflow-x: visible; }
 
+.trend-summary-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+    .trend-summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+    }
+}
+
+.trend-summary-item {
+    position: relative;
+    border-radius: 0.75rem;
+    padding: 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    background: color-mix(in srgb, var(--muted) 12%, var(--background));
+    display: grid;
+    gap: 0.5rem;
+}
+
+.trend-summary-item strong {
+    font-size: 0.95rem;
+    color: var(--foreground);
+}
+
+.trend-summary-item .trend-summary-meta {
+    font-size: 0.72rem;
+    color: var(--muted-foreground);
+}
+
+.trend-summary-chip {
+    width: 12px;
+    height: 12px;
+    border-radius: 0.35rem;
+    border: 1px solid currentColor;
+    flex-shrink: 0;
+}
+
+.trend-summary-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.trend-slider {
+    accent-color: var(--primary);
+}
+
 .main-grid {
     display: grid;
     gap: 1.5rem;

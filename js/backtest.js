@@ -2,6 +2,9 @@
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
+// Patch Tag: LB-TREND-SENSITIVITY-20250726A
+// Patch Tag: LB-TREND-SENSITIVITY-20250817A
+// Patch Tag: LB-TREND-REGRESSION-20250903A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -275,6 +278,637 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
+
+const TREND_ANALYSIS_VERSION = 'LB-TREND-REGRESSION-20250903A';
+const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
+const TREND_WINDOW_SIZE = 20;
+const TREND_BASE_THRESHOLDS = {
+    slopeStrict: 0.0024,
+    trendRatioStrict: 2.1,
+    strengthStrict: 2.8,
+    r2Strict: 0.55,
+};
+const TREND_SENSITIVITY_MIN = 1;
+const TREND_SENSITIVITY_MAX = 100;
+const TREND_SENSITIVITY_DEFAULT = 40;
+const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.0063;
+const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
+const TREND_SENSITIVITY_EQUIVALENT_MIN = 70;
+const TREND_SENSITIVITY_EQUIVALENT_MAX = 100;
+const TREND_SENSITIVITY_ORIGINAL_MIN = 1;
+const TREND_SENSITIVITY_ORIGINAL_MAX = 100;
+const TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED =
+    (TREND_SENSITIVITY_EQUIVALENT_MIN - TREND_SENSITIVITY_ORIGINAL_MIN)
+    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
+const TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED =
+    (TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_ORIGINAL_MIN)
+    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
+
+const TREND_STYLE_MAP = {
+    uptrend: {
+        label: '起漲',
+        overlay: 'rgba(34, 197, 94, 0.18)',
+        accent: '#16a34a',
+        border: 'rgba(34, 197, 94, 0.35)',
+    },
+    consolidation: {
+        label: '盤整',
+        overlay: 'rgba(107, 114, 128, 0.16)',
+        accent: '#4b5563',
+        border: 'rgba(107, 114, 128, 0.32)',
+    },
+    downtrend: {
+        label: '跌落',
+        overlay: 'rgba(239, 68, 68, 0.18)',
+        accent: '#dc2626',
+        border: 'rgba(239, 68, 68, 0.38)',
+    },
+};
+
+const trendAnalysisState = {
+    version: TREND_ANALYSIS_VERSION,
+    sensitivity: TREND_SENSITIVITY_DEFAULT,
+    thresholds: null,
+    segments: [],
+    summary: null,
+    result: null,
+};
+
+const trendBackgroundPlugin = {
+    id: TREND_BACKGROUND_PLUGIN_ID,
+    beforeDatasetsDraw(chart, _args, opts) {
+        const chartArea = chart.chartArea;
+        const xScale = chart.scales?.x;
+        if (!chartArea || !xScale) return;
+        const pluginOptions = chart.options?.plugins?.[TREND_BACKGROUND_PLUGIN_ID] || opts || {};
+        const segments = Array.isArray(pluginOptions.segments) ? pluginOptions.segments : [];
+        if (!segments.length) return;
+        const labels = chart.data?.labels || [];
+        if (!labels.length) return;
+        let step = 0;
+        if (labels.length > 1) {
+            const firstPixel = xScale.getPixelForValue(labels[0], 0);
+            const secondPixel = xScale.getPixelForValue(labels[1], 1);
+            step = secondPixel - firstPixel;
+        } else {
+            step = chartArea.width;
+        }
+        const halfStep = step / 2;
+        const { top, bottom } = chartArea;
+        const ctx = chart.ctx;
+        ctx.save();
+        segments.forEach((segment) => {
+            const startIdx = segment?.startIndex;
+            const endIdx = segment?.endIndex;
+            if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
+            const boundedEndIdx = Math.min(endIdx, labels.length - 1);
+            const startLabel = labels[startIdx];
+            const endLabel = labels[boundedEndIdx];
+            const startCenter = xScale.getPixelForValue(startLabel, startIdx);
+            const endCenter = xScale.getPixelForValue(endLabel, boundedEndIdx);
+            if (!Number.isFinite(startCenter) || !Number.isFinite(endCenter)) return;
+            const left = startCenter - halfStep;
+            const right = endCenter + halfStep;
+            const width = Math.max(1, right - left);
+            const fillStyle = segment.overlay || TREND_STYLE_MAP[segment.type]?.overlay || 'rgba(0,0,0,0.06)';
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(left, top, width, bottom - top);
+        });
+        ctx.restore();
+    },
+};
+
+if (typeof Chart !== 'undefined' && Chart.register) {
+    Chart.register(trendBackgroundPlugin);
+}
+
+function computeTrendThresholds(sensitivity) {
+    const min = TREND_SENSITIVITY_MIN;
+    const max = TREND_SENSITIVITY_MAX;
+    const span = Math.max(1, max - min);
+    let safe = Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT;
+    if (safe < min) safe = min;
+    if (safe > max) safe = max;
+    const sliderNormalized = span > 0 ? (safe - min) / span : 0;
+    const effectiveNormalized = TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED
+        + sliderNormalized * (TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED);
+    const multiplierSpan = TREND_SENSITIVITY_MAX_MULTIPLIER - TREND_SENSITIVITY_MIN_MULTIPLIER;
+    const rawMultiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - effectiveNormalized * multiplierSpan;
+    const clampedMultiplier = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, rawMultiplier),
+    );
+    const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
+    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + sliderNormalized * equivalentSpan;
+    const multiplierAtMinRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
+        - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED * multiplierSpan;
+    const multiplierAtMaxRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
+        - TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED * multiplierSpan;
+    const multiplierAtMin = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMinRaw),
+    );
+    const multiplierAtMax = Math.max(
+        TREND_SENSITIVITY_MIN_MULTIPLIER,
+        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMaxRaw),
+    );
+    let ratio = null;
+    if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMax > 0) {
+        ratio = multiplierAtMin / multiplierAtMax;
+    }
+
+    const slopeThreshold = Math.max(
+        0.00012,
+        TREND_BASE_THRESHOLDS.slopeStrict * Math.pow(clampedMultiplier, 0.35),
+    );
+    const slopeRelaxed = Math.max(0.00008, slopeThreshold * 0.6);
+    const trendRatioThreshold = Math.max(
+        0.45,
+        TREND_BASE_THRESHOLDS.trendRatioStrict * Math.pow(clampedMultiplier, 0.2),
+    );
+    const trendRatioRelaxed = Math.max(0.35, trendRatioThreshold * 0.65);
+    const strengthThreshold = Math.max(
+        0.55,
+        TREND_BASE_THRESHOLDS.strengthStrict * Math.pow(clampedMultiplier, 0.25),
+    );
+    const strengthRelaxed = Math.max(0.45, strengthThreshold * 0.6);
+    const r2Threshold = Math.max(
+        0.12,
+        Math.min(0.92, TREND_BASE_THRESHOLDS.r2Strict * Math.pow(clampedMultiplier, 0.15)),
+    );
+    const r2Relaxed = Math.max(0.08, Math.min(0.9, r2Threshold * 0.75));
+
+    return {
+        windowSize: TREND_WINDOW_SIZE,
+        sensitivity: safe,
+        sliderNormalized,
+        normalizedSensitivity: effectiveNormalized,
+        equivalentSensitivity,
+        multiplier: clampedMultiplier,
+        slopeThreshold,
+        slopeRelaxed,
+        trendRatioThreshold,
+        trendRatioRelaxed,
+        strengthThreshold,
+        strengthRelaxed,
+        r2Threshold,
+        r2Relaxed,
+        range: {
+            min,
+            max,
+            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
+            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
+            multiplierAtMin,
+            multiplierAtMax,
+            ratio,
+        },
+    };
+}
+
+function formatPercentPlain(value, digits = 1) {
+    if (!Number.isFinite(value)) return '—';
+    return `${value.toFixed(digits)}%`;
+}
+
+function formatTrendMultiplier(value) {
+    if (!Number.isFinite(value)) return '—';
+    if (value >= 1) return value.toFixed(1);
+    if (value >= 0.1) return value.toFixed(2);
+    if (value >= 0.01) return value.toFixed(3);
+    return value.toFixed(4);
+}
+
+function formatDecimal(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return value.toFixed(digits);
+}
+
+function computeTrendAnalysisFromResult(result, thresholds) {
+    const dates = Array.isArray(result?.dates) ? result.dates : [];
+    const returns = Array.isArray(result?.strategyReturns) ? result.strategyReturns : [];
+    const length = Math.min(dates.length, returns.length);
+    if (length === 0) {
+        return { segments: [], summary: null };
+    }
+    const netValues = new Array(length).fill(null);
+    const logValues = new Array(length).fill(null);
+    const validIndices = [];
+    for (let i = 0; i < length; i += 1) {
+        const parsed = Number.parseFloat(returns[i]);
+        if (Number.isFinite(parsed)) {
+            const net = 1 + parsed / 100;
+            if (net > 0) {
+                netValues[i] = net;
+                logValues[i] = Math.log(net);
+                validIndices.push(i);
+            }
+        }
+    }
+    if (validIndices.length < 2) {
+        return { segments: [], summary: null };
+    }
+    const startIdx = validIndices[0];
+    const endIdx = validIndices[validIndices.length - 1];
+    const classifications = new Array(length).fill(null);
+    const logDiffs = new Array(length).fill(null);
+    for (let i = startIdx + 1; i <= endIdx; i += 1) {
+        if (Number.isFinite(logValues[i]) && Number.isFinite(logValues[i - 1])) {
+            logDiffs[i] = logValues[i] - logValues[i - 1];
+        }
+    }
+    const windowSize = Math.max(5, Math.round(thresholds?.windowSize || TREND_WINDOW_SIZE));
+    const slopeThreshold = Number.isFinite(thresholds?.slopeThreshold)
+        ? thresholds.slopeThreshold
+        : 0.0012;
+    const slopeRelaxed = Number.isFinite(thresholds?.slopeRelaxed)
+        ? thresholds.slopeRelaxed
+        : slopeThreshold * 0.6;
+    const ratioThreshold = Number.isFinite(thresholds?.trendRatioThreshold)
+        ? thresholds.trendRatioThreshold
+        : 1.0;
+    const ratioRelaxed = Number.isFinite(thresholds?.trendRatioRelaxed)
+        ? thresholds.trendRatioRelaxed
+        : ratioThreshold * 0.7;
+    const strengthThreshold = Number.isFinite(thresholds?.strengthThreshold)
+        ? thresholds.strengthThreshold
+        : 1.2;
+    const strengthRelaxed = Number.isFinite(thresholds?.strengthRelaxed)
+        ? thresholds.strengthRelaxed
+        : strengthThreshold * 0.7;
+    const r2Threshold = Number.isFinite(thresholds?.r2Threshold)
+        ? thresholds.r2Threshold
+        : 0.35;
+    const r2Relaxed = Number.isFinite(thresholds?.r2Relaxed)
+        ? thresholds.r2Relaxed
+        : Math.max(0.08, r2Threshold * 0.75);
+
+    const computeWindowMetrics = (startIndex, endIndex) => {
+        const count = endIndex - startIndex + 1;
+        if (count < 3) return null;
+        let sumX = 0;
+        let sumY = 0;
+        let sumXX = 0;
+        let sumXY = 0;
+        for (let offset = 0; offset < count; offset += 1) {
+            const value = logValues[startIndex + offset];
+            if (!Number.isFinite(value)) {
+                return null;
+            }
+            const x = offset;
+            sumX += x;
+            sumY += value;
+            sumXX += x * x;
+            sumXY += x * value;
+        }
+        const denominator = count * sumXX - sumX * sumX;
+        if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-9) {
+            return null;
+        }
+        const slope = (count * sumXY - sumX * sumY) / denominator;
+        const intercept = (sumY - slope * sumX) / count;
+        const meanY = sumY / count;
+        let ssTot = 0;
+        let ssRes = 0;
+        for (let offset = 0; offset < count; offset += 1) {
+            const y = logValues[startIndex + offset];
+            const x = offset;
+            const fitted = slope * x + intercept;
+            const diffMean = y - meanY;
+            const residual = y - fitted;
+            ssTot += diffMean * diffMean;
+            ssRes += residual * residual;
+        }
+        const r2 = ssTot > 0 ? Math.max(0, 1 - (ssRes / ssTot)) : 0;
+        const residualStd = Math.sqrt(ssRes / Math.max(1, count - 2));
+        let diffSum = 0;
+        let diffSq = 0;
+        let diffCount = 0;
+        for (let idx = startIndex + 1; idx <= endIndex; idx += 1) {
+            const diff = logDiffs[idx];
+            if (!Number.isFinite(diff)) continue;
+            diffSum += diff;
+            diffSq += diff * diff;
+            diffCount += 1;
+        }
+        const diffMean = diffCount > 0 ? diffSum / diffCount : 0;
+        const diffVariance = diffCount > 0 ? Math.max(0, diffSq / diffCount - diffMean * diffMean) : 0;
+        const volatility = Math.sqrt(diffVariance);
+        const trendRatio = volatility > 0
+            ? slope / volatility
+            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        const strength = residualStd > 0
+            ? slope / residualStd
+            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        return {
+            slope,
+            slopeAbs: Math.abs(slope),
+            r2,
+            trendRatio,
+            trendRatioAbs: Math.abs(trendRatio),
+            strength,
+            strengthAbs: Math.abs(strength),
+        };
+    };
+
+    for (let idx = startIdx; idx <= endIdx; idx += 1) {
+        if (!Number.isFinite(logValues[idx])) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        if (idx - windowSize + 1 < startIdx) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        let invalidWindow = false;
+        for (let j = idx - windowSize + 1; j <= idx; j += 1) {
+            if (!Number.isFinite(logValues[j])) {
+                invalidWindow = true;
+                break;
+            }
+        }
+        if (invalidWindow) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
+        if (!metrics) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        const {
+            slope,
+            slopeAbs,
+            r2,
+            trendRatioAbs,
+            strengthAbs,
+        } = metrics;
+        let classification = 'consolidation';
+        const passesStrict = slopeAbs >= slopeThreshold
+            && r2 >= r2Threshold
+            && trendRatioAbs >= ratioThreshold
+            && strengthAbs >= strengthThreshold;
+        const passesRelaxed = slopeAbs >= slopeRelaxed
+            && (
+                (r2 >= r2Relaxed && trendRatioAbs >= ratioRelaxed)
+                || (strengthAbs >= strengthRelaxed && trendRatioAbs >= ratioRelaxed)
+                || (strengthAbs >= strengthThreshold && r2 >= r2Relaxed)
+            );
+        if (passesStrict || passesRelaxed) {
+            classification = slope >= 0 ? 'uptrend' : 'downtrend';
+        }
+        classifications[idx] = classification;
+    }
+
+    const getNetValueBackward = (index) => {
+        for (let i = Math.min(index, length - 1); i >= 0; i -= 1) {
+            const value = netValues[i];
+            if (Number.isFinite(value) && value > 0) return value;
+        }
+        return 1;
+    };
+
+    const segments = [];
+    let segmentType = null;
+    let segmentStart = null;
+    for (let idx = startIdx; idx <= endIdx; idx += 1) {
+        const type = classifications[idx] || segmentType || 'consolidation';
+        if (segmentType === null) {
+            segmentType = type;
+            segmentStart = idx;
+            continue;
+        }
+        if (type !== segmentType) {
+            segments.push(buildSegment(segmentType, segmentStart, idx - 1));
+            segmentType = type;
+            segmentStart = idx;
+        }
+    }
+    if (segmentType !== null && segmentStart !== null) {
+        segments.push(buildSegment(segmentType, segmentStart, endIdx));
+    }
+
+    function buildSegment(type, startIndex, endIndex) {
+        const startDate = dates[startIndex] || null;
+        const endDate = dates[endIndex] || null;
+        const baseValue = startIndex > 0 ? getNetValueBackward(startIndex - 1) : 1;
+        const endValue = getNetValueBackward(endIndex);
+        const safeBase = baseValue > 0 ? baseValue : 1e-6;
+        const safeEnd = endValue > 0 ? endValue : 1e-6;
+        const factor = safeEnd / safeBase;
+        const returnPercent = (factor - 1) * 100;
+        return {
+            type,
+            startIndex,
+            endIndex,
+            startDate,
+            endDate,
+            days: Math.max(1, endIndex - startIndex + 1),
+            factor,
+            returnPercent,
+            overlay: TREND_STYLE_MAP[type]?.overlay || 'rgba(0,0,0,0.06)',
+        };
+    }
+
+    const totalDays = Math.max(1, endIdx - startIdx + 1);
+    const aggregated = {
+        uptrend: { segments: 0, days: 0, factor: 1 },
+        consolidation: { segments: 0, days: 0, factor: 1 },
+        downtrend: { segments: 0, days: 0, factor: 1 },
+    };
+    segments.forEach((segment) => {
+        const bucket = aggregated[segment.type];
+        if (!bucket) return;
+        bucket.segments += 1;
+        bucket.days += segment.days;
+        const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
+        bucket.factor *= segFactor;
+    });
+
+    const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
+        const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
+        acc[key] = {
+            segments: bucket.segments,
+            days: bucket.days,
+            coveragePct,
+            returnPct: (bucket.factor - 1) * 100,
+        };
+        return acc;
+    }, {});
+
+    return {
+        segments,
+        summary: {
+            startIndex: startIdx,
+            endIndex: endIdx,
+            totalDays,
+            aggregatedByType,
+        },
+    };
+}
+
+function updateChartTrendOverlay() {
+    if (!stockChart) return;
+    if (!stockChart.options) stockChart.options = {};
+    if (!stockChart.options.plugins) stockChart.options.plugins = {};
+    stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] = {
+        ...(stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] || {}),
+        segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+    };
+    stockChart.update('none');
+}
+
+function renderTrendSummary() {
+    const sliderValueEl = document.getElementById('trendSensitivityValue');
+    if (sliderValueEl) {
+        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}`;
+    }
+    const badgeEl = document.getElementById('trend-version-badge');
+    if (badgeEl) {
+        badgeEl.textContent = trendAnalysisState.version;
+    }
+    const thresholds = trendAnalysisState.thresholds;
+    const thresholdTextEl = document.getElementById('trend-threshold-text');
+    if (thresholdTextEl && thresholds) {
+        const slopeDailyPct = Math.expm1(thresholds.slopeThreshold) * 100;
+        const slopeAnnualPct = Math.expm1(thresholds.slopeThreshold * 252) * 100;
+        const slopeRelaxDailyPct = Math.expm1(thresholds.slopeRelaxed) * 100;
+        const slopeRelaxAnnualPct = Math.expm1(thresholds.slopeRelaxed * 252) * 100;
+        const trendRatioStrict = formatDecimal(thresholds.trendRatioThreshold, 2);
+        const trendRatioRelaxed = formatDecimal(thresholds.trendRatioRelaxed, 2);
+        const strengthStrict = formatDecimal(thresholds.strengthThreshold, 2);
+        const strengthRelaxed = formatDecimal(thresholds.strengthRelaxed, 2);
+        const r2Strict = formatDecimal(thresholds.r2Threshold, 2);
+        const r2Relaxed = formatDecimal(thresholds.r2Relaxed, 2);
+        const multiplierText = formatTrendMultiplier(thresholds.multiplier);
+        const rangeInfo = thresholds.range || {};
+        const rangeMaxValue = Number.isFinite(rangeInfo.multiplierAtMin)
+            ? rangeInfo.multiplierAtMin
+            : TREND_SENSITIVITY_MAX_MULTIPLIER;
+        const rangeMinValue = Number.isFinite(rangeInfo.multiplierAtMax)
+            ? rangeInfo.multiplierAtMax
+            : TREND_SENSITIVITY_MIN_MULTIPLIER;
+        const maxMultiplier = formatTrendMultiplier(rangeMaxValue);
+        const minMultiplier = formatTrendMultiplier(rangeMinValue);
+        let ratio = Number.isFinite(rangeInfo.ratio) && rangeInfo.ratio > 0
+            ? rangeInfo.ratio
+            : (rangeMinValue > 0 ? rangeMaxValue / rangeMinValue : null);
+        let ratioText = '—';
+        if (Number.isFinite(ratio) && ratio > 0) {
+            if (ratio >= 100) {
+                ratioText = ratio.toFixed(0);
+            } else if (ratio >= 10) {
+                ratioText = ratio.toFixed(0);
+            } else {
+                ratioText = ratio.toFixed(1);
+            }
+        }
+        const equivalentMin = Number.isFinite(rangeInfo.minEquivalent)
+            ? Math.round(rangeInfo.minEquivalent)
+            : null;
+        const equivalentMax = Number.isFinite(rangeInfo.maxEquivalent)
+            ? Math.round(rangeInfo.maxEquivalent)
+            : null;
+        const equivalentCurrent = Number.isFinite(thresholds.equivalentSensitivity)
+            ? Math.round(thresholds.equivalentSensitivity)
+            : null;
+        const sliderMappingText = (equivalentMin !== null && equivalentMax !== null)
+            ? `滑桿 1→100 ≈ 舊版 ${equivalentMin}→${equivalentMax}`
+            : '滑桿 1→100';
+        const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
+        thresholdTextEl.innerHTML = `
+            <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
+            起漲：斜率 ≥ ${formatPercentPlain(slopeDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeAnnualPct, 1)}），R² ≥ ${r2Strict}，
+            且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
+            若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
+            並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
+            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
+        `;
+    }
+    const placeholderEl = document.getElementById('trend-summary-placeholder');
+    const metaEl = document.getElementById('trend-summary-meta');
+    const container = document.getElementById('trend-summary-container');
+    if (!container) return;
+    const summary = trendAnalysisState.summary;
+    const segments = trendAnalysisState.segments;
+    if (!summary || !segments || segments.length === 0) {
+        container.innerHTML = '';
+        if (placeholderEl) placeholderEl.classList.remove('hidden');
+        if (metaEl) {
+            metaEl.classList.add('hidden');
+            metaEl.textContent = '';
+        }
+        return;
+    }
+    if (placeholderEl) placeholderEl.classList.add('hidden');
+    if (metaEl) {
+        const firstSegment = segments[0];
+        const lastSegment = segments[segments.length - 1];
+        const rangeText = firstSegment?.startDate && lastSegment?.endDate
+            ? `${firstSegment.startDate} ~ ${lastSegment.endDate}`
+            : '—';
+        metaEl.textContent = `統計範圍：${rangeText}（共 ${summary.totalDays} 個交易日）`;
+        metaEl.classList.remove('hidden');
+    }
+    const order = ['uptrend', 'consolidation', 'downtrend'];
+    const cards = order.map((key) => {
+        const style = TREND_STYLE_MAP[key];
+        const stats = summary.aggregatedByType[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: 0 };
+        const returnText = formatPercent(stats.returnPct);
+        const coverageText = formatPercentPlain(stats.coveragePct, 1);
+        const borderColor = style?.border || 'rgba(148, 163, 184, 0.35)';
+        const background = style?.overlay || 'rgba(148, 163, 184, 0.15)';
+        const accent = style?.accent || 'var(--foreground)';
+        const label = style?.label || key;
+        return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2" style="color: ${accent};">
+                    <span class="trend-summary-chip" style="background-color: ${background}; border-color: ${accent};"></span>
+                    <strong>${label}</strong>
+                </div>
+                <span class="trend-summary-meta">${stats.segments} 段</span>
+            </div>
+            <div class="trend-summary-value" style="color: ${accent};">${returnText}</div>
+            <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
+        </div>`;
+    }).join('');
+    container.innerHTML = cards;
+}
+
+function recomputeTrendAnalysis(options = {}) {
+    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
+    if (trendAnalysisState.result) {
+        const analysis = computeTrendAnalysisFromResult(trendAnalysisState.result, trendAnalysisState.thresholds);
+        trendAnalysisState.segments = analysis.segments;
+        trendAnalysisState.summary = analysis.summary;
+    } else {
+        trendAnalysisState.segments = [];
+        trendAnalysisState.summary = null;
+    }
+    renderTrendSummary();
+    if (!options.skipChartUpdate) {
+        updateChartTrendOverlay();
+    }
+}
+
+function initialiseTrendControls() {
+    const slider = document.getElementById('trendSensitivitySlider');
+    if (slider) {
+        slider.value = `${trendAnalysisState.sensitivity}`;
+        slider.addEventListener('input', (event) => {
+            const value = Number.parseInt(event.target.value, 10);
+            if (Number.isFinite(value)) {
+                trendAnalysisState.sensitivity = Math.max(TREND_SENSITIVITY_MIN, Math.min(TREND_SENSITIVITY_MAX, value));
+                recomputeTrendAnalysis();
+            }
+        });
+    }
+    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
+    renderTrendSummary();
+}
+
+document.addEventListener('DOMContentLoaded', initialiseTrendControls);
 
 function cloneArrayOfRanges(ranges) {
     if (!Array.isArray(ranges)) return undefined;
@@ -2963,7 +3597,12 @@ function handleBacktestResult(result, stockName, dataSource) {
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
         lastOverallResult = null; lastSubPeriodResults = null;
-         if (suggestionArea) suggestionArea.classList.add('hidden');
+        trendAnalysisState.result = null;
+        trendAnalysisState.segments = [];
+        trendAnalysisState.summary = null;
+        renderTrendSummary();
+        updateChartTrendOverlay();
+        if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
         return;
     }
@@ -2973,10 +3612,17 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
+        trendAnalysisState.result = {
+            dates: Array.isArray(result.dates) ? [...result.dates] : [],
+            strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
+        };
+        recomputeTrendAnalysis({ skipChartUpdate: true });
+
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
+        updateChartTrendOverlay();
         activateTab('summary');
 
         setTimeout(() => {
@@ -4039,6 +4685,9 @@ function renderChart(result) {
                 intersect: false,
             },
             plugins: {
+                [TREND_BACKGROUND_PLUGIN_ID]: {
+                    segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+                },
                 legend: {
                     position: 'top',
                     labels: { usePointStyle: true }
