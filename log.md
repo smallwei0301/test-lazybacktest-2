@@ -1,9 +1,3 @@
-# 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
-- **Issue recap**: 敏感度分析卡片缺乏專屬樣式，表格 tooltip 容易被裁切且說明未引導至既有「批量優化」功能，營運與用戶在判讀 ±10% 測試結果時缺乏一致門檻。
-- **Fix**: 新增 `sensitivity-card` 版型與橫向滾動區，並擴充 `tooltiptext--sensitivity` 寬度設定，確保情境表格在桌機與行動裝置都能完整顯示提示；同步更新敏感度指標、情境欄位與操作建議 tooltip 內容，引導使用者以「批量優化」進一步驗證易飄移參數。
-- **Diagnostics**: 於瀏覽器檢視 DOM 結構確認新樣式使 tooltip 皆能完整呈現，並以假資料模擬敏感度表格保證長行文字在 `tooltiptext--sensitivity` 下能換行，不再被父層 `overflow` 截斷。
-- **Testing**: 受限於容器無法連線回測 proxy，僅完成靜態檢閱與瀏覽器排版模擬；後續將在 Netlify 預覽站實測 hover 行為與 console 訊息。
-
 # 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
 - **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
 - **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。

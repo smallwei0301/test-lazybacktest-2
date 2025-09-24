@@ -1,22 +1,6 @@
 /* --- 自訂 CSS --- */
 .tooltip { position: relative; display: inline-block; vertical-align: middle; }
-.tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.tooltip .tooltiptext.tooltiptext--sensitivity { width: auto; min-width: min(260px, calc(100vw - 3rem)); max-width: min(380px, calc(100vw - 3rem)); padding: 14px 18px; line-height: 1.65; white-space: normal; word-break: break-word; box-shadow: 0 12px 28px rgba(0,0,0,0.35); }
-.sensitivity-card { display: flex; flex-direction: column; gap: 1.5rem; }
-.sensitivity-card__metrics { display: grid; gap: 1rem; }
-@media (min-width: 768px) { .sensitivity-card__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.sensitivity-card__metric { border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; background-color: var(--background); box-shadow: 0 8px 16px rgb(15 23 42 / 0.08); display: flex; flex-direction: column; gap: 0.75rem; min-height: 140px; }
-.sensitivity-card__metric h4 { font-size: 0.95rem; font-weight: 600; color: var(--foreground); display: flex; align-items: center; gap: 0.5rem; }
-.sensitivity-card__metric p { margin: 0; }
-.sensitivity-card__metric-value { font-size: 1.75rem; font-weight: 700; color: var(--primary); }
-.sensitivity-card__metric-desc { font-size: 0.8rem; color: var(--muted-foreground); line-height: 1.5; }
-.sensitivity-card__scroller { margin: 0 -0.75rem; padding: 0 0.75rem 0.5rem; overflow-x: auto; overflow-y: visible; }
-.sensitivity-card__table { min-width: 640px; border-collapse: separate; border-spacing: 0; width: 100%; }
-.sensitivity-card__table th, .sensitivity-card__table td { border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; text-align: left; }
-.sensitivity-card__table thead th { font-size: 0.75rem; font-weight: 600; color: var(--muted-foreground); background-color: rgba(8, 145, 178, 0.06); position: sticky; top: 0; z-index: 1; }
-.sensitivity-card__table tbody tr:last-child td { border-bottom: none; }
-.sensitivity-card__hint { font-size: 0.8rem; color: var(--muted-foreground); line-height: 1.6; background-color: rgba(8, 145, 178, 0.08); border: 1px solid rgba(8, 145, 178, 0.2); border-radius: 0.75rem; padding: 1rem 1.25rem; display: flex; gap: 0.75rem; align-items: flex-start; }
-.sensitivity-card__hint i { color: var(--primary); }
+.tooltip .tooltiptext { visibility: hidden; display: inline-block; width: auto; min-width: min(240px, calc(100vw - 2.5rem)); max-width: min(320px, calc(100vw - 2.5rem)); background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 12px 16px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.6; pointer-events: none; white-space: normal; word-break: break-word; box-shadow: 0 8px 18px rgba(0,0,0,0.35); }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
 #chart-container { height: 500px; }
 @media (max-width: 768px) { #chart-container { height: 350px; } }
