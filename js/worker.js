@@ -37,6 +37,7 @@ const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
+const TODAY_SUGGESTION_VERSION = "LB-SUGGESTION-EVAL-20250924B";
 
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
@@ -5531,6 +5532,19 @@ function runStrategy(data, params, options = {}) {
   startIdx = Math.max(startIdx, effectiveStartIdx);
   startIdx = Math.min(startIdx, n - 1);
   startIdx = Math.max(1, startIdx);
+  if (!Number.isFinite(startIdx)) {
+    const fallbackStart = Number.isFinite(effectiveStartIdx)
+      ? effectiveStartIdx
+      : 0;
+    startIdx =
+      n > 1
+        ? Math.min(Math.max(1, Math.trunc(fallbackStart)), n - 1)
+        : 0;
+  } else if (n > 1) {
+    startIdx = Math.min(Math.max(1, Math.trunc(startIdx)), n - 1);
+  } else {
+    startIdx = Math.max(0, Math.min(Math.trunc(startIdx), n - 1));
+  }
   warmupSummary.computedStartIndex = startIdx;
   warmupSummary.effectiveStartIndex = effectiveStartIdx;
   warmupSummary.barsBeforeFirstTrade = Math.max(
@@ -9523,8 +9537,81 @@ self.onmessage = async function (e) {
         forceFinalLiquidation: false,
         captureFinalState: true,
       });
-      const evaluation = todayResult?.finalEvaluation || null;
-      const latestDate = suggestionData[suggestionData.length - 1]?.date || null;
+      const toFiniteNumber = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+      };
+      const resolveInitialCapital = () => {
+        const resultCapital = toFiniteNumber(todayResult?.initialCapital);
+        if (resultCapital !== null) return resultCapital;
+        const paramCapital = toFiniteNumber(params.initialCapital);
+        if (paramCapital !== null) return paramCapital;
+        return 0;
+      };
+      let evaluation = todayResult?.finalEvaluation || null;
+      let latestDate = suggestionData[suggestionData.length - 1]?.date || null;
+      let fallbackApplied = false;
+      if (!latestDate) {
+        for (let idx = suggestionData.length - 1; idx >= 0; idx -= 1) {
+          const candidate = suggestionData[idx];
+          if (candidate && typeof candidate.date === "string" && candidate.date) {
+            latestDate = candidate.date;
+            break;
+          }
+        }
+      }
+      if ((!evaluation || !evaluation.date) && suggestionData.length > 0) {
+        let fallbackRow = null;
+        for (let idx = suggestionData.length - 1; idx >= 0; idx -= 1) {
+          const candidate = suggestionData[idx];
+          if (candidate && typeof candidate.date === "string" && candidate.date) {
+            fallbackRow = candidate;
+            break;
+          }
+        }
+        if (!fallbackRow && suggestionData.length > 0) {
+          fallbackRow = suggestionData[suggestionData.length - 1];
+        }
+        if (fallbackRow) {
+          const baseCapital = resolveInitialCapital();
+          evaluation = {
+            date: fallbackRow.date || latestDate || todayISO,
+            open: toFiniteNumber(fallbackRow.open),
+            high: toFiniteNumber(fallbackRow.high),
+            low: toFiniteNumber(fallbackRow.low),
+            close: toFiniteNumber(fallbackRow.close),
+            volume: toFiniteNumber(fallbackRow.volume),
+            longState: "空手",
+            shortState: "空手",
+            executedBuy: false,
+            executedSell: false,
+            executedShort: false,
+            executedCover: false,
+            longPos: 0,
+            shortPos: 0,
+            longShares: 0,
+            shortShares: 0,
+            longAverageEntryPrice: null,
+            lastBuyPrice: null,
+            lastShortPrice: null,
+            longCapital: baseCapital,
+            shortCapital: params.enableShorting ? baseCapital : 0,
+            longProfit: 0,
+            shortProfit: 0,
+            portfolioValue: baseCapital,
+            strategyReturn: 0,
+            longEntryState: null,
+            longExitState: null,
+          };
+          fallbackApplied = true;
+          if (!latestDate) {
+            latestDate = evaluation.date;
+          }
+          if (todayResult && typeof todayResult === "object") {
+            todayResult.finalEvaluation = evaluation;
+          }
+        }
+      }
       if (!evaluation || !latestDate) {
         const message = "回測資料不足以推導今日建議。";
         self.postMessage({
@@ -9573,6 +9660,9 @@ self.onmessage = async function (e) {
           notes.push("策略目前維持空手，暫無倉位需要調整。");
           break;
       }
+      if (fallbackApplied) {
+        notes.push("暖身資料尚未生成完整策略狀態，暫以最新收盤價維持空手觀望。");
+      }
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
         notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
       }
@@ -9601,6 +9691,15 @@ self.onmessage = async function (e) {
         appliedEndDate: todayISO,
         startDateUsed: strategyParams.startDate,
         dataStartDateUsed: dataStartDate,
+        diagnostics: {
+          evaluationFallbackApplied: fallbackApplied,
+        },
+        meta: {
+          version: TODAY_SUGGESTION_VERSION,
+          evaluationSource: fallbackApplied
+            ? "fallback_latest_bar"
+            : "simulation_final_state",
+        },
       };
 
       self.postMessage({

@@ -447,3 +447,9 @@
 - **Diagnostics**: `diagnostics.warmup` 現會伴隨 `insufficientData: true`，今日建議筆記可對應暖身欄位確認起始落差是否超過指標需求。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
 
+# 2025-09-24 — Patch LB-SUGGESTION-EVAL-20250924B
+- **Issue recap**: 使用者回報即使資料完整仍出現「無法判斷今日操作」，追蹤發現 `startIdx` 在罕見參數組合下可能為 `NaN`，導致 `finalEvaluation` 與最新日期皆為空值，今日建議再次退回資料不足訊息。
+- **Fix**: 正規化 `startIdx`，確保暖身起點落在有效索引，並於建議流程缺少模擬狀態時以最新行情組裝安全的空手評估，回傳版本資訊與 fallback 診斷供追蹤。
+- **Diagnostics**: 今日建議 payload 新增 `diagnostics.evaluationFallbackApplied` 與 `meta.version = LB-SUGGESTION-EVAL-20250924B`，筆記亦會提示「暖身資料尚未生成完整策略狀態」。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
+
