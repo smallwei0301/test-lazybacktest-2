@@ -1,6 +1,8 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
+// Patch Tag: LB-COVERAGE-STREAM-20250705A
+
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -13,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureTaiwanDirectoryReady({ forceRefresh: shouldForceRefresh }).catch((error) => {
         console.warn('[Taiwan Directory] 預載入失敗:', error);
     });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderBlobUsageCard();
 });
 
 let lastPriceDebug = {
@@ -36,12 +42,934 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
+const DATA_CACHE_INDEX_KEY = 'LB_DATA_CACHE_INDEX_V20250723A';
+const DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
+const TW_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const US_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3;
+const DEFAULT_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+
+const SESSION_DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
+const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
+const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
+const SESSION_DATA_CACHE_LIMIT = 24;
+
+const YEAR_STORAGE_VERSION = 'LB-CACHE-TIER-20250720A';
+const YEAR_STORAGE_PREFIX = 'LB_YEAR_DATA_CACHE_V20250720A';
+const YEAR_STORAGE_TW_TTL_MS = 1000 * 60 * 60 * 24 * 3;
+const YEAR_STORAGE_US_TTL_MS = 1000 * 60 * 60 * 24 * 1;
+const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
+
+const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
+const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
+const BLOB_LEDGER_MAX_EVENTS = 36;
+
+function cloneArrayOfRanges(ranges) {
+    if (!Array.isArray(ranges)) return undefined;
+    return ranges
+        .map((range) => {
+            if (!range || typeof range !== 'object') return null;
+            return {
+                start: range.start || null,
+                end: range.end || null,
+            };
+        })
+        .filter((range) => range !== null);
+}
+
+function normaliseFetchDiagnosticsForCacheReplay(diagnostics, options = {}) {
+    const base = diagnostics && typeof diagnostics === 'object' ? diagnostics : {};
+    const requestedRange = options.requestedRange || base.requested || null;
+    const requestedStart = requestedRange?.start || null;
+    const requestedEnd = requestedRange?.end || null;
+    const coverageRanges = options.coverage || base.coverage || null;
+    const sourceLabel = options.source || base.replaySource || base.source || 'cache-replay';
+    const sanitized = {
+        ...base,
+        source: sourceLabel,
+        replaySource: sourceLabel,
+        cacheReplay: true,
+        usedCache: true,
+        replayedAt: Date.now(),
+    };
+    sanitized.requested = {
+        start: requestedStart,
+        end: requestedEnd,
+    };
+    if (coverageRanges) {
+        sanitized.coverage = cloneArrayOfRanges(coverageRanges);
+    }
+    if (sanitized.rangeFetch && typeof sanitized.rangeFetch === 'object') {
+        const rangeFetch = { ...sanitized.rangeFetch };
+        rangeFetch.cacheReplay = true;
+        rangeFetch.readOps = 0;
+        rangeFetch.writeOps = 0;
+        if (Array.isArray(rangeFetch.operations)) {
+            rangeFetch.operations = [];
+        }
+        if (typeof rangeFetch.status === 'string' && !/cache/i.test(rangeFetch.status)) {
+            rangeFetch.status = `${rangeFetch.status}-cache`;
+        }
+        sanitized.rangeFetch = rangeFetch;
+    }
+    const blobInfo = base.blob && typeof base.blob === 'object' ? { ...base.blob } : {};
+    blobInfo.operations = [];
+    blobInfo.readOps = 0;
+    blobInfo.writeOps = 0;
+    blobInfo.cacheReplay = true;
+    if (!blobInfo.provider && sourceLabel) {
+        blobInfo.provider = sourceLabel;
+    }
+    sanitized.blob = blobInfo;
+    if (Array.isArray(base.months)) {
+        sanitized.months = base.months.map((month) => ({
+            ...(typeof month === 'object' ? month : {}),
+            operations: [],
+            cacheReplay: true,
+            readOps: 0,
+            writeOps: 0,
+        }));
+    }
+    if (Array.isArray(sanitized.operations)) {
+        sanitized.operations = [];
+    }
+    return sanitized;
+}
+
+function normalizeMarketKeyForCache(market) {
+    const normalized = (market || 'TWSE').toString().toUpperCase();
+    if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
+    return normalized;
+}
+
+function getDatasetCacheTTLMs(market) {
+    const normalized = normalizeMarketKeyForCache(market);
+    if (normalized === 'US') return US_DATA_CACHE_TTL_MS;
+    if (normalized === 'TPEX' || normalized === 'TWSE') return TW_DATA_CACHE_TTL_MS;
+    return DEFAULT_DATA_CACHE_TTL_MS;
+}
+
+function getYearStorageTtlMs(market) {
+    const normalized = normalizeMarketKeyForCache(market);
+    if (normalized === 'US') return YEAR_STORAGE_US_TTL_MS;
+    if (normalized === 'TPEX' || normalized === 'TWSE') return YEAR_STORAGE_TW_TTL_MS;
+    return YEAR_STORAGE_DEFAULT_TTL_MS;
+}
+
+function buildSessionStorageEntryKey(cacheKey) {
+    return `${SESSION_DATA_CACHE_ENTRY_PREFIX}${cacheKey}`;
+}
+
+function loadSessionDataCacheIndex() {
+    if (typeof window === 'undefined' || !window.sessionStorage) {
+        return new Map();
+    }
+    try {
+        const raw = window.sessionStorage.getItem(SESSION_DATA_CACHE_INDEX_KEY);
+        if (!raw) return new Map();
+        const parsed = JSON.parse(raw);
+        const records = Array.isArray(parsed?.records)
+            ? parsed.records
+            : Array.isArray(parsed)
+                ? parsed
+                : [];
+        const map = new Map();
+        records.forEach((record) => {
+            if (!record || typeof record !== 'object') return;
+            const key = record.key || record.cacheKey;
+            const cachedAt = Number(record.cachedAt);
+            const market = record.market || record.marketType || null;
+            const priceMode = record.priceMode || null;
+            const split = Boolean(record.splitAdjustment);
+            if (!key || !Number.isFinite(cachedAt)) return;
+            map.set(key, {
+                cachedAt,
+                market,
+                priceMode,
+                splitAdjustment: split,
+            });
+        });
+        return map;
+    } catch (error) {
+        console.warn('[Main] 無法載入 Session 回測快取索引:', error);
+        return new Map();
+    }
+}
+
+function saveSessionDataCacheIndex() {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    if (!(sessionDataCacheIndex instanceof Map)) return;
+    try {
+        const records = Array.from(sessionDataCacheIndex.entries()).map(([key, entry]) => ({
+            key,
+            cachedAt: Number.isFinite(entry?.cachedAt) ? entry.cachedAt : Date.now(),
+            market: entry?.market || null,
+            priceMode: entry?.priceMode || null,
+            splitAdjustment: entry?.splitAdjustment ? 1 : 0,
+        }));
+        const payload = { version: SESSION_DATA_CACHE_VERSION, records };
+        window.sessionStorage.setItem(SESSION_DATA_CACHE_INDEX_KEY, JSON.stringify(payload));
+    } catch (error) {
+        console.warn('[Main] 無法寫入 Session 回測快取索引:', error);
+    }
+}
+
+function pruneSessionDataCacheEntries(options = {}) {
+    if (!(sessionDataCacheIndex instanceof Map)) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    const now = Date.now();
+    const removedKeys = [];
+    const ttlMs = YEAR_STORAGE_DEFAULT_TTL_MS;
+    for (const [key, entry] of sessionDataCacheIndex.entries()) {
+        const cachedAt = Number(entry?.cachedAt);
+        if (!Number.isFinite(cachedAt)) {
+            sessionDataCacheIndex.delete(key);
+            removedKeys.push(key);
+            continue;
+        }
+        const ttl = getYearStorageTtlMs(entry?.market || null) || ttlMs;
+        if (ttl > 0 && now - cachedAt > ttl) {
+            sessionDataCacheIndex.delete(key);
+            removedKeys.push(key);
+        }
+    }
+    const limit = Number.isFinite(options?.limit) ? options.limit : SESSION_DATA_CACHE_LIMIT;
+    if (limit > 0 && sessionDataCacheIndex.size > limit) {
+        const sorted = Array.from(sessionDataCacheIndex.entries()).sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+        while (sorted.length > limit) {
+            const [key] = sorted.shift();
+            sessionDataCacheIndex.delete(key);
+            removedKeys.push(key);
+        }
+    }
+    if (removedKeys.length > 0) {
+        removedKeys.forEach((key) => {
+            try {
+                window.sessionStorage.removeItem(buildSessionStorageEntryKey(key));
+            } catch (error) {
+                console.warn('[Main] 無法移除 Session 回測快取項目:', error);
+            }
+        });
+    }
+    if (options?.save !== false) {
+        saveSessionDataCacheIndex();
+    }
+}
+
+function getSessionDataCacheEntry(cacheKey) {
+    if (!cacheKey) return null;
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    try {
+        const raw = window.sessionStorage.getItem(buildSessionStorageEntryKey(cacheKey));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== SESSION_DATA_CACHE_VERSION) return null;
+        if (!Array.isArray(parsed.data) || parsed.data.length === 0) return null;
+        return parsed;
+    } catch (error) {
+        console.warn('[Main] 解析 Session 回測快取失敗:', error);
+        return null;
+    }
+}
+
+function persistSessionDataCacheEntry(cacheKey, cacheEntry, options = {}) {
+    if (!cacheKey || !cacheEntry) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    const payload = {
+        version: SESSION_DATA_CACHE_VERSION,
+        cachedAt: Date.now(),
+        data: Array.isArray(cacheEntry.data) ? cacheEntry.data : [],
+        coverage: Array.isArray(cacheEntry.coverage) ? cacheEntry.coverage : [],
+        meta: {
+            stockName: cacheEntry.stockName || null,
+            stockNo: cacheEntry.stockNo || null,
+            market: options.market || null,
+            dataSource: cacheEntry.dataSource || null,
+            dataSources: Array.isArray(cacheEntry.dataSources) ? cacheEntry.dataSources : [],
+            priceMode: cacheEntry.priceMode || null,
+            splitAdjustment: Boolean(cacheEntry.splitAdjustment),
+            dataStartDate: cacheEntry.dataStartDate || null,
+            effectiveStartDate: cacheEntry.effectiveStartDate || null,
+            lookbackDays: cacheEntry.lookbackDays || null,
+            summary: cacheEntry.summary || null,
+            adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
+            debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
+            priceSource: cacheEntry.priceSource || null,
+            fetchRange: cacheEntry.fetchRange || null,
+            fetchDiagnostics: cacheEntry.fetchDiagnostics || null,
+            coverageFingerprint: cacheEntry.coverageFingerprint || null,
+        },
+    };
+    try {
+        window.sessionStorage.setItem(buildSessionStorageEntryKey(cacheKey), JSON.stringify(payload));
+        sessionDataCacheIndex.set(cacheKey, {
+            cachedAt: payload.cachedAt,
+            market: options.market || null,
+            priceMode: cacheEntry.priceMode || null,
+            splitAdjustment: Boolean(cacheEntry.splitAdjustment),
+        });
+        pruneSessionDataCacheEntries({ save: true });
+    } catch (error) {
+        console.warn('[Main] 寫入 Session 回測快取失敗:', error);
+    }
+}
+
+function removeSessionDataCacheEntry(cacheKey) {
+    if (!cacheKey) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+        window.sessionStorage.removeItem(buildSessionStorageEntryKey(cacheKey));
+    } catch (error) {
+        console.warn('[Main] 移除 Session 回測快取失敗:', error);
+    }
+    if (sessionDataCacheIndex instanceof Map) {
+        sessionDataCacheIndex.delete(cacheKey);
+        saveSessionDataCacheIndex();
+    }
+}
+
+function buildYearStorageKey(context, year) {
+    if (!context || !context.stockNo) return null;
+    const market = normalizeMarketKeyForCache(context.market || context.marketType || currentMarket || 'TWSE');
+    const stockNo = (context.stockNo || '').toString().toUpperCase();
+    const priceMode = (context.priceMode || (context.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const priceModeKey = priceMode === 'adjusted' ? 'ADJ' : 'RAW';
+    const splitFlag = context.splitAdjustment ? 'SPLIT' : 'NOSPLIT';
+    return `${YEAR_STORAGE_PREFIX}::${market}|${stockNo}|${priceModeKey}|${splitFlag}|${year}`;
+}
+
+function loadYearStorageSlice(context, year) {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const key = buildYearStorageKey(context, year);
+    if (!key) return null;
+    try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== YEAR_STORAGE_VERSION) return null;
+        const cachedAt = Number(parsed.cachedAt);
+        if (!Number.isFinite(cachedAt)) return null;
+        const ttl = getYearStorageTtlMs(parsed.market || context.market || null);
+        if (ttl > 0 && Date.now() - cachedAt > ttl) {
+            window.localStorage.removeItem(key);
+            return null;
+        }
+        if (!Array.isArray(parsed.data) || parsed.data.length === 0) return null;
+        return parsed;
+    } catch (error) {
+        console.warn('[Main] 解析年度快取失敗:', error);
+        return null;
+    }
+}
+
+function computeCoverageFromRows(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const sorted = rows
+        .map((row) => (row && row.date ? parseISODateToUTC(row.date) : NaN))
+        .filter((ms) => Number.isFinite(ms))
+        .sort((a, b) => a - b);
+    if (sorted.length === 0) return [];
+    const tolerance = MAIN_DAY_MS * 6;
+    const segments = [];
+    let segStart = sorted[0];
+    let segEnd = segStart + MAIN_DAY_MS;
+    for (let i = 1; i < sorted.length; i += 1) {
+        const current = sorted[i];
+        if (!Number.isFinite(current)) continue;
+        if (current <= segEnd + tolerance) {
+            if (current + MAIN_DAY_MS > segEnd) {
+                segEnd = current + MAIN_DAY_MS;
+            }
+        } else {
+            segments.push({ start: utcToISODate(segStart), end: utcToISODate(segEnd - MAIN_DAY_MS) });
+            segStart = current;
+            segEnd = current + MAIN_DAY_MS;
+        }
+    }
+    segments.push({ start: utcToISODate(segStart), end: utcToISODate(segEnd - MAIN_DAY_MS) });
+    return segments;
+}
+
+function computeCoverageFingerprint(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    const parts = coverage
+        .map((range) => {
+            if (!range || (!range.start && !range.end)) return null;
+            const start = range.start || '';
+            const end = range.end || '';
+            return `${start}~${end}`;
+        })
+        .filter(Boolean);
+    if (parts.length === 0) return null;
+    return parts.join('|');
+}
+
+function persistYearStorageSlices(context, dataset, options = {}) {
+    if (!context || !Array.isArray(dataset) || dataset.length === 0) return;
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const grouped = new Map();
+    dataset.forEach((row) => {
+        if (!row || typeof row.date !== 'string') return;
+        const year = parseInt(row.date.slice(0, 4), 10);
+        if (!Number.isFinite(year)) return;
+        if (!grouped.has(year)) grouped.set(year, []);
+        grouped.get(year).push(row);
+    });
+    const now = Date.now();
+    grouped.forEach((rows, year) => {
+        const key = buildYearStorageKey(context, year);
+        if (!key) return;
+        const payload = {
+            version: YEAR_STORAGE_VERSION,
+            cachedAt: now,
+            market: context.market || null,
+            stockNo: context.stockNo || null,
+            priceMode: context.priceMode || null,
+            splitAdjustment: Boolean(context.splitAdjustment),
+            data: rows,
+            coverage: computeCoverageFromRows(rows),
+        };
+        try {
+            window.localStorage.setItem(key, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('[Main] 寫入年度快取失敗:', error);
+        }
+    });
+    if (options?.prune !== false) {
+        pruneYearStorageEntries();
+    }
+}
+
+function pruneYearStorageEntries() {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const now = Date.now();
+    const toRemove = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i);
+        if (!key || !key.startsWith(`${YEAR_STORAGE_PREFIX}::`)) continue;
+        try {
+            const raw = window.localStorage.getItem(key);
+            if (!raw) {
+                toRemove.push(key);
+                continue;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed || parsed.version !== YEAR_STORAGE_VERSION) {
+                toRemove.push(key);
+                continue;
+            }
+            const ttl = getYearStorageTtlMs(parsed.market || null);
+            const cachedAt = Number(parsed.cachedAt);
+            if (!Number.isFinite(cachedAt) || (ttl > 0 && now - cachedAt > ttl)) {
+                toRemove.push(key);
+            }
+        } catch (error) {
+            console.warn('[Main] 檢查年度快取時失敗:', error);
+            toRemove.push(key);
+        }
+    }
+    toRemove.forEach((key) => {
+        try {
+            window.localStorage.removeItem(key);
+        } catch (error) {
+            console.warn('[Main] 移除年度快取失敗:', error);
+        }
+    });
+}
+
+const sessionDataCacheIndex = loadSessionDataCacheIndex();
+pruneSessionDataCacheEntries({ save: false });
+
+const persistentDataCacheIndex = loadPersistentDataCacheIndex();
+prunePersistentDataCacheIndex();
+
+pruneYearStorageEntries();
+
+function loadBlobUsageLedger() {
+    const base = { version: BLOB_LEDGER_VERSION, updatedAt: null, months: {} };
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return base;
+    }
+    try {
+        const raw = window.localStorage.getItem(BLOB_LEDGER_STORAGE_KEY);
+        if (!raw) return base;
+        const parsed = JSON.parse(raw);
+        const months = parsed && typeof parsed.months === 'object' ? parsed.months : {};
+        const ledger = { version: BLOB_LEDGER_VERSION, updatedAt: parsed?.updatedAt || null, months: {} };
+        const now = new Date();
+        const limit = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+        Object.entries(months).forEach(([monthKey, stats]) => {
+            if (!monthKey || typeof stats !== 'object') return;
+            const [yearStr, monthStr] = monthKey.split('-');
+            const year = parseInt(yearStr, 10);
+            const month = parseInt(monthStr, 10) - 1;
+            if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+            const monthDate = new Date(year, month, 1);
+            if (monthDate < limit) return;
+            ledger.months[monthKey] = {
+                readOps: Number(stats.readOps) || 0,
+                writeOps: Number(stats.writeOps) || 0,
+                cacheHits: Number(stats.cacheHits) || 0,
+                cacheMisses: Number(stats.cacheMisses) || 0,
+                stocks: stats.stocks && typeof stats.stocks === 'object' ? stats.stocks : {},
+                events: Array.isArray(stats.events) ? stats.events.slice(0, BLOB_LEDGER_MAX_EVENTS) : [],
+            };
+        });
+        return ledger;
+    } catch (error) {
+        console.warn('[Main] 載入 Blob 用量紀錄失敗:', error);
+        return base;
+    }
+}
+
+const blobUsageLedger = loadBlobUsageLedger();
+const blobUsageAccordionState = { overrides: {} };
+
+function isBlobUsageGroupExpanded(dateKey, defaultExpanded) {
+    if (!dateKey) return defaultExpanded;
+    if (Object.prototype.hasOwnProperty.call(blobUsageAccordionState.overrides, dateKey)) {
+        return Boolean(blobUsageAccordionState.overrides[dateKey]);
+    }
+    return defaultExpanded;
+}
+
+function setBlobUsageGroupExpanded(dateKey, expanded) {
+    if (!dateKey) return;
+    blobUsageAccordionState.overrides[dateKey] = Boolean(expanded);
+}
+
+function recordTaiwanDirectoryBlobUsage(cacheMeta) {
+    if (!cacheMeta || cacheMeta.store !== 'blob') return;
+    const operations = [
+        {
+            action: 'read',
+            cacheHit: Boolean(cacheMeta.hit),
+            key: 'taiwan-directory',
+            source: 'taiwan-directory',
+            count: 1,
+        },
+    ];
+    if (!cacheMeta.hit) {
+        operations.push({
+            action: 'write',
+            cacheHit: false,
+            key: 'taiwan-directory',
+            source: 'taiwan-directory',
+            count: 1,
+        });
+    }
+    recordBlobUsageEvents(operations, { source: 'taiwan-directory' });
+    renderBlobUsageCard();
+}
+
+function saveBlobUsageLedger() {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+        window.localStorage.setItem(BLOB_LEDGER_STORAGE_KEY, JSON.stringify(blobUsageLedger));
+    } catch (error) {
+        console.warn('[Main] 寫入 Blob 用量紀錄失敗:', error);
+    }
+}
+
+function recordBlobUsageEvents(operations, options = {}) {
+    if (!Array.isArray(operations) || operations.length === 0) return;
+    if (!blobUsageLedger || typeof blobUsageLedger !== 'object') return;
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!blobUsageLedger.months[monthKey]) {
+        blobUsageLedger.months[monthKey] = {
+            readOps: 0,
+            writeOps: 0,
+            cacheHits: 0,
+            cacheMisses: 0,
+            stocks: {},
+            events: [],
+        };
+    }
+    const monthRecord = blobUsageLedger.months[monthKey];
+    operations.forEach((op) => {
+        if (!op || typeof op !== 'object') return;
+        const action = op.action || op.type || 'read';
+        const stockNo = op.stockNo || options.stockNo || null;
+        const market = op.market || options.market || null;
+        const cacheHit = Boolean(op.cacheHit);
+        const opCount = Number(op.count) || 1;
+        if (action === 'write') {
+            monthRecord.writeOps += opCount;
+        } else {
+            monthRecord.readOps += opCount;
+        }
+        if (cacheHit) {
+            monthRecord.cacheHits += opCount;
+        } else {
+            monthRecord.cacheMisses += opCount;
+        }
+        if (stockNo) {
+            if (!monthRecord.stocks[stockNo]) {
+                monthRecord.stocks[stockNo] = { count: 0, market: market || null };
+            }
+            monthRecord.stocks[stockNo].count += opCount;
+            monthRecord.stocks[stockNo].market = market || monthRecord.stocks[stockNo].market || null;
+        }
+        const event = {
+            timestamp: Date.now(),
+            action,
+            cacheHit,
+            key: op.key || op.yearKey || null,
+            stockNo,
+            market,
+            source: op.source || options.source || null,
+            count: opCount,
+        };
+        monthRecord.events.unshift(event);
+        if (monthRecord.events.length > BLOB_LEDGER_MAX_EVENTS) {
+            monthRecord.events.length = BLOB_LEDGER_MAX_EVENTS;
+        }
+    });
+    blobUsageLedger.updatedAt = Date.now();
+    saveBlobUsageLedger();
+}
+
+function resolvePriceMode(settings) {
+    if (!settings) return 'raw';
+    const mode = settings.priceMode || (settings.adjustedPrice ? 'adjusted' : 'raw');
+    return mode === 'adjusted' ? 'adjusted' : 'raw';
+}
+
+function enumerateYearsBetween(startISO, endISO) {
+    if (!startISO || !endISO) return [];
+    const startYear = parseInt(startISO.slice(0, 4), 10);
+    const endYear = parseInt(endISO.slice(0, 4), 10);
+    if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return [];
+    const years = [];
+    const step = startYear <= endYear ? 1 : -1;
+    for (let year = startYear; step > 0 ? year <= endYear : year >= endYear; year += step) {
+        years.push(year);
+    }
+    return years;
+}
+
+function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
+    if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) return null;
+    const meta = payload.meta || {};
+    const dataSourceLabel = meta.dataSource || '瀏覽器 Session 快取';
+    const sourceLabels = Array.isArray(meta.dataSources) && meta.dataSources.length > 0
+        ? meta.dataSources
+        : [dataSourceLabel];
+    const requestedRange = meta.fetchRange && typeof meta.fetchRange === 'object'
+        ? { start: meta.fetchRange.start || null, end: meta.fetchRange.end || null }
+        : {
+            start: context.startDate || meta.dataStartDate || null,
+            end: context.endDate || null,
+        };
+    const replayDiagnostics = normaliseFetchDiagnosticsForCacheReplay(meta.fetchDiagnostics || null, {
+        source: 'session-storage-cache',
+        requestedRange,
+        coverage: payload.coverage,
+    });
+    return {
+        data: payload.data,
+        coverage: Array.isArray(payload.coverage) ? payload.coverage : [],
+        coverageFingerprint: computeCoverageFingerprint(payload.coverage),
+        stockName: meta.stockName || context.stockNo || null,
+        stockNo: meta.stockNo || context.stockNo || null,
+        market: meta.market || context.market || null,
+        dataSources: sourceLabels,
+        dataSource: summariseSourceLabels(sourceLabels),
+        fetchedAt: payload.cachedAt || Date.now(),
+        adjustedPrice: meta.priceMode === 'adjusted' || meta.adjustedPrice,
+        splitAdjustment: Boolean(meta.splitAdjustment),
+        priceMode: meta.priceMode || (meta.adjustedPrice ? 'adjusted' : 'raw'),
+        dataStartDate: meta.dataStartDate || null,
+        effectiveStartDate: meta.effectiveStartDate || null,
+        lookbackDays: meta.lookbackDays || null,
+        summary: meta.summary || null,
+        adjustments: Array.isArray(meta.adjustments) ? meta.adjustments : [],
+        debugSteps: Array.isArray(meta.debugSteps) ? meta.debugSteps : [],
+        priceSource: meta.priceSource || null,
+        fetchRange: meta.fetchRange || null,
+        fetchDiagnostics: replayDiagnostics,
+    };
+}
+
+function loadYearDatasetForRange(context, startISO, endISO) {
+    const years = enumerateYearsBetween(startISO, endISO);
+    if (years.length === 0) return null;
+    const slices = [];
+    for (let i = 0; i < years.length; i += 1) {
+        const slice = loadYearStorageSlice(context, years[i]);
+        if (!slice) return null;
+        slices.push(slice);
+    }
+    const merged = new Map();
+    slices.forEach((slice) => {
+        if (!slice || !Array.isArray(slice.data)) return;
+        slice.data.forEach((row) => {
+            if (row && row.date) {
+                merged.set(row.date, row);
+            }
+        });
+    });
+    if (merged.size === 0) return null;
+    const combined = Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const coverage = computeCoverageFromRows(combined);
+    if (!coverageCoversRange(coverage, { start: startISO, end: endISO })) {
+        return null;
+    }
+    const fetchedAt = Math.max(...slices.map((slice) => Number(slice.cachedAt) || 0));
+    return {
+        data: combined,
+        coverage,
+        coverageFingerprint: computeCoverageFingerprint(coverage),
+        fetchedAt: Number.isFinite(fetchedAt) ? fetchedAt : Date.now(),
+        stockName: slices.find((slice) => slice.stockNo)?.stockNo || context.stockNo || null,
+        stockNo: context.stockNo || null,
+        market: context.market || null,
+        dataSource: '瀏覽器年度快取',
+        dataSources: ['瀏覽器年度快取'],
+    };
+}
+
+function hydrateDatasetFromStorage(cacheKey, curSettings) {
+    if (!cacheKey || !curSettings) return null;
+    if (!(cachedDataStore instanceof Map)) return null;
+    const existing = cachedDataStore.get(cacheKey);
+    if (existing && Array.isArray(existing.data) && existing.data.length > 0) {
+        return existing;
+    }
+    const normalizedMarket = normalizeMarketKeyForCache(curSettings.market || curSettings.marketType || currentMarket || 'TWSE');
+    const sessionPayload = getSessionDataCacheEntry(cacheKey);
+    if (sessionPayload) {
+        const sessionEntry = rebuildCacheEntryFromSessionPayload(sessionPayload, {
+            stockNo: curSettings.stockNo,
+            startDate: curSettings.dataStartDate || curSettings.startDate,
+            endDate: curSettings.endDate,
+            market: normalizedMarket,
+        });
+        if (sessionEntry) {
+            sessionEntry.stockNo = sessionEntry.stockNo || curSettings.stockNo;
+            sessionEntry.market = sessionEntry.market || normalizedMarket;
+            sessionEntry.coverageFingerprint = sessionEntry.coverageFingerprint
+                || computeCoverageFingerprint(sessionEntry.coverage);
+            applyCacheStartMetadata(cacheKey, sessionEntry, curSettings.effectiveStartDate || curSettings.startDate, {
+                toleranceDays: START_GAP_TOLERANCE_DAYS,
+                acknowledgeExcessGap: true,
+            });
+            cachedDataStore.set(cacheKey, sessionEntry);
+            persistDataCacheIndexEntry(cacheKey, {
+                market: normalizedMarket,
+                fetchedAt: sessionEntry.fetchedAt,
+                priceMode: sessionEntry.priceMode || resolvePriceMode(curSettings),
+                splitAdjustment: curSettings.splitAdjustment,
+                dataStartDate: sessionEntry.dataStartDate || curSettings.dataStartDate || curSettings.startDate,
+                coverageFingerprint: sessionEntry.coverageFingerprint || computeCoverageFingerprint(sessionEntry.coverage),
+            });
+            return sessionEntry;
+        }
+    }
+    const priceMode = resolvePriceMode(curSettings);
+    const yearDataset = loadYearDatasetForRange({
+        market: normalizedMarket,
+        stockNo: curSettings.stockNo,
+        priceMode,
+        splitAdjustment: curSettings.splitAdjustment,
+    }, curSettings.dataStartDate || curSettings.startDate, curSettings.endDate);
+    if (yearDataset) {
+        const entry = {
+            data: yearDataset.data,
+            coverage: yearDataset.coverage,
+            coverageFingerprint: yearDataset.coverageFingerprint,
+            stockName: yearDataset.stockName || curSettings.stockNo,
+            stockNo: curSettings.stockNo,
+            market: normalizedMarket,
+            dataSources: yearDataset.dataSources || [yearDataset.dataSource],
+            dataSource: summariseSourceLabels(yearDataset.dataSources || [yearDataset.dataSource]),
+            fetchedAt: yearDataset.fetchedAt,
+            adjustedPrice: priceMode === 'adjusted',
+            splitAdjustment: Boolean(curSettings.splitAdjustment),
+            priceMode,
+            dataStartDate: curSettings.dataStartDate || curSettings.startDate,
+            effectiveStartDate: curSettings.effectiveStartDate || curSettings.startDate,
+            lookbackDays: curSettings.lookbackDays || null,
+            fetchRange: { start: curSettings.dataStartDate || curSettings.startDate, end: curSettings.endDate },
+            fetchDiagnostics: normaliseFetchDiagnosticsForCacheReplay(null, {
+                source: 'browser-year-cache',
+                requestedRange: { start: curSettings.dataStartDate || curSettings.startDate, end: curSettings.endDate },
+                coverage: yearDataset.coverage,
+            }),
+        };
+        applyCacheStartMetadata(cacheKey, entry, curSettings.effectiveStartDate || curSettings.startDate, {
+            toleranceDays: START_GAP_TOLERANCE_DAYS,
+            acknowledgeExcessGap: true,
+        });
+        cachedDataStore.set(cacheKey, entry);
+        persistDataCacheIndexEntry(cacheKey, {
+            market: normalizedMarket,
+            fetchedAt: entry.fetchedAt,
+            priceMode,
+            splitAdjustment: curSettings.splitAdjustment,
+            dataStartDate: entry.dataStartDate,
+            coverageFingerprint: entry.coverageFingerprint || computeCoverageFingerprint(entry.coverage),
+        });
+        persistSessionDataCacheEntry(cacheKey, entry, { market: normalizedMarket });
+        return entry;
+    }
+    return null;
+}
+
+function findSupersetDatasetCandidate(curSettings, options = {}) {
+    if (!curSettings || !(cachedDataStore instanceof Map)) return null;
+    const normalizedMarket = normalizeMarketKeyForCache(
+        curSettings.market || curSettings.marketType || currentMarket || 'TWSE',
+    );
+    const targetStockNo = (curSettings.stockNo || '').toUpperCase();
+    const targetRange = {
+        start: curSettings.dataStartDate || curSettings.startDate,
+        end: curSettings.endDate,
+    };
+    const priceMode = resolvePriceMode(curSettings);
+    const splitFlag = Boolean(curSettings.splitAdjustment);
+    let best = null;
+    cachedDataStore.forEach((entry, key) => {
+        if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) return;
+        const entryStock = (entry.stockNo || '').toUpperCase();
+        if (entryStock !== targetStockNo) return;
+        const entryMarket = normalizeMarketKeyForCache(entry.market || normalizedMarket);
+        if (entryMarket !== normalizedMarket) return;
+        const entryMode = resolvePriceMode(entry);
+        if ((entryMode === 'adjusted') !== (priceMode === 'adjusted')) return;
+        if (Boolean(entry.splitAdjustment) !== splitFlag) return;
+        if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return;
+        if (!coverageCoversRange(entry.coverage, targetRange)) return;
+        if (options.excludeKey && options.excludeKey === key) return;
+        if (!best || (Number(entry.fetchedAt) || 0) > (Number(best.entry.fetchedAt) || 0)) {
+            best = { key, entry };
+        }
+    });
+    return best;
+}
+
+function materializeSupersetCacheEntry(cacheKey, curSettings) {
+    if (!cacheKey || !curSettings || !(cachedDataStore instanceof Map)) return null;
+    const normalizedMarket = normalizeMarketKeyForCache(
+        curSettings.market || curSettings.marketType || currentMarket || 'TWSE',
+    );
+    const existing = cachedDataStore.get(cacheKey);
+    const targetRange = {
+        start: curSettings.dataStartDate || curSettings.startDate,
+        end: curSettings.endDate,
+    };
+    if (
+        existing &&
+        Array.isArray(existing.data) &&
+        existing.data.length > 0 &&
+        coverageCoversRange(existing.coverage, targetRange)
+    ) {
+        existing.stockNo = existing.stockNo || curSettings.stockNo;
+        existing.market = existing.market || normalizedMarket;
+        existing.coverageFingerprint = existing.coverageFingerprint
+            || computeCoverageFingerprint(existing.coverage);
+        return existing;
+    }
+    const candidate = findSupersetDatasetCandidate(curSettings, { excludeKey: cacheKey });
+    if (!candidate) return null;
+    const priceMode = resolvePriceMode(curSettings);
+    const sliceStart = curSettings.dataStartDate || curSettings.startDate;
+    const sliceEnd = curSettings.endDate;
+    const sliceRows = candidate.entry.data.filter((row) =>
+        row && row.date >= sliceStart && row.date <= sliceEnd,
+    );
+    if (sliceRows.length === 0) return null;
+    const coverage = computeCoverageFromRows(sliceRows);
+    if (!coverageCoversRange(coverage, targetRange)) return null;
+    const coverageFingerprint = computeCoverageFingerprint(coverage);
+    const sourceLabels = Array.isArray(candidate.entry.dataSources)
+        ? candidate.entry.dataSources.slice()
+        : candidate.entry.dataSource
+            ? [candidate.entry.dataSource]
+            : [];
+    const supersetEntry = {
+        data: sliceRows,
+        coverage,
+        coverageFingerprint,
+        stockName: candidate.entry.stockName || curSettings.stockNo,
+        stockNo: curSettings.stockNo,
+        market: normalizedMarket,
+        dataSources: sourceLabels,
+        dataSource: summariseSourceLabels(sourceLabels),
+        fetchedAt: Number.isFinite(candidate.entry.fetchedAt)
+            ? candidate.entry.fetchedAt
+            : Date.now(),
+        adjustedPrice: priceMode === 'adjusted',
+        splitAdjustment: Boolean(curSettings.splitAdjustment),
+        priceMode,
+        dataStartDate: sliceStart,
+        effectiveStartDate: curSettings.effectiveStartDate || curSettings.startDate,
+        lookbackDays: curSettings.lookbackDays || candidate.entry.lookbackDays || null,
+        fetchRange: { start: sliceStart, end: sliceEnd },
+        summary: candidate.entry.summary || null,
+        adjustments: Array.isArray(candidate.entry.adjustments)
+            ? candidate.entry.adjustments
+            : [],
+        debugSteps: Array.isArray(candidate.entry.debugSteps)
+            ? candidate.entry.debugSteps
+            : [],
+        priceSource: candidate.entry.priceSource || null,
+        splitDiagnostics: candidate.entry.splitDiagnostics || null,
+        finmindStatus: candidate.entry.finmindStatus || null,
+        adjustmentFallbackApplied: Boolean(candidate.entry.adjustmentFallbackApplied),
+        adjustmentDebugLog: Array.isArray(candidate.entry.adjustmentDebugLog)
+            ? candidate.entry.adjustmentDebugLog
+            : [],
+        adjustmentChecks: Array.isArray(candidate.entry.adjustmentChecks)
+            ? candidate.entry.adjustmentChecks
+            : [],
+        datasetDiagnostics: candidate.entry.datasetDiagnostics || null,
+        fetchDiagnostics: normaliseFetchDiagnosticsForCacheReplay(
+            candidate.entry.fetchDiagnostics || null,
+            {
+                source: 'main-superset-cache',
+                requestedRange: { start: sliceStart, end: sliceEnd },
+                coverage,
+            },
+        ),
+    };
+    applyCacheStartMetadata(cacheKey, supersetEntry, supersetEntry.effectiveStartDate, {
+        toleranceDays: START_GAP_TOLERANCE_DAYS,
+        acknowledgeExcessGap: true,
+    });
+    cachedDataStore.set(cacheKey, supersetEntry);
+    persistDataCacheIndexEntry(cacheKey, {
+        market: normalizedMarket,
+        fetchedAt: supersetEntry.fetchedAt,
+        priceMode,
+        splitAdjustment: curSettings.splitAdjustment,
+        dataStartDate: supersetEntry.dataStartDate,
+        coverageFingerprint,
+    });
+    persistSessionDataCacheEntry(cacheKey, supersetEntry, { market: normalizedMarket });
+    persistYearStorageSlices({
+        market: normalizedMarket,
+        stockNo: curSettings.stockNo,
+        priceMode,
+        splitAdjustment: curSettings.splitAdjustment,
+    }, supersetEntry.data);
+    console.log(
+        `[Main] 使用年度 Superset 快取回填 ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd})。`,
+    );
+    return supersetEntry;
+}
 
 function parseISODateToUTC(iso) {
     if (!iso || typeof iso !== 'string') return NaN;
     const [y, m, d] = iso.split('-').map((val) => parseInt(val, 10));
     if ([y, m, d].some((num) => Number.isNaN(num))) return NaN;
     return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+function formatNumberWithComma(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '0';
+    return num.toLocaleString('zh-TW');
 }
 
 function computeEffectiveStartGap(data, effectiveStartISO) {
@@ -124,6 +1052,172 @@ function evaluateCacheStartGap(cacheKey, cacheEntry, effectiveStartISO, options 
     return { shouldForce: false, gapDays, firstEffectiveDate, acknowledged: true };
 }
 
+function loadPersistentDataCacheIndex() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return new Map();
+    }
+    try {
+        const raw = window.localStorage.getItem(DATA_CACHE_INDEX_KEY);
+        if (!raw) return new Map();
+        const parsed = JSON.parse(raw);
+        const records = Array.isArray(parsed?.records)
+            ? parsed.records
+            : Array.isArray(parsed)
+                ? parsed
+                : [];
+        const now = Date.now();
+        const map = new Map();
+        records.forEach((record) => {
+            if (!record || typeof record !== 'object') return;
+            const key = record.key || record.cacheKey;
+            const fetchedAt = Number(record.fetchedAt);
+            if (!key || !Number.isFinite(fetchedAt)) return;
+            const normalizedMarket = normalizeMarketKeyForCache(record.market);
+            const ttl = getDatasetCacheTTLMs(normalizedMarket);
+            if (ttl > 0 && now - fetchedAt > ttl) return;
+            map.set(key, {
+                market: normalizedMarket,
+                fetchedAt,
+                priceMode: record.priceMode || null,
+                splitAdjustment: Boolean(record.splitAdjustment),
+                dataStartDate: record.dataStartDate || null,
+                coverageFingerprint: record.coverageFingerprint || null,
+            });
+        });
+        return map;
+    } catch (error) {
+        console.warn('[Main] 無法載入資料快取索引:', error);
+        return new Map();
+    }
+}
+
+function savePersistentDataCacheIndex() {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (!(persistentDataCacheIndex instanceof Map)) return;
+    try {
+        const records = Array.from(persistentDataCacheIndex.entries()).map(([key, entry]) => ({
+            key,
+            market: entry.market,
+            fetchedAt: entry.fetchedAt,
+            priceMode: entry.priceMode || null,
+            splitAdjustment: entry.splitAdjustment ? 1 : 0,
+            dataStartDate: entry.dataStartDate || null,
+            coverageFingerprint: entry.coverageFingerprint || null,
+        }));
+        const payload = { version: DATA_CACHE_VERSION, records };
+        window.localStorage.setItem(DATA_CACHE_INDEX_KEY, JSON.stringify(payload));
+    } catch (error) {
+        console.warn('[Main] 無法寫入資料快取索引:', error);
+    }
+}
+
+function persistDataCacheIndexEntry(cacheKey, meta) {
+    if (!(persistentDataCacheIndex instanceof Map)) return;
+    if (!cacheKey || !meta) return;
+    const normalizedMarket = normalizeMarketKeyForCache(meta.market);
+    const record = {
+        market: normalizedMarket,
+        fetchedAt: Number.isFinite(meta.fetchedAt) ? meta.fetchedAt : Date.now(),
+        priceMode: meta.priceMode || null,
+        splitAdjustment: Boolean(meta.splitAdjustment),
+        dataStartDate: meta.dataStartDate || null,
+        coverageFingerprint: meta.coverageFingerprint || null,
+    };
+    persistentDataCacheIndex.set(cacheKey, record);
+    prunePersistentDataCacheIndex({ save: false });
+    savePersistentDataCacheIndex();
+}
+
+function removePersistentDataCacheEntry(cacheKey) {
+    if (!(persistentDataCacheIndex instanceof Map)) return;
+    if (!cacheKey) return;
+    const removed = persistentDataCacheIndex.delete(cacheKey);
+    if (removed) {
+        savePersistentDataCacheIndex();
+    }
+    if (cachedDataStore instanceof Map) {
+        cachedDataStore.delete(cacheKey);
+    }
+}
+
+function clearPersistentDataCacheIndex() {
+    if (persistentDataCacheIndex instanceof Map) {
+        persistentDataCacheIndex.clear();
+    }
+    if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+            window.localStorage.removeItem(DATA_CACHE_INDEX_KEY);
+        } catch (error) {
+            console.warn('[Main] 無法清除資料快取索引:', error);
+        }
+    }
+}
+
+function prunePersistentDataCacheIndex(options = {}) {
+    if (!(persistentDataCacheIndex instanceof Map)) return false;
+    const now = Date.now();
+    let mutated = false;
+    for (const [key, entry] of persistentDataCacheIndex.entries()) {
+        if (!entry || !Number.isFinite(entry.fetchedAt)) continue;
+        const ttl = getDatasetCacheTTLMs(entry.market);
+        if (ttl > 0 && now - entry.fetchedAt > ttl) {
+            persistentDataCacheIndex.delete(key);
+            mutated = true;
+            if (cachedDataStore instanceof Map) {
+                cachedDataStore.delete(key);
+            }
+        }
+    }
+    if (mutated && options.save !== false) {
+        savePersistentDataCacheIndex();
+    }
+    return mutated;
+}
+
+function ensureDatasetCacheEntryFresh(cacheKey, entry, market) {
+    const normalizedMarket = normalizeMarketKeyForCache(market || 'TWSE');
+    const ttl = getDatasetCacheTTLMs(normalizedMarket);
+    const meta = persistentDataCacheIndex instanceof Map ? persistentDataCacheIndex.get(cacheKey) : null;
+    const fetchedAtCandidate = Number.isFinite(entry?.fetchedAt)
+        ? entry.fetchedAt
+        : Number.isFinite(meta?.fetchedAt)
+            ? meta.fetchedAt
+            : null;
+    if (
+        ttl > 0 &&
+        Number.isFinite(fetchedAtCandidate) &&
+        Date.now() - fetchedAtCandidate > ttl
+    ) {
+        if (cachedDataStore instanceof Map && cachedDataStore.has(cacheKey)) {
+            cachedDataStore.delete(cacheKey);
+        }
+        if (persistentDataCacheIndex instanceof Map && persistentDataCacheIndex.has(cacheKey)) {
+            persistentDataCacheIndex.delete(cacheKey);
+            savePersistentDataCacheIndex();
+        }
+        return null;
+    }
+    if (entry && persistentDataCacheIndex instanceof Map) {
+        const needsUpdate =
+            !meta ||
+            meta.market !== normalizedMarket ||
+            !Number.isFinite(meta.fetchedAt) ||
+            (Number.isFinite(entry.fetchedAt) && entry.fetchedAt !== meta.fetchedAt);
+        if (needsUpdate) {
+            persistentDataCacheIndex.set(cacheKey, {
+                market: normalizedMarket,
+                fetchedAt: Number.isFinite(entry.fetchedAt) ? entry.fetchedAt : Date.now(),
+                priceMode: entry.priceMode || null,
+                splitAdjustment: Boolean(entry.splitAdjustment),
+                dataStartDate: entry.dataStartDate || null,
+                coverageFingerprint: entry.coverageFingerprint || null,
+            });
+            savePersistentDataCacheIndex();
+        }
+    }
+    return entry || null;
+}
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -136,22 +1230,65 @@ function runBacktestInternal() {
         if(!isValid) return;
 
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        const maxIndicatorPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        const windowOptions = {
+            minBars: 90,
+            multiplier: 2,
+            marginTradingDays: 12,
+            extraCalendarDays: 7,
+            minDate: sharedUtils?.MIN_DATA_DATE,
+            defaultStartDate: params.startDate,
+        };
+        let windowDecision = null;
+        if (sharedUtils && typeof sharedUtils.resolveDataWindow === 'function') {
+            windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
+        }
+        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
-        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
-            : Math.max(90, maxIndicatorPeriod * 2);
-        const effectiveStartDate = params.startDate;
-        let dataStartDate = effectiveStartDate;
-        if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
-            dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
-                minDate: sharedUtils.MIN_DATA_DATE,
-                marginTradingDays: 12,
-                extraCalendarDays: 7,
-            }) || effectiveStartDate;
+        const maxIndicatorPeriod = Number.isFinite(windowDecision?.maxIndicatorPeriod)
+            ? windowDecision.maxIndicatorPeriod
+            : fallbackMaxPeriod;
+        let lookbackDays = Number.isFinite(windowDecision?.lookbackDays)
+            ? windowDecision.lookbackDays
+            : null;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+                const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
+                if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
+                    lookbackDays = fallbackDecision.lookbackDays;
+                }
+                if (!Number.isFinite(windowDecision?.maxIndicatorPeriod) && Number.isFinite(fallbackDecision?.maxIndicatorPeriod)) {
+                    windowDecision = { ...(windowDecision || {}), maxIndicatorPeriod: fallbackDecision.maxIndicatorPeriod };
+                }
+            }
         }
-        if (!dataStartDate) dataStartDate = effectiveStartDate;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+                ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, maxIndicatorPeriod * 2);
+        }
+        let effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
+        const bufferTradingDays = Number.isFinite(windowDecision?.bufferTradingDays)
+            ? windowDecision.bufferTradingDays
+            : windowOptions.marginTradingDays;
+        const extraCalendarDays = Number.isFinite(windowDecision?.extraCalendarDays)
+            ? windowDecision.extraCalendarDays
+            : windowOptions.extraCalendarDays;
+        let dataStartDate = windowDecision?.dataStartDate || null;
+        if (!dataStartDate && effectiveStartDate) {
+            if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
+                dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+                    minDate: sharedUtils?.MIN_DATA_DATE,
+                    marginTradingDays: bufferTradingDays,
+                    extraCalendarDays,
+                }) || effectiveStartDate;
+            } else {
+                dataStartDate = effectiveStartDate;
+            }
+        }
+        if (!dataStartDate) {
+            dataStartDate = effectiveStartDate || sharedUtils?.MIN_DATA_DATE || windowOptions.minDate || params.startDate;
+        }
         params.effectiveStartDate = effectiveStartDate;
         params.dataStartDate = dataStartDate;
         params.lookbackDays = lookbackDays;
@@ -161,6 +1298,7 @@ function runBacktestInternal() {
         const curSettings={
             stockNo:params.stockNo,
             startDate:dataStartDate,
+            dataStartDate:dataStartDate,
             endDate:params.endDate,
             effectiveStartDate,
             market:marketKey,
@@ -169,11 +1307,13 @@ function runBacktestInternal() {
             priceMode: priceMode,
             lookbackDays,
         };
-        let useCache=!needsDataFetch(curSettings);
         const cacheKey = buildCacheKey(curSettings);
+        hydrateDatasetFromStorage(cacheKey, curSettings);
+        materializeSupersetCacheEntry(cacheKey, curSettings);
+        let useCache=!needsDataFetch(curSettings);
         let cachedEntry = null;
         if (useCache) {
-            cachedEntry = cachedDataStore.get(cacheKey);
+            cachedEntry = ensureDatasetCacheEntryFresh(cacheKey, cachedDataStore.get(cacheKey), curSettings.market);
             if (cachedEntry && Array.isArray(cachedEntry.data)) {
                 const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
                 if (startCheck.shouldForce) {
@@ -196,6 +1336,18 @@ function runBacktestInternal() {
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
+            const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(
+                cachedEntry.fetchDiagnostics || null,
+                {
+                    source: 'main-memory-cache',
+                    requestedRange: {
+                        start: curSettings.dataStartDate || curSettings.startDate,
+                        end: curSettings.endDate,
+                    },
+                    coverage: cachedEntry.coverage,
+                }
+            );
+            cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
             cachedStockData = cachedEntry.data;
@@ -239,7 +1391,7 @@ function runBacktestInternal() {
                 }
             } else if(type==='result'){
                 if(!useCache&&data?.rawData){
-                     const existingEntry = cachedDataStore.get(cacheKey);
+                     const existingEntry = ensureDatasetCacheEntryFresh(cacheKey, cachedDataStore.get(cacheKey), curSettings.market);
                      const mergedDataMap = new Map(Array.isArray(existingEntry?.data) ? existingEntry.data.map(row => [row.date, row]) : []);
                      if (Array.isArray(data.rawData)) {
                          data.rawData.forEach(row => {
@@ -291,16 +1443,26 @@ function runBacktestInternal() {
                     const resolvedLookback = Number.isFinite(data?.rawMeta?.lookbackDays)
                         ? data.rawMeta.lookbackDays
                         : lookbackDays;
+                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null;
+                    const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
+                        source: 'main-memory-cache',
+                        requestedRange: fetchedRange,
+                        coverage: mergedCoverage,
+                    });
                     const cacheEntry = {
                         data: mergedData,
                         stockName: stockName || existingEntry?.stockName || params.stockNo,
+                        stockNo: curSettings.stockNo,
+                        market: curSettings.market,
                         dataSources: sourceArray,
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                         coverage: mergedCoverage,
+                        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
                         priceMode: priceMode,
+                        dataStartDate: curSettings.dataStartDate || curSettings.startDate,
                         adjustmentFallbackApplied: fallbackFlag,
                         summary: summaryMeta,
                         adjustments: adjustmentsMeta,
@@ -314,13 +1476,29 @@ function runBacktestInternal() {
                         effectiveStartDate: rawEffectiveStart,
                         lookbackDays: resolvedLookback,
                         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
-                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+                        fetchDiagnostics: cacheDiagnostics,
+                        lastRemoteFetchDiagnostics: rawFetchDiagnostics,
                     };
-                    applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
+                     applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
                         acknowledgeExcessGap: true,
                     });
                      cachedDataStore.set(cacheKey, cacheEntry);
+                    persistDataCacheIndexEntry(cacheKey, {
+                        market: curSettings.market,
+                        fetchedAt: cacheEntry.fetchedAt || Date.now(),
+                        priceMode,
+                        splitAdjustment: params.splitAdjustment,
+                        dataStartDate: cacheEntry.dataStartDate || curSettings.startDate,
+                        coverageFingerprint: cacheEntry.coverageFingerprint || null,
+                     });
+                     persistSessionDataCacheEntry(cacheKey, cacheEntry, { market: curSettings.market });
+                     persistYearStorageSlices({
+                        market: curSettings.market,
+                        stockNo: curSettings.stockNo,
+                        priceMode,
+                        splitAdjustment: params.splitAdjustment,
+                     }, cacheEntry.data);
                      visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
                      cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
@@ -355,9 +1533,18 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
+                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
+                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
+                        source: 'main-memory-cache',
+                        requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
+                        coverage: updatedCoverage,
+                    });
                     const updatedEntry = {
                         ...cachedEntry,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
+                        stockNo: curSettings.stockNo,
+                        market: curSettings.market,
                         dataSources: updatedArray,
                         dataSource: summariseSourceLabels(updatedArray),
                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
@@ -375,15 +1562,33 @@ function runBacktestInternal() {
                         adjustmentChecks: adjustmentChecksMeta,
                         fetchRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
                         effectiveStartDate: cachedEntry.effectiveStartDate || effectiveStartDate,
+                        dataStartDate: curSettings.dataStartDate || curSettings.startDate,
                         lookbackDays: cachedEntry.lookbackDays || lookbackDays,
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
-                        fetchDiagnostics: data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null,
+                        fetchDiagnostics: updatedDiagnostics,
+                        lastRemoteFetchDiagnostics: rawFetchDiagnostics,
+                        coverageFingerprint: computeCoverageFingerprint(updatedCoverage),
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
                         acknowledgeExcessGap: false,
                     });
                     cachedDataStore.set(cacheKey, updatedEntry);
+                    persistDataCacheIndexEntry(cacheKey, {
+                        market: curSettings.market,
+                        fetchedAt: updatedEntry.fetchedAt || Date.now(),
+                        priceMode,
+                        splitAdjustment: params.splitAdjustment,
+                        dataStartDate: updatedEntry.dataStartDate || curSettings.startDate,
+                        coverageFingerprint: updatedEntry.coverageFingerprint || null,
+                    });
+                    persistSessionDataCacheEntry(cacheKey, updatedEntry, { market: curSettings.market });
+                    persistYearStorageSlices({
+                        market: curSettings.market,
+                        stockNo: curSettings.stockNo,
+                        priceMode,
+                        splitAdjustment: params.splitAdjustment,
+                    }, updatedEntry.data);
                     visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
                     cachedStockData = updatedEntry.data;
                     lastFetchSettings = { ...curSettings };
@@ -439,6 +1644,21 @@ function runBacktestInternal() {
                     lastDatasetDiagnostics = null;
                 }
                 refreshDataDiagnosticsPanel(lastDatasetDiagnostics);
+                const fetchDiagnostics = data?.datasetDiagnostics?.fetch || null;
+                const blobOps = Array.isArray(fetchDiagnostics?.blob?.operations)
+                    ? fetchDiagnostics.blob.operations
+                    : [];
+                const shouldRecordBlob =
+                    !fetchDiagnostics?.cacheReplay &&
+                    blobOps.length > 0;
+                if (shouldRecordBlob) {
+                    recordBlobUsageEvents(blobOps, {
+                        stockNo: params?.stockNo || curSettings.stockNo,
+                        market: params?.marketType || params?.market || curSettings.market,
+                        source: fetchDiagnostics?.blob?.source || fetchDiagnostics?.blob?.provider || null,
+                    });
+                    renderBlobUsageCard();
+                }
                 handleBacktestResult(data, stockName, dataSource); // Process and display main results
 
                 getSuggestion();
@@ -972,6 +2192,148 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
     renderDiagnosticsPreview('dataDiagnosticsPreview', warmup.previewRows || []);
     renderDiagnosticsFetch(diag.fetch || null);
     renderDiagnosticsTestingGuidance(diag);
+}
+
+function renderBlobUsageCard() {
+    const container = document.getElementById('blobUsageContent');
+    const updatedAtEl = document.getElementById('blobUsageUpdatedAt');
+    if (!container) return;
+    if (!blobUsageLedger || typeof blobUsageLedger !== 'object') {
+        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">尚未累積 Blob 用量統計，執行回測後將在此顯示本月操作數與熱門查詢。</div>`;
+        if (updatedAtEl) updatedAtEl.textContent = '';
+        return;
+    }
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const monthRecord = blobUsageLedger.months?.[monthKey] || null;
+    if (!monthRecord) {
+        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">本月尚未觸發任何 Blob 操作。</div>`;
+        if (updatedAtEl) updatedAtEl.textContent = '';
+        return;
+    }
+    const totalOps = Number(monthRecord.readOps || 0) + Number(monthRecord.writeOps || 0);
+    const hit = Number(monthRecord.cacheHits || 0);
+    const miss = Number(monthRecord.cacheMisses || 0);
+    const hitRate = totalOps > 0 ? `${((hit / totalOps) * 100).toFixed(1)}%` : '—';
+    const topStocks = Object.entries(monthRecord.stocks || {})
+        .map(([stock, info]) => ({
+            stock,
+            count: Number(info?.count) || 0,
+            market: info?.market || null,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+    const topStocksHtml = topStocks.length > 0
+        ? topStocks
+            .map((item) => `<div class="flex items-center justify-between"><span>${escapeHtml(item.stock)}</span><span style="color: var(--muted-foreground);">${item.count} 次${item.market ? `・${escapeHtml(item.market)}` : ''}</span></div>`)
+            .join('')
+        : '<div style="color: var(--muted-foreground);">尚無熱門查詢</div>';
+
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const events = Array.isArray(monthRecord.events) ? monthRecord.events : [];
+    const grouped = [];
+    const groupMap = new Map();
+    events.forEach((event) => {
+        const when = new Date(Number(event.timestamp) || Date.now());
+        const dateKey = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
+        if (!groupMap.has(dateKey)) {
+            groupMap.set(dateKey, {
+                key: dateKey,
+                label: `${when.getFullYear()}/${String(when.getMonth() + 1).padStart(2, '0')}/${String(when.getDate()).padStart(2, '0')}`,
+                rows: [],
+            });
+            grouped.push(groupMap.get(dateKey));
+        }
+        groupMap.get(dateKey).rows.push({ raw: event, when });
+    });
+
+    const eventsHtml = grouped.length > 0
+        ? grouped.map((group) => {
+            const defaultExpanded = group.key === todayKey;
+            const expanded = isBlobUsageGroupExpanded(group.key, defaultExpanded);
+            const indicator = expanded ? '－' : '＋';
+            const rowsHtml = group.rows.map((item) => {
+                const actionLabel = item.raw.action === 'write' ? '寫入' : '讀取';
+                const badgeClass = item.raw.action === 'write'
+                    ? 'bg-amber-100 text-amber-700 border-amber-200'
+                    : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                const statusLabel = item.raw.cacheHit ? '命中' : '補抓';
+                const timeLabel = `${String(item.when.getHours()).padStart(2, '0')}:${String(item.when.getMinutes()).padStart(2, '0')}`;
+                const infoParts = [];
+                if (item.raw.stockNo) infoParts.push(`<span>${escapeHtml(item.raw.stockNo)}</span>`);
+                if (item.raw.market) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.market)}</span>`);
+                if (item.raw.key) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.key)}</span>`);
+                if (item.raw.source) infoParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(item.raw.source)}</span>`);
+                infoParts.push(`<span style="color: var(--muted-foreground);">${statusLabel}</span>`);
+                infoParts.push(`<span style="color: var(--muted-foreground);">${timeLabel}</span>`);
+                return `<div class="border rounded px-3 py-2 text-[11px]" style="border-color: var(--border);">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${badgeClass}">${actionLabel}</span>
+                        ${infoParts.join(' ')}
+                    </div>
+                </div>`;
+            }).join('');
+            return `<div class="border rounded-md" data-blob-group="${group.key}" style="border-color: var(--border); background-color: color-mix(in srgb, var(--background) 96%, transparent);">
+                <button type="button" class="w-full flex items-center justify-between px-3 py-2 text-left text-[11px] font-medium" data-blob-group-toggle="${group.key}" aria-expanded="${expanded ? 'true' : 'false'}" style="color: var(--foreground);">
+                    <span>${group.label}</span>
+                    <span class="flex items-center gap-2" style="color: var(--muted-foreground);">
+                        <span>${group.rows.length} 筆</span>
+                        <span data-blob-group-indicator="${group.key}" aria-hidden="true">${indicator}</span>
+                    </span>
+                </button>
+                <div class="space-y-2 px-3 pb-3 ${expanded ? '' : 'hidden'}" data-blob-group-body="${group.key}">
+                    ${rowsHtml}
+                </div>
+            </div>`;
+        }).join('')
+        : '<div style="color: var(--muted-foreground);">尚未記錄近期操作</div>';
+
+    container.innerHTML = `
+        <div class="grid grid-cols-2 gap-3 text-[11px]">
+            <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
+                <div class="font-medium" style="color: var(--foreground);">本月操作數</div>
+                <div class="mt-1 text-lg font-semibold" style="color: var(--foreground);">${formatNumberWithComma(totalOps)}</div>
+                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">讀取 ${formatNumberWithComma(monthRecord.readOps || 0)}・寫入 ${formatNumberWithComma(monthRecord.writeOps || 0)}</div>
+            </div>
+            <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
+                <div class="font-medium" style="color: var(--foreground);">命中率</div>
+                <div class="mt-1 text-lg font-semibold" style="color: var(--foreground);">${hitRate}</div>
+                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">命中 ${formatNumberWithComma(hit)}・補抓 ${formatNumberWithComma(miss)}</div>
+            </div>
+        </div>
+        <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
+            <div class="font-medium mb-1" style="color: var(--foreground);">熱門股票</div>
+            <div class="space-y-1">${topStocksHtml}</div>
+        </div>
+        <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
+            <div class="font-medium mb-1" style="color: var(--foreground);">近期操作</div>
+            <div class="space-y-2" style="max-height: 16rem; overflow-y: auto; padding-right: 0.25rem;">${eventsHtml}</div>
+        </div>
+    `;
+
+    if (grouped.length > 0) {
+        const toggles = container.querySelectorAll('[data-blob-group-toggle]');
+        toggles.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const dateKey = btn.getAttribute('data-blob-group-toggle');
+                const body = container.querySelector(`[data-blob-group-body="${dateKey}"]`);
+                const indicator = container.querySelector(`[data-blob-group-indicator="${dateKey}"]`);
+                if (!body) return;
+                const currentlyExpanded = !body.classList.contains('hidden');
+                const nextState = !currentlyExpanded;
+                body.classList.toggle('hidden', !nextState);
+                btn.setAttribute('aria-expanded', nextState ? 'true' : 'false');
+                if (indicator) indicator.textContent = nextState ? '－' : '＋';
+                setBlobUsageGroupExpanded(dateKey, nextState);
+            });
+        });
+    }
+
+    if (updatedAtEl) {
+        updatedAtEl.textContent = blobUsageLedger.updatedAt
+            ? `更新於 ${new Date(blobUsageLedger.updatedAt).toLocaleString('zh-TW')}`
+            : '';
+    }
 }
 
 function toggleDataDiagnostics(forceOpen) {
@@ -2301,7 +3663,11 @@ function runOptimizationInternal(optimizeType) {
         
         if(useCache && cachedStockData) {
             workerMsg.cachedData=cachedStockData;
-            const cacheEntry = cachedDataStore.get(buildCacheKey(curSettings));
+            const cacheEntry = ensureDatasetCacheEntryFresh(
+                buildCacheKey(curSettings),
+                cachedDataStore.get(buildCacheKey(curSettings)),
+                curSettings.market,
+            );
                 if (cacheEntry) {
                     workerMsg.cachedMeta = {
                         summary: cacheEntry.summary || null,
@@ -3403,6 +4769,7 @@ function updateStrategyParams(type) {
         }
     }
 }
+
 function resetSettings() {
     document.getElementById("stockNo").value = "2330";
     initDates();
@@ -3442,6 +4809,7 @@ function resetSettings() {
     clearPreviousResults();
     showSuccess("設定已重置");
 }
+
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 
@@ -4237,6 +5605,7 @@ async function preloadTaiwanDirectory(options = {}) {
             },
             { seedCache: options.seedCache !== false },
         );
+        recordTaiwanDirectoryBlobUsage(payload.cache || null);
     } catch (error) {
         taiwanDirectoryState.lastError = error;
         console.warn('[Taiwan Directory] 載入失敗:', error);
