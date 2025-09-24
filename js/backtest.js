@@ -15,8 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ensureTaiwanDirectoryReady({ forceRefresh: shouldForceRefresh }).catch((error) => {
         console.warn('[Taiwan Directory] 預載入失敗:', error);
     });
-    console.info(`[Main] Strategy status card patch loaded: ${STRATEGY_STATUS_PATCH_TAG}`);
-    resetStrategyStatusCard('idle');
 });
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -44,7 +42,6 @@ let lastDatasetDiagnostics = null;
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
-
 const DATA_CACHE_INDEX_KEY = 'LB_DATA_CACHE_INDEX_V20250723A';
 const DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
 const TW_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -962,7 +959,6 @@ function materializeSupersetCacheEntry(cacheKey, curSettings) {
     return supersetEntry;
 }
 
-
 function parseISODateToUTC(iso) {
     if (!iso || typeof iso !== 'string') return NaN;
     const [y, m, d] = iso.split('-').map((val) => parseInt(val, 10));
@@ -1339,7 +1335,6 @@ function runBacktestInternal() {
         }
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
-        resetStrategyStatusCard('loading');
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
             const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(
                 cachedEntry.fetchDiagnostics || null,
@@ -1702,7 +1697,6 @@ function runBacktestInternal() {
                 hideLoading();
                 const suggestionArea = document.getElementById('today-suggestion-area');
                  if (suggestionArea) suggestionArea.classList.add('hidden');
-                 resetStrategyStatusCard('idle');
             }
         };
 
@@ -1712,7 +1706,6 @@ function runBacktestInternal() {
              hideLoading();
              const suggestionArea = document.getElementById('today-suggestion-area');
               if (suggestionArea) suggestionArea.classList.add('hidden');
-              resetStrategyStatusCard('idle');
         };
 
         const workerMsg={
@@ -1755,7 +1748,6 @@ function runBacktestInternal() {
         hideLoading();
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
-        resetStrategyStatusCard('idle');
         if(backtestWorker)backtestWorker.terminate(); backtestWorker = null;
     }
 }
@@ -1791,7 +1783,6 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
-    resetStrategyStatusCard('idle');
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -1966,282 +1957,6 @@ function formatDiagnosticsReasonCounts(reasons) {
         .sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return '—';
     return entries.map(([reason, count]) => `${reason}×${count}`).join('、');
-}
-
-function getStrategyStatusCardElements() {
-    const card = document.getElementById('strategy-status-card');
-    const headline = document.getElementById('strategy-status-headline');
-    const detail = document.getElementById('strategy-status-detail');
-    const badge = document.getElementById('strategy-status-badge');
-    if (!card || !headline || !detail || !badge) return null;
-    return { card, headline, detail, badge };
-}
-
-function setStrategyStatusCardState({ visible, variant, badgeText, headlineText, detailText, detailHTML }) {
-    const elements = getStrategyStatusCardElements();
-    if (!elements) return;
-    const { card, headline, detail, badge } = elements;
-    const variantClass = STRATEGY_STATUS_BADGE_VARIANTS[variant] || STRATEGY_STATUS_BADGE_VARIANTS.neutral;
-    badge.className = `${STRATEGY_STATUS_BADGE_BASE_CLASS} ${variantClass}`;
-    badge.textContent = badgeText;
-    headline.textContent = headlineText;
-    if (typeof detailHTML === 'string' && detailHTML.length > 0) {
-        detail.innerHTML = detailHTML;
-    } else if (detailText !== undefined && detailText !== null) {
-        detail.textContent = detailText;
-    } else {
-        detail.textContent = '';
-    }
-    if (visible) {
-        card.classList.remove('hidden');
-    } else {
-        card.classList.add('hidden');
-    }
-}
-
-function resetStrategyStatusCard(mode = 'idle') {
-    if (mode === 'loading') {
-        setStrategyStatusCardState({
-            visible: true,
-            variant: 'loading',
-            badgeText: '計算中',
-            headlineText: '正在比對誰笑到最後…',
-            detailText: '演算小隊正翻找數據，等下就會送上戰況比分與指標體檢，請先喝口水稍候片刻。',
-        });
-        return;
-    }
-    setStrategyStatusCardState({
-        visible: false,
-        variant: 'loading',
-        badgeText: '尚未開賽',
-        headlineText: '執行回測後將揭曉策略戰況',
-        detailText: '回測一結束，我會立刻爆料策略與買入持有誰佔上風，還會順手端出指標體檢心得，讓你秒懂戰局體質。',
-    });
-}
-
-function toFiniteNumber(value) {
-    if (typeof value === 'number') {
-        return Number.isFinite(value) ? value : null;
-    }
-    if (typeof value === 'string') {
-        const parsed = Number.parseFloat(value);
-        return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-}
-
-function formatPercentValue(value) {
-    const num = toFiniteNumber(value);
-    if (num === null) return '—';
-    const prefix = num > 0 ? '+' : num < 0 ? '' : '';
-    return `${prefix}${num.toFixed(2)}%`;
-}
-
-function formatPercentDiff(value) {
-    const num = toFiniteNumber(value);
-    if (num === null) return '0.00 個百分點';
-    return `${Math.abs(num).toFixed(2)} 個百分點`;
-}
-
-function splitSummaryIntoBulletLines(summary) {
-    if (typeof summary !== 'string') return [];
-    return summary
-        .split(/[；;]+/u)
-        .map((segment) => segment.trim())
-        .filter((segment) => segment.length > 0)
-        .map((segment) => {
-            if (/[。！？]$/u.test(segment)) {
-                return segment;
-            }
-            return `${segment}。`;
-        });
-}
-
-function buildStrategyHealthSummary(result) {
-    const thresholds = STRATEGY_HEALTH_THRESHOLDS;
-    const highlights = [];
-    const cautions = [];
-
-    const annualized = toFiniteNumber(result && result.annualizedReturn);
-    if (annualized !== null) {
-        if (annualized >= thresholds.annualizedReturn) {
-            highlights.push(`年化報酬 ${annualized.toFixed(2)}%`);
-        } else {
-            cautions.push(`年化報酬只有 ${annualized.toFixed(2)}%，收益動能偏弱，建議檢視進出場節奏`);
-        }
-    }
-
-    const sharpeRaw = result && result.sharpeRatio;
-    if (typeof sharpeRaw === 'number' && !Number.isNaN(sharpeRaw)) {
-        if (Number.isFinite(sharpeRaw)) {
-            if (sharpeRaw >= thresholds.sharpeRatio) {
-                highlights.push(`夏普值 ${sharpeRaw.toFixed(2)}`);
-            } else {
-                cautions.push(`夏普值僅 ${sharpeRaw.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力`);
-            }
-        } else if (sharpeRaw > 0) {
-            highlights.push('夏普值趨近無窮大');
-        }
-    }
-
-    const sortinoRaw = result && result.sortinoRatio;
-    if (typeof sortinoRaw === 'number' && !Number.isNaN(sortinoRaw)) {
-        if (Number.isFinite(sortinoRaw)) {
-            if (sortinoRaw >= thresholds.sortinoRatio) {
-                highlights.push(`索提諾比率 ${sortinoRaw.toFixed(2)}`);
-            } else {
-                cautions.push(`索提諾比率只有 ${sortinoRaw.toFixed(2)}，下檔風險控制力道有限，記得設定停損`);
-            }
-        } else if (sortinoRaw > 0) {
-            highlights.push('索提諾比率極佳（趨近無窮大）');
-        }
-    }
-
-    const maxDrawdownRaw = toFiniteNumber(result && result.maxDrawdown);
-    if (maxDrawdownRaw !== null) {
-        const dd = Math.abs(maxDrawdownRaw);
-        if (dd <= thresholds.maxDrawdown) {
-            highlights.push(`最大回撤僅 ${dd.toFixed(2)}%`);
-        } else {
-            cautions.push(`最大回撤達 ${dd.toFixed(2)}%，部位可能經歷較大回檔，務必規劃資金緩衝`);
-        }
-    }
-
-    const annHalf1 = toFiniteNumber(result && result.annReturnHalf1);
-    const annHalf2 = toFiniteNumber(result && result.annReturnHalf2);
-    if (annHalf1 !== null && annHalf2 !== null && annHalf1 !== 0) {
-        const ratio = annHalf2 / annHalf1;
-        if (Number.isFinite(ratio)) {
-            if (ratio >= thresholds.stabilityRatio) {
-                highlights.push(`前後段報酬比 ${ratio.toFixed(2)}`);
-            } else {
-                cautions.push(`前後段報酬比僅 ${ratio.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證`);
-            }
-        }
-    }
-
-    const sharpeHalf1 = toFiniteNumber(result && result.sharpeHalf1);
-    const sharpeHalf2 = toFiniteNumber(result && result.sharpeHalf2);
-    if (sharpeHalf1 !== null && sharpeHalf2 !== null && sharpeHalf1 !== 0) {
-        const ratio = sharpeHalf2 / sharpeHalf1;
-        if (Number.isFinite(ratio)) {
-            if (ratio >= thresholds.stabilityRatio) {
-                highlights.push(`前後段夏普比 ${ratio.toFixed(2)}`);
-            } else {
-                cautions.push(`前後段夏普比只有 ${ratio.toFixed(2)}，可能存在過擬合，請留意驗證樣本`);
-            }
-        }
-    }
-
-    if (highlights.length === 0 && cautions.length === 0) {
-        return '指標巡檢資料不足，稍後重跑一次確認數據。';
-    }
-
-    if (cautions.length === 0) {
-        const highlightText = highlights.join('、');
-        return `指標巡檢全數過關：${highlightText}，這套策略目前可以被列為「非常好」，照表操課即可。`;
-    }
-
-    const cautionText = cautions.join('；');
-    const highlightTail = highlights.length > 0 ? `；另外 ${highlights.join('、')} 表現還算給力，記得把優勢守住` : '';
-    return `指標巡檢：${cautionText}${highlightTail}，請調整倉位或優化參數再上。`;
-}
-
-function updateStrategyStatusCard(result) {
-    const elements = getStrategyStatusCardElements();
-    if (!elements) return;
-    const strategyTotalReturn = toFiniteNumber(result && result.returnRate);
-    let buyHoldTotalReturn = null;
-    if (Array.isArray(result && result.buyHoldReturns)) {
-        for (let idx = result.buyHoldReturns.length - 1; idx >= 0; idx -= 1) {
-            const candidate = toFiniteNumber(result.buyHoldReturns[idx]);
-            if (candidate !== null) {
-                buyHoldTotalReturn = candidate;
-                break;
-            }
-        }
-    }
-    const strategyAnnual = toFiniteNumber(result && result.annualizedReturn);
-    const buyHoldAnnual = toFiniteNumber(result && result.buyHoldAnnualizedReturn);
-
-    let metricLabel = '總報酬率';
-    let strategyMetric = strategyTotalReturn;
-    let buyHoldMetric = buyHoldTotalReturn;
-    let diff = strategyMetric !== null && buyHoldMetric !== null
-        ? strategyMetric - buyHoldMetric
-        : null;
-
-    if (diff === null && strategyAnnual !== null && buyHoldAnnual !== null) {
-        metricLabel = '年化報酬率';
-        strategyMetric = strategyAnnual;
-        buyHoldMetric = buyHoldAnnual;
-        diff = strategyMetric - buyHoldMetric;
-    }
-
-    if (diff === null || strategyMetric === null || buyHoldMetric === null) {
-        setStrategyStatusCardState({
-            visible: true,
-            variant: 'loading',
-            badgeText: '資料補眠',
-            headlineText: '😴 資料還在補眠',
-            detailText: '近期資料或買入持有基準還在路上，請檢查區間設定或稍後再跑一次。',
-        });
-        return;
-    }
-
-    let variant = 'neutral';
-    let badgeText = '勝負未定';
-    let headlineText = '🤝 暫時打成平手';
-    let baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
-    let detailHTML = null;
-
-    const healthSummary = buildStrategyHealthSummary(result);
-
-    if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
-        variant = 'positive';
-        badgeText = '策略領先';
-        headlineText = '🎉 策略完勝買入持有';
-        baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前領先 ${formatPercentDiff(diff)}。今晚可以替自己加菜，但風險控管還是不能鬆手。`;
-    } else if (diff < -STRATEGY_STATUS_DIFF_THRESHOLD) {
-        variant = 'negative';
-        badgeText = '策略加油';
-        headlineText = '🛠️ 策略暫時落後';
-        const bulletLines = [
-            `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。`,
-        ];
-        if (healthSummary) {
-            const healthLines = splitSummaryIntoBulletLines(healthSummary);
-            if (healthLines.length > 0) {
-                bulletLines.push(...healthLines);
-            } else {
-                bulletLines.push(healthSummary.endsWith('。') ? healthSummary : `${healthSummary}。`);
-            }
-        }
-        const bulletListHtml = bulletLines
-            .map((line) => `<li>${escapeHtml(line)}</li>`)
-            .join('');
-        detailHTML = `
-            <p class="text-[15px] font-semibold leading-relaxed" style="color: var(--foreground);">快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。</p>
-            <ul class="mt-2 space-y-1 list-disc pl-5 text-[13px] leading-relaxed" style="color: var(--foreground);">
-                ${bulletListHtml}
-            </ul>
-        `.trim();
-    }
-
-    const detailText = detailHTML
-        ? undefined
-        : healthSummary
-            ? `${baseDetailText} ${healthSummary}`
-            : baseDetailText;
-
-    setStrategyStatusCardState({
-        visible: true,
-        variant,
-        badgeText,
-        headlineText,
-        detailText,
-        detailHTML,
-    });
 }
 
 function renderDiagnosticsEntries(containerId, entries) {
@@ -3050,7 +2765,6 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastOverallResult = null; lastSubPeriodResults = null;
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
-        resetStrategyStatusCard('idle');
         return;
     }
     try {
@@ -3061,7 +2775,6 @@ function handleBacktestResult(result, stockName, dataSource) {
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
-        updateStrategyStatusCard(result);
         displayTradeResults(result);
         renderChart(result);
         activateTab('summary');
@@ -3078,7 +2791,6 @@ function handleBacktestResult(result, stockName, dataSource) {
          showError(`處理回測結果時發生錯誤: ${error.message}`);
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
-         resetStrategyStatusCard('idle');
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
