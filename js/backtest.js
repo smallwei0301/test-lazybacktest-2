@@ -63,6 +63,399 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SEGMENT-20250714A';
+const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
+const TREND_WINDOW_SIZE = 20;
+const TREND_BASE_THRESHOLDS = {
+    sharpe: 1.2,
+    slope: 0.0012,
+    volatility: 0.0045,
+};
+const TREND_SENSITIVITY_STEP = 0.06;
+
+const TREND_STYLE_MAP = {
+    uptrend: {
+        label: '起漲',
+        overlay: 'rgba(34, 197, 94, 0.18)',
+        accent: '#16a34a',
+        border: 'rgba(34, 197, 94, 0.35)',
+    },
+    consolidation: {
+        label: '盤整',
+        overlay: 'rgba(107, 114, 128, 0.16)',
+        accent: '#4b5563',
+        border: 'rgba(107, 114, 128, 0.32)',
+    },
+    downtrend: {
+        label: '跌落',
+        overlay: 'rgba(239, 68, 68, 0.18)',
+        accent: '#dc2626',
+        border: 'rgba(239, 68, 68, 0.38)',
+    },
+};
+
+const trendAnalysisState = {
+    version: TREND_ANALYSIS_VERSION,
+    sensitivity: 5,
+    thresholds: null,
+    segments: [],
+    summary: null,
+    result: null,
+};
+
+const trendBackgroundPlugin = {
+    id: TREND_BACKGROUND_PLUGIN_ID,
+    beforeDatasetsDraw(chart, _args, opts) {
+        const chartArea = chart.chartArea;
+        const xScale = chart.scales?.x;
+        if (!chartArea || !xScale) return;
+        const pluginOptions = chart.options?.plugins?.[TREND_BACKGROUND_PLUGIN_ID] || opts || {};
+        const segments = Array.isArray(pluginOptions.segments) ? pluginOptions.segments : [];
+        if (!segments.length) return;
+        const labels = chart.data?.labels || [];
+        if (!labels.length) return;
+        let step = 0;
+        if (labels.length > 1) {
+            const firstPixel = xScale.getPixelForValue(labels[0], 0);
+            const secondPixel = xScale.getPixelForValue(labels[1], 1);
+            step = secondPixel - firstPixel;
+        } else {
+            step = chartArea.width;
+        }
+        const halfStep = step / 2;
+        const { top, bottom } = chartArea;
+        const ctx = chart.ctx;
+        ctx.save();
+        segments.forEach((segment) => {
+            const startIdx = segment?.startIndex;
+            const endIdx = segment?.endIndex;
+            if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
+            const boundedEndIdx = Math.min(endIdx, labels.length - 1);
+            const startLabel = labels[startIdx];
+            const endLabel = labels[boundedEndIdx];
+            const startCenter = xScale.getPixelForValue(startLabel, startIdx);
+            const endCenter = xScale.getPixelForValue(endLabel, boundedEndIdx);
+            if (!Number.isFinite(startCenter) || !Number.isFinite(endCenter)) return;
+            const left = startCenter - halfStep;
+            const right = endCenter + halfStep;
+            const width = Math.max(1, right - left);
+            const fillStyle = segment.overlay || TREND_STYLE_MAP[segment.type]?.overlay || 'rgba(0,0,0,0.06)';
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(left, top, width, bottom - top);
+        });
+        ctx.restore();
+    },
+};
+
+if (typeof Chart !== 'undefined' && Chart.register) {
+    Chart.register(trendBackgroundPlugin);
+}
+
+function computeTrendThresholds(sensitivity) {
+    const safe = Number.isFinite(sensitivity) ? Math.max(0, Math.min(10, sensitivity)) : 0;
+    const multiplier = 1 - TREND_SENSITIVITY_STEP * safe;
+    return {
+        windowSize: TREND_WINDOW_SIZE,
+        sensitivity: safe,
+        multiplier,
+        upSharpe: TREND_BASE_THRESHOLDS.sharpe * multiplier,
+        downSharpe: -TREND_BASE_THRESHOLDS.sharpe * multiplier,
+        slopeFloor: TREND_BASE_THRESHOLDS.slope * multiplier,
+        volFloor: TREND_BASE_THRESHOLDS.volatility * multiplier,
+    };
+}
+
+function formatPercentPlain(value, digits = 1) {
+    if (!Number.isFinite(value)) return '—';
+    return `${value.toFixed(digits)}%`;
+}
+
+function computeTrendAnalysisFromResult(result, thresholds) {
+    const dates = Array.isArray(result?.dates) ? result.dates : [];
+    const returns = Array.isArray(result?.strategyReturns) ? result.strategyReturns : [];
+    const length = Math.min(dates.length, returns.length);
+    if (length === 0) {
+        return { segments: [], summary: null };
+    }
+    const netValues = new Array(length).fill(null);
+    const logValues = new Array(length).fill(null);
+    const validIndices = [];
+    for (let i = 0; i < length; i += 1) {
+        const parsed = Number.parseFloat(returns[i]);
+        if (Number.isFinite(parsed)) {
+            const net = 1 + parsed / 100;
+            if (net > 0) {
+                netValues[i] = net;
+                logValues[i] = Math.log(net);
+                validIndices.push(i);
+            }
+        }
+    }
+    if (validIndices.length < 2) {
+        return { segments: [], summary: null };
+    }
+    const startIdx = validIndices[0];
+    const endIdx = validIndices[validIndices.length - 1];
+    const classifications = new Array(length).fill(null);
+    const logDiffs = new Array(length).fill(null);
+    for (let i = startIdx + 1; i <= endIdx; i += 1) {
+        if (Number.isFinite(logValues[i]) && Number.isFinite(logValues[i - 1])) {
+            logDiffs[i] = logValues[i] - logValues[i - 1];
+        }
+    }
+    const windowSize = Math.max(5, Math.round(thresholds?.windowSize || TREND_WINDOW_SIZE));
+    for (let idx = startIdx; idx <= endIdx; idx += 1) {
+        if (!Number.isFinite(logValues[idx])) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        if (idx - windowSize + 1 < startIdx) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        let invalidWindow = false;
+        for (let j = idx - windowSize + 1; j <= idx; j += 1) {
+            if (!Number.isFinite(logValues[j])) {
+                invalidWindow = true;
+                break;
+            }
+        }
+        if (invalidWindow) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
+        }
+        const startLog = logValues[idx - windowSize + 1];
+        const endLog = logValues[idx];
+        const slope = (endLog - startLog) / windowSize;
+        let sum = 0;
+        let sumSq = 0;
+        let count = 0;
+        for (let j = idx - windowSize + 2; j <= idx; j += 1) {
+            const diff = logDiffs[j];
+            if (!Number.isFinite(diff)) continue;
+            sum += diff;
+            sumSq += diff * diff;
+            count += 1;
+        }
+        const mean = count > 0 ? sum / count : 0;
+        const variance = count > 0 ? Math.max(0, sumSq / count - mean * mean) : 0;
+        const volatility = Math.sqrt(variance);
+        let classification = 'consolidation';
+        if (volatility < thresholds.volFloor) {
+            if (slope >= thresholds.slopeFloor) classification = 'uptrend';
+            else if (slope <= -thresholds.slopeFloor) classification = 'downtrend';
+        } else {
+            const ratio = slope / (volatility + 1e-9);
+            if (ratio >= thresholds.upSharpe) classification = 'uptrend';
+            else if (ratio <= thresholds.downSharpe) classification = 'downtrend';
+        }
+        classifications[idx] = classification;
+    }
+
+    const getNetValueBackward = (index) => {
+        for (let i = Math.min(index, length - 1); i >= 0; i -= 1) {
+            const value = netValues[i];
+            if (Number.isFinite(value) && value > 0) return value;
+        }
+        return 1;
+    };
+
+    const segments = [];
+    let segmentType = null;
+    let segmentStart = null;
+    for (let idx = startIdx; idx <= endIdx; idx += 1) {
+        const type = classifications[idx] || segmentType || 'consolidation';
+        if (segmentType === null) {
+            segmentType = type;
+            segmentStart = idx;
+            continue;
+        }
+        if (type !== segmentType) {
+            segments.push(buildSegment(segmentType, segmentStart, idx - 1));
+            segmentType = type;
+            segmentStart = idx;
+        }
+    }
+    if (segmentType !== null && segmentStart !== null) {
+        segments.push(buildSegment(segmentType, segmentStart, endIdx));
+    }
+
+    function buildSegment(type, startIndex, endIndex) {
+        const startDate = dates[startIndex] || null;
+        const endDate = dates[endIndex] || null;
+        const baseValue = startIndex > 0 ? getNetValueBackward(startIndex - 1) : 1;
+        const endValue = getNetValueBackward(endIndex);
+        const safeBase = baseValue > 0 ? baseValue : 1e-6;
+        const safeEnd = endValue > 0 ? endValue : 1e-6;
+        const factor = safeEnd / safeBase;
+        const returnPercent = (factor - 1) * 100;
+        return {
+            type,
+            startIndex,
+            endIndex,
+            startDate,
+            endDate,
+            days: Math.max(1, endIndex - startIndex + 1),
+            factor,
+            returnPercent,
+            overlay: TREND_STYLE_MAP[type]?.overlay || 'rgba(0,0,0,0.06)',
+        };
+    }
+
+    const totalDays = Math.max(1, endIdx - startIdx + 1);
+    const aggregated = {
+        uptrend: { segments: 0, days: 0, factor: 1 },
+        consolidation: { segments: 0, days: 0, factor: 1 },
+        downtrend: { segments: 0, days: 0, factor: 1 },
+    };
+    segments.forEach((segment) => {
+        const bucket = aggregated[segment.type];
+        if (!bucket) return;
+        bucket.segments += 1;
+        bucket.days += segment.days;
+        const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
+        bucket.factor *= segFactor;
+    });
+
+    const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
+        const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
+        acc[key] = {
+            segments: bucket.segments,
+            days: bucket.days,
+            coveragePct,
+            returnPct: (bucket.factor - 1) * 100,
+        };
+        return acc;
+    }, {});
+
+    return {
+        segments,
+        summary: {
+            startIndex: startIdx,
+            endIndex: endIdx,
+            totalDays,
+            aggregatedByType,
+        },
+    };
+}
+
+function updateChartTrendOverlay() {
+    if (!stockChart) return;
+    if (!stockChart.options) stockChart.options = {};
+    if (!stockChart.options.plugins) stockChart.options.plugins = {};
+    stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] = {
+        ...(stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] || {}),
+        segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+    };
+    stockChart.update('none');
+}
+
+function renderTrendSummary() {
+    const sliderValueEl = document.getElementById('trendSensitivityValue');
+    if (sliderValueEl) {
+        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}`;
+    }
+    const badgeEl = document.getElementById('trend-version-badge');
+    if (badgeEl) {
+        badgeEl.textContent = trendAnalysisState.version;
+    }
+    const thresholds = trendAnalysisState.thresholds;
+    const thresholdTextEl = document.getElementById('trend-threshold-text');
+    if (thresholdTextEl && thresholds) {
+        const upSharpe = thresholds.upSharpe.toFixed(2);
+        const downSharpe = thresholds.downSharpe.toFixed(2);
+        const slopePct = (Math.exp(thresholds.slopeFloor) - 1) * 100;
+        const volPct = thresholds.volFloor * 100;
+        thresholdTextEl.innerHTML = `
+            <span class="font-semibold">判別公式：</span>20 日平均對數淨值斜率 ÷ 同期波動度。<br>
+            起漲：比值 ≥ ${upSharpe}，跌落：比值 ≤ ${downSharpe}。<br>
+            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = 1 − 0.06 × 靈敏度。
+        `;
+    }
+    const placeholderEl = document.getElementById('trend-summary-placeholder');
+    const metaEl = document.getElementById('trend-summary-meta');
+    const container = document.getElementById('trend-summary-container');
+    if (!container) return;
+    const summary = trendAnalysisState.summary;
+    const segments = trendAnalysisState.segments;
+    if (!summary || !segments || segments.length === 0) {
+        container.innerHTML = '';
+        if (placeholderEl) placeholderEl.classList.remove('hidden');
+        if (metaEl) {
+            metaEl.classList.add('hidden');
+            metaEl.textContent = '';
+        }
+        return;
+    }
+    if (placeholderEl) placeholderEl.classList.add('hidden');
+    if (metaEl) {
+        const firstSegment = segments[0];
+        const lastSegment = segments[segments.length - 1];
+        const rangeText = firstSegment?.startDate && lastSegment?.endDate
+            ? `${firstSegment.startDate} ~ ${lastSegment.endDate}`
+            : '—';
+        metaEl.textContent = `統計範圍：${rangeText}（共 ${summary.totalDays} 個交易日）`;
+        metaEl.classList.remove('hidden');
+    }
+    const order = ['uptrend', 'consolidation', 'downtrend'];
+    const cards = order.map((key) => {
+        const style = TREND_STYLE_MAP[key];
+        const stats = summary.aggregatedByType[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: 0 };
+        const returnText = formatPercent(stats.returnPct);
+        const coverageText = formatPercentPlain(stats.coveragePct, 1);
+        const borderColor = style?.border || 'rgba(148, 163, 184, 0.35)';
+        const background = style?.overlay || 'rgba(148, 163, 184, 0.15)';
+        const accent = style?.accent || 'var(--foreground)';
+        const label = style?.label || key;
+        return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2" style="color: ${accent};">
+                    <span class="trend-summary-chip" style="background-color: ${background}; border-color: ${accent};"></span>
+                    <strong>${label}</strong>
+                </div>
+                <span class="trend-summary-meta">${stats.segments} 段</span>
+            </div>
+            <div class="trend-summary-value" style="color: ${accent};">${returnText}</div>
+            <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
+        </div>`;
+    }).join('');
+    container.innerHTML = cards;
+}
+
+function recomputeTrendAnalysis(options = {}) {
+    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    if (trendAnalysisState.result) {
+        const analysis = computeTrendAnalysisFromResult(trendAnalysisState.result, trendAnalysisState.thresholds);
+        trendAnalysisState.segments = analysis.segments;
+        trendAnalysisState.summary = analysis.summary;
+    } else {
+        trendAnalysisState.segments = [];
+        trendAnalysisState.summary = null;
+    }
+    renderTrendSummary();
+    if (!options.skipChartUpdate) {
+        updateChartTrendOverlay();
+    }
+}
+
+function initialiseTrendControls() {
+    const slider = document.getElementById('trendSensitivitySlider');
+    if (slider) {
+        slider.value = `${trendAnalysisState.sensitivity}`;
+        slider.addEventListener('input', (event) => {
+            const value = Number.parseInt(event.target.value, 10);
+            if (Number.isFinite(value)) {
+                trendAnalysisState.sensitivity = Math.max(0, Math.min(10, value));
+                recomputeTrendAnalysis();
+            }
+        });
+    }
+    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    renderTrendSummary();
+}
+
+document.addEventListener('DOMContentLoaded', initialiseTrendControls);
+
 function cloneArrayOfRanges(ranges) {
     if (!Array.isArray(ranges)) return undefined;
     return ranges
@@ -2763,7 +3156,12 @@ function handleBacktestResult(result, stockName, dataSource) {
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
         lastOverallResult = null; lastSubPeriodResults = null;
-         if (suggestionArea) suggestionArea.classList.add('hidden');
+        trendAnalysisState.result = null;
+        trendAnalysisState.segments = [];
+        trendAnalysisState.summary = null;
+        renderTrendSummary();
+        updateChartTrendOverlay();
+        if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
         return;
     }
@@ -2773,10 +3171,17 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
+        trendAnalysisState.result = {
+            dates: Array.isArray(result.dates) ? [...result.dates] : [],
+            strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
+        };
+        recomputeTrendAnalysis({ skipChartUpdate: true });
+
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
         renderChart(result);
+        updateChartTrendOverlay();
         activateTab('summary');
 
         setTimeout(() => {
@@ -3649,6 +4054,9 @@ function renderChart(result) {
                 intersect: false,
             },
             plugins: {
+                [TREND_BACKGROUND_PLUGIN_ID]: {
+                    segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+                },
                 legend: {
                     position: 'top',
                     labels: { usePointStyle: true }
