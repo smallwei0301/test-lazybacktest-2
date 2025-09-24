@@ -31,6 +31,400 @@ function showError(m) { const el=document.getElementById("result"); el.innerHTML
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
 
+// Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
+const stagedEntryControls = (() => {
+    const state = {
+        container: null,
+        list: null,
+        addButton: null,
+        manual: false,
+    };
+
+    const getPositionSizeValue = () => {
+        const positionInput = document.getElementById('positionSize');
+        const value = parseFloat(positionInput?.value);
+        return Number.isFinite(value) && value > 0 ? value : 100;
+    };
+
+    const setManual = (flag) => {
+        state.manual = Boolean(flag);
+    };
+
+    const createStageRow = (initialValue) => {
+        const fallback = getPositionSizeValue();
+        const value = Number.isFinite(initialValue) && initialValue > 0 ? initialValue : fallback;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3';
+        row.dataset.entryStageRow = 'true';
+
+        const label = document.createElement('span');
+        label.className = 'text-xs font-medium min-w-[52px]';
+        label.style.color = 'var(--muted-foreground)';
+        label.dataset.stageLabel = 'true';
+        label.textContent = '第 1 段';
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.max = '100';
+        input.step = '0.1';
+        input.value = Number(value.toFixed ? value.toFixed(2) : value).toString();
+        input.className = 'w-full max-w-[120px] px-3 py-1.5 border border-border rounded-md text-sm focus:ring-accent focus:border-accent bg-input text-foreground';
+        input.setAttribute('data-entry-stage-percent', 'true');
+        input.addEventListener('input', () => setManual(true));
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '移除';
+        removeBtn.className = 'text-xs px-2 py-1 rounded border transition-colors';
+        removeBtn.style.borderColor = 'var(--border)';
+        removeBtn.style.color = 'var(--destructive)';
+        removeBtn.addEventListener('click', () => {
+            if (!state.list) return;
+            if (state.list.children.length <= 1) {
+                input.value = getPositionSizeValue().toString();
+                setManual(false);
+                return;
+            }
+            setManual(true);
+            row.remove();
+            renumberStages();
+        });
+
+        row.append(label, input, removeBtn);
+        return row;
+    };
+
+    const renumberStages = () => {
+        if (!state.list) return;
+        const rows = Array.from(state.list.querySelectorAll('[data-entry-stage-row="true"]'));
+        rows.forEach((row, index) => {
+            const label = row.querySelector('[data-stage-label="true"]');
+            if (label) label.textContent = `第 ${index + 1} 段`;
+            const removeBtn = row.querySelector('button');
+            if (removeBtn) {
+                removeBtn.disabled = rows.length <= 1;
+                removeBtn.classList.toggle('opacity-50', removeBtn.disabled);
+                removeBtn.classList.toggle('cursor-not-allowed', removeBtn.disabled);
+            }
+        });
+    };
+
+    const addStage = (value) => {
+        if (!state.list) return;
+        const row = createStageRow(value);
+        state.list.appendChild(row);
+        renumberStages();
+    };
+
+    const syncFromPositionSize = () => {
+        if (!state.list || state.manual) return;
+        const fallback = getPositionSizeValue();
+        const input = state.list.querySelector('input[data-entry-stage-percent]');
+        if (input) input.value = fallback.toString();
+        else addStage(fallback);
+        renumberStages();
+    };
+
+    const getValues = () => {
+        if (!state.list) return [];
+        return Array.from(
+            state.list.querySelectorAll('input[data-entry-stage-percent]')
+        )
+            .map((input) => parseFloat(input.value))
+            .filter((value) => Number.isFinite(value) && value > 0);
+    };
+
+    const setValues = (values, options = {}) => {
+        if (!state.list) return;
+        const fallback = getPositionSizeValue();
+        const validValues = Array.isArray(values)
+            ? values.filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        state.list.innerHTML = '';
+        if (validValues.length === 0) {
+            addStage(fallback);
+            setManual(false);
+            return;
+        }
+        validValues.forEach((val) => addStage(val));
+        const manualFlag = options.manual ?? (validValues.length > 1 || Math.abs(validValues[0] - fallback) > 1e-6);
+        setManual(manualFlag);
+        renumberStages();
+    };
+
+    const init = () => {
+        state.container = document.getElementById('stagedEntryContainer');
+        state.list = document.getElementById('entryStageList');
+        state.addButton = document.getElementById('addEntryStageButton');
+        if (!state.container || !state.list) return;
+
+        const positionInput = document.getElementById('positionSize');
+        if (positionInput) {
+            positionInput.addEventListener('input', () => syncFromPositionSize());
+        }
+
+        if (state.addButton) {
+            state.addButton.addEventListener('click', () => {
+                setManual(true);
+                addStage(getPositionSizeValue());
+            });
+        }
+
+        setValues([getPositionSizeValue()], { manual: false });
+    };
+
+    return {
+        init,
+        getValues,
+        setValues,
+        reset: (defaultPercent) => setValues([defaultPercent], { manual: false }),
+        syncFromPositionSize,
+        markManual: () => setManual(true),
+        clearManual: () => setManual(false),
+    };
+})();
+
+window.lazybacktestStagedEntry = {
+    init: stagedEntryControls.init,
+    getValues: () => stagedEntryControls.getValues(),
+    setValues: (values, options) => {
+        if (options && typeof options === 'object') {
+            stagedEntryControls.setValues(values, options);
+        } else {
+            stagedEntryControls.setValues(values);
+        }
+    },
+    resetToDefault: (percent) => stagedEntryControls.reset(percent),
+    syncFromPositionSize: () => stagedEntryControls.syncFromPositionSize(),
+    markManual: () => stagedEntryControls.markManual(),
+    clearManual: () => stagedEntryControls.clearManual(),
+};
+
+const stagedExitControls = (() => {
+    const state = {
+        container: null,
+        list: null,
+        addButton: null,
+        manual: false,
+    };
+
+    const getDefaultPercent = () => 100;
+
+    const setManual = (flag) => {
+        state.manual = Boolean(flag);
+    };
+
+    const createStageRow = (initialValue) => {
+        const fallback = getDefaultPercent();
+        const value = Number.isFinite(initialValue) && initialValue > 0 ? initialValue : fallback;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3';
+        row.dataset.exitStageRow = 'true';
+
+        const label = document.createElement('span');
+        label.className = 'text-xs font-medium min-w-[52px]';
+        label.style.color = 'var(--muted-foreground)';
+        label.dataset.stageLabel = 'true';
+        label.textContent = '第 1 段';
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.max = '100';
+        input.step = '0.1';
+        input.value = Number(value.toFixed ? value.toFixed(2) : value).toString();
+        input.className = 'w-full max-w-[120px] px-3 py-1.5 border border-border rounded-md text-sm focus:ring-accent focus:border-accent bg-input text-foreground';
+        input.setAttribute('data-exit-stage-percent', 'true');
+        input.addEventListener('input', () => setManual(true));
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '移除';
+        removeBtn.className = 'text-xs px-2 py-1 rounded border transition-colors';
+        removeBtn.style.borderColor = 'var(--border)';
+        removeBtn.style.color = 'var(--destructive)';
+        removeBtn.addEventListener('click', () => {
+            if (!state.list) return;
+            if (state.list.children.length <= 1) {
+                input.value = getDefaultPercent().toString();
+                setManual(false);
+                return;
+            }
+            setManual(true);
+            row.remove();
+            renumberStages();
+        });
+
+        row.append(label, input, removeBtn);
+        return row;
+    };
+
+    const renumberStages = () => {
+        if (!state.list) return;
+        const rows = Array.from(state.list.querySelectorAll('[data-exit-stage-row="true"]'));
+        rows.forEach((row, index) => {
+            const label = row.querySelector('[data-stage-label="true"]');
+            if (label) label.textContent = `第 ${index + 1} 段`;
+            const removeBtn = row.querySelector('button');
+            if (removeBtn) {
+                removeBtn.disabled = rows.length <= 1;
+                removeBtn.classList.toggle('opacity-50', removeBtn.disabled);
+                removeBtn.classList.toggle('cursor-not-allowed', removeBtn.disabled);
+            }
+        });
+    };
+
+    const addStage = (value) => {
+        if (!state.list) return;
+        const row = createStageRow(value);
+        state.list.appendChild(row);
+        renumberStages();
+    };
+
+    const getValues = () => {
+        if (!state.list) return [];
+        return Array.from(
+            state.list.querySelectorAll('input[data-exit-stage-percent]')
+        )
+            .map((input) => parseFloat(input.value))
+            .filter((value) => Number.isFinite(value) && value > 0);
+    };
+
+    const setValues = (values, options = {}) => {
+        if (!state.list) return;
+        const fallback = getDefaultPercent();
+        const validValues = Array.isArray(values)
+            ? values.filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        state.list.innerHTML = '';
+        if (validValues.length === 0) {
+            addStage(fallback);
+            setManual(false);
+            return;
+        }
+        validValues.forEach((val) => addStage(val));
+        const manualFlag = options.manual ?? (validValues.length > 1 || Math.abs(validValues[0] - fallback) > 1e-6);
+        setManual(manualFlag);
+        renumberStages();
+    };
+
+    const init = () => {
+        state.container = document.getElementById('stagedExitContainer');
+        state.list = document.getElementById('exitStageList');
+        state.addButton = document.getElementById('addExitStageButton');
+        if (!state.container || !state.list) return;
+
+        if (state.addButton) {
+            state.addButton.addEventListener('click', () => {
+                setManual(true);
+                addStage(getDefaultPercent());
+            });
+        }
+
+        setValues([getDefaultPercent()], { manual: false });
+    };
+
+    return {
+        init,
+        getValues,
+        setValues,
+        reset: (defaultPercent) => setValues([defaultPercent], { manual: false }),
+        markManual: () => setManual(true),
+        clearManual: () => setManual(false),
+    };
+})();
+
+window.lazybacktestStagedExit = {
+    init: stagedExitControls.init,
+    getValues: () => stagedExitControls.getValues(),
+    setValues: (values, options) => {
+        if (options && typeof options === 'object') {
+            stagedExitControls.setValues(values, options);
+        } else {
+            stagedExitControls.setValues(values);
+        }
+    },
+    resetToDefault: (percent) => stagedExitControls.reset(percent),
+    markManual: () => stagedExitControls.markManual(),
+    clearManual: () => stagedExitControls.clearManual(),
+};
+
+const multiStagePanelController = (() => {
+    const state = {
+        container: null,
+        toggle: null,
+        icon: null,
+        content: null,
+        expanded: false,
+    };
+
+    const ensureElements = () => {
+        if (state.container && state.toggle && state.icon && state.content) {
+            return true;
+        }
+        state.container = document.getElementById('multiStagePanel');
+        state.toggle = document.getElementById('multiStageToggle');
+        state.icon = document.getElementById('multiStageToggleIcon');
+        state.content = document.getElementById('multiStageContent');
+        return Boolean(state.container && state.toggle && state.icon && state.content);
+    };
+
+    const applyState = () => {
+        if (!ensureElements()) return;
+        const expanded = Boolean(state.expanded);
+        state.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (expanded) {
+            state.content.classList.remove('hidden');
+            state.icon.textContent = '−';
+        } else {
+            state.content.classList.add('hidden');
+            state.icon.textContent = '+';
+        }
+    };
+
+    const setExpanded = (flag) => {
+        state.expanded = Boolean(flag);
+        applyState();
+    };
+
+    const toggle = () => {
+        setExpanded(!state.expanded);
+    };
+
+    const bindEvents = () => {
+        if (!ensureElements()) return;
+        state.toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggle();
+        });
+    };
+
+    const init = () => {
+        if (!ensureElements()) return;
+        state.expanded = state.toggle.getAttribute('aria-expanded') === 'true';
+        bindEvents();
+        applyState();
+    };
+
+    return {
+        init,
+        open: () => setExpanded(true),
+        close: () => setExpanded(false),
+        toggle,
+        isOpen: () => Boolean(state.expanded),
+        ensure: ensureElements,
+    };
+})();
+
+window.lazybacktestMultiStagePanel = {
+    init: () => multiStagePanelController.init(),
+    open: () => multiStagePanelController.open(),
+    close: () => multiStagePanelController.close(),
+    toggle: () => multiStagePanelController.toggle(),
+    isOpen: () => multiStagePanelController.isOpen(),
+};
+
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
     open: false,
@@ -1444,6 +1838,22 @@ function getBacktestParams() {
     const endDate = document.getElementById('endDate')?.value;
     const initialCapital = parseFloat(document.getElementById('initialCapital')?.value) || 100000;
     const positionSize = parseFloat(document.getElementById('positionSize')?.value) || 100;
+    const stagedEntryValues = (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.getValues === 'function')
+        ? window.lazybacktestStagedEntry.getValues()
+        : [];
+    const entryStages = Array.isArray(stagedEntryValues) && stagedEntryValues.length > 0
+        ? stagedEntryValues.filter((value) => Number.isFinite(value) && value > 0)
+        : [positionSize];
+    const entryStagingModeSelect = document.getElementById('entryStagingMode');
+    const entryStagingMode = entryStagingModeSelect?.value || 'signal_repeat';
+    const stagedExitValues = (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.getValues === 'function')
+        ? window.lazybacktestStagedExit.getValues()
+        : [];
+    const exitStages = Array.isArray(stagedExitValues) && stagedExitValues.length > 0
+        ? stagedExitValues.filter((value) => Number.isFinite(value) && value > 0)
+        : [100];
+    const exitStagingModeSelect = document.getElementById('exitStagingMode');
+    const exitStagingMode = exitStagingModeSelect?.value || 'signal_repeat';
     const stopLoss = parseFloat(document.getElementById('stopLoss')?.value) || 0;
     const takeProfit = parseFloat(document.getElementById('takeProfit')?.value) || 0;
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
@@ -1489,6 +1899,9 @@ function getBacktestParams() {
         exitStrategy,
         entryParams,
         exitParams,
+        entryStagingMode,
+        exitStages,
+        exitStagingMode,
         enableShorting,
         shortEntryStrategy,
         shortExitStrategy,
@@ -1499,6 +1912,7 @@ function getBacktestParams() {
         positionBasis,
         market,
         marketType: currentMarket,
+        entryStages,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
@@ -1531,6 +1945,16 @@ function validateBacktestParams(p) {
     if (new Date(p.startDate) >= new Date(p.endDate)) { showError('結束日期需晚於開始日期'); return false; }
     if (p.initialCapital <= 0) { showError('本金需>0'); return false; }
     if (p.positionSize <= 0 || p.positionSize > 100) { showError('部位大小1-100%'); return false; }
+    if (!Array.isArray(p.entryStages) || p.entryStages.length === 0) { showError('請設定至少一個進場百分比'); return false; }
+    if (p.entryStages.some((val) => typeof val !== 'number' || !Number.isFinite(val) || val <= 0 || val > 100)) {
+        showError('分段進場百分比需介於1-100%');
+        return false;
+    }
+    if (!Array.isArray(p.exitStages) || p.exitStages.length === 0) { showError('請設定至少一個出場百分比'); return false; }
+    if (p.exitStages.some((val) => typeof val !== 'number' || !Number.isFinite(val) || val <= 0 || val > 100)) {
+        showError('分段出場百分比需介於1-100%');
+        return false;
+    }
     if (p.stopLoss < 0 || p.stopLoss > 100) { showError('停損0-100%'); return false; }
     if (p.takeProfit < 0) { showError('停利>=0%'); return false; }
     if (p.buyFee < 0) { showError('買入手續費不能小於 0%'); return false; }
@@ -1561,10 +1985,16 @@ const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
 function buildCacheKey(cur) {
     if (!cur) return '';
     const market = (cur.market || cur.marketType || 'TWSE').toUpperCase();
+    const stockNo = (cur.stockNo || '').toString().toUpperCase();
     const rawMode = (cur.priceMode || (cur.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const priceModeKey = rawMode === 'adjusted' ? 'ADJ' : 'RAW';
     const splitFlag = cur.splitAdjustment ? 'SPLIT' : 'NOSPLIT';
-    return `${market}|${cur.stockNo}|${priceModeKey}|${splitFlag}`;
+    const dataStart = cur.dataStartDate || cur.startDate || cur.effectiveStartDate || 'NA';
+    const effectiveStart = cur.effectiveStartDate || cur.startDate || 'NA';
+    const lookbackKey = Number.isFinite(cur.lookbackDays)
+        ? `LB${Math.round(cur.lookbackDays)}`
+        : 'LB-';
+    return `${market}|${stockNo}|${priceModeKey}|${splitFlag}|${dataStart}|${effectiveStart}|${lookbackKey}`;
 }
 
 function parseISOToUTC(iso) {
@@ -1645,32 +2075,118 @@ function extractRangeData(data, startISO, endISO) {
     return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
 }
 
+function parseSourceLabelDescriptor(label) {
+    const original = (label || '').toString().trim();
+    if (!original) return null;
+    let base = original;
+    let extra = null;
+    const match = original.match(/\(([^)]+)\)\s*$/);
+    if (match) {
+        extra = match[1].trim();
+        base = original.slice(0, match.index).trim() || base;
+    }
+    const normalizedAll = original.toLowerCase();
+    const typeOrder = [
+        { pattern: /(瀏覽器|browser|session|local|記憶體|memory)/, type: '本地快取' },
+        { pattern: /(netlify|blob)/, type: 'Blob 快取' },
+        { pattern: /(proxy)/, type: 'Proxy 快取' },
+        { pattern: /(cache|快取)/, type: 'Proxy 快取' },
+    ];
+    let resolvedType = null;
+    for (let i = 0; i < typeOrder.length && !resolvedType; i += 1) {
+        if (typeOrder[i].pattern.test(normalizedAll)) {
+            resolvedType = typeOrder[i].type;
+        }
+    }
+    if (!resolvedType && extra && /(cache|快取)/i.test(extra)) {
+        resolvedType = 'Proxy 快取';
+    }
+    return {
+        base: base || original,
+        extra,
+        type: resolvedType,
+        original,
+    };
+}
+
+function decorateSourceBase(descriptor) {
+    if (!descriptor) return '';
+    const base = descriptor.base || descriptor.original || '';
+    if (!base) return '';
+    if (descriptor.extra && !/^(?:cache|快取)$/i.test(descriptor.extra)) {
+        return `${base}｜${descriptor.extra}`;
+    }
+    return base;
+}
+
 function summariseSourceLabels(labels) {
     if (!Array.isArray(labels) || labels.length === 0) return '';
-    const unique = Array.from(new Set(labels.filter((label) => !!label)));
-    if (unique.length === 0) return '';
-    if (unique.length === 1) return unique[0];
-    const hasCache = unique.some((label) => /快取|cache/i.test(label));
-    const hasRemote = unique.some((label) => !/快取|cache/i.test(label));
-    if (hasRemote && hasCache) {
-        const primary = unique.find((label) => !/快取|cache/i.test(label)) || unique[0];
-        return `${primary} (部分快取)`;
-    }
-    if (hasCache) {
-        return `${unique[0]} (快取)`;
-    }
-    return unique.join(' / ');
+    const parsed = labels
+        .map((label) => parseSourceLabelDescriptor(label))
+        .filter((item) => item && (item.base || item.original));
+    if (parsed.length === 0) return '';
 
+    const baseOrder = [];
+    const baseSeen = new Set();
+    parsed.forEach((item) => {
+        const decorated = decorateSourceBase(item);
+        if (decorated && !baseSeen.has(decorated)) {
+            baseSeen.add(decorated);
+            baseOrder.push(decorated);
+        }
+    });
+
+    const remoteOrder = [];
+    const remoteSeen = new Set();
+    parsed.forEach((item) => {
+        const decorated = decorateSourceBase(item);
+        if (!decorated || remoteSeen.has(decorated)) return;
+        const normalizedBase = (item.base || '').toLowerCase();
+        const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+        const isBlob = /(netlify|blob)/.test(normalizedBase);
+        const isProxy = item.type === 'Proxy 快取';
+        if (!isLocal && (!item.type || isProxy) && !isBlob) {
+            remoteSeen.add(decorated);
+            remoteOrder.push(decorated);
+        }
+    });
+
+    const suffixMap = new Map();
+    parsed.forEach((item) => {
+        if (!item.type) return;
+        let descriptor = item.type;
+        if (item.extra && !/^(?:cache|快取)$/i.test(item.extra)) {
+            descriptor = `${descriptor}｜${item.extra}`;
+        }
+        if (!suffixMap.has(descriptor)) {
+            suffixMap.set(descriptor, true);
+        }
+    });
+
+    const primaryOrder = remoteOrder.length > 0 ? remoteOrder : baseOrder;
+    if (primaryOrder.length === 0) return '';
+
+    const suffixes = Array.from(suffixMap.keys());
+    if (suffixes.length === 0) {
+        return primaryOrder.join(' + ');
+    }
+    return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
 }
 
 function needsDataFetch(cur) {
-    if (!cur || !cur.stockNo || !cur.startDate || !cur.endDate) return true;
+    if (!cur || !cur.stockNo || !(cur.startDate || cur.dataStartDate) || !cur.endDate) return true;
     const key = buildCacheKey(cur);
 
-    const entry = cachedDataStore.get(key);
+    const normalizedMarket = typeof normalizeMarketKeyForCache === 'function'
+        ? normalizeMarketKeyForCache(cur.market || cur.marketType || currentMarket || 'TWSE')
+        : normalizeMarketValue(cur.market || cur.marketType || currentMarket || 'TWSE');
+    const entry = typeof ensureDatasetCacheEntryFresh === 'function'
+        ? ensureDatasetCacheEntryFresh(key, cachedDataStore.get(key), normalizedMarket)
+        : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
-    return !coverageCoversRange(entry.coverage, { start: cur.startDate, end: cur.endDate });
+    const rangeStart = cur.dataStartDate || cur.startDate;
+    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
@@ -1702,12 +2218,24 @@ function getSuggestion() {
     try {
         const params = getBacktestParams();
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        const maxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+        let lookbackDecision = null;
+        if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+            lookbackDecision = sharedUtils.resolveLookbackDays(params, { minBars: 90, multiplier: 2 });
+        }
+        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
-        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-            ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
-            : Math.max(90, maxPeriod * 2);
+        const maxPeriod = Number.isFinite(lookbackDecision?.maxIndicatorPeriod)
+            ? lookbackDecision.maxIndicatorPeriod
+            : fallbackMaxPeriod;
+        let lookbackDays = Number.isFinite(lookbackDecision?.lookbackDays)
+            ? lookbackDecision.lookbackDays
+            : null;
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+                ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, maxPeriod * 2);
+        }
         console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
 
         if (cachedStockData.length < lookbackDays) {
@@ -1771,6 +2299,18 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
+
+        if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
+            window.lazybacktestMultiStagePanel.init();
+        }
+
+        if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.init === 'function') {
+            window.lazybacktestStagedEntry.init();
+        }
+
+        if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.init === 'function') {
+            window.lazybacktestStagedExit.init();
+        }
 
         // 初始化資料來源測試面板
         initDataSourceTester();

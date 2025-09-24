@@ -654,6 +654,98 @@ async function persistYahooEntries(store, stockNo, yahooData, adjusted) {
     return label;
 }
 
+function parseSourceLabelDescriptor(label) {
+    const original = (label || '').toString().trim();
+    if (!original) return null;
+    let base = original;
+    let extra = null;
+    const match = original.match(/\(([^)]+)\)\s*$/);
+    if (match) {
+        extra = match[1].trim();
+        base = original.slice(0, match.index).trim() || base;
+    }
+    const normalizedAll = original.toLowerCase();
+    const typeOrder = [
+        { pattern: /(瀏覽器|browser|session|local|記憶體|memory)/, type: '本地快取' },
+        { pattern: /(netlify|blob)/, type: 'Blob 快取' },
+        { pattern: /(proxy)/, type: 'Proxy 快取' },
+        { pattern: /(cache|快取)/, type: 'Proxy 快取' },
+    ];
+    let resolvedType = null;
+    for (let i = 0; i < typeOrder.length && !resolvedType; i += 1) {
+        if (typeOrder[i].pattern.test(normalizedAll)) {
+            resolvedType = typeOrder[i].type;
+        }
+    }
+    if (!resolvedType && extra && /(cache|快取)/i.test(extra)) {
+        resolvedType = 'Proxy 快取';
+    }
+    return {
+        base: base || original,
+        extra,
+        type: resolvedType,
+        original,
+    };
+}
+
+function decorateSourceBase(descriptor) {
+    if (!descriptor) return '';
+    const base = descriptor.base || descriptor.original || '';
+    if (!base) return '';
+    if (descriptor.extra && !/^(?:cache|快取)$/i.test(descriptor.extra)) {
+        return `${base}｜${descriptor.extra}`;
+    }
+    return base;
+}
+
+function summariseSourceDescriptors(parsed) {
+    if (!Array.isArray(parsed) || parsed.length === 0) return '';
+    const baseOrder = [];
+    const baseSeen = new Set();
+    parsed.forEach((item) => {
+        const decorated = decorateSourceBase(item);
+        if (decorated && !baseSeen.has(decorated)) {
+            baseSeen.add(decorated);
+            baseOrder.push(decorated);
+        }
+    });
+
+    const remoteOrder = [];
+    const remoteSeen = new Set();
+    parsed.forEach((item) => {
+        const decorated = decorateSourceBase(item);
+        if (!decorated || remoteSeen.has(decorated)) return;
+        const normalizedBase = (item.base || '').toLowerCase();
+        const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+        const isBlob = /(netlify|blob)/.test(normalizedBase);
+        const isProxy = item.type === 'Proxy 快取';
+        if (!isLocal && (!item.type || isProxy) && !isBlob) {
+            remoteSeen.add(decorated);
+            remoteOrder.push(decorated);
+        }
+    });
+
+    const suffixMap = new Map();
+    parsed.forEach((item) => {
+        if (!item.type) return;
+        let descriptor = item.type;
+        if (item.extra && !/^(?:cache|快取)$/i.test(item.extra)) {
+            descriptor = `${descriptor}｜${item.extra}`;
+        }
+        if (!suffixMap.has(descriptor)) {
+            suffixMap.set(descriptor, true);
+        }
+    });
+
+    const primaryOrder = remoteOrder.length > 0 ? remoteOrder : baseOrder;
+    if (primaryOrder.length === 0) return '';
+    const suffixes = Array.from(suffixMap.keys());
+    if (suffixes.length === 0) {
+        return primaryOrder.join(' + ');
+    }
+    return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
+}
+
 function summariseSources(flags, adjusted) {
     const entries =
         flags instanceof Set
@@ -661,31 +753,24 @@ function summariseSources(flags, adjusted) {
             : Array.isArray(flags)
                 ? flags
                 : [];
-    if (entries.length === 0) {
-        return adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
+    const parsed = entries
+        .map((label) => parseSourceLabelDescriptor(label))
+        .filter((item) => item && (item.base || item.original));
+    const hasRemote = parsed.some((item) => {
+        const normalizedBase = (item.base || '').toLowerCase();
+        const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+        const isBlob = /(netlify|blob)/.test(normalizedBase);
+        const isProxy = item.type === 'Proxy 快取';
+        return !isLocal && (!item.type || isProxy) && !isBlob;
+    });
+    const fallbackLabel = adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
+    const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
+    const combined = parsed.slice();
+    if (!hasRemote && fallbackDescriptor) {
+        combined.push(fallbackDescriptor);
     }
-    const cacheLabels = entries.filter((label) => /快取|cache|記憶體/i.test(label));
-    const remoteLabels = entries
-        .filter((label) => !/快取|cache|記憶體/i.test(label))
-        .map((label) => label.replace(/\s*\((?:部份)?快取\)\s*$/i, '').trim())
-        .filter(Boolean);
-    const fallback = adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
-    const uniqueRemote = Array.from(new Set(remoteLabels));
-    if (uniqueRemote.length === 0) {
-        if (cacheLabels.length > 0) {
-            const suffix = cacheLabels.length > 1 ? '部分快取' : '快取';
-            return `${fallback} (${suffix})`;
-        }
-        return fallback;
-    }
-    const primary = uniqueRemote[0];
-    if (cacheLabels.length > 0) {
-        return `${primary} (部分快取)`;
-    }
-    if (uniqueRemote.length === 1) {
-        return primary;
-    }
-    return uniqueRemote.join(' + ');
+    const summary = summariseSourceDescriptors(combined);
+    return summary || (fallbackDescriptor ? summariseSourceDescriptors([fallbackDescriptor]) : '');
 }
 
 function validateForceSource(adjusted, forceSource) {

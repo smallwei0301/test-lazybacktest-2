@@ -22,6 +22,14 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));
         document.getElementById('optimizeShortExitBtn').addEventListener('click', () => runOptimizationInternal('shortExit'));
         document.getElementById('optimizeRiskBtn').addEventListener('click', () => runOptimizationInternal('risk'));
+        const stagingOptimizeBtn = document.getElementById('stagingOptimizationBtn');
+        if (stagingOptimizeBtn) {
+            stagingOptimizeBtn.addEventListener('click', runStagingOptimization);
+        }
+        const applyStagingBtn = document.getElementById('applyStagingOptimizationBtn');
+        if (applyStagingBtn) {
+            applyStagingBtn.addEventListener('click', applyBestStagingRecommendation);
+        }
         document.getElementById('resetBtn').addEventListener('click', resetSettings);
         document.getElementById('randomizeBtn').addEventListener('click', randomizeSettings);
         document.getElementById('stockNo').addEventListener('keypress', e=>{if(e.key==='Enter')runBacktestInternal();});

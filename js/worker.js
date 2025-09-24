@@ -1,7 +1,7 @@
 
 importScripts('shared-lookback.js');
 
-// --- Worker Data Acquisition & Cache (v11.6 - US Yahoo fallback integration) ---
+// --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
 // Patch Tag: LB-ADJ-PIPE-20250220A
@@ -12,9 +12,12 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-ADJ-PIPE-20250527A
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
-const WORKER_DATA_VERSION = "v11.6";
+// Patch Tag: LB-COVERAGE-STREAM-20250705A
+// Patch Tag: LB-BLOB-RANGE-20250708A
+const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
+const workerYearSupersetCache = new Map(); // Map<marketKey, Map<stockKey, Map<year, YearSupersetEntry>>>
 let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
@@ -22,6 +25,13 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+
+function differenceInDays(laterDate, earlierDate) {
+  if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
+  if (!(earlierDate instanceof Date) || Number.isNaN(earlierDate.getTime())) return null;
+  const diff = laterDate.getTime() - earlierDate.getTime();
+  return Math.floor(diff / DAY_MS);
+}
 
 function getPrimaryForceSource(marketKey, adjusted) {
   if (adjusted) {
@@ -49,9 +59,22 @@ function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
 }
 
-function buildCacheKey(stockNo, startDate, endDate, adjusted = false, split = false) {
+function buildCacheKey(
+  stockNo,
+  startDate,
+  endDate,
+  adjusted = false,
+  split = false,
+  effectiveStartDate = null,
+  marketKey = "",
+) {
   const splitFlag = split ? "SPLIT" : "NOSPLIT";
-  return `${stockNo}__${startDate}__${endDate}__${getPriceModeKey(adjusted)}__${splitFlag}`;
+  const priceModeKey = getPriceModeKey(adjusted);
+  const marketPrefix = marketKey ? `${marketKey}__` : "";
+  const dataKey = startDate || "START-";
+  const endKey = endDate || "END-";
+  const effectiveKey = effectiveStartDate || "E-";
+  return `${marketPrefix}${stockNo}__${dataKey}__${endKey}__${priceModeKey}__${splitFlag}__${effectiveKey}`;
 }
 
 function ensureMarketCache(marketKey) {
@@ -80,6 +103,128 @@ function ensureMonthlyStockCache(marketKey, stockNo, adjusted = false, split = f
     marketCache.set(stockKey, new Map());
   }
   return marketCache.get(stockKey);
+}
+
+function ensureYearSupersetMarketCache(marketKey) {
+  if (!workerYearSupersetCache.has(marketKey)) {
+    workerYearSupersetCache.set(marketKey, new Map());
+  }
+  return workerYearSupersetCache.get(marketKey);
+}
+
+function getYearSupersetStockKey(stockNo, priceModeKey, split = false) {
+  const stockKey = (stockNo || "").toUpperCase();
+  const splitFlag = split ? "SPLIT" : "NOSPLIT";
+  return `${stockKey}__${priceModeKey || "RAW"}__${splitFlag}`;
+}
+
+function ensureYearSupersetStockCache(
+  marketKey,
+  stockNo,
+  priceModeKey,
+  split = false,
+) {
+  const marketCache = ensureYearSupersetMarketCache(marketKey);
+  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+  if (!marketCache.has(stockKey)) {
+    marketCache.set(stockKey, new Map());
+  }
+  return marketCache.get(stockKey);
+}
+
+function getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split = false) {
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  if (!stockCache.has(year)) {
+    return null;
+  }
+  const entry = stockCache.get(year);
+  if (!entry) return null;
+  if (!Array.isArray(entry.data)) {
+    entry.data = [];
+  }
+  if (!Array.isArray(entry.coverage)) {
+    entry.coverage = [];
+  }
+  return entry;
+}
+
+function setYearSupersetEntry(
+  marketKey,
+  stockNo,
+  priceModeKey,
+  year,
+  entry,
+  split = false,
+) {
+  if (!entry) return;
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  stockCache.set(year, entry);
+}
+
+function mergeYearSupersetRows(existingEntry, rows) {
+  if (!existingEntry) return;
+  if (!Array.isArray(existingEntry.data)) {
+    existingEntry.data = [];
+  }
+  const map = new Map(existingEntry.data.map((row) => [row.date, row]));
+  rows.forEach((row) => {
+    if (row && row.date) {
+      map.set(row.date, row);
+    }
+  });
+  existingEntry.data = Array.from(map.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+  rebuildCoverageFromData(existingEntry);
+  existingEntry.lastUpdated = Date.now();
+}
+
+function recordYearSupersetSlices({
+  marketKey,
+  stockNo,
+  priceModeKey,
+  split = false,
+  rows,
+}) {
+  if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!row || typeof row.date !== "string") return;
+    const year = parseInt(row.date.slice(0, 4), 10);
+    if (!Number.isFinite(year)) return;
+    if (!grouped.has(year)) grouped.set(year, []);
+    grouped.get(year).push(row);
+  });
+  grouped.forEach((yearRows, year) => {
+    const entry =
+      getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split) ||
+      {
+        data: [],
+        coverage: [],
+        lastUpdated: 0,
+      };
+    mergeYearSupersetRows(entry, yearRows);
+    setYearSupersetEntry(
+      marketKey,
+      stockNo,
+      priceModeKey,
+      year,
+      entry,
+      split,
+    );
+  });
 }
 
 function rebuildCoverageFromData(entry) {
@@ -301,6 +446,74 @@ function addCoverage(entry, startISO, endISO) {
     : [];
   normalized.push(newRange);
   entry.coverage = mergeRangeBounds(normalized);
+}
+
+function ensureRangeFingerprints(entry) {
+  if (!entry) return [];
+  if (!Array.isArray(entry.rangeFingerprints)) {
+    entry.rangeFingerprints = [];
+  }
+  entry.rangeFingerprints = entry.rangeFingerprints
+    .map((fp) => {
+      if (!fp || typeof fp !== "object") return null;
+      if (!fp.start || !fp.end) return null;
+      return {
+        start: fp.start,
+        end: fp.end,
+        createdAt: Number.isFinite(fp.createdAt) ? fp.createdAt : Date.now(),
+      };
+    })
+    .filter(Boolean);
+  return entry.rangeFingerprints;
+}
+
+function pruneFingerprintsForRanges(entry, ranges) {
+  if (!entry || !Array.isArray(ranges) || ranges.length === 0) return;
+  const list = ensureRangeFingerprints(entry);
+  if (list.length === 0) return;
+  const isoRanges = ranges
+    .map((range) => {
+      if (!range || !Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+        return null;
+      }
+      const { startISO, endISO } = rangeBoundsToISO(range);
+      return { startISO, endISO };
+    })
+    .filter(Boolean);
+  if (isoRanges.length === 0) return;
+  entry.rangeFingerprints = list.filter((fp) =>
+    !isoRanges.some(
+      (isoRange) =>
+        fp.start <= isoRange.endISO && fp.end >= isoRange.startISO,
+    ),
+  );
+}
+
+function findFingerprintSuperset(entry, startISO, endISO) {
+  const list = ensureRangeFingerprints(entry);
+  return list.find((fp) => fp.start <= startISO && fp.end >= endISO) || null;
+}
+
+function addRangeFingerprint(entry, startISO, endISO) {
+  if (!entry || !startISO || !endISO) return;
+  const list = ensureRangeFingerprints(entry);
+  if (list.some((fp) => fp.start <= startISO && fp.end >= endISO)) {
+    return;
+  }
+  const now = Date.now();
+  const updated = list.filter(
+    (fp) => !(fp.start >= startISO && fp.end <= endISO),
+  );
+  updated.push({ start: startISO, end: endISO, createdAt: now });
+  updated.sort((a, b) => {
+    if (a.start === b.start) return a.end.localeCompare(b.end);
+    return a.start.localeCompare(b.start);
+  });
+  const MAX_FINGERPRINTS = 24;
+  while (updated.length > MAX_FINGERPRINTS) {
+    updated.shift();
+  }
+  entry.rangeFingerprints = updated;
 }
 
 function computeMissingRanges(existingCoverage, targetStartISO, targetEndISO) {
@@ -679,6 +892,76 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
   };
 }
 
+function cloneCoverageRanges(ranges) {
+  if (!Array.isArray(ranges)) return undefined;
+  return ranges
+    .map((range) => {
+      if (!range || typeof range !== "object") return null;
+      return {
+        start: range.start || null,
+        end: range.end || null,
+      };
+    })
+    .filter((range) => range !== null);
+}
+
+function prepareDiagnosticsForCacheReplay(diagnostics, options = {}) {
+  const base = diagnostics && typeof diagnostics === "object" ? diagnostics : {};
+  const requested = options.requestedRange || base.requested || null;
+  const sourceLabel = options.source || base.replaySource || base.source || "cache-replay";
+  const sanitized = {
+    ...base,
+    source: sourceLabel,
+    replaySource: sourceLabel,
+    cacheReplay: true,
+    usedCache: true,
+    replayedAt: Date.now(),
+  };
+  sanitized.requested = {
+    start: requested?.start || null,
+    end: requested?.end || null,
+  };
+  const coverage = options.coverage || base.coverage || null;
+  if (coverage) {
+    sanitized.coverage = cloneCoverageRanges(coverage);
+  }
+  if (sanitized.rangeFetch && typeof sanitized.rangeFetch === "object") {
+    const rangeFetch = { ...sanitized.rangeFetch };
+    rangeFetch.cacheReplay = true;
+    rangeFetch.readOps = 0;
+    rangeFetch.writeOps = 0;
+    if (Array.isArray(rangeFetch.operations)) {
+      rangeFetch.operations = [];
+    }
+    if (typeof rangeFetch.status === "string" && !/cache/i.test(rangeFetch.status)) {
+      rangeFetch.status = `${rangeFetch.status}-cache`;
+    }
+    sanitized.rangeFetch = rangeFetch;
+  }
+  const blobInfo = base.blob && typeof base.blob === "object" ? { ...base.blob } : {};
+  blobInfo.operations = [];
+  blobInfo.readOps = 0;
+  blobInfo.writeOps = 0;
+  blobInfo.cacheReplay = true;
+  if (!blobInfo.provider && sourceLabel) {
+    blobInfo.provider = sourceLabel;
+  }
+  sanitized.blob = blobInfo;
+  if (Array.isArray(base.months)) {
+    sanitized.months = base.months.map((month) => ({
+      ...(typeof month === "object" ? month : {}),
+      operations: [],
+      cacheReplay: true,
+      readOps: 0,
+      writeOps: 0,
+    }));
+  }
+  if (Array.isArray(sanitized.operations)) {
+    sanitized.operations = [];
+  }
+  return sanitized;
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -723,6 +1006,67 @@ function enumerateMonths(startDate, endDate) {
     cursor.setMonth(cursor.getMonth() + 1);
   }
   return months;
+}
+
+function buildMonthSegments(months, warmupCutoffISO, options = {}) {
+  if (!Array.isArray(months) || months.length === 0) {
+    return [];
+  }
+  const warmupGroupSize = Number.isFinite(options.warmupGroupSize)
+    ? Math.max(1, Math.floor(options.warmupGroupSize))
+    : 3;
+  const activeConcurrency = Number.isFinite(options.activeConcurrency)
+    ? Math.max(1, Math.floor(options.activeConcurrency))
+    : 1;
+  const warmupCutoffUTC = warmupCutoffISO ? isoToUTC(warmupCutoffISO) : NaN;
+  const segments = [];
+  let warmupBucket = [];
+
+  function flushWarmupBucket() {
+    if (warmupBucket.length === 0) return;
+    const firstLabel = warmupBucket[0]?.label || '';
+    const lastLabel = warmupBucket[warmupBucket.length - 1]?.label || firstLabel;
+    const segmentLabel = warmupBucket.length === 1 ? firstLabel : `${firstLabel}~${lastLabel}`;
+    segments.push({
+      type: 'warmup',
+      label: segmentLabel,
+      months: warmupBucket,
+      concurrency: 1,
+    });
+    warmupBucket = [];
+  }
+
+  months.forEach((monthInfo) => {
+    if (!monthInfo) return;
+    const monthStartUTC = isoToUTC(monthInfo.rangeStartISO);
+    const monthEndUTCExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+    const clonedInfo = { ...monthInfo };
+    const isWarmup =
+      Number.isFinite(warmupCutoffUTC) && Number.isFinite(monthStartUTC)
+        ? monthStartUTC < warmupCutoffUTC
+        : false;
+    if (isWarmup) {
+      clonedInfo.phase = 'warmup';
+      warmupBucket.push(clonedInfo);
+      if (
+        warmupBucket.length >= warmupGroupSize ||
+        (Number.isFinite(monthEndUTCExclusive) && monthEndUTCExclusive >= warmupCutoffUTC)
+      ) {
+        flushWarmupBucket();
+      }
+    } else {
+      flushWarmupBucket();
+      clonedInfo.phase = 'active';
+      segments.push({
+        type: 'active',
+        label: clonedInfo.label,
+        months: [clonedInfo],
+        concurrency: activeConcurrency,
+      });
+    }
+  });
+  flushWarmupBucket();
+  return segments;
 }
 
 function delay(ms) {
@@ -1353,15 +1697,114 @@ function dedupeAndSortData(rows) {
   );
 }
 
+function parseSourceLabelDescriptor(label) {
+  const original = (label || '').toString().trim();
+  if (!original) return null;
+  let base = original;
+  let extra = null;
+  const match = original.match(/\(([^)]+)\)\s*$/);
+  if (match) {
+    extra = match[1].trim();
+    base = original.slice(0, match.index).trim() || base;
+  }
+  const normalizedAll = original.toLowerCase();
+  const typeOrder = [
+    { pattern: /(瀏覽器|browser|session|local|記憶體|memory)/, type: '本地快取' },
+    { pattern: /(netlify|blob)/, type: 'Blob 快取' },
+    { pattern: /(proxy)/, type: 'Proxy 快取' },
+    { pattern: /(cache|快取)/, type: 'Proxy 快取' },
+  ];
+  let resolvedType = null;
+  for (let i = 0; i < typeOrder.length && !resolvedType; i += 1) {
+    if (typeOrder[i].pattern.test(normalizedAll)) {
+      resolvedType = typeOrder[i].type;
+    }
+  }
+  if (!resolvedType && extra && /(cache|快取)/i.test(extra)) {
+    resolvedType = 'Proxy 快取';
+  }
+  return {
+    base: base || original,
+    extra,
+    type: resolvedType,
+    original,
+  };
+}
+
+function decorateSourceBase(descriptor) {
+  if (!descriptor) return '';
+  const base = descriptor.base || descriptor.original || '';
+  if (!base) return '';
+  if (descriptor.extra && !/^(?:cache|快取)$/i.test(descriptor.extra)) {
+    return `${base}｜${descriptor.extra}`;
+  }
+  return base;
+}
+
+function summariseSourceDescriptors(parsed) {
+  if (!Array.isArray(parsed) || parsed.length === 0) return '';
+  const baseOrder = [];
+  const baseSeen = new Set();
+  parsed.forEach((item) => {
+    const decorated = decorateSourceBase(item);
+    if (decorated && !baseSeen.has(decorated)) {
+      baseSeen.add(decorated);
+      baseOrder.push(decorated);
+    }
+  });
+
+  const remoteOrder = [];
+  const remoteSeen = new Set();
+  parsed.forEach((item) => {
+    const decorated = decorateSourceBase(item);
+    if (!decorated || remoteSeen.has(decorated)) return;
+    const normalizedBase = (item.base || '').toLowerCase();
+    const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+    const isBlob = /(netlify|blob)/.test(normalizedBase);
+    const isProxy = item.type === 'Proxy 快取';
+    if (!isLocal && (!item.type || isProxy) && !isBlob) {
+      remoteSeen.add(decorated);
+      remoteOrder.push(decorated);
+    }
+  });
+
+  const suffixMap = new Map();
+  parsed.forEach((item) => {
+    if (!item.type) return;
+    let descriptor = item.type;
+    if (item.extra && !/^(?:cache|快取)$/i.test(item.extra)) {
+      descriptor = `${descriptor}｜${item.extra}`;
+    }
+    if (!suffixMap.has(descriptor)) {
+      suffixMap.set(descriptor, true);
+    }
+  });
+
+  const primaryOrder = remoteOrder.length > 0 ? remoteOrder : baseOrder;
+  if (primaryOrder.length === 0) return '';
+  const suffixes = Array.from(suffixMap.keys());
+  if (suffixes.length === 0) {
+    return primaryOrder.join(' + ');
+  }
+  return `${primaryOrder.join(' + ')}（${suffixes.join('、')}）`;
+}
+
 function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
   const entries =
     flags instanceof Set ? Array.from(flags) : Array.isArray(flags) ? flags : [];
-  const cacheLabels = entries.filter((src) => /快取|cache/i.test(src));
-  const remoteLabels = entries
-    .filter((src) => !/快取|cache/i.test(src))
-    .map((label) => label.replace(/\s*\((?:部份)?快取\)\s*$/i, '').trim())
-    .filter(Boolean);
-  const fallback =
+  const parsed = entries
+    .map((label) => parseSourceLabelDescriptor(label))
+    .filter((item) => item && (item.base || item.original));
+
+  const hasRemote = parsed.some((item) => {
+    const normalizedBase = (item.base || '').toLowerCase();
+    const isLocal = /(瀏覽器|browser|session|local|記憶體|memory)/.test(normalizedBase);
+    const isBlob = /(netlify|blob)/.test(normalizedBase);
+    const isProxy = item.type === 'Proxy 快取';
+    return !isLocal && (!item.type || isProxy) && !isBlob;
+  });
+
+  const fallbackLabel =
     options.fallbackRemote ||
     (options.adjusted
       ? 'Yahoo Finance (還原)'
@@ -1370,22 +1813,14 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
         : options.market === 'US'
           ? 'FinMind (主來源)'
           : defaultLabel || 'TWSE (主來源)');
-  const uniqueRemote = Array.from(new Set(remoteLabels));
-  if (uniqueRemote.length === 0) {
-    if (cacheLabels.length > 0) {
-      const suffix = cacheLabels.length > 1 ? '部分快取' : '快取';
-      return `${fallback} (${suffix})`;
-    }
-    return fallback;
+
+  const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
+  const combined = parsed.slice();
+  if (!hasRemote && fallbackDescriptor) {
+    combined.push(fallbackDescriptor);
   }
-  const primary = uniqueRemote[0];
-  if (cacheLabels.length > 0) {
-    return `${primary} (部分快取)`;
-  }
-  if (uniqueRemote.length === 1) {
-    return primary;
-  }
-  return uniqueRemote.join(' + ');
+  const summary = summariseSourceDescriptors(combined);
+  return summary || (fallbackDescriptor ? summariseSourceDescriptors([fallbackDescriptor]) : '');
 }
 
 async function runWithConcurrency(items, limit, workerFn) {
@@ -1402,6 +1837,463 @@ async function runWithConcurrency(items, limit, workerFn) {
   );
   await Promise.all(workers);
   return results;
+}
+
+function tryResolveRangeFromYearSuperset({
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  split = false,
+  fetchDiagnostics,
+  cacheKey,
+  optionEffectiveStart,
+  optionLookbackDays,
+}) {
+  if (split) return null;
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") return null;
+  const priceModeKey = getPriceModeKey(false);
+  const stockCache = ensureYearSupersetStockCache(
+    marketKey,
+    stockNo,
+    priceModeKey,
+    split,
+  );
+  if (!stockCache || stockCache.size === 0) return null;
+  const startYear = parseInt(startDate.slice(0, 4), 10);
+  const endYear = parseInt(endDate.slice(0, 4), 10);
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+  const combinedRows = [];
+  const years = [];
+  for (let year = startYear; year <= endYear; year += 1) {
+    const entry = getYearSupersetEntry(
+      marketKey,
+      stockNo,
+      priceModeKey,
+      year,
+      split,
+    );
+    if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) {
+      return null;
+    }
+    const segmentStartISO =
+      year === startYear ? startDate : `${year}-01-01`;
+    const segmentEndISO =
+      year === endYear ? endDate : `${year}-12-31`;
+    const missing = computeMissingRanges(
+      entry.coverage,
+      segmentStartISO,
+      segmentEndISO,
+    );
+    if (missing.length > 0) {
+      return null;
+    }
+    entry.data
+      .filter(
+        (row) =>
+          row &&
+          row.date >= segmentStartISO &&
+          row.date <= segmentEndISO,
+      )
+      .forEach((row) => combinedRows.push(row));
+    years.push(year);
+  }
+  if (combinedRows.length === 0) return null;
+  const deduped = dedupeAndSortData(combinedRows);
+  if (deduped.length === 0) return null;
+
+  const rangeFetchInfo = {
+    provider: "worker-year-superset",
+    market: marketKey,
+    status: "hit",
+    cacheHit: true,
+    years,
+    yearKeys: years.map(
+      (year) => `${marketKey}|${stockNo.toUpperCase()}|${year}`,
+    ),
+    readOps: 0,
+    writeOps: 0,
+    rowCount: deduped.length,
+  };
+  fetchDiagnostics.rangeFetch = rangeFetchInfo;
+  fetchDiagnostics.usedCache = true;
+
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate: startDate,
+    endDate,
+  });
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+
+  const dataSourceFlags = new Set([
+    "Netlify 年度快取 (Worker Superset)",
+  ]);
+  const defaultRemoteLabel =
+    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+  const dataSourceLabel = summariseDataSourceFlags(
+    dataSourceFlags,
+    defaultRemoteLabel,
+    { market: marketKey, adjusted: false },
+  );
+
+  fetchDiagnostics.blob = {
+    provider: "worker-year-cache",
+    years,
+    yearKeys: rangeFetchInfo.yearKeys,
+    cacheHits: years.length,
+    cacheMisses: 0,
+    readOps: 0,
+    writeOps: 0,
+    operations: [],
+    cacheReplay: true,
+  };
+
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "worker-year-superset",
+    requestedRange: { start: startDate, end: endDate },
+    coverage: null,
+  });
+
+  const cacheEntry = {
+    data: deduped,
+    stockName: stockNo,
+    dataSource: dataSourceLabel,
+    timestamp: Date.now(),
+    meta: {
+      stockNo,
+      startDate,
+      dataStartDate: startDate,
+      effectiveStartDate: optionEffectiveStart,
+      endDate,
+      priceMode: priceModeKey,
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
+      diagnostics: cacheDiagnostics,
+      rangeCache: {
+        provider: "worker-year-superset",
+        years,
+      },
+    },
+    priceMode: priceModeKey,
+  };
+  setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
+
+  return {
+    data: deduped,
+    dataSource: dataSourceLabel,
+    stockName: stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    dataStartDate: startDate,
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
+  };
+}
+
+async function tryFetchRangeFromBlob({
+  stockNo,
+  startDate,
+  endDate,
+  marketKey,
+  startDateObj,
+  endDateObj,
+  optionEffectiveStart,
+  optionLookbackDays,
+  fetchDiagnostics,
+  cacheKey,
+  split,
+}) {
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") {
+    return null;
+  }
+
+  const rangeFetchInfo = {
+    provider: "netlify-blob-range",
+    market: marketKey,
+    status: "pending",
+    cacheHit: false,
+    years: [],
+    yearKeys: [],
+    readOps: 0,
+    writeOps: 0,
+  };
+  fetchDiagnostics.rangeFetch = rangeFetchInfo;
+
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    marketType: marketKey,
+  });
+  const requestUrl = `/.netlify/functions/stock-range?${params.toString()}`;
+  const startedAt = Date.now();
+  let response;
+  try {
+    response = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+  } catch (error) {
+    rangeFetchInfo.status = "network-error";
+    rangeFetchInfo.error = error?.message || String(error);
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍請求失敗 (${stockNo})：`,
+      error,
+    );
+    return null;
+  }
+
+  rangeFetchInfo.httpStatus = response.status;
+  if (!response.ok) {
+    rangeFetchInfo.status = "http-error";
+    rangeFetchInfo.error = `HTTP ${response.status}`;
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍 HTTP ${response.status} (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    rangeFetchInfo.status = "parse-error";
+    rangeFetchInfo.error = error?.message || String(error);
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應解析失敗 (${stockNo})：`,
+      error,
+    );
+    return null;
+  }
+
+  if (!payload || !Array.isArray(payload.aaData)) {
+    rangeFetchInfo.status = "invalid-payload";
+    rangeFetchInfo.error = "Missing aaData";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應缺少 aaData (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const normalizedRows = payload.aaData
+    .map((row) =>
+      normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj),
+    )
+    .filter(Boolean);
+  if (normalizedRows.length === 0) {
+    rangeFetchInfo.status = "empty";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍回應為空 (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const deduped = dedupeAndSortData(normalizedRows);
+  if (deduped.length === 0) {
+    rangeFetchInfo.status = "empty";
+    rangeFetchInfo.durationMs = Date.now() - startedAt;
+    console.warn(
+      `[Worker] Netlify Blob 範圍排序後仍無資料 (${stockNo})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  const firstDate = deduped[0]?.date || null;
+  const lastDate = deduped[deduped.length - 1]?.date || null;
+  const firstDateObj = firstDate ? new Date(firstDate) : null;
+  const lastDateObj = lastDate ? new Date(lastDate) : null;
+  const startGapRaw = firstDateObj ? differenceInDays(firstDateObj, startDateObj) : null;
+  const endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+  const startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+  const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+
+  const blobMeta = payload?.meta || {};
+  rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
+  rangeFetchInfo.yearKeys = Array.isArray(blobMeta.yearKeys) ? blobMeta.yearKeys : [];
+  rangeFetchInfo.readOps = Number(blobMeta.readOps) || 0;
+  rangeFetchInfo.writeOps = Number(blobMeta.writeOps) || 0;
+  rangeFetchInfo.cacheHit = Number(blobMeta.cacheMisses || 0) === 0;
+  rangeFetchInfo.rowCount = deduped.length;
+  rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
+  rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
+  rangeFetchInfo.durationMs = Date.now() - startedAt;
+  rangeFetchInfo.dataSource = payload?.dataSource || null;
+
+  const startGapExceeded =
+    Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
+  const endGapExceeded =
+    Number.isFinite(endGap) && endGap > COVERAGE_GAP_TOLERANCE_DAYS;
+
+  if (startGapExceeded || endGapExceeded) {
+    rangeFetchInfo.status = "insufficient";
+    rangeFetchInfo.reason = startGapExceeded ? "start-gap" : "end-gap";
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料覆蓋不足 (startGap=${
+        startGap ?? "N/A"
+      }, endGap=${endGap ?? "N/A"})，改用 Proxy 逐月補抓。`,
+    );
+    return null;
+  }
+
+  rangeFetchInfo.status = "success";
+
+  const dataStartDate = firstDate || startDate;
+  const dataSourceFlags = new Set();
+  if (typeof payload.dataSource === "string" && payload.dataSource.trim() !== "") {
+    dataSourceFlags.add(payload.dataSource);
+  }
+  const blobSourceLabel = rangeFetchInfo.cacheHit
+    ? "Netlify 年度快取 (Blob 命中)"
+    : "Netlify 年度快取 (Blob 補抓)";
+  dataSourceFlags.add(blobSourceLabel);
+
+  const defaultRemoteLabel =
+    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+
+  const dataSourceLabel = summariseDataSourceFlags(dataSourceFlags, defaultRemoteLabel, {
+    market: marketKey,
+    adjusted: false,
+  });
+
+  const overview = summariseDatasetRows(deduped, {
+    requestedStart: optionEffectiveStart || startDate,
+    effectiveStartDate: optionEffectiveStart || startDate,
+    warmupStartDate: startDate,
+    dataStartDate,
+    endDate,
+  });
+
+  fetchDiagnostics.overview = overview;
+  fetchDiagnostics.gapToleranceDays = CRITICAL_START_GAP_TOLERANCE_DAYS;
+  if (Number.isFinite(overview?.firstValidCloseGapFromRequested)) {
+    fetchDiagnostics.firstValidCloseGapFromRequested =
+      overview.firstValidCloseGapFromRequested;
+  }
+  if (Number.isFinite(overview?.firstValidCloseGapFromEffective)) {
+    fetchDiagnostics.firstValidCloseGapFromEffective =
+      overview.firstValidCloseGapFromEffective;
+  }
+  const blobOperations = [];
+  const readMap = new Map();
+  if (Array.isArray(rangeFetchInfo.yearKeys)) {
+    rangeFetchInfo.yearKeys.forEach((yearKey) => {
+      readMap.set(yearKey, {
+        action: "read",
+        key: yearKey,
+        stockNo,
+        market: marketKey,
+        cacheHit: true,
+        count: 1,
+        source: "netlify-year-cache",
+      });
+    });
+  }
+  if (Array.isArray(blobMeta.hitYearKeys)) {
+    blobMeta.hitYearKeys.forEach((key) => {
+      if (readMap.has(key)) {
+        readMap.get(key).cacheHit = true;
+      }
+    });
+  }
+  if (Array.isArray(blobMeta.missYearKeys)) {
+    blobMeta.missYearKeys.forEach((key) => {
+      if (readMap.has(key)) {
+        readMap.get(key).cacheHit = false;
+      } else {
+        readMap.set(key, {
+          action: "read",
+          key,
+          stockNo,
+          market: marketKey,
+          cacheHit: false,
+          count: 1,
+          source: "netlify-year-cache",
+        });
+      }
+    });
+  }
+  blobOperations.push(...readMap.values());
+  if (Array.isArray(blobMeta.primedYearKeys)) {
+    blobMeta.primedYearKeys.forEach((key) => {
+      blobOperations.push({
+        action: "write",
+        key,
+        stockNo,
+        market: marketKey,
+        cacheHit: false,
+        count: 1,
+        source: "netlify-year-cache",
+      });
+    });
+  }
+
+  fetchDiagnostics.usedCache = rangeFetchInfo.cacheHit;
+  fetchDiagnostics.blob = {
+    provider: "netlify-year-cache",
+    years: rangeFetchInfo.years,
+    yearKeys: rangeFetchInfo.yearKeys,
+    cacheHits: Number(blobMeta.cacheHits) || 0,
+    cacheMisses: Number(blobMeta.cacheMisses) || 0,
+    readOps: rangeFetchInfo.readOps,
+    writeOps: rangeFetchInfo.writeOps,
+    operations: blobOperations,
+  };
+
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "netlify-blob-range",
+    requestedRange: { start: startDate, end: endDate },
+  });
+  recordYearSupersetSlices({
+    marketKey,
+    stockNo,
+    priceModeKey: getPriceModeKey(false),
+    split,
+    rows: deduped,
+  });
+  const cacheEntry = {
+    data: deduped,
+    stockName: payload.stockName || stockNo,
+    dataSource: dataSourceLabel,
+    timestamp: Date.now(),
+    meta: {
+      stockNo,
+      startDate,
+      dataStartDate,
+      effectiveStartDate: optionEffectiveStart,
+      endDate,
+      priceMode: getPriceModeKey(false),
+      splitAdjustment: split,
+      lookbackDays: optionLookbackDays,
+      fetchRange: { start: startDate, end: endDate },
+      diagnostics: cacheDiagnostics,
+      rangeCache: blobMeta || null,
+    },
+    priceMode: getPriceModeKey(false),
+  };
+  setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
+
+  self.postMessage({
+    type: "progress",
+    progress: 38,
+    message: "Netlify Blob 範圍快取整理中...",
+  });
+
+  return {
+    data: deduped,
+    dataSource: dataSourceLabel,
+    stockName: payload.stockName || stockNo,
+    fetchRange: { start: startDate, end: endDate },
+    dataStartDate,
+    effectiveStartDate: optionEffectiveStart,
+    lookbackDays: optionLookbackDays,
+    diagnostics: fetchDiagnostics,
+  };
 }
 
 async function fetchStockData(
@@ -1436,7 +2328,15 @@ async function fetchStockData(
   const marketKey = getMarketKey(marketType);
   const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
   const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
-  const cacheKey = buildCacheKey(stockNo, startDate, endDate, adjusted, split);
+  const cacheKey = buildCacheKey(
+    stockNo,
+    startDate,
+    endDate,
+    adjusted,
+    split,
+    optionEffectiveStart,
+    marketKey,
+  );
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   const fetchDiagnostics = {
     stockNo,
@@ -1451,6 +2351,17 @@ async function fetchStockData(
     usedCache: Boolean(cachedEntry),
   };
   if (cachedEntry) {
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
+      cachedEntry?.meta?.diagnostics || null,
+      {
+        source: "worker-cache",
+        requestedRange: { start: startDate, end: endDate },
+        coverage: cachedEntry?.meta?.coverage || cachedEntry.coverage,
+      },
+    );
+    if (workerLastMeta && typeof workerLastMeta === "object") {
+      workerLastMeta = { ...workerLastMeta, diagnostics: cacheDiagnostics };
+    }
     self.postMessage({
       type: "progress",
       progress: 15,
@@ -1503,19 +2414,70 @@ async function fetchStockData(
       fetchRange:
         cachedEntry?.meta?.fetchRange ||
         { start: startDate, end: endDate },
+      dataStartDate:
+        cachedEntry?.meta?.dataStartDate ||
+        cachedEntry?.meta?.startDate ||
+        startDate,
       effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
       lookbackDays: cachedEntry?.meta?.lookbackDays || null,
-      diagnostics: cachedEntry?.meta?.diagnostics || null,
+      diagnostics: cacheDiagnostics,
     };
   }
 
-  self.postMessage({
-    type: "progress",
-    progress: adjusted ? 8 : 5,
-    message: adjusted ? "準備抓取還原股價..." : "準備抓取原始數據...",
-  });
+  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+    const supersetResult = tryResolveRangeFromYearSuperset({
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+      split,
+      fetchDiagnostics,
+      cacheKey,
+      optionEffectiveStart,
+      optionLookbackDays,
+    });
+    if (supersetResult) {
+      self.postMessage({
+        type: "progress",
+        progress: 6,
+        message: "命中年度 Superset 快取...",
+      });
+      return supersetResult;
+    }
+  }
+
+  let blobRangeAttempted = false;
+  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+    blobRangeAttempted = true;
+    self.postMessage({
+      type: "progress",
+      progress: 8,
+      message: "檢查 Netlify Blob 範圍快取...",
+    });
+    const blobRangeResult = await tryFetchRangeFromBlob({
+      stockNo,
+      startDate,
+      endDate,
+      marketKey,
+      startDateObj,
+      endDateObj,
+      optionEffectiveStart,
+      optionLookbackDays,
+      fetchDiagnostics,
+      cacheKey,
+      split,
+    });
+    if (blobRangeResult) {
+      return blobRangeResult;
+    }
+  }
 
   if (adjusted) {
+    self.postMessage({
+      type: "progress",
+      progress: 8,
+      message: "準備抓取還原股價...",
+    });
     self.postMessage({
       type: "progress",
       progress: 18,
@@ -1544,6 +2506,10 @@ async function fetchStockData(
       overview: adjustedOverview,
       usedCache: false,
     };
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(adjustedDiagnostics, {
+      source: "worker-adjusted-cache",
+      requestedRange: { start: startDate, end: endDate },
+    });
     const adjustedEntry = {
       data: adjustedResult.data,
       stockName: adjustedResult.stockName || stockNo,
@@ -1553,6 +2519,7 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        dataStartDate: startDate,
         effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
@@ -1596,7 +2563,7 @@ async function fetchStockData(
         adjustmentChecks: Array.isArray(adjustedResult.adjustmentChecks)
           ? adjustedResult.adjustmentChecks
           : [],
-        diagnostics: adjustedDiagnostics,
+        diagnostics: cacheDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1641,11 +2608,18 @@ async function fetchStockData(
         ? adjustedResult.adjustmentChecks
         : [],
       fetchRange: { start: startDate, end: endDate },
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
       diagnostics: adjustedDiagnostics,
     };
   }
+
+  self.postMessage({
+    type: "progress",
+    progress: blobRangeAttempted ? 12 : 5,
+    message: "準備抓取原始數據...",
+  });
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -1657,6 +2631,10 @@ async function fetchStockData(
       dataStartDate: startDate,
       endDate,
     });
+    const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+      source: "worker-empty-cache",
+      requestedRange: { start: startDate, end: endDate },
+    });
     const entry = {
       data: [],
       stockName: stockNo,
@@ -1665,12 +2643,13 @@ async function fetchStockData(
       meta: {
         stockNo,
         startDate,
+        dataStartDate: startDate,
         effectiveStartDate: optionEffectiveStart,
         endDate,
         priceMode: getPriceModeKey(adjusted),
         lookbackDays: optionLookbackDays,
         fetchRange: { start: startDate, end: endDate },
-        diagnostics: fetchDiagnostics,
+        diagnostics: cacheDiagnostics,
       },
       priceMode: getPriceModeKey(adjusted),
     };
@@ -1680,6 +2659,7 @@ async function fetchStockData(
       dataSource: marketKey,
       stockName,
       fetchRange: { start: startDate, end: endDate },
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       lookbackDays: optionLookbackDays,
       diagnostics: fetchDiagnostics,
@@ -1691,282 +2671,348 @@ async function fetchStockData(
   const isTpex = marketKey === "TPEX";
   const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
-  let completed = 0;
-  const monthResults = await runWithConcurrency(
-    months,
-    concurrencyLimit,
-    async (monthInfo) => {
-      try {
-        let monthEntry = getMonthlyCacheEntry(
+  const segments = buildMonthSegments(months, optionEffectiveStart, {
+    warmupGroupSize: isUs ? 2 : 3,
+    activeConcurrency: concurrencyLimit,
+  });
+  if (segments.length === 0) {
+    segments.push({
+      type: "active",
+      label: months[0]?.label || "",
+      months: months.map((info) => ({ ...info, phase: "active" })),
+      concurrency: concurrencyLimit,
+    });
+  }
+  fetchDiagnostics.queuePlan = segments.map((segment) => ({
+    type: segment.type,
+    label: segment.label,
+    months: segment.months.map((month) => month.monthKey),
+    size: segment.months.length,
+  }));
+  const totalMonths = months.length;
+  let completedMonths = 0;
+
+  async function processMonth(monthInfo) {
+    try {
+      let monthEntry = getMonthlyCacheEntry(
+        marketKey,
+        stockNo,
+        monthInfo.monthKey,
+        adjusted,
+        split,
+      );
+      if (!monthEntry) {
+        monthEntry = {
+          data: [],
+          coverage: [],
+          sources: new Set(),
+          stockName: "",
+          lastUpdated: 0,
+        };
+        setMonthlyCacheEntry(
           marketKey,
           stockNo,
           monthInfo.monthKey,
+          monthEntry,
           adjusted,
           split,
         );
-        if (!monthEntry) {
-          monthEntry = {
-            data: [],
-            coverage: [],
-            sources: new Set(),
-            stockName: "",
-            lastUpdated: 0,
-          };
-          setMonthlyCacheEntry(
-            marketKey,
-            stockNo,
-            monthInfo.monthKey,
-            monthEntry,
-            adjusted,
-            split,
-          );
-        }
+      }
 
-        const existingCoverage = Array.isArray(monthEntry.coverage)
-          ? monthEntry.coverage.map((range) => ({ ...range }))
-          : [];
-        const forcedRepairRanges = detectCoverageGapsForMonth(
+      ensureRangeFingerprints(monthEntry);
+      const existingCoverage = Array.isArray(monthEntry.coverage)
+        ? monthEntry.coverage.map((range) => ({ ...range }))
+        : [];
+      const forcedRepairRanges = detectCoverageGapsForMonth(
+        monthEntry,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+        { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
+      );
+      let coverageForComputation = existingCoverage;
+      if (forcedRepairRanges.length > 0) {
+        coverageForComputation = subtractRangeBounds(
+          existingCoverage,
+          forcedRepairRanges,
+        );
+        monthEntry.coverage = subtractRangeBounds(
+          monthEntry.coverage || [],
+          forcedRepairRanges,
+        );
+        console.warn(
+          `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
+        );
+      }
+      pruneFingerprintsForRanges(monthEntry, forcedRepairRanges);
+      const fingerprintSuperset = findFingerprintSuperset(
+        monthEntry,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+      );
+      let missingRanges;
+      let coveredLengthBefore;
+      if (fingerprintSuperset) {
+        missingRanges = [];
+        const targetStartUtc = isoToUTC(monthInfo.rangeStartISO);
+        const targetEndUtcExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+        coveredLengthBefore =
+          Number.isFinite(targetStartUtc) && Number.isFinite(targetEndUtcExclusive)
+            ? Math.max(0, targetEndUtcExclusive - targetStartUtc)
+            : 0;
+      } else {
+        missingRanges = computeMissingRanges(
+          coverageForComputation,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+        coveredLengthBefore = getCoveredLength(
+          coverageForComputation,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+        );
+      }
+      const forcedRangeKeys = new Set(
+        forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
+      );
+      const monthSourceFlags = new Set(
+        monthEntry.sources instanceof Set
+          ? Array.from(monthEntry.sources)
+          : monthEntry.sources || [],
+      );
+      const monthCacheFlags = new Set();
+      const forcedSourceUsage = new Set();
+      let monthStockName = monthEntry.stockName || "";
+      let forcedReloadCompleted = false;
+
+      if (missingRanges.length > 0) {
+        for (let i = 0; i < missingRanges.length; i += 1) {
+          const missingRange = missingRanges[i];
+          const { startISO, endISO } = rangeBoundsToISO(missingRange);
+          const rangeKey = `${missingRange.start}-${missingRange.end}`;
+          const shouldForceRange =
+            forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+          const candidateSources = [];
+          if (shouldForceRange) {
+            if (primaryForceSource) candidateSources.push(primaryForceSource);
+            if (
+              fallbackForceSource &&
+              fallbackForceSource !== primaryForceSource
+            ) {
+              candidateSources.push(fallbackForceSource);
+            }
+          }
+          candidateSources.push(null);
+
+          let payload = null;
+          let lastError = null;
+          for (let c = 0; c < candidateSources.length; c += 1) {
+            const forceSource = candidateSources[c];
+            const params = new URLSearchParams({
+              stockNo,
+              month: monthInfo.monthKey,
+              start: startISO,
+              end: endISO,
+            });
+            if (adjusted) params.set("adjusted", "1");
+            if (forceSource) params.set("forceSource", forceSource);
+            if (shouldForceRange) {
+              params.set(
+                "cacheBust",
+                `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              );
+            }
+            const url = `${proxyPath}?${params.toString()}`;
+            try {
+              const responsePayload = await fetchWithAdaptiveRetry(url, {
+                headers: { Accept: "application/json" },
+              });
+              if (responsePayload?.error) {
+                throw new Error(responsePayload.error);
+              }
+              payload = responsePayload;
+              if (forceSource) {
+                forcedSourceUsage.add(forceSource);
+                console.warn(
+                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
+                    responsePayload?.aaData,
+                  )
+                    ? responsePayload.aaData.length
+                    : Array.isArray(responsePayload?.data)
+                      ? responsePayload.data.length
+                      : 0} 筆資料。`,
+                );
+              }
+              break;
+            } catch (error) {
+              lastError = error;
+              console.error(`[Worker] 抓取 ${url} 失敗:`, error);
+              payload = null;
+            }
+          }
+
+          if (!payload) {
+            if (lastError) {
+              console.error(
+                `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
+              );
+            }
+            continue;
+          }
+
+          if (payload?.source === "blob") {
+            const cacheLabel = isTpex
+              ? "TPEX (快取)"
+              : isUs
+                ? "US (快取)"
+                : "TWSE (快取)";
+            monthCacheFlags.add(cacheLabel);
+            monthEntry.sources.add(cacheLabel);
+          } else if (payload?.source === "memory") {
+            const cacheLabel = isTpex
+              ? "TPEX (記憶體快取)"
+              : isUs
+                ? "US (記憶體快取)"
+                : "TWSE (記憶體快取)";
+            monthCacheFlags.add(cacheLabel);
+            monthEntry.sources.add(cacheLabel);
+          }
+          const rows = Array.isArray(payload?.aaData)
+            ? payload.aaData
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : [];
+          const normalized = [];
+          rows.forEach((row) => {
+            const normalizedRow = normalizeProxyRow(
+              row,
+              isTpex,
+              startDateObj,
+              endDateObj,
+            );
+            if (normalizedRow) normalized.push(normalizedRow);
+          });
+          if (payload?.stockName) {
+            monthStockName = payload.stockName;
+          }
+          const sourceLabel =
+            payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
+          if (sourceLabel) {
+            monthSourceFlags.add(sourceLabel);
+            monthEntry.sources.add(sourceLabel);
+          }
+          if (Array.isArray(payload?.dataSources)) {
+            payload.dataSources
+              .filter((label) => typeof label === "string" && label.trim() !== "")
+              .forEach((label) => {
+                monthSourceFlags.add(label);
+                monthEntry.sources.add(label);
+              });
+          }
+          if (normalized.length > 0) {
+            mergeMonthlyData(monthEntry, normalized);
+            const sortedNormalized = normalized
+              .slice()
+              .sort((a, b) => a.date.localeCompare(b.date));
+            const coverageStart = sortedNormalized[0]?.date || null;
+            const coverageEnd =
+              sortedNormalized[sortedNormalized.length - 1]?.date || null;
+            if (coverageStart && coverageEnd) {
+              addCoverage(monthEntry, coverageStart, coverageEnd);
+            }
+            rebuildCoverageFromData(monthEntry);
+            if (shouldForceRange) {
+              forcedReloadCompleted = true;
+            }
+          }
+          monthEntry.lastUpdated = Date.now();
+          if (!monthEntry.stockName && monthStockName) {
+            monthEntry.stockName = monthStockName;
+          }
+        }
+      }
+
+      const rowsForRange = (monthEntry.data || []).filter(
+        (row) =>
+          row &&
+          row.date >= monthInfo.rangeStartISO &&
+          row.date <= monthInfo.rangeEndISO,
+      );
+
+      const postMissing = computeMissingRanges(
+        monthEntry.coverage,
+        monthInfo.rangeStartISO,
+        monthInfo.rangeEndISO,
+      );
+      if (postMissing.length === 0) {
+        addRangeFingerprint(
           monthEntry,
           monthInfo.rangeStartISO,
           monthInfo.rangeEndISO,
-          { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
         );
-        let coverageForComputation = existingCoverage;
-        if (forcedRepairRanges.length > 0) {
-          coverageForComputation = subtractRangeBounds(
-            existingCoverage,
-            forcedRepairRanges,
-          );
-          monthEntry.coverage = subtractRangeBounds(
-            monthEntry.coverage || [],
-            forcedRepairRanges,
-          );
-          monthEntry.lastForcedReloadAt = Date.now();
-          if (forcedRepairRanges.length > 0) {
-            console.warn(
-              `[Worker] 檢測到 ${stockNo} ${monthInfo.monthKey} 的月度快取缺口，強制重新抓取 ${forcedRepairRanges.length} 段資料。`,
-            );
-          }
-        }
-        const missingRanges = computeMissingRanges(
-          coverageForComputation,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const coveredLengthBefore = getCoveredLength(
-          coverageForComputation,
-          monthInfo.rangeStartISO,
-          monthInfo.rangeEndISO,
-        );
-        const forcedRangeKeys = new Set(
-          forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
-        );
-        const monthSourceFlags = new Set(
-          monthEntry.sources instanceof Set
-            ? Array.from(monthEntry.sources)
-            : monthEntry.sources || [],
-        );
-        const monthCacheFlags = new Set();
-        const forcedSourceUsage = new Set();
-        let monthStockName = monthEntry.stockName || "";
-
-        if (missingRanges.length > 0) {
-          for (let i = 0; i < missingRanges.length; i += 1) {
-            const missingRange = missingRanges[i];
-            const { startISO, endISO } = rangeBoundsToISO(missingRange);
-            const rangeKey = `${missingRange.start}-${missingRange.end}`;
-            const shouldForceRange =
-              forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
-            const candidateSources = [];
-            if (shouldForceRange) {
-              if (primaryForceSource) candidateSources.push(primaryForceSource);
-              if (
-                fallbackForceSource &&
-                fallbackForceSource !== primaryForceSource
-              ) {
-                candidateSources.push(fallbackForceSource);
-              }
-            }
-            candidateSources.push(null);
-
-            let payload = null;
-            let lastError = null;
-            for (let c = 0; c < candidateSources.length; c += 1) {
-              const forceSource = candidateSources[c];
-              const params = new URLSearchParams({
-                stockNo,
-                month: monthInfo.monthKey,
-                start: startISO,
-                end: endISO,
-              });
-              if (adjusted) params.set("adjusted", "1");
-              if (forceSource) params.set("forceSource", forceSource);
-              if (shouldForceRange) {
-                params.set(
-                  "cacheBust",
-                  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                );
-              }
-              const url = `${proxyPath}?${params.toString()}`;
-              try {
-                const responsePayload = await fetchWithAdaptiveRetry(url, {
-                  headers: { Accept: "application/json" },
-                });
-                if (responsePayload?.error) {
-                  throw new Error(responsePayload.error);
-                }
-                payload = responsePayload;
-                if (forceSource) {
-                  forcedSourceUsage.add(forceSource);
-                  console.warn(
-                    `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 以 ${forceSource} 強制補抓 ${Array.isArray(
-                      responsePayload?.aaData,
-                    )
-                      ? responsePayload.aaData.length
-                      : Array.isArray(responsePayload?.data)
-                        ? responsePayload.data.length
-                        : 0} 筆資料。`,
-                  );
-                }
-                break;
-              } catch (error) {
-                lastError = error;
-                console.error(`[Worker] 抓取 ${url} 失敗:`, error);
-                payload = null;
-              }
-            }
-
-            if (!payload) {
-              if (lastError) {
-                console.error(
-                  `[Worker] ${stockNo} ${monthInfo.monthKey} ${startISO}~${endISO} 補抓失敗，後續指標可能缺少暖身資料。`,
-                );
-              }
-              continue;
-            }
-
-            if (payload?.source === "blob") {
-              const cacheLabel = isTpex
-                ? "TPEX (快取)"
-                : isUs
-                  ? "US (快取)"
-                  : "TWSE (快取)";
-              monthCacheFlags.add(cacheLabel);
-              monthEntry.sources.add(cacheLabel);
-            } else if (payload?.source === "memory") {
-              const cacheLabel = isTpex
-                ? "TPEX (記憶體快取)"
-                : isUs
-                  ? "US (記憶體快取)"
-                  : "TWSE (記憶體快取)";
-              monthCacheFlags.add(cacheLabel);
-              monthEntry.sources.add(cacheLabel);
-            }
-            const rows = Array.isArray(payload?.aaData)
-              ? payload.aaData
-              : Array.isArray(payload?.data)
-                ? payload.data
-                : [];
-            const normalized = [];
-            rows.forEach((row) => {
-              const normalizedRow = normalizeProxyRow(
-                row,
-                isTpex,
-                startDateObj,
-                endDateObj,
-              );
-              if (normalizedRow) normalized.push(normalizedRow);
-            });
-            if (payload?.stockName) {
-              monthStockName = payload.stockName;
-            }
-            const sourceLabel =
-              payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
-            if (sourceLabel) {
-              monthSourceFlags.add(sourceLabel);
-              monthEntry.sources.add(sourceLabel);
-            }
-            if (Array.isArray(payload?.dataSources)) {
-              payload.dataSources
-                .filter((label) => typeof label === "string" && label.trim() !== "")
-                .forEach((label) => {
-                  monthSourceFlags.add(label);
-                  monthEntry.sources.add(label);
-                });
-            }
-            if (normalized.length > 0) {
-              mergeMonthlyData(monthEntry, normalized);
-              const sortedNormalized = normalized
-                .slice()
-                .sort((a, b) => a.date.localeCompare(b.date));
-              const coverageStart = sortedNormalized[0]?.date || null;
-              const coverageEnd =
-                sortedNormalized[sortedNormalized.length - 1]?.date || null;
-              if (coverageStart && coverageEnd) {
-                addCoverage(monthEntry, coverageStart, coverageEnd);
-              }
-              rebuildCoverageFromData(monthEntry);
-            }
-            monthEntry.lastUpdated = Date.now();
-            if (!monthEntry.stockName && monthStockName) {
-              monthEntry.stockName = monthStockName;
-            }
-          }
-        }
-
-        const rowsForRange = (monthEntry.data || []).filter(
-          (row) =>
-            row &&
-            row.date >= monthInfo.rangeStartISO &&
-            row.date <= monthInfo.rangeEndISO,
-        );
-
-        monthCacheFlags.forEach((label) => {
-          monthSourceFlags.add(label);
-        });
-
-        const usedCache =
-          missingRanges.length === 0 || coveredLengthBefore > 0;
-
-        const monthDiagnostics = {
-          monthKey: monthInfo.monthKey,
-          label: monthInfo.label,
-          requestedStart: monthInfo.rangeStartISO,
-          requestedEnd: monthInfo.rangeEndISO,
-          missingSegments: missingRanges.length,
-          forcedRepairs: forcedRepairRanges.length,
-          forcedRepairSamples: forcedRepairRanges
-            .slice(0, 3)
-            .map((range) => rangeBoundsToISO(range)),
-          cacheCoverageDaysBefore: Math.round(
-            coveredLengthBefore / DAY_MS,
-          ),
-          usedCache,
-          rowsReturned: rowsForRange.length,
-          firstRowDate: rowsForRange[0]?.date || null,
-          lastRowDate:
-            rowsForRange[rowsForRange.length - 1]?.date || null,
-          cacheSources: Array.from(monthSourceFlags),
-          forcedSources: Array.from(forcedSourceUsage),
-        };
-        return {
-          rows: rowsForRange,
-          sourceFlags: Array.from(monthSourceFlags),
-          stockName: monthStockName,
-          usedCache,
-          diagnostics: monthDiagnostics,
-        };
-      } finally {
-        completed += 1;
-        const progress = 10 + Math.round((completed / months.length) * 35);
-        self.postMessage({
-          type: "progress",
-          progress,
-          message: `處理 ${monthInfo.label} 數據...`,
-        });
       }
-    },
-  );
+
+      monthCacheFlags.forEach((label) => {
+        monthSourceFlags.add(label);
+      });
+
+      if (forcedRepairRanges.length > 0 && forcedReloadCompleted) {
+        monthEntry.lastForcedReloadAt = Date.now();
+      }
+
+      const usedCache =
+        missingRanges.length === 0 || coveredLengthBefore > 0;
+
+      const monthDiagnostics = {
+        monthKey: monthInfo.monthKey,
+        label: monthInfo.label,
+        requestedStart: monthInfo.rangeStartISO,
+        requestedEnd: monthInfo.rangeEndISO,
+        missingSegments: missingRanges.length,
+        forcedRepairs: forcedRepairRanges.length,
+        forcedRepairSamples: forcedRepairRanges
+          .slice(0, 3)
+          .map((range) => rangeBoundsToISO(range)),
+        cacheCoverageDaysBefore: Math.round(
+          coveredLengthBefore / DAY_MS,
+        ),
+        usedCache,
+        rowsReturned: rowsForRange.length,
+        firstRowDate: rowsForRange[0]?.date || null,
+        lastRowDate:
+          rowsForRange[rowsForRange.length - 1]?.date || null,
+        cacheSources: Array.from(monthSourceFlags),
+        forcedSources: Array.from(forcedSourceUsage),
+        queuePhase: monthInfo.phase || "active",
+      };
+      return {
+        rows: rowsForRange,
+        sourceFlags: Array.from(monthSourceFlags),
+        stockName: monthStockName,
+        usedCache,
+        diagnostics: monthDiagnostics,
+      };
+    } finally {
+      completedMonths += 1;
+      const progress = 10 + Math.round((completedMonths / totalMonths) * 35);
+      const phaseLabel =
+        monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
+      self.postMessage({
+        type: "progress",
+        progress,
+        message: `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
+      });
+    }
+  }
+
+  const monthResults = [];
+  for (const segment of segments) {
+    const results = await runWithConcurrency(
+      segment.months,
+      segment.concurrency || 1,
+      processMonth,
+    );
+    monthResults.push(...results);
+  }
 
   const normalizedRows = [];
   const sourceFlags = new Set();
@@ -2071,6 +3117,17 @@ async function fetchStockData(
     }
   }
 
+  const cacheDiagnostics = prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+    source: "worker-proxy-cache",
+    requestedRange: { start: startDate, end: endDate },
+  });
+  recordYearSupersetSlices({
+    marketKey,
+    stockNo,
+    priceModeKey: getPriceModeKey(adjusted),
+    split,
+    rows: deduped,
+  });
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
     stockName: stockName || stockNo,
@@ -2079,13 +3136,14 @@ async function fetchStockData(
     meta: {
       stockNo,
       startDate,
+      dataStartDate: startDate,
       effectiveStartDate: optionEffectiveStart,
       endDate,
       priceMode: getPriceModeKey(adjusted),
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
-      diagnostics: fetchDiagnostics,
+      diagnostics: cacheDiagnostics,
     },
     priceMode: getPriceModeKey(adjusted),
   });
@@ -2101,6 +3159,7 @@ async function fetchStockData(
     dataSource: dataSourceLabel,
     stockName: stockName || stockNo,
     fetchRange: { start: startDate, end: endDate },
+    dataStartDate: startDate,
     effectiveStartDate: optionEffectiveStart,
     lookbackDays: optionLookbackDays,
     diagnostics: fetchDiagnostics,
@@ -3729,6 +4788,237 @@ function combinePositionLabel(longState, shortState) {
 }
 
 // --- 運行策略回測 (修正年化報酬率計算) ---
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function cloneParamsForSensitivity(baseParams) {
+  try {
+    return JSON.parse(JSON.stringify(baseParams));
+  } catch (error) {
+    console.warn(
+      "[Worker Sensitivity] Failed to clone params with JSON, fallback to shallow copy.",
+      error,
+    );
+    return { ...baseParams };
+  }
+}
+
+function adjustNumericParameter(baseValue, factor) {
+  if (!Number.isFinite(baseValue)) return null;
+  let adjusted = baseValue * factor;
+  if (Number.isInteger(baseValue)) {
+    adjusted = Math.round(adjusted);
+    if (adjusted === baseValue) {
+      adjusted = factor > 1 ? baseValue + 1 : Math.max(1, baseValue - 1);
+    }
+  } else {
+    adjusted = parseFloat(adjusted.toFixed(4));
+  }
+  if (!Number.isFinite(adjusted)) return null;
+  if (baseValue > 0 && adjusted <= 0) {
+    adjusted = Number.isInteger(baseValue) ? 1 : Math.max(0.0001, Math.abs(adjusted));
+  }
+  return adjusted;
+}
+
+function computeReturnDriftPercent(baseValue, variantValue) {
+  if (!Number.isFinite(baseValue) || !Number.isFinite(variantValue)) return null;
+  const diff = variantValue - baseValue;
+  if (Math.abs(baseValue) < 1e-6) {
+    return Math.abs(diff);
+  }
+  return (diff / Math.abs(baseValue)) * 100;
+}
+
+function computeStabilityScore(driftValues) {
+  const valid = driftValues
+    .map((v) => (Number.isFinite(v) ? Math.abs(v) : null))
+    .filter((v) => v !== null);
+  if (valid.length === 0) return null;
+  const avg = valid.reduce((sum, cur) => sum + cur, 0) / valid.length;
+  const capped = Math.min(100, avg);
+  return Math.max(0, 100 - capped);
+}
+
+function computeParameterSensitivity(data, baseParams, baseMetrics) {
+  try {
+    if (!isPlainObject(baseParams)) return null;
+    const sensitivityGroups = [];
+    const groupConfigs = [
+      {
+        key: "entryParams",
+        label: "進場策略",
+        strategyKey: baseParams.entryStrategy,
+      },
+      {
+        key: "exitParams",
+        label: "出場策略",
+        strategyKey: baseParams.exitStrategy,
+      },
+    ];
+    if (baseParams.enableShorting) {
+      groupConfigs.push(
+        {
+          key: "shortEntryParams",
+          label: "做空進場",
+          strategyKey: baseParams.shortEntryStrategy,
+        },
+        {
+          key: "shortExitParams",
+          label: "回補出場",
+          strategyKey: baseParams.shortExitStrategy,
+        },
+      );
+    }
+
+    const adjustments = [
+      { label: "+10%", factor: 1.1 },
+      { label: "-10%", factor: 0.9 },
+    ];
+
+    const processedParameters = [];
+
+    for (const groupConfig of groupConfigs) {
+      const paramsObject = baseParams[groupConfig.key];
+      if (!isPlainObject(paramsObject)) continue;
+      const parameterEntries = Object.entries(paramsObject).filter(([, value]) =>
+        Number.isFinite(Number(value)),
+      );
+      if (parameterEntries.length === 0) continue;
+
+      const paramResults = [];
+
+      for (const [paramName, rawValue] of parameterEntries) {
+        const baseValue = Number(rawValue);
+        const scenarioResults = [];
+        for (const adjustment of adjustments) {
+          const adjustedValue = adjustNumericParameter(baseValue, adjustment.factor);
+          if (adjustedValue === null || adjustedValue === baseValue) {
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: null,
+              driftPercent: null,
+            });
+            continue;
+          }
+          const mutatedParams = cloneParamsForSensitivity(baseParams);
+          mutatedParams.skipSensitivity = true;
+          mutatedParams.suppressProgress = true;
+          if (!isPlainObject(mutatedParams[groupConfig.key])) {
+            mutatedParams[groupConfig.key] = {};
+          }
+          mutatedParams[groupConfig.key][paramName] = adjustedValue;
+          try {
+            const outcome = runStrategy(data, mutatedParams);
+            const variantReturn = Number.isFinite(outcome?.returnRate)
+              ? outcome.returnRate
+              : null;
+            const driftPercent = Number.isFinite(baseMetrics.returnRate)
+              ? computeReturnDriftPercent(baseMetrics.returnRate, variantReturn)
+              : null;
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: {
+                returnRate: variantReturn,
+                annualizedReturn: Number.isFinite(outcome?.annualizedReturn)
+                  ? outcome.annualizedReturn
+                  : null,
+                sharpeRatio: Number.isFinite(outcome?.sharpeRatio)
+                  ? outcome.sharpeRatio
+                  : null,
+              },
+              driftPercent,
+              deltaReturn:
+                Number.isFinite(variantReturn) && Number.isFinite(baseMetrics.returnRate)
+                  ? variantReturn - baseMetrics.returnRate
+                  : null,
+              deltaSharpe:
+                Number.isFinite(outcome?.sharpeRatio) && Number.isFinite(baseMetrics.sharpeRatio)
+                  ? outcome.sharpeRatio - baseMetrics.sharpeRatio
+                  : null,
+            });
+          } catch (error) {
+            console.warn(
+              `[Worker Sensitivity] Failed to evaluate ${groupConfig.key}.${paramName} 調整 ${adjustment.label}:`,
+              error,
+            );
+            scenarioResults.push({
+              label: adjustment.label,
+              value: adjustedValue,
+              run: null,
+              driftPercent: null,
+              deltaReturn: null,
+              deltaSharpe: null,
+            });
+          }
+        }
+
+        const driftValues = scenarioResults
+          .map((item) => (Number.isFinite(item.driftPercent) ? Math.abs(item.driftPercent) : null))
+          .filter((value) => value !== null);
+        const avgDrift =
+          driftValues.length > 0
+            ? driftValues.reduce((sum, cur) => sum + cur, 0) / driftValues.length
+            : null;
+        const stabilityScore = computeStabilityScore(driftValues);
+        paramResults.push({
+          name: paramName,
+          baseValue,
+          scenarios: scenarioResults,
+          averageDriftPercent: avgDrift,
+          stabilityScore,
+        });
+        processedParameters.push({ avgDrift, stabilityScore });
+      }
+
+      if (paramResults.length > 0) {
+        sensitivityGroups.push({
+          label: groupConfig.label,
+          strategy: groupConfig.strategyKey,
+          parameters: paramResults,
+        });
+      }
+    }
+
+    if (sensitivityGroups.length === 0) return null;
+
+    const flattened = processedParameters.filter((item) => item.avgDrift !== null);
+    const avgDriftAll =
+      flattened.length > 0
+        ? flattened.reduce((sum, cur) => sum + Math.abs(cur.avgDrift || 0), 0) / flattened.length
+        : null;
+    const overallScore = computeStabilityScore(
+      processedParameters
+        .map((item) => item.avgDrift)
+        .filter((value) => Number.isFinite(value)),
+    );
+
+    return {
+      baseline: {
+        returnRate: baseMetrics.returnRate,
+        annualizedReturn: baseMetrics.annualizedReturn,
+        sharpeRatio: baseMetrics.sharpeRatio,
+      },
+      groups: sensitivityGroups,
+      summary: {
+        averageDriftPercent: avgDriftAll,
+        stabilityScore: overallScore,
+      },
+      window: "±10%",
+    };
+  } catch (error) {
+    console.warn("[Worker Sensitivity] Unexpected error computing parameter sensitivity", error);
+    return null;
+  }
+}
+
 function runStrategy(data, params) {
   // --- 新增的保護機制 ---
   if (!Array.isArray(data)) {
@@ -3738,33 +5028,66 @@ function runStrategy(data, params) {
   }
   // --- 保護機制結束 ---
 
-  self.postMessage({
-    type: "progress",
-    progress: 70,
-    message: "回測模擬中...",
-  });
+  const skipSensitivity = params?.skipSensitivity === true;
+  const suppressProgress = params?.suppressProgress === true;
+
+  if (!suppressProgress) {
+    self.postMessage({
+      type: "progress",
+      progress: 70,
+      message: "回測模擬中...",
+    });
+  }
   const n = data.length;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
-  const {
-    initialCapital,
-    positionSize,
-    stopLoss: globalSL,
-    takeProfit: globalTP,
-    entryStrategy,
-    exitStrategy,
-    entryParams,
-    exitParams,
-    enableShorting,
-    shortEntryStrategy,
-    shortExitStrategy,
-    shortEntryParams,
-    shortExitParams,
-    tradeTiming,
-    buyFee,
-    sellFee,
-    positionBasis,
-  } = params;
+    const {
+      initialCapital,
+      positionSize,
+      stopLoss: globalSL,
+      takeProfit: globalTP,
+      entryStrategy,
+      exitStrategy,
+      entryParams,
+      entryStages,
+      entryStagingMode,
+      exitParams,
+      exitStages,
+      exitStagingMode,
+      enableShorting,
+      shortEntryStrategy,
+      shortExitStrategy,
+      shortEntryParams,
+      shortExitParams,
+      tradeTiming,
+      buyFee,
+      sellFee,
+      positionBasis,
+    } = params;
+
+    const entryStagePercentsRaw = Array.isArray(entryStages)
+      ? entryStages.map((value) => Number(value))
+      : [];
+    const entryStagePercents = entryStagePercentsRaw.filter(
+      (value) => Number.isFinite(value) && value > 0,
+    );
+    if (entryStagePercents.length === 0) {
+      entryStagePercents.push(positionSize);
+    }
+    const entryStageMode =
+      typeof entryStagingMode === "string" ? entryStagingMode : "signal_repeat";
+
+    const exitStagePercentsRaw = Array.isArray(exitStages)
+      ? exitStages.map((value) => Number(value))
+      : [];
+    const exitStagePercents = exitStagePercentsRaw.filter(
+      (value) => Number.isFinite(value) && value > 0,
+    );
+    if (exitStagePercents.length === 0) {
+      exitStagePercents.push(100);
+    }
+    const exitStageMode =
+      typeof exitStagingMode === "string" ? exitStagingMode : "signal_repeat";
 
   if (!data || n === 0) throw new Error("回測數據無效");
   const dates = data.map((d) => d.date);
@@ -3983,8 +5306,24 @@ function runStrategy(data, params) {
   let longShares = 0;
   let lastBuyP = 0;
   let curPeakP = 0;
-  let longTrades = [];
-  let longCompletedTrades = [];
+    let longTrades = [];
+    let longCompletedTrades = [];
+    let currentLongEntryBreakdown = [];
+    let longPositionCostWithFee = 0;
+    let longPositionCostWithoutFee = 0;
+    let longAverageEntryPrice = 0;
+    let filledEntryStages = 0;
+    let currentLongPositionId = null;
+    let nextLongPositionId = 1;
+    let filledExitStages = 0;
+    let lastLongStagePrice = null;
+    let lastEntryStageTrigger = null;
+    let lastLongExitStagePrice = null;
+    let lastExitStageTrigger = null;
+    let currentLongExitPlan = null;
+    let resetExitPlanAfterCapture = false;
+    const longEntryStageStates = new Array(n).fill(null);
+    const longExitStageStates = new Array(n).fill(null);
   const buySigs = [];
   const sellSigs = [];
   const longPl = Array(n).fill(0);
@@ -4019,14 +5358,15 @@ function runStrategy(data, params) {
       buyHoldReturns: Array(n).fill(0),
       strategyReturns: Array(n).fill(0),
       dates: dates,
-      chartBuySignals: [],
-      chartSellSignals: [],
-      chartShortSignals: [],
-      chartCoverSignals: [],
-      entryStrategy: params.entryStrategy,
-      exitStrategy: params.exitStrategy,
-      entryParams: params.entryParams,
-      exitParams: params.exitParams,
+        chartBuySignals: [],
+        chartSellSignals: [],
+        chartShortSignals: [],
+        chartCoverSignals: [],
+        entryStrategy: params.entryStrategy,
+        exitStrategy: params.exitStrategy,
+        entryParams: params.entryParams,
+        entryStages: entryStagePercents.slice(),
+        exitParams: params.exitParams,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -4048,9 +5388,272 @@ function runStrategy(data, params) {
     };
   }
 
-  console.log(
-    `[Worker] Starting simulation loop from index ${startIdx} to ${n - 1}`,
-  );
+    console.log(
+      `[Worker] Starting simulation loop from index ${startIdx} to ${n - 1}`,
+    );
+
+    const executeLongStage = ({
+      tradePrice,
+      tradeDate,
+      stageIndex,
+      baseCapitalForSizing,
+      investmentLimitOverride,
+      strategyKey,
+      signalIndex,
+      kdValues,
+      macdValues,
+      indicatorValues,
+      trigger,
+    }) => {
+      if (!Number.isFinite(tradePrice) || tradePrice <= 0) {
+        return { executed: false };
+      }
+
+      const adjustedTradePrice = tradePrice * (1 + buyFee / 100);
+      if (!Number.isFinite(adjustedTradePrice) || adjustedTradePrice <= 0) {
+        return { executed: false };
+      }
+
+      const resolvedStageIndex = Number.isInteger(stageIndex) && stageIndex >= 0
+        ? Math.min(stageIndex, entryStagePercents.length - 1)
+        : Math.min(filledEntryStages, entryStagePercents.length - 1);
+      const stagePercent = entryStagePercents[resolvedStageIndex];
+      if (!Number.isFinite(stagePercent) || stagePercent <= 0) {
+        return { executed: false };
+      }
+
+      let spendingLimit = Number.isFinite(investmentLimitOverride)
+        ? Math.min(longCap, investmentLimitOverride)
+        : null;
+      if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
+        const base = Number.isFinite(baseCapitalForSizing) && baseCapitalForSizing > 0
+          ? baseCapitalForSizing
+          : initialCapital;
+        spendingLimit = Math.min(longCap, base * (stagePercent / 100));
+      }
+      if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
+        return { executed: false };
+      }
+
+      const stageShares = Math.floor(spendingLimit / adjustedTradePrice);
+      if (!Number.isFinite(stageShares) || stageShares <= 0) {
+        return { executed: false };
+      }
+
+      const stageCostWithFee = stageShares * adjustedTradePrice;
+      if (!Number.isFinite(stageCostWithFee) || stageCostWithFee <= 0) {
+        return { executed: false };
+      }
+      if (longCap + 1e-9 < stageCostWithFee) {
+        return { executed: false };
+      }
+
+      const stageCostWithoutFee = stageShares * tradePrice;
+      longCap -= stageCostWithFee;
+      longPositionCostWithFee += stageCostWithFee;
+      longPositionCostWithoutFee += stageCostWithoutFee;
+      longShares += stageShares;
+      longPos = 1;
+      if (!currentLongPositionId) {
+        currentLongPositionId = nextLongPositionId;
+        nextLongPositionId += 1;
+      }
+      filledEntryStages = Math.min(filledEntryStages + 1, entryStagePercents.length);
+      longAverageEntryPrice =
+        longShares > 0 ? longPositionCostWithoutFee / longShares : 0;
+      lastBuyP = longAverageEntryPrice;
+      curPeakP = Math.max(curPeakP || 0, tradePrice);
+
+      const cumulativePercent = currentLongEntryBreakdown.reduce(
+        (sum, info) => sum + (info.allocationPercent || 0),
+        0,
+      ) + stagePercent;
+
+      const stageTrigger =
+        typeof trigger === "string" ? trigger : "signal";
+
+      const stageSnapshot = {
+        type: "buy",
+        date: tradeDate,
+        price: tradePrice,
+        shares: stageShares,
+        cost: stageCostWithFee,
+        costWithoutFee: stageCostWithoutFee,
+        allocationPercent: stagePercent,
+        cumulativeStagePercent: cumulativePercent,
+        capital_after: longCap,
+        triggeringStrategy: strategyKey,
+        simType: "long",
+        positionId: currentLongPositionId,
+        stageTrigger,
+        originalShares: stageShares,
+        originalCost: stageCostWithFee,
+        originalCostWithoutFee: stageCostWithoutFee,
+        remainingShares: stageShares,
+        remainingCost: stageCostWithFee,
+        remainingCostWithoutFee: stageCostWithoutFee,
+        stageIndex: resolvedStageIndex,
+      };
+      if (kdValues) stageSnapshot.kdValues = kdValues;
+      if (macdValues) stageSnapshot.macdValues = macdValues;
+      if (indicatorValues) stageSnapshot.indicatorValues = indicatorValues;
+
+      currentLongEntryBreakdown.push({ ...stageSnapshot });
+      longTrades.push({ ...stageSnapshot });
+      if (Number.isInteger(signalIndex) && signalIndex >= 0) {
+        buySigs.push({ date: tradeDate, index: signalIndex });
+      }
+
+      console.log(
+        `[Worker LONG] Stage ${resolvedStageIndex + 1}/${entryStagePercents.length} Buy Executed: ${stageShares}@${tradePrice} on ${tradeDate}, Cap After: ${longCap.toFixed(0)}`,
+      );
+
+      lastLongStagePrice = tradePrice;
+      lastEntryStageTrigger = stageTrigger;
+      filledExitStages = 0;
+      currentLongExitPlan = null;
+      lastLongExitStagePrice = null;
+      lastExitStageTrigger = null;
+
+      return { executed: true, shares: stageShares, tradeData: stageSnapshot };
+    };
+
+    const buildAggregatedLongEntry = () => {
+      if (currentLongEntryBreakdown.length === 0) return null;
+      const totalShares = currentLongEntryBreakdown.reduce(
+        (sum, info) => sum + (info.shares || 0),
+        0,
+      );
+      const totalPercent = currentLongEntryBreakdown.reduce(
+        (sum, info) => sum + (info.allocationPercent || 0),
+        0,
+      );
+      const averageEntryPrice =
+        totalShares > 0 ? longPositionCostWithoutFee / totalShares : 0;
+      return {
+        type: "buy",
+        date: currentLongEntryBreakdown[0]?.date || null,
+        price: averageEntryPrice,
+        shares: totalShares,
+        cost: longPositionCostWithFee,
+        costWithoutFee: longPositionCostWithoutFee,
+        averageEntryPrice,
+        stageCount: currentLongEntryBreakdown.length,
+        cumulativeStagePercent: totalPercent,
+        stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
+        positionId: currentLongPositionId,
+      };
+    };
+
+    const computeExitStagePlan = (totalShares) => {
+      if (!Number.isFinite(totalShares) || totalShares <= 0) return null;
+      const plan = [];
+      let allocated = 0;
+      for (let idx = 0; idx < exitStagePercents.length; idx += 1) {
+        if (idx === exitStagePercents.length - 1) {
+          plan.push(Math.max(totalShares - allocated, 0));
+          break;
+        }
+        let stageShare = Math.floor((totalShares * exitStagePercents[idx]) / 100);
+        const remainingStages = exitStagePercents.length - idx;
+        const remainingShares = totalShares - allocated;
+        if (stageShare <= 0 && remainingShares > remainingStages) {
+          stageShare = 1;
+        }
+        plan.push(stageShare);
+        allocated += stageShare;
+      }
+      if (plan.length < exitStagePercents.length) {
+        const lastShare = Math.max(totalShares - plan.reduce((sum, val) => sum + val, 0), 0);
+        plan.push(lastShare);
+      }
+      const sumShares = plan.reduce((sum, val) => sum + val, 0);
+      if (sumShares !== totalShares && plan.length > 0) {
+        plan[plan.length - 1] += totalShares - sumShares;
+      }
+      return plan;
+    };
+
+    const consumeEntryForShares = (sharesToConsume) => {
+      if (!Number.isFinite(sharesToConsume) || sharesToConsume <= 0) return null;
+      let remaining = sharesToConsume;
+      let totalCostWithFee = 0;
+      let totalCostWithoutFee = 0;
+      const stages = [];
+      for (const stage of currentLongEntryBreakdown) {
+        const availableShares = stage.remainingShares ?? stage.shares ?? 0;
+        if (!Number.isFinite(availableShares) || availableShares <= 0) continue;
+        const take = Math.min(availableShares, remaining);
+        if (take <= 0) continue;
+        const availableCost = stage.remainingCost ?? stage.cost ?? 0;
+        const availableCostWithoutFee = stage.remainingCostWithoutFee ?? stage.costWithoutFee ?? 0;
+        const costPerShareWithFee = availableShares > 0 ? availableCost / availableShares : 0;
+        const costPerShareWithoutFee = availableShares > 0 ? availableCostWithoutFee / availableShares : 0;
+        const consumedCostWithFee = costPerShareWithFee * take;
+        const consumedCostWithoutFee = costPerShareWithoutFee * take;
+        stage.remainingShares = availableShares - take;
+        stage.remainingCost = availableCost - consumedCostWithFee;
+        stage.remainingCostWithoutFee = availableCostWithoutFee - consumedCostWithoutFee;
+        totalCostWithFee += consumedCostWithFee;
+        totalCostWithoutFee += consumedCostWithoutFee;
+        stages.push({
+          date: stage.date,
+          price: stage.price,
+          shares: take,
+          cost: consumedCostWithFee,
+          costWithoutFee: consumedCostWithoutFee,
+          allocationPercent: stage.allocationPercent,
+          stageTrigger: stage.stageTrigger,
+          stageIndex: stage.stageIndex,
+        });
+        remaining -= take;
+        if (remaining <= 0) break;
+      }
+      const consumedShares = sharesToConsume - remaining;
+      return {
+        shares: consumedShares,
+        cost: totalCostWithFee,
+        costWithoutFee: totalCostWithoutFee,
+        averageEntryPrice:
+          consumedShares > 0 ? totalCostWithoutFee / consumedShares : 0,
+        stages,
+      };
+    };
+
+    const captureEntryStageState = () => ({
+      totalStages: entryStagePercents.length,
+      filledStages: filledEntryStages,
+      sharesHeld: longShares,
+      averageEntryPrice: longShares > 0 ? longAverageEntryPrice : null,
+      lastStagePrice: Number.isFinite(lastLongStagePrice)
+        ? lastLongStagePrice
+        : null,
+      lastTrigger: lastEntryStageTrigger || null,
+      mode: entryStageMode,
+      nextTriggerPrice:
+        entryStageMode === "price_pullback" &&
+        filledEntryStages < entryStagePercents.length &&
+        Number.isFinite(lastLongStagePrice)
+          ? lastLongStagePrice
+          : null,
+    });
+
+    const captureExitStageState = () => ({
+      totalStages: exitStagePercents.length,
+      executedStages: filledExitStages,
+      remainingShares: longShares,
+      lastStagePrice: Number.isFinite(lastLongExitStagePrice)
+        ? lastLongExitStagePrice
+        : null,
+      lastTrigger: lastExitStageTrigger || null,
+      mode: exitStageMode,
+      nextTriggerPrice:
+        exitStageMode === "price_rally" &&
+        filledExitStages < exitStagePercents.length &&
+        Number.isFinite(lastLongExitStagePrice)
+          ? lastLongExitStagePrice
+          : null,
+    });
   for (let i = startIdx; i < n; i++) {
     const curC = closes[i];
     const curH = highs[i];
@@ -4071,6 +5674,8 @@ function runStrategy(data, params) {
       longStateSeries[i] = longState;
       shortStateSeries[i] = shortState;
       positionStatesFull[i] = combinePositionLabel(longState, shortState);
+      longEntryStageStates[i] = captureEntryStageState();
+      longExitStageStates[i] = captureExitStageState();
       portfolioVal[i] = portfolioVal[i - 1] ?? initialCapital;
       strategyReturns[i] = strategyReturns[i - 1] ?? 0;
       continue;
@@ -4086,36 +5691,27 @@ function runStrategy(data, params) {
       if (pendingTrade && pendingTrade.executeOnDate === dates[i]) {
         const actualTradePrice = curO;
 
-        if (pendingTrade.type === "buy") {
-          // 執行隔日買入
-          const actualAdjustedPrice = actualTradePrice * (1 + buyFee / 100);
-          const actualShares = Math.floor(
-            pendingTrade.investmentLimit / actualAdjustedPrice,
-          );
-          const actualCost = actualShares * actualAdjustedPrice;
-
-          if (actualShares > 0 && longCap >= actualCost) {
-            longCap -= actualCost;
-            longPos = 1;
-            lastBuyP = actualTradePrice;
-            curPeakP = actualTradePrice;
-            longShares = actualShares;
-
-            const tradeData = {
-              type: "buy",
-              date: dates[i],
-              price: actualTradePrice,
-              shares: actualShares,
-              cost: actualCost,
-              capital_after: longCap,
-              triggeringStrategy: pendingTrade.strategy,
-              simType: "long",
-            };
-            longTrades.push(tradeData);
-            buySigs.push({ date: dates[i], index: i });
-            executedBuy = true;
-          }
-        } else if (pendingTrade.type === "short") {
+          if (pendingTrade.type === "buy") {
+            const stageIndex =
+              Number.isInteger(pendingTrade.stageIndex) && pendingTrade.stageIndex >= 0
+                ? pendingTrade.stageIndex
+                : filledEntryStages;
+            const result = executeLongStage({
+              tradePrice: actualTradePrice,
+              tradeDate: dates[i],
+              stageIndex,
+              investmentLimitOverride: pendingTrade.investmentLimit,
+              strategyKey: pendingTrade.strategy,
+              signalIndex: i,
+              kdValues: pendingTrade.kdValues,
+              macdValues: pendingTrade.macdValues,
+              indicatorValues: pendingTrade.indicatorValues,
+              trigger: pendingTrade.stageTrigger,
+            });
+            if (result.executed) {
+              executedBuy = true;
+            }
+          } else if (pendingTrade.type === "short") {
           // 執行隔日做空
           const actualAdjustedPrice = actualTradePrice * (1 + buyFee / 100);
           const actualShares = Math.floor(
@@ -4360,74 +5956,228 @@ function runStrategy(data, params) {
         if (!sellSignal && !slTrig && globalTP > 0 && lastBuyP > 0) {
           if (curC >= lastBuyP * (1 + globalTP / 100)) tpTrig = true;
         }
-        if (sellSignal || slTrig || tpTrig) {
+        const candidateExitPrice =
+          tradeTiming === "open" && canTradeOpen && check(nextO)
+            ? nextO
+            : curC;
+        let priceRallyTrigger = false;
+        if (
+          exitStageMode === "price_rally" &&
+          filledExitStages > 0 &&
+          filledExitStages < exitStagePercents.length &&
+          longPos === 1 &&
+          Number.isFinite(lastLongExitStagePrice) &&
+          check(candidateExitPrice) &&
+          candidateExitPrice > lastLongExitStagePrice
+        ) {
+          priceRallyTrigger = true;
+        }
+
+        if (sellSignal || slTrig || tpTrig || priceRallyTrigger) {
           tradePrice = null;
           tradeDate = dates[i];
-          if (tradeTiming === "close") tradePrice = curC;
-          else if (canTradeOpen) {
+          if (tradeTiming === "close") {
+            tradePrice = curC;
+          } else if (canTradeOpen) {
             tradePrice = nextO;
             tradeDate = dates[i + 1];
           } else if (tradeTiming === "open" && i === n - 1) {
             tradePrice = curC;
             tradeDate = dates[i];
           }
+
           if (check(tradePrice) && tradePrice > 0 && longShares > 0) {
-            const rev = longShares * tradePrice * (1 - sellFee / 100);
-            const costB = longShares * lastBuyP;
-            const entryCostWithFee = costB * (1 + buyFee / 100);
-            const prof = rev - entryCostWithFee;
-            const profP =
-              entryCostWithFee > 0 ? (prof / entryCostWithFee) * 100 : 0;
-            longCap += rev;
-            const tradeData = {
-              type: "sell",
-              date: tradeDate,
-              price: tradePrice,
-              shares: longShares,
-              revenue: rev,
-              profit: prof,
-              profitPercent: profP,
-              capital_after: longCap,
-              triggeredByStopLoss: slTrig,
-              triggeredByTakeProfit: tpTrig,
-              triggeringStrategy: exitStrategy,
-              simType: "long",
-            };
-            if (exitKDValues) tradeData.kdValues = exitKDValues;
-            if (exitMACDValues) tradeData.macdValues = exitMACDValues;
-            if (exitIndicatorValues)
-              tradeData.indicatorValues = exitIndicatorValues;
-            longTrades.push(tradeData);
-            // 修正：隔日開盤價交易時，訊號應顯示在實際交易日
-            if (tradeTiming === "close" || !canTradeOpen) {
-              sellSigs.push({ date: dates[i], index: i });
-            } else if (canTradeOpen) {
-              sellSigs.push({ date: dates[i + 1], index: i + 1 });
+            let riskExit = false;
+            let exitTriggerLabel = null;
+            let sharesToSell = 0;
+            let stageIndexForPlan = Math.min(
+              filledExitStages,
+              exitStagePercents.length - 1,
+            );
+
+            if (slTrig || tpTrig) {
+              riskExit = true;
+              sharesToSell = longShares;
+              exitTriggerLabel = slTrig ? "stop_loss" : "take_profit";
+            } else {
+              if (
+                !Array.isArray(currentLongExitPlan) ||
+                currentLongExitPlan.length === 0 ||
+                filledExitStages === 0
+              ) {
+                currentLongExitPlan = computeExitStagePlan(longShares);
+              }
+              const plan = Array.isArray(currentLongExitPlan)
+                ? currentLongExitPlan
+                : null;
+              if (plan && plan.length > 0) {
+                stageIndexForPlan = Math.min(
+                  filledExitStages,
+                  plan.length - 1,
+                );
+                sharesToSell = plan[stageIndexForPlan];
+              }
+              if (!Number.isFinite(sharesToSell) || sharesToSell <= 0) {
+                sharesToSell = longShares;
+              }
+              sharesToSell = Math.min(Math.max(sharesToSell, 0), longShares);
+              exitTriggerLabel =
+                priceRallyTrigger && !sellSignal ? "price_rally" : "signal";
             }
-            executedSell = true;
-            const lastBuyIdx = longTrades.map((t) => t.type).lastIndexOf("buy");
-            if (
-              lastBuyIdx !== -1 &&
-              longTrades[lastBuyIdx].shares === longShares
-            ) {
-              longCompletedTrades.push({
-                entry: longTrades[lastBuyIdx],
-                exit: tradeData,
-                profit: prof,
-                profitPercent: profP,
-              });
+
+            const consumption = consumeEntryForShares(sharesToSell);
+            const executedShares =
+              consumption && Number.isFinite(consumption.shares)
+                ? consumption.shares
+                : 0;
+            if (executedShares > 0) {
+              const revenue =
+                executedShares * tradePrice * (1 - sellFee / 100);
+              const entryCostWithFee = Number.isFinite(consumption.cost)
+                ? consumption.cost
+                : 0;
+              const entryCostWithoutFee = Number.isFinite(
+                consumption.costWithoutFee,
+              )
+                ? consumption.costWithoutFee
+                : 0;
+              const stageAverageEntryPrice =
+                executedShares > 0
+                  ? entryCostWithoutFee / executedShares
+                  : 0;
+              const profit = revenue - entryCostWithFee;
+              const profitPercent =
+                entryCostWithFee > 0 ? (profit / entryCostWithFee) * 100 : 0;
+
+              longCap += revenue;
+              longPositionCostWithFee = Math.max(
+                0,
+                longPositionCostWithFee - entryCostWithFee,
+              );
+              longPositionCostWithoutFee = Math.max(
+                0,
+                longPositionCostWithoutFee - entryCostWithoutFee,
+              );
+              longShares -= executedShares;
+              if (longShares < 0) longShares = 0;
+
+              if (longShares > 0 && longPositionCostWithoutFee > 0) {
+                longAverageEntryPrice = longPositionCostWithoutFee / longShares;
+                longPos = 1;
+                lastBuyP = longAverageEntryPrice;
+              } else {
+                longAverageEntryPrice = 0;
+              }
+
+              const stagePercent =
+                exitStagePercents[
+                  Math.min(
+                    stageIndexForPlan,
+                    exitStagePercents.length - 1,
+                  )
+                ] || 0;
+              const cumulativePercent = exitStagePercents
+                .slice(0, stageIndexForPlan + 1)
+                .reduce(
+                  (sum, value) =>
+                    sum + (Number.isFinite(value) ? value : 0),
+                  0,
+                );
+
+              const tradeData = {
+                type: "sell",
+                date: tradeDate,
+                price: tradePrice,
+                shares: executedShares,
+                revenue,
+                profit,
+                profitPercent,
+                capital_after: longCap,
+                triggeredByStopLoss: slTrig,
+                triggeredByTakeProfit: tpTrig,
+                triggeringStrategy: exitStrategy,
+                simType: "long",
+                entryCost: entryCostWithFee,
+                entryAveragePrice: stageAverageEntryPrice,
+                stageCount: currentLongEntryBreakdown.length,
+                positionId: currentLongPositionId,
+                stageTrigger: exitTriggerLabel,
+                stageIndex: stageIndexForPlan,
+                allocationPercent: stagePercent,
+                cumulativeStagePercent: cumulativePercent,
+                plannedShares:
+                  Array.isArray(currentLongExitPlan) &&
+                  stageIndexForPlan < currentLongExitPlan.length
+                    ? currentLongExitPlan[stageIndexForPlan]
+                    : executedShares,
+                consumedEntryStages: Array.isArray(consumption?.stages)
+                  ? consumption.stages
+                  : [],
+              };
+              if (exitKDValues) tradeData.kdValues = exitKDValues;
+              if (exitMACDValues) tradeData.macdValues = exitMACDValues;
+              if (exitIndicatorValues)
+                tradeData.indicatorValues = exitIndicatorValues;
+              longTrades.push(tradeData);
+              if (tradeTiming === "close" || !canTradeOpen) {
+                sellSigs.push({ date: dates[i], index: i });
+              } else if (canTradeOpen) {
+                sellSigs.push({ date: dates[i + 1], index: i + 1 });
+              }
+              executedSell = true;
+              lastLongExitStagePrice = tradePrice;
+              lastExitStageTrigger = exitTriggerLabel;
+              if (!riskExit) {
+                filledExitStages = Math.min(
+                  filledExitStages + 1,
+                  exitStagePercents.length,
+                );
+              } else {
+                filledExitStages = exitStagePercents.length;
+                currentLongExitPlan = null;
+              }
+
+              let aggregatedEntry = null;
+              if (longShares === 0) {
+                aggregatedEntry = buildAggregatedLongEntry();
+              }
+              if (aggregatedEntry && longShares === 0) {
+                longCompletedTrades.push({
+                  entry: aggregatedEntry,
+                  exit: tradeData,
+                  profit,
+                  profitPercent,
+                });
+              } else if (longShares === 0 && !aggregatedEntry) {
+                console.warn(
+                  `[Worker LONG] Sell @ ${tradeDate} could not rebuild aggregated entry.`,
+                );
+              }
+
+              if (longShares === 0) {
+                longPos = 0;
+                lastBuyP = 0;
+                curPeakP = 0;
+                longPositionCostWithFee = 0;
+                longPositionCostWithoutFee = 0;
+                currentLongEntryBreakdown = [];
+                currentLongPositionId = null;
+                currentLongExitPlan = null;
+                filledEntryStages = 0;
+                lastLongStagePrice = null;
+                lastEntryStageTrigger = null;
+                resetExitPlanAfterCapture = true;
+                filledExitStages = exitStagePercents.length;
+              }
+
+              console.log(
+                `[Worker LONG] Stage Sell Executed: ${executedShares}@${tradePrice} on ${tradeDate}, Profit: ${profit.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
+              );
             } else {
               console.warn(
-                `[Worker LONG] Sell @ ${tradeDate} could not find matching buy trade.`,
+                `[Worker LONG] Exit stage computed 0 shares on ${dates[i]} (requested ${sharesToSell}).`,
               );
             }
-            console.log(
-              `[Worker LONG] Sell Executed: ${longShares}@${tradePrice} on ${tradeDate}, Profit: ${prof.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
-            );
-            longPos = 0;
-            longShares = 0;
-            lastBuyP = 0;
-            curPeakP = 0;
           } else {
             console.warn(
               `[Worker LONG] Invalid trade price (${tradePrice}) or zero shares for Sell Signal on ${dates[i]}`,
@@ -4724,7 +6474,7 @@ function runStrategy(data, params) {
         );
       }
     }
-    if (longPos === 0 && shortPos === 0) {
+    if (shortPos === 0 && filledEntryStages < entryStagePercents.length) {
       let buySignal = false;
       let entryKDValues = null,
         entryMACDValues = null,
@@ -4902,78 +6652,90 @@ function runStrategy(data, params) {
           }
           break;
       }
-      if (buySignal) {
-        tradePrice = null;
-        tradeDate = dates[i];
-        if (tradeTiming === "close") {
-          tradePrice = curC;
-          // 立即執行收盤價交易
-          if (check(tradePrice) && tradePrice > 0 && longCap > 0) {
+        let shouldEnterStage = false;
+        let stageTriggerType = null;
+        if (buySignal) {
+          shouldEnterStage = true;
+          stageTriggerType = "signal";
+        }
+        if (
+          !shouldEnterStage &&
+          entryStageMode === "price_pullback" &&
+          filledEntryStages > 0 &&
+          filledEntryStages < entryStagePercents.length &&
+          longPos === 1 &&
+          Number.isFinite(lastLongStagePrice) &&
+          check(curC)
+        ) {
+          if (tradeTiming === "close" && curC < lastLongStagePrice) {
+            shouldEnterStage = true;
+            stageTriggerType = "price_pullback";
+          } else if (canTradeOpen && curC < lastLongStagePrice) {
+            shouldEnterStage = true;
+            stageTriggerType = "price_pullback";
+          }
+        }
+        if (shouldEnterStage) {
+          tradePrice = null;
+          tradeDate = dates[i];
+          const stageIndex = filledEntryStages;
+          const triggerLabel = stageTriggerType || "signal";
+          if (tradeTiming === "close") {
+            tradePrice = curC;
+            if (check(tradePrice) && tradePrice > 0 && longCap > 0) {
+              let baseCapitalForSizing = initialCapital;
+              if (positionBasis === "totalCapital") {
+                baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
+              }
+              const result = executeLongStage({
+                tradePrice,
+                tradeDate,
+                stageIndex,
+                baseCapitalForSizing,
+                strategyKey: entryStrategy,
+                signalIndex: i,
+                kdValues: entryKDValues,
+                macdValues: entryMACDValues,
+                indicatorValues: entryIndicatorValues,
+                trigger: triggerLabel,
+              });
+              if (result.executed) {
+                executedBuy = true;
+              }
+            }
+          } else if (canTradeOpen) {
             let baseCapitalForSizing = initialCapital;
             if (positionBasis === "totalCapital") {
               baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
             }
             const maxInvestmentAllowed =
-              baseCapitalForSizing * (positionSize / 100);
+              baseCapitalForSizing *
+              (entryStagePercents[Math.min(stageIndex, entryStagePercents.length - 1)] / 100);
             const actualInvestmentLimit = Math.min(
               longCap,
               maxInvestmentAllowed,
             );
-            const adjustedTradePrice = tradePrice * (1 + buyFee / 100);
-            if (adjustedTradePrice <= 0) {
-              longShares = 0;
+
+            if (actualInvestmentLimit > 0) {
+              pendingNextDayTrade = {
+                type: "buy",
+                executeOnDate: dates[i + 1],
+                investmentLimit: actualInvestmentLimit,
+                strategy: entryStrategy,
+                triggerIndex: i,
+                stageIndex,
+                kdValues: entryKDValues,
+                macdValues: entryMACDValues,
+                indicatorValues: entryIndicatorValues,
+                stageTrigger: triggerLabel,
+              };
             } else {
-              longShares = Math.floor(
-                actualInvestmentLimit / adjustedTradePrice,
+              console.warn(
+                `[Worker LONG] Stage ${stageIndex + 1} pending entry skipped due to zero investment limit on ${dates[i]}.`,
               );
             }
-            if (longShares > 0) {
-              const cost = longShares * adjustedTradePrice;
-              if (longCap >= cost) {
-                longCap -= cost;
-                longPos = 1;
-                lastBuyP = tradePrice;
-                curPeakP = tradePrice;
-                const tradeData = {
-                  type: "buy",
-                  date: tradeDate,
-                  price: tradePrice,
-                  shares: longShares,
-                  cost: cost,
-                  capital_after: longCap,
-                  triggeringStrategy: entryStrategy,
-                  simType: "long",
-                };
-                if (entryKDValues) tradeData.kdValues = entryKDValues;
-                if (entryMACDValues) tradeData.macdValues = entryMACDValues;
-                if (entryIndicatorValues)
-                  tradeData.indicatorValues = entryIndicatorValues;
-                longTrades.push(tradeData);
-                buySigs.push({ date: dates[i], index: i });
-                executedBuy = true;
-              }
-            }
           }
-        } else if (canTradeOpen) {
-          // 修正：隔日開盤價交易 - 只記錄交易意圖，不立即執行
-          let baseCapitalForSizing = initialCapital;
-          if (positionBasis === "totalCapital") {
-            baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
-          }
-          const maxInvestmentAllowed =
-            baseCapitalForSizing * (positionSize / 100);
-          const actualInvestmentLimit = Math.min(longCap, maxInvestmentAllowed);
-
-          // 記錄隔日交易意圖，不進行實際交易
-          pendingNextDayTrade = {
-            type: "buy",
-            executeOnDate: dates[i + 1],
-            investmentLimit: actualInvestmentLimit,
-            strategy: entryStrategy,
-            triggerIndex: i,
-          };
         }
-      }
     }
     if (enableShorting && shortPos === 0 && longPos === 0) {
       let shortSignal = false;
@@ -5268,6 +7030,15 @@ function runStrategy(data, params) {
     shortStateSeries[i] = shortState;
     positionStatesFull[i] = combinePositionLabel(longState, shortState);
 
+    longEntryStageStates[i] = captureEntryStageState();
+    longExitStageStates[i] = captureExitStageState();
+    if (resetExitPlanAfterCapture) {
+      filledExitStages = 0;
+      lastLongExitStagePrice = null;
+      lastExitStageTrigger = null;
+      resetExitPlanAfterCapture = false;
+    }
+
     // --- STEP 3: Update Daily P/L AFTER all potential trades ---
     longPl[i] =
       longCap + (longPos === 1 ? longShares * curC : 0) - initialCapital;
@@ -5304,48 +7075,72 @@ function runStrategy(data, params) {
     const lastIdx = n - 1;
     const finalP =
       lastIdx >= 0 && check(closes[lastIdx]) ? closes[lastIdx] : null;
-    if (longPos === 1 && finalP !== null && longShares > 0) {
-      const rev = longShares * finalP * (1 - sellFee / 100);
-      const costB = longShares * lastBuyP * (1 + buyFee / 100);
-      const prof = rev - costB;
-      longCap += rev;
-      const finalTradeData = {
-        type: "sell",
-        date: dates[lastIdx],
-        price: finalP,
-        shares: longShares,
-        revenue: rev,
-        profit: prof,
-        profitPercent: costB > 0 ? (prof / costB) * 100 : 0,
-        capital_after: longCap,
-        triggeredByStopLoss: false,
-        triggeredByTakeProfit: false,
-        triggeringStrategy: "EndOfPeriod",
-        simType: "long",
-      };
-      longTrades.push(finalTradeData);
-      if (!sellSigs.some((s) => s.index === lastIdx))
-        sellSigs.push({ date: dates[lastIdx], index: lastIdx });
-      longStateSeries[lastIdx] = "出場";
-      positionStatesFull[lastIdx] = combinePositionLabel(
-        longStateSeries[lastIdx],
-        shortStateSeries[lastIdx],
-      );
-      const lastBuyI = longTrades.map((t) => t.type).lastIndexOf("buy");
-      if (lastBuyI !== -1 && longTrades[lastBuyI].shares === longShares) {
-        longCompletedTrades.push({
-          entry: longTrades[lastBuyI],
-          exit: finalTradeData,
+      if (longPos === 1 && finalP !== null && longShares > 0) {
+        const rev = longShares * finalP * (1 - sellFee / 100);
+        const entryCostWithFee = longPositionCostWithFee;
+        const prof = rev - entryCostWithFee;
+        const profitPercent =
+          entryCostWithFee > 0 ? (prof / entryCostWithFee) * 100 : 0;
+        longCap += rev;
+        const finalTradeData = {
+          type: "sell",
+          date: dates[lastIdx],
+          price: finalP,
+          shares: longShares,
+          revenue: rev,
           profit: prof,
-          profitPercent: finalTradeData.profitPercent,
-        });
-      }
-      longPl[lastIdx] = longCap - initialCapital;
-      longPos = 0;
-      longShares = 0;
-      console.log(
-        `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
-      );
+          profitPercent,
+          capital_after: longCap,
+          triggeredByStopLoss: false,
+          triggeredByTakeProfit: false,
+          triggeringStrategy: "EndOfPeriod",
+          simType: "long",
+          entryCost: entryCostWithFee,
+          entryAveragePrice: longAverageEntryPrice,
+          stageCount: currentLongEntryBreakdown.length,
+          positionId: currentLongPositionId,
+        };
+        longTrades.push(finalTradeData);
+        if (!sellSigs.some((s) => s.index === lastIdx))
+          sellSigs.push({ date: dates[lastIdx], index: lastIdx });
+        longStateSeries[lastIdx] = "出場";
+        positionStatesFull[lastIdx] = combinePositionLabel(
+          longStateSeries[lastIdx],
+          shortStateSeries[lastIdx],
+        );
+        const aggregatedEntry = buildAggregatedLongEntry();
+        if (aggregatedEntry) {
+          longCompletedTrades.push({
+            entry: aggregatedEntry,
+            exit: finalTradeData,
+            profit: prof,
+            profitPercent,
+          });
+        }
+        longPl[lastIdx] = longCap - initialCapital;
+        longPos = 0;
+        longShares = 0;
+        lastBuyP = 0;
+        longAverageEntryPrice = 0;
+        longPositionCostWithFee = 0;
+        longPositionCostWithoutFee = 0;
+        currentLongEntryBreakdown = [];
+        filledEntryStages = 0;
+        currentLongExitPlan = null;
+        filledExitStages = exitStagePercents.length;
+        lastLongExitStagePrice = finalP;
+        lastExitStageTrigger = "final_day";
+        lastLongStagePrice = null;
+        lastEntryStageTrigger = null;
+        longEntryStageStates[lastIdx] = captureEntryStageState();
+        longExitStageStates[lastIdx] = captureExitStageState();
+        filledExitStages = 0;
+        lastLongExitStagePrice = null;
+        lastExitStageTrigger = null;
+        currentLongPositionId = null;
+        console.log(
+          `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
+        );
     } else if (longPos === 1) {
       longPl[lastIdx] = longPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
@@ -5813,7 +7608,9 @@ function runStrategy(data, params) {
       }
     }
 
-    self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    if (!suppressProgress) {
+      self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    }
     const visibleStartIdx = Math.max(0, effectiveStartIdx);
     const sliceArray = (arr) =>
       Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
@@ -5830,6 +7627,8 @@ function runStrategy(data, params) {
       visibleStartIdx,
     );
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
+    const trimmedEntryStageStates = sliceArray(longEntryStageStates);
+    const trimmedExitStageStates = sliceArray(longExitStageStates);
     const runtimeDiagnostics = {
       dataset: datasetSummary,
       warmup: warmupSummary,
@@ -5848,6 +7647,14 @@ function runStrategy(data, params) {
       console.log("[Worker] Warmup summary", warmupSummary);
       console.log("[Worker] BuyHold summary", buyHoldSummary);
     }
+    const parameterSensitivity =
+      skipSensitivity
+        ? null
+        : computeParameterSensitivity(data, params, {
+            returnRate: returnR,
+            annualizedReturn: annualR,
+            sharpeRatio: sharpeR,
+          });
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -5868,13 +7675,17 @@ function runStrategy(data, params) {
       strategyReturns: sliceArray(strategyReturns),
       dates: sliceArray(dates),
       chartBuySignals: adjustSignals(buySigs),
-      chartSellSignals: adjustSignals(sellSigs),
-      chartShortSignals: adjustSignals(shortSigs),
-      chartCoverSignals: adjustSignals(coverSigs),
-      entryStrategy: params.entryStrategy,
-      exitStrategy: params.exitStrategy,
-      entryParams: params.entryParams,
-      exitParams: params.exitParams,
+        chartSellSignals: adjustSignals(sellSigs),
+        chartShortSignals: adjustSignals(shortSigs),
+        chartCoverSignals: adjustSignals(coverSigs),
+        entryStrategy: params.entryStrategy,
+        exitStrategy: params.exitStrategy,
+        entryParams: params.entryParams,
+        entryStages: entryStagePercents.slice(),
+        entryStagingMode: entryStageMode,
+        exitParams: params.exitParams,
+        exitStages: exitStagePercents.slice(),
+        exitStagingMode: exitStageMode,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -5895,7 +7706,10 @@ function runStrategy(data, params) {
       subPeriodResults: subPeriodResults,
       priceIndicatorSeries: trimmedIndicatorDisplay,
       positionStates: trimmedPositionStates,
+      longEntryStageStates: trimmedEntryStageStates,
+      longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
+      parameterSensitivity,
     };
   } catch (finalError) {
     console.error("Final calculation error:", finalError);
@@ -6009,6 +7823,8 @@ async function runOptimization(
       message: `測試 ${optParamName}=${curVal}`,
     });
     const testParams = JSON.parse(JSON.stringify(baseParams));
+    testParams.skipSensitivity = true;
+    testParams.suppressProgress = true;
     if (optimizeTargetStrategy === "risk") {
       if (optParamName === "stopLoss" || optParamName === "takeProfit") {
         testParams[optParamName] = curVal;
@@ -6623,21 +8439,45 @@ self.onmessage = async function (e) {
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
       : null;
+  const windowOptions = {
+    minBars: 90,
+    multiplier: 2,
+    marginTradingDays: 12,
+    extraCalendarDays: 7,
+    minDate: sharedUtils?.MIN_DATA_DATE,
+    defaultStartDate: params?.startDate,
+  };
+  let windowDecision = null;
+  if (sharedUtils && typeof sharedUtils.resolveDataWindow === "function") {
+    windowDecision = sharedUtils.resolveDataWindow(params || {}, windowOptions);
+  }
   const incomingLookback = Number.isFinite(e.data?.lookbackDays)
     ? e.data.lookbackDays
     : Number.isFinite(params?.lookbackDays)
       ? params.lookbackDays
-      : 0;
+      : null;
   const inferredMax =
     sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === "function"
       ? sharedUtils.getMaxIndicatorPeriod(params || {})
       : 0;
-  let lookbackDays = incomingLookback;
-  if (
-    (!Number.isFinite(lookbackDays) || lookbackDays <= 0) &&
-    sharedUtils &&
-    typeof sharedUtils.estimateLookbackBars === "function"
-  ) {
+  let lookbackDays = Number.isFinite(incomingLookback) && incomingLookback > 0
+    ? incomingLookback
+    : null;
+  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && Number.isFinite(windowDecision?.lookbackDays)) {
+    lookbackDays = windowDecision.lookbackDays;
+  }
+  if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+    if (sharedUtils && typeof sharedUtils.resolveLookbackDays === "function") {
+      const fallbackDecision = sharedUtils.resolveLookbackDays(params || {}, windowOptions);
+      if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
+        lookbackDays = fallbackDecision.lookbackDays;
+        if (!windowDecision) {
+          windowDecision = fallbackDecision;
+        }
+      }
+    }
+  }
+  if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && sharedUtils && typeof sharedUtils.estimateLookbackBars === "function") {
     lookbackDays = sharedUtils.estimateLookbackBars(inferredMax, {
       minBars: 90,
       multiplier: 2,
@@ -6647,9 +8487,18 @@ self.onmessage = async function (e) {
     lookbackDays = Math.max(90, inferredMax * 2);
   }
   const effectiveStartDate =
-    e.data?.effectiveStartDate || params?.effectiveStartDate || params?.startDate || null;
+    e.data?.effectiveStartDate ||
+    windowDecision?.effectiveStartDate ||
+    params?.effectiveStartDate ||
+    params?.startDate ||
+    windowDecision?.minDataDate ||
+    null;
   const dataStartDate =
-    e.data?.dataStartDate || params?.dataStartDate || effectiveStartDate || params?.startDate;
+    e.data?.dataStartDate ||
+    windowDecision?.dataStartDate ||
+    params?.dataStartDate ||
+    effectiveStartDate ||
+    params?.startDate;
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
@@ -6664,6 +8513,8 @@ self.onmessage = async function (e) {
         params.endDate,
         params.adjustedPrice,
         params.splitAdjustment,
+        effectiveStartDate,
+        marketKey,
       );
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
@@ -6671,6 +8522,17 @@ self.onmessage = async function (e) {
         workerLastDataset = cachedData;
         const existingEntry = getWorkerCacheEntry(marketKey, cacheKey);
         if (!existingEntry) {
+          const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
+            cachedMeta?.diagnostics || null,
+            {
+              source: "main-thread-cache",
+              requestedRange: {
+                start: dataStartDate || params.startDate,
+                end: params.endDate,
+              },
+              coverage: cachedMeta?.coverage,
+            },
+          );
           setWorkerCacheEntry(marketKey, cacheKey, {
             data: cachedData,
             stockName: params.stockNo,
@@ -6704,12 +8566,23 @@ self.onmessage = async function (e) {
                 (dataStartDate
                   ? { start: dataStartDate, end: params.endDate }
                   : null),
-              diagnostics: cachedMeta?.diagnostics || null,
+              diagnostics: cacheDiagnostics,
             },
             priceMode: getPriceModeKey(params.adjustedPrice),
           });
         }
         if (cachedMeta) {
+          const replayDiagnostics = prepareDiagnosticsForCacheReplay(
+            cachedMeta.diagnostics || workerLastMeta?.diagnostics || null,
+            {
+              source: "main-thread-cache",
+              requestedRange: {
+                start: dataStartDate || params.startDate,
+                end: params.endDate,
+              },
+              coverage: cachedMeta?.coverage,
+            },
+          );
           workerLastMeta = {
             ...(workerLastMeta || {}),
             stockNo: params.stockNo,
@@ -6754,7 +8627,7 @@ self.onmessage = async function (e) {
                 ? { start: dataStartDate, end: params.endDate }
                 : null),
             lookbackDays,
-            diagnostics: cachedMeta.diagnostics || null,
+            diagnostics: replayDiagnostics,
           };
         }
       } else {
