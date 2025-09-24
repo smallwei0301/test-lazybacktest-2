@@ -2,8 +2,277 @@
 .tooltip { position: relative; display: inline-block; vertical-align: middle; }
 .tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+#backtest-result .tooltiptext { z-index: 10000; }
+.tooltiptext--sensitivity {
+    max-width: min(300px, calc(100vw - 48px));
+}
+.sensitivity-card {
+    position: relative;
+    overflow: visible;
+    isolation: isolate;
+}
+.sensitivity-card .sensitivity-table-wrapper {
+    position: relative;
+    margin: 0 -1rem;
+    padding: 0 1rem 0.75rem;
+}
+.sensitivity-card .sensitivity-table-wrapper table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+.sensitivity-card td,
+.sensitivity-card th {
+    position: relative;
+    overflow: visible;
+}
+.sensitivity-table-desktop {
+    display: none;
+    width: 100%;
+    border-color: var(--border);
+    border-width: 1px;
+    border-style: solid;
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, #ffffff 92%, var(--background));
+}
+
+.sensitivity-table-mobile {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.sensitivity-mobile-row {
+    background: color-mix(in srgb, #ffffff 92%, var(--background));
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.sensitivity-mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.sensitivity-mobile-param {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--foreground);
+}
+
+.sensitivity-mobile-base {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+}
+
+.sensitivity-mobile-scenarios,
+.sensitivity-mobile-metrics {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sensitivity-mobile-scenarios > div,
+.sensitivity-mobile-metrics > div {
+    background: color-mix(in srgb, var(--muted) 6%, var(--background));
+    border-radius: 0.6rem;
+    padding: 0.75rem 0.5rem;
+    display: grid;
+    gap: 0.4rem;
+}
+
+.sensitivity-mobile-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-align: center;
+}
+
+@media (min-width: 640px) {
+    .sensitivity-table-desktop {
+        display: table;
+    }
+
+    .sensitivity-table-mobile {
+        display: none;
+    }
+}
+.main-layout-shell, .main-grid, .left-panel, .right-panel { overflow: visible; }
+.left-panel { overflow-x: visible; }
+.right-panel { overflow-x: visible; }
+
+.main-grid {
+    display: grid;
+    gap: 1.5rem;
+    grid-template-columns: 1fr;
+    align-items: start;
+}
+
+@media (min-width: 1024px) {
+    .main-grid {
+        grid-template-columns: minmax(320px, 0.35fr) minmax(0, 1fr);
+    }
+}
+
+.summary-metrics-grid {
+    display: grid;
+    gap: 1.25rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.summary-metrics-grid > * {
+    min-width: 0;
+}
+
+@media (max-width: 480px) {
+    .summary-metrics-grid {
+        gap: 0.75rem;
+    }
+
+    .summary-metrics-grid > * {
+        padding: 1.25rem !important;
+    }
+
+    .summary-metrics-grid > * .text-2xl {
+        font-size: 1.375rem;
+        line-height: 1.2;
+    }
+
+    .summary-metrics-grid > * .text-3xl {
+        font-size: 1.6rem;
+        line-height: 1.2;
+    }
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid {
+        gap: 1.5rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .summary-metrics-grid {
+        gap: 1.75rem;
+    }
+}
+
+.summary-metrics-grid.summary-metrics-grid--performance {
+    align-items: stretch;
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid.summary-metrics-grid--performance {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .summary-metrics-grid.summary-metrics-grid--performance {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.summary-metrics-grid.summary-metrics-grid--risk {
+    gap: 1.1rem;
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid.summary-metrics-grid--risk {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .summary-metrics-grid.summary-metrics-grid--risk {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1536px) {
+    .summary-metrics-grid.summary-metrics-grid--risk {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+.summary-metrics-grid.summary-metrics-grid--trade {
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid.summary-metrics-grid--trade {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1024px) {
+    .summary-metrics-grid.summary-metrics-grid--trade {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.summary-metrics-grid.summary-metrics-grid--strategy {
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid.summary-metrics-grid--strategy {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .summary-metrics-grid.summary-metrics-grid--strategy {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.summary-metrics-grid.summary-metrics-grid--sensitivity {
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    .summary-metrics-grid.summary-metrics-grid--sensitivity {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+#backtest-result { position: relative; overflow: visible; }
+.developer-area-wrapper { width: 100%; }
+.developer-area-wrapper:not(.hidden) .hero-developer-card { animation: fadeIn 0.3s ease-in-out; }
+.developer-toggle-active { border-color: var(--primary) !important; color: var(--primary) !important; background-color: color-mix(in srgb, var(--primary) 12%, var(--input)) !important; box-shadow: 0 8px 20px rgba(8, 145, 178, 0.15); }
+.summary-card { width: 100%; max-width: 100%; }
+.summary-card .card-header { padding-left: 1.5rem; padding-right: 1.5rem; }
+.summary-card .card-content { padding: 1.5rem; }
+.summary-result-container { width: 100%; color: var(--foreground); }
+.summary-result-container > * { width: 100%; }
+.summary-result-container table { width: 100%; }
+.summary-result-container { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.summary-result-container::-webkit-scrollbar { height: 6px; }
+.summary-result-container::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 9999px; }
+.backtest-result-placeholder {
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border: 2px dashed var(--card);
+    border-radius: calc(var(--radius) + 2px);
+    color: var(--muted-foreground);
+    background-color: color-mix(in srgb, var(--muted) 6%, transparent);
+    padding: 1.5rem;
+}
+
 #chart-container { height: 500px; }
 @media (max-width: 768px) { #chart-container { height: 350px; } }
+.summary-card .card-header { padding-top: 1.5rem; padding-bottom: 0; }
+.summary-card .card-content { padding-top: 1.5rem; }
+@media (max-width: 640px) {
+    .summary-card .card-header { padding: 1.25rem 1rem 0 1rem; }
+    .summary-card .card-content { padding: 1.25rem 1rem 1.5rem 1rem; }
+    .backtest-result-placeholder { padding: 1.5rem 1.25rem; }
+}
 .optimization-table th { position: sticky; top: 0; z-index: 1; background-color: #f9fafb; }
 .optimization-table th.sortable-header { cursor: pointer; position: relative; padding-right: 1.5rem; }
 .optimization-table th.sortable-header::after { content: ''; position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); border: 4px solid transparent; opacity: 0.3; transition: opacity 0.2s; }

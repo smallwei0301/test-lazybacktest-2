@@ -1,3 +1,63 @@
+## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+- **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
+- **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
+- **Diagnostics**: 手機寬度下逐一比對績效、風險、交易統計與策略卡片皆兩欄呈現且不再被截斷；敏感度卡改為堆疊卡片後，+10%/-10%、漂移與穩定度指標無需橫向捲動即可閱讀，tooltip 仍保持對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('summary scripts compile');NODE`
+
+## 2025-07-09 — Patch LB-UI-LAYOUT-20250709A / LB-SUMMARY-20250709A
+- **Issue recap**: 開發者區域搬移後，桌機版左右欄版型失衡，摘要卡片落在主操作區之下，footer 也失去原有的結構。回測摘要的績效指標僅能單列顯示，桌機版視覺資訊密度不足。
+- **Fix**: 重構主要版面為 `main` 直向骨架並以 `main-grid` 控制 2 欄排版，確保「執行回測」之後的結果卡固定顯示於右欄，footer 恢復黏附頁面底部。摘要卡使用自訂 `summary-metrics-grid` 版型，桌機自動排出雙欄以上的績效卡並改善間距。
+- **Diagnostics**: 摘要卡採用語義化樣式類別，後續如需檢查欄位或新增指標，可直接在 CSS 中調整佈局；主要版面同時維持 `left-panel/right-panel` sticky 行為，方便排查。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));new vm.Script(fs.readFileSync('js/main.js','utf8'));new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('scripts compile');NODE`
+
+# 2025-07-11 — Patch LB-DEVELOPER-HERO-20250711A
+- **Issue recap**: 開發者區域需要納入 Hero 區域並改為按鈕開闔，同時回測摘要卡在手機版仍會被擠壓成窄幅視窗，使用者難以閱讀完整結果。
+- **Fix**: 將原本位於左欄的開發者卡片搬移至 Hero，下方新增切換按鈕與動畫顯示；重構回測摘要卡的 placeholder 與 CSS，讓結果容器在小尺寸螢幕可自適應寬度並保留捲軸。
+- **Diagnostics**: 靜態檢視 DOM 確認左側設定仍維持原先卡片順序，Hero 按鈕 aria 狀態隨切換更新；回測摘要容器移除 flex 限制後，模擬手機寬度檢查不再橫向截斷。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'));console.log('worker.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'));console.log('main.js compiles');NODE`
+
+# 2025-07-24 — Patch LB-UI-DEDUP-20250724A
+- **Issue recap**: 首頁下方（Footer 前）殘留舊版配置，重複出現策略管理、快速結果、執行回測卡片及摘要/績效分析等分頁導覽，造成內容冗長並讓使用者誤以為需要再次設定。
+- **Fix**: 移除左側面板重複的交易設定、風險管理、策略卡片，以及右側結果分頁的重複區塊，僅保留新版含分段優化導覽的版本以維持資訊結構一致。
+- **Diagnostics**: 透過原始碼檢視確認 `策略管理`、`快速結果` 與 `right-panel` 僅剩單一實例，版面在 Footer 前即結束主要內容，無額外重複卡片。
+- **Testing**: 受限於容器無法連線實際回測代理，未能進行瀏覽器端回測；後續將於 Netlify 預覽站確認版面滾動與 console 狀態。
+
+
+# 2025-06-27 — Patch LB-SENSITIVITY-TOOLTIP-20250627A
+- **Issue recap**: 使用者反映敏感度摘要中的平均漂移提示仍提及不存在於前端的 Walk-Forward 測試，且表格內的 tooltip 於桌機截圖時會被卡片邊界遮擋。
+- **Fix**: 將判讀建議改為導引用戶使用現有的「批量優化」功能比對不同時間窗結果，並為敏感度卡片新增 `sensitivity-card`/`tooltiptext--sensitivity` 佈局與邊距設定，避免表格 tooltip 被裁切。
+- **Diagnostics**: 靜態檢閱產生的 DOM，確認敏感度卡片外層已套用新 class、tooltip 寬度收斂至 300px 以下且不再撞到容器邊界；平均漂移提示改為引用批量優化，不再提及未上線的 Walk-Forward。
+- **Testing**: 受限於容器無法連線回測 proxy，尚未執行實際回測；預計於 Netlify 預覽站驗證 hover 視覺與 console。
+
+# 2025-06-26 — Patch LB-TOOLTIP-WIDTH-20250626A
+- **Issue recap**: 佈署後的 tooltip 仍僅呈現狹長直條，字元被強制逐字換行，使用者無法閱讀敏感度門檻與設定說明。
+- **Fix**: 調整 tooltip 泡泡為 `inline-block` 並設定 `min-width`／`max-width` 為視窗寬度自適應的範圍，放寬 padding、陰影與行高，確保中文字維持可讀寬度且不再被 shrink-to-fit 擠壓。
+- **Diagnostics**: 透過瀏覽器檢視產生的敏感度卡片與設定表單 DOM，確認計算後的泡泡寬度皆大於 200px，實際 hover 時可完整顯示分段說明，不再出現僅剩細長條的情況。
+- **Testing**: 受限於容器無法連線回測 proxy，未能啟動實際回測；已規劃於 Netlify 預覽站實測所有 tooltip hover 與 console 狀態。
+
+# 2025-06-25 — Patch LB-TOOLTIP-OVERFLOW-20250625A
+- **Issue recap**: 回測摘要、風險指標與設定面板的 tooltip 會被主版面 `overflow-hidden` 容器裁切，只剩細長的黑條，無法閱讀 QuantConnect 等平臺的門檻說明。
+- **Fix**: 將主內容容器、左右面板與結果區改為允許溢位顯示，補上 `main-layout-shell` 標記並提升 tooltip 的層級，確保 hover 時可以完整展開文字。
+- **Diagnostics**: 透過瀏覽器檢視 HTML 結構確認所有 tooltip 皆存在且不再被裁切，敏感度卡片、風險指標及左側設定欄位均能正常顯示完整說明。
+- **Testing**: 受限於容器無法連線資料源，未能啟動實際回測；已進行靜態檢視並規劃在 Netlify 預覽站重新驗證 hover 行為與 console。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-TOOLTIP-20250624B
+- **Issue recap**: 敏感度卡片的平均漂移幅度缺乏判讀提示，表格內的 tooltip 又被橫向卷軸容器裁切，截圖時無法完整顯示資訊。
+- **Fix**: 平均漂移摘要卡新增國際常用的穩健門檻提示；調整 tooltip 佈局、CSS 堆疊層級與表格容器溢位設定，確保 PP／漂移說明可完整顯示。
+- **Diagnostics**: 在桌機與截圖模式檢視 tooltip 皆能完整顯示四段說明，±10% 欄位 hover 不再被卡片邊界裁切，方便用戶快速判讀與分享。
+- **Testing**: 受限於容器無法啟動前端及串接資料源，未進行實機回測；已透過程式碼靜態檢視確認版面結構與提示內容。
+
+# 2025-06-24 — Patch LB-SENSITIVITY-GUIDE-20250624A
+- **Issue recap**: 敏感度卡片雖已呈現 ±10% 測試結果，但未解釋 PP（百分點）、調整欄位與判讀重點，散戶難以理解進/出場策略的報酬差異含義。
+- **Fix**: Tooltip 補充 PP 計算公式與 Sharpe 比較基準，+10%/-10% 欄位加入操作說明，並新增「如何解讀敏感度結果」提示卡分解漂移、穩定度與 Sharpe Δ 等指標。
+- **Diagnostics**: 每個情境列的 PP 皆附提示說明正負號代表的策略優劣，頂端 tooltip 概述國際平臺門檻與百分點定義，協助截圖分享時維持一致說法。
+- **Testing**: 受限於容器無法實際回測，已透過程式碼靜態檢視確認 UI 提示與數據欄位皆覆蓋「進場」「出場」等敏感度群組；後續需在可存取資料源環境進行實測。
+
+# 2025-06-23 — Patch LB-SENSITIVITY-20250623A
+- **Issue recap**: 回測摘要缺乏參數敏感度檢查，散戶無法評估主要參數 ±10% 漂移幅度，過擬合風險與合理門檻也無法在 UI 上即時辨識。
+- **Fix**: Worker 於回傳結果時新增 ±10% 參數重跑並計算報酬漂移、Sharpe 變化與穩定度分數；前端回測摘要插入「敏感度分析」卡片，顯示整體穩定度、平均漂移與各參數細項，並提供 tooltip 說明國外平臺常用判讀門檻。
+- **Diagnostics**: Tooltip 列出 QuantConnect／Portfolio123 等平臺建議的分數區間，表格亦顯示每個參數在 +10%／-10% 調整時的報酬差異與漂移幅度，可快速截圖協助用戶與營運端討論參數穩健性。
+- **Testing**: 受限於環境無法啟動前端與實際回測，已透過程式靜態檢閱與重跑 Worker 函式確保敏感度計算不影響原有流程；後續需在具資料來源的環境實際回測驗證 console 無錯誤。
 
 # 2025-07-01 — Patch LB-STAGING-TOGGLE-20250701A
 - **Issue recap**: 多次進出場設定以卡片樣式呈現，標題字級與旁邊欄位不一致且需整塊點擊，導致視覺重量過高、用戶難以辨識點擊焦點。

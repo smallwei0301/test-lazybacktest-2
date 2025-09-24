@@ -366,40 +366,50 @@
             </header>
 
             <!-- Main Content -->
-            <div class="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
+            <main class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
                 <!-- Hero Section -->
                 <div class="bg-background border-b flex-shrink-0" style="background-color: var(--background); border-color: var(--border);">
                     <div class="container mx-auto px-4 py-12">
-                        <div class="text-center">
-                            <h1 class="text-4xl lg:text-5xl font-bold text-foreground mb-6" style="color: var(--foreground);">
-                                股票回測工具
-                            </h1>
-                            <p class="text-lg text-muted mb-8 max-w-3xl mx-auto" style="color: var(--muted-foreground);">
-                                透過歷史數據驗證您的交易策略，做出更明智的投資決策
-                            </p>
-                            
-                            <!-- 一鍵回測按鈕 -->
-                            <button 
-                                id="quickBacktestBtn"
-                                class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center mx-auto"
-                                style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                        <div class="text-center flex flex-col items-center gap-8">
+                            <div class="space-y-6 max-w-3xl">
+                                <h1 class="text-4xl lg:text-5xl font-bold text-foreground" style="color: var(--foreground);">
+                                    股票回測工具
+                                </h1>
+                                <p class="text-lg text-muted mx-auto" style="color: var(--muted-foreground);">
+                                    透過歷史數據驗證您的交易策略，做出更明智的投資決策
+                                </p>
+                            </div>
+
+                            <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
+                                <!-- 一鍵回測按鈕 -->
+                                <button
+                                    id="quickBacktestBtn"
+                                    class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
+                                    style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                                >
+                                    <i data-lucide="zap" class="lucide mr-3"></i>
+                                    一鍵回測台積電
+                                </button>
+
+                                <button
+                                    id="developerAreaToggle"
+                                    type="button"
+                                    class="btn-outline px-6 py-4 text-sm font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
+                                    style="color: var(--foreground); border: 1px solid var(--border); background-color: var(--input);"
+                                    aria-expanded="false"
+                                    aria-controls="developerAreaWrapper"
+                                >
+                                    <i data-lucide="wrench" class="lucide mr-2"></i>
+                                    開發者區域
+                                </button>
+                            </div>
+
+                            <div
+                                id="developerAreaWrapper"
+                                class="hidden w-full max-w-4xl text-left mx-auto developer-area-wrapper"
+                                aria-hidden="true"
                             >
-                                <i data-lucide="zap" class="lucide mr-3"></i>
-                                一鍵回測台積電
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="container mx-auto px-4 py-8 flex-1 overflow-hidden">
-                    <div class="grid lg:grid-cols-[30%_70%] gap-1 h-full overflow-hidden overflow-x-hidden main-grid">
-                        <!-- Left Panel - Settings and Controls -->
-                        <div class="space-y-6 lg:overflow-y-auto lg:h-screen lg:sticky lg:top-0 lg:pb-8 overflow-x-hidden left-panel" style="scrollbar-width: thin; scrollbar-color: var(--muted) var(--background);">
-
-                            <!-- Settings Cards -->
-                            <div class="space-y-6">
-                                <!-- Developer Area Card -->
-                                <div class="card" id="developerAreaCard">
+                                <div class="card hero-developer-card" id="developerAreaCard">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
                                             <i data-lucide="wrench" class="lucide text-primary" style="color: var(--primary);"></i>
@@ -492,18 +502,24 @@
                                                 <div id="blobUsageUpdatedAt" class="text-[11px]" style="color: var(--muted-foreground);"></div>
                                             </div>
                                             <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
-                                                <div id="blobUsageContent" class="px-3 py-3 space-y-3 text-[11px]" style="color: var(--foreground);">
-                                                    <div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">
-                                                        尚未累積 Blob 用量統計，執行回測後將在此顯示本月操作數與熱門查詢。
-                                                    </div>
-                                                </div>
+                                                <div id="blobUsageContent" class="px-3 py-3 space-y-3 text-[11px]" style="color: var(--foreground);"></div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
+                <div class="container mx-auto px-4 py-8 flex-1 overflow-hidden">
+                    <div class="main-grid h-full overflow-hidden overflow-x-hidden">
+                        <!-- Left Panel - Settings and Controls -->
+                        <div class="space-y-6 lg:overflow-y-auto lg:h-screen lg:sticky lg:top-0 lg:pb-8 overflow-x-hidden left-panel" style="scrollbar-width: thin; scrollbar-color: var(--muted) var(--background);">
+
+                            <!-- Settings Cards -->
+                            <div class="space-y-6">
                                 <!-- Basic Settings Card -->
-                                <div class="card">
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
@@ -1108,7 +1124,7 @@
                             <!-- Summary Tab -->
                             <div class="tab-content active" id="summary-tab">
                                 <!-- Chart Area -->
-                                <div class="card shadow-lg mb-8">
+                                <div class="card shadow-lg summary-card mb-8">
                                     <div class="card-header">
                                         <h3 class="card-title">淨值曲線圖</h3>
                                     </div>
@@ -1124,17 +1140,15 @@
                                 </div>
                                 
                                 <!-- Summary Results -->
-                                <div class="card shadow-lg">
+                                <div class="card shadow-lg summary-card">
                                     <div class="card-header">
                                         <h3 class="card-title">回測摘要</h3>
                                     </div>
                                     <div class="card-content">
-                                        <div
-                                            id="backtest-result"
-                                            class="text-muted min-h-[200px] flex items-center justify-center border-2 border-dashed rounded-lg"
-                                            style="color: var(--muted-foreground); border-color: var(--card);"
-                                        >
-                                            執行回測後將顯示詳細結果
+                                        <div id="backtest-result" class="summary-result-container">
+                                            <div id="backtest-result-placeholder" class="backtest-result-placeholder">
+                                                執行回測後將顯示詳細結果
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1637,7 +1651,7 @@
                         </div>
                     </div>
                 </div>
-            </div>
+            </main>
             <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
                 <div class="container mx-auto px-4">
                     <div class="grid md:grid-cols-4 gap-8">
