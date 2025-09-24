@@ -63,7 +63,7 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
-const ROLLING_TEST_VERSION = 'LB-ROLLING-20240705A';
+const ROLLING_TEST_VERSION = 'LB-ROLLING-20240707A';
 const ROLLING_RISK_FREE_RATE = 0.01; // 1% annual risk-free baseline for Sharpe/Sortino
 
 function cloneArrayOfRanges(ranges) {
@@ -3836,11 +3836,21 @@ function renderRollingTestReport(result) {
     lastRollingAnalysis = analysis;
 
     if (!analysis || analysis.status !== 'ok') {
-        const message = analysis?.message || '滾動測試僅支援完成回測後的資料。';
-        placeholder.textContent = message;
-        placeholder.classList.remove('hidden');
-        reportContainer.classList.add('hidden');
-        reportContainer.innerHTML = '';
+        const fallbackSection = buildRollingFallbackSection(analysis);
+        if (fallbackSection) {
+            placeholder.classList.add('hidden');
+            reportContainer.classList.remove('hidden');
+            reportContainer.innerHTML = fallbackSection;
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            }
+        } else {
+            const message = analysis?.message || '滾動測試僅支援完成回測後的資料。';
+            placeholder.textContent = message;
+            placeholder.classList.remove('hidden');
+            reportContainer.classList.add('hidden');
+            reportContainer.innerHTML = '';
+        }
         return;
     }
 
@@ -3857,6 +3867,107 @@ function renderRollingTestReport(result) {
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
         lucide.createIcons();
     }
+}
+
+function buildRollingFallbackSection(analysis) {
+    if (!analysis) {
+        return '';
+    }
+
+    const status = analysis.status || 'unknown';
+    const dataset = analysis.dataset || null;
+    const message = analysis.message || (status === 'empty'
+        ? '請先執行回測以產生滾動測試資料。'
+        : '目前無法建立 Walk-Forward 測試視窗。');
+
+    let title = '滾動測試暫無結果';
+    let chipHtml = '<span class="rolling-chip grade-NA">NA ｜ 等待資料</span>';
+    let guidanceItems = [];
+
+    if (status === 'empty') {
+        title = '尚未執行回測';
+        guidanceItems = [
+            '輸入股票代號、區間與策略後，點擊「執行回測」。',
+            '回測完成後即可自動評估 Walk-Forward 穩健度。',
+        ];
+    } else if (status === 'insufficient') {
+        title = '資料不足，無法產生滾動測試';
+        chipHtml = '<span class="rolling-chip grade-NA">NA ｜ 資料不足</span>';
+        guidanceItems = [
+            '延長回測期間，至少涵蓋 42 個月（36→6 組合）以上資料量。',
+            '確認「資料暖身診斷」卡片是否顯示缺口或快取仍在補抓。',
+            '若資料來源延遲，可於 10~15 分鐘後重新執行回測。',
+        ];
+    } else {
+        title = '滾動測試暫時無法計算';
+        chipHtml = '<span class="rolling-chip grade-NA">NA ｜ 待確認</span>';
+        guidanceItems = [
+            '重新執行回測並觀察 Console 是否有錯誤訊息。',
+            '若持續發生，請將「資料暖身診斷」截圖與 Console 訊息回報。',
+        ];
+    }
+
+    const datasetRows = [];
+    if (dataset) {
+        datasetRows.push({ label: '資料範圍', value: `${escapeHtml(dataset.start || '—')} ~ ${escapeHtml(dataset.end || '—')}` });
+        if (Number.isFinite(dataset.tradingDays)) {
+            datasetRows.push({ label: '交易日數', value: `${dataset.tradingDays} 日` });
+        }
+        if (Number.isFinite(dataset.totalMonths)) {
+            datasetRows.push({ label: '涵蓋月數', value: `${dataset.totalMonths} 個月` });
+        }
+        if (Number.isFinite(dataset.totalYears)) {
+            datasetRows.push({ label: '約略年數', value: `${dataset.totalYears.toFixed(1)} 年` });
+        }
+    }
+
+    const requirementList = ROLLING_CONFIG_PRESETS
+        .map((preset) => {
+            const minMonths = preset.trainMonths + preset.testMonths;
+            return `<li>訓練 ${preset.trainMonths} 個月 → 測試 ${preset.testMonths} 個月（至少 ${minMonths} 個月資料）</li>`;
+        })
+        .join('');
+
+    const datasetSection = datasetRows.length > 0
+        ? `<div class="rolling-config-card">
+                <h5 class="text-sm font-semibold mb-2" style="color: var(--foreground);">現有資料摘要</h5>
+                <ul class="space-y-1 text-sm" style="color: var(--muted-foreground);">
+                    ${datasetRows.map((row) => `<li><span class="font-medium" style="color: var(--foreground);">${escapeHtml(row.label)}：</span>${escapeHtml(row.value)}</li>`).join('')}
+                </ul>
+            </div>`
+        : '';
+
+    const guidanceSection = guidanceItems.length > 0
+        ? `<div class="rolling-config-card">
+                <h5 class="text-sm font-semibold mb-2" style="color: var(--foreground);">建議操作</h5>
+                <ul class="list-disc pl-5 space-y-1 text-sm" style="color: var(--muted-foreground);">
+                    ${guidanceItems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+                </ul>
+            </div>`
+        : '';
+
+    return `
+        <section class="space-y-4">
+            <div class="rolling-summary-card">
+                <div class="rolling-summary-header">
+                    <div>
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">Walk-Forward 狀態</p>
+                        <h4 class="text-lg font-semibold" style="color: var(--foreground);">${escapeHtml(title)}</h4>
+                    </div>
+                    ${chipHtml}
+                </div>
+                <p class="text-sm" style="color: var(--muted-foreground);">${escapeHtml(message)}</p>
+            </div>
+            ${datasetSection}
+            <div class="rolling-config-card">
+                <h5 class="text-sm font-semibold mb-2" style="color: var(--foreground);">預設視窗需求</h5>
+                <ul class="list-disc pl-5 space-y-1 text-sm" style="color: var(--muted-foreground);">
+                    ${requirementList}
+                </ul>
+            </div>
+            ${guidanceSection}
+        </section>
+    `;
 }
 
 function computeRollingAnalysis(result) {
