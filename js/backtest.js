@@ -4,6 +4,7 @@
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
+// Patch Tag: LB-TREND-REGRESSION-20250903A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -65,13 +66,14 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250823A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-REGRESSION-20250903A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
-    sharpe: 1.2,
-    slope: 0.0012,
-    volatility: 0.0045,
+    slopeStrict: 0.0024,
+    trendRatioStrict: 2.1,
+    strengthStrict: 2.8,
+    r2Strict: 0.55,
 };
 const TREND_SENSITIVITY_MIN = 1;
 const TREND_SENSITIVITY_MAX = 100;
@@ -201,6 +203,28 @@ function computeTrendThresholds(sensitivity) {
     if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMax > 0) {
         ratio = multiplierAtMin / multiplierAtMax;
     }
+
+    const slopeThreshold = Math.max(
+        0.00012,
+        TREND_BASE_THRESHOLDS.slopeStrict * Math.pow(clampedMultiplier, 0.35),
+    );
+    const slopeRelaxed = Math.max(0.00008, slopeThreshold * 0.6);
+    const trendRatioThreshold = Math.max(
+        0.45,
+        TREND_BASE_THRESHOLDS.trendRatioStrict * Math.pow(clampedMultiplier, 0.2),
+    );
+    const trendRatioRelaxed = Math.max(0.35, trendRatioThreshold * 0.65);
+    const strengthThreshold = Math.max(
+        0.55,
+        TREND_BASE_THRESHOLDS.strengthStrict * Math.pow(clampedMultiplier, 0.25),
+    );
+    const strengthRelaxed = Math.max(0.45, strengthThreshold * 0.6);
+    const r2Threshold = Math.max(
+        0.12,
+        Math.min(0.92, TREND_BASE_THRESHOLDS.r2Strict * Math.pow(clampedMultiplier, 0.15)),
+    );
+    const r2Relaxed = Math.max(0.08, Math.min(0.9, r2Threshold * 0.75));
+
     return {
         windowSize: TREND_WINDOW_SIZE,
         sensitivity: safe,
@@ -208,10 +232,14 @@ function computeTrendThresholds(sensitivity) {
         normalizedSensitivity: effectiveNormalized,
         equivalentSensitivity,
         multiplier: clampedMultiplier,
-        upSharpe: TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
-        downSharpe: -TREND_BASE_THRESHOLDS.sharpe * clampedMultiplier,
-        slopeFloor: TREND_BASE_THRESHOLDS.slope * clampedMultiplier,
-        volFloor: TREND_BASE_THRESHOLDS.volatility * clampedMultiplier,
+        slopeThreshold,
+        slopeRelaxed,
+        trendRatioThreshold,
+        trendRatioRelaxed,
+        strengthThreshold,
+        strengthRelaxed,
+        r2Threshold,
+        r2Relaxed,
         range: {
             min,
             max,
@@ -235,6 +263,11 @@ function formatTrendMultiplier(value) {
     if (value >= 0.1) return value.toFixed(2);
     if (value >= 0.01) return value.toFixed(3);
     return value.toFixed(4);
+}
+
+function formatDecimal(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return value.toFixed(digits);
 }
 
 function computeTrendAnalysisFromResult(result, thresholds) {
@@ -271,6 +304,99 @@ function computeTrendAnalysisFromResult(result, thresholds) {
         }
     }
     const windowSize = Math.max(5, Math.round(thresholds?.windowSize || TREND_WINDOW_SIZE));
+    const slopeThreshold = Number.isFinite(thresholds?.slopeThreshold)
+        ? thresholds.slopeThreshold
+        : 0.0012;
+    const slopeRelaxed = Number.isFinite(thresholds?.slopeRelaxed)
+        ? thresholds.slopeRelaxed
+        : slopeThreshold * 0.6;
+    const ratioThreshold = Number.isFinite(thresholds?.trendRatioThreshold)
+        ? thresholds.trendRatioThreshold
+        : 1.0;
+    const ratioRelaxed = Number.isFinite(thresholds?.trendRatioRelaxed)
+        ? thresholds.trendRatioRelaxed
+        : ratioThreshold * 0.7;
+    const strengthThreshold = Number.isFinite(thresholds?.strengthThreshold)
+        ? thresholds.strengthThreshold
+        : 1.2;
+    const strengthRelaxed = Number.isFinite(thresholds?.strengthRelaxed)
+        ? thresholds.strengthRelaxed
+        : strengthThreshold * 0.7;
+    const r2Threshold = Number.isFinite(thresholds?.r2Threshold)
+        ? thresholds.r2Threshold
+        : 0.35;
+    const r2Relaxed = Number.isFinite(thresholds?.r2Relaxed)
+        ? thresholds.r2Relaxed
+        : Math.max(0.08, r2Threshold * 0.75);
+
+    const computeWindowMetrics = (startIndex, endIndex) => {
+        const count = endIndex - startIndex + 1;
+        if (count < 3) return null;
+        let sumX = 0;
+        let sumY = 0;
+        let sumXX = 0;
+        let sumXY = 0;
+        for (let offset = 0; offset < count; offset += 1) {
+            const value = logValues[startIndex + offset];
+            if (!Number.isFinite(value)) {
+                return null;
+            }
+            const x = offset;
+            sumX += x;
+            sumY += value;
+            sumXX += x * x;
+            sumXY += x * value;
+        }
+        const denominator = count * sumXX - sumX * sumX;
+        if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-9) {
+            return null;
+        }
+        const slope = (count * sumXY - sumX * sumY) / denominator;
+        const intercept = (sumY - slope * sumX) / count;
+        const meanY = sumY / count;
+        let ssTot = 0;
+        let ssRes = 0;
+        for (let offset = 0; offset < count; offset += 1) {
+            const y = logValues[startIndex + offset];
+            const x = offset;
+            const fitted = slope * x + intercept;
+            const diffMean = y - meanY;
+            const residual = y - fitted;
+            ssTot += diffMean * diffMean;
+            ssRes += residual * residual;
+        }
+        const r2 = ssTot > 0 ? Math.max(0, 1 - (ssRes / ssTot)) : 0;
+        const residualStd = Math.sqrt(ssRes / Math.max(1, count - 2));
+        let diffSum = 0;
+        let diffSq = 0;
+        let diffCount = 0;
+        for (let idx = startIndex + 1; idx <= endIndex; idx += 1) {
+            const diff = logDiffs[idx];
+            if (!Number.isFinite(diff)) continue;
+            diffSum += diff;
+            diffSq += diff * diff;
+            diffCount += 1;
+        }
+        const diffMean = diffCount > 0 ? diffSum / diffCount : 0;
+        const diffVariance = diffCount > 0 ? Math.max(0, diffSq / diffCount - diffMean * diffMean) : 0;
+        const volatility = Math.sqrt(diffVariance);
+        const trendRatio = volatility > 0
+            ? slope / volatility
+            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        const strength = residualStd > 0
+            ? slope / residualStd
+            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        return {
+            slope,
+            slopeAbs: Math.abs(slope),
+            r2,
+            trendRatio,
+            trendRatioAbs: Math.abs(trendRatio),
+            strength,
+            strengthAbs: Math.abs(strength),
+        };
+    };
+
     for (let idx = startIdx; idx <= endIdx; idx += 1) {
         if (!Number.isFinite(logValues[idx])) {
             classifications[idx] = classifications[idx - 1] || 'consolidation';
@@ -291,30 +417,31 @@ function computeTrendAnalysisFromResult(result, thresholds) {
             classifications[idx] = classifications[idx - 1] || 'consolidation';
             continue;
         }
-        const startLog = logValues[idx - windowSize + 1];
-        const endLog = logValues[idx];
-        const slope = (endLog - startLog) / windowSize;
-        let sum = 0;
-        let sumSq = 0;
-        let count = 0;
-        for (let j = idx - windowSize + 2; j <= idx; j += 1) {
-            const diff = logDiffs[j];
-            if (!Number.isFinite(diff)) continue;
-            sum += diff;
-            sumSq += diff * diff;
-            count += 1;
+        const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
+        if (!metrics) {
+            classifications[idx] = classifications[idx - 1] || 'consolidation';
+            continue;
         }
-        const mean = count > 0 ? sum / count : 0;
-        const variance = count > 0 ? Math.max(0, sumSq / count - mean * mean) : 0;
-        const volatility = Math.sqrt(variance);
+        const {
+            slope,
+            slopeAbs,
+            r2,
+            trendRatioAbs,
+            strengthAbs,
+        } = metrics;
         let classification = 'consolidation';
-        if (volatility < thresholds.volFloor) {
-            if (slope >= thresholds.slopeFloor) classification = 'uptrend';
-            else if (slope <= -thresholds.slopeFloor) classification = 'downtrend';
-        } else {
-            const ratio = slope / (volatility + 1e-9);
-            if (ratio >= thresholds.upSharpe) classification = 'uptrend';
-            else if (ratio <= thresholds.downSharpe) classification = 'downtrend';
+        const passesStrict = slopeAbs >= slopeThreshold
+            && r2 >= r2Threshold
+            && trendRatioAbs >= ratioThreshold
+            && strengthAbs >= strengthThreshold;
+        const passesRelaxed = slopeAbs >= slopeRelaxed
+            && (
+                (r2 >= r2Relaxed && trendRatioAbs >= ratioRelaxed)
+                || (strengthAbs >= strengthRelaxed && trendRatioAbs >= ratioRelaxed)
+                || (strengthAbs >= strengthThreshold && r2 >= r2Relaxed)
+            );
+        if (passesStrict || passesRelaxed) {
+            classification = slope >= 0 ? 'uptrend' : 'downtrend';
         }
         classifications[idx] = classification;
     }
@@ -429,10 +556,16 @@ function renderTrendSummary() {
     const thresholds = trendAnalysisState.thresholds;
     const thresholdTextEl = document.getElementById('trend-threshold-text');
     if (thresholdTextEl && thresholds) {
-        const upSharpe = thresholds.upSharpe.toFixed(2);
-        const downSharpe = thresholds.downSharpe.toFixed(2);
-        const slopePct = (Math.exp(thresholds.slopeFloor) - 1) * 100;
-        const volPct = thresholds.volFloor * 100;
+        const slopeDailyPct = Math.expm1(thresholds.slopeThreshold) * 100;
+        const slopeAnnualPct = Math.expm1(thresholds.slopeThreshold * 252) * 100;
+        const slopeRelaxDailyPct = Math.expm1(thresholds.slopeRelaxed) * 100;
+        const slopeRelaxAnnualPct = Math.expm1(thresholds.slopeRelaxed * 252) * 100;
+        const trendRatioStrict = formatDecimal(thresholds.trendRatioThreshold, 2);
+        const trendRatioRelaxed = formatDecimal(thresholds.trendRatioRelaxed, 2);
+        const strengthStrict = formatDecimal(thresholds.strengthThreshold, 2);
+        const strengthRelaxed = formatDecimal(thresholds.strengthRelaxed, 2);
+        const r2Strict = formatDecimal(thresholds.r2Threshold, 2);
+        const r2Relaxed = formatDecimal(thresholds.r2Relaxed, 2);
         const multiplierText = formatTrendMultiplier(thresholds.multiplier);
         const rangeInfo = thresholds.range || {};
         const rangeMaxValue = Number.isFinite(rangeInfo.multiplierAtMin)
@@ -470,9 +603,12 @@ function renderTrendSummary() {
             : '滑桿 1→100';
         const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
         thresholdTextEl.innerHTML = `
-            <span class="font-semibold">判別公式：</span>20 日平均對數淨值斜率 ÷ 同期波動度。<br>
-            起漲：比值 ≥ ${upSharpe}，跌落：比值 ≤ ${downSharpe}。<br>
-            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，倍率越小越靈敏）。
+            <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
+            起漲：斜率 ≥ ${formatPercentPlain(slopeDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeAnnualPct, 1)}），R² ≥ ${r2Strict}，
+            且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
+            若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
+            並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
+            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');

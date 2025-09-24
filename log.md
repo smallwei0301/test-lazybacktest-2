@@ -1,7 +1,13 @@
+## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
+- **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
+- **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
+- **Diagnostics**: 檢查趨勢卡公式說明是否顯示線性回歸條件、R² 與雙訊噪閾值，拖曳滑桿確認斜率門檻與訊噪數值會隨靈敏度同步刷新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-08-23 — Patch LB-TREND-SENSITIVITY-20250823A
-- **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。 
-- **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。 
-- **Diagnostics**: 確認趨勢卡說明顯示「滑桿 1→100 ≈ 舊版 70→100」與新的倍率差距，拖曳滑桿時可看到目前等效級距與倍率即時刷新。 
+- **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。
+- **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。
+- **Diagnostics**: 確認趨勢卡說明顯示「滑桿 1→100 ≈ 舊版 70→100」與新的倍率差距，拖曳滑桿時可看到目前等效級距與倍率即時刷新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2025-08-17 — Patch LB-TREND-SENSITIVITY-20250817A
