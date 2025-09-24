@@ -971,9 +971,9 @@ function materializeSupersetCacheEntry(cacheKey, curSettings) {
         priceMode,
         splitAdjustment: curSettings.splitAdjustment,
     }, supersetEntry.data);
-    console.log(`[Main] Rehydrated year superset cache for ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd}).`);
-
-
+    console.log(
+        `[Main] 雿輻撟游漲 Superset 敹怠??‵ ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd})?,
+    );
     return supersetEntry;
 }
 
