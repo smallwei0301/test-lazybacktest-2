@@ -2650,6 +2650,8 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250905A';
+
 const STRATEGY_STATUS_BADGE_CLASSES = {
     idle: 'strategy-status-badge--idle',
     loading: 'strategy-status-badge--loading',
