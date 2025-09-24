@@ -1,4 +1,10 @@
 
+# 2025-09-06 — Patch LB-SENSITIVITY-RECOVERY-20250906A
+- **Issue recap**: 回測摘要在渲染敏感度分析卡片時拋出 `ReferenceError: sensitivityData is not defined`，導致整個摘要區塊無法顯示並觸發主執行緒錯誤提示。
+- **Fix**: 將敏感度資料來源改為以參數傳入的 `sensitivityPayload`，避免閉包意外引用未宣告變數，同時保留 `sensitivityAnalysis` / `parameterSensitivity` / `sensitivityData` 的回傳相容性。
+- **Diagnostics**: 以模擬結果物件逐一驗證 `sensitivityPayload` 缺席、僅含 `parameterSensitivity` 或完整 `sensitivityAnalysis` 三種情境，確認敏感度卡片能顯示對應的提示或表格。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 # 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
 - **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
 - **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
@@ -427,5 +433,17 @@
 - **Issue recap**: 使用者反映敏感度卡僅顯示 ±10% 場景且未說明方向指標門檻，穩定度分數未考量 Sharpe Δ，摘要卡文案也與下方動態網格脫節。
 - **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
-- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。
+
+# 2025-09-05 — Patch LB-STRATEGY-STATUS-20250905A
+- **Issue recap**: 回測頁面載入策略對決卡片時，`STRATEGY_STATUS_VERSION` 常數未定義導致主執行緒拋出 ReferenceError，策略速報在回測前即終止渲染。
+- **Fix**: 於前端主執行緒定義 `STRATEGY_STATUS_VERSION`，同步採用新版本碼 `LB-STRATEGY-STATUS-20250905A` 以標示策略速報模組狀態，避免卡片渲染流程出現缺失常數。
+- **Diagnostics**: 快速回顧 `getStrategyStatusElements` 與 `resetStrategyStatusCard`，確認 badge、標題與版本欄位均能成功套用常數並恢復預設文案。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
+
+# 2025-09-24 — Patch LB-SUGGESTION-WARMUP-20250924A
+- **Issue recap**: 今日建議模組即使取得完整回測資料仍回傳「回測資料不足以推導今日建議」，原因是策略起始指標需求超過可用列數時 `finalEvaluation` 未建立，前端僅能顯示資料不足訊息。
+- **Fix**: 當暖身需求尚未滿足且無法展開模擬時，仍以最後一筆有效行情組裝 `finalEvaluation`，標記空手狀態並保留暖身診斷，讓 UI 能正常輸出「維持空手」等建議。
+- **Diagnostics**: `diagnostics.warmup` 現會伴隨 `insufficientData: true`，今日建議筆記可對應暖身欄位確認起始落差是否超過指標需求。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
 
