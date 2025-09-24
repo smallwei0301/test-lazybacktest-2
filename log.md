@@ -1,4 +1,10 @@
 
+# 2025-09-06 — Patch LB-SENSITIVITY-RECOVERY-20250906A
+- **Issue recap**: 回測摘要在渲染敏感度分析卡片時拋出 `ReferenceError: sensitivityData is not defined`，導致整個摘要區塊無法顯示並觸發主執行緒錯誤提示。
+- **Fix**: 將敏感度資料來源改為以參數傳入的 `sensitivityPayload`，避免閉包意外引用未宣告變數，同時保留 `sensitivityAnalysis` / `parameterSensitivity` / `sensitivityData` 的回傳相容性。
+- **Diagnostics**: 以模擬結果物件逐一驗證 `sensitivityPayload` 缺席、僅含 `parameterSensitivity` 或完整 `sensitivityAnalysis` 三種情境，確認敏感度卡片能顯示對應的提示或表格。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 # 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
 - **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
 - **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
