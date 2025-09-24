@@ -1,3 +1,9 @@
+## 2025-08-17 — Patch LB-TREND-SENSITIVITY-20250817A
+- **Issue recap**: 靈敏度滑桿雖已擴充為 1-100 級距，但倍率縮放僅有 1.00→0.20，將滑桿推至 100 時仍難以明顯放大起漲／跌落分區。
+- **Fix**: 維持 1-100 級距但將倍率範圍拓展至 1.00→0.02（上下限差 50 倍），同步更新趨勢卡說明與倍率比值提示，確保高靈敏度時盤整區段明顯收斂。
+- **Diagnostics**: 手動檢視趨勢卡門檻說明顯示 50 倍差距、滑桿拖曳後倍率讀值同步刷新，並確認 Chart.js 底色插件會依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-07-26 — Patch LB-TREND-SENSITIVITY-20250726A
 - **Issue recap**: 使用者反映趨勢靈敏度滑桿僅有 0-10 級距，調整後仍難以顯示底色分段，盤整區塊覆蓋過大。
 - **Fix**: 將滑桿範圍放大至 1-100，改以線性內插 1.00→0.20 的門檻倍率縮放，更新趨勢版本代碼與公式說明，確保高靈敏度時起漲／跌落段能明顯放大。

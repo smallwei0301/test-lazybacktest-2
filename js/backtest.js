@@ -3,6 +3,7 @@
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
+// Patch Tag: LB-TREND-SENSITIVITY-20250817A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -64,7 +65,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250726A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20250817A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
@@ -75,7 +76,7 @@ const TREND_BASE_THRESHOLDS = {
 const TREND_SENSITIVITY_MIN = 1;
 const TREND_SENSITIVITY_MAX = 100;
 const TREND_SENSITIVITY_DEFAULT = 40;
-const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.2;
+const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.02;
 const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
 
 const TREND_STYLE_MAP = {
@@ -390,12 +391,25 @@ function renderTrendSummary() {
         const slopePct = (Math.exp(thresholds.slopeFloor) - 1) * 100;
         const volPct = thresholds.volFloor * 100;
         const multiplier = thresholds.multiplier.toFixed(2);
-        const maxMultiplier = (thresholds.range?.maxMultiplier ?? TREND_SENSITIVITY_MAX_MULTIPLIER).toFixed(2);
-        const minMultiplier = (thresholds.range?.minMultiplier ?? TREND_SENSITIVITY_MIN_MULTIPLIER).toFixed(2);
+        const rangeMax = thresholds.range?.maxMultiplier ?? TREND_SENSITIVITY_MAX_MULTIPLIER;
+        const rangeMin = thresholds.range?.minMultiplier ?? TREND_SENSITIVITY_MIN_MULTIPLIER;
+        const maxMultiplier = rangeMax.toFixed(2);
+        const minMultiplier = rangeMin.toFixed(2);
+        const ratio = rangeMin > 0 ? rangeMax / rangeMin : null;
+        let ratioText = '—';
+        if (Number.isFinite(ratio) && ratio > 0) {
+            if (ratio >= 100) {
+                ratioText = ratio.toFixed(0);
+            } else if (ratio >= 10) {
+                ratioText = ratio.toFixed(0);
+            } else {
+                ratioText = ratio.toFixed(1);
+            }
+        }
         thresholdTextEl.innerHTML = `
             <span class="font-semibold">判別公式：</span>20 日平均對數淨值斜率 ÷ 同期波動度。<br>
             起漲：比值 ≥ ${upSharpe}，跌落：比值 ≤ ${downSharpe}。<br>
-            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplier}（靈敏度於 ${maxMultiplier} → ${minMultiplier} 間線性縮放，數值越低代表越靈敏）。
+            若 20 日日波動度 &lt; ${formatPercentPlain(volPct, 2)} 時，改以日斜率 ≥ ${formatPercentPlain(slopePct, 2)} 或 ≤ -${formatPercentPlain(slopePct, 2)} 判定；門檻倍率 = ${multiplier}（滑桿 1→100 對應 ${maxMultiplier} → ${minMultiplier} 倍，上下限相差 ${ratioText} 倍，倍率越小越靈敏）。
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');
