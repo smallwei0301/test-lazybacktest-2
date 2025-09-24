@@ -1,24 +1,9 @@
-﻿// Patch Tag: LB-TW-DIRECTORY-20250620A
+
+// Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 
-const STRATEGY_STATUS_PATCH_TAG = 'LB-STRATEGY-STATUS-20250723A';
-const STRATEGY_STATUS_BADGE_BASE_CLASS = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors duration-150';
-const STRATEGY_STATUS_BADGE_VARIANTS = Object.freeze({
-    neutral: 'bg-gray-100 text-gray-600 border-gray-300',
-    positive: 'bg-emerald-100 text-emerald-700 border-emerald-300',
-    negative: 'bg-rose-100 text-rose-700 border-rose-300',
-    loading: 'bg-slate-100 text-slate-600 border-slate-300 animate-pulse',
-});
-const STRATEGY_STATUS_DIFF_THRESHOLD = 3;
-const STRATEGY_HEALTH_THRESHOLDS = Object.freeze({
-    annualizedReturn: 10,
-    sharpeRatio: 1,
-    sortinoRatio: 1.5,
-    maxDrawdown: 20,
-    stabilityRatio: 0.8,
-});
-
+// 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
@@ -28,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const shouldForceRefresh = !taiwanDirectoryState.cachedAt
         || (Date.now() - taiwanDirectoryState.cachedAt) > TAIWAN_DIRECTORY_CACHE_TTL_MS;
     ensureTaiwanDirectoryReady({ forceRefresh: shouldForceRefresh }).catch((error) => {
-        console.warn('[Taiwan Directory] ???亙仃??', error);
+        console.warn('[Taiwan Directory] 預載入失敗:', error);
     });
     console.info(`[Main] Strategy status card patch loaded: ${STRATEGY_STATUS_PATCH_TAG}`);
     resetStrategyStatusCard('idle');
@@ -58,7 +43,7 @@ let lastDatasetDiagnostics = null;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
-const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // ?剖?????閰阡??唳???
+const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
 
 const DATA_CACHE_INDEX_KEY = 'LB_DATA_CACHE_INDEX_V20250723A';
 const DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
@@ -208,7 +193,7 @@ function loadSessionDataCacheIndex() {
         });
         return map;
     } catch (error) {
-        console.warn('[Main] ?⊥?頛 Session ?葫敹怠?蝝Ｗ?:', error);
+        console.warn('[Main] 無法載入 Session 回測快取索引:', error);
         return new Map();
     }
 }
@@ -227,7 +212,7 @@ function saveSessionDataCacheIndex() {
         const payload = { version: SESSION_DATA_CACHE_VERSION, records };
         window.sessionStorage.setItem(SESSION_DATA_CACHE_INDEX_KEY, JSON.stringify(payload));
     } catch (error) {
-        console.warn('[Main] ?⊥?撖怠 Session ?葫敹怠?蝝Ｗ?:', error);
+        console.warn('[Main] 無法寫入 Session 回測快取索引:', error);
     }
 }
 
@@ -264,7 +249,7 @@ function pruneSessionDataCacheEntries(options = {}) {
             try {
                 window.sessionStorage.removeItem(buildSessionStorageEntryKey(key));
             } catch (error) {
-                console.warn('[Main] ?⊥?蝘駁 Session ?葫敹怠??:', error);
+                console.warn('[Main] 無法移除 Session 回測快取項目:', error);
             }
         });
     }
@@ -284,7 +269,7 @@ function getSessionDataCacheEntry(cacheKey) {
         if (!Array.isArray(parsed.data) || parsed.data.length === 0) return null;
         return parsed;
     } catch (error) {
-        console.warn('[Main] 閫?? Session ?葫敹怠?憭望?:', error);
+        console.warn('[Main] 解析 Session 回測快取失敗:', error);
         return null;
     }
 }
@@ -327,7 +312,7 @@ function persistSessionDataCacheEntry(cacheKey, cacheEntry, options = {}) {
         });
         pruneSessionDataCacheEntries({ save: true });
     } catch (error) {
-        console.warn('[Main] 撖怠 Session ?葫敹怠?憭望?:', error);
+        console.warn('[Main] 寫入 Session 回測快取失敗:', error);
     }
 }
 
@@ -337,7 +322,7 @@ function removeSessionDataCacheEntry(cacheKey) {
     try {
         window.sessionStorage.removeItem(buildSessionStorageEntryKey(cacheKey));
     } catch (error) {
-        console.warn('[Main] 蝘駁 Session ?葫敹怠?憭望?:', error);
+        console.warn('[Main] 移除 Session 回測快取失敗:', error);
     }
     if (sessionDataCacheIndex instanceof Map) {
         sessionDataCacheIndex.delete(cacheKey);
@@ -374,7 +359,7 @@ function loadYearStorageSlice(context, year) {
         if (!Array.isArray(parsed.data) || parsed.data.length === 0) return null;
         return parsed;
     } catch (error) {
-        console.warn('[Main] 閫??撟游漲敹怠?憭望?:', error);
+        console.warn('[Main] 解析年度快取失敗:', error);
         return null;
     }
 }
@@ -449,7 +434,7 @@ function persistYearStorageSlices(context, dataset, options = {}) {
         try {
             window.localStorage.setItem(key, JSON.stringify(payload));
         } catch (error) {
-            console.warn('[Main] 撖怠撟游漲敹怠?憭望?:', error);
+            console.warn('[Main] 寫入年度快取失敗:', error);
         }
     });
     if (options?.prune !== false) {
@@ -481,7 +466,7 @@ function pruneYearStorageEntries() {
                 toRemove.push(key);
             }
         } catch (error) {
-            console.warn('[Main] 瑼Ｘ撟游漲敹怠??仃??', error);
+            console.warn('[Main] 檢查年度快取時失敗:', error);
             toRemove.push(key);
         }
     }
@@ -489,7 +474,7 @@ function pruneYearStorageEntries() {
         try {
             window.localStorage.removeItem(key);
         } catch (error) {
-            console.warn('[Main] 蝘駁撟游漲敹怠?憭望?:', error);
+            console.warn('[Main] 移除年度快取失敗:', error);
         }
     });
 }
@@ -534,7 +519,7 @@ function loadBlobUsageLedger() {
         });
         return ledger;
     } catch (error) {
-        console.warn('[Main] 頛 Blob ?券?蝝?仃??', error);
+        console.warn('[Main] 載入 Blob 用量紀錄失敗:', error);
         return base;
     }
 }
@@ -584,7 +569,7 @@ function saveBlobUsageLedger() {
     try {
         window.localStorage.setItem(BLOB_LEDGER_STORAGE_KEY, JSON.stringify(blobUsageLedger));
     } catch (error) {
-        console.warn('[Main] 撖怠 Blob ?券?蝝?仃??', error);
+        console.warn('[Main] 寫入 Blob 用量紀錄失敗:', error);
     }
 }
 
@@ -669,7 +654,7 @@ function enumerateYearsBetween(startISO, endISO) {
 function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
     if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) return null;
     const meta = payload.meta || {};
-    const dataSourceLabel = meta.dataSource || '?汗??Session 敹怠?';
+    const dataSourceLabel = meta.dataSource || '瀏覽器 Session 快取';
     const sourceLabels = Array.isArray(meta.dataSources) && meta.dataSources.length > 0
         ? meta.dataSources
         : [dataSourceLabel];
@@ -742,8 +727,8 @@ function loadYearDatasetForRange(context, startISO, endISO) {
         stockName: slices.find((slice) => slice.stockNo)?.stockNo || context.stockNo || null,
         stockNo: context.stockNo || null,
         market: context.market || null,
-        dataSource: '?汗?典僑摨血翰??,
-        dataSources: ['?汗?典僑摨血翰??],
+        dataSource: '瀏覽器年度快取',
+        dataSources: ['瀏覽器年度快取'],
     };
 }
 
@@ -972,7 +957,7 @@ function materializeSupersetCacheEntry(cacheKey, curSettings) {
         splitAdjustment: curSettings.splitAdjustment,
     }, supersetEntry.data);
     console.log(
-        `[Main] 雿輻撟游漲 Superset 敹怠??‵ ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd})?,
+        `[Main] 使用年度 Superset 快取回填 ${curSettings.stockNo} (${sliceStart} ~ ${sliceEnd})。`,
     );
     return supersetEntry;
 }
@@ -1105,7 +1090,7 @@ function loadPersistentDataCacheIndex() {
         });
         return map;
     } catch (error) {
-        console.warn('[Main] ?⊥?頛鞈?敹怠?蝝Ｗ?:', error);
+        console.warn('[Main] 無法載入資料快取索引:', error);
         return new Map();
     }
 }
@@ -1126,7 +1111,7 @@ function savePersistentDataCacheIndex() {
         const payload = { version: DATA_CACHE_VERSION, records };
         window.localStorage.setItem(DATA_CACHE_INDEX_KEY, JSON.stringify(payload));
     } catch (error) {
-        console.warn('[Main] ?⊥?撖怠鞈?敹怠?蝝Ｗ?:', error);
+        console.warn('[Main] 無法寫入資料快取索引:', error);
     }
 }
 
@@ -1167,7 +1152,7 @@ function clearPersistentDataCacheIndex() {
         try {
             window.localStorage.removeItem(DATA_CACHE_INDEX_KEY);
         } catch (error) {
-            console.warn('[Main] ?⊥?皜鞈?敹怠?蝝Ｗ?:', error);
+            console.warn('[Main] 無法清除資料快取索引:', error);
         }
     }
 }
@@ -1237,10 +1222,10 @@ function ensureDatasetCacheEntryFresh(cacheKey, entry, market) {
     return entry || null;
 }
 
-// --- 銝餃?皜砍??---
+// --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
-    if (!workerUrl) { showError("?閮?撘?撠皞?撠梁?嚗?蝔?閰行??頛???); hideLoading(); return; }
+    if (!workerUrl) { showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); hideLoading(); return; }
     try {
         const params=getBacktestParams();
         console.log("[Main] Params:", params);
@@ -1337,22 +1322,22 @@ function runBacktestInternal() {
                 const startCheck = evaluateCacheStartGap(cacheKey, cachedEntry, effectiveStartDate);
                 if (startCheck.shouldForce) {
                     const gapText = Number.isFinite(startCheck.gapDays)
-                        ? `${startCheck.gapDays} 憭奈
-                        : '?芰憭拇';
-                    const firstDateText = startCheck.firstEffectiveDate || '??;
-                    console.warn(`[Main] 敹怠?擐????交? (${firstDateText}) 頛身摰絲暺敺?${gapText}嚗?粹??唳???start=${effectiveStartDate}`);
+                        ? `${startCheck.gapDays} 天`
+                        : '未知天數';
+                    const firstDateText = startCheck.firstEffectiveDate || '無';
+                    console.warn(`[Main] 快取首筆有效日期 (${firstDateText}) 較設定起點落後 ${gapText}，改為重新抓取。 start=${effectiveStartDate}`);
                     useCache = false;
                     cachedEntry = null;
                 } else if (startCheck.acknowledged && Number.isFinite(startCheck.gapDays) && startCheck.gapDays > START_GAP_TOLERANCE_DAYS) {
-                    console.warn(`[Main] 敹怠?擐????交?撌脰敺?${startCheck.gapDays} 憭抬?撌脣餈?蝣箄?鞈?蝻箏嚗?窒?典翰???);
+                    console.warn(`[Main] 快取首筆有效日期已落後 ${startCheck.gapDays} 天，已在近期確認資料缺口，暫時沿用快取資料。`);
                 }
             } else {
-                console.warn('[Main] 敹怠??批捆銝??冽?蝯??啣虜嚗?粹??唳???);
+                console.warn('[Main] 快取內容不存在或結構異常，改為重新抓取。');
                 useCache = false;
                 cachedEntry = null;
             }
         }
-        const msg=useCache?"??雿輻敹怠??瑁??葫...":"???脣??豢?銝血?皜?..";
+        const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
         resetStrategyStatusCard('loading');
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
@@ -1374,7 +1359,7 @@ function runBacktestInternal() {
             lastFetchSettings = { ...curSettings };
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
-            console.log(`[Main] 敺翰?銝?${cacheKey}嚗???${curSettings.startDate} ~ ${curSettings.endDate}`);
+            console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
 
@@ -1394,9 +1379,9 @@ function runBacktestInternal() {
 
             if(type==='progress'){
                 updateProgress(progress);
-                if(message)document.getElementById('loadingText').textContent=`??${message}`;
+                if(message)document.getElementById('loadingText').textContent=`⌛ ${message}`;
             } else if(type==='marketError'){
-                // ??撣?亥岷?航炊嚗＊蝷箸?折隤方???閰望?
+                // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
                 if (window.showMarketSwitchModal) {
                     window.showMarketSwitchModal(message, marketType, stockNo);
@@ -1405,7 +1390,7 @@ function runBacktestInternal() {
                     showError(message);
                 }
             } else if(type==='stockNameInfo'){
-                // ???∠巨?迂鞈?嚗＊蝷箏UI銝?
+                // 處理股票名稱資訊，顯示在UI上
                 if (window.showStockName) {
                     window.showStockName(e.data.stockName, e.data.stockNo, e.data.marketType);
                 }
@@ -1615,7 +1600,7 @@ function runBacktestInternal() {
                     refreshPriceInspectorControls();
                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
-                     console.log("[Main] 雿輻銝餃銵?敹怠?鞈??瑁??葫??);
+                     console.log("[Main] 使用主執行緒快取資料執行回測。");
 
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
@@ -1650,15 +1635,15 @@ function runBacktestInternal() {
                         console.log('[Main] Fetch diagnostics', fetchDiag);
                     }
                     if (runtimeDataset && Number.isFinite(runtimeDataset.firstValidCloseGapFromEffective) && runtimeDataset.firstValidCloseGapFromEffective > 1) {
-                        console.warn(`[Main] ${params?.stockNo || ''} 蝚砌?蝑???文?賢??澈韏琿? ${runtimeDataset.firstValidCloseGapFromEffective} 憭押);
+                        console.warn(`[Main] ${params?.stockNo || ''} 第一筆有效收盤價落後暖身起點 ${runtimeDataset.firstValidCloseGapFromEffective} 天。`);
                     }
                     if (runtimeDataset?.invalidRowsInRange?.count > 0) {
                         const reasonSummary = formatDiagnosticsReasonCounts(runtimeDataset.invalidRowsInRange.reasons);
-                        console.warn(`[Main] ${params?.stockNo || ''} ???菜葫??${runtimeDataset.invalidRowsInRange.count} 蝑??????蝯梯?: ${reasonSummary}`);
+                        console.warn(`[Main] ${params?.stockNo || ''} 區間內偵測到 ${runtimeDataset.invalidRowsInRange.count} 筆無效資料，原因統計: ${reasonSummary}`);
                     }
                     if (fetchDiag?.overview?.invalidRowsInRange?.count > 0) {
                         const fetchReason = formatDiagnosticsReasonCounts(fetchDiag.overview.invalidRowsInRange.reasons);
-                        console.warn(`[Main] ${params?.stockNo || ''} ?垢??? ${fetchDiag.overview.invalidRowsInRange.count} 蝑??雿???蝯梯?: ${fetchReason}`);
+                        console.warn(`[Main] ${params?.stockNo || ''} 遠端回應包含 ${fetchDiag.overview.invalidRowsInRange.count} 筆無效欄位，原因統計: ${fetchReason}`);
                     }
                 } else {
                     lastDatasetDiagnostics = null;
@@ -1687,32 +1672,32 @@ function runBacktestInternal() {
                 const suggestionArea = document.getElementById('today-suggestion-area');
                 const suggestionText = document.getElementById('suggestion-text');
                 if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.suggestion || '?⊥???撱箄降';
+                    suggestionText.textContent = data.suggestion || '無法取得建議';
                     suggestionArea.classList.remove('hidden', 'loading');
                      suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center'; // Base classes
-                    if (data.suggestion === '??鞎瑕' || data.suggestion === '?? (憭?') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
-                    else if (data.suggestion === '?征鞈?' || data.suggestion === '?? (蝛?') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
-                    else if (data.suggestion === '??鞈?' || data.suggestion === '?征??') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
-                    else if (data.suggestion === '蝑?') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
+                    if (data.suggestion === '做多買入' || data.suggestion === '持有 (多)') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
+                    else if (data.suggestion === '做空賣出' || data.suggestion === '持有 (空)') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
+                    else if (data.suggestion === '做多賣出' || data.suggestion === '做空回補') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
+                    else if (data.suggestion === '等待') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
                      else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
 
                     hideLoading();
-                    showSuccess("?葫摰?嚗?);
+                    showSuccess("回測完成！");
                     if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
                 }
             } else if(type==='suggestionError'){
                 const suggestionArea = document.getElementById('today-suggestion-area');
                 const suggestionText = document.getElementById('suggestion-text');
                 if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.message || '閮?撱箄降??隤?;
+                    suggestionText.textContent = data.message || '計算建議時發生錯誤';
                     suggestionArea.classList.remove('hidden', 'loading');
                     suggestionArea.className = 'my-4 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md text-center';
                 }
                  hideLoading();
-                 showError("?葫摰?嚗?閮?撱箄降??隤扎?);
+                 showError("回測完成，但計算建議時發生錯誤。");
                  if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
-                showError(data?.message||'?葫???航炊');
+                showError(data?.message||'回測過程錯誤');
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
                 const suggestionArea = document.getElementById('today-suggestion-area');
@@ -1722,7 +1707,7 @@ function runBacktestInternal() {
         };
 
         backtestWorker.onerror=e=>{
-             showError(`Worker?航炊: ${e.message}`); console.error("[Main] Worker Error:",e);
+             showError(`Worker錯誤: ${e.message}`); console.error("[Main] Worker Error:",e);
              if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
              hideLoading();
              const suggestionArea = document.getElementById('today-suggestion-area');
@@ -1741,7 +1726,7 @@ function runBacktestInternal() {
         if(useCache) {
             const cachePayload = cachedEntry?.data || cachedStockData;
             if (Array.isArray(cachePayload)) {
-                workerMsg.cachedData = cachePayload; // Prefer摰敹怠?鞈?
+                workerMsg.cachedData = cachePayload; // Prefer完整快取資料
             }
             if (cachedEntry) {
                 workerMsg.cachedMeta = {
@@ -1766,7 +1751,7 @@ function runBacktestInternal() {
 
     } catch (error) {
         console.error("[Main] Error in runBacktestInternal:", error);
-        showError(`?瑁??葫??隤? ${error.message}`);
+        showError(`執行回測時發生錯誤: ${error.message}`);
         hideLoading();
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
@@ -1776,16 +1761,16 @@ function runBacktestInternal() {
 }
 
 function clearPreviousResults() {
-    document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">隢銵?皜?/p>`;
-    document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">隢銵?皜?/p>`;
-    document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">隢銵??/p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">隢??瑁??葫隞亦????蜀???/p>`;
+    document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
+    document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
+    document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
+    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
         const chartContainer = document.getElementById('chart-container');
         if (chartContainer) {
-            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>?瑁??葫敺?憿舐內瘛典潭蝺?/p></div>';
+            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
             if (typeof lucide !== 'undefined' && lucide.createIcons) {
                 lucide.createIcons();
             }
@@ -1793,7 +1778,7 @@ function clearPreviousResults() {
     }
     const resEl=document.getElementById("result");
     resEl.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md';
-    resEl.innerHTML = `<i class="fas fa-info-circle mr-2"></i> 隢身摰??訾蒂?瑁??;
+    resEl.innerHTML = `<i class="fas fa-info-circle mr-2"></i> 請設定參數並執行。`;
     lastOverallResult = null; lastSubPeriodResults = null;
     lastIndicatorSeries = null;
     lastPositionStates = [];
@@ -1814,9 +1799,9 @@ function clearPreviousResults() {
 }
 
 const adjustmentReasonLabels = {
-    missingPriceRow: '蝻箏?撠??寞',
-    invalidBaseClose: '?⊥??箸???,
-    ratioOutOfRange: '隤踵瘥??啣虜',
+    missingPriceRow: '缺少對應價格',
+    invalidBaseClose: '無效基準價',
+    ratioOutOfRange: '調整比例異常',
 };
 
 function escapeHtml(text) {
@@ -1838,7 +1823,7 @@ function formatSkipReasons(skipReasons) {
             const label = adjustmentReasonLabels[reason] || reason;
             return `${label}: ${count}`;
         })
-        .join('??);
+        .join('、');
 }
 
 function updatePriceDebug(meta = {}) {
@@ -1887,14 +1872,14 @@ function renderPricePipelineSteps() {
     const rows = lastPriceDebug.steps.map((step) => {
         const status = step.status === 'success' ? 'text-emerald-600'
             : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
-        let detailText = step.detail ? ` ??${escapeHtml(step.detail)}` : '';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
         if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
-            detailText += ' ??撌脣??典??渡葬??;
+            detailText += ' ・ 已啟用備援縮放';
         }
         const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
-        const reasonText = reasonFormatted ? ` ??${escapeHtml(reasonFormatted)}` : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
         return `<div class="flex items-center gap-2 text-[11px]">
-            <span class="${status}">??/span>
+            <span class="${status}">●</span>
             <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
         </div>`;
     }).join('');
@@ -1916,26 +1901,26 @@ function renderPriceInspectorDebug() {
     if (lastPriceDebug.summary && typeof lastPriceDebug.summary === 'object') {
         const applied = Number(lastPriceDebug.summary.adjustmentEvents || 0);
         const skipped = Number(lastPriceDebug.summary.skippedEvents || 0);
-        summaryItems.push(`?? ${applied} 隞跆);
-        summaryItems.push(`?仿? ${skipped} 隞跆);
+        summaryItems.push(`成功 ${applied} 件`);
+        summaryItems.push(`略過 ${skipped} 件`);
     }
     if (lastPriceDebug.fallbackApplied) {
-        summaryItems.push('?蝮格撌脣???);
+        summaryItems.push('備援縮放已啟用');
     }
     const summaryLine = summaryItems.length > 0
-        ? `<div class="text-[11px] font-medium" style="color: var(--foreground);">${escapeHtml(summaryItems.join(' ??'))}</div>`
+        ? `<div class="text-[11px] font-medium" style="color: var(--foreground);">${escapeHtml(summaryItems.join(' ・ '))}</div>`
         : '';
     const stepsHtml = lastPriceDebug.steps.map((step) => {
         const status = step.status === 'success' ? 'text-emerald-600'
             : step.status === 'warning' ? 'text-amber-600' : 'text-rose-600';
-        let detailText = step.detail ? ` ??${escapeHtml(step.detail)}` : '';
+        let detailText = step.detail ? ` ・ ${escapeHtml(step.detail)}` : '';
         if (step.key === 'adjustmentApply' && lastPriceDebug.fallbackApplied) {
-            detailText += ' ??撌脣??典??渡葬??;
+            detailText += ' ・ 已啟用備援縮放';
         }
         const reasonFormatted = step.skipReasons ? formatSkipReasons(step.skipReasons) : '';
-        const reasonText = reasonFormatted ? ` ??${escapeHtml(reasonFormatted)}` : '';
+        const reasonText = reasonFormatted ? ` ・ ${escapeHtml(reasonFormatted)}` : '';
         return `<div class="flex items-start gap-2 text-[11px]">
-            <span class="${status}">??/span>
+            <span class="${status}">●</span>
             <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
         </div>`;
     }).join('');
@@ -1946,41 +1931,41 @@ function renderPriceInspectorDebug() {
 const dataDiagnosticsState = { open: false };
 
 function formatDiagnosticsValue(value) {
-    if (value === null || value === undefined || value === '') return '??;
+    if (value === null || value === undefined || value === '') return '—';
     if (typeof value === 'number') {
-        if (Number.isNaN(value)) return '??;
+        if (Number.isNaN(value)) return '—';
         return value.toString();
     }
     return String(value);
 }
 
 function formatDiagnosticsRange(start, end) {
-    if (!start && !end) return '??;
+    if (!start && !end) return '—';
     if (start && end) return `${start} ~ ${end}`;
-    return start || end || '??;
+    return start || end || '—';
 }
 
 function formatDiagnosticsIndex(entry) {
-    if (!entry || typeof entry !== 'object') return '??;
-    const date = entry.date || '??;
-    const index = Number.isFinite(entry.index) ? `#${entry.index}` : '#??;
+    if (!entry || typeof entry !== 'object') return '—';
+    const date = entry.date || '—';
+    const index = Number.isFinite(entry.index) ? `#${entry.index}` : '#—';
     return `${date} (${index})`;
 }
 
 function formatDiagnosticsGap(days) {
-    if (!Number.isFinite(days)) return '??;
-    if (days === 0) return '0 憭?;
-    return `${days > 0 ? '+' : ''}${days} 憭奈;
+    if (!Number.isFinite(days)) return '—';
+    if (days === 0) return '0 天';
+    return `${days > 0 ? '+' : ''}${days} 天`;
 }
 
 function formatDiagnosticsReasonCounts(reasons) {
-    if (!reasons || typeof reasons !== 'object') return '??;
+    if (!reasons || typeof reasons !== 'object') return '—';
     const entries = Object.entries(reasons)
         .map(([reason, count]) => [reason, Number(count)])
         .filter(([, count]) => Number.isFinite(count) && count > 0)
         .sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return '??;
-    return entries.map(([reason, count]) => `${reason}?${count}`).join('??);
+    if (entries.length === 0) return '—';
+    return entries.map(([reason, count]) => `${reason}×${count}`).join('、');
 }
 
 function getStrategyStatusCardElements() {
@@ -2019,18 +2004,18 @@ function resetStrategyStatusCard(mode = 'idle') {
         setStrategyStatusCardState({
             visible: true,
             variant: 'loading',
-            badgeText: '閮?銝?,
-            headlineText: '甇?瘥?隤啁??唳?敺?,
-            detailText: '瞍?撠?甇?蕃?暹??蝑?撠望????唳?瘥???璅?瑼ｇ?隢??瘞渡????颯?,
+            badgeText: '計算中',
+            headlineText: '正在比對誰笑到最後…',
+            detailText: '演算小隊正翻找數據，等下就會送上戰況比分與指標體檢，請先喝口水稍候片刻。',
         });
         return;
     }
     setStrategyStatusCardState({
         visible: false,
         variant: 'loading',
-        badgeText: '撠?魚',
-        headlineText: '?瑁??葫敺??剜?蝑?唳?',
-        detailText: '?葫銝蝯?嚗????餌????亥?鞎瑕??隤唬?銝◢嚗????垢?箸?璅?瑼Ｗ?敺?霈?蝘??啣?擃釭??,
+        badgeText: '尚未開賽',
+        headlineText: '執行回測後將揭曉策略戰況',
+        detailText: '回測一結束，我會立刻爆料策略與買入持有誰佔上風，還會順手端出指標體檢心得，讓你秒懂戰局體質。',
     });
 }
 
@@ -2047,28 +2032,28 @@ function toFiniteNumber(value) {
 
 function formatPercentValue(value) {
     const num = toFiniteNumber(value);
-    if (num === null) return '??;
+    if (num === null) return '—';
     const prefix = num > 0 ? '+' : num < 0 ? '' : '';
     return `${prefix}${num.toFixed(2)}%`;
 }
 
 function formatPercentDiff(value) {
     const num = toFiniteNumber(value);
-    if (num === null) return '0.00 ???';
-    return `${Math.abs(num).toFixed(2)} ???`;
+    if (num === null) return '0.00 個百分點';
+    return `${Math.abs(num).toFixed(2)} 個百分點`;
 }
 
 function splitSummaryIntoBulletLines(summary) {
     if (typeof summary !== 'string') return [];
     return summary
-        .split(/[嚗?]+/u)
+        .split(/[；;]+/u)
         .map((segment) => segment.trim())
         .filter((segment) => segment.length > 0)
         .map((segment) => {
-            if (/[??嚗$/u.test(segment)) {
+            if (/[。！？]$/u.test(segment)) {
                 return segment;
             }
-            return `${segment}?;
+            return `${segment}。`;
         });
 }
 
@@ -2080,9 +2065,9 @@ function buildStrategyHealthSummary(result) {
     const annualized = toFiniteNumber(result && result.annualizedReturn);
     if (annualized !== null) {
         if (annualized >= thresholds.annualizedReturn) {
-            highlights.push(`撟游??梢 ${annualized.toFixed(2)}%`);
+            highlights.push(`年化報酬 ${annualized.toFixed(2)}%`);
         } else {
-            cautions.push(`撟游??梢?芣? ${annualized.toFixed(2)}%嚗???賢?撘梧?撱箄降瑼Ｚ??脣?渡?憟);
+            cautions.push(`年化報酬只有 ${annualized.toFixed(2)}%，收益動能偏弱，建議檢視進出場節奏`);
         }
     }
 
@@ -2090,12 +2075,12 @@ function buildStrategyHealthSummary(result) {
     if (typeof sharpeRaw === 'number' && !Number.isNaN(sharpeRaw)) {
         if (Number.isFinite(sharpeRaw)) {
             if (sharpeRaw >= thresholds.sharpeRatio) {
-                highlights.push(`憭??${sharpeRaw.toFixed(2)}`);
+                highlights.push(`夏普值 ${sharpeRaw.toFixed(2)}`);
             } else {
-                cautions.push(`憭?澆? ${sharpeRaw.toFixed(2)}嚗郭??靘??梢銝?瞍漁嚗??芣?閬??????);
+                cautions.push(`夏普值僅 ${sharpeRaw.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力`);
             }
         } else if (sharpeRaw > 0) {
-            highlights.push('憭?潸隅餈蝒桀之');
+            highlights.push('夏普值趨近無窮大');
         }
     }
 
@@ -2103,12 +2088,12 @@ function buildStrategyHealthSummary(result) {
     if (typeof sortinoRaw === 'number' && !Number.isNaN(sortinoRaw)) {
         if (Number.isFinite(sortinoRaw)) {
             if (sortinoRaw >= thresholds.sortinoRatio) {
-                highlights.push(`蝝Ｘ?隢暹???${sortinoRaw.toFixed(2)}`);
+                highlights.push(`索提諾比率 ${sortinoRaw.toFixed(2)}`);
             } else {
-                cautions.push(`蝝Ｘ?隢暹????${sortinoRaw.toFixed(2)}嚗?瑼◢?芣?嗅?????閮?閮剖???`);
+                cautions.push(`索提諾比率只有 ${sortinoRaw.toFixed(2)}，下檔風險控制力道有限，記得設定停損`);
             }
         } else if (sortinoRaw > 0) {
-            highlights.push('蝝Ｘ?隢暹??扔雿喉?頞刻??∠狙憭改?');
+            highlights.push('索提諾比率極佳（趨近無窮大）');
         }
     }
 
@@ -2116,9 +2101,9 @@ function buildStrategyHealthSummary(result) {
     if (maxDrawdownRaw !== null) {
         const dd = Math.abs(maxDrawdownRaw);
         if (dd <= thresholds.maxDrawdown) {
-            highlights.push(`?憭批??文? ${dd.toFixed(2)}%`);
+            highlights.push(`最大回撤僅 ${dd.toFixed(2)}%`);
         } else {
-            cautions.push(`?憭批??日? ${dd.toFixed(2)}%嚗雿?賜?甇瑁?憭批?瑼???閬?鞈?蝺抵?`);
+            cautions.push(`最大回撤達 ${dd.toFixed(2)}%，部位可能經歷較大回檔，務必規劃資金緩衝`);
         }
     }
 
@@ -2128,9 +2113,9 @@ function buildStrategyHealthSummary(result) {
         const ratio = annHalf2 / annHalf1;
         if (Number.isFinite(ratio)) {
             if (ratio >= thresholds.stabilityRatio) {
-                highlights.push(`??畾萄?祆? ${ratio.toFixed(2)}`);
+                highlights.push(`前後段報酬比 ${ratio.toFixed(2)}`);
             } else {
-                cautions.push(`??畾萄?祆???${ratio.toFixed(2)}嚗??亙銝?撣?????撱箄降憭?皛曉?撽?`);
+                cautions.push(`前後段報酬比僅 ${ratio.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證`);
             }
         }
     }
@@ -2141,25 +2126,25 @@ function buildStrategyHealthSummary(result) {
         const ratio = sharpeHalf2 / sharpeHalf1;
         if (Number.isFinite(ratio)) {
             if (ratio >= thresholds.stabilityRatio) {
-                highlights.push(`??畾萄??格? ${ratio.toFixed(2)}`);
+                highlights.push(`前後段夏普比 ${ratio.toFixed(2)}`);
             } else {
-                cautions.push(`??畾萄??格??芣? ${ratio.toFixed(2)}嚗?賢??券??砍?嚗???撽?璅?`);
+                cautions.push(`前後段夏普比只有 ${ratio.toFixed(2)}，可能存在過擬合，請留意驗證樣本`);
             }
         }
     }
 
     if (highlights.length === 0 && cautions.length === 0) {
-        return '??撌⊥炎鞈?銝雲嚗?敺?頝?甈∠Ⅱ隤??;
+        return '指標巡檢資料不足，稍後重跑一次確認數據。';
     }
 
     if (cautions.length === 0) {
-        const highlightText = highlights.join('??);
-        return `??撌⊥炎?冽??嚗?{highlightText}嚗?蝑?桀??臭誑鋡怠??箝?撣詨末???扯”?玨?喳?;
+        const highlightText = highlights.join('、');
+        return `指標巡檢全數過關：${highlightText}，這套策略目前可以被列為「非常好」，照表操課即可。`;
     }
 
-    const cautionText = cautions.join('嚗?);
-    const highlightTail = highlights.length > 0 ? `嚗憭?${highlights.join('??)} 銵函??蝯血?嚗?敺??芸摰?` : '';
-    return `??撌⊥炎嚗?{cautionText}${highlightTail}嚗?隤踵??????詨?銝;
+    const cautionText = cautions.join('；');
+    const highlightTail = highlights.length > 0 ? `；另外 ${highlights.join('、')} 表現還算給力，記得把優勢守住` : '';
+    return `指標巡檢：${cautionText}${highlightTail}，請調整倉位或優化參數再上。`;
 }
 
 function updateStrategyStatusCard(result) {
@@ -2179,7 +2164,7 @@ function updateStrategyStatusCard(result) {
     const strategyAnnual = toFiniteNumber(result && result.annualizedReturn);
     const buyHoldAnnual = toFiniteNumber(result && result.buyHoldAnnualizedReturn);
 
-    let metricLabel = '蝮賢?祉?';
+    let metricLabel = '總報酬率';
     let strategyMetric = strategyTotalReturn;
     let buyHoldMetric = buyHoldTotalReturn;
     let diff = strategyMetric !== null && buyHoldMetric !== null
@@ -2187,7 +2172,7 @@ function updateStrategyStatusCard(result) {
         : null;
 
     if (diff === null && strategyAnnual !== null && buyHoldAnnual !== null) {
-        metricLabel = '撟游??梢??;
+        metricLabel = '年化報酬率';
         strategyMetric = strategyAnnual;
         buyHoldMetric = buyHoldAnnual;
         diff = strategyMetric - buyHoldMetric;
@@ -2197,46 +2182,46 @@ function updateStrategyStatusCard(result) {
         setStrategyStatusCardState({
             visible: true,
             variant: 'loading',
-            badgeText: '鞈?鋆?',
-            headlineText: '? 鞈??鋆?',
-            detailText: '餈?鞈??眺?交??皞??刻楝銝?隢炎?亙??身摰?蝔???銝甈～?,
+            badgeText: '資料補眠',
+            headlineText: '😴 資料還在補眠',
+            detailText: '近期資料或買入持有基準還在路上，請檢查區間設定或稍後再跑一次。',
         });
         return;
     }
 
     let variant = 'neutral';
-    let badgeText = '???芸?';
-    let headlineText = '?? ?急???撟單?';
-    let baseDetailText = `蝑${metricLabel} ${formatPercentValue(strategyMetric)}嚗眺?交???${formatPercentValue(buyHoldMetric)}嚗榆頝??${formatPercentDiff(diff)}??憒典凝隤踹???鞈??蔭嚗?銝??撠望?璈?頞??;
+    let badgeText = '勝負未定';
+    let headlineText = '🤝 暫時打成平手';
+    let baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，差距只有 ${formatPercentDiff(diff)}。不妨微調停損或資金配置，下一回合就有機會超車。`;
     let detailHTML = null;
 
     const healthSummary = buildStrategyHealthSummary(result);
 
     if (diff > STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'positive';
-        badgeText = '蝑??';
-        headlineText = '?? 蝑摰?鞎瑕??';
-        baseDetailText = `蝑${metricLabel} ${formatPercentValue(strategyMetric)}嚗眺?交???${formatPercentValue(buyHoldMetric)}嚗????${formatPercentDiff(diff)}???隞交?芸楛??嚗?憸券?抒恣?銝擛??;
+        badgeText = '策略領先';
+        headlineText = '🎉 策略完勝買入持有';
+        baseDetailText = `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前領先 ${formatPercentDiff(diff)}。今晚可以替自己加菜，但風險控管還是不能鬆手。`;
     } else if (diff < -STRATEGY_STATUS_DIFF_THRESHOLD) {
         variant = 'negative';
-        badgeText = '蝑?硃';
-        headlineText = '??儭?蝑?急??賢?';
+        badgeText = '策略加油';
+        headlineText = '🛠️ 策略暫時落後';
         const bulletLines = [
-            `蝑${metricLabel} ${formatPercentValue(strategyMetric)}嚗眺?交???${formatPercentValue(buyHoldMetric)}嚗?敺?${formatPercentDiff(diff)}?,
+            `策略${metricLabel} ${formatPercentValue(strategyMetric)}，買入持有 ${formatPercentValue(buyHoldMetric)}，目前落後 ${formatPercentDiff(diff)}。`,
         ];
         if (healthSummary) {
             const healthLines = splitSummaryIntoBulletLines(healthSummary);
             if (healthLines.length > 0) {
                 bulletLines.push(...healthLines);
             } else {
-                bulletLines.push(healthSummary.endsWith('??) ? healthSummary : `${healthSummary}?);
+                bulletLines.push(healthSummary.endsWith('。') ? healthSummary : `${healthSummary}。`);
             }
         }
         const bulletListHtml = bulletLines
             .map((line) => `<li>${escapeHtml(line)}</li>`)
             .join('');
         detailHTML = `
-            <p class="text-[15px] font-semibold leading-relaxed" style="color: var(--foreground);">敹怠?怎??亙??憸券蝞∠?撠?隤踵?嚗?銝瘜ａ???/p>
+            <p class="text-[15px] font-semibold leading-relaxed" style="color: var(--foreground);">快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。</p>
             <ul class="mt-2 space-y-1 list-disc pl-5 text-[13px] leading-relaxed" style="color: var(--foreground);">
                 ${bulletListHtml}
             </ul>
@@ -2263,7 +2248,7 @@ function renderDiagnosticsEntries(containerId, entries) {
     const container = document.getElementById(containerId);
     if (!container) return;
     if (!Array.isArray(entries) || entries.length === 0) {
-        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">?∟???/p>`;
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">無資料</p>`;
         return;
     }
     container.innerHTML = entries
@@ -2283,26 +2268,26 @@ function renderDiagnosticsSamples(containerId, samples, options = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
     if (!Array.isArray(samples) || samples.length === 0) {
-        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">${options.emptyText || '?∠撣豢見??}</p>`;
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">${options.emptyText || '無異常樣本'}</p>`;
         return;
     }
     container.innerHTML = samples
         .map((sample) => {
             const date = escapeHtml(sample.date || '');
-            const index = Number.isFinite(sample.index) ? `#${sample.index}` : '#??;
+            const index = Number.isFinite(sample.index) ? `#${sample.index}` : '#—';
             const reasons = Array.isArray(sample.reasons)
-                ? escapeHtml(sample.reasons.join('??))
-                : '??;
+                ? escapeHtml(sample.reasons.join('、'))
+                : '—';
             const close = sample.close !== undefined && sample.close !== null
                 ? escapeHtml(sample.close.toString())
-                : '??;
+                : '—';
             const volume = sample.volume !== undefined && sample.volume !== null
                 ? escapeHtml(sample.volume.toString())
-                : '??;
+                : '—';
             return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
                 <div style="color: var(--foreground);">${date} (${index})</div>
-                <div class="text-muted-foreground" style="color: var(--muted-foreground);">??: ${reasons}</div>
-                <div class="text-muted-foreground" style="color: var(--muted-foreground);">?嗥: ${close} 嚚??? ${volume}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">原因: ${reasons}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收盤: ${close} ｜ 量: ${volume}</div>
             </div>`;
         })
         .join('');
@@ -2312,32 +2297,32 @@ function renderDiagnosticsPreview(containerId, rows) {
     const container = document.getElementById(containerId);
     if (!container) return;
     if (!Array.isArray(rows) || rows.length === 0) {
-        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">撠???啗?璅???/p>`;
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未取得鄰近樣本。</p>`;
         return;
     }
     container.innerHTML = rows
         .map((row) => {
-            const index = Number.isFinite(row.index) ? `#${row.index}` : '#??;
+            const index = Number.isFinite(row.index) ? `#${row.index}` : '#—';
             const date = escapeHtml(row.date || '');
             const close = row.close !== undefined && row.close !== null
                 ? escapeHtml(row.close.toString())
-                : '??;
+                : '—';
             const open = row.open !== undefined && row.open !== null
                 ? escapeHtml(row.open.toString())
-                : '??;
+                : '—';
             const high = row.high !== undefined && row.high !== null
                 ? escapeHtml(row.high.toString())
-                : '??;
+                : '—';
             const low = row.low !== undefined && row.low !== null
                 ? escapeHtml(row.low.toString())
-                : '??;
+                : '—';
             const volume = row.volume !== undefined && row.volume !== null
                 ? escapeHtml(row.volume.toString())
-                : '??;
+                : '—';
             return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
                 <div style="color: var(--foreground);">${date} (${index})</div>
-                <div class="text-muted-foreground" style="color: var(--muted-foreground);">??${open} 擃?${high} 雿?${low}</div>
-                <div class="text-muted-foreground" style="color: var(--muted-foreground);">??${close} 嚚???${volume}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">開:${open} 高:${high} 低:${low}</div>
+                <div class="text-muted-foreground" style="color: var(--muted-foreground);">收:${close} ｜ 量:${volume}</div>
             </div>`;
         })
         .join('');
@@ -2347,19 +2332,19 @@ function renderDiagnosticsTestingGuidance(diag) {
     const container = document.getElementById('dataDiagnosticsTesting');
     if (!container) return;
     if (!diag) {
-        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">?瑁??葫敺??冽迨??撱箄降???葫閰行郊撽?/p>`;
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">執行回測後會在此提供建議的手動測試步驟。</p>`;
         return;
     }
     const dataset = diag.runtime?.dataset || {};
     const buyHold = diag.runtime?.buyHold || {};
     const fetchOverview = diag.fetch?.overview || {};
     const reasonSummary = formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons);
-    const buyHoldFirst = buyHold.firstValidPriceDate || '??;
+    const buyHoldFirst = buyHold.firstValidPriceDate || '—';
     const fetchRange = formatDiagnosticsRange(fetchOverview.firstDate, fetchOverview.lastDate);
     container.innerHTML = `<ol class="list-decimal pl-4 space-y-1">
-        <li style="color: var(--foreground);">隢?撠?銵刻絲暺?${escapeHtml(dataset.requestedStart || '??)}嚗?鞎瑕??擐嚗?{escapeHtml(buyHoldFirst)}嚗?銝行???銝迨?∠??芸???/li>
-        <li style="color: var(--foreground);">?乓??雿絞閮＊蝷?${escapeHtml(reasonSummary)}嚗??瑕? console 銝?[Worker] dataset/fetch summary ?”?潸撓?箝?/li>
-        <li style="color: var(--foreground);">蝣箄??垢鞈?蝭? ${escapeHtml(fetchRange)} ?臬閬??澈??憒?蝻箄????澆??望?閮餉???/li>
+        <li style="color: var(--foreground);">請比對圖表起點（${escapeHtml(dataset.requestedStart || '—')}）與買入持有首日（${escapeHtml(buyHoldFirst)}），並於回報時附上此卡片截圖。</li>
+        <li style="color: var(--foreground);">若「無效欄位統計」顯示 ${escapeHtml(reasonSummary)}，請擷取 console 中 [Worker] dataset/fetch summary 的表格輸出。</li>
+        <li style="color: var(--foreground);">確認遠端資料範圍 ${escapeHtml(fetchRange)} 是否覆蓋暖身期，如仍缺資料請於回報時註記。</li>
     </ol>`;
 }
 
@@ -2368,42 +2353,42 @@ function renderDiagnosticsFetch(fetchDiag) {
     const monthsContainer = document.getElementById('dataDiagnosticsFetchMonths');
     if (!summaryContainer || !monthsContainer) return;
     if (!fetchDiag) {
-        summaryContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">撠?瑕??垢鞈???/p>`;
+        summaryContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未擷取遠端資料。</p>`;
         monthsContainer.innerHTML = '';
         return;
     }
     const overview = fetchDiag.overview || {};
     renderDiagnosticsEntries('dataDiagnosticsFetchSummary', [
-        { label: '??韏琿?', value: fetchDiag.dataStartDate || fetchDiag.requested?.start || '?? },
-        { label: '?垢鞈?蝭?', value: formatDiagnosticsRange(overview.firstDate, overview.lastDate) },
-        { label: '?澈韏琿?', value: overview.warmupStartDate || fetchDiag.dataStartDate || fetchDiag.requested?.start || '?? },
-        { label: '蝚砌?蝑????, value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterWarmupStart || overview.firstValidCloseOnOrAfterEffectiveStart) },
-        { label: '頝?頨怨絲暺予??, value: formatDiagnosticsGap(overview.firstValidCloseGapFromWarmup ?? overview.firstValidCloseGapFromEffective) },
-        { label: '?垢?⊥?蝑', value: overview.invalidRowsInRange?.count ?? 0 },
-        { label: '?垢?⊥?甈?', value: formatDiagnosticsReasonCounts(overview.invalidRowsInRange?.reasons) },
-        { label: '?漲?挾', value: Array.isArray(fetchDiag.months) ? fetchDiag.months.length : 0 },
+        { label: '抓取起點', value: fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '遠端資料範圍', value: formatDiagnosticsRange(overview.firstDate, overview.lastDate) },
+        { label: '暖身起點', value: overview.warmupStartDate || fetchDiag.dataStartDate || fetchDiag.requested?.start || '—' },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(overview.firstValidCloseOnOrAfterWarmupStart || overview.firstValidCloseOnOrAfterEffectiveStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(overview.firstValidCloseGapFromWarmup ?? overview.firstValidCloseGapFromEffective) },
+        { label: '遠端無效筆數', value: overview.invalidRowsInRange?.count ?? 0 },
+        { label: '遠端無效欄位', value: formatDiagnosticsReasonCounts(overview.invalidRowsInRange?.reasons) },
+        { label: '月度分段', value: Array.isArray(fetchDiag.months) ? fetchDiag.months.length : 0 },
     ]);
     if (!Array.isArray(fetchDiag.months) || fetchDiag.months.length === 0) {
-        monthsContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">瘝??漲敹怠?蝝??/p>`;
+        monthsContainer.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">沒有月度快取紀錄。</p>`;
         return;
     }
     const recentMonths = fetchDiag.months.slice(-6);
     monthsContainer.innerHTML = recentMonths
         .map((month) => {
-            const monthLabel = escapeHtml(month.label || month.monthKey || '??);
+            const monthLabel = escapeHtml(month.label || month.monthKey || '—');
             const rows = formatDiagnosticsValue(month.rowsReturned);
             const missing = formatDiagnosticsValue(month.missingSegments);
             const forced = formatDiagnosticsValue(month.forcedRepairs);
-            const firstDate = escapeHtml(month.firstRowDate || '??);
-            const cacheUsed = month.usedCache ? '?? : '??;
+            const firstDate = escapeHtml(month.firstRowDate || '—');
+            const cacheUsed = month.usedCache ? '是' : '否';
             return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
                 <div class="font-medium" style="color: var(--foreground);">${monthLabel}</div>
                 <div class="flex flex-wrap gap-2 text-muted-foreground" style="color: var(--muted-foreground);">
-                    <span>蝑 ${rows}</span>
-                    <span>蝻箏 ${missing}</span>
-                    <span>撘瑕鋆? ${forced}</span>
-                    <span>擐? ${firstDate}</span>
-                    <span>雿輻敹怠? ${cacheUsed}</span>
+                    <span>筆數 ${rows}</span>
+                    <span>缺口 ${missing}</span>
+                    <span>強制補抓 ${forced}</span>
+                    <span>首筆 ${firstDate}</span>
+                    <span>使用快取 ${cacheUsed}</span>
                 </div>
             </div>`;
         })
@@ -2416,9 +2401,9 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
     const titleEl = document.getElementById('dataDiagnosticsTitle');
     if (!hintEl || !contentEl || !titleEl) return;
     if (!diag) {
-        hintEl.textContent = '隢??瑁??葫敺????頨怨?敹怠?閮箸鞈???;
+        hintEl.textContent = '請先執行回測後，再查看暖身與快取診斷資訊。';
         contentEl.classList.add('hidden');
-        titleEl.textContent = '鞈??澈閮箸';
+        titleEl.textContent = '資料暖身診斷';
         renderDiagnosticsEntries('dataDiagnosticsSummary', []);
         renderDiagnosticsEntries('dataDiagnosticsName', []);
         renderDiagnosticsEntries('dataDiagnosticsWarmup', []);
@@ -2430,64 +2415,64 @@ function refreshDataDiagnosticsPanel(diag = lastDatasetDiagnostics) {
         renderDiagnosticsTestingGuidance(null);
         return;
     }
-    hintEl.textContent = '?仿????嚗?銝雿菜?靘迨?∠??批捆??console 閮箸鞈???;
+    hintEl.textContent = '若需回報問題，請一併提供此卡片內容與 console 診斷資訊。';
     contentEl.classList.remove('hidden');
     const meta = diag.meta || {};
     const dataset = diag.runtime?.dataset || {};
     const warmup = diag.runtime?.warmup || {};
     const buyHold = diag.runtime?.buyHold || {};
-    titleEl.textContent = `鞈??澈閮箸嚗?{dataset.requestedStart || warmup.requestedStart || '??} ??${dataset.endDate || diag.fetch?.requested?.end || '??}`;
+    titleEl.textContent = `資料暖身診斷：${dataset.requestedStart || warmup.requestedStart || '—'} → ${dataset.endDate || diag.fetch?.requested?.end || '—'}`;
     renderDiagnosticsEntries('dataDiagnosticsName', [
-        { label: '?∠巨隞?Ⅳ', value: meta.stockNo || dataset.stockNo || '?? },
-        { label: '?∠巨?迂', value: meta.stockName || '?? },
-        { label: '?迂靘?', value: meta.nameSource || '?? },
-        { label: '?迂撣', value: meta.nameMarket ? getMarketDisplayName(meta.nameMarket) : '?? },
-        { label: '?啗皜靘?', value: meta.directorySource || '?? },
-        { label: '皜?', value: meta.directoryVersion || '?? },
-        { label: '皜?湔??', value: meta.directoryUpdatedAt || '?? },
+        { label: '股票代碼', value: meta.stockNo || dataset.stockNo || '—' },
+        { label: '股票名稱', value: meta.stockName || '—' },
+        { label: '名稱來源', value: meta.nameSource || '—' },
+        { label: '名稱市場', value: meta.nameMarket ? getMarketDisplayName(meta.nameMarket) : '—' },
+        { label: '台股清單來源', value: meta.directorySource || '—' },
+        { label: '清單版本', value: meta.directoryVersion || '—' },
+        { label: '清單更新時間', value: meta.directoryUpdatedAt || '—' },
     ]);
     renderDiagnosticsEntries('dataDiagnosticsSummary', [
-        { label: '鞈?蝮賜???, value: dataset.totalRows },
-        { label: '鞈?蝭?', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
-        { label: '雿輻?絲暺?, value: dataset.requestedStart || warmup.requestedStart || '?? },
-        { label: '?澈韏琿?', value: dataset.warmupStartDate || warmup.warmupStartDate || dataset.dataStartDate || warmup.dataStartDate || '?? },
-        { label: '?澈蝑', value: dataset.warmupRows },
-        { label: '?????, value: dataset.rowsWithinRange },
-        { label: '蝚砌?蝑?=雿輻?絲暺?, value: formatDiagnosticsIndex(dataset.firstRowOnOrAfterRequestedStart) },
-        { label: '蝚砌?蝑????, value: formatDiagnosticsIndex(dataset.firstValidCloseOnOrAfterRequestedStart) },
-        { label: '頝?頨怨絲暺予??, value: formatDiagnosticsGap(dataset.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromEffective) },
-        { label: '頝蝙?刻絲暺予??, value: formatDiagnosticsGap(dataset.firstValidCloseGapFromRequested) },
-        { label: '???⊥?蝑', value: dataset.invalidRowsInRange?.count ?? 0 },
-        { label: '蝚砌?蝑????, value: dataset.firstInvalidRowOnOrAfterEffectiveStart ? formatDiagnosticsIndex(dataset.firstInvalidRowOnOrAfterEffectiveStart) : '?? },
-        { label: '?⊥?甈?蝯梯?', value: formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons) },
+        { label: '資料總筆數', value: dataset.totalRows },
+        { label: '資料範圍', value: formatDiagnosticsRange(dataset.firstDate, dataset.lastDate) },
+        { label: '使用者起點', value: dataset.requestedStart || warmup.requestedStart || '—' },
+        { label: '暖身起點', value: dataset.warmupStartDate || warmup.warmupStartDate || dataset.dataStartDate || warmup.dataStartDate || '—' },
+        { label: '暖身筆數', value: dataset.warmupRows },
+        { label: '區間筆數', value: dataset.rowsWithinRange },
+        { label: '第一筆>=使用者起點', value: formatDiagnosticsIndex(dataset.firstRowOnOrAfterRequestedStart) },
+        { label: '第一筆有效收盤', value: formatDiagnosticsIndex(dataset.firstValidCloseOnOrAfterRequestedStart) },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(dataset.firstValidCloseGapFromRequested) },
+        { label: '區間內無效筆數', value: dataset.invalidRowsInRange?.count ?? 0 },
+        { label: '第一筆無效資料', value: dataset.firstInvalidRowOnOrAfterEffectiveStart ? formatDiagnosticsIndex(dataset.firstInvalidRowOnOrAfterEffectiveStart) : '—' },
+        { label: '無效欄位統計', value: formatDiagnosticsReasonCounts(dataset.invalidRowsInRange?.reasons) },
     ]);
     renderDiagnosticsSamples(
         'dataDiagnosticsInvalidSamples',
         dataset.invalidRowsInRange?.samples || [],
-        { emptyText: '??撠閫撖?⊥?蝑?? }
+        { emptyText: '區間內尚未觀察到無效筆數。' }
     );
     renderDiagnosticsEntries('dataDiagnosticsWarmup', [
-        { label: '?澈韏琿?', value: warmup.warmupStartDate || warmup.dataStartDate || dataset.warmupStartDate || '?? },
-        { label: 'Longest ??蝒?, value: warmup.longestLookback },
-        { label: 'KD ?瘙?(憭?蝛?', value: `${formatDiagnosticsValue(warmup.kdNeedLong)} / ${formatDiagnosticsValue(warmup.kdNeedShort)}` },
-        { label: 'MACD ?瘙?(憭?蝛?', value: `${formatDiagnosticsValue(warmup.macdNeedLong)} / ${formatDiagnosticsValue(warmup.macdNeedShort)}` },
-        { label: '璅⊥韏瑕?蝝Ｗ?', value: warmup.computedStartIndex },
-        { label: '??韏瑕?蝝Ｗ?', value: warmup.effectiveStartIndex },
-        { label: '?澈?蝑', value: warmup.barsBeforeFirstTrade },
-        { label: '閮剖? Lookback 憭拇', value: warmup.lookbackDays },
-        { label: '頝?頨怨絲暺予??, value: formatDiagnosticsGap(warmup.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromWarmup) },
+        { label: '暖身起點', value: warmup.warmupStartDate || warmup.dataStartDate || dataset.warmupStartDate || '—' },
+        { label: 'Longest 指標窗', value: warmup.longestLookback },
+        { label: 'KD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.kdNeedLong)} / ${formatDiagnosticsValue(warmup.kdNeedShort)}` },
+        { label: 'MACD 需求 (多/空)', value: `${formatDiagnosticsValue(warmup.macdNeedLong)} / ${formatDiagnosticsValue(warmup.macdNeedShort)}` },
+        { label: '模擬起始索引', value: warmup.computedStartIndex },
+        { label: '有效起始索引', value: warmup.effectiveStartIndex },
+        { label: '暖身耗用筆數', value: warmup.barsBeforeFirstTrade },
+        { label: '設定 Lookback 天數', value: warmup.lookbackDays },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(warmup.firstValidCloseGapFromWarmup ?? dataset.firstValidCloseGapFromWarmup) },
     ]);
     renderDiagnosticsEntries('dataDiagnosticsBuyHold', [
-        { label: '擐????嗥蝝Ｗ?', value: buyHold.firstValidPriceIdx },
-        { label: '擐????嗥?交?', value: buyHold.firstValidPriceDate || '?? },
-        { label: '頝?頨怨絲暺予??, value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromEffective) },
-        { label: '頝蝙?刻絲暺予??, value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromRequested) },
-        { label: '?澈敺??斤???, value: buyHold.invalidBarsBeforeFirstValid?.count ?? 0 },
+        { label: '首筆有效收盤索引', value: buyHold.firstValidPriceIdx },
+        { label: '首筆有效收盤日期', value: buyHold.firstValidPriceDate || '—' },
+        { label: '距暖身起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromEffective) },
+        { label: '距使用者起點天數', value: formatDiagnosticsGap(buyHold.firstValidPriceGapFromRequested) },
+        { label: '暖身後無效收盤筆數', value: buyHold.invalidBarsBeforeFirstValid?.count ?? 0 },
     ]);
     renderDiagnosticsSamples(
         'dataDiagnosticsBuyHoldSamples',
         buyHold.invalidBarsBeforeFirstValid?.samples || [],
-        { emptyText: '?澈敺閫撖?嗥?寧撩憭晞? }
+        { emptyText: '暖身後未觀察到收盤價缺失。' }
     );
     renderDiagnosticsPreview('dataDiagnosticsPreview', warmup.previewRows || []);
     renderDiagnosticsFetch(diag.fetch || null);
@@ -2499,7 +2484,7 @@ function renderBlobUsageCard() {
     const updatedAtEl = document.getElementById('blobUsageUpdatedAt');
     if (!container) return;
     if (!blobUsageLedger || typeof blobUsageLedger !== 'object') {
-        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">撠蝝舐? Blob ?券?蝯梯?嚗銵?皜砍?撠甇日＊蝷箸??雿???亥岷??/div>`;
+        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">尚未累積 Blob 用量統計，執行回測後將在此顯示本月操作數與熱門查詢。</div>`;
         if (updatedAtEl) updatedAtEl.textContent = '';
         return;
     }
@@ -2507,14 +2492,14 @@ function renderBlobUsageCard() {
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const monthRecord = blobUsageLedger.months?.[monthKey] || null;
     if (!monthRecord) {
-        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">?祆?撠閫貊隞颱? Blob ????/div>`;
+        container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">本月尚未觸發任何 Blob 操作。</div>`;
         if (updatedAtEl) updatedAtEl.textContent = '';
         return;
     }
     const totalOps = Number(monthRecord.readOps || 0) + Number(monthRecord.writeOps || 0);
     const hit = Number(monthRecord.cacheHits || 0);
     const miss = Number(monthRecord.cacheMisses || 0);
-    const hitRate = totalOps > 0 ? `${((hit / totalOps) * 100).toFixed(1)}%` : '??;
+    const hitRate = totalOps > 0 ? `${((hit / totalOps) * 100).toFixed(1)}%` : '—';
     const topStocks = Object.entries(monthRecord.stocks || {})
         .map(([stock, info]) => ({
             stock,
@@ -2525,9 +2510,9 @@ function renderBlobUsageCard() {
         .slice(0, 5);
     const topStocksHtml = topStocks.length > 0
         ? topStocks
-            .map((item) => `<div class="flex items-center justify-between"><span>${escapeHtml(item.stock)}</span><span style="color: var(--muted-foreground);">${item.count} 甈?{item.market ? `??{escapeHtml(item.market)}` : ''}</span></div>`)
+            .map((item) => `<div class="flex items-center justify-between"><span>${escapeHtml(item.stock)}</span><span style="color: var(--muted-foreground);">${item.count} 次${item.market ? `・${escapeHtml(item.market)}` : ''}</span></div>`)
             .join('')
-        : '<div style="color: var(--muted-foreground);">撠?梢??亥岷</div>';
+        : '<div style="color: var(--muted-foreground);">尚無熱門查詢</div>';
 
     const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const events = Array.isArray(monthRecord.events) ? monthRecord.events : [];
@@ -2551,13 +2536,13 @@ function renderBlobUsageCard() {
         ? grouped.map((group) => {
             const defaultExpanded = group.key === todayKey;
             const expanded = isBlobUsageGroupExpanded(group.key, defaultExpanded);
-            const indicator = expanded ? '嚗? : '嚗?;
+            const indicator = expanded ? '－' : '＋';
             const rowsHtml = group.rows.map((item) => {
-                const actionLabel = item.raw.action === 'write' ? '撖怠' : '霈??;
+                const actionLabel = item.raw.action === 'write' ? '寫入' : '讀取';
                 const badgeClass = item.raw.action === 'write'
                     ? 'bg-amber-100 text-amber-700 border-amber-200'
                     : 'bg-emerald-100 text-emerald-700 border-emerald-200';
-                const statusLabel = item.raw.cacheHit ? '?賭葉' : '鋆?';
+                const statusLabel = item.raw.cacheHit ? '命中' : '補抓';
                 const timeLabel = `${String(item.when.getHours()).padStart(2, '0')}:${String(item.when.getMinutes()).padStart(2, '0')}`;
                 const infoParts = [];
                 if (item.raw.stockNo) infoParts.push(`<span>${escapeHtml(item.raw.stockNo)}</span>`);
@@ -2577,7 +2562,7 @@ function renderBlobUsageCard() {
                 <button type="button" class="w-full flex items-center justify-between px-3 py-2 text-left text-[11px] font-medium" data-blob-group-toggle="${group.key}" aria-expanded="${expanded ? 'true' : 'false'}" style="color: var(--foreground);">
                     <span>${group.label}</span>
                     <span class="flex items-center gap-2" style="color: var(--muted-foreground);">
-                        <span>${group.rows.length} 蝑?/span>
+                        <span>${group.rows.length} 筆</span>
                         <span data-blob-group-indicator="${group.key}" aria-hidden="true">${indicator}</span>
                     </span>
                 </button>
@@ -2586,27 +2571,27 @@ function renderBlobUsageCard() {
                 </div>
             </div>`;
         }).join('')
-        : '<div style="color: var(--muted-foreground);">撠閮?餈???</div>';
+        : '<div style="color: var(--muted-foreground);">尚未記錄近期操作</div>';
 
     container.innerHTML = `
         <div class="grid grid-cols-2 gap-3 text-[11px]">
             <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
-                <div class="font-medium" style="color: var(--foreground);">?祆?????/div>
+                <div class="font-medium" style="color: var(--foreground);">本月操作數</div>
                 <div class="mt-1 text-lg font-semibold" style="color: var(--foreground);">${formatNumberWithComma(totalOps)}</div>
-                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">霈??${formatNumberWithComma(monthRecord.readOps || 0)}?餃神??${formatNumberWithComma(monthRecord.writeOps || 0)}</div>
+                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">讀取 ${formatNumberWithComma(monthRecord.readOps || 0)}・寫入 ${formatNumberWithComma(monthRecord.writeOps || 0)}</div>
             </div>
             <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
-                <div class="font-medium" style="color: var(--foreground);">?賭葉??/div>
+                <div class="font-medium" style="color: var(--foreground);">命中率</div>
                 <div class="mt-1 text-lg font-semibold" style="color: var(--foreground);">${hitRate}</div>
-                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">?賭葉 ${formatNumberWithComma(hit)}?餉???${formatNumberWithComma(miss)}</div>
+                <div class="mt-1 text-xs" style="color: var(--muted-foreground);">命中 ${formatNumberWithComma(hit)}・補抓 ${formatNumberWithComma(miss)}</div>
             </div>
         </div>
         <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
-            <div class="font-medium mb-1" style="color: var(--foreground);">?梢??∠巨</div>
+            <div class="font-medium mb-1" style="color: var(--foreground);">熱門股票</div>
             <div class="space-y-1">${topStocksHtml}</div>
         </div>
         <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
-            <div class="font-medium mb-1" style="color: var(--foreground);">餈???</div>
+            <div class="font-medium mb-1" style="color: var(--foreground);">近期操作</div>
             <div class="space-y-2" style="max-height: 16rem; overflow-y: auto; padding-right: 0.25rem;">${eventsHtml}</div>
         </div>
     `;
@@ -2623,7 +2608,7 @@ function renderBlobUsageCard() {
                 const nextState = !currentlyExpanded;
                 body.classList.toggle('hidden', !nextState);
                 btn.setAttribute('aria-expanded', nextState ? 'true' : 'false');
-                if (indicator) indicator.textContent = nextState ? '嚗? : '嚗?;
+                if (indicator) indicator.textContent = nextState ? '－' : '＋';
                 setBlobUsageGroupExpanded(dateKey, nextState);
             });
         });
@@ -2631,7 +2616,7 @@ function renderBlobUsageCard() {
 
     if (updatedAtEl) {
         updatedAtEl.textContent = blobUsageLedger.updatedAt
-            ? `?湔??${new Date(blobUsageLedger.updatedAt).toLocaleString('zh-TW')}`
+            ? `更新於 ${new Date(blobUsageLedger.updatedAt).toLocaleString('zh-TW')}`
             : '';
     }
 }
@@ -2670,14 +2655,14 @@ function updateDataSourceDisplay(dataSource, stockName) {
     if (!displayEl) return;
 
     if (dataSource) {
-        let sourceText = `?豢?靘?: ${dataSource}`;
+        let sourceText = `數據來源: ${dataSource}`;
         displayEl.textContent = sourceText;
         displayEl.classList.remove('hidden');
         if (typeof window.refreshDataSourceTester === 'function') {
             try {
                 window.refreshDataSourceTester();
             } catch (error) {
-                console.warn('[Main] ?湔鞈?靘?皜祈岫?Ｘ???憭?', error);
+                console.warn('[Main] 更新資料來源測試面板時發生例外:', error);
             }
         }
     } else {
@@ -2719,7 +2704,7 @@ function refreshPriceInspectorControls() {
     }
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
-    const modeLabel = modeKey === 'adjusted' ? '???寞' : '???嗥??;
+    const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
     const sourceLabel = resolvePriceInspectorSourceLabel();
     const lastStartFallback = lastFetchSettings?.effectiveStartDate || lastFetchSettings?.startDate || '';
     const displayData = visibleStockData.length > 0 ? visibleStockData : [];
@@ -2729,11 +2714,11 @@ function refreshPriceInspectorControls() {
     controls.classList.remove('hidden');
     openBtn.disabled = false;
     if (summaryEl) {
-        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 蝑?(${modeLabel})`];
+        const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 筆 (${modeLabel})`];
         if (sourceLabel) {
             summaryParts.push(sourceLabel);
         }
-        summaryEl.textContent = summaryParts.join(' ??');
+        summaryEl.textContent = summaryParts.join(' ・ ');
     }
     renderPricePipelineSteps();
 }
@@ -2758,17 +2743,17 @@ function collectPriceInspectorIndicatorColumns() {
         }
     };
 
-    pushColumn('longEntry', `憭?脣嚚?{resolveStrategyDisplayName(lastOverallResult.entryStrategy)}`);
-    pushColumn('longExit', `憭?箏嚚?{resolveStrategyDisplayName(lastOverallResult.exitStrategy)}`);
+    pushColumn('longEntry', `多單進場｜${resolveStrategyDisplayName(lastOverallResult.entryStrategy)}`);
+    pushColumn('longExit', `多單出場｜${resolveStrategyDisplayName(lastOverallResult.exitStrategy)}`);
     if (lastOverallResult.enableShorting) {
-        pushColumn('shortEntry', `?征?脣嚚?{resolveStrategyDisplayName(lastOverallResult.shortEntryStrategy)}`);
-        pushColumn('shortExit', `?征?箏嚚?{resolveStrategyDisplayName(lastOverallResult.shortExitStrategy)}`);
+        pushColumn('shortEntry', `做空進場｜${resolveStrategyDisplayName(lastOverallResult.shortEntryStrategy)}`);
+        pushColumn('shortExit', `做空出場｜${resolveStrategyDisplayName(lastOverallResult.shortExitStrategy)}`);
     }
     return columns;
 }
 
 function formatIndicatorNumericValue(value, column) {
-    if (!Number.isFinite(value)) return '銝雲';
+    if (!Number.isFinite(value)) return '不足';
     if (column?.format === 'integer') {
         return Math.round(value).toLocaleString('zh-TW');
     }
@@ -2778,7 +2763,7 @@ function formatIndicatorNumericValue(value, column) {
 
 function renderIndicatorCell(columnGroup, rowIndex) {
     if (!columnGroup || !Array.isArray(columnGroup.columns) || columnGroup.columns.length === 0) {
-        return '??;
+        return '—';
     }
     const lines = [];
     columnGroup.columns.forEach((col) => {
@@ -2787,30 +2772,30 @@ function renderIndicatorCell(columnGroup, rowIndex) {
         if (col.format === 'text') {
             const textValue = rawValue !== null && rawValue !== undefined && rawValue !== ''
                 ? String(rawValue)
-                : '??;
+                : '—';
             lines.push(`${escapeHtml(col.label)}: ${escapeHtml(textValue)}`);
         } else {
             const formatted = formatIndicatorNumericValue(rawValue, col);
             lines.push(`${escapeHtml(col.label)}: ${formatted}`);
         }
     });
-    return lines.length > 0 ? lines.join('<br>') : '??;
+    return lines.length > 0 ? lines.join('<br>') : '—';
 }
 
 function formatStageModeLabel(mode, type) {
     if (!mode) return '';
     if (type === 'entry') {
-        return mode === 'price_pullback' ? '?寞??Ⅳ' : '蝑閮??孛??;
+        return mode === 'price_pullback' ? '價格回落加碼' : '策略訊號再觸發';
     }
     if (type === 'exit') {
-        return mode === 'price_rally' ? '?寞韏圈???箏' : '蝑閮??孛??;
+        return mode === 'price_rally' ? '價格走高分批出場' : '策略訊號再觸發';
     }
     return '';
 }
 
 function resolveStageModeDisplay(stageCandidate, stageMode, type) {
     if (stageCandidate && stageCandidate.isSingleFull) {
-        return '?';
+        return '皆可';
     }
     const explicitLabel = stageMode && typeof stageMode === 'object' && typeof stageMode.label === 'string'
         ? stageMode.label
@@ -2819,11 +2804,11 @@ function resolveStageModeDisplay(stageCandidate, stageMode, type) {
         ? stageMode.value
         : stageMode;
     const fallbackLabel = formatStageModeLabel(modeValue, type);
-    return explicitLabel || fallbackLabel || '??;
+    return explicitLabel || fallbackLabel || '—';
 }
 
 function renderStageStateCell(state, context) {
-    if (!state || typeof state !== 'object') return '??;
+    if (!state || typeof state !== 'object') return '—';
     const type = context?.type === 'exit' ? 'exit' : 'entry';
     const parts = [];
     const modeLabel = formatStageModeLabel(state.mode, type);
@@ -2831,54 +2816,54 @@ function renderStageStateCell(state, context) {
 
     if (type === 'entry') {
         if (Number.isFinite(state.filledStages) && Number.isFinite(state.totalStages)) {
-            parts.push(`撌脤?${state.filledStages}/${state.totalStages} 畾琛);
+            parts.push(`已進 ${state.filledStages}/${state.totalStages} 段`);
         }
         if (Number.isFinite(state.sharesHeld)) {
-            parts.push(`? ${state.sharesHeld} ?︶);
+            parts.push(`持股 ${state.sharesHeld} 股`);
         }
         if (Number.isFinite(state.averageEntryPrice)) {
-            parts.push(`? ${state.averageEntryPrice.toFixed(2)}`);
+            parts.push(`均價 ${state.averageEntryPrice.toFixed(2)}`);
         }
         if (Number.isFinite(state.lastStagePrice)) {
-            parts.push(`??唳挾 ${state.lastStagePrice.toFixed(2)}`);
+            parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
         if (state.totalStages > state.filledStages) {
             if (state.mode === 'price_pullback' && Number.isFinite(state.nextTriggerPrice)) {
-                parts.push(`敺孛?潘??嗥 < ${state.nextTriggerPrice.toFixed(2)}`);
+                parts.push(`待觸發：收盤 < ${state.nextTriggerPrice.toFixed(2)}`);
             } else {
-                parts.push('敺孛?潘?蝑閮?');
+                parts.push('待觸發：策略訊號');
             }
         } else if (state.totalStages > 0 && state.filledStages >= state.totalStages) {
-            parts.push('撌脣?賊脣');
+            parts.push('已全數進場');
         }
     } else {
         if (Number.isFinite(state.executedStages) && Number.isFinite(state.totalStages)) {
-            parts.push(`撌脣 ${state.executedStages}/${state.totalStages} 畾琛);
+            parts.push(`已出 ${state.executedStages}/${state.totalStages} 段`);
         }
         if (Number.isFinite(state.remainingShares)) {
-            parts.push(`?拚? ${state.remainingShares} ?︶);
+            parts.push(`剩餘 ${state.remainingShares} 股`);
         }
         if (Number.isFinite(state.lastStagePrice)) {
-            parts.push(`??唳挾 ${state.lastStagePrice.toFixed(2)}`);
+            parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
         if (state.totalStages > state.executedStages) {
             if (state.mode === 'price_rally' && Number.isFinite(state.nextTriggerPrice)) {
-                parts.push(`敺孛?潘??嗥 > ${state.nextTriggerPrice.toFixed(2)}`);
+                parts.push(`待觸發：收盤 > ${state.nextTriggerPrice.toFixed(2)}`);
             } else {
-                parts.push('敺孛?潘?蝑閮?');
+                parts.push('待觸發：策略訊號');
             }
         } else if (state.totalStages > 0 && state.executedStages >= state.totalStages) {
-            parts.push('撌脣?詨??);
+            parts.push('已全數出場');
         }
     }
 
-    if (parts.length === 0) return '??;
+    if (parts.length === 0) return '—';
     return parts.map((part) => escapeHtml(part)).join('<br>');
 }
 
 function openPriceInspectorModal() {
     if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
-        showError('撠???寞鞈?嚗??銵?皜研?);
+        showError('尚未取得價格資料，請先執行回測。');
         return;
     }
     const modal = document.getElementById('priceInspectorModal');
@@ -2887,15 +2872,15 @@ function openPriceInspectorModal() {
     if (!modal || !tbody) return;
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
-    const modeLabel = modeKey === 'adjusted' ? '憿舐內??敺?? : '憿舐內???嗥??;
+    const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
     const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
-        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 蝑];
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
         if (sourceLabel) {
             subtitleParts.push(sourceLabel);
         }
-        subtitle.textContent = subtitleParts.join(' ??');
+        subtitle.textContent = subtitleParts.join(' ・ ');
     }
     renderPriceInspectorDebug();
 
@@ -2909,26 +2894,26 @@ function openPriceInspectorModal() {
         ? lastOverallResult.longExitStageStates
         : [];
     const baseHeaderConfig = [
-        { key: 'date', label: '?交?', align: 'left' },
-        { key: 'open', label: '?', align: 'right' },
-        { key: 'high', label: '?擃?, align: 'right' },
-        { key: 'low', label: '?雿?, align: 'right' },
-        { key: 'rawClose', label: '???嗥', align: 'right' },
-        { key: 'close', label: '???嗥', align: 'right' },
-        { key: 'factor', label: '????', align: 'right' },
+        { key: 'date', label: '日期', align: 'left' },
+        { key: 'open', label: '開盤', align: 'right' },
+        { key: 'high', label: '最高', align: 'right' },
+        { key: 'low', label: '最低', align: 'right' },
+        { key: 'rawClose', label: '原始收盤', align: 'right' },
+        { key: 'close', label: '還原收盤', align: 'right' },
+        { key: 'factor', label: '還原因子', align: 'right' },
     ];
     indicatorColumns.forEach((col) => {
         baseHeaderConfig.push({ key: col.key, label: col.header, align: 'left', isIndicator: true, series: col.series });
     });
     baseHeaderConfig.push(
-        { key: 'longEntryStage', label: '憭?脣?挾', align: 'left' },
-        { key: 'longExitStage', label: '憭?箏?挾', align: 'left' },
+        { key: 'longEntryStage', label: '多單進場分段', align: 'left' },
+        { key: 'longExitStage', label: '多單出場分段', align: 'left' },
     );
     baseHeaderConfig.push(
-        { key: 'position', label: '?????, align: 'left' },
-        { key: 'formula', label: '閮??砍?', align: 'left' },
-        { key: 'volume', label: '(?)??, align: 'right' },
-        { key: 'source', label: '?寞靘?', align: 'left' },
+        { key: 'position', label: '倉位狀態', align: 'left' },
+        { key: 'formula', label: '計算公式', align: 'left' },
+        { key: 'volume', label: '(千股)量', align: 'right' },
+        { key: 'source', label: '價格來源', align: 'left' },
     );
 
     if (headerRow) {
@@ -2939,8 +2924,8 @@ function openPriceInspectorModal() {
 
     const totalColumns = baseHeaderConfig.length;
 
-    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '??);
-    const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '??);
+    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
+    const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
     const computeRawClose = (row) => {
         if (!row) return null;
         const rawCandidates = [
@@ -2966,7 +2951,7 @@ function openPriceInspectorModal() {
         .map((row, rowIndex) => {
             const volumeLabel = Number.isFinite(row?.volume)
                 ? Number(row.volume).toLocaleString('zh-TW')
-                : '??;
+                : '—';
             const factor = Number(row?.adjustedFactor);
             const closeValue = Number(row?.close);
             const rawCloseValue = computeRawClose(row);
@@ -2974,18 +2959,18 @@ function openPriceInspectorModal() {
             const closeText = formatNumber(closeValue);
             const factorText = formatFactor(factor);
             const hasFactor = Number.isFinite(factor) && Math.abs(factor) > 0;
-            let formulaText = '??;
-            if (closeText !== '??) {
-                if (hasFactor && rawCloseText !== '?? && factorText !== '??) {
-                    formulaText = `${rawCloseText} ? ${factorText} = ${closeText}`;
+            let formulaText = '—';
+            if (closeText !== '—') {
+                if (hasFactor && rawCloseText !== '—' && factorText !== '—') {
+                    formulaText = `${rawCloseText} × ${factorText} = ${closeText}`;
                 } else {
-                    formulaText = `${closeText}嚗隤踵嚗;
+                    formulaText = `${closeText}（未調整）`;
                 }
             }
             const rowSource =
                 typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
                     ? row.priceSource.trim()
-                    : sourceLabel || '??;
+                    : sourceLabel || '—';
             const indicatorCells = indicatorColumns
                 .map((col) =>
                     `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`
@@ -2995,7 +2980,7 @@ function openPriceInspectorModal() {
             const exitStageState = longExitStageStates[rowIndex] || null;
             const entryStageCell = renderStageStateCell(entryStageState, { type: 'entry' });
             const exitStageCell = renderStageStateCell(exitStageState, { type: 'exit' });
-            const positionLabel = lastPositionStates[rowIndex] || '蝛箸?';
+            const positionLabel = lastPositionStates[rowIndex] || '空手';
             return `
                 <tr>
                     <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
@@ -3018,7 +3003,7 @@ function openPriceInspectorModal() {
 
     tbody.innerHTML =
         rowsHtml ||
-        `<tr><td class="px-3 py-4 text-center" colspan="${totalColumns}" style="color: var(--muted-foreground);">?∟???/td></tr>`;
+        `<tr><td class="px-3 py-4 text-center" colspan="${totalColumns}" style="color: var(--muted-foreground);">無資料</td></tr>`;
 
     const scroller = modal.querySelector('.overflow-auto');
     if (scroller) scroller.scrollTop = 0;
@@ -3061,7 +3046,7 @@ function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
     if(!result||!result.dates||result.dates.length===0){
-        showError("?葫蝯??⊥???豢?");
+        showError("回測結果無效或無數據");
         lastOverallResult = null; lastSubPeriodResults = null;
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
@@ -3090,7 +3075,7 @@ function handleBacktestResult(result, stockName, dataSource) {
 
     } catch (error) {
          console.error("[Main] Error processing backtest result:", error);
-         showError(`???葫蝯???隤? ${error.message}`);
+         showError(`處理回測結果時發生錯誤: ${error.message}`);
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
          resetStrategyStatusCard('idle');
@@ -3106,20 +3091,20 @@ function displayBacktestResult(result) {
     }
     
     if (!result) { 
-        el.innerHTML = `<p class="text-gray-500">?⊥?蝯?</p>`; 
+        el.innerHTML = `<p class="text-gray-500">無效結果</p>`; 
         return; 
     } 
-    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '??) : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "撠?皜祆???敺???嚗?蝞畾萄??芰?蝮賢?祉????桀潘???蝞瘥?(敺挾/?挾)???潭餈?1 頛蔔嚗誨銵函??亦蜀?銝???頛帘摰??祈???> 0.5 ?舀??; let performanceHtml = `
+    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
         <div class="mb-8">
-            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">蝮暹???</h4>
+            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, var(--background)) 0%, color-mix(in srgb, var(--primary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--primary) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--primary);">撟游??梢??/p>
+                            <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">撠蜇?梢??祕??皜祆???敺洵銝??????唳?敺????嚗??撟游像???拙?祉???br>?砍?嚗?(?蝯??/ ???祇?)^(1 / 撟湔) - 1) * 100%<br>瘜冽?嚗迨?詨澆??葫???瑕漲??嚗???梢?航撠璆菟??僑??祉???/span>
+                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
@@ -3127,10 +3112,10 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 15%, var(--background)); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">鞎瑕??撟游?</p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">買入持有年化</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">?函?祕??皜祆??嚗蝝眺?乩蒂??閰脰蟡函?撟游??梢?撘?銝?雿蝙?刻?寡?蝞?/span>
+                                <span class="tooltiptext">在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${bhAnnR>=0?'text-emerald-600':'text-rose-600'}">${bhAnnR>=0?'+':''}${bhAnnR.toFixed(2)}%</p>
@@ -3138,10 +3123,10 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium text-emerald-600">蝮賢?祉?</p>
+                            <p class="text-sm font-medium text-emerald-600">總報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">蝑?蝯蜇鞈?詨??澆?憪???梢??br>?砍?嚗??蝯??- ???祇?) / ???祇? * 100%<br>甇斤蝺批?祉?嚗????????/span>
+                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
@@ -3153,7 +3138,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--accent);">Buy & Hold</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">鞎瑕??蝮賢?祉?</span>
+                                <span class="tooltiptext">買入持有總報酬率</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${bhR>=0?'text-emerald-600':'text-rose-600'}">${bhR>=0?'+':''}${bhR.toFixed(2)}%</p>
@@ -3163,14 +3148,14 @@ function displayBacktestResult(result) {
         </div>`;
     let riskHtml = `
         <div class="mb-8">
-            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">憸券??</h4>
+            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">風險指標</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #ef4444 8%, var(--background)) 0%, color-mix(in srgb, #ef4444 4%, var(--background)) 100%); border-color: color-mix(in srgb, #ef4444 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium text-rose-600">?憭批???/p>
+                            <p class="text-sm font-medium text-rose-600">最大回撤</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">蝑**蝮質???*?脩?敺風?脫?擃???唳?雿???憭抒??頝??撘?(撜啣?- 靚瑕? / 撜啣?* 100%</span>
+                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
@@ -3178,10 +3163,10 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, var(--background)) 0%, color-mix(in srgb, var(--primary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--primary) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--primary);">憭??/p>
+                            <p class="text-sm font-medium" style="color: var(--primary);">夏普值</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">銵⊿?瘥雿蜇憸券(璅?撌???脣???憿?研虜 > 1 銵函內銝嚗? 2 ?貊憟踝?> 3 ?虜?芰? (?詨??潛憸券?拍?)??/span>
+                                <span class="tooltiptext">衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--primary);">${sharpe}</p>
@@ -3189,10 +3174,10 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background:  color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">蝝Ｘ?隢暹???/p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">索提諾比率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">銵⊿?瘥雿?'銝?憸券' ??脣???憿??(?芾?扳??郭????擃?憟踝??虜?冽瘥?銝?蝑?踹??扳?憸券???/span>
+                                <span class="tooltiptext">衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--muted-foreground);">${sortino}</p>
@@ -3200,7 +3185,7 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--accent);">????梢??)</p>
+                            <p class="text-sm font-medium" style="color: var(--accent);">過擬合(報酬率比)</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${overfittingTooltip}</span>
@@ -3212,7 +3197,7 @@ function displayBacktestResult(result) {
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--secondary) 6%, var(--background)); border-color: color-mix(in srgb, var(--secondary) 20%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--secondary);">???憭?潭?)</p>
+                            <p class="text-sm font-medium" style="color: var(--secondary);">過擬合(夏普值比)</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${overfittingTooltip}</span>
@@ -3225,14 +3210,14 @@ function displayBacktestResult(result) {
         </div>`;
     let tradeStatsHtml = `
         <div class="mb-8">
-            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">鈭斗?蝯梯?</h4>
+            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">交易統計</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">??</p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">勝率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">?????蝛箔漱??/span>
+                                <span class="tooltiptext">包含做多與做空交易</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${winR}%</p>
@@ -3241,37 +3226,37 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">蝮賭漱?活??/p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">總交易次數</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">?????蝛箔漱??/span>
+                                <span class="tooltiptext">包含做多與做空交易</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${totalTrades}</p>
-                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">甈?/p>
+                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
                     </div>
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
-                        <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">撟喳?鈭斗??</p>
+                        <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">平均交易盈虧</p>
                         <p class="text-2xl font-bold ${avgP>=0?'text-emerald-600':'text-rose-600'}">${avgP>=0?'+':''}${Math.round(avgP).toLocaleString()}</p>
-                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">??/p>
+                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">元</p>
                     </div>
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
-                        <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">?憭折?甈⊥</p>
+                        <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">最大連虧次數</p>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${maxCL}</p>
-                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">甈?/p>
+                        <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
                     </div>
                 </div>
             </div>
         </div>`;
     let strategySettingsHtml = `
         <div>
-            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">蝑閮剖?</h4>
+            <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">策略設定</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium text-emerald-600">?? ?脣蝑</p>
+                            <p class="text-sm font-medium text-emerald-600">📈 進場策略</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${entryDesc.desc.replace(/\n/g,'<br>')}</span>
@@ -3282,7 +3267,7 @@ function displayBacktestResult(result) {
                 </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #ef4444 8%, var(--background)) 0%, color-mix(in srgb, #ef4444 4%, var(--background)) 100%); border-color: color-mix(in srgb, #ef4444 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium text-rose-600">?? ?箏蝑</p>
+                            <p class="text-sm font-medium text-rose-600">📉 出場策略</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${exitDesc.desc.replace(/\n/g,'<br>')}</span>
@@ -3293,7 +3278,7 @@ function displayBacktestResult(result) {
                 </div> ${ result.enableShorting && shortEntryDesc && shortExitDesc ? `                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--accent);">?? ?征蝑</p>
+                            <p class="text-sm font-medium" style="color: var(--accent);">📉 做空策略</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${shortEntryDesc.desc.replace(/\n/g,'<br>')}</span>
@@ -3305,7 +3290,7 @@ function displayBacktestResult(result) {
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, var(--background)) 0%, color-mix(in srgb, var(--primary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--primary) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm font-medium" style="color: var(--primary);">?? ??蝑</p>
+                            <p class="text-sm font-medium" style="color: var(--primary);">📈 回補策略</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
                                 <span class="tooltiptext">${shortExitDesc.desc.replace(/\n/g,'<br>')}</span>
@@ -3315,45 +3300,45 @@ function displayBacktestResult(result) {
                     </div>
                 </div>` : `                <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 15%, var(--background)); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
                     <div class="text-center">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">?? ?征蝑?芸???/p>
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">📉 做空策略未啟用</p>
                     </div>
                 </div>
                 <div class="bg-gray-100 p-6 rounded-xl border border-gray-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-gray-500 font-medium">?? ??蝑?芸???/p>
+                        <p class="text-sm text-gray-500 font-medium">📈 回補策略未啟用</p>
                     </div>
                 </div> `}                <div class="bg-orange-50 p-6 rounded-xl border border-orange-200 shadow-sm">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
-                            <p class="text-sm text-orange-600 font-medium">?? ?典?憸冽</p>
+                            <p class="text-sm text-orange-600 font-medium">⚠️ 全局風控</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs bg-blue-600 text-white rounded-full cursor-help">?</span>
-                                <span class="tooltiptext">??/?閮剖? (憭征?梁)</span>
+                                <span class="tooltiptext">停損/停利設定 (多空共用)</span>
                             </span>
                         </div>
-                        <p class="text-base font-semibold text-gray-800">??${result.stopLoss>0?result.stopLoss+'%':'N/A'} / ??${result.takeProfit>0?result.takeProfit+'%':'N/A'}</p>
+                        <p class="text-base font-semibold text-gray-800">損:${result.stopLoss>0?result.stopLoss+'%':'N/A'} / 利:${result.takeProfit>0?result.takeProfit+'%':'N/A'}</p>
                     </div>
                 </div>
                 <div class="bg-indigo-50 p-6 rounded-xl border border-indigo-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-indigo-600 font-medium mb-3">??鞎瑁都??暺?/p>
-                        <p class="text-base font-semibold text-gray-800">${result.tradeTiming==='open'?'??':'?嗆?嗥'}</p>
+                        <p class="text-sm text-indigo-600 font-medium mb-3">⏰ 買賣時間點</p>
+                        <p class="text-base font-semibold text-gray-800">${result.tradeTiming==='open'?'隔日開盤':'當日收盤'}</p>
                     </div>
                 </div>
                 <div class="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-blue-600 font-medium mb-3">? ???祇?</p>
-                        <p class="text-base font-semibold text-gray-800">${result.initialCapital.toLocaleString()}??/p>
+                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金</p>
+                        <p class="text-base font-semibold text-gray-800">${result.initialCapital.toLocaleString()}元</p>
                     </div>
                 </div>
                 <div class="bg-yellow-50 p-6 rounded-xl border border-yellow-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-yellow-600 font-medium mb-3">?? ?蝯???/p>
-                        <p class="text-base font-semibold text-gray-800">${Math.round(finalValue).toLocaleString()}??/p>
+                        <p class="text-sm text-yellow-600 font-medium mb-3">🏆 最終資產</p>
+                        <p class="text-base font-semibold text-gray-800">${Math.round(finalValue).toLocaleString()}元</p>
                     </div>
                 </div> </div> </div>`;
 
-        // 撠???憛??湔???銝行溶??嗥???
+        // 將四個區塊垂直排列，並添加適當的間距
         el.innerHTML = `
             <div class="space-y-8">
                 ${performanceHtml}
@@ -3384,7 +3369,7 @@ const formatIndicatorValues = (indicatorValues) => {
         return parts.length > 0 ? '<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(' + parts.join(' ') + ')</div>' : ''; 
     } catch (e) { 
         console.error("[Main] Error in formatIndicatorValues:", e, indicatorValues); 
-        return '<div class="mt-1 text-xs" style="color: #dc2626;">(???潭撘隤?</div>'; 
+        return '<div class="mt-1 text-xs" style="color: #dc2626;">(指標值格式錯誤)</div>'; 
     } 
 }; 
 
@@ -3401,10 +3386,10 @@ const formatKDParams = (kdVals) => {
         const dNow = kdVals?.dNow; 
         const kNext = kdVals?.kNext; 
         const dNext = kdVals?.dNext; 
-        return `<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(K/D ??${formatV(kPrev)}/${formatV(dPrev)}, ??${formatV(kNow)}/${formatV(dNow)}, 甈?${formatV(kNext)}/${formatV(dNext)})</div>`; 
+        return `<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(K/D 前:${formatV(kPrev)}/${formatV(dPrev)}, 當:${formatV(kNow)}/${formatV(dNow)}, 次:${formatV(kNext)}/${formatV(dNext)})</div>`; 
     } catch (e) { 
         console.error("[Main] Error in formatKDParams:", e, kdVals); 
-        return '<div class="mt-1 text-xs" style="color: #dc2626;">(KD?潭撘隤?</div>'; 
+        return '<div class="mt-1 text-xs" style="color: #dc2626;">(KD值格式錯誤)</div>'; 
     } 
 }; 
 
@@ -3421,10 +3406,10 @@ const formatMACDParams = (macdValues) => {
         const deaNow = macdValues?.deaNow; 
         const difNext = macdValues?.difNext; 
         const deaNext = macdValues?.deaNext; 
-        return `<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(DIF/DEA ??${formatV(difPrev)}/${formatV(deaPrev)}, ??${formatV(difNow)}/${formatV(deaNow)}, 甈?${formatV(difNext)}/${formatV(deaNext)})</div>`; 
+        return `<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(DIF/DEA 前:${formatV(difPrev)}/${formatV(deaPrev)}, 當:${formatV(difNow)}/${formatV(deaNow)}, 次:${formatV(difNext)}/${formatV(deaNext)})</div>`; 
     } catch (e) { 
         console.error("[Main] Error in formatMACDParams:", e, macdValues); 
-        return '<div class="mt-1 text-xs" style="color: #dc2626;">(MACD?潭撘隤?</div>'; 
+        return '<div class="mt-1 text-xs" style="color: #dc2626;">(MACD值格式錯誤)</div>'; 
     } 
 };
 function displayTradeResults(result) { 
@@ -3438,18 +3423,18 @@ function displayTradeResults(result) {
     
     const tradeTiming = result?.tradeTiming;
     
-    // ?內??歇鋡怎宏?歹??⊿??湔
+    // 提示區域已被移除，無需更新
     
-    // 瑼Ｘ?豢?????
+    // 檢查數據有效性
     if (!result || !result.completedTrades || !Array.isArray(result.completedTrades)) { 
-        tradeResultsEl.innerHTML = `<p class="text-xs text-muted-foreground text-center py-8" style="color: var(--muted-foreground);">鈭斗?閮??豢??⊥??撩憭?/p>`; 
+        tradeResultsEl.innerHTML = `<p class="text-xs text-muted-foreground text-center py-8" style="color: var(--muted-foreground);">交易記錄數據無效或缺失</p>`; 
         console.error("[Main] Invalid completedTrades data:", result); 
         return; 
     }
     
-    // 瘝?鈭斗?閮?
+    // 沒有交易記錄
     if (result.completedTrades.length === 0) { 
-        tradeResultsEl.innerHTML = `<p class="text-xs text-muted-foreground text-center py-8" style="color: var(--muted-foreground);">瘝?鈭斗?閮?</p>`; 
+        tradeResultsEl.innerHTML = `<p class="text-xs text-muted-foreground text-center py-8" style="color: var(--muted-foreground);">沒有交易記錄</p>`; 
         return; 
     }
     
@@ -3457,7 +3442,7 @@ function displayTradeResults(result) {
         let tradeHtml = result.completedTrades.map((tradePair, index) => { 
             if (!tradePair || !tradePair.entry || !tradePair.exit || !tradePair.entry.type || !tradePair.exit.type) { 
                 console.warn(`[Main] Invalid trade pair structure at index ${index}:`, tradePair); 
-                return `<div class="trade-signal p-3 border-b last:border-b-0" style="border-color: var(--border);"><p class="text-xs text-red-600">?航炊嚗迨蝑漱???豢?蝯?銝???(Index: ${index})</p></div>`; 
+                return `<div class="trade-signal p-3 border-b last:border-b-0" style="border-color: var(--border);"><p class="text-xs text-red-600">錯誤：此筆交易對數據結構不完整 (Index: ${index})</p></div>`; 
             }
             
             try { 
@@ -3474,15 +3459,15 @@ function displayTradeResults(result) {
                     else if (entryTrade?.indicatorValues) entryParamsDisplay = formatIndicatorValues(entryTrade.indicatorValues); 
                 } catch (entryFormatError) { 
                     console.error(`[Main] Error formatting entry display for trade index ${index}:`, entryFormatError, entryTrade); 
-                    entryParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(?脣靽⊥?澆??航炊)</span>'; 
+                    entryParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(進場信息格式錯誤)</span>'; 
                 }
                 
                 let exitParamsDisplay = ''; 
                 const sl = exitTrade?.triggeredByStopLoss || false; 
                 const tp = exitTrade?.triggeredByTakeProfit || false; 
                 let trigger = ''; 
-                if(sl) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #fee2e2; color: #dc2626;">????</span>'; 
-                else if(tp) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #dcfce7; color: #16a34a;">????/span>'; 
+                if(sl) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #fee2e2; color: #dc2626;">🛑停損</span>'; 
+                else if(tp) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #dcfce7; color: #16a34a;">✅停利</span>'; 
                 
                 try { 
                     if (exitTrade?.kdValues) exitParamsDisplay = formatKDParams(exitTrade.kdValues); 
@@ -3490,19 +3475,19 @@ function displayTradeResults(result) {
                     else if (exitTrade?.indicatorValues) exitParamsDisplay = formatIndicatorValues(exitTrade.indicatorValues); 
                 } catch (exitFormatError) { 
                     console.error(`[Main] Error formatting exit display for trade index ${index}:`, exitFormatError, exitTrade); 
-                    exitParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(?箏靽⊥?澆??航炊)</span>'; 
+                    exitParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(出場信息格式錯誤)</span>'; 
                 }
                 
                 const entryDate = entryTrade.date || 'N/A'; 
                 const entryPrice = typeof entryTrade.price === 'number' ? entryTrade.price.toFixed(2) : 'N/A'; 
                 const entryShares = entryTrade.shares || 'N/A'; 
-                const entryActionText = isShortTrade ? '?征' : '鞎瑕'; 
+                const entryActionText = isShortTrade ? '做空' : '買入'; 
                 const entryActionClass = isShortTrade ? 'short-signal' : 'buy-signal'; 
                 const entryActionStyle = isShortTrade ? 'background-color: #fef3c7; color: #d97706;' : 'background-color: #fee2e2; color: #dc2626;';
                 
                 const exitDate = exitTrade.date || 'N/A'; 
                 const exitPrice = typeof exitTrade.price === 'number' ? exitTrade.price.toFixed(2) : 'N/A'; 
-                const exitActionText = isShortTrade ? '??' : '鞈?'; 
+                const exitActionText = isShortTrade ? '回補' : '賣出'; 
                 const exitActionClass = isShortTrade ? 'cover-signal' : 'sell-signal'; 
                 const exitActionStyle = isShortTrade ? 'background-color: #e0e7ff; color: #7c3aed;' : 'background-color: #dcfce7; color: #16a34a;';
                 
@@ -3522,7 +3507,7 @@ function displayTradeResults(result) {
                                     <span class="text-xs" style="color: var(--muted-foreground);">${entryDate}</span>
                                     <span class="trade-action text-xs font-medium px-2 py-1 rounded ${entryActionClass}" style="${entryActionStyle}">${entryActionText}</span>
                                     <span class="text-sm font-semibold" style="color: var(--foreground);">${entryPrice}</span>
-                                    <span class="text-xs" style="color: var(--muted-foreground);">${entryShares} ??/span>
+                                    <span class="text-xs" style="color: var(--muted-foreground);">${entryShares} 股</span>
                                 </div>
                             </div>
                             ${entryParamsDisplay}
@@ -3536,7 +3521,7 @@ function displayTradeResults(result) {
                                     <span class="text-sm font-semibold" style="color: var(--foreground);">${exitPrice}</span>
                                 </div>
                                 <div class="flex items-center">
-                                    <span class="text-sm font-bold" style="color: ${profitColor};">${profitSign}${profitValue}??/span>
+                                    <span class="text-sm font-bold" style="color: ${profitColor};">${profitSign}${profitValue}元</span>
                                     ${trigger}
                                 </div>
                             </div>
@@ -3547,15 +3532,15 @@ function displayTradeResults(result) {
             } catch (mapError) { 
                 console.error(`[Main] Error formatting trade pair at index ${index}:`, mapError); 
                 console.error("[Main] Problematic trade pair object:", tradePair); 
-                return `<div class="trade-signal p-3 border-b" style="border-color: var(--border);"><p class="text-xs text-red-600">?航炊嚗撘?甇斤?鈭斗?撠??粹 (Index: ${index})</p></div>`; 
+                return `<div class="trade-signal p-3 border-b" style="border-color: var(--border);"><p class="text-xs text-red-600">錯誤：格式化此筆交易對時出錯 (Index: ${index})</p></div>`; 
             } 
         }).join(''); 
         
         tradeResultsEl.innerHTML = `<div class="trade-list rounded-md max-h-80 overflow-y-auto" style="border: 1px solid var(--border);">${tradeHtml}</div>`; 
     } catch (error) { 
         console.error("[Main] Error rendering trade results list:", error); 
-        tradeResultsEl.innerHTML = `<p class="text-xs text-red-600 text-center py-8">憿舐內鈭斗?閮??”??隤扎?/p>`; 
-        showError("憿舐內鈭斗?閮???荔?隢炎?交?嗅??); 
+        tradeResultsEl.innerHTML = `<p class="text-xs text-red-600 text-center py-8">顯示交易記錄列表時發生錯誤。</p>`; 
+        showError("顯示交易記錄時出錯，請檢查控制台。"); 
     } 
 }
 function renderChart(result) {
@@ -3566,7 +3551,7 @@ function renderChart(result) {
     }
     
     if (!result || !result.dates || result.dates.length === 0) {
-        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>?⊥?皜脫??”嚗??頞喋?/p></div>`;
+        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
         // Re-initialize Lucide icons
         if (typeof lucide !== 'undefined' && lucide.createIcons) {
             lucide.createIcons();
@@ -3612,26 +3597,26 @@ function renderChart(result) {
     const bhData = result.buyHoldReturns.map(v => check(v) ? parseFloat(v) : null);
     
     const datasets = [
-        { label: '鞎瑕銝行???%', data: bhData, borderColor: '#6b7280', borderWidth: 1.5, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true },
-        { label: '蝑 %', data: stratData, borderColor: '#3b82f6', borderWidth: 2, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true }
+        { label: '買入並持有 %', data: bhData, borderColor: '#6b7280', borderWidth: 1.5, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true },
+        { label: '策略 %', data: stratData, borderColor: '#3b82f6', borderWidth: 2, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true }
     ];
     
     if (buySigs.length > 0) {
-        datasets.push({ type:'scatter', label:'鞎瑕', data:buySigs, backgroundColor:'#ef4444', radius:6, pointStyle:'triangle', rotation:0, yAxisID:'y' });
+        datasets.push({ type:'scatter', label:'買入', data:buySigs, backgroundColor:'#ef4444', radius:6, pointStyle:'triangle', rotation:0, yAxisID:'y' });
     }
     if (sellSigs.length > 0) {
-        datasets.push({ type:'scatter', label:'鞈?', data:sellSigs, backgroundColor:'#22c55e', radius:6, pointStyle:'triangle', rotation:180, yAxisID:'y' });
+        datasets.push({ type:'scatter', label:'賣出', data:sellSigs, backgroundColor:'#22c55e', radius:6, pointStyle:'triangle', rotation:180, yAxisID:'y' });
     }
     if (result.enableShorting) {
         if (shortSigs.length > 0) {
-            datasets.push({ type:'scatter', label:'?征', data:shortSigs, backgroundColor:'#f59e0b', radius:7, pointStyle:'rectRot', yAxisID:'y' });
+            datasets.push({ type:'scatter', label:'做空', data:shortSigs, backgroundColor:'#f59e0b', radius:7, pointStyle:'rectRot', yAxisID:'y' });
         }
         if (coverSigs.length > 0) {
-            datasets.push({ type:'scatter', label:'??', data:coverSigs, backgroundColor:'#8b5cf6', radius:7, pointStyle:'rect', yAxisID:'y' });
+            datasets.push({ type:'scatter', label:'回補', data:coverSigs, backgroundColor:'#8b5cf6', radius:7, pointStyle:'rect', yAxisID:'y' });
         }
     }
     
-    // 蝣箔??辣撌脰酉??
+    // 確保插件已註冊
     console.log('Creating chart with plugins:', Chart.registry.plugins.items);
     
     stockChart = new Chart(ctx, {
@@ -3682,7 +3667,7 @@ function renderChart(result) {
                     position: 'left',
                     title: {
                         display: true,
-                        text: '?嗥???(%)'
+                        text: '收益率 (%)'
                     },
                     ticks: {
                         callback: v => v + '%'
@@ -3707,13 +3692,13 @@ function renderChart(result) {
         }
     });
     
-    // ?芸?蝢拇??喃?隞嗉????舀撌阡???
+    // 自定義拖曳事件處理，支援左鍵和右鍵
     const canvas = stockChart.canvas;
     let isPanning = false;
     let lastX = 0;
     
     canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 0 || e.button === 2) { // 撌阡???
+        if (e.button === 0 || e.button === 2) { // 左鍵或右鍵
             isPanning = true;
             lastX = e.clientX;
             canvas.style.cursor = 'grabbing';
@@ -3728,11 +3713,11 @@ function renderChart(result) {
             const canvasPosition = Chart.helpers.getRelativePosition(e, stockChart);
             const dataX = scale.getValueForPixel(canvasPosition.x);
             
-            // 閮?撟喟宏??
+            // 計算平移量
             const range = scale.max - scale.min;
             const panAmount = (deltaX / canvas.width) * range;
             
-            // ?湔蝮格
+            // 更新縮放
             stockChart.zoomScale('x', {min: scale.min - panAmount, max: scale.max - panAmount}, 'none');
             
             lastX = e.clientX;
@@ -3750,20 +3735,20 @@ function renderChart(result) {
         canvas.style.cursor = 'default';
     });
     
-    // 蝳?喲?詨
+    // 禁用右鍵選單
     canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault();
     });
 }
-// ?芸?撠?脣漲憿舐內?賣
+// 優化專用進度顯示函數
 function showOptimizationProgress(message) {
-    console.log('[Main] showOptimizationProgress 鋡怨矽??', message);
+    console.log('[Main] showOptimizationProgress 被調用:', message);
     const progressSection = document.getElementById('optimization-progress-section');
     const statusText = document.getElementById('optimization-status-text');
     const progressBar = document.getElementById('optimization-progress-bar');
     const progressText = document.getElementById('optimization-progress-text');
     
-    console.log('[Main] ?脣漲??瑼Ｘ:', {
+    console.log('[Main] 進度元素檢查:', {
         progressSection: !!progressSection,
         statusText: !!statusText,
         progressBar: !!progressBar,
@@ -3772,16 +3757,16 @@ function showOptimizationProgress(message) {
     
     if (progressSection && statusText) {
         progressSection.classList.remove('hidden');
-        statusText.textContent = message || '???芸??脰?銝?..';
+        statusText.textContent = message || '⌛ 優化進行中...';
         
-        // ?蔭?脣漲璇?
+        // 重置進度條
         if (progressBar) progressBar.style.width = '0%';
         if (progressText) progressText.textContent = '0%';
         
-        console.log('[Main] 憿舐內?芸??脣漲:', message);
-        console.log('[Main] ?脣漲???class list:', progressSection.classList.toString());
+        console.log('[Main] 顯示優化進度:', message);
+        console.log('[Main] 進度區域 class list:', progressSection.classList.toString());
     } else {
-        console.error('[Main] ?⊥??曉?芸??脣漲憿舐內??!');
+        console.error('[Main] 無法找到優化進度顯示元素!');
     }
 }
 
@@ -3802,34 +3787,34 @@ function updateOptimizationProgress(progress, message) {
         statusText.textContent = message;
     }
     
-    console.log(`[Main] ?湔?芸??脣漲: ${safeProgress}%`, message);
+    console.log(`[Main] 更新優化進度: ${safeProgress}%`, message);
 }
 
 function hideOptimizationProgress() {
-    console.log('[Main] hideOptimizationProgress 鋡怨矽??);
+    console.log('[Main] hideOptimizationProgress 被調用');
     const progressSection = document.getElementById('optimization-progress-section');
     if (progressSection) {
         progressSection.classList.add('hidden');
-        console.log('[Main] ?梯??芸??脣漲憿舐內');
-        console.log('[Main] ?脣漲???class list:', progressSection.classList.toString());
+        console.log('[Main] 隱藏優化進度顯示');
+        console.log('[Main] 進度區域 class list:', progressSection.classList.toString());
     } else {
-        console.error('[Main] ?曆???optimization-progress-section ??');
+        console.error('[Main] 找不到 optimization-progress-section 元素');
     }
 }
 
 function runOptimizationInternal(optimizeType) { 
     if (!workerUrl) { 
-        showError("?閮?撘?撠皞?撠梁?嚗?蝔?閰行??頛???); 
+        showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); 
         return; 
     } 
     
     console.log(`[Main] runOptimizationInternal called for ${optimizeType}`); 
     
-    // 蝡???啣????
+    // 立即切換到優化頁面
     activateTab('optimization');
-    console.log('[Main] 撌脣???芸??');
+    console.log('[Main] 已切換到優化頁面');
     
-    // ?脣??芸???蝯??冽撠?憿舐內嚗??怎揣?姥瘥??漱?活?賂?
+    // 儲存優化前的結果用於對比顯示（包含索提諾比率與交易次數）
     if (lastOverallResult) {
         preOptimizationResult = {
             annualizedReturn: lastOverallResult.annualizedReturn,
@@ -3839,14 +3824,14 @@ function runOptimizationInternal(optimizeType) {
             sortinoRatio: lastOverallResult.sortinoRatio,
             totalTrades: lastOverallResult.totalTrades ?? lastOverallResult.tradesCount ?? lastOverallResult.tradeCount ?? null
         };
-        console.log('[Main] 撌脣摮??蝯??冽撠?:', preOptimizationResult);
+        console.log('[Main] 已儲存優化前結果用於對比:', preOptimizationResult);
     } else {
         preOptimizationResult = null;
-        console.log('[Main] ?∪?函??芸?????);
+        console.log('[Main] 無可用的優化前結果');
     }
     
-    // 憿舐內??皞????
-    showOptimizationProgress('??甇?撽??...');
+    // 顯示初始準備狀態
+    showOptimizationProgress('⌛ 正在驗證參數...');
     
     const params=getBacktestParams(); 
     let targetStratKey, paramSelectId, selectedParamName, optLabel, optRange, msgAction, configKey, config; 
@@ -3855,7 +3840,7 @@ function runOptimizationInternal(optimizeType) {
     
     if (isShortOpt && !params.enableShorting) { 
         hideOptimizationProgress();
-        showError("隢???征蝑??脰??征?賊??芸???); 
+        showError("請先啟用做空策略才能進行做空相關優化。"); 
         return; 
     } 
     
@@ -3864,8 +3849,8 @@ function runOptimizationInternal(optimizeType) {
         return;
     }
     
-    const msgActionMap = {'entry': '憭?脣', 'exit': '憭?箏', 'shortEntry': '?征?脣', 'shortExit': '???箏', 'risk': '憸券?批'}; 
-    msgAction = msgActionMap[optimizeType] || '?芰'; 
+    const msgActionMap = {'entry': '多單進場', 'exit': '多單出場', 'shortEntry': '做空進場', 'shortExit': '回補出場', 'risk': '風險控制'}; 
+    msgAction = msgActionMap[optimizeType] || '未知'; 
     
     if (isRiskOpt) { 
         paramSelectId = 'optimizeRiskParamSelect'; 
@@ -3873,7 +3858,7 @@ function runOptimizationInternal(optimizeType) {
         config = globalOptimizeTargets[selectedParamName]; 
         if (!config) { 
             hideOptimizationProgress();
-            showError(`?曆??圈◢?芸???${selectedParamName} ???蝵柴); 
+            showError(`找不到風險參數 ${selectedParamName} 的優化配置。`); 
             return; 
         } 
         msgAction = config.label; 
@@ -3898,14 +3883,14 @@ function runOptimizationInternal(optimizeType) {
             params.enableShorting = true; 
         } else { 
             hideOptimizationProgress();
-            showError("?芰?????); 
+            showError("未知的優化類型。"); 
             return; 
         } 
         
         selectedParamName = document.getElementById(paramSelectId)?.value; 
         if (!selectedParamName || selectedParamName === 'null') { 
             hideOptimizationProgress();
-            showError(`隢 ${msgAction} 蝑?豢?????脰??芸??); 
+            showError(`請為 ${msgAction} 策略選擇有效參數進行優化。`); 
             return; 
         } 
         
@@ -3913,7 +3898,7 @@ function runOptimizationInternal(optimizeType) {
         const optTarget = config?.optimizeTargets?.find(t => t.name === selectedParamName); 
         if (!optTarget) { 
             hideOptimizationProgress();
-            showError(`?曆??啣???"${selectedParamName}" (${configKey}) ???蝵柴); 
+            showError(`找不到參數 "${selectedParamName}" (${configKey}) 的優化配置。`); 
             console.error(`Optimization config not found for key: ${configKey}, param: ${selectedParamName}`); 
             return; 
         } 
@@ -3933,17 +3918,17 @@ function runOptimizationInternal(optimizeType) {
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
     };
     const useCache=!needsDataFetch(curSettings); 
-    const msg=`?????芸? ${msgAction} (${optLabel}) (${useCache?'雿輻敹怠?':'頛?唳??})...`; 
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
     
-    // ???支???蝯?嚗?銝??脣漲
+    // 先清除之前的結果，但不隱藏優化進度
     clearPreviousResults(); 
-    console.log('[Main] 撌脫??支???蝯?');
+    console.log('[Main] 已清除之前的結果');
     
-    // ?嗅??湔?脣漲憿舐內?箏祕???芸?靽⊥
+    // 然後更新進度顯示為實際的優化信息
     showOptimizationProgress(msg);
-    console.log('[Main] 撌脫?圈脣漲憿舐內??', msg);
+    console.log('[Main] 已更新進度顯示為:', msg);
     
-    // 蝳?芸???嚗甇ａ?銴???
+    // 禁用優化按鈕，防止重複點擊
     const optimizeButtons = ['optimizeEntryBtn', 'optimizeExitBtn', 'optimizeShortEntryBtn', 'optimizeShortExitBtn', 'optimizeRiskBtn'];
     optimizeButtons.forEach(btnId => {
         const btn = document.getElementById(btnId);
@@ -3992,7 +3977,7 @@ function runOptimizationInternal(optimizeType) {
             const{type,data,progress,message}=e.data; 
             
             if(type==='progress'){
-                // 雿輻?芸?撠?脣漲?湔
+                // 使用優化專用的進度更新
                 updateOptimizationProgress(progress, message);
             } else if(type==='result'){ 
                 if(!useCache&&data?.rawDataUsed){
@@ -4006,7 +3991,7 @@ function runOptimizationInternal(optimizeType) {
                     console.warn("[Main] Opt worker no rawData returned.");
                 }
                 
-                document.getElementById('optimization-title').textContent=`${msgAction}?芸? (${optLabel})`; 
+                document.getElementById('optimization-title').textContent=`${msgAction}優化 (${optLabel})`; 
                 handleOptimizationResult(data.results || data, selectedParamName, optLabel); 
                 
                 if(optimizationWorker) optimizationWorker.terminate(); 
@@ -4014,21 +3999,21 @@ function runOptimizationInternal(optimizeType) {
                 
                 hideOptimizationProgress();
                 
-                // ???芸???
+                // 重新啟用優化按鈕
                 optimizeButtons.forEach(btnId => {
                     const btn = document.getElementById(btnId);
                     if (btn) btn.disabled = false;
                 });
                 
-                showSuccess("?芸?摰?嚗?);  
+                showSuccess("優化完成！");  
             } else if(type==='error'){ 
-                showError(data?.message||"?芸????粹"); 
+                showError(data?.message||"優化過程出錯"); 
                 if(optimizationWorker) optimizationWorker.terminate(); 
                 optimizationWorker=null; 
                 
                 hideOptimizationProgress();
                 
-                // ???芸???
+                // 重新啟用優化按鈕
                 optimizeButtons.forEach(btnId => {
                     const btn = document.getElementById(btnId);
                     if (btn) btn.disabled = false;
@@ -4037,12 +4022,12 @@ function runOptimizationInternal(optimizeType) {
         }; 
         
         optimizationWorker.onerror=e=>{
-            showError(`Worker?航炊: ${e.message}`); 
+            showError(`Worker錯誤: ${e.message}`); 
             console.error("[Main] Opt Worker Error:",e); 
             optimizationWorker=null; 
             hideOptimizationProgress();
             
-            // ???芸???
+            // 重新啟用優化按鈕
             optimizeButtons.forEach(btnId => {
                 const btn = document.getElementById(btnId);
                 if (btn) btn.disabled = false;
@@ -4050,10 +4035,10 @@ function runOptimizationInternal(optimizeType) {
         }; 
     } catch (workerError) { 
         console.error("[Main] Opt Worker init error:", workerError); 
-        showError(`???芸?撘?憭望?: ${workerError.message}`); 
+        showError(`啟動優化引擎失敗: ${workerError.message}`); 
         hideOptimizationProgress(); 
         
-        // ???芸???
+        // 重新啟用優化按鈕
         optimizeButtons.forEach(btnId => {
             const btn = document.getElementById(btnId);
             if (btn) btn.disabled = false;
@@ -4063,12 +4048,12 @@ function runOptimizationInternal(optimizeType) {
 function handleOptimizationResult(results, optName, optLabel) { 
     currentOptimizationResults=[]; 
     if(!results||!Array.isArray(results)||results.length===0){
-        document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">?⊥??????/p>`;
+        document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">無有效優化結果</p>`;
         return;
     } 
     const validRes=results.filter(r=>r&&typeof r.annualizedReturn==='number'&&isFinite(r.annualizedReturn)&&typeof r.maxDrawdown==='number'); 
     if(validRes.length===0){
-        document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">?芸?摰?嚗??⊥?????/p>`;
+        document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">優化完成，但無有效結果</p>`;
         return;
     } 
     currentOptimizationResults=validRes; 
@@ -4102,14 +4087,14 @@ function renderOptimizationTable(optName, optLabel) {
         <table class="optimization-table w-full text-sm text-left text-gray-500">
             <thead class="text-xs text-gray-700 uppercase bg-gray-50">
                 <tr>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="paramValue">${pLabel} ??/th>
-                    <th scope="col" class="px-4 py-3 sortable-header sort-desc" data-sort-key="annualizedReturn">撟游??梢</th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="returnRate">蝮賢??/th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="maxDrawdown">?憭批???/th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="winRate">??</th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="sharpeRatio">憭??/th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="sortinoRatio">蝝Ｘ?隢曉?/th>
-                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="tradesCount">鈭斗?甈⊥</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="paramValue">${pLabel} 值</th>
+                    <th scope="col" class="px-4 py-3 sortable-header sort-desc" data-sort-key="annualizedReturn">年化報酬</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="returnRate">總報酬</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="maxDrawdown">最大回撤</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="winRate">勝率</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="sharpeRatio">夏普值</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="sortinoRatio">索提諾值</th>
+                    <th scope="col" class="px-4 py-3 sortable-header" data-sort-key="tradesCount">交易次數</th>
                 </tr>
             </thead>
             <tbody>`;
@@ -4125,41 +4110,41 @@ function renderOptimizationTable(optName, optLabel) {
             <td class="px-4 py-2">${r.maxDrawdown.toFixed(2)}%</td>
             <td class="px-4 py-2">${r.winRate.toFixed(1)}%</td>
             <td class="px-4 py-2">${r.sharpeRatio?.toFixed(2) ?? 'N/A'}</td>
-            <td class="px-4 py-2">${r.sortinoRatio ? (isFinite(r.sortinoRatio) ? r.sortinoRatio.toFixed(2) : '??) : 'N/A'}</td>
+            <td class="px-4 py-2">${r.sortinoRatio ? (isFinite(r.sortinoRatio) ? r.sortinoRatio.toFixed(2) : '∞') : 'N/A'}</td>
             <td class="px-4 py-2">${r.tradesCount}</td>
         </tr>`;
     }).join('');
     
     tableHtml += `</tbody></table></div>`;
     
-    // 瑽遣??HTML嚗＊蝷箏????脰?撠?
+    // 構建摘要HTML，顯示優化前的數據進行對比
     let summaryHtml = `<div class="mt-4 p-3 bg-gray-100 rounded-md text-sm">
-        <h4 class="font-semibold">?雿喳??貊??? ${pLabel} = ${bestRes.paramValue}</h4>`;
+        <h4 class="font-semibold">最佳參數組合: ${pLabel} = ${bestRes.paramValue}</h4>`;
     
-    // 憿舐內?芸????亥”?橘??芸?雿輻 preOptimizationResult嚗???芸???摮?嚗?∪????lastOverallResult
+    // 顯示優化前策略表現：優先使用 preOptimizationResult（在啟動優化時保存），若無則回退到 lastOverallResult
     const before = preOptimizationResult || lastOverallResult;
     if (before && before.annualizedReturn !== null && before.annualizedReturn !== undefined) {
         summaryHtml += `<div class="mt-2">
-            <p class="text-gray-700 font-medium">?芸????亥”?橘?</p>
+            <p class="text-gray-700 font-medium">優化前策略表現：</p>
             <p class="text-gray-600">
-                撟游??梢?? ${before.annualizedReturn?.toFixed(2) ?? 'N/A'}%, 
-                ?憭批??? ${before.maxDrawdown?.toFixed(2) ?? 'N/A'}%, 
-                ??: ${before.winRate?.toFixed(1) ?? 'N/A'}%, 
-                憭?? ${before.sharpeRatio?.toFixed(2) ?? 'N/A'}, 
-                蝝Ｘ?隢曉? ${before.sortinoRatio?.toFixed(2) ?? 'N/A'}, 
-                鈭斗?甈⊥: ${before.totalTrades ?? before.tradesCount ?? before.tradeCount ?? 'N/A'}
+                年化報酬率: ${before.annualizedReturn?.toFixed(2) ?? 'N/A'}%, 
+                最大回撤: ${before.maxDrawdown?.toFixed(2) ?? 'N/A'}%, 
+                勝率: ${before.winRate?.toFixed(1) ?? 'N/A'}%, 
+                夏普值: ${before.sharpeRatio?.toFixed(2) ?? 'N/A'}, 
+                索提諾值: ${before.sortinoRatio?.toFixed(2) ?? 'N/A'}, 
+                交易次數: ${before.totalTrades ?? before.tradesCount ?? before.tradeCount ?? 'N/A'}
             </p>
         </div>`;
     }
     
-    // 撌脩宏?扎???雿唾”?整＊蝷綽??????蝑銵函靘?撠?
+    // 已移除「優化後最佳表現」顯示，僅保留優化前策略表現供比對
     
-    summaryHtml += `<p class="mt-1 text-xs text-gray-500">?內嚗??”?潭??剖?????雿喳??豢???啣銝撠?甈?嚗??瑁??葫??/p></div>`;
+    summaryHtml += `<p class="mt-1 text-xs text-gray-500">提示：點擊表格標頭可排序。將最佳參數手動更新到上方對應欄位，再執行回測。</p></div>`;
     
     el.innerHTML = summaryHtml + tableHtml;
 }
 function addSortListeners() { const table=document.querySelector("#optimization-results .optimization-table"); if(!table)return; const headers=table.querySelectorAll("th.sortable-header"); headers.forEach(header=>{ header.onclick=()=>{ const sortKey=header.dataset.sortKey; if(!sortKey)return; if(sortState.key===sortKey)sortState.direction=sortState.direction==='asc'?'desc':'asc'; else {sortState.key=sortKey; sortState.direction='desc';} sortTable();}; }); }
-function sortTable() { const{key,direction}=sortState; if(!currentOptimizationResults||currentOptimizationResults.length===0)return; currentOptimizationResults.sort((a,b)=>{ let vA=a[key]; let vB=b[key]; if(key==='sortinoRatio'){vA=isFinite(vA)?vA:(direction==='asc'?Infinity:-Infinity); vB=isFinite(vB)?vB:(direction==='asc'?Infinity:-Infinity);} vA=(vA===null||vA===undefined||isNaN(vA))?(direction==='asc'?Infinity:-Infinity):vA; vB=(vB===null||vB===undefined||isNaN(vB))?(direction==='asc'?Infinity:-Infinity):vB; if(vA<vB)return direction==='asc'?-1:1; if(vA>vB)return direction==='asc'?1:-1; return 0; }); const optTitle=document.getElementById('optimization-title').textContent; let optLabel='???; const match=optTitle.match(/\((.+)\)/); if(match&&match[1])optLabel=match[1]; renderOptimizationTable(sortState.key, optLabel); const headers=document.querySelectorAll("#optimization-results th.sortable-header"); headers.forEach(h=>{h.classList.remove('sort-asc','sort-desc'); if(h.dataset.sortKey===key)h.classList.add(direction==='asc'?'sort-asc':'sort-desc');}); addSortListeners(); }
+function sortTable() { const{key,direction}=sortState; if(!currentOptimizationResults||currentOptimizationResults.length===0)return; currentOptimizationResults.sort((a,b)=>{ let vA=a[key]; let vB=b[key]; if(key==='sortinoRatio'){vA=isFinite(vA)?vA:(direction==='asc'?Infinity:-Infinity); vB=isFinite(vB)?vB:(direction==='asc'?Infinity:-Infinity);} vA=(vA===null||vA===undefined||isNaN(vA))?(direction==='asc'?Infinity:-Infinity):vA; vB=(vB===null||vB===undefined||isNaN(vB))?(direction==='asc'?Infinity:-Infinity):vB; if(vA<vB)return direction==='asc'?-1:1; if(vA>vB)return direction==='asc'?1:-1; return 0; }); const optTitle=document.getElementById('optimization-title').textContent; let optLabel='參數值'; const match=optTitle.match(/\((.+)\)/); if(match&&match[1])optLabel=match[1]; renderOptimizationTable(sortState.key, optLabel); const headers=document.querySelectorAll("#optimization-results th.sortable-header"); headers.forEach(h=>{h.classList.remove('sort-asc','sort-desc'); if(h.dataset.sortKey===key)h.classList.add(direction==='asc'?'sort-asc':'sort-desc');}); addSortListeners(); }
 const stagingOptimizationState = {
     running: false,
     results: [],
@@ -4168,7 +4153,7 @@ const stagingOptimizationState = {
 };
 
 function formatStagePercentages(values) {
-    if (!Array.isArray(values) || values.length === 0) return '??;
+    if (!Array.isArray(values) || values.length === 0) return '—';
     return values
         .map((val) => {
             if (!Number.isFinite(val)) return '0%';
@@ -4276,20 +4261,20 @@ function buildStagingOptimizationCombos(params) {
     if (normalizedEntry.length > 0) {
         entryCandidates.push({
             id: 'entry_current',
-            label: '?桀?閮剖?',
+            label: '目前設定',
             values: normalizedEntry,
             display: formatStagePercentages(normalizedEntry),
             isSingleFull: isFullAllocationSingleStage(normalizedEntry, entryBase),
         });
     }
     const entryProfiles = [
-        { id: 'entry_single', label: '?格挾皛踹?, weights: [1] },
-        { id: 'entry_even_two', label: '?拇挾撟喳?', weights: [0.5, 0.5] },
-        { id: 'entry_front_heavy', label: '??敺? (60/40)', weights: [0.6, 0.4] },
-        { id: 'entry_back_heavy', label: '??敺? (40/60)', weights: [0.4, 0.6] },
-        { id: 'entry_pyramid', label: '??憛?(50/30/20)', weights: [0.5, 0.3, 0.2] },
-        { id: 'entry_reverse_pyramid', label: '??摮? (20/30/50)', weights: [0.2, 0.3, 0.5] },
-        { id: 'entry_ladder', label: '?０?? (30/30/40)', weights: [0.3, 0.3, 0.4] },
+        { id: 'entry_single', label: '單段滿倉', weights: [1] },
+        { id: 'entry_even_two', label: '兩段平均', weights: [0.5, 0.5] },
+        { id: 'entry_front_heavy', label: '先重後輕 (60/40)', weights: [0.6, 0.4] },
+        { id: 'entry_back_heavy', label: '先輕後重 (40/60)', weights: [0.4, 0.6] },
+        { id: 'entry_pyramid', label: '金字塔 (50/30/20)', weights: [0.5, 0.3, 0.2] },
+        { id: 'entry_reverse_pyramid', label: '倒金字塔 (20/30/50)', weights: [0.2, 0.3, 0.5] },
+        { id: 'entry_ladder', label: '階梯遞增 (30/30/40)', weights: [0.3, 0.3, 0.4] },
     ];
     entryProfiles.forEach((profile) => {
         const values = scaleStageWeights(entryBase, profile.weights);
@@ -4309,19 +4294,19 @@ function buildStagingOptimizationCombos(params) {
     if (normalizedExit.length > 0) {
         exitCandidates.push({
             id: 'exit_current',
-            label: '?桀?閮剖?',
+            label: '目前設定',
             values: normalizedExit,
             display: formatStagePercentages(normalizedExit),
             isSingleFull: isFullAllocationSingleStage(normalizedExit, exitBase),
         });
     }
     const exitProfiles = [
-        { id: 'exit_single', label: '銝甈∪皜?, weights: [1] },
-        { id: 'exit_even_two', label: '?拇挾撟喳?', weights: [0.5, 0.5] },
-        { id: 'exit_front_heavy', label: '??敺? (60/40)', weights: [0.6, 0.4] },
-        { id: 'exit_back_heavy', label: '??敺? (40/60)', weights: [0.4, 0.6] },
-        { id: 'exit_triplet', label: '銝挾?０ (30/30/40)', weights: [0.3, 0.3, 0.4] },
-        { id: 'exit_tail_hold', label: '靽?撠暹挾 (25/25/50)', weights: [0.25, 0.25, 0.5] },
+        { id: 'exit_single', label: '一次出清', weights: [1] },
+        { id: 'exit_even_two', label: '兩段平均', weights: [0.5, 0.5] },
+        { id: 'exit_front_heavy', label: '先重後輕 (60/40)', weights: [0.6, 0.4] },
+        { id: 'exit_back_heavy', label: '先輕後重 (40/60)', weights: [0.4, 0.6] },
+        { id: 'exit_triplet', label: '三段階梯 (30/30/40)', weights: [0.3, 0.3, 0.4] },
+        { id: 'exit_tail_hold', label: '保留尾段 (25/25/50)', weights: [0.25, 0.25, 0.5] },
     ];
     exitProfiles.forEach((profile) => {
         const values = scaleStageWeights(exitBase, profile.weights);
@@ -4337,12 +4322,12 @@ function buildStagingOptimizationCombos(params) {
     const dedupedExit = dedupeStageCandidates(exitCandidates);
 
     const entryModeOptionsRaw = [
-        { value: 'price_pullback', label: formatStageModeLabel('price_pullback', 'entry') || '?寞??Ⅳ' },
-        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'entry') || '蝑閮??孛?? },
+        { value: 'price_pullback', label: formatStageModeLabel('price_pullback', 'entry') || '價格回落加碼' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'entry') || '策略訊號再觸發' },
     ];
     const exitModeOptionsRaw = [
-        { value: 'price_rally', label: formatStageModeLabel('price_rally', 'exit') || '?寞韏圈???箏' },
-        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'exit') || '蝑閮??孛?? },
+        { value: 'price_rally', label: formatStageModeLabel('price_rally', 'exit') || '價格走高分批出場' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'exit') || '策略訊號再觸發' },
     ];
 
     const sortModeOptions = (options, targetValue) => {
@@ -4535,11 +4520,11 @@ function updateStagingOptimizationProgress(currentIndex, total, entryLabel, exit
         const percent = Math.max(0, Math.min(100, Math.round((currentIndex / total) * 100)));
         progressBar.style.width = `${percent}%`;
     }
-    const entryText = entryLabel || '??;
-    const exitText = exitLabel || '??;
-    const entryModeText = entryModeLabel ? `嚗?{entryModeLabel}嚗 : '';
-    const exitModeText = exitModeLabel ? `嚗?{exitModeLabel}嚗 : '';
-    updateStagingOptimizationStatus(`皜祈岫蝚?${currentIndex} / ${total} 蝯??脣 ${entryText}${entryModeText}嚗??${exitText}${exitModeText}`);
+    const entryText = entryLabel || '—';
+    const exitText = exitLabel || '—';
+    const entryModeText = entryModeLabel ? `（${entryModeLabel}）` : '';
+    const exitModeText = exitModeLabel ? `（${exitModeLabel}）` : '';
+    updateStagingOptimizationStatus(`測試第 ${currentIndex} / ${total} 組：進場 ${entryText}${entryModeText}，出場 ${exitText}${exitModeText}`);
 }
 
 function formatPercent(value) {
@@ -4562,7 +4547,7 @@ function renderStagingOptimizationResults(results) {
 
     if (!Array.isArray(results) || results.length === 0) {
         tableBody.innerHTML = '';
-        summaryEl.textContent = '?芸?敺????挾蝯?蝯???;
+        summaryEl.textContent = '未取得有效的分段組合結果。';
         resultsContainer.classList.add('hidden');
         return;
     }
@@ -4612,15 +4597,15 @@ function renderStagingOptimizationResults(results) {
         const metrics = best.metrics;
         const entryModeLabel = resolveStageModeDisplay(best.combination?.entry, best.combination?.entryMode, 'entry');
         const exitModeLabel = resolveStageModeDisplay(best.combination?.exit, best.combination?.exitMode, 'exit');
-        summaryEl.innerHTML = `?刻蝯?嚗?strong>${best.combination.entry.display}</strong>嚗?{entryModeLabel}嚗?? <strong>${best.combination.exit.display}</strong>嚗?{exitModeLabel}嚗 +
-            ` 撟游??梢 <span class="${metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(metrics.annualizedReturn)}</span>` +
-            ` 嚗?憭瘥? ${formatNumber(metrics.sharpeRatio, 2)} 嚗??憭批???<span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>? +
-            `<br><span class="text-xs" style="color: var(--muted-foreground);">?勗???${sorted.length} 蝯葫閰艾?/span>`;
+        summaryEl.innerHTML = `推薦組合：<strong>${best.combination.entry.display}</strong>（${entryModeLabel}） × <strong>${best.combination.exit.display}</strong>（${exitModeLabel}）。` +
+            ` 年化報酬 <span class="${metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(metrics.annualizedReturn)}</span>` +
+            ` ／ 夏普比率 ${formatNumber(metrics.sharpeRatio, 2)} ／ 最大回撤 <span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>。` +
+            `<br><span class="text-xs" style="color: var(--muted-foreground);">共完成 ${sorted.length} 組測試。</span>`;
     } else {
-        summaryEl.textContent = '?芣?圈???挾蝯???;
+        summaryEl.textContent = '未找到適合的分段組合。';
     }
 
-    updateStagingOptimizationStatus('?挾?芸?摰?嚗?潔??寞??行??柴?, false);
+    updateStagingOptimizationStatus('分段優化完成！可於下方查看推薦清單。', false);
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
         lucide.createIcons();
     }
@@ -4628,11 +4613,11 @@ function renderStagingOptimizationResults(results) {
 
 async function runStagingOptimization() {
     if (!workerUrl) {
-        showError('?閮?撘?撠皞?撠梁?嚗?蝔?閰艾?);
+        showError('背景計算引擎尚未準備就緒，請稍候再試。');
         return;
     }
     if (stagingOptimizationState.running) {
-        updateStagingOptimizationStatus('?挾?芸??脰?銝哨?隢???);
+        updateStagingOptimizationStatus('分段優化進行中，請稍候。');
         return;
     }
 
@@ -4647,7 +4632,7 @@ async function runStagingOptimization() {
     const baseParams = getBacktestParams();
     if (!validateBacktestParams(baseParams)) {
         activateTab('staging-optimizer');
-        updateStagingOptimizationStatus('隢?靽格迤?葫閮剖?敺??岫?挾?芸???, true);
+        updateStagingOptimizationStatus('請先修正回測設定後再嘗試分段優化。', true);
         return;
     }
 
@@ -4656,7 +4641,7 @@ async function runStagingOptimization() {
     if (progressBar) progressBar.style.width = '0%';
     const resultsContainer = document.getElementById('staging-optimization-results');
     if (resultsContainer) resultsContainer.classList.add('hidden');
-    updateStagingOptimizationStatus('甇??渡???挾蝯?...', false);
+    updateStagingOptimizationStatus('正在整理候選分段組合...', false);
 
     stagingOptimizationState.running = true;
     stagingOptimizationState.results = [];
@@ -4664,7 +4649,7 @@ async function runStagingOptimization() {
 
     if (runButton) {
         runButton.disabled = true;
-        runButton.innerHTML = '<i data-lucide="loader-2" class="lucide-sm animate-spin"></i> ?挾?芸?銝?..';
+        runButton.innerHTML = '<i data-lucide="loader-2" class="lucide-sm animate-spin"></i> 分段優化中...';
         if (typeof lucide !== 'undefined' && lucide.createIcons) {
             lucide.createIcons();
         }
@@ -4674,11 +4659,11 @@ async function runStagingOptimization() {
         const combinations = buildStagingOptimizationCombos(baseParams);
         stagingOptimizationState.combinations = combinations.combos;
         if (!Array.isArray(combinations.combos) || combinations.combos.length === 0) {
-            updateStagingOptimizationStatus('?桀?閮剖??⊥??Ｙ?????畾萇???, true);
+            updateStagingOptimizationStatus('目前設定無法產生有效的分段組合。', true);
             stagingOptimizationState.running = false;
             if (runButton) {
                 runButton.disabled = false;
-                runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 銝?萄??畾萇???;
+                runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
                 if (typeof lucide !== 'undefined' && lucide.createIcons) {
                     lucide.createIcons();
                 }
@@ -4734,8 +4719,8 @@ async function runStagingOptimization() {
                 total,
                 combo.entry.display,
                 combo.exit.display,
-                entryModeProgressLabel === '?? ? '' : entryModeProgressLabel,
-                exitModeProgressLabel === '?? ? '' : exitModeProgressLabel
+                entryModeProgressLabel === '—' ? '' : entryModeProgressLabel,
+                exitModeProgressLabel === '—' ? '' : exitModeProgressLabel
             );
 
             const candidateParams = {
@@ -4784,8 +4769,8 @@ async function runStagingOptimization() {
                 total,
                 combo.entry.display,
                 combo.exit.display,
-                entryModeCompleteLabel === '?? ? '' : entryModeCompleteLabel,
-                exitModeCompleteLabel === '?? ? '' : exitModeCompleteLabel
+                entryModeCompleteLabel === '—' ? '' : entryModeCompleteLabel,
+                exitModeCompleteLabel === '—' ? '' : exitModeCompleteLabel
             );
 
             const metrics = {
@@ -4805,13 +4790,13 @@ async function runStagingOptimization() {
         renderStagingOptimizationResults(results);
         if (applyButton) applyButton.disabled = !stagingOptimizationState.bestResult;
     } catch (error) {
-        console.error('[Staging Optimization] ?潛??航炊:', error);
-        updateStagingOptimizationStatus(`?挾?芸??潛??航炊嚗?{error.message}`, true);
+        console.error('[Staging Optimization] 發生錯誤:', error);
+        updateStagingOptimizationStatus(`分段優化發生錯誤：${error.message}`, true);
     } finally {
         stagingOptimizationState.running = false;
         if (runButton) {
             runButton.disabled = false;
-            runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 銝?萄??畾萇???;
+            runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
             if (typeof lucide !== 'undefined' && lucide.createIcons) {
                 lucide.createIcons();
             }
@@ -4849,7 +4834,7 @@ function executeStagingCandidate(params, options) {
                 resolve({ result: data, updatedEntry, rawDataUsed: data?.rawDataUsed || null });
             } else if (type === 'error') {
                 cleanup();
-                reject(new Error(data?.message || '?挾?芸???憭望?'));
+                reject(new Error(data?.message || '分段優化運算失敗'));
             }
         };
 
@@ -4874,7 +4859,7 @@ function executeStagingCandidate(params, options) {
 function applyBestStagingRecommendation() {
     const best = stagingOptimizationState.bestResult;
     if (!best) {
-        updateStagingOptimizationStatus('撠?Ｙ??刻?挾嚗??銵?畾萄??, true);
+        updateStagingOptimizationStatus('尚未產生推薦分段，請先執行分段優化。', true);
         return;
     }
     if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
@@ -4896,8 +4881,8 @@ function applyBestStagingRecommendation() {
         exitModeSelect.value = best.combination.exitMode.value || best.combination.exitMode;
         exitModeSelect.dispatchEvent(new Event('change'));
     }
-    updateStagingOptimizationStatus('撌脣??冽?血?畾蛛?隢??啣銵?皜祉Ⅱ隤蜀??, false);
-    showSuccess('撌脣??冽?血?畾菔身摰?撱箄降??葫隞亦Ⅱ隤蜀?”?整?);
+    updateStagingOptimizationStatus('已套用推薦分段，請重新執行回測確認績效。', false);
+    showSuccess('已套用推薦分段設定，建議重新回測以確認績效表現。');
 }
 
 
@@ -4932,63 +4917,63 @@ function updateStrategyParams(type) {
     paramsContainer.innerHTML = '';
     
     if (!config?.defaultParams || Object.keys(config.defaultParams).length === 0) {
-        paramsContainer.innerHTML = '<p class="text-xs text-gray-400 italic">甇斤??亦??</p>';
+        paramsContainer.innerHTML = '<p class="text-xs text-gray-400 italic">此策略無需參數</p>';
     } else {
         for (const pName in config.defaultParams) {
             const defVal = config.defaultParams[pName];
             let lbl = pName;
             let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1);
             
-            // 璅惜?迂??
+            // 標籤名稱處理
             if (internalKey === 'k_d_cross') {
-                if(pName==='period')lbl='KD?望?';
-                else if(pName==='thresholdX'){lbl='D?潔???X)';idSfx='KdThresholdX';}
+                if(pName==='period')lbl='KD週期';
+                else if(pName==='thresholdX'){lbl='D值上限(X)';idSfx='KdThresholdX';}
             } else if (internalKey === 'k_d_cross_exit') {
-                if(pName==='period')lbl='KD?望?';
-                else if(pName==='thresholdY'){lbl='D?潔???Y)';idSfx='KdThresholdY';}
+                if(pName==='period')lbl='KD週期';
+                else if(pName==='thresholdY'){lbl='D值下限(Y)';idSfx='KdThresholdY';}
             } else if (internalKey === 'turtle_stop_loss') {
-                if(pName==='stopLossPeriod'){lbl='???望?';idSfx='StopLossPeriod';}
+                if(pName==='stopLossPeriod'){lbl='停損週期';idSfx='StopLossPeriod';}
             } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') {
-                lbl='DEA?望?(x)'; idSfx = 'SignalPeriod';
+                lbl='DEA週期(x)'; idSfx = 'SignalPeriod';
             } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'shortPeriod') {
-                lbl='DI?胥MA(n)';
+                lbl='DI短EMA(n)';
             } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'longPeriod') {
-                lbl='DI?幌MA(m)';
+                lbl='DI長EMA(m)';
             } else if (internalKey === 'short_k_d_cross') {
-                if(pName==='period')lbl='KD?望?';
-                else if(pName==='thresholdY'){lbl='D?潔???Y)';idSfx='ShortKdThresholdY';}
+                if(pName==='period')lbl='KD週期';
+                else if(pName==='thresholdY'){lbl='D值下限(Y)';idSfx='ShortKdThresholdY';}
             } else if (internalKey === 'cover_k_d_cross') {
-                if(pName==='period')lbl='KD?望?';
-                else if(pName==='thresholdX'){lbl='D?潔???X)';idSfx='CoverKdThresholdX';}
+                if(pName==='period')lbl='KD週期';
+                else if(pName==='thresholdX'){lbl='D值上限(X)';idSfx='CoverKdThresholdX';}
             } else if (internalKey === 'short_macd_cross') {
-                if(pName==='shortPeriod')lbl='DI?胥MA(n)';
-                else if(pName==='longPeriod')lbl='DI?幌MA(m)';
-                else if(pName==='signalPeriod'){lbl='DEA?望?(x)';idSfx='ShortSignalPeriod';}
+                if(pName==='shortPeriod')lbl='DI短EMA(n)';
+                else if(pName==='longPeriod')lbl='DI長EMA(m)';
+                else if(pName==='signalPeriod'){lbl='DEA週期(x)';idSfx='ShortSignalPeriod';}
             } else if (internalKey === 'cover_macd_cross') {
-                if(pName==='shortPeriod')lbl='DI?胥MA(n)';
-                else if(pName==='longPeriod')lbl='DI?幌MA(m)';
-                else if(pName==='signalPeriod'){lbl='DEA?望?(x)';idSfx='CoverSignalPeriod';}
+                if(pName==='shortPeriod')lbl='DI短EMA(n)';
+                else if(pName==='longPeriod')lbl='DI長EMA(m)';
+                else if(pName==='signalPeriod'){lbl='DEA週期(x)';idSfx='CoverSignalPeriod';}
             } else if (internalKey === 'short_turtle_stop_loss') {
-                if(pName==='stopLossPeriod'){lbl='閫撖望?';idSfx='ShortStopLossPeriod';}
+                if(pName==='stopLossPeriod'){lbl='觀察週期';idSfx='ShortStopLossPeriod';}
             } else if (internalKey === 'cover_turtle_breakout') {
-                if(pName==='breakoutPeriod'){lbl='蝒?望?';idSfx='CoverBreakoutPeriod';}
+                if(pName==='breakoutPeriod'){lbl='突破週期';idSfx='CoverBreakoutPeriod';}
             } else if (internalKey === 'cover_trailing_stop') {
-                if(pName==='percentage'){lbl='?曉?瘥?%)';idSfx='CoverTrailingStopPercentage';}
+                if(pName==='percentage'){lbl='百分比(%)';idSfx='CoverTrailingStopPercentage';}
             } else {
                 const baseKey = internalKey.replace('short_', '').replace('cover_', '').replace('_exit', '');
                 if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
-                    if(pName==='shortPeriod')lbl='?剜?SMA';
-                    else if(pName==='longPeriod')lbl='?瑟?SMA';
+                    if(pName==='shortPeriod')lbl='短期SMA';
+                    else if(pName==='longPeriod')lbl='長期SMA';
                 } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
-                    if(pName==='period')lbl='SMA?望?';
-                } else if(pName==='period')lbl='?望?';
-                else if(pName==='threshold')lbl='?曉?;
-                else if(pName==='signalPeriod')lbl='靽∟??望?';
-                else if(pName==='deviations')lbl='璅?撌?;
-                else if(pName==='multiplier')lbl='?漱?';
-                else if(pName==='percentage')lbl='?曉?瘥?%)';
-                else if(pName==='breakoutPeriod')lbl='蝒?望?';
-                else if(pName==='stopLossPeriod')lbl='???望?';
+                    if(pName==='period')lbl='SMA週期';
+                } else if(pName==='period')lbl='週期';
+                else if(pName==='threshold')lbl='閾值';
+                else if(pName==='signalPeriod')lbl='信號週期';
+                else if(pName==='deviations')lbl='標準差';
+                else if(pName==='multiplier')lbl='成交量倍數';
+                else if(pName==='percentage')lbl='百分比(%)';
+                else if(pName==='breakoutPeriod')lbl='突破週期';
+                else if(pName==='stopLossPeriod')lbl='停損週期';
                 else { lbl = pName; }
             }
             
@@ -4998,11 +4983,11 @@ function updateStrategyParams(type) {
             lb.htmlFor = id;
             lb.className = "block text-xs font-medium text-gray-600 mb-1";
             
-            // 瑼Ｘ?臬?????閮蒂瘛餃?蝭?憿舐內嚗?冽????仿???
+            // 檢查是否有優化範圍資訊並添加範圍顯示（適用於所有策略類型）
             const optimizeTarget = config.optimizeTargets?.find(t => t.name === pName);
             if (optimizeTarget?.range) {
                 const rangeText = `${optimizeTarget.range.from}-${optimizeTarget.range.to}`;
-                lb.innerHTML = `${lbl}<br><span class="text-xs text-blue-500 font-normal">蝭?: ${rangeText}</span>`;
+                lb.innerHTML = `${lbl}<br><span class="text-xs text-blue-500 font-normal">範圍: ${rangeText}</span>`;
             } else {
                 lb.textContent = lbl;
             }
@@ -5013,7 +4998,7 @@ function updateStrategyParams(type) {
             ip.value = defVal;
             ip.className = "w-full px-2 py-1 border border-gray-300 rounded-md shadow-sm text-sm focus:ring-blue-500 focus:border-blue-500";
             
-            // 閮剖?頛詨蝭?
+            // 設定輸入範圍
             if(pName.includes('Period')||pName==='period'||pName==='stopLossPeriod'||pName==='breakoutPeriod'){
                 ip.min=1;ip.max=200;ip.step=1;
             } else if(pName==='threshold'&&(internalKey.includes('rsi')||internalKey.includes('williams'))){
@@ -5036,7 +5021,7 @@ function updateStrategyParams(type) {
         }
     }
     
-    // ?湔?芸???賊?
+    // 更新優化參數選項
     let optimizeSelectId = null;
     if (type === 'entry' || type === 'exit' || type === 'shortEntry' || type === 'shortExit') {
         if (type === 'entry') optimizeSelectId = 'optimizeEntryParamSelect';
@@ -5057,14 +5042,14 @@ function updateStrategyParams(type) {
                         optimizeSelect.appendChild(opt);
                     });
                     optimizeSelect.disabled = false;
-                    optimizeSelect.title = `?豢??芸??`;
+                    optimizeSelect.title = `選擇優化參數`;
                 } else {
                     const opt = document.createElement('option');
                     opt.value="null";
-                    opt.textContent = '?∪?芸?';
+                    opt.textContent = '無可優化';
                     optimizeSelect.appendChild(opt);
                     optimizeSelect.disabled = true;
-                    optimizeSelect.title = '甇斤??亦?臬????;
+                    optimizeSelect.title = '此策略無可優化參數';
                 }
             } else {
                 console.warn(`[Update Params] Optimize select element not found: #${optimizeSelectId}`);
@@ -5110,7 +5095,7 @@ function resetSettings() {
     lastFetchSettings = null;
     refreshPriceInspectorControls();
     clearPreviousResults();
-    showSuccess("閮剖?撌脤?蝵?);
+    showSuccess("設定已重置");
 }
 
 function initTabs() { 
@@ -5162,7 +5147,7 @@ function setDefaultFees(stockNo) {
     if (isUSMarket) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
-        console.log(`[Fees] US market defaults applied for ${stockCode || '(?芾撓??'}`);
+        console.log(`[Fees] US market defaults applied for ${stockCode || '(未輸入)'}`);
         return;
     }
 
@@ -5176,18 +5161,18 @@ function setDefaultFees(stockNo) {
     if (isTAIEX) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
-        console.log(`[Fees] ??身鞎餌? for ${stockCode}`);
+        console.log(`[Fees] 指數預設費率 for ${stockCode}`);
     } else if (isETF) {
         buyFeeInput.value = etfBuyFeeRate.toFixed(4);
         sellFeeInput.value = (etfSellFeeRate + etfTaxRate).toFixed(4);
-        console.log(`[Fees] ETF ?身鞎餌? for ${stockCode} -> Buy: ${buyFeeInput.value}%, Sell+Tax: ${sellFeeInput.value}%`);
+        console.log(`[Fees] ETF 預設費率 for ${stockCode} -> Buy: ${buyFeeInput.value}%, Sell+Tax: ${sellFeeInput.value}%`);
     } else {
         buyFeeInput.value = stockBuyFeeRate.toFixed(4);
         sellFeeInput.value = (stockSellFeeRate + stockTaxRate).toFixed(4);
-        console.log(`[Fees] Stock ?身鞎餌? for ${stockCode} -> Buy: ${buyFeeInput.value}%, Sell+Tax: ${sellFeeInput.value}%`);
+        console.log(`[Fees] Stock 預設費率 for ${stockCode} -> Buy: ${buyFeeInput.value}%, Sell+Tax: ${sellFeeInput.value}%`);
     }
 }
-function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY); try { const parsed = strategies ? JSON.parse(strategies) : {}; // 皜??????
+function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY); try { const parsed = strategies ? JSON.parse(strategies) : {}; // 清理損壞的數據
         const cleaned = {};
         for (const [name, data] of Object.entries(parsed)) {
             if (data && typeof data === 'object' && data.settings) {
@@ -5196,11 +5181,11 @@ function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_ST
                 console.warn(`[Storage] Removing corrupted strategy: ${name}`, data);
             }
         }
-        // 憒???憯?◤皜?嚗??localStorage
+        // 如果有損壞數據被清理，更新 localStorage
         if (Object.keys(cleaned).length !== Object.keys(parsed).length) {
             localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(cleaned));
         }
-        return cleaned; } catch (e) { console.error("霈???交?閫??JSON?航炊:", e); return {}; } }
+        return cleaned; } catch (e) { console.error("讀取策略時解析JSON錯誤:", e); return {}; } }
 function saveStrategyToLocalStorage(name, settings, metrics) { 
     try { 
         const strategies = getSavedStrategies(); 
@@ -5237,32 +5222,32 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
         localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); 
         return true; 
     } catch (e) { 
-        console.error("?脣?蝑??localStorage ??隤?", e); 
+        console.error("儲存策略到 localStorage 時發生錯誤:", e); 
         if (e.name === 'QuotaExceededError') { 
-            showError("?脣?憭望?嚗ocalStorage 蝛粹?撌脫遛???芷銝鈭?蝑??); 
+            showError("儲存失敗：localStorage 空間已滿。請刪除一些舊策略。"); 
         } else { 
-            showError(`?脣?蝑憭望?: ${e.message}`); 
+            showError(`儲存策略失敗: ${e.message}`); 
         } 
         return false; 
     } 
 }
-function deleteStrategyFromLocalStorage(name) { try { const strategies = getSavedStrategies(); if (strategies[name]) { delete strategies[name]; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); return true; } return false; } catch (e) { console.error("?芷蝑??隤?", e); showError(`?芷蝑憭望?: ${e.message}`); return false; } }
+function deleteStrategyFromLocalStorage(name) { try { const strategies = getSavedStrategies(); if (strategies[name]) { delete strategies[name]; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); return true; } return false; } catch (e) { console.error("刪除策略時發生錯誤:", e); showError(`刪除策略失敗: ${e.message}`); return false; } }
 function populateSavedStrategiesDropdown() { 
     const selectElement = document.getElementById('loadStrategySelect'); 
     if (!selectElement) return;
     
-    selectElement.innerHTML = '<option value="">-- ?豢?閬??亦?蝑 --</option>'; 
+    selectElement.innerHTML = '<option value="">-- 選擇要載入的策略 --</option>'; 
     const strategies = getSavedStrategies(); 
     const strategyNames = Object.keys(strategies).sort(); 
     
     strategyNames.forEach(name => { 
         const strategyData = strategies[name]; 
-        if (!strategyData) return; // 頝喲? null ??undefined ???亥???
+        if (!strategyData) return; // 跳過 null 或 undefined 的策略資料 
         
-        const metrics = strategyData.metrics || {}; // 靽格迤嚗僑??祉?撌脩??舐???澆?嚗??閬?銋誑100
+        const metrics = strategyData.metrics || {}; // 修正：年化報酬率已經是百分比格式，不需要再乘以100
         const annReturn = (metrics.annualizedReturn !== null && !isNaN(metrics.annualizedReturn)) ? metrics.annualizedReturn.toFixed(2) + '%' : 'N/A'; 
         const sharpe = (metrics.sharpeRatio !== null && !isNaN(metrics.sharpeRatio)) ? metrics.sharpeRatio.toFixed(2) : 'N/A'; 
-        const displayText = `${name} (撟游?:${annReturn} | Sharpe:${sharpe})`; 
+        const displayText = `${name} (年化:${annReturn} | Sharpe:${sharpe})`; 
         const option = document.createElement('option'); 
         option.value = name; 
         option.textContent = displayText; 
@@ -5270,7 +5255,7 @@ function populateSavedStrategiesDropdown() {
     }); 
 }
 function saveStrategy() { 
-    // ???身蝑?迂嚗蝙?其葉??蝔梧?
+    // 生成預設策略名稱（使用中文名稱）
     const stockNo = document.getElementById('stockNo').value.trim().toUpperCase() || '2330';
     const entryStrategy = document.getElementById('entryStrategy').value;
     const exitStrategy = document.getElementById('exitStrategy').value;
@@ -5278,21 +5263,21 @@ function saveStrategy() {
     const startDate = document.getElementById('startDate').value;
     const endDate = document.getElementById('endDate').value;
     
-    // 閮???撟港遢
+    // 計算期間年份
     let yearPeriod = '';
     if (startDate && endDate) {
         const startYear = new Date(startDate).getFullYear();
         const endYear = new Date(endDate).getFullYear();
         const yearDiff = endYear - startYear;
         if (yearDiff > 0) {
-            yearPeriod = `${yearDiff}撟循;
+            yearPeriod = `${yearDiff}年`;
         }
     }
     
-    // ?脣?銝剜?蝑?迂
+    // 獲取中文策略名稱
     const entryStrategyName = strategyDescriptions[entryStrategy]?.name || entryStrategy;
     
-    // ?箏蝑?閬畾??誑?脣?甇?Ⅱ?葉??蝔?
+    // 出場策略需要特殊處理以獲取正確的中文名稱
     let exitStrategyName;
     if (['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(exitStrategy)) {
         const exitStrategyKey = exitStrategy + '_exit';
@@ -5310,26 +5295,26 @@ function saveStrategy() {
         defaultName = `${stockNo}_${entryStrategyName}_${exitStrategyName}_${shortEntryStrategyName}_${shortExitStrategyName}`;
     }
     
-    // 瘛餃???撟港遢?圈?閮剖?蝔望撠?
+    // 添加期間年份到預設名稱末尾
     if (yearPeriod) {
         defaultName += `_${yearPeriod}`;
     }
     
-    const strategyName = prompt("隢撓?亦??亙?蝔梧?", defaultName); 
+    const strategyName = prompt("請輸入策略名稱：", defaultName); 
     if (!strategyName || strategyName.trim() === "") { 
-        showInfo("蝑?迂銝?箇征??); 
+        showInfo("策略名稱不能為空。"); 
         return; 
     } 
     const trimmedName = strategyName.trim();
     
     const strategies = getSavedStrategies(); 
     if (strategies[trimmedName]) { 
-        if (!confirm(`蝑 "${trimmedName}" 撌脣??具?西???`)) { 
+        if (!confirm(`策略 "${trimmedName}" 已存在。是否覆蓋？`)) { 
             return; 
         } 
     } 
     if (lastOverallResult === null || lastOverallResult.annualizedReturn === null || lastOverallResult.sharpeRatio === null) { 
-        if (!confirm("撠?瑁??葫??甈∪?皜祉??蝮暹?????虫?閬摮迨蝑閮剖?嚗蜀??璅?憿舐內??N/A嚗?")) { 
+        if (!confirm("尚未執行回測或上次回測無有效績效指標。是否仍要儲存此策略設定（績效指標將顯示為 N/A）？")) { 
             return; 
         } 
     } 
@@ -5338,10 +5323,10 @@ function saveStrategy() {
     
     if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) { 
         populateSavedStrategiesDropdown(); 
-        showSuccess(`蝑 "${trimmedName}" 撌脣摮?`); 
+        showSuccess(`策略 "${trimmedName}" 已儲存！`); 
     }
 }
-function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("隢?敺???桅??頛???乓?); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`頛蝑 "${strategyName}" 憭望?嚗銝蝑?豢??); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
+function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
         if (window.lazybacktestStagedEntry) {
             if (Array.isArray(settings.entryStages) && settings.entryStages.length > 0 && typeof window.lazybacktestStagedEntry.setValues === 'function') {
                 window.lazybacktestStagedEntry.setValues(settings.entryStages);
@@ -5359,39 +5344,39 @@ function loadStrategy() { const selectElement = document.getElementById('loadStr
             }
         }
         const exitModeSelect = document.getElementById('exitStagingMode');
-        if (exitModeSelect) exitModeSelect.value = settings.exitStagingMode || 'signal_repeat'; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } document.getElementById('exitStrategy').value = settings.exitStrategy || 'ma_cross'; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(settings.exitStrategy)) ? `${settings.exitStrategy}_exit` : settings.exitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { document.getElementById('shortEntryStrategy').value = settings.shortEntryStrategy || 'short_ma_cross'; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = `short_${settings.shortEntryStrategy}`; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } document.getElementById('shortExitStrategy').value = settings.shortExitStrategy || 'cover_ma_cross'; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = `cover_${settings.shortExitStrategy}`; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`蝑 "${strategyName}" 撌脰??伐?`); 
+        if (exitModeSelect) exitModeSelect.value = settings.exitStagingMode || 'signal_repeat'; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } document.getElementById('exitStrategy').value = settings.exitStrategy || 'ma_cross'; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(settings.exitStrategy)) ? `${settings.exitStrategy}_exit` : settings.exitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { document.getElementById('shortEntryStrategy').value = settings.shortEntryStrategy || 'short_ma_cross'; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = `short_${settings.shortEntryStrategy}`; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } document.getElementById('shortExitStrategy').value = settings.shortExitStrategy || 'cover_ma_cross'; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = `cover_${settings.shortExitStrategy}`; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`策略 "${strategyName}" 已載入！`); 
     
-    // 憿舐內蝣箄?撠店獢蒂?芸??瑁??葫
-    if (confirm(`蝑?撌脰??亙???\n\n?臬蝡?瑁??葫隞交???亥”?橘?`)) {
-        // ?芸??瑁??葫
+    // 顯示確認對話框並自動執行回測
+    if (confirm(`策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
+        // 自動執行回測
         setTimeout(() => {
             runBacktestInternal();
         }, 100);
     }
     
-    lastOverallResult = null; lastSubPeriodResults = null; } catch (error) { console.error(`頛蝑 "${strategyName}" ??隤?`, error); showError(`頛蝑憭望?: ${error.message}`); } }
-function deleteStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("隢?敺???桅???芷???乓?); return; } if (confirm(`蝣箏?閬?斤???"${strategyName}" ??甇斗?雿瘜儔?)) { if (deleteStrategyFromLocalStorage(strategyName)) { populateSavedStrategiesDropdown(); showSuccess(`蝑 "${strategyName}" 撌脣?歹?`); } } }
-function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(Math.random() * arr.length)]; const getRandomValue = (min, max, step) => { if (step === undefined || step === 0) step = 1; const range = max - min; if (range <= 0 && step > 0) return min; if (step <= 0) return min; const steps = Math.max(0, Math.floor(range / step)); const randomStep = Math.floor(Math.random() * (steps + 1)); let value = min + randomStep * step; if (step.toString().includes('.')) { const precision = step.toString().split('.')[1].length; value = parseFloat(value.toFixed(precision)); } return Math.max(min, Math.min(max, value)); }; const allKeys = Object.keys(strategyDescriptions); const entryKeys = allKeys.filter(k => !k.startsWith('short_') && !k.startsWith('cover_') && !k.endsWith('_exit') && k !== 'fixed_stop_loss'); const exitKeysRaw = allKeys.filter(k => (k.endsWith('_exit') || ['ma_below', 'rsi_overbought', 'bollinger_reversal', 'trailing_stop', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss', 'fixed_stop_loss'].includes(k)) && !k.startsWith('short_') && !k.startsWith('cover_')); const exitKeys = exitKeysRaw.map(k => k.replace('_exit', '')).filter(k => k !== 'fixed_stop_loss'); const shortEntryKeys = allKeys.filter(k => k.startsWith('short_') && k !== 'short_fixed_stop_loss'); const coverKeys = allKeys.filter(k => k.startsWith('cover_') && k !== 'cover_fixed_stop_loss'); const setRandomParams = (type, strategyKey) => { let internalKey = strategyKey; if (type === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(strategyKey)) internalKey = `${strategyKey}_exit`; else if (type === 'shortEntry') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(strategyKey)) internalKey = `short_${strategyKey}`; } else if (type === 'shortExit') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(strategyKey)) internalKey = `cover_${strategyKey}`; } const config = strategyDescriptions[internalKey]; if (!config || !config.defaultParams) return; let params = {}; for (const pName in config.defaultParams) { const target = config.optimizeTargets?.find(t => t.name === pName); let randomVal; if (target?.range) { randomVal = getRandomValue(target.range.from, target.range.to, target.range.step); } else { if (pName.includes('Period') || pName.includes('period')) randomVal = getRandomValue(5, 100, 1); else if (pName === 'threshold' && internalKey.includes('rsi')) randomVal = getRandomValue(10, 90, 1); else if (pName === 'threshold' && internalKey.includes('williams')) randomVal = getRandomValue(-90, -10, 1); else if (pName === 'thresholdX' || pName === 'thresholdY') randomVal = getRandomValue(10, 90, 1); else if (pName === 'deviations') randomVal = getRandomValue(1, 3, 0.1); else if (pName === 'multiplier') randomVal = getRandomValue(1.5, 5, 0.1); else if (pName === 'percentage') randomVal = getRandomValue(1, 25, 0.5); else randomVal = config.defaultParams[pName]; } params[pName] = randomVal; } if (['ma_cross', 'ema_cross', 'short_ma_cross', 'short_ema_cross', 'cover_ma_cross', 'cover_ema_cross'].some(prefix => internalKey.startsWith(prefix))) { if (params.shortPeriod && params.longPeriod && params.shortPeriod >= params.longPeriod) { params.shortPeriod = getRandomValue(3, Math.max(4, params.longPeriod - 1), 1); console.log(`[Random] Adjusted ${type} shortPeriod to ${params.shortPeriod} (long: ${params.longPeriod})`); } } for (const pName in params) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const inputId = `${type}${idSfx}`; const inputEl = document.getElementById(inputId); if (inputEl) { inputEl.value = params[pName]; } else { console.warn(`[Random] Input element not found for ${type} - ${pName}: #${inputId}`); } } }; const randomEntryKey = getRandomElement(entryKeys); const randomExitKey = getRandomElement(exitKeys); document.getElementById('entryStrategy').value = randomEntryKey; document.getElementById('exitStrategy').value = randomExitKey; updateStrategyParams('entry'); updateStrategyParams('exit'); setRandomParams('entry', randomEntryKey); setRandomParams('exit', randomExitKey); if (document.getElementById('enableShortSelling').checked) { const randomShortEntryKey = getRandomElement(shortEntryKeys); const randomCoverKey = getRandomElement(coverKeys); document.getElementById('shortEntryStrategy').value = randomShortEntryKey; document.getElementById('shortExitStrategy').value = randomCoverKey; updateStrategyParams('shortEntry'); updateStrategyParams('shortExit'); setRandomParams('shortEntry', randomShortEntryKey.replace('short_', '')); setRandomParams('shortExit', randomCoverKey.replace('cover_', '')); } showSuccess("蝑???詨歇?冽?閮剖?嚗?); }
+    lastOverallResult = null; lastSubPeriodResults = null; } catch (error) { console.error(`載入策略 "${strategyName}" 時發生錯誤:`, error); showError(`載入策略失敗: ${error.message}`); } }
+function deleteStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要刪除的策略。"); return; } if (confirm(`確定要刪除策略 "${strategyName}" 嗎？此操作無法復原。`)) { if (deleteStrategyFromLocalStorage(strategyName)) { populateSavedStrategiesDropdown(); showSuccess(`策略 "${strategyName}" 已刪除！`); } } }
+function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(Math.random() * arr.length)]; const getRandomValue = (min, max, step) => { if (step === undefined || step === 0) step = 1; const range = max - min; if (range <= 0 && step > 0) return min; if (step <= 0) return min; const steps = Math.max(0, Math.floor(range / step)); const randomStep = Math.floor(Math.random() * (steps + 1)); let value = min + randomStep * step; if (step.toString().includes('.')) { const precision = step.toString().split('.')[1].length; value = parseFloat(value.toFixed(precision)); } return Math.max(min, Math.min(max, value)); }; const allKeys = Object.keys(strategyDescriptions); const entryKeys = allKeys.filter(k => !k.startsWith('short_') && !k.startsWith('cover_') && !k.endsWith('_exit') && k !== 'fixed_stop_loss'); const exitKeysRaw = allKeys.filter(k => (k.endsWith('_exit') || ['ma_below', 'rsi_overbought', 'bollinger_reversal', 'trailing_stop', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss', 'fixed_stop_loss'].includes(k)) && !k.startsWith('short_') && !k.startsWith('cover_')); const exitKeys = exitKeysRaw.map(k => k.replace('_exit', '')).filter(k => k !== 'fixed_stop_loss'); const shortEntryKeys = allKeys.filter(k => k.startsWith('short_') && k !== 'short_fixed_stop_loss'); const coverKeys = allKeys.filter(k => k.startsWith('cover_') && k !== 'cover_fixed_stop_loss'); const setRandomParams = (type, strategyKey) => { let internalKey = strategyKey; if (type === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(strategyKey)) internalKey = `${strategyKey}_exit`; else if (type === 'shortEntry') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(strategyKey)) internalKey = `short_${strategyKey}`; } else if (type === 'shortExit') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(strategyKey)) internalKey = `cover_${strategyKey}`; } const config = strategyDescriptions[internalKey]; if (!config || !config.defaultParams) return; let params = {}; for (const pName in config.defaultParams) { const target = config.optimizeTargets?.find(t => t.name === pName); let randomVal; if (target?.range) { randomVal = getRandomValue(target.range.from, target.range.to, target.range.step); } else { if (pName.includes('Period') || pName.includes('period')) randomVal = getRandomValue(5, 100, 1); else if (pName === 'threshold' && internalKey.includes('rsi')) randomVal = getRandomValue(10, 90, 1); else if (pName === 'threshold' && internalKey.includes('williams')) randomVal = getRandomValue(-90, -10, 1); else if (pName === 'thresholdX' || pName === 'thresholdY') randomVal = getRandomValue(10, 90, 1); else if (pName === 'deviations') randomVal = getRandomValue(1, 3, 0.1); else if (pName === 'multiplier') randomVal = getRandomValue(1.5, 5, 0.1); else if (pName === 'percentage') randomVal = getRandomValue(1, 25, 0.5); else randomVal = config.defaultParams[pName]; } params[pName] = randomVal; } if (['ma_cross', 'ema_cross', 'short_ma_cross', 'short_ema_cross', 'cover_ma_cross', 'cover_ema_cross'].some(prefix => internalKey.startsWith(prefix))) { if (params.shortPeriod && params.longPeriod && params.shortPeriod >= params.longPeriod) { params.shortPeriod = getRandomValue(3, Math.max(4, params.longPeriod - 1), 1); console.log(`[Random] Adjusted ${type} shortPeriod to ${params.shortPeriod} (long: ${params.longPeriod})`); } } for (const pName in params) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const inputId = `${type}${idSfx}`; const inputEl = document.getElementById(inputId); if (inputEl) { inputEl.value = params[pName]; } else { console.warn(`[Random] Input element not found for ${type} - ${pName}: #${inputId}`); } } }; const randomEntryKey = getRandomElement(entryKeys); const randomExitKey = getRandomElement(exitKeys); document.getElementById('entryStrategy').value = randomEntryKey; document.getElementById('exitStrategy').value = randomExitKey; updateStrategyParams('entry'); updateStrategyParams('exit'); setRandomParams('entry', randomEntryKey); setRandomParams('exit', randomExitKey); if (document.getElementById('enableShortSelling').checked) { const randomShortEntryKey = getRandomElement(shortEntryKeys); const randomCoverKey = getRandomElement(coverKeys); document.getElementById('shortEntryStrategy').value = randomShortEntryKey; document.getElementById('shortExitStrategy').value = randomCoverKey; updateStrategyParams('shortEntry'); updateStrategyParams('shortExit'); setRandomParams('shortEntry', randomShortEntryKey.replace('short_', '')); setRandomParams('shortExit', randomCoverKey.replace('cover_', '')); } showSuccess("策略與參數已隨機設定！"); }
 
-// --- 撣???蟡其誨蝣潭?批???---
+// --- 市場切換和股票代碼智慧功能 ---
 
-// ?典?霈
-let currentMarket = 'TWSE'; // ?身?箔?撣?
-let isAutoSwitching = false; // ?脫迫?⊿?????
+// 全域變數
+let currentMarket = 'TWSE'; // 預設為上市
+let isAutoSwitching = false; // 防止無限重複切換
 // Patch Tag: LB-TW-NAMELOCK-20250616A
-let manualMarketOverride = false; // 雿輻????摰??湔???芸?颲刻?
-let manualOverrideCodeSnapshot = ''; // 蝝?孛?潮?摰??蟡其誨蝣?
-let isFetchingName = false; // ?脫迫???亥岷?∠巨?迂
+let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動辨識
+let manualOverrideCodeSnapshot = ''; // 紀錄觸發鎖定時的股票代碼
+let isFetchingName = false; // 防止重複查詢股票名稱
 // Patch Tag: LB-US-NAMECACHE-20250622A
 const stockNameLookupCache = new Map(); // Map<cacheKey, { info, cachedAt }>
 const STOCK_NAME_CACHE_LIMIT = 4096;
-const STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 撠?閮擃翰??
+const STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 小時記憶體快取
 const LOCAL_STOCK_NAME_CACHE_KEY = 'LB_TW_NAME_CACHE_V20250620A';
-const LOCAL_STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // ?啗?迂靽? 7 憭?
+const LOCAL_STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 台股名稱保留 7 天
 const LOCAL_US_NAME_CACHE_KEY = 'LB_US_NAME_CACHE_V20250622A';
-const LOCAL_US_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 蝢?迂靽? 3 憭?
+const LOCAL_US_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 美股名稱保留 3 天
 const TAIWAN_DIRECTORY_CACHE_KEY = 'LB_TW_DIRECTORY_CACHE_V20250620A';
-const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // ?啗摰皜 24 撠???
+const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單 24 小時過期
 const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
@@ -5412,15 +5397,15 @@ let taiwanDirectoryReadyPromise = null;
 hydrateTaiwanNameCache();
 hydrateUSNameCache();
 preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
-    console.warn('[Taiwan Directory] ?砍皜??憭望?:', error);
+    console.warn('[Taiwan Directory] 本地清單預載失敗:', error);
 });
 
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-NAME-CACHE-20250614A
 const MARKET_META = {
-    TWSE: { label: '銝?', fetchName: fetchStockNameFromTWSE },
-    TPEX: { label: '銝?', fetchName: fetchStockNameFromTPEX },
-    US: { label: '蝢', fetchName: fetchStockNameFromUS },
+    TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
+    TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
+    US: { label: '美股', fetchName: fetchStockNameFromUS },
 };
 
 function loadPersistentTaiwanNameCache() {
@@ -5453,7 +5438,7 @@ function loadPersistentTaiwanNameCache() {
         }
         return map;
     } catch (error) {
-        console.warn('[Stock Name] ?⊥?頛?啗?迂敹怠?:', error);
+        console.warn('[Stock Name] 無法載入台股名稱快取:', error);
         return new Map();
     }
 }
@@ -5488,7 +5473,7 @@ function loadPersistentUSNameCache() {
         }
         return map;
     } catch (error) {
-        console.warn('[Stock Name] ?⊥?頛蝢?迂敹怠?:', error);
+        console.warn('[Stock Name] 無法載入美股名稱快取:', error);
         return new Map();
     }
 }
@@ -5554,7 +5539,7 @@ function savePersistentTaiwanNameCache() {
         }));
         window.localStorage.setItem(LOCAL_STOCK_NAME_CACHE_KEY, JSON.stringify(payload));
     } catch (error) {
-        console.warn('[Stock Name] ?⊥?撖怠?啗?迂敹怠?:', error);
+        console.warn('[Stock Name] 無法寫入台股名稱快取:', error);
     }
 }
 
@@ -5569,7 +5554,7 @@ function savePersistentUSNameCache() {
         }));
         window.localStorage.setItem(LOCAL_US_NAME_CACHE_KEY, JSON.stringify(payload));
     } catch (error) {
-        console.warn('[Stock Name] ?⊥?撖怠蝢?迂敹怠?:', error);
+        console.warn('[Stock Name] 無法寫入美股名稱快取:', error);
     }
 }
 
@@ -5731,7 +5716,7 @@ function loadTaiwanDirectoryFromStorage() {
             cachedAt,
         };
     } catch (error) {
-        console.warn('[Taiwan Directory] ?⊥?霈??唳??桀翰??', error);
+        console.warn('[Taiwan Directory] 無法讀取本地清單快取:', error);
         return null;
     }
 }
@@ -5751,7 +5736,7 @@ function saveTaiwanDirectoryToStorage(payload) {
         };
         window.localStorage.setItem(TAIWAN_DIRECTORY_CACHE_KEY, JSON.stringify(record));
     } catch (error) {
-        console.warn('[Taiwan Directory] ?⊥?撖怠?砍皜敹怠?:', error);
+        console.warn('[Taiwan Directory] 無法寫入本地清單快取:', error);
     }
 }
 
@@ -5761,7 +5746,7 @@ function normaliseDirectoryEntry(entry) {
     const name = (entry.name || entry.stock_name || '').toString().trim();
     if (!stockId || !name) return null;
     const market = entry.market ? normalizeMarketValue(entry.market) : null;
-    const board = entry.board || (market === 'TWSE' ? '銝?' : market === 'TPEX' ? '銝?' : null);
+    const board = entry.board || (market === 'TWSE' ? '上市' : market === 'TPEX' ? '上櫃' : null);
     const instrumentType = entry.instrumentType || (entry.isETF ? 'ETF' : null);
     const isETF = entry.isETF === true || /^00\d{2,4}$/.test(stockId);
     const marketCategory = entry.marketCategory || entry.rawType || null;
@@ -5789,8 +5774,8 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
                     ? Object.values(payload.entries)
                     : [];
     const map = new Map();
-    const sourceLabel = payload.source || '?啗摰皜';
-    const versionLabel = payload.version ? `${sourceLabel}嚚?{payload.version}` : sourceLabel;
+    const sourceLabel = payload.source || '台股官方清單';
+    const versionLabel = payload.version ? `${sourceLabel}｜${payload.version}` : sourceLabel;
 
     for (const raw of rawEntries) {
         const entry = normaliseDirectoryEntry(raw);
@@ -5894,7 +5879,7 @@ async function preloadTaiwanDirectory(options = {}) {
         }
         const payload = await response.json();
         if (!payload || payload.status === 'error') {
-            throw new Error(payload?.message || '?啗摰皜???啣虜');
+            throw new Error(payload?.message || '台股官方清單回應異常');
         }
         const entries = payload.data && typeof payload.data === 'object' ? Object.values(payload.data) : [];
         applyTaiwanDirectoryPayload(
@@ -5911,7 +5896,7 @@ async function preloadTaiwanDirectory(options = {}) {
         recordTaiwanDirectoryBlobUsage(payload.cache || null);
     } catch (error) {
         taiwanDirectoryState.lastError = error;
-        console.warn('[Taiwan Directory] 頛憭望?:', error);
+        console.warn('[Taiwan Directory] 載入失敗:', error);
     } finally {
         taiwanDirectoryState.loading = false;
     }
@@ -5962,8 +5947,8 @@ function resolveCachedStockNameInfo(stockCode, preferredMarket) {
                 instrumentType: directoryEntry.instrumentType,
                 marketCategory: directoryEntry.marketCategory,
                 sourceLabel: taiwanDirectoryState.source
-                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `嚚?{taiwanDirectoryState.version}` : ''}`
-                    : '?啗摰皜',
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
                 infoSource: taiwanDirectoryState.source || 'Taiwan Directory',
                 directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
                 market: directoryEntry.market || preferredMarket || null,
@@ -6014,8 +5999,8 @@ function isLikelyTaiwanETF(symbol) {
 function deriveNameSourceLabel(market) {
     const normalized = normalizeMarketValue(market || '');
     if (normalized === 'US') return 'FinMind USStockInfo';
-    if (normalized === 'TPEX') return 'TPEX ?祇?鞈?';
-    if (normalized === 'TWSE') return 'TWSE ?交?鈭方?閮?;
+    if (normalized === 'TPEX') return 'TPEX 公開資訊';
+    if (normalized === 'TWSE') return 'TWSE 日成交資訊';
     return '';
 }
 
@@ -6114,14 +6099,14 @@ function formatStockNameDisplay(info, options = {}) {
 
     const suffixParts = [];
     if (options.autoSwitched && options.targetLabel) {
-        suffixParts.push(`撌脣??${options.targetLabel}`);
+        suffixParts.push(`已切換至${options.targetLabel}`);
     }
     if (options.fromCache) {
-        suffixParts.push('敹怠?');
+        suffixParts.push('快取');
     }
 
-    const main = `${info.name}${uniqueClassification.length > 0 ? `嚗?{uniqueClassification.join('??)}嚗 : ''}`;
-    const suffix = suffixParts.length > 0 ? `嚗?{suffixParts.join('??)}嚗 : '';
+    const main = `${info.name}${uniqueClassification.length > 0 ? `（${uniqueClassification.join('・')}）` : ''}`;
+    const suffix = suffixParts.length > 0 ? `（${suffixParts.join('・')}）` : '';
 
     return {
         text: `${main}${suffix}`,
@@ -6134,7 +6119,7 @@ function composeStockNameText(display, fallback = '') {
     return display.text || fallback;
 }
 
-// ?????游?????
+// 初始化市場切換功能
 function initializeMarketSwitch() {
     const marketSelect = document.getElementById('marketSelect');
     const stockNoInput = document.getElementById('stockNo');
@@ -6150,7 +6135,7 @@ function initializeMarketSwitch() {
 
         const triggeredByAuto = isAutoSwitching === true;
         currentMarket = nextMarket;
-        console.log(`[Market Switch] ???? ${currentMarket}`);
+        console.log(`[Market Switch] 切換到: ${currentMarket}`);
         if (triggeredByAuto) {
             manualMarketOverride = false;
             manualOverrideCodeSnapshot = '';
@@ -6181,7 +6166,7 @@ function initializeMarketSwitch() {
         manualOverrideCodeSnapshot = stockCode;
         hideStockName();
         if (stockCode === 'TAIEX') {
-            showStockName('?啁???', 'success');
+            showStockName('台灣加權指數', 'success');
             return;
         }
         if (stockCode) {
@@ -6197,7 +6182,7 @@ function initializeMarketSwitch() {
     });
 }
 
-// ?脫??賣 - ?踹??餌? API 隢?
+// 防抖函數 - 避免頻繁 API 請求
 let stockNameTimeout;
 function debouncedFetchStockName(stockCode, options = {}) {
     clearTimeout(stockNameTimeout);
@@ -6224,7 +6209,7 @@ async function resolveStockName(fetcher, stockCode, market) {
         const result = await fetcher(stockCode);
         return normalizeStockNameResult(result, { stockCode, market });
     } catch (error) {
-        console.warn('[Stock Name] ?亥岷??隤?', error);
+        console.warn('[Stock Name] 查詢時發生錯誤:', error);
         return null;
     }
 }
@@ -6243,19 +6228,19 @@ async function fetchStockName(stockCode, options = {}) {
         }
     }
     if (isFetchingName) {
-        console.log('[Stock Name] 撌脫??脰?銝剔??亥岷嚗歲?甈∟?瘙?);
+        console.log('[Stock Name] 已有進行中的查詢，跳過本次請求');
         return;
     }
     isFetchingName = true;
 
-    console.log(`[Stock Name] ?亥岷?∠巨?迂: ${normalizedCode} (撣: ${currentMarket})`);
+    console.log(`[Stock Name] 查詢股票名稱: ${normalizedCode} (市場: ${currentMarket})`);
 
     try {
-        showStockName('?亥岷銝?..', 'info');
+        showStockName('查詢中...', 'info');
         const allowAutoSwitch = !manualMarketOverride;
         const restrictToTaiwan = shouldRestrictToTaiwanMarkets(normalizedCode);
         if (restrictToTaiwan) {
-            console.log(`[Stock Name] ${normalizedCode} ??蝣潛?詨?嚗?摰閰Ｖ?撣?銝?靘?`);
+            console.log(`[Stock Name] ${normalizedCode} 前四碼為數字，限定查詢上市/上櫃來源`);
         }
         const searchOrder = allowAutoSwitch
             ? resolveStockNameSearchOrder(normalizedCode, currentMarket)
@@ -6267,7 +6252,7 @@ async function fetchStockName(stockCode, options = {}) {
         if (cacheHit && cacheHit.info) {
             if (cacheHit.cachedAt) {
                 const cachedISO = new Date(cacheHit.cachedAt).toISOString();
-                console.log(`[Stock Name] 敹怠??賭葉 ${cacheHit.market} 嚚?${cachedISO}`);
+                console.log(`[Stock Name] 快取命中 ${cacheHit.market} ｜ ${cachedISO}`);
             }
             if (cacheHit.market === currentMarket || !allowAutoSwitch) {
                 const display = formatStockNameDisplay(cacheHit.info, { fromCache: true });
@@ -6307,13 +6292,13 @@ async function fetchStockName(stockCode, options = {}) {
         const currentLabel = getMarketDisplayName(currentMarket);
         showMarketSwitchSuggestion(normalizedCode, currentLabel, null);
     } catch (error) {
-        console.error('[Stock Name] ?亥岷?航炊:', error);
-        showStockName('?亥岷憭望?', 'error');
+        console.error('[Stock Name] 查詢錯誤:', error);
+        showStockName('查詢失敗', 'error');
     } finally {
         isFetchingName = false;
     }
 }
-// 敺?TWSE ???∠巨?迂
+// 從 TWSE 取得股票名稱
 async function fetchStockNameFromTWSE(stockCode) {
     try {
         await ensureTaiwanDirectoryReady();
@@ -6321,10 +6306,10 @@ async function fetchStockNameFromTWSE(stockCode) {
         if (directoryEntry) {
             return {
                 name: directoryEntry.name,
-                board: directoryEntry.board || '銝?',
+                board: directoryEntry.board || '上市',
                 source: taiwanDirectoryState.source
-                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `嚚?{taiwanDirectoryState.version}` : ''}`
-                    : '?啗摰皜',
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
                 instrumentType: directoryEntry.instrumentType,
                 market: directoryEntry.market || 'TWSE',
                 marketCategory: directoryEntry.marketCategory || null,
@@ -6334,7 +6319,7 @@ async function fetchStockNameFromTWSE(stockCode) {
             };
         }
 
-        // 雿輻?嗆?蝚砌?憭拐??箸閰Ｘ??
+        // 使用當月第一天作為查詢日期
         const now = new Date();
         const queryDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}01`;
 
@@ -6346,14 +6331,14 @@ async function fetchStockNameFromTWSE(stockCode) {
         const data = await response.json();
         
         if (data.stat === 'OK' && data.title) {
-            // 敺?title ???∠巨?迂嚗虜?澆??綽?"110撟?1??2330 ?啁?????漱鞈?"
-            const match = data.title.match(/\d+撟廄d+?s+\d+\s+(.+?)\s+??漱鞈?/);
+            // 從 title 提取股票名稱，通常格式為："110年01月 2330 台積電 各日成交資訊"
+            const match = data.title.match(/\d+年\d+月\s+\d+\s+(.+?)\s+各日成交資訊/);
             if (match && match[1]) {
                 const name = match[1].trim();
                 return {
                     name,
-                    board: '銝?',
-                    source: 'TWSE ?交?鈭方?閮?,
+                    board: '上市',
+                    source: 'TWSE 日成交資訊',
                     instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
                 };
             }
@@ -6361,12 +6346,12 @@ async function fetchStockNameFromTWSE(stockCode) {
 
         return null;
     } catch (error) {
-        console.error('[TWSE API] ?亥岷?∠巨?迂憭望?:', error);
+        console.error('[TWSE API] 查詢股票名稱失敗:', error);
         return null;
     }
 }
 
-// 敺?TPEX ???∠巨?迂 (雿輻隞??隡箸??刻圾瘙慢ORS??)
+// 從 TPEX 取得股票名稱 (使用代理伺服器解決CORS問題)
 async function fetchStockNameFromTPEX(stockCode) {
     try {
         await ensureTaiwanDirectoryReady();
@@ -6374,10 +6359,10 @@ async function fetchStockNameFromTPEX(stockCode) {
         if (directoryEntry) {
             return {
                 name: directoryEntry.name,
-                board: directoryEntry.board || '銝?',
+                board: directoryEntry.board || '上櫃',
                 source: taiwanDirectoryState.source
-                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `嚚?{taiwanDirectoryState.version}` : ''}`
-                    : '?啗摰皜',
+                    ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                    : '台股官方清單',
                 instrumentType: directoryEntry.instrumentType,
                 market: directoryEntry.market || 'TPEX',
                 marketCategory: directoryEntry.marketCategory || null,
@@ -6387,35 +6372,35 @@ async function fetchStockNameFromTPEX(stockCode) {
             };
         }
 
-        console.log(`[TPEX Name] ?亥岷?∠巨隞?Ⅳ: ${stockCode}`);
+        console.log(`[TPEX Name] 查詢股票代碼: ${stockCode}`);
 
-        // ?寞?1: 雿輻隞??隡箸???(憒??舐)
+        // 方法1: 使用代理伺服器 (如果可用)
         const proxyResult = await fetchTPEXNameViaProxy(stockCode);
         if (proxyResult && !proxyResult.error && proxyResult.name) {
             return {
                 name: proxyResult.name.trim(),
-                board: '銝?',
-                source: proxyResult.source || 'TPEX ?祇?鞈?隞??',
+                board: '上櫃',
+                source: proxyResult.source || 'TPEX 公開資訊代理',
                 instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
             };
         }
 
-        // ?寞?2: 雿輻JSONP?孵??岫?PI
+        // 方法2: 使用JSONP方式嘗試舊API
         const jsonpResult = await fetchTPEXNameViaJSONP(stockCode);
         if (jsonpResult) {
             return {
                 name: typeof jsonpResult === 'string' ? jsonpResult.trim() : String(jsonpResult),
-                board: '銝?',
+                board: '上櫃',
                 source: 'TPEX JSONP',
                 instrumentType: isLikelyTaiwanETF(stockCode) ? 'ETF' : null,
             };
         }
 
-        console.warn(`[TPEX Name] ?⊥????∠巨隞?Ⅳ ${stockCode} ??蝔常);
+        console.warn(`[TPEX Name] 無法取得股票代碼 ${stockCode} 的名稱`);
         return null;
 
     } catch (error) {
-        console.error(`[TPEX Name] ?亥岷?∠巨?迂憭望?:`, error);
+        console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
         return null;
     }
 }
@@ -6425,7 +6410,7 @@ async function fetchStockNameFromUS(stockCode) {
         const url = `/api/us/?mode=info&stockNo=${encodeURIComponent(stockCode)}`;
         const response = await fetch(url);
         if (!response.ok) {
-            console.warn(`[US Name] API ???Ⅳ ${response.status}`);
+            console.warn(`[US Name] API 回傳狀態碼 ${response.status}`);
             return null;
         }
         const data = await response.json();
@@ -6456,14 +6441,14 @@ async function fetchStockNameFromUS(stockCode) {
         }
         return null;
     } catch (error) {
-        console.error('[US Name] ?亥岷?∠巨?迂憭望?:', error);
+        console.error('[US Name] 查詢股票名稱失敗:', error);
         return null;
     }
 }
 
-// 雿輻隞??隡箸??函?PEX?∠巨?迂
+// 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockNo) {
-    // **?靽格迤嚗蝙?其??摰??撘??渡?甇瑕?交?**
+    // **關鍵修正：使用一個固定的、格式完整的歷史日期**
     const placeholderDate = '113/01/01'; 
 
     const url = `/.netlify/functions/tpex-proxy?stockNo=${stockNo}&date=${placeholderDate}`;
@@ -6473,13 +6458,13 @@ async function fetchTPEXNameViaProxy(stockNo) {
     try {
         const response = await fetch(url);
         if (!response.ok) {
-            console.error(`[TPEX Proxy Name] 隞??? HTTP ${response.status}`);
+            console.error(`[TPEX Proxy Name] 代理回傳 HTTP ${response.status}`);
             return { error: `HTTP status ${response.status}` };
         }
         const data = await response.json();
 
         if (data.error) {
-            console.warn('[TPEX Proxy Name] 隞????航炊璅?', data);
+            console.warn('[TPEX Proxy Name] 代理回傳錯誤標記', data);
             return data;
         }
 
@@ -6493,16 +6478,16 @@ async function fetchTPEXNameViaProxy(stockNo) {
              return { error: 'no_data' };
         }
     } catch (error) {
-        console.error('[TPEX Proxy Name] ?澆隞????隤?', error);
+        console.error('[TPEX Proxy Name] 呼叫代理時發生錯誤:', error);
         return { error: error.message };
     }
 }
 
-// 雿輻JSONP?孵??岫?脣?TPEX?∠巨?迂
+// 使用JSONP方式嘗試獲取TPEX股票名稱
 function fetchTPEXNameViaJSONP(stockCode) {
     return new Promise((resolve) => {
         try {
-            // ?岫雿輻?舀JSONP??API蝡舫?
+            // 嘗試使用支援JSONP的舊API端點
             const now = new Date();
             const rocYear = now.getFullYear() - 1911;
             const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -6511,7 +6496,7 @@ function fetchTPEXNameViaJSONP(stockCode) {
             const callbackName = `tpexCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const script = document.createElement('script');
             
-            // 閮剔蔭頞?
+            // 設置超時
             const timeout = setTimeout(() => {
                 cleanup();
                 resolve(null);
@@ -6541,12 +6526,12 @@ function fetchTPEXNameViaJSONP(stockCode) {
                     }
                     resolve(null);
                 } catch (e) {
-                    console.warn(`[TPEX JSONP] 閫???航炊:`, e);
+                    console.warn(`[TPEX JSONP] 解析錯誤:`, e);
                     resolve(null);
                 }
             };
             
-            // ?岫JSONP?澆??RL
+            // 嘗試JSONP格式的URL
             script.src = `https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d=${queryDate}&stkno=${stockCode}&callback=${callbackName}`;
             script.onerror = () => {
                 cleanup();
@@ -6556,13 +6541,13 @@ function fetchTPEXNameViaJSONP(stockCode) {
             document.head.appendChild(script);
             
         } catch (error) {
-            console.warn(`[TPEX JSONP] 閮剔蔭?航炊:`, error);
+            console.warn(`[TPEX JSONP] 設置錯誤:`, error);
             resolve(null);
         }
     });
 }
 
-// 憿舐內撣??撱箄降
+// 顯示市場切換建議
 function showMarketSwitchSuggestion(stockCode, currentMarketLabel, targetMarket) {
     const stockNameDisplay = document.getElementById('stockNameDisplay');
     if (!stockNameDisplay) return;
@@ -6577,7 +6562,7 @@ function showMarketSwitchSuggestion(stockCode, currentMarketLabel, targetMarket)
                         <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
                     </svg>
                     <span class="text-yellow-800 text-xs">
-                        ${currentMarketLabel}撣?亦??{stockCode}??
+                        ${currentMarketLabel}市場查無「${stockCode}」
                     </span>
                 </div>
                 <button
@@ -6585,7 +6570,7 @@ function showMarketSwitchSuggestion(stockCode, currentMarketLabel, targetMarket)
                     class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                     onclick="switchToMarket('${targetMarket}', '${stockCode}')"
                 >
-                    ????{targetLabel}
+                    切換至${targetLabel}
                 </button>
             </div>
         `;
@@ -6596,7 +6581,7 @@ function showMarketSwitchSuggestion(stockCode, currentMarketLabel, targetMarket)
                     <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
                 </svg>
                 <span class="text-yellow-800 text-xs">
-                    ${currentMarketLabel}??瑹?蝢撣??曉??{stockCode}??
+                    ${currentMarketLabel}、上櫃與美股市場皆未找到「${stockCode}」。
                 </span>
             </div>
         `;
@@ -6609,7 +6594,7 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
     const targetLabel = getMarketDisplayName(normalizedMarket);
     const { presetInfo = null, fromCache = false, skipToast = false } = options;
 
-    console.log(`[Market Switch] ????${normalizedMarket} ?亥岷 ${normalizedCode}`);
+    console.log(`[Market Switch] 切換到 ${normalizedMarket} 查詢 ${normalizedCode}`);
 
     manualMarketOverride = false;
     manualOverrideCodeSnapshot = '';
@@ -6625,7 +6610,7 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
     setDefaultFees(normalizedCode);
 
     if (!presetInfo) {
-        showStockName('?亥岷銝?..', 'info');
+        showStockName('查詢中...', 'info');
     }
 
     try {
@@ -6640,22 +6625,22 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
             const display = formatStockNameDisplay(info, { autoSwitched: true, targetLabel, fromCache });
             showStockName(composeStockNameText(display, info.name), 'success');
             if (!skipToast) {
-                showSuccess(`撌脣??${targetLabel}撣銝行?? ${info.name}`);
+                showSuccess(`已切換至${targetLabel}市場並找到: ${info.name}`);
             }
             return info;
         }
 
-        showStockName(`?嗅?撣?亦??{normalizedCode}?, 'error');
+        showStockName(`當前市場查無「${normalizedCode}」`, 'error');
         return null;
     } catch (error) {
-        console.error('[Market Switch] ?亥岷?航炊:', error);
-        showStockName('?亥岷憭望?', 'error');
+        console.error('[Market Switch] 查詢錯誤:', error);
+        showStockName('查詢失敗', 'error');
         return null;
     } finally {
         isAutoSwitching = false;
     }
 }
-// 憿舐內?∠巨?迂
+// 顯示股票名稱
 function showStockName(name, type = 'success') {
     const stockNameDisplay = document.getElementById('stockNameDisplay');
     if (!stockNameDisplay) return;
@@ -6664,7 +6649,7 @@ function showStockName(name, type = 'success') {
     const safeText = escapeHtml(typeof name === 'string' ? name : String(name ?? ''));
     stockNameDisplay.innerHTML = `<span class="stock-name-text">${safeText}</span>`;
     
-    // ?脣??折??摮?蝝?閮剖?憿
+    // 獲取內部的文字元素來設定顏色
     const textElement = stockNameDisplay.querySelector('.stock-name-text');
     if (textElement) {
         if (type === 'success') {
@@ -6679,7 +6664,7 @@ function showStockName(name, type = 'success') {
     }
 }
 
-// ?梯??∠巨?迂
+// 隱藏股票名稱
 function hideStockName() {
     const stockNameDisplay = document.getElementById('stockNameDisplay');
     if (stockNameDisplay) {
@@ -6688,8 +6673,8 @@ function hideStockName() {
     }
 }
 
-// --- ?典??賣 ---
-// 撠?switchToMarket ?賣瘛餃??啣撅蝭?嚗? HTML onclick 隤輻
+// --- 全局函數 ---
+// 將 switchToMarket 函數添加到全局範圍，供 HTML onclick 調用
 window.getTaiwanDirectoryMeta = function getTaiwanDirectoryMeta() {
     return {
         ready: taiwanDirectoryState.ready,
@@ -6701,16 +6686,12 @@ window.getTaiwanDirectoryMeta = function getTaiwanDirectoryMeta() {
 };
 window.switchToMarket = switchToMarket;
 
-// --- ????---
-// ??DOM 頛摰?敺?憪?撣???
+// --- 初始化 ---
+// 在 DOM 載入完成後初始化市場切換功能
 document.addEventListener('DOMContentLoaded', function() {
-    // 撱園銝暺?憪?嚗Ⅱ靽隞?憪?摰?
+    // 延遲一點初始化，確保其他初始化完成
     setTimeout(() => {
         initializeMarketSwitch();
-        console.log('[Market Switch] 撣???撌脣?憪?');
+        console.log('[Market Switch] 市場切換功能已初始化');
     }, 100);
 });
-
-
-
-
