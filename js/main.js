@@ -31,6 +31,400 @@ function showError(m) { const el=document.getElementById("result"); el.innerHTML
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
 
+// Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
+const stagedEntryControls = (() => {
+    const state = {
+        container: null,
+        list: null,
+        addButton: null,
+        manual: false,
+    };
+
+    const getPositionSizeValue = () => {
+        const positionInput = document.getElementById('positionSize');
+        const value = parseFloat(positionInput?.value);
+        return Number.isFinite(value) && value > 0 ? value : 100;
+    };
+
+    const setManual = (flag) => {
+        state.manual = Boolean(flag);
+    };
+
+    const createStageRow = (initialValue) => {
+        const fallback = getPositionSizeValue();
+        const value = Number.isFinite(initialValue) && initialValue > 0 ? initialValue : fallback;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3';
+        row.dataset.entryStageRow = 'true';
+
+        const label = document.createElement('span');
+        label.className = 'text-xs font-medium min-w-[52px]';
+        label.style.color = 'var(--muted-foreground)';
+        label.dataset.stageLabel = 'true';
+        label.textContent = '第 1 段';
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.max = '100';
+        input.step = '0.1';
+        input.value = Number(value.toFixed ? value.toFixed(2) : value).toString();
+        input.className = 'w-full max-w-[120px] px-3 py-1.5 border border-border rounded-md text-sm focus:ring-accent focus:border-accent bg-input text-foreground';
+        input.setAttribute('data-entry-stage-percent', 'true');
+        input.addEventListener('input', () => setManual(true));
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '移除';
+        removeBtn.className = 'text-xs px-2 py-1 rounded border transition-colors';
+        removeBtn.style.borderColor = 'var(--border)';
+        removeBtn.style.color = 'var(--destructive)';
+        removeBtn.addEventListener('click', () => {
+            if (!state.list) return;
+            if (state.list.children.length <= 1) {
+                input.value = getPositionSizeValue().toString();
+                setManual(false);
+                return;
+            }
+            setManual(true);
+            row.remove();
+            renumberStages();
+        });
+
+        row.append(label, input, removeBtn);
+        return row;
+    };
+
+    const renumberStages = () => {
+        if (!state.list) return;
+        const rows = Array.from(state.list.querySelectorAll('[data-entry-stage-row="true"]'));
+        rows.forEach((row, index) => {
+            const label = row.querySelector('[data-stage-label="true"]');
+            if (label) label.textContent = `第 ${index + 1} 段`;
+            const removeBtn = row.querySelector('button');
+            if (removeBtn) {
+                removeBtn.disabled = rows.length <= 1;
+                removeBtn.classList.toggle('opacity-50', removeBtn.disabled);
+                removeBtn.classList.toggle('cursor-not-allowed', removeBtn.disabled);
+            }
+        });
+    };
+
+    const addStage = (value) => {
+        if (!state.list) return;
+        const row = createStageRow(value);
+        state.list.appendChild(row);
+        renumberStages();
+    };
+
+    const syncFromPositionSize = () => {
+        if (!state.list || state.manual) return;
+        const fallback = getPositionSizeValue();
+        const input = state.list.querySelector('input[data-entry-stage-percent]');
+        if (input) input.value = fallback.toString();
+        else addStage(fallback);
+        renumberStages();
+    };
+
+    const getValues = () => {
+        if (!state.list) return [];
+        return Array.from(
+            state.list.querySelectorAll('input[data-entry-stage-percent]')
+        )
+            .map((input) => parseFloat(input.value))
+            .filter((value) => Number.isFinite(value) && value > 0);
+    };
+
+    const setValues = (values, options = {}) => {
+        if (!state.list) return;
+        const fallback = getPositionSizeValue();
+        const validValues = Array.isArray(values)
+            ? values.filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        state.list.innerHTML = '';
+        if (validValues.length === 0) {
+            addStage(fallback);
+            setManual(false);
+            return;
+        }
+        validValues.forEach((val) => addStage(val));
+        const manualFlag = options.manual ?? (validValues.length > 1 || Math.abs(validValues[0] - fallback) > 1e-6);
+        setManual(manualFlag);
+        renumberStages();
+    };
+
+    const init = () => {
+        state.container = document.getElementById('stagedEntryContainer');
+        state.list = document.getElementById('entryStageList');
+        state.addButton = document.getElementById('addEntryStageButton');
+        if (!state.container || !state.list) return;
+
+        const positionInput = document.getElementById('positionSize');
+        if (positionInput) {
+            positionInput.addEventListener('input', () => syncFromPositionSize());
+        }
+
+        if (state.addButton) {
+            state.addButton.addEventListener('click', () => {
+                setManual(true);
+                addStage(getPositionSizeValue());
+            });
+        }
+
+        setValues([getPositionSizeValue()], { manual: false });
+    };
+
+    return {
+        init,
+        getValues,
+        setValues,
+        reset: (defaultPercent) => setValues([defaultPercent], { manual: false }),
+        syncFromPositionSize,
+        markManual: () => setManual(true),
+        clearManual: () => setManual(false),
+    };
+})();
+
+window.lazybacktestStagedEntry = {
+    init: stagedEntryControls.init,
+    getValues: () => stagedEntryControls.getValues(),
+    setValues: (values, options) => {
+        if (options && typeof options === 'object') {
+            stagedEntryControls.setValues(values, options);
+        } else {
+            stagedEntryControls.setValues(values);
+        }
+    },
+    resetToDefault: (percent) => stagedEntryControls.reset(percent),
+    syncFromPositionSize: () => stagedEntryControls.syncFromPositionSize(),
+    markManual: () => stagedEntryControls.markManual(),
+    clearManual: () => stagedEntryControls.clearManual(),
+};
+
+const stagedExitControls = (() => {
+    const state = {
+        container: null,
+        list: null,
+        addButton: null,
+        manual: false,
+    };
+
+    const getDefaultPercent = () => 100;
+
+    const setManual = (flag) => {
+        state.manual = Boolean(flag);
+    };
+
+    const createStageRow = (initialValue) => {
+        const fallback = getDefaultPercent();
+        const value = Number.isFinite(initialValue) && initialValue > 0 ? initialValue : fallback;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3';
+        row.dataset.exitStageRow = 'true';
+
+        const label = document.createElement('span');
+        label.className = 'text-xs font-medium min-w-[52px]';
+        label.style.color = 'var(--muted-foreground)';
+        label.dataset.stageLabel = 'true';
+        label.textContent = '第 1 段';
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.max = '100';
+        input.step = '0.1';
+        input.value = Number(value.toFixed ? value.toFixed(2) : value).toString();
+        input.className = 'w-full max-w-[120px] px-3 py-1.5 border border-border rounded-md text-sm focus:ring-accent focus:border-accent bg-input text-foreground';
+        input.setAttribute('data-exit-stage-percent', 'true');
+        input.addEventListener('input', () => setManual(true));
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '移除';
+        removeBtn.className = 'text-xs px-2 py-1 rounded border transition-colors';
+        removeBtn.style.borderColor = 'var(--border)';
+        removeBtn.style.color = 'var(--destructive)';
+        removeBtn.addEventListener('click', () => {
+            if (!state.list) return;
+            if (state.list.children.length <= 1) {
+                input.value = getDefaultPercent().toString();
+                setManual(false);
+                return;
+            }
+            setManual(true);
+            row.remove();
+            renumberStages();
+        });
+
+        row.append(label, input, removeBtn);
+        return row;
+    };
+
+    const renumberStages = () => {
+        if (!state.list) return;
+        const rows = Array.from(state.list.querySelectorAll('[data-exit-stage-row="true"]'));
+        rows.forEach((row, index) => {
+            const label = row.querySelector('[data-stage-label="true"]');
+            if (label) label.textContent = `第 ${index + 1} 段`;
+            const removeBtn = row.querySelector('button');
+            if (removeBtn) {
+                removeBtn.disabled = rows.length <= 1;
+                removeBtn.classList.toggle('opacity-50', removeBtn.disabled);
+                removeBtn.classList.toggle('cursor-not-allowed', removeBtn.disabled);
+            }
+        });
+    };
+
+    const addStage = (value) => {
+        if (!state.list) return;
+        const row = createStageRow(value);
+        state.list.appendChild(row);
+        renumberStages();
+    };
+
+    const getValues = () => {
+        if (!state.list) return [];
+        return Array.from(
+            state.list.querySelectorAll('input[data-exit-stage-percent]')
+        )
+            .map((input) => parseFloat(input.value))
+            .filter((value) => Number.isFinite(value) && value > 0);
+    };
+
+    const setValues = (values, options = {}) => {
+        if (!state.list) return;
+        const fallback = getDefaultPercent();
+        const validValues = Array.isArray(values)
+            ? values.filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        state.list.innerHTML = '';
+        if (validValues.length === 0) {
+            addStage(fallback);
+            setManual(false);
+            return;
+        }
+        validValues.forEach((val) => addStage(val));
+        const manualFlag = options.manual ?? (validValues.length > 1 || Math.abs(validValues[0] - fallback) > 1e-6);
+        setManual(manualFlag);
+        renumberStages();
+    };
+
+    const init = () => {
+        state.container = document.getElementById('stagedExitContainer');
+        state.list = document.getElementById('exitStageList');
+        state.addButton = document.getElementById('addExitStageButton');
+        if (!state.container || !state.list) return;
+
+        if (state.addButton) {
+            state.addButton.addEventListener('click', () => {
+                setManual(true);
+                addStage(getDefaultPercent());
+            });
+        }
+
+        setValues([getDefaultPercent()], { manual: false });
+    };
+
+    return {
+        init,
+        getValues,
+        setValues,
+        reset: (defaultPercent) => setValues([defaultPercent], { manual: false }),
+        markManual: () => setManual(true),
+        clearManual: () => setManual(false),
+    };
+})();
+
+window.lazybacktestStagedExit = {
+    init: stagedExitControls.init,
+    getValues: () => stagedExitControls.getValues(),
+    setValues: (values, options) => {
+        if (options && typeof options === 'object') {
+            stagedExitControls.setValues(values, options);
+        } else {
+            stagedExitControls.setValues(values);
+        }
+    },
+    resetToDefault: (percent) => stagedExitControls.reset(percent),
+    markManual: () => stagedExitControls.markManual(),
+    clearManual: () => stagedExitControls.clearManual(),
+};
+
+const multiStagePanelController = (() => {
+    const state = {
+        container: null,
+        toggle: null,
+        icon: null,
+        content: null,
+        expanded: false,
+    };
+
+    const ensureElements = () => {
+        if (state.container && state.toggle && state.icon && state.content) {
+            return true;
+        }
+        state.container = document.getElementById('multiStagePanel');
+        state.toggle = document.getElementById('multiStageToggle');
+        state.icon = document.getElementById('multiStageToggleIcon');
+        state.content = document.getElementById('multiStageContent');
+        return Boolean(state.container && state.toggle && state.icon && state.content);
+    };
+
+    const applyState = () => {
+        if (!ensureElements()) return;
+        const expanded = Boolean(state.expanded);
+        state.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (expanded) {
+            state.content.classList.remove('hidden');
+            state.icon.textContent = '−';
+        } else {
+            state.content.classList.add('hidden');
+            state.icon.textContent = '+';
+        }
+    };
+
+    const setExpanded = (flag) => {
+        state.expanded = Boolean(flag);
+        applyState();
+    };
+
+    const toggle = () => {
+        setExpanded(!state.expanded);
+    };
+
+    const bindEvents = () => {
+        if (!ensureElements()) return;
+        state.toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggle();
+        });
+    };
+
+    const init = () => {
+        if (!ensureElements()) return;
+        state.expanded = state.toggle.getAttribute('aria-expanded') === 'true';
+        bindEvents();
+        applyState();
+    };
+
+    return {
+        init,
+        open: () => setExpanded(true),
+        close: () => setExpanded(false),
+        toggle,
+        isOpen: () => Boolean(state.expanded),
+        ensure: ensureElements,
+    };
+})();
+
+window.lazybacktestMultiStagePanel = {
+    init: () => multiStagePanelController.init(),
+    open: () => multiStagePanelController.open(),
+    close: () => multiStagePanelController.close(),
+    toggle: () => multiStagePanelController.toggle(),
+    isOpen: () => multiStagePanelController.isOpen(),
+};
+
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
     open: false,
@@ -1444,6 +1838,22 @@ function getBacktestParams() {
     const endDate = document.getElementById('endDate')?.value;
     const initialCapital = parseFloat(document.getElementById('initialCapital')?.value) || 100000;
     const positionSize = parseFloat(document.getElementById('positionSize')?.value) || 100;
+    const stagedEntryValues = (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.getValues === 'function')
+        ? window.lazybacktestStagedEntry.getValues()
+        : [];
+    const entryStages = Array.isArray(stagedEntryValues) && stagedEntryValues.length > 0
+        ? stagedEntryValues.filter((value) => Number.isFinite(value) && value > 0)
+        : [positionSize];
+    const entryStagingModeSelect = document.getElementById('entryStagingMode');
+    const entryStagingMode = entryStagingModeSelect?.value || 'signal_repeat';
+    const stagedExitValues = (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.getValues === 'function')
+        ? window.lazybacktestStagedExit.getValues()
+        : [];
+    const exitStages = Array.isArray(stagedExitValues) && stagedExitValues.length > 0
+        ? stagedExitValues.filter((value) => Number.isFinite(value) && value > 0)
+        : [100];
+    const exitStagingModeSelect = document.getElementById('exitStagingMode');
+    const exitStagingMode = exitStagingModeSelect?.value || 'signal_repeat';
     const stopLoss = parseFloat(document.getElementById('stopLoss')?.value) || 0;
     const takeProfit = parseFloat(document.getElementById('takeProfit')?.value) || 0;
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
@@ -1489,6 +1899,9 @@ function getBacktestParams() {
         exitStrategy,
         entryParams,
         exitParams,
+        entryStagingMode,
+        exitStages,
+        exitStagingMode,
         enableShorting,
         shortEntryStrategy,
         shortExitStrategy,
@@ -1499,6 +1912,7 @@ function getBacktestParams() {
         positionBasis,
         market,
         marketType: currentMarket,
+        entryStages,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
@@ -1531,6 +1945,16 @@ function validateBacktestParams(p) {
     if (new Date(p.startDate) >= new Date(p.endDate)) { showError('結束日期需晚於開始日期'); return false; }
     if (p.initialCapital <= 0) { showError('本金需>0'); return false; }
     if (p.positionSize <= 0 || p.positionSize > 100) { showError('部位大小1-100%'); return false; }
+    if (!Array.isArray(p.entryStages) || p.entryStages.length === 0) { showError('請設定至少一個進場百分比'); return false; }
+    if (p.entryStages.some((val) => typeof val !== 'number' || !Number.isFinite(val) || val <= 0 || val > 100)) {
+        showError('分段進場百分比需介於1-100%');
+        return false;
+    }
+    if (!Array.isArray(p.exitStages) || p.exitStages.length === 0) { showError('請設定至少一個出場百分比'); return false; }
+    if (p.exitStages.some((val) => typeof val !== 'number' || !Number.isFinite(val) || val <= 0 || val > 100)) {
+        showError('分段出場百分比需介於1-100%');
+        return false;
+    }
     if (p.stopLoss < 0 || p.stopLoss > 100) { showError('停損0-100%'); return false; }
     if (p.takeProfit < 0) { showError('停利>=0%'); return false; }
     if (p.buyFee < 0) { showError('買入手續費不能小於 0%'); return false; }
@@ -1875,6 +2299,18 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
+
+        if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
+            window.lazybacktestMultiStagePanel.init();
+        }
+
+        if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.init === 'function') {
+            window.lazybacktestStagedEntry.init();
+        }
+
+        if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.init === 'function') {
+            window.lazybacktestStagedExit.init();
+        }
 
         // 初始化資料來源測試面板
         initDataSourceTester();

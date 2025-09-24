@@ -1,6 +1,8 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
+
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -2495,6 +2497,85 @@ function renderIndicatorCell(columnGroup, rowIndex) {
     return lines.length > 0 ? lines.join('<br>') : '—';
 }
 
+function formatStageModeLabel(mode, type) {
+    if (!mode) return '';
+    if (type === 'entry') {
+        return mode === 'price_pullback' ? '價格回落加碼' : '策略訊號再觸發';
+    }
+    if (type === 'exit') {
+        return mode === 'price_rally' ? '價格走高分批出場' : '策略訊號再觸發';
+    }
+    return '';
+}
+
+function resolveStageModeDisplay(stageCandidate, stageMode, type) {
+    if (stageCandidate && stageCandidate.isSingleFull) {
+        return '皆可';
+    }
+    const explicitLabel = stageMode && typeof stageMode === 'object' && typeof stageMode.label === 'string'
+        ? stageMode.label
+        : '';
+    const modeValue = stageMode && typeof stageMode === 'object' && stageMode.value !== undefined
+        ? stageMode.value
+        : stageMode;
+    const fallbackLabel = formatStageModeLabel(modeValue, type);
+    return explicitLabel || fallbackLabel || '—';
+}
+
+function renderStageStateCell(state, context) {
+    if (!state || typeof state !== 'object') return '—';
+    const type = context?.type === 'exit' ? 'exit' : 'entry';
+    const parts = [];
+    const modeLabel = formatStageModeLabel(state.mode, type);
+    if (modeLabel) parts.push(escapeHtml(modeLabel));
+
+    if (type === 'entry') {
+        if (Number.isFinite(state.filledStages) && Number.isFinite(state.totalStages)) {
+            parts.push(`已進 ${state.filledStages}/${state.totalStages} 段`);
+        }
+        if (Number.isFinite(state.sharesHeld)) {
+            parts.push(`持股 ${state.sharesHeld} 股`);
+        }
+        if (Number.isFinite(state.averageEntryPrice)) {
+            parts.push(`均價 ${state.averageEntryPrice.toFixed(2)}`);
+        }
+        if (Number.isFinite(state.lastStagePrice)) {
+            parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
+        }
+        if (state.totalStages > state.filledStages) {
+            if (state.mode === 'price_pullback' && Number.isFinite(state.nextTriggerPrice)) {
+                parts.push(`待觸發：收盤 < ${state.nextTriggerPrice.toFixed(2)}`);
+            } else {
+                parts.push('待觸發：策略訊號');
+            }
+        } else if (state.totalStages > 0 && state.filledStages >= state.totalStages) {
+            parts.push('已全數進場');
+        }
+    } else {
+        if (Number.isFinite(state.executedStages) && Number.isFinite(state.totalStages)) {
+            parts.push(`已出 ${state.executedStages}/${state.totalStages} 段`);
+        }
+        if (Number.isFinite(state.remainingShares)) {
+            parts.push(`剩餘 ${state.remainingShares} 股`);
+        }
+        if (Number.isFinite(state.lastStagePrice)) {
+            parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
+        }
+        if (state.totalStages > state.executedStages) {
+            if (state.mode === 'price_rally' && Number.isFinite(state.nextTriggerPrice)) {
+                parts.push(`待觸發：收盤 > ${state.nextTriggerPrice.toFixed(2)}`);
+            } else {
+                parts.push('待觸發：策略訊號');
+            }
+        } else if (state.totalStages > 0 && state.executedStages >= state.totalStages) {
+            parts.push('已全數出場');
+        }
+    }
+
+    if (parts.length === 0) return '—';
+    return parts.map((part) => escapeHtml(part)).join('<br>');
+}
+
 function openPriceInspectorModal() {
     if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
         showError('尚未取得價格資料，請先執行回測。');
@@ -2521,6 +2602,12 @@ function openPriceInspectorModal() {
     // Patch Tag: LB-PRICE-INSPECTOR-20250512A
     const headerRow = document.getElementById('priceInspectorHeaderRow');
     const indicatorColumns = collectPriceInspectorIndicatorColumns();
+    const longEntryStageStates = Array.isArray(lastOverallResult?.longEntryStageStates)
+        ? lastOverallResult.longEntryStageStates
+        : [];
+    const longExitStageStates = Array.isArray(lastOverallResult?.longExitStageStates)
+        ? lastOverallResult.longExitStageStates
+        : [];
     const baseHeaderConfig = [
         { key: 'date', label: '日期', align: 'left' },
         { key: 'open', label: '開盤', align: 'right' },
@@ -2533,6 +2620,10 @@ function openPriceInspectorModal() {
     indicatorColumns.forEach((col) => {
         baseHeaderConfig.push({ key: col.key, label: col.header, align: 'left', isIndicator: true, series: col.series });
     });
+    baseHeaderConfig.push(
+        { key: 'longEntryStage', label: '多單進場分段', align: 'left' },
+        { key: 'longExitStage', label: '多單出場分段', align: 'left' },
+    );
     baseHeaderConfig.push(
         { key: 'position', label: '倉位狀態', align: 'left' },
         { key: 'formula', label: '計算公式', align: 'left' },
@@ -2600,6 +2691,10 @@ function openPriceInspectorModal() {
                     `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`
                 )
                 .join('');
+            const entryStageState = longEntryStageStates[rowIndex] || null;
+            const exitStageState = longExitStageStates[rowIndex] || null;
+            const entryStageCell = renderStageStateCell(entryStageState, { type: 'entry' });
+            const exitStageCell = renderStageStateCell(exitStageState, { type: 'exit' });
             const positionLabel = lastPositionStates[rowIndex] || '空手';
             return `
                 <tr>
@@ -2611,6 +2706,8 @@ function openPriceInspectorModal() {
                     <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
                     ${indicatorCells}
+                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${entryStageCell}</td>
+                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${exitStageCell}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(positionLabel)}</td>
                     <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                     <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
@@ -3760,6 +3857,747 @@ function renderOptimizationTable(optName, optLabel) {
 }
 function addSortListeners() { const table=document.querySelector("#optimization-results .optimization-table"); if(!table)return; const headers=table.querySelectorAll("th.sortable-header"); headers.forEach(header=>{ header.onclick=()=>{ const sortKey=header.dataset.sortKey; if(!sortKey)return; if(sortState.key===sortKey)sortState.direction=sortState.direction==='asc'?'desc':'asc'; else {sortState.key=sortKey; sortState.direction='desc';} sortTable();}; }); }
 function sortTable() { const{key,direction}=sortState; if(!currentOptimizationResults||currentOptimizationResults.length===0)return; currentOptimizationResults.sort((a,b)=>{ let vA=a[key]; let vB=b[key]; if(key==='sortinoRatio'){vA=isFinite(vA)?vA:(direction==='asc'?Infinity:-Infinity); vB=isFinite(vB)?vB:(direction==='asc'?Infinity:-Infinity);} vA=(vA===null||vA===undefined||isNaN(vA))?(direction==='asc'?Infinity:-Infinity):vA; vB=(vB===null||vB===undefined||isNaN(vB))?(direction==='asc'?Infinity:-Infinity):vB; if(vA<vB)return direction==='asc'?-1:1; if(vA>vB)return direction==='asc'?1:-1; return 0; }); const optTitle=document.getElementById('optimization-title').textContent; let optLabel='參數值'; const match=optTitle.match(/\((.+)\)/); if(match&&match[1])optLabel=match[1]; renderOptimizationTable(sortState.key, optLabel); const headers=document.querySelectorAll("#optimization-results th.sortable-header"); headers.forEach(h=>{h.classList.remove('sort-asc','sort-desc'); if(h.dataset.sortKey===key)h.classList.add(direction==='asc'?'sort-asc':'sort-desc');}); addSortListeners(); }
+const stagingOptimizationState = {
+    running: false,
+    results: [],
+    bestResult: null,
+    combinations: [],
+};
+
+function formatStagePercentages(values) {
+    if (!Array.isArray(values) || values.length === 0) return '—';
+    return values
+        .map((val) => {
+            if (!Number.isFinite(val)) return '0%';
+            const rounded = Number.parseFloat(val.toFixed(2));
+            if (Math.abs(rounded) < 0.01) return '0%';
+            if (Math.abs(rounded - Math.round(rounded)) < 0.01) {
+                return `${Math.round(rounded)}%`;
+            }
+            return `${rounded.toFixed(2)}%`;
+        })
+        .join(' / ');
+}
+
+function scaleStageWeights(base, weights) {
+    if (!Array.isArray(weights) || weights.length === 0) return [];
+    const sanitizedWeights = weights
+        .map((weight) => Number.parseFloat(weight))
+        .filter((weight) => Number.isFinite(weight) && weight > 0);
+    if (sanitizedWeights.length === 0) return [];
+    if (!Number.isFinite(base) || base <= 0) {
+        return sanitizedWeights.map((value) => Number.parseFloat(value.toFixed(2)));
+    }
+    const totalWeight = sanitizedWeights.reduce((sum, weight) => sum + weight, 0);
+    if (!Number.isFinite(totalWeight) || totalWeight <= 0) return [];
+    const scaled = [];
+    let allocated = 0;
+    sanitizedWeights.forEach((weight, index) => {
+        let value = (base * weight) / totalWeight;
+        value = Number.isFinite(value) ? value : 0;
+        value = Number.parseFloat(value.toFixed(2));
+        if (value <= 0) {
+            value = Number.parseFloat((base / sanitizedWeights.length).toFixed(2));
+        }
+        if (index === sanitizedWeights.length - 1) {
+            value = Number.parseFloat((base - allocated).toFixed(2));
+        }
+        allocated = Number.parseFloat((allocated + value).toFixed(2));
+        scaled.push(Math.max(value, 0.1));
+    });
+    const scaledTotal = scaled.reduce((sum, val) => sum + val, 0);
+    const diff = Number.parseFloat((base - scaledTotal).toFixed(2));
+    if (Math.abs(diff) >= 0.01 && scaled.length > 0) {
+        const lastIndex = scaled.length - 1;
+        const adjusted = Number.parseFloat((scaled[lastIndex] + diff).toFixed(2));
+        scaled[lastIndex] = Math.max(adjusted, 0.1);
+    }
+    return scaled.map((val) => Number.parseFloat(val.toFixed(2)));
+}
+
+function normalizeStageValues(values, base) {
+    if (!Array.isArray(values) || values.length === 0) return [];
+    const sanitized = values
+        .map((val) => Number.parseFloat(val))
+        .filter((val) => Number.isFinite(val) && val > 0);
+    if (sanitized.length === 0) return [];
+    if (!Number.isFinite(base) || base <= 0) {
+        return sanitized.map((val) => Number.parseFloat(val.toFixed(2)));
+    }
+    const total = sanitized.reduce((sum, val) => sum + val, 0);
+    if (Math.abs(total - base) < 0.01) {
+        return sanitized.map((val) => Number.parseFloat(val.toFixed(2)));
+    }
+    return scaleStageWeights(base, sanitized);
+}
+
+function dedupeStageCandidates(candidates) {
+    const map = new Map();
+    candidates.forEach((candidate) => {
+        if (!candidate || !Array.isArray(candidate.values) || candidate.values.length === 0) return;
+        const key = candidate.values.map((val) => Number.parseFloat(val).toFixed(2)).join('|');
+        if (!map.has(key)) {
+            map.set(key, candidate);
+        }
+    });
+    return Array.from(map.values());
+}
+
+function isFullAllocationSingleStage(values, base) {
+    if (!Array.isArray(values) || values.length === 0) return false;
+    const sanitized = values
+        .map((val) => Number.parseFloat(val))
+        .filter((val) => Number.isFinite(val) && val > 0);
+    if (sanitized.length !== 1) return false;
+    const total = sanitized[0];
+    if (!Number.isFinite(total)) return false;
+    const target = Number.isFinite(base) && base > 0 ? base : total;
+    const tolerance = Math.max(0.1, target * 0.001);
+    return Math.abs(total - target) <= tolerance;
+}
+
+function resolveModesForCandidate(isSingleFull, options, preferredValue) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+    if (!isSingleFull) return options.slice();
+    const preferred = preferredValue ? options.find((opt) => opt && opt.value === preferredValue) : null;
+    return [preferred || options[0]];
+}
+
+function buildStagingOptimizationCombos(params) {
+    const positionSize = Number.parseFloat(params.positionSize) || 100;
+    const entryBase = Math.max(positionSize, 1);
+    const exitBase = 100;
+
+    const entryCandidates = [];
+    const normalizedEntry = normalizeStageValues(params.entryStages, entryBase);
+    if (normalizedEntry.length > 0) {
+        entryCandidates.push({
+            id: 'entry_current',
+            label: '目前設定',
+            values: normalizedEntry,
+            display: formatStagePercentages(normalizedEntry),
+            isSingleFull: isFullAllocationSingleStage(normalizedEntry, entryBase),
+        });
+    }
+    const entryProfiles = [
+        { id: 'entry_single', label: '單段滿倉', weights: [1] },
+        { id: 'entry_even_two', label: '兩段平均', weights: [0.5, 0.5] },
+        { id: 'entry_front_heavy', label: '先重後輕 (60/40)', weights: [0.6, 0.4] },
+        { id: 'entry_back_heavy', label: '先輕後重 (40/60)', weights: [0.4, 0.6] },
+        { id: 'entry_pyramid', label: '金字塔 (50/30/20)', weights: [0.5, 0.3, 0.2] },
+        { id: 'entry_reverse_pyramid', label: '倒金字塔 (20/30/50)', weights: [0.2, 0.3, 0.5] },
+        { id: 'entry_ladder', label: '階梯遞增 (30/30/40)', weights: [0.3, 0.3, 0.4] },
+    ];
+    entryProfiles.forEach((profile) => {
+        const values = scaleStageWeights(entryBase, profile.weights);
+        if (values.length === 0) return;
+        entryCandidates.push({
+            id: profile.id,
+            label: profile.label,
+            values,
+            display: formatStagePercentages(values),
+            isSingleFull: isFullAllocationSingleStage(values, entryBase),
+        });
+    });
+    const dedupedEntry = dedupeStageCandidates(entryCandidates);
+
+    const exitCandidates = [];
+    const normalizedExit = normalizeStageValues(params.exitStages, exitBase);
+    if (normalizedExit.length > 0) {
+        exitCandidates.push({
+            id: 'exit_current',
+            label: '目前設定',
+            values: normalizedExit,
+            display: formatStagePercentages(normalizedExit),
+            isSingleFull: isFullAllocationSingleStage(normalizedExit, exitBase),
+        });
+    }
+    const exitProfiles = [
+        { id: 'exit_single', label: '一次出清', weights: [1] },
+        { id: 'exit_even_two', label: '兩段平均', weights: [0.5, 0.5] },
+        { id: 'exit_front_heavy', label: '先重後輕 (60/40)', weights: [0.6, 0.4] },
+        { id: 'exit_back_heavy', label: '先輕後重 (40/60)', weights: [0.4, 0.6] },
+        { id: 'exit_triplet', label: '三段階梯 (30/30/40)', weights: [0.3, 0.3, 0.4] },
+        { id: 'exit_tail_hold', label: '保留尾段 (25/25/50)', weights: [0.25, 0.25, 0.5] },
+    ];
+    exitProfiles.forEach((profile) => {
+        const values = scaleStageWeights(exitBase, profile.weights);
+        if (values.length === 0) return;
+        exitCandidates.push({
+            id: profile.id,
+            label: profile.label,
+            values,
+            display: formatStagePercentages(values),
+            isSingleFull: isFullAllocationSingleStage(values, exitBase),
+        });
+    });
+    const dedupedExit = dedupeStageCandidates(exitCandidates);
+
+    const entryModeOptionsRaw = [
+        { value: 'price_pullback', label: formatStageModeLabel('price_pullback', 'entry') || '價格回落加碼' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'entry') || '策略訊號再觸發' },
+    ];
+    const exitModeOptionsRaw = [
+        { value: 'price_rally', label: formatStageModeLabel('price_rally', 'exit') || '價格走高分批出場' },
+        { value: 'signal_repeat', label: formatStageModeLabel('signal_repeat', 'exit') || '策略訊號再觸發' },
+    ];
+
+    const sortModeOptions = (options, targetValue) => {
+        if (!targetValue) return options.slice();
+        return options.slice().sort((a, b) => {
+            if (a.value === targetValue) return -1;
+            if (b.value === targetValue) return 1;
+            return 0;
+        });
+    };
+
+    const entryModeOptions = sortModeOptions(entryModeOptionsRaw, params.entryStagingMode || null);
+    const exitModeOptions = sortModeOptions(exitModeOptionsRaw, params.exitStagingMode || null);
+
+    const combos = [];
+    dedupedEntry.forEach((entryCandidate) => {
+        const entryModes = resolveModesForCandidate(
+            isFullAllocationSingleStage(entryCandidate.values, entryBase),
+            entryModeOptions,
+            params.entryStagingMode || null,
+        );
+        if (!entryModes.length) return;
+        dedupedExit.forEach((exitCandidate) => {
+            const exitModes = resolveModesForCandidate(
+                isFullAllocationSingleStage(exitCandidate.values, exitBase),
+                exitModeOptions,
+                params.exitStagingMode || null,
+            );
+            if (!exitModes.length) return;
+            entryModes.forEach((entryMode) => {
+                exitModes.forEach((exitMode) => {
+                    combos.push({
+                        entry: entryCandidate,
+                        exit: exitCandidate,
+                        entryMode,
+                        exitMode,
+                    });
+                });
+            });
+        });
+    });
+
+    return {
+        entryCandidates: dedupedEntry,
+        exitCandidates: dedupedExit,
+        combos,
+    };
+}
+
+function buildCachedMetaFromEntry(entry, effectiveStartDate, lookbackDays) {
+    if (!entry) return null;
+    return {
+        summary: entry.summary || null,
+        adjustments: Array.isArray(entry.adjustments) ? entry.adjustments : [],
+        debugSteps: Array.isArray(entry.debugSteps) ? entry.debugSteps : [],
+        adjustmentFallbackApplied: Boolean(entry.adjustmentFallbackApplied),
+        priceSource: entry.priceSource || null,
+        dataSource: entry.dataSource || null,
+        splitAdjustment: Boolean(entry.splitAdjustment),
+        fetchRange: entry.fetchRange || null,
+        effectiveStartDate: entry.effectiveStartDate || effectiveStartDate,
+        lookbackDays: entry.lookbackDays || lookbackDays,
+        diagnostics: entry.fetchDiagnostics || entry.datasetDiagnostics || null,
+    };
+}
+
+function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cacheKey, effectiveStartDate, lookbackDays, existingEntry) {
+    if (!data) return existingEntry || null;
+    const priceMode = curSettings.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw');
+
+    const mergeRawData = Array.isArray(data.rawData) && data.rawData.length > 0;
+    const mergedDataMap = new Map(Array.isArray(existingEntry?.data) ? existingEntry.data.map((row) => [row.date, row]) : []);
+    if (mergeRawData) {
+        data.rawData.forEach((row) => {
+            if (row && row.date) {
+                mergedDataMap.set(row.date, row);
+            }
+        });
+    }
+    let mergedData = Array.from(mergedDataMap.values());
+    mergedData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    let fetchedRange = null;
+    if (data?.rawMeta?.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end) {
+        fetchedRange = {
+            start: data.rawMeta.fetchRange.start,
+            end: data.rawMeta.fetchRange.end,
+        };
+    } else if (curSettings.startDate && curSettings.endDate) {
+        fetchedRange = { start: curSettings.startDate, end: curSettings.endDate };
+    }
+
+    if (!mergeRawData && Array.isArray(data.rawDataUsed) && data.rawDataUsed.length > 0) {
+        mergedData = data.rawDataUsed.slice();
+        mergedData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        if (!fetchedRange && mergedData.length > 0) {
+            fetchedRange = {
+                start: mergedData[0].date || curSettings.startDate,
+                end: mergedData[mergedData.length - 1].date || curSettings.endDate,
+            };
+        }
+    }
+
+    if (!mergedData || mergedData.length === 0) {
+        return existingEntry || null;
+    }
+
+    const mergedCoverage = mergeIsoCoverage(
+        existingEntry?.coverage || [],
+        fetchedRange && fetchedRange.start && fetchedRange.end ? { start: fetchedRange.start, end: fetchedRange.end } : null,
+    );
+    const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
+    if (dataSource) sourceSet.add(dataSource);
+    const sourceArray = Array.from(sourceSet);
+
+    const rawMeta = data.rawMeta || {};
+    const dataDebug = data.dataDebug || {};
+    const debugSteps = Array.isArray(rawMeta.debugSteps)
+        ? rawMeta.debugSteps
+        : (Array.isArray(dataDebug.debugSteps) ? dataDebug.debugSteps : []);
+    const summaryMeta = rawMeta.summary || dataDebug.summary || existingEntry?.summary || null;
+    const adjustmentsMeta = Array.isArray(rawMeta.adjustments)
+        ? rawMeta.adjustments
+        : (Array.isArray(dataDebug.adjustments) ? dataDebug.adjustments : existingEntry?.adjustments || []);
+    const fallbackFlag = typeof rawMeta.adjustmentFallbackApplied === 'boolean'
+        ? rawMeta.adjustmentFallbackApplied
+        : (typeof dataDebug.adjustmentFallbackApplied === 'boolean'
+            ? dataDebug.adjustmentFallbackApplied
+            : Boolean(existingEntry?.adjustmentFallbackApplied));
+    const priceSourceMeta = rawMeta.priceSource || dataDebug.priceSource || existingEntry?.priceSource || null;
+    const splitDiagnosticsMeta = rawMeta.splitDiagnostics || dataDebug.splitDiagnostics || existingEntry?.splitDiagnostics || null;
+    const finmindStatusMeta = rawMeta.finmindStatus || dataDebug.finmindStatus || existingEntry?.finmindStatus || null;
+    const adjustmentDebugLogMeta = rawMeta.adjustmentDebugLog || dataDebug.adjustmentDebugLog || existingEntry?.adjustmentDebugLog || null;
+    const adjustmentChecksMeta = rawMeta.adjustmentChecks || dataDebug.adjustmentChecks || existingEntry?.adjustmentChecks || null;
+
+    const updatedEntry = {
+        ...(existingEntry || {}),
+        data: mergedData,
+        coverage: mergedCoverage,
+        dataSources: sourceArray,
+        dataSource: summariseSourceLabels(sourceArray),
+        fetchedAt: Date.now(),
+        adjustedPrice: params.adjustedPrice,
+        splitAdjustment: params.splitAdjustment,
+        priceMode,
+        adjustmentFallbackApplied: fallbackFlag,
+        summary: summaryMeta,
+        adjustments: adjustmentsMeta,
+        debugSteps,
+        priceSource: priceSourceMeta,
+        splitDiagnostics: splitDiagnosticsMeta,
+        finmindStatus: finmindStatusMeta,
+        adjustmentDebugLog: adjustmentDebugLogMeta,
+        adjustmentChecks: adjustmentChecksMeta,
+        fetchRange: fetchedRange,
+        effectiveStartDate: curSettings.effectiveStartDate || effectiveStartDate,
+        lookbackDays,
+        datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
+        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+    };
+
+    applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
+        toleranceDays: START_GAP_TOLERANCE_DAYS,
+        acknowledgeExcessGap: false,
+    });
+    cachedDataStore.set(cacheKey, updatedEntry);
+    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+    cachedStockData = updatedEntry.data;
+    lastFetchSettings = { ...curSettings };
+    refreshPriceInspectorControls();
+    updatePriceDebug(updatedEntry);
+    return updatedEntry;
+}
+
+function updateStagingOptimizationStatus(message, isError = false) {
+    const statusEl = document.getElementById('staging-optimization-status');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.style.color = isError ? 'var(--destructive)' : 'var(--muted-foreground)';
+    statusEl.classList.toggle('font-semibold', Boolean(isError));
+}
+
+function updateStagingOptimizationProgress(currentIndex, total, entryLabel, exitLabel, entryModeLabel, exitModeLabel) {
+    const progressWrapper = document.getElementById('staging-optimization-progress');
+    const progressBar = document.getElementById('staging-optimization-progress-bar');
+    if (progressWrapper) {
+        progressWrapper.classList.remove('hidden');
+    }
+    if (progressBar && Number.isFinite(total) && total > 0) {
+        const percent = Math.max(0, Math.min(100, Math.round((currentIndex / total) * 100)));
+        progressBar.style.width = `${percent}%`;
+    }
+    const entryText = entryLabel || '—';
+    const exitText = exitLabel || '—';
+    const entryModeText = entryModeLabel ? `（${entryModeLabel}）` : '';
+    const exitModeText = exitModeLabel ? `（${exitModeLabel}）` : '';
+    updateStagingOptimizationStatus(`測試第 ${currentIndex} / ${total} 組：進場 ${entryText}${entryModeText}，出場 ${exitText}${exitModeText}`);
+}
+
+function formatPercent(value) {
+    if (!Number.isFinite(value)) return 'N/A';
+    const rounded = Number.parseFloat(value.toFixed(2));
+    const sign = rounded > 0 ? '+' : '';
+    return `${sign}${rounded}%`;
+}
+
+function formatNumber(value, digits = 2) {
+    if (!Number.isFinite(value)) return 'N/A';
+    return value.toFixed(digits);
+}
+
+function renderStagingOptimizationResults(results) {
+    const resultsContainer = document.getElementById('staging-optimization-results');
+    const tableBody = document.getElementById('staging-optimization-table-body');
+    const summaryEl = document.getElementById('staging-optimization-summary');
+    if (!resultsContainer || !tableBody || !summaryEl) return;
+
+    if (!Array.isArray(results) || results.length === 0) {
+        tableBody.innerHTML = '';
+        summaryEl.textContent = '未取得有效的分段組合結果。';
+        resultsContainer.classList.add('hidden');
+        return;
+    }
+
+    const sorted = [...results].sort((a, b) => {
+        const aAnn = Number.isFinite(a.metrics?.annualizedReturn) ? a.metrics.annualizedReturn : -Infinity;
+        const bAnn = Number.isFinite(b.metrics?.annualizedReturn) ? b.metrics.annualizedReturn : -Infinity;
+        if (bAnn !== aAnn) return bAnn - aAnn;
+        const aSharpe = Number.isFinite(a.metrics?.sharpeRatio) ? a.metrics.sharpeRatio : -Infinity;
+        const bSharpe = Number.isFinite(b.metrics?.sharpeRatio) ? b.metrics.sharpeRatio : -Infinity;
+        if (bSharpe !== aSharpe) return bSharpe - aSharpe;
+        const aDrawdown = Number.isFinite(a.metrics?.maxDrawdown) ? a.metrics.maxDrawdown : Infinity;
+        const bDrawdown = Number.isFinite(b.metrics?.maxDrawdown) ? b.metrics.maxDrawdown : Infinity;
+        return aDrawdown - bDrawdown;
+    });
+
+    stagingOptimizationState.results = sorted;
+    stagingOptimizationState.bestResult = sorted[0] || null;
+
+    const rows = sorted.slice(0, Math.min(sorted.length, 10)).map((item, index) => {
+        const metrics = item.metrics || {};
+        const annCls = Number.isFinite(metrics.annualizedReturn) && metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600';
+        const drawCls = Number.isFinite(metrics.maxDrawdown) ? 'text-rose-600' : '';
+        const sharpeText = Number.isFinite(metrics.sharpeRatio) ? metrics.sharpeRatio.toFixed(2) : 'N/A';
+        const drawdownText = Number.isFinite(metrics.maxDrawdown) ? `${metrics.maxDrawdown.toFixed(2)}%` : 'N/A';
+        const tradesText = Number.isFinite(metrics.tradesCount) ? metrics.tradesCount : (Number.isFinite(metrics.tradeCount) ? metrics.tradeCount : 'N/A');
+        const entryModeLabel = resolveStageModeDisplay(item.combination?.entry, item.combination?.entryMode, 'entry');
+        const exitModeLabel = resolveStageModeDisplay(item.combination?.exit, item.combination?.exitMode, 'exit');
+        return `<tr class="${index === 0 ? 'bg-emerald-50 font-semibold' : 'hover:bg-muted/40'}">
+            <td class="px-3 py-2">${index + 1}</td>
+            <td class="px-3 py-2">${item.combination.entry.display}</td>
+            <td class="px-3 py-2">${entryModeLabel}</td>
+            <td class="px-3 py-2">${item.combination.exit.display}</td>
+            <td class="px-3 py-2">${exitModeLabel}</td>
+            <td class="px-3 py-2 ${annCls}">${formatPercent(metrics.annualizedReturn)}</td>
+            <td class="px-3 py-2">${sharpeText}</td>
+            <td class="px-3 py-2 ${drawCls}">${drawdownText}</td>
+            <td class="px-3 py-2">${tradesText}</td>
+        </tr>`;
+    }).join('');
+
+    tableBody.innerHTML = rows;
+    resultsContainer.classList.remove('hidden');
+
+    const best = stagingOptimizationState.bestResult;
+    if (best && best.metrics) {
+        const metrics = best.metrics;
+        const entryModeLabel = resolveStageModeDisplay(best.combination?.entry, best.combination?.entryMode, 'entry');
+        const exitModeLabel = resolveStageModeDisplay(best.combination?.exit, best.combination?.exitMode, 'exit');
+        summaryEl.innerHTML = `推薦組合：<strong>${best.combination.entry.display}</strong>（${entryModeLabel}） × <strong>${best.combination.exit.display}</strong>（${exitModeLabel}）。` +
+            ` 年化報酬 <span class="${metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(metrics.annualizedReturn)}</span>` +
+            ` ／ 夏普比率 ${formatNumber(metrics.sharpeRatio, 2)} ／ 最大回撤 <span class="text-rose-600">${formatPercent(metrics.maxDrawdown)}</span>。` +
+            `<br><span class="text-xs" style="color: var(--muted-foreground);">共完成 ${sorted.length} 組測試。</span>`;
+    } else {
+        summaryEl.textContent = '未找到適合的分段組合。';
+    }
+
+    updateStagingOptimizationStatus('分段優化完成！可於下方查看推薦清單。', false);
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
+
+async function runStagingOptimization() {
+    if (!workerUrl) {
+        showError('背景計算引擎尚未準備就緒，請稍候再試。');
+        return;
+    }
+    if (stagingOptimizationState.running) {
+        updateStagingOptimizationStatus('分段優化進行中，請稍候。');
+        return;
+    }
+
+    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
+        window.lazybacktestMultiStagePanel.open();
+    }
+
+    const runButton = document.getElementById('stagingOptimizationBtn');
+    const applyButton = document.getElementById('applyStagingOptimizationBtn');
+    if (applyButton) applyButton.disabled = true;
+
+    const baseParams = getBacktestParams();
+    if (!validateBacktestParams(baseParams)) {
+        activateTab('staging-optimizer');
+        updateStagingOptimizationStatus('請先修正回測設定後再嘗試分段優化。', true);
+        return;
+    }
+
+    activateTab('staging-optimizer');
+    const progressBar = document.getElementById('staging-optimization-progress-bar');
+    if (progressBar) progressBar.style.width = '0%';
+    const resultsContainer = document.getElementById('staging-optimization-results');
+    if (resultsContainer) resultsContainer.classList.add('hidden');
+    updateStagingOptimizationStatus('正在整理候選分段組合...', false);
+
+    stagingOptimizationState.running = true;
+    stagingOptimizationState.results = [];
+    stagingOptimizationState.bestResult = null;
+
+    if (runButton) {
+        runButton.disabled = true;
+        runButton.innerHTML = '<i data-lucide="loader-2" class="lucide-sm animate-spin"></i> 分段優化中...';
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+    }
+
+    try {
+        const combinations = buildStagingOptimizationCombos(baseParams);
+        stagingOptimizationState.combinations = combinations.combos;
+        if (!Array.isArray(combinations.combos) || combinations.combos.length === 0) {
+            updateStagingOptimizationStatus('目前設定無法產生有效的分段組合。', true);
+            stagingOptimizationState.running = false;
+            if (runButton) {
+                runButton.disabled = false;
+                runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
+                if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                    lucide.createIcons();
+                }
+            }
+            return;
+        }
+
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+        const maxIndicatorPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(baseParams)
+            : 0;
+        const lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+            ? sharedUtils.estimateLookbackBars(maxIndicatorPeriod, { minBars: 90, multiplier: 2 })
+            : Math.max(90, maxIndicatorPeriod * 2);
+        const effectiveStartDate = baseParams.startDate;
+        let dataStartDate = effectiveStartDate;
+        if (sharedUtils && typeof sharedUtils.computeBufferedStartDate === 'function') {
+            dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
+                minDate: sharedUtils.MIN_DATA_DATE,
+                marginTradingDays: 12,
+                extraCalendarDays: 7,
+            }) || effectiveStartDate;
+        }
+        if (!dataStartDate) dataStartDate = effectiveStartDate;
+
+        const curSettings = {
+            stockNo: baseParams.stockNo,
+            startDate: dataStartDate,
+            endDate: baseParams.endDate,
+            effectiveStartDate,
+            market: (baseParams.market || baseParams.marketType || currentMarket || 'TWSE').toUpperCase(),
+            adjustedPrice: baseParams.adjustedPrice,
+            splitAdjustment: baseParams.splitAdjustment,
+            priceMode: (baseParams.priceMode || (baseParams.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+            lookbackDays,
+        };
+        const cacheKey = buildCacheKey(curSettings);
+        let cachedEntry = cachedDataStore.get(cacheKey) || null;
+        let cachedPayload = Array.isArray(cachedEntry?.data) ? cachedEntry.data : (Array.isArray(cachedStockData) ? cachedStockData : null);
+        let cachedMeta = cachedEntry ? buildCachedMetaFromEntry(cachedEntry, effectiveStartDate, lookbackDays) : null;
+        let datasetReady = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+
+        const results = [];
+        const total = combinations.combos.length;
+        let index = 0;
+
+        for (const combo of combinations.combos) {
+            index += 1;
+            const entryModeProgressLabel = resolveStageModeDisplay(combo.entry, combo.entryMode, 'entry');
+            const exitModeProgressLabel = resolveStageModeDisplay(combo.exit, combo.exitMode, 'exit');
+            updateStagingOptimizationProgress(
+                index - 1,
+                total,
+                combo.entry.display,
+                combo.exit.display,
+                entryModeProgressLabel === '—' ? '' : entryModeProgressLabel,
+                exitModeProgressLabel === '—' ? '' : exitModeProgressLabel
+            );
+
+            const candidateParams = {
+                ...baseParams,
+                entryStages: combo.entry.values.slice(),
+                exitStages: combo.exit.values.slice(),
+                entryStagingMode: combo.entryMode?.value || combo.entryMode || baseParams.entryStagingMode,
+                exitStagingMode: combo.exitMode?.value || combo.exitMode || baseParams.exitStagingMode,
+            };
+
+            const runOptions = {
+                useCache: datasetReady,
+                cachedData: datasetReady ? cachedPayload : null,
+                cachedMeta: datasetReady ? cachedMeta : null,
+                dataStartDate,
+                effectiveStartDate,
+                lookbackDays,
+                curSettings,
+                cacheKey,
+                existingEntry: cachedEntry,
+            };
+
+            const { result, updatedEntry, rawDataUsed } = await executeStagingCandidate(candidateParams, runOptions);
+            if (!datasetReady) {
+                if (updatedEntry && Array.isArray(updatedEntry.data)) {
+                    cachedEntry = updatedEntry;
+                    cachedPayload = updatedEntry.data;
+                    cachedMeta = buildCachedMetaFromEntry(updatedEntry, effectiveStartDate, lookbackDays);
+                    datasetReady = true;
+                } else if (Array.isArray(rawDataUsed) && rawDataUsed.length > 0) {
+                    cachedPayload = rawDataUsed;
+                    cachedMeta = null;
+                    datasetReady = true;
+                    cachedStockData = rawDataUsed;
+                }
+            } else if (updatedEntry && Array.isArray(updatedEntry.data)) {
+                cachedEntry = updatedEntry;
+                cachedPayload = updatedEntry.data;
+                cachedMeta = buildCachedMetaFromEntry(updatedEntry, effectiveStartDate, lookbackDays);
+            }
+
+            const entryModeCompleteLabel = resolveStageModeDisplay(combo.entry, combo.entryMode, 'entry');
+            const exitModeCompleteLabel = resolveStageModeDisplay(combo.exit, combo.exitMode, 'exit');
+            updateStagingOptimizationProgress(
+                index,
+                total,
+                combo.entry.display,
+                combo.exit.display,
+                entryModeCompleteLabel === '—' ? '' : entryModeCompleteLabel,
+                exitModeCompleteLabel === '—' ? '' : exitModeCompleteLabel
+            );
+
+            const metrics = {
+                annualizedReturn: Number.isFinite(result?.annualizedReturn) ? result.annualizedReturn : null,
+                sharpeRatio: Number.isFinite(result?.sharpeRatio) ? result.sharpeRatio : null,
+                maxDrawdown: Number.isFinite(result?.maxDrawdown) ? result.maxDrawdown : null,
+                tradesCount: Number.isFinite(result?.tradesCount) ? result.tradesCount : Number.isFinite(result?.tradeCount) ? result.tradeCount : null,
+            };
+
+            results.push({
+                combination: combo,
+                metrics,
+                raw: result,
+            });
+        }
+
+        renderStagingOptimizationResults(results);
+        if (applyButton) applyButton.disabled = !stagingOptimizationState.bestResult;
+    } catch (error) {
+        console.error('[Staging Optimization] 發生錯誤:', error);
+        updateStagingOptimizationStatus(`分段優化發生錯誤：${error.message}`, true);
+    } finally {
+        stagingOptimizationState.running = false;
+        if (runButton) {
+            runButton.disabled = false;
+            runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            }
+        }
+    }
+}
+
+function executeStagingCandidate(params, options) {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(workerUrl);
+        const cleanup = () => {
+            try { worker.terminate(); } catch (err) { console.warn('[Staging Optimization] Worker terminate failed:', err); }
+        };
+        worker.onerror = (err) => {
+            cleanup();
+            reject(err);
+        };
+        worker.onmessage = (event) => {
+            const { type, data, dataSource } = event.data;
+            if (type === 'result') {
+                let updatedEntry = null;
+                if (!options.useCache || !options.existingEntry || Array.isArray(data?.rawData)) {
+                    updatedEntry = syncCacheFromBacktestResult(
+                        data,
+                        dataSource,
+                        params,
+                        options.curSettings,
+                        options.cacheKey,
+                        options.effectiveStartDate,
+                        options.lookbackDays,
+                        options.existingEntry,
+                    );
+                }
+                cleanup();
+                resolve({ result: data, updatedEntry, rawDataUsed: data?.rawDataUsed || null });
+            } else if (type === 'error') {
+                cleanup();
+                reject(new Error(data?.message || '分段優化運算失敗'));
+            }
+        };
+
+        const message = {
+            type: 'runBacktest',
+            params,
+            useCachedData: Boolean(options.useCache && Array.isArray(options.cachedData) && options.cachedData.length > 0),
+            dataStartDate: options.dataStartDate,
+            effectiveStartDate: options.effectiveStartDate,
+            lookbackDays: options.lookbackDays,
+        };
+        if (message.useCachedData) {
+            message.cachedData = options.cachedData;
+            if (options.cachedMeta) {
+                message.cachedMeta = options.cachedMeta;
+            }
+        }
+        worker.postMessage(message);
+    });
+}
+
+function applyBestStagingRecommendation() {
+    const best = stagingOptimizationState.bestResult;
+    if (!best) {
+        updateStagingOptimizationStatus('尚未產生推薦分段，請先執行分段優化。', true);
+        return;
+    }
+    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
+        window.lazybacktestMultiStagePanel.open();
+    }
+    if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.setValues === 'function') {
+        window.lazybacktestStagedEntry.setValues(best.combination.entry.values, { manual: true });
+    }
+    if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.setValues === 'function') {
+        window.lazybacktestStagedExit.setValues(best.combination.exit.values, { manual: true });
+    }
+    const entryModeSelect = document.getElementById('entryStagingMode');
+    if (entryModeSelect && best.combination.entryMode) {
+        entryModeSelect.value = best.combination.entryMode.value || best.combination.entryMode;
+        entryModeSelect.dispatchEvent(new Event('change'));
+    }
+    const exitModeSelect = document.getElementById('exitStagingMode');
+    if (exitModeSelect && best.combination.exitMode) {
+        exitModeSelect.value = best.combination.exitMode.value || best.combination.exitMode;
+        exitModeSelect.dispatchEvent(new Event('change'));
+    }
+    updateStagingOptimizationStatus('已套用推薦分段，請重新執行回測確認績效。', false);
+    showSuccess('已套用推薦分段設定，建議重新回測以確認績效表現。');
+}
+
+
 function updateStrategyParams(type) {
     const strategySelect = document.getElementById(`${type}Strategy`);
     const paramsContainer = document.getElementById(`${type}Params`);
@@ -3931,7 +4769,47 @@ function updateStrategyParams(type) {
         }
     }
 }
-function resetSettings() { document.getElementById("stockNo").value="2330"; initDates(); document.getElementById("initialCapital").value="100000"; document.getElementById("positionSize").value="100"; document.getElementById("stopLoss").value="0"; document.getElementById("takeProfit").value="0"; document.getElementById("positionBasisInitial").checked = true; setDefaultFees("2330"); document.querySelector('input[name="tradeTiming"][value="close"]').checked = true; document.getElementById("entryStrategy").value="ma_cross"; updateStrategyParams('entry'); document.getElementById("exitStrategy").value="ma_cross"; updateStrategyParams('exit'); const shortCheckbox = document.getElementById("enableShortSelling"); const shortArea = document.getElementById("short-strategy-area"); shortCheckbox.checked = false; shortArea.style.display = 'none'; document.getElementById("shortEntryStrategy").value="short_ma_cross"; updateStrategyParams('shortEntry'); document.getElementById("shortExitStrategy").value="cover_ma_cross"; updateStrategyParams('shortExit'); cachedStockData=null; cachedDataStore.clear(); clearPersistentDataCacheIndex(); lastFetchSettings=null; refreshPriceInspectorControls(); clearPreviousResults(); showSuccess("設定已重置"); }
+
+function resetSettings() {
+    document.getElementById("stockNo").value = "2330";
+    initDates();
+    document.getElementById("initialCapital").value = "100000";
+    document.getElementById("positionSize").value = "100";
+    if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.resetToDefault === 'function') {
+        window.lazybacktestStagedEntry.resetToDefault(100);
+    }
+    if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.resetToDefault === 'function') {
+        window.lazybacktestStagedExit.resetToDefault(100);
+    }
+    const entryModeSelect = document.getElementById("entryStagingMode");
+    if (entryModeSelect) entryModeSelect.value = "signal_repeat";
+    const exitModeSelect = document.getElementById("exitStagingMode");
+    if (exitModeSelect) exitModeSelect.value = "signal_repeat";
+    document.getElementById("stopLoss").value = "0";
+    document.getElementById("takeProfit").value = "0";
+    document.getElementById("positionBasisInitial").checked = true;
+    setDefaultFees("2330");
+    document.querySelector('input[name="tradeTiming"][value="close"]').checked = true;
+    document.getElementById("entryStrategy").value = "ma_cross";
+    updateStrategyParams('entry');
+    document.getElementById("exitStrategy").value = "ma_cross";
+    updateStrategyParams('exit');
+    const shortCheckbox = document.getElementById("enableShortSelling");
+    const shortArea = document.getElementById("short-strategy-area");
+    shortCheckbox.checked = false;
+    shortArea.style.display = 'none';
+    document.getElementById("shortEntryStrategy").value = "short_ma_cross";
+    updateStrategyParams('shortEntry');
+    document.getElementById("shortExitStrategy").value = "cover_ma_cross";
+    updateStrategyParams('shortExit');
+    cachedStockData = null;
+    cachedDataStore.clear();
+    lastFetchSettings = null;
+    refreshPriceInspectorControls();
+    clearPreviousResults();
+    showSuccess("設定已重置");
+}
+
 function initTabs() { 
     // Initialize with summary tab active
     activateTab('summary'); 
@@ -4030,10 +4908,14 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
                 endDate: settings.endDate, 
                 initialCapital: settings.initialCapital, 
                 tradeTiming: settings.tradeTiming, 
-                entryStrategy: settings.entryStrategy, 
-                entryParams: settings.entryParams, 
-                exitStrategy: settings.exitStrategy, 
-                exitParams: settings.exitParams, 
+                entryStrategy: settings.entryStrategy,
+                entryParams: settings.entryParams,
+                entryStages: settings.entryStages,
+                entryStagingMode: settings.entryStagingMode,
+                exitStrategy: settings.exitStrategy,
+                exitParams: settings.exitParams,
+                exitStages: settings.exitStages,
+                exitStagingMode: settings.exitStagingMode,
                 enableShorting: settings.enableShorting, 
                 shortEntryStrategy: settings.shortEntryStrategy, 
                 shortEntryParams: settings.shortEntryParams, 
@@ -4156,7 +5038,25 @@ function saveStrategy() {
         showSuccess(`策略 "${trimmedName}" 已儲存！`); 
     }
 }
-function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } document.getElementById('exitStrategy').value = settings.exitStrategy || 'ma_cross'; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(settings.exitStrategy)) ? `${settings.exitStrategy}_exit` : settings.exitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { document.getElementById('shortEntryStrategy').value = settings.shortEntryStrategy || 'short_ma_cross'; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = `short_${settings.shortEntryStrategy}`; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } document.getElementById('shortExitStrategy').value = settings.shortExitStrategy || 'cover_ma_cross'; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = `cover_${settings.shortExitStrategy}`; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`策略 "${strategyName}" 已載入！`); 
+function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
+        if (window.lazybacktestStagedEntry) {
+            if (Array.isArray(settings.entryStages) && settings.entryStages.length > 0 && typeof window.lazybacktestStagedEntry.setValues === 'function') {
+                window.lazybacktestStagedEntry.setValues(settings.entryStages);
+            } else if (typeof window.lazybacktestStagedEntry.resetToDefault === 'function') {
+                window.lazybacktestStagedEntry.resetToDefault(settings.positionSize || 100);
+            }
+        }
+        const entryModeSelect = document.getElementById('entryStagingMode');
+        if (entryModeSelect) entryModeSelect.value = settings.entryStagingMode || 'signal_repeat';
+        if (window.lazybacktestStagedExit) {
+            if (Array.isArray(settings.exitStages) && settings.exitStages.length > 0 && typeof window.lazybacktestStagedExit.setValues === 'function') {
+                window.lazybacktestStagedExit.setValues(settings.exitStages);
+            } else if (typeof window.lazybacktestStagedExit.resetToDefault === 'function') {
+                window.lazybacktestStagedExit.resetToDefault(100);
+            }
+        }
+        const exitModeSelect = document.getElementById('exitStagingMode');
+        if (exitModeSelect) exitModeSelect.value = settings.exitStagingMode || 'signal_repeat'; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } document.getElementById('exitStrategy').value = settings.exitStrategy || 'ma_cross'; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(settings.exitStrategy)) ? `${settings.exitStrategy}_exit` : settings.exitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { document.getElementById('shortEntryStrategy').value = settings.shortEntryStrategy || 'short_ma_cross'; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = `short_${settings.shortEntryStrategy}`; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } document.getElementById('shortExitStrategy').value = settings.shortExitStrategy || 'cover_ma_cross'; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = `cover_${settings.shortExitStrategy}`; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`策略 "${strategyName}" 已載入！`); 
     
     // 顯示確認對話框並自動執行回測
     if (confirm(`策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
