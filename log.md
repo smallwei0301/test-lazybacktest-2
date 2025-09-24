@@ -441,3 +441,9 @@
 - **Diagnostics**: 快速回顧 `getStrategyStatusElements` 與 `resetStrategyStatusCard`，確認 badge、標題與版本欄位均能成功套用常數並恢復預設文案。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
 
+# 2025-09-24 — Patch LB-SUGGESTION-WARMUP-20250924A
+- **Issue recap**: 今日建議模組即使取得完整回測資料仍回傳「回測資料不足以推導今日建議」，原因是策略起始指標需求超過可用列數時 `finalEvaluation` 未建立，前端僅能顯示資料不足訊息。
+- **Fix**: 當暖身需求尚未滿足且無法展開模擬時，仍以最後一筆有效行情組裝 `finalEvaluation`，標記空手狀態並保留暖身診斷，讓 UI 能正常輸出「維持空手」等建議。
+- **Diagnostics**: `diagnostics.warmup` 現會伴隨 `insufficientData: true`，今日建議筆記可對應暖身欄位確認起始落差是否超過指標需求。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`。
+

@@ -5590,7 +5590,46 @@ function runStrategy(data, params, options = {}) {
   const shortPl = Array(n).fill(0);
 
   if (startIdx >= n || n < 2) {
-    return {
+    const safeNumber = (value) =>
+      typeof value === "number" && Number.isFinite(value) ? value : null;
+    const fallbackEvaluation =
+      captureFinalState && n > 0
+        ? {
+            date:
+              typeof dates[n - 1] === "string"
+                ? dates[n - 1]
+                : typeof data[n - 1]?.date === "string"
+                ? data[n - 1].date
+                : null,
+            open: safeNumber(opens[n - 1]),
+            high: safeNumber(highs[n - 1]),
+            low: safeNumber(lows[n - 1]),
+            close: safeNumber(closes[n - 1]),
+            volume: safeNumber(volumes[n - 1]),
+            longState: "空手",
+            shortState: "空手",
+            executedBuy: false,
+            executedSell: false,
+            executedShort: false,
+            executedCover: false,
+            longPos: 0,
+            shortPos: 0,
+            longShares: 0,
+            shortShares: 0,
+            longAverageEntryPrice: null,
+            lastBuyPrice: null,
+            lastShortPrice: null,
+            longCapital: initialCapital,
+            shortCapital: params.enableShorting ? initialCapital : 0,
+            longProfit: 0,
+            shortProfit: 0,
+            portfolioValue: initialCapital,
+            strategyReturn: 0,
+            longEntryState: null,
+            longExitState: null,
+          }
+        : null;
+    const result = {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
       finalValue: initialCapital,
@@ -5609,15 +5648,18 @@ function runStrategy(data, params, options = {}) {
       buyHoldReturns: Array(n).fill(0),
       strategyReturns: Array(n).fill(0),
       dates: dates,
-        chartBuySignals: [],
-        chartSellSignals: [],
-        chartShortSignals: [],
-        chartCoverSignals: [],
-        entryStrategy: params.entryStrategy,
-        exitStrategy: params.exitStrategy,
-        entryParams: params.entryParams,
-        entryStages: entryStagePercents.slice(),
-        exitParams: params.exitParams,
+      chartBuySignals: [],
+      chartSellSignals: [],
+      chartShortSignals: [],
+      chartCoverSignals: [],
+      entryStrategy: params.entryStrategy,
+      exitStrategy: params.exitStrategy,
+      entryParams: params.entryParams,
+      entryStages: entryStagePercents.slice(),
+      entryStagingMode: entryStageMode,
+      exitParams: params.exitParams,
+      exitStages: exitStagePercents.slice(),
+      exitStagingMode: exitStageMode,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -5636,7 +5678,23 @@ function runStrategy(data, params, options = {}) {
       sharpeHalf1: null,
       annReturnHalf2: null,
       sharpeHalf2: null,
+      priceIndicatorSeries: [],
+      positionStates: [],
+      longEntryStageStates: [],
+      longExitStageStates: [],
+      diagnostics: {
+        dataset: datasetSummary,
+        warmup: warmupSummary,
+        buyHold: null,
+        insufficientData: true,
+      },
+      parameterSensitivity: null,
+      sensitivityAnalysis: null,
     };
+    if (captureFinalState) {
+      result.finalEvaluation = fallbackEvaluation;
+    }
+    return result;
   }
 
     console.log(
