@@ -1,3 +1,8 @@
+# 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
+- **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
+- **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('strategy status patch scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。

@@ -21,6 +21,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderBlobUsageCard();
 });
 
+document.addEventListener('DOMContentLoaded', () => {
+    resetStrategyStatusCard('idle');
+});
+
 let lastPriceDebug = {
     steps: [],
     summary: null,
@@ -62,6 +66,8 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
+
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250726A';
 
 function cloneArrayOfRanges(ranges) {
     if (!Array.isArray(ranges)) return undefined;
@@ -1357,6 +1363,7 @@ function runBacktestInternal() {
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
+        resetStrategyStatusCard('loading');
 
         if(backtestWorker) { // Ensure previous worker is terminated
             backtestWorker.terminate();
@@ -1378,6 +1385,7 @@ function runBacktestInternal() {
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
+                resetStrategyStatusCard('error', { message });
                 if (window.showMarketSwitchModal) {
                     window.showMarketSwitchModal(message, marketType, stockNo);
                 } else {
@@ -1697,6 +1705,7 @@ function runBacktestInternal() {
                 hideLoading();
                 const suggestionArea = document.getElementById('today-suggestion-area');
                  if (suggestionArea) suggestionArea.classList.add('hidden');
+                resetStrategyStatusCard('error', { message: data?.message || '回測過程錯誤' });
             }
         };
 
@@ -1783,6 +1792,7 @@ function clearPreviousResults() {
         suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
         suggestionText.textContent = "-";
     }
+    resetStrategyStatusCard('idle');
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -1803,6 +1813,319 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+const STRATEGY_STATUS_BADGE_CLASSES = {
+    idle: 'strategy-status-badge--idle',
+    loading: 'strategy-status-badge--loading',
+    lead: 'strategy-status-badge--lead',
+    tie: 'strategy-status-badge--tie',
+    lag: 'strategy-status-badge--lag',
+    sleep: 'strategy-status-badge--sleep',
+    error: 'strategy-status-badge--error',
+};
+
+const STRATEGY_STATUS_BADGE_TEXT = {
+    idle: '待命',
+    loading: '計算中',
+    lead: '領先',
+    tie: '拉鋸',
+    lag: '落後',
+    sleep: '補眠',
+    error: '暫停',
+};
+
+const STRATEGY_STATUS_CARD_CLASSNAMES = [
+    'strategy-status-card--lead',
+    'strategy-status-card--lag',
+    'strategy-status-card--tie',
+    'strategy-status-card--loading',
+    'strategy-status-card--idle',
+    'strategy-status-card--sleep',
+    'strategy-status-card--error',
+];
+
+function getStrategyStatusElements() {
+    const card = document.getElementById('strategy-status-card');
+    if (!card) return null;
+    return {
+        card,
+        badge: card.querySelector('[data-strategy-status-badge]'),
+        title: card.querySelector('[data-strategy-status-title]'),
+        detail: card.querySelector('[data-strategy-status-detail]'),
+        version: card.querySelector('[data-strategy-status-version]'),
+    };
+}
+
+function formatPercentSignedValue(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+    return `${sign}${Math.abs(value).toFixed(digits)}%`;
+}
+
+function formatPercentMagnitudeValue(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return `${Math.abs(value).toFixed(digits)}%`;
+}
+
+function toFiniteNumber(value) {
+    const num = Number.parseFloat(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function pickLastFiniteNumber(values) {
+    if (!Array.isArray(values)) return null;
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+        const candidate = Number.parseFloat(values[i]);
+        if (Number.isFinite(candidate)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function splitSummaryIntoBulletLines(content) {
+    if (!content) return [];
+    const text = Array.isArray(content) ? content.join(' ') : String(content);
+    const sentences = [];
+    let buffer = '';
+    const commit = () => {
+        const trimmed = buffer.trim();
+        if (trimmed) {
+            sentences.push(trimmed);
+        }
+        buffer = '';
+    };
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        buffer += char;
+        if ('。！？'.includes(char)) {
+            commit();
+        }
+    }
+    commit();
+    return sentences
+        .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+        .filter((sentence) => sentence.length > 0)
+        .map((sentence) => (/[。！？]$/.test(sentence) ? sentence : `${sentence}。`));
+}
+
+function renderStrategyStatusDetail(detailEl, config = {}) {
+    if (!detailEl) return;
+    if (config.detailHTML) {
+        detailEl.innerHTML = config.detailHTML;
+        return;
+    }
+    const fragments = [];
+    if (config.highlight) {
+        fragments.push(`<p class="strategy-status-highlight">${escapeHtml(config.highlight)}</p>`);
+    }
+    let bulletLines = [];
+    if (Array.isArray(config.bulletLines)) {
+        bulletLines = config.bulletLines
+            .map((line) => (typeof line === 'string' ? line.trim() : ''))
+            .filter((line) => line.length > 0)
+            .map((line) => (/[。！？]$/.test(line) ? line : `${line}。`));
+    } else if (typeof config.bulletText === 'string') {
+        bulletLines = splitSummaryIntoBulletLines(config.bulletText);
+    }
+    if (bulletLines.length > 0) {
+        const items = bulletLines
+            .map((line) => `<li>${escapeHtml(line)}</li>`)
+            .join('');
+        fragments.push(`<ul class="strategy-status-list">${items}</ul>`);
+    }
+    const fallbackText = config.text || config.detailText;
+    if (fallbackText && bulletLines.length === 0) {
+        fragments.push(`<p>${escapeHtml(fallbackText)}</p>`);
+    }
+    detailEl.innerHTML = fragments.join('');
+}
+
+function applyStrategyStatusState(state, config = {}) {
+    const elements = getStrategyStatusElements();
+    if (!elements) return;
+    const { card, badge, title, detail, version } = elements;
+    if (version) {
+        version.textContent = STRATEGY_STATUS_VERSION;
+    }
+    if (card) {
+        STRATEGY_STATUS_CARD_CLASSNAMES.forEach((className) => card.classList.remove(className));
+        if (state) {
+            card.classList.add(`strategy-status-card--${state}`);
+        }
+    }
+    if (badge) {
+        const badgeClass = STRATEGY_STATUS_BADGE_CLASSES[state] || STRATEGY_STATUS_BADGE_CLASSES.idle;
+        badge.className = `strategy-status-badge ${badgeClass}`;
+        badge.textContent = config.badgeText || STRATEGY_STATUS_BADGE_TEXT[state] || STRATEGY_STATUS_BADGE_TEXT.idle;
+    }
+    if (title) {
+        title.textContent = config.title || '';
+    }
+    renderStrategyStatusDetail(detail, config);
+}
+
+function buildStrategyHealthSummary(result = {}) {
+    const warnings = [];
+    const positiveParts = [];
+
+    const annual = toFiniteNumber(result?.annualizedReturn);
+    const sharpe = toFiniteNumber(result?.sharpeRatio);
+    const sortino = toFiniteNumber(result?.sortinoRatio);
+    const maxDD = toFiniteNumber(result?.maxDrawdown);
+    const annHalf1 = toFiniteNumber(result?.annReturnHalf1);
+    const annHalf2 = toFiniteNumber(result?.annReturnHalf2);
+    const sharpeHalf1 = toFiniteNumber(result?.sharpeHalf1);
+    const sharpeHalf2 = toFiniteNumber(result?.sharpeHalf2);
+
+    const indicatorAlerts = [];
+    if (annual !== null && annual < 6) {
+        indicatorAlerts.push(`年化報酬僅 ${formatPercentSignedValue(annual, 2)}，需要檢查訊號是否過度保守或進場過慢`);
+    }
+    if (sharpe !== null && sharpe < 0.8) {
+        indicatorAlerts.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力`);
+    }
+    if (sortino !== null && sortino < 0.9) {
+        indicatorAlerts.push(`索提諾比率只有 ${sortino.toFixed(2)}，代表下檔風險偏高，請搭配停損或對沖`);
+    }
+    if (maxDD !== null && maxDD > 25) {
+        indicatorAlerts.push(`最大回撤高達 ${formatPercentMagnitudeValue(maxDD, 1)}，資金要預留防震緩衝`);
+    }
+    if (indicatorAlerts.length > 0) {
+        warnings.push(`指標巡檢：${indicatorAlerts.join('；')}。`);
+    }
+
+    if (annHalf1 !== null && Math.abs(annHalf1) > 1e-6 && annHalf2 !== null) {
+        const returnStability = annHalf2 / annHalf1;
+        if (Number.isFinite(returnStability)) {
+            const absReturnStability = Math.abs(returnStability);
+            if (absReturnStability < 0.6 || absReturnStability > 1.6 || returnStability < 0) {
+                warnings.push(`前後段報酬比僅 ${returnStability.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證。`);
+            }
+        }
+    }
+
+    if (sharpeHalf1 !== null && Math.abs(sharpeHalf1) > 1e-6 && sharpeHalf2 !== null) {
+        const sharpeStability = sharpeHalf2 / sharpeHalf1;
+        if (Number.isFinite(sharpeStability)) {
+            const absSharpeStability = Math.abs(sharpeStability);
+            if (absSharpeStability < 0.6 || absSharpeStability > 1.6 || sharpeStability < 0) {
+                warnings.push(`前後段夏普比只有 ${sharpeStability.toFixed(2)}，可能存在過擬合，請留意驗證樣本。`);
+            }
+        }
+    }
+
+    if (annual !== null && annual >= 12) {
+        positiveParts.push(`年化報酬 ${formatPercentSignedValue(annual, 2)}`);
+    }
+    if (sharpe !== null && sharpe >= 1) {
+        positiveParts.push(`夏普值 ${sharpe.toFixed(2)}`);
+    }
+    if (sortino !== null && sortino >= 1) {
+        positiveParts.push(`索提諾比率 ${sortino.toFixed(2)}`);
+    }
+    if (maxDD !== null && maxDD <= 15) {
+        positiveParts.push(`最大回撤僅 ${formatPercentMagnitudeValue(maxDD, 2)}`);
+    }
+
+    let positiveLine = null;
+    if (positiveParts.length > 0) {
+        const base = positiveParts.join('、');
+        if (warnings.length === 0) {
+            positiveLine = `${base}，全部站在甜蜜區，持續維持紀律就能穩穩收割。`;
+        } else {
+            positiveLine = `${base} 表現還算給力，記得把優勢守住，請調整倉位或優化參數再上。`;
+        }
+    }
+
+    return {
+        warnings,
+        positiveLine,
+    };
+}
+
+function resetStrategyStatusCard(state = 'idle', config = {}) {
+    const defaults = { badgeText: STRATEGY_STATUS_BADGE_TEXT[state] || STRATEGY_STATUS_BADGE_TEXT.idle };
+    if (state === 'idle') {
+        defaults.title = '等待開賽信號';
+        defaults.text = `版本碼 ${STRATEGY_STATUS_VERSION} 已就緒，回測完成後將送上策略對決戰況與指標體檢結論。`;
+    } else if (state === 'loading') {
+        defaults.title = '策略計算中';
+        defaults.text = '已派出模擬交易員比對策略與買入持有的勝負差距，請稍候片刻。';
+    } else if (state === 'error') {
+        defaults.title = '速報暫停播放';
+        const message = typeof config.message === 'string' && config.message.trim().length > 0
+            ? config.message.trim()
+            : '回測遇到例外狀況';
+        defaults.text = `${message}，請檢查參數或稍後再試。`;
+    } else if (state === 'sleep') {
+        defaults.title = '資料補眠中';
+        defaults.text = config.message
+            || '尚未取得完整的策略或買入持有成果，請確認資料暖身診斷是否顯示成功。';
+    }
+    applyStrategyStatusState(state, { ...defaults, ...config });
+}
+
+function updateStrategyStatusCard(result) {
+    const strategyReturn = toFiniteNumber(result?.returnRate);
+    const buyHoldReturn = toFiniteNumber(pickLastFiniteNumber(result?.buyHoldReturns));
+
+    if (strategyReturn === null && buyHoldReturn === null) {
+        resetStrategyStatusCard('sleep', { message: '策略與基準尚未完成計算，稍後再查看速報。' });
+        return;
+    }
+    if (strategyReturn === null || buyHoldReturn === null) {
+        resetStrategyStatusCard('sleep', { message: '資料尚未齊備，請重新執行回測或檢查資料診斷。' });
+        return;
+    }
+
+    const difference = strategyReturn - buyHoldReturn;
+    const diffAbs = Math.abs(difference);
+    const health = buildStrategyHealthSummary(result || {});
+
+    const differenceLine = `策略總報酬率 ${formatPercentSignedValue(strategyReturn, 2)}，買入持有 ${formatPercentSignedValue(buyHoldReturn, 2)}，目前${difference >= 0 ? `領先 ${formatPercentMagnitudeValue(difference, 2)} 個百分點` : `落後 ${formatPercentMagnitudeValue(difference, 2)} 個百分點`}。`;
+
+    const detailLines = [];
+    if (Array.isArray(health.warnings) && health.warnings.length > 0) {
+        detailLines.push(...health.warnings);
+    }
+    if (typeof health.positiveLine === 'string' && health.positiveLine.trim().length > 0) {
+        const line = health.positiveLine.trim();
+        detailLines.push(line.endsWith('。') ? line : `${line}。`);
+    }
+
+    if (difference <= -1) {
+        const combinedText = [differenceLine, ...detailLines].filter(Boolean).join(' ');
+        const bulletLines = splitSummaryIntoBulletLines(combinedText);
+        applyStrategyStatusState('lag', {
+            badgeText: STRATEGY_STATUS_BADGE_TEXT.lag,
+            title: '策略暫時落後基準，準備反攻。',
+            highlight: '快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。',
+            bulletLines,
+        });
+        return;
+    }
+
+    if (difference >= 1) {
+        const bulletLines = [differenceLine, ...detailLines].filter(Boolean);
+        applyStrategyStatusState('lead', {
+            badgeText: STRATEGY_STATUS_BADGE_TEXT.lead,
+            title: '策略火力全開，暫時超車買入持有。',
+            bulletLines,
+        });
+        return;
+    }
+
+    const neutralTitle = diffAbs < 0.5
+        ? '策略與買入持有呈現拉鋸戰。'
+        : '策略與買入持有分差接近，請持續觀察。';
+    const bulletLines = [differenceLine, ...detailLines].filter(Boolean);
+    applyStrategyStatusState('tie', {
+        badgeText: STRATEGY_STATUS_BADGE_TEXT.tie,
+        title: neutralTitle,
+        bulletLines,
+    });
 }
 
 function formatSkipReasons(skipReasons) {
@@ -2765,6 +3088,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastOverallResult = null; lastSubPeriodResults = null;
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
+        resetStrategyStatusCard('error', { message: '回測結果無效或無數據' });
         return;
     }
     try {
@@ -2775,6 +3099,7 @@ function handleBacktestResult(result, stockName, dataSource) {
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
+        updateStrategyStatusCard(result);
         displayTradeResults(result);
         renderChart(result);
         activateTab('summary');
@@ -2791,6 +3116,7 @@ function handleBacktestResult(result, stockName, dataSource) {
          showError(`處理回測結果時發生錯誤: ${error.message}`);
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
+         resetStrategyStatusCard('error', { message: error?.message || '處理回測結果時發生錯誤' });
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
