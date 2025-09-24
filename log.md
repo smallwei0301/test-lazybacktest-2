@@ -1,3 +1,9 @@
+## 2025-07-30 — Patch LB-SENSITIVITY-GUARD-20250730A
+- **Issue recap**: 回測完成後 `displayBacktestResult` 直接引用未定義的 `sensitivityData`，導致前端在渲染摘要前即拋出 `ReferenceError`，使用者無法看到任何回測結果。
+- **Fix**: 新增遞迴尋找流程自動從回傳結果及瀏覽器快取來源擷取參數敏感度資料，若未取得有效 `groups` 則回退為空狀態提示，避免主流程因缺資料而中斷。
+- **Diagnostics**: 逐步檢視 `displayBacktestResult` 內的敏感度卡片渲染邏輯，確認在缺少敏感度資料時改為渲染「暫無結果可顯示」說明，並保持既有 tooltip 與佈局結構。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
