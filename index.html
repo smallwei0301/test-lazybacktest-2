@@ -1014,6 +1014,127 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <div class="card shadow-lg mt-8" id="sensitivity-analysis-card">
+                                    <div class="card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="activity" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <h3 class="card-title">敏感度分析</h3>
+                                        </div>
+                                        <span
+                                            class="tooltip inline-flex items-center gap-1 text-xs font-medium text-muted-foreground"
+                                            style="color: var(--muted-foreground);"
+                                        >
+                                            <span class="inline-flex items-center gap-1">
+                                                <i data-lucide="info" class="lucide-sm"></i>
+                                                門檻說明
+                                            </span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">
+                                                我們以各主要參數在 ±10% 內的重新回測結果評估漂移幅度，並參考國外量化平台常見的容許範圍。
+                                                建議穩定度 ≧ 70 分、平均漂移幅度 ≦ 5 個百分點視為健康；若超過門檻，可利用「批量優化」功能批次驗證更細的調整幅度。
+                                            </span>
+                                        </span>
+                                    </div>
+                                    <div class="card-content sensitivity-card">
+                                        <div class="sensitivity-card__metrics">
+                                            <div class="sensitivity-card__metric">
+                                                <h4>
+                                                    <i data-lucide="shuffle" class="lucide-sm text-primary" style="color: var(--primary);"></i>
+                                                    平均漂移幅度
+                                                </h4>
+                                                <p class="sensitivity-card__metric-value" id="sensitivity-average-drift">--</p>
+                                                <p class="sensitivity-card__metric-desc">完成回測後會顯示主要參數在 ±10% 調整時的平均報酬差。</p>
+                                                <span class="tooltip inline-flex items-center gap-1 text-xs text-muted-foreground" style="color: var(--muted-foreground);">
+                                                    <span class="inline-flex items-center gap-1">
+                                                        <i data-lucide="lightbulb" class="lucide-sm"></i>
+                                                        判讀提示
+                                                    </span>
+                                                    <span class="tooltiptext tooltiptext--sensitivity">
+                                                        ±10% 的平均漂移若低於 3~5 個百分點，通常代表策略對小幅度參數變動具有韌性；若超過 8%，建議以「批量優化」功能針對主要參數建立更細的掃描步距，確認是否需要調整進出場規則。
+                                                    </span>
+                                                </span>
+                                            </div>
+                                            <div class="sensitivity-card__metric">
+                                                <h4>
+                                                    <i data-lucide="shield-check" class="lucide-sm text-primary" style="color: var(--primary);"></i>
+                                                    穩定度指標
+                                                </h4>
+                                                <p class="sensitivity-card__metric-value" id="sensitivity-stability-score">--</p>
+                                                <p class="sensitivity-card__metric-desc">結合漂移、Sharpe Δ 與最大回撤變化計算的綜合穩定度，分數越高代表策略越不易因微調而失衡。</p>
+                                                <span class="tooltip inline-flex items-center gap-1 text-xs text-muted-foreground" style="color: var(--muted-foreground);">
+                                                    <span class="inline-flex items-center gap-1">
+                                                        <i data-lucide="sparkles" class="lucide-sm"></i>
+                                                        建議範圍
+                                                    </span>
+                                                    <span class="tooltiptext tooltiptext--sensitivity">
+                                                        70 分以上通常為安全範圍；50~70 代表需留意個別參數是否拉低整體穩定度。低於 50 時，可透過「批量優化」篩選報酬穩定的子參數組合，再回頭調整正式策略設定。
+                                                    </span>
+                                                </span>
+                                            </div>
+                                            <div class="sensitivity-card__metric">
+                                                <h4>
+                                                    <i data-lucide="compass" class="lucide-sm text-primary" style="color: var(--primary);"></i>
+                                                    Sharpe Δ 區間
+                                                </h4>
+                                                <p class="sensitivity-card__metric-value" id="sensitivity-sharpe-range">--</p>
+                                                <p class="sensitivity-card__metric-desc">顯示 ±10% 調整下 Sharpe Ratio 的上下界，協助判斷風險調整後的收益波動。</p>
+                                                <span class="tooltip inline-flex items-center gap-1 text-xs text-muted-foreground" style="color: var(--muted-foreground);">
+                                                    <span class="inline-flex items-center gap-1">
+                                                        <i data-lucide="route" class="lucide-sm"></i>
+                                                        對照批量優化
+                                                    </span>
+                                                    <span class="tooltiptext tooltiptext--sensitivity">
+                                                        若 Sharpe Δ 區間寬於 ±0.2，建議在「批量優化」設定相同參數區間並觀察不同組合的 Sharpe 分佈，找出落在合理風險報酬比的組合再行調整策略。
+                                                    </span>
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div class="sensitivity-card__scroller">
+                                            <table class="sensitivity-card__table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>情境參數</th>
+                                                        <th>
+                                                            <span class="tooltip inline-flex items-center gap-1">
+                                                                <span>-10% 調整</span>
+                                                                <span class="tooltiptext tooltiptext--sensitivity">
+                                                                    將此參數下調 10% 後的績效差異。若變動顯著，建議在「批量優化」中設定更細的步距確認是否存在明顯的過擬合峰值。
+                                                                </span>
+                                                            </span>
+                                                        </th>
+                                                        <th>基準表現</th>
+                                                        <th>
+                                                            <span class="tooltip inline-flex items-center gap-1">
+                                                                <span>+10% 調整</span>
+                                                                <span class="tooltiptext tooltiptext--sensitivity">
+                                                                    將此參數上調 10% 後的績效差異。若報酬或風險指標快速惡化，可透過「批量優化」找出更平坦的區域再鎖定適用範圍。
+                                                                </span>
+                                                            </span>
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="sensitivity-table-body">
+                                                    <tr>
+                                                        <td colspan="4" class="py-6 text-center text-sm" style="color: var(--muted-foreground);">
+                                                            執行回測後將列出各主要參數的 ±10% 影響，含報酬、Sharpe 與最大回撤差異。
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        <div class="sensitivity-card__hint">
+                                            <i data-lucide="target" class="lucide-sm"></i>
+                                            <div>
+                                                <p class="font-semibold text-sm" style="color: var(--foreground);">操作建議</p>
+                                                <p class="m-0">
+                                                    若任一參數在 ±10% 內出現大幅飄移，可先將該參數設定為「批量優化」目標，並在掃描結果中挑選落在穩健範圍的組合；待確認穩定區間後，再回到正式策略中更新參數值。
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Performance Tab -->
