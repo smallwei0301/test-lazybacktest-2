@@ -1183,6 +1183,28 @@
                                     </div>
                                 </div>
 
+                                <div class="card shadow-lg summary-card" id="strategy-status-card">
+                                    <div class="card-header">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="shield-check" class="lucide-sm" aria-hidden="true"></i>
+                                                <span>策略狀態速報</span>
+                                            </h3>
+                                            <span id="strategy-status-version" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-STRATEGY-STATUS-20250628A</span>
+                                        </div>
+                                        <p id="strategy-status-subtitle" class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
+                                            回測完成後會即時通報策略和買入持有誰領先，並附上核心指標體檢小抄。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <span id="strategy-status-badge" class="inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--muted-foreground);">等待戰報</span>
+                                        <h4 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">等候裁判吹哨</h4>
+                                        <div id="strategy-status-detail" class="text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            執行回測後會顯示策略戰況、差距以及風險體檢提醒。
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div class="card shadow-lg summary-card" id="trend-analysis-card">
                                     <div class="card-header">
                                         <div class="flex items-center justify-between gap-2">

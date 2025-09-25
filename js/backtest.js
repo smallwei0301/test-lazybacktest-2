@@ -255,6 +255,363 @@ const todaySuggestionUI = (() => {
 
 window.lazybacktestTodaySuggestion = todaySuggestionUI;
 
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250628A';
+
+const strategyStatusCard = (() => {
+    const state = {
+        container: null,
+        badge: null,
+        title: null,
+        detail: null,
+        subtitle: null,
+        version: null,
+    };
+
+    const toneConfigs = {
+        neutral: {
+            label: '等待戰報',
+            bg: 'color-mix(in srgb, var(--muted) 20%, transparent)',
+            color: 'var(--muted-foreground)',
+        },
+        loading: {
+            label: '計算中',
+            bg: 'rgba(59, 130, 246, 0.18)',
+            color: '#1d4ed8',
+        },
+        leading: {
+            label: '領先中',
+            bg: 'rgba(34, 197, 94, 0.16)',
+            color: '#15803d',
+        },
+        trailing: {
+            label: '落後中',
+            bg: 'rgba(239, 68, 68, 0.16)',
+            color: '#b91c1c',
+        },
+        tie: {
+            label: '拉鋸戰',
+            bg: 'rgba(14, 165, 233, 0.18)',
+            color: '#0f766e',
+        },
+        warning: {
+            label: '資料待補',
+            bg: 'rgba(251, 191, 36, 0.22)',
+            color: '#b45309',
+        },
+        error: {
+            label: '異常',
+            bg: 'rgba(239, 68, 68, 0.22)',
+            color: '#7f1d1d',
+        },
+    };
+
+    const percentFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : { format: (value) => (Number.isFinite(value) ? value.toFixed(2) : '—') };
+    const ratioFormatter = percentFormatter;
+    const scoreFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
+        : { format: (value) => (Number.isFinite(value) ? String(Math.round(value)) : '—') };
+
+    function ensureCardReady() {
+        if (!state.container) return false;
+        state.container.classList.remove('hidden');
+        return true;
+    }
+
+    function applyTone(toneKey, overrideLabel) {
+        if (!state.badge) return;
+        const config = toneConfigs[toneKey] || toneConfigs.neutral;
+        const labelText = overrideLabel || config.label;
+        state.badge.textContent = labelText;
+        state.badge.style.backgroundColor = config.bg;
+        state.badge.style.color = config.color;
+    }
+
+    function setTitle(text) {
+        if (state.title) {
+            state.title.textContent = text;
+        }
+    }
+
+    function setSubtitle(text) {
+        if (state.subtitle) {
+            state.subtitle.textContent = text;
+        }
+    }
+
+    function setDetail(options = {}) {
+        if (!state.detail) return;
+        const { html, text } = options;
+        if (typeof html === 'string') {
+            state.detail.innerHTML = html;
+        } else if (typeof text === 'string') {
+            state.detail.innerHTML = escapeHtml(text);
+        } else {
+            state.detail.innerHTML = '—';
+        }
+    }
+
+    function formatPercent(value, { signed = true } = {}) {
+        if (!Number.isFinite(value)) return '—';
+        const magnitude = percentFormatter.format(Math.abs(value));
+        if (!signed) return magnitude;
+        return value >= 0 ? `+${magnitude}` : `-${magnitude}`;
+    }
+
+    function formatRatio(value) {
+        if (!Number.isFinite(value)) return '—';
+        return ratioFormatter.format(value);
+    }
+
+    function formatScore(value) {
+        if (!Number.isFinite(value)) return '—';
+        return scoreFormatter.format(value);
+    }
+
+    function computeStrategyMetrics(result) {
+        if (!result) return null;
+        const buyHoldArray = Array.isArray(result.buyHoldReturns) ? result.buyHoldReturns : [];
+        const buyHoldReturn = buyHoldArray.length > 0
+            ? Number(buyHoldArray[buyHoldArray.length - 1])
+            : Number(result.buyHoldReturn ?? NaN);
+        const strategyReturn = Number(result.returnRate ?? NaN);
+        if (!Number.isFinite(strategyReturn) || !Number.isFinite(buyHoldReturn)) {
+            return null;
+        }
+
+        const annualizedReturn = Number(result.annualizedReturn ?? NaN);
+        const buyHoldAnnualizedReturn = Number(result.buyHoldAnnualizedReturn ?? NaN);
+        const sharpeRatio = Number(result.sharpeRatio ?? NaN);
+        const sortinoRatio = Number(result.sortinoRatio ?? NaN);
+        const maxDrawdown = Number(result.maxDrawdown ?? NaN);
+        const annReturnHalf1 = Number(result.annReturnHalf1 ?? NaN);
+        const annReturnHalf2 = Number(result.annReturnHalf2 ?? NaN);
+        const sharpeHalf1 = Number(result.sharpeHalf1 ?? NaN);
+        const sharpeHalf2 = Number(result.sharpeHalf2 ?? NaN);
+        const ratioReturn = Number.isFinite(annReturnHalf1) && Math.abs(annReturnHalf1) > 1e-6 && Number.isFinite(annReturnHalf2)
+            ? annReturnHalf2 / annReturnHalf1
+            : NaN;
+        const ratioSharpe = Number.isFinite(sharpeHalf1) && Math.abs(sharpeHalf1) > 1e-6 && Number.isFinite(sharpeHalf2)
+            ? sharpeHalf2 / sharpeHalf1
+            : NaN;
+        const stabilityScore = (() => {
+            const sensitivityScore = result?.parameterSensitivity?.summary?.stabilityScore;
+            if (Number.isFinite(sensitivityScore)) return sensitivityScore;
+            if (Number.isFinite(result?.sensitivityAnalysis?.summary?.stabilityScore)) {
+                return result.sensitivityAnalysis.summary.stabilityScore;
+            }
+            return Number(result.stabilityScore ?? NaN);
+        })();
+
+        return {
+            strategyReturn,
+            buyHoldReturn,
+            annualizedReturn: Number.isFinite(annualizedReturn) ? annualizedReturn : NaN,
+            buyHoldAnnualizedReturn: Number.isFinite(buyHoldAnnualizedReturn) ? buyHoldAnnualizedReturn : NaN,
+            sharpeRatio: Number.isFinite(sharpeRatio) ? sharpeRatio : NaN,
+            sortinoRatio: Number.isFinite(sortinoRatio) ? sortinoRatio : NaN,
+            maxDrawdown: Number.isFinite(maxDrawdown) ? maxDrawdown : NaN,
+            annReturnRatio: Number.isFinite(ratioReturn) ? ratioReturn : NaN,
+            sharpeHalfRatio: Number.isFinite(ratioSharpe) ? ratioSharpe : NaN,
+            stabilityScore: Number.isFinite(stabilityScore) ? stabilityScore : NaN,
+        };
+    }
+
+    function buildStrategyHealthSummary(metrics) {
+        const warnings = [];
+        const positives = [];
+
+        if (Number.isFinite(metrics.annualizedReturn)) {
+            if (metrics.annualizedReturn < 6) {
+                warnings.push(`年化報酬只有 ${formatPercent(metrics.annualizedReturn)}，火力偏弱，建議檢查進出場節奏。`);
+            } else {
+                positives.push(`年化報酬 ${formatPercent(metrics.annualizedReturn)}`);
+            }
+        }
+
+        if (Number.isFinite(metrics.sharpeRatio)) {
+            if (metrics.sharpeRatio < 0.8) {
+                warnings.push(`夏普值僅 ${formatRatio(metrics.sharpeRatio)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力。`);
+            } else {
+                positives.push(`夏普值 ${formatRatio(metrics.sharpeRatio)}`);
+            }
+        }
+
+        if (Number.isFinite(metrics.sortinoRatio)) {
+            if (metrics.sortinoRatio < 0.9) {
+                warnings.push(`索提諾比率只有 ${formatRatio(metrics.sortinoRatio)}，下檔風險的回饋不夠香，記得守住風控線。`);
+            } else {
+                positives.push(`索提諾比率 ${formatRatio(metrics.sortinoRatio)}`);
+            }
+        }
+
+        if (Number.isFinite(metrics.maxDrawdown)) {
+            if (metrics.maxDrawdown > 20) {
+                warnings.push(`最大回撤達 ${formatPercent(metrics.maxDrawdown, { signed: false })}% ，資金水庫要挖深一點才能撐住波動。`);
+            } else {
+                positives.push(`最大回撤僅 ${formatPercent(metrics.maxDrawdown, { signed: false })}%`);
+            }
+        }
+
+        if (Number.isFinite(metrics.annReturnRatio)) {
+            if (metrics.annReturnRatio < 0.6) {
+                warnings.push(`前後段報酬比僅 ${formatRatio(metrics.annReturnRatio)}，策略在不同市況易變臉，建議多做滾動驗證。`);
+            } else {
+                positives.push(`前後段報酬比 ${formatRatio(metrics.annReturnRatio)}`);
+            }
+        }
+
+        if (Number.isFinite(metrics.sharpeHalfRatio)) {
+            if (metrics.sharpeHalfRatio < 0.6) {
+                warnings.push(`前後段夏普比只有 ${formatRatio(metrics.sharpeHalfRatio)}，可能存在過擬合，請留意驗證樣本。`);
+            } else {
+                positives.push(`前後段夏普比 ${formatRatio(metrics.sharpeHalfRatio)}`);
+            }
+        }
+
+        if (Number.isFinite(metrics.stabilityScore)) {
+            if (metrics.stabilityScore < 60) {
+                warnings.push(`穩定度得分 ${formatScore(metrics.stabilityScore)} 分，參數輕推就飄，操作前先鎖定容忍區間。`);
+            } else {
+                positives.push(`穩定度得分 ${formatScore(metrics.stabilityScore)} 分`);
+            }
+        }
+
+        let positiveSummary = '';
+        if (positives.length > 0) {
+            if (warnings.length === 0) {
+                positiveSummary = `${positives.join('、')} 全部亮綠燈，這套策略目前狀態超讚，維持節奏就能續攻。`;
+            } else {
+                positiveSummary = `${positives.join('、')} 表現還算給力，記得把優勢守住再調整參數上場。`;
+            }
+        }
+
+        return { warnings, positiveSummary };
+    }
+
+    function splitSummaryIntoBulletLines(lines) {
+        const items = Array.isArray(lines)
+            ? lines
+            : typeof lines === 'string'
+                ? lines.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+                : [];
+        if (!items.length) return '';
+        const listItems = items
+            .filter((line) => typeof line === 'string' && line.trim().length > 0)
+            .map((line) => `<li class="leading-relaxed">${escapeHtml(line.trim())}</li>`)
+            .join('');
+        return `<ul class="list-disc list-inside space-y-1 text-sm" style="color: var(--foreground);">${listItems}</ul>`;
+    }
+
+    function reset() {
+        if (!ensureCardReady()) return;
+        if (state.version) state.version.textContent = STRATEGY_STATUS_VERSION;
+        applyTone('neutral');
+        setTitle('等候裁判吹哨');
+        setSubtitle('回測完成後會即時通報策略和買入持有誰領先，並附上核心指標體檢小抄。');
+        setDetail({ text: '執行回測後會顯示策略戰況、差距以及風險體檢提醒。' });
+    }
+
+    function setLoading() {
+        if (!ensureCardReady()) return;
+        applyTone('loading');
+        setTitle('戰情中心運算中');
+        setDetail({ text: '指標巡檢正在飛速更新，稍後就知道誰領先。' });
+    }
+
+    function setNoData(message) {
+        if (!ensureCardReady()) return;
+        applyTone('warning', '資料補眠');
+        setTitle('資料還在補眠');
+        setDetail({ text: message || '目前缺少足夠的交易資料，待回測完成後再更新戰況。' });
+    }
+
+    function setError(message) {
+        if (!ensureCardReady()) return;
+        applyTone('error');
+        setTitle('戰情中心收到紅燈');
+        setDetail({ text: message || '回測過程出現異常，請稍後重新嘗試或調整參數。' });
+    }
+
+    function update(result) {
+        if (!ensureCardReady()) return;
+        const metrics = computeStrategyMetrics(result);
+        if (!metrics) {
+            setNoData('回測結果缺少必要的績效數據，暫無戰況可比。');
+            return;
+        }
+
+        const diff = metrics.strategyReturn - metrics.buyHoldReturn;
+        const diffAbs = Math.abs(diff);
+        const gapText = formatPercent(diffAbs, { signed: false });
+        const strategyText = formatPercent(metrics.strategyReturn);
+        const buyHoldText = formatPercent(metrics.buyHoldReturn);
+        const health = buildStrategyHealthSummary(metrics);
+        const bulletLines = [];
+        let highlight = '';
+
+        if (diff <= -5) {
+            applyTone('trailing');
+            setTitle('買入持有暫時壓著打');
+            highlight = '<p class="text-base font-semibold text-rose-600 leading-relaxed mb-3">快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。</p>';
+            bulletLines.push(`策略總報酬率 ${strategyText}，買入持有 ${buyHoldText}，目前落後 ${gapText} 個百分點。`);
+        } else if (diff >= 5) {
+            applyTone('leading');
+            setTitle('策略正帶頭衝鋒');
+            highlight = '<p class="text-base font-semibold text-emerald-600 leading-relaxed mb-3">戰術奏效，策略目前踩在節奏點上。</p>';
+            bulletLines.push(`策略總報酬率 ${strategyText}，買入持有 ${buyHoldText}，目前領先 ${gapText} 個百分點。`);
+        } else {
+            applyTone('tie');
+            setTitle('雙方正拉鋸');
+            highlight = '<p class="text-base font-semibold text-sky-700 leading-relaxed mb-3">比分咬得緊，下一次交易就可能翻盤。</p>';
+            bulletLines.push(`策略總報酬率 ${strategyText}，買入持有 ${buyHoldText}，雙方只差 ${gapText} 個百分點。`);
+        }
+
+        bulletLines.push(...health.warnings);
+        if (health.positiveSummary) {
+            bulletLines.push(health.positiveSummary);
+        }
+
+        const detailHtml = highlight + splitSummaryIntoBulletLines(bulletLines);
+        setDetail({ html: detailHtml });
+    }
+
+    function init() {
+        state.container = document.getElementById('strategy-status-card');
+        state.badge = document.getElementById('strategy-status-badge');
+        state.title = document.getElementById('strategy-status-title');
+        state.detail = document.getElementById('strategy-status-detail');
+        state.subtitle = document.getElementById('strategy-status-subtitle');
+        state.version = document.getElementById('strategy-status-version');
+        if (!state.container) return;
+        reset();
+    }
+
+    return {
+        init,
+        reset,
+        setLoading,
+        setNoData,
+        setError,
+        update,
+        splitSummaryIntoBulletLines,
+    };
+})();
+
+document.addEventListener('DOMContentLoaded', () => {
+    strategyStatusCard.init();
+});
+
+window.lazybacktestStrategyStatus = {
+    reset: () => strategyStatusCard.reset(),
+    setLoading: () => strategyStatusCard.setLoading(),
+    setNoData: (message) => strategyStatusCard.setNoData(message),
+    setError: (message) => strategyStatusCard.setError(message),
+    update: (result) => strategyStatusCard.update(result),
+    splitSummaryIntoBulletLines: (lines) => strategyStatusCard.splitSummaryIntoBulletLines(lines),
+};
+
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
 const START_GAP_RETRY_MS = 6 * 60 * 60 * 1000; // 六小時後再嘗試重新抓取
@@ -2204,6 +2561,9 @@ function runBacktestInternal() {
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
+        if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setLoading === 'function') {
+            window.lazybacktestStrategyStatus.setLoading();
+        }
 
         if(backtestWorker) { // Ensure previous worker is terminated
             backtestWorker.terminate();
@@ -2221,16 +2581,32 @@ function runBacktestInternal() {
 
             if(type==='progress'){
                 updateProgress(progress);
+                if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setLoading === 'function') {
+                    window.lazybacktestStrategyStatus.setLoading();
+                }
                 if(message)document.getElementById('loadingText').textContent=`⌛ ${message}`;
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
+                if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setError === 'function') {
+                    window.lazybacktestStrategyStatus.setError(message);
+                }
                 if (window.showMarketSwitchModal) {
                     window.showMarketSwitchModal(message, marketType, stockNo);
                 } else {
                     console.error('[Main] showMarketSwitchModal function not found');
                     showError(message);
                 }
+            } else if (type === 'no_data') {
+                hideLoading();
+                const fallbackMsg = data?.message || '指定範圍無有效交易數據，暫停更新戰況。';
+                showError(fallbackMsg);
+                if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setNoData === 'function') {
+                    window.lazybacktestStrategyStatus.setNoData(fallbackMsg);
+                }
+                const suggestionArea = document.getElementById('today-suggestion-area');
+                if (suggestionArea) suggestionArea.classList.add('hidden');
+                if(backtestWorker) { backtestWorker.terminate(); backtestWorker = null; }
             } else if(type==='stockNameInfo'){
                 // 處理股票名稱資訊，顯示在UI上
                 if (window.showStockName) {
@@ -2527,6 +2903,9 @@ function runBacktestInternal() {
                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
                 showError(data?.message||'回測過程錯誤');
+                if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setError === 'function') {
+                    window.lazybacktestStrategyStatus.setError(data?.message || '回測過程錯誤');
+                }
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
                 if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
@@ -2541,6 +2920,9 @@ function runBacktestInternal() {
              hideLoading();
              const suggestionArea = document.getElementById('today-suggestion-area');
               if (suggestionArea) suggestionArea.classList.add('hidden');
+             if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setError === 'function') {
+                 window.lazybacktestStrategyStatus.setError(`Worker錯誤: ${e.message}`);
+             }
         };
 
         const workerMsg={
@@ -2583,6 +2965,9 @@ function runBacktestInternal() {
         hideLoading();
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
+        if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setError === 'function') {
+            window.lazybacktestStrategyStatus.setError(`執行回測時發生錯誤: ${error.message}`);
+        }
         if(backtestWorker)backtestWorker.terminate(); backtestWorker = null;
     }
 }
@@ -2616,6 +3001,9 @@ function clearPreviousResults() {
     } else {
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
+    }
+    if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.reset === 'function') {
+        window.lazybacktestStrategyStatus.reset();
     }
     visibleStockData = [];
     renderPricePipelineSteps();
@@ -3603,6 +3991,9 @@ function handleBacktestResult(result, stockName, dataSource) {
         renderTrendSummary();
         updateChartTrendOverlay();
         if (suggestionArea) suggestionArea.classList.add('hidden');
+        if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.setNoData === 'function') {
+            window.lazybacktestStrategyStatus.setNoData('回測結果無效或無數據，暫無戰況可供比較。');
+        }
          hideLoading();
         return;
     }
@@ -3617,6 +4008,10 @@ function handleBacktestResult(result, stockName, dataSource) {
             strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
         };
         recomputeTrendAnalysis({ skipChartUpdate: true });
+
+        if (window.lazybacktestStrategyStatus && typeof window.lazybacktestStrategyStatus.update === 'function') {
+            window.lazybacktestStrategyStatus.update(result);
+        }
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);

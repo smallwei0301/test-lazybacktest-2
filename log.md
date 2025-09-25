@@ -1,4 +1,10 @@
 
+## 2025-09-11 — Patch LB-STRATEGY-STATUS-20250911A
+- **Issue recap**: 策略速報仍放在建議卡片附近，缺少與回測摘要並列的戰況提示，也未將指標體檢拆成條列說明，使用者難以快速掌握策略與買入持有的差距。
+- **Fix**: 將「策略狀態速報」移至摘要分頁淨值曲線下方，預設掛上版本碼 `LB-STRATEGY-STATUS-20250628A`，並依回測結果切換領先／落後／拉鋸徽章與口語化標題；同步新增 `splitSummaryIntoBulletLines` 與策略體檢評語，於落後情境先顯示放大激勵句，再以條列呈現差距、風險指標與優勢。
+- **Diagnostics**: 執行回測時觀察戰況卡會在載入中顯示「戰情中心運算中」，完成後依差距切換顏色與文案；資料不足、錯誤或 Worker 例外會改為補眠／紅燈提示，並保留 bullet 條列格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(f=>new vm.Script(fs.readFileSync(f,'utf8'),{filename:f}));console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
@@ -422,4 +428,5 @@
 - **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+
 
