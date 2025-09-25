@@ -7928,6 +7928,7 @@ function runStrategy(data, params, options = {}) {
       console.log("[Worker] BuyHold summary", buyHoldSummary);
     }
 
+
     const shouldSkipSensitivity =
       skipSensitivity || (params && params.__skipSensitivity);
     let sensitivityAnalysis = null;
@@ -7952,7 +7953,6 @@ function runStrategy(data, params, options = {}) {
       }
     }
     return {
-
       stockNo: params.stockNo,
       initialCapital: initialCapital,
       finalValue: finalV,
@@ -9521,6 +9521,7 @@ self.onmessage = async function (e) {
       if (params.endDate && latestDate && latestDate > params.endDate) {
         notes.push(`已延伸資料至 ${latestDate}，超過原設定結束日 ${params.endDate}。`);
       }
+
 
       const suggestionPayload = {
         status: "ok",
