@@ -5,6 +5,7 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-TODAY-SUGGESTION-20250904A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -55,6 +56,7 @@ const todaySuggestionUI = (() => {
     const positionEl = document.getElementById('today-suggestion-position');
     const portfolioEl = document.getElementById('today-suggestion-portfolio');
     const notesEl = document.getElementById('today-suggestion-notes');
+    const notesContainer = document.getElementById('today-suggestion-notes-container');
     const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
     const numberFormatter = typeof Intl !== 'undefined'
         ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
@@ -108,9 +110,9 @@ const todaySuggestionUI = (() => {
     function formatPriceValue(value, type) {
         if (!Number.isFinite(value)) return null;
         const formatted = numberFormatter.format(value);
-        if (!type) return formatted;
+        if (!type) return `${formatted} 元`;
         const label = priceTypeLabel[type] || '價格';
-        return `${label} ${formatted}`;
+        return `${label} ${formatted} 元`;
     }
 
     function formatShares(shares) {
@@ -146,9 +148,11 @@ const todaySuggestionUI = (() => {
         notesEl.innerHTML = '';
         if (!Array.isArray(notes) || notes.length === 0) {
             notesEl.style.display = 'none';
+            if (notesContainer) notesContainer.classList.add('hidden');
             return;
         }
         notesEl.style.display = 'block';
+        if (notesContainer) notesContainer.classList.remove('hidden');
         notes.forEach((note) => {
             if (!note) return;
             const li = document.createElement('li');
@@ -249,6 +253,7 @@ const todaySuggestionUI = (() => {
             if (!area) return;
             ensureAreaVisible();
             showPlaceholderContent();
+            setNotes([]);
         },
     };
 })();

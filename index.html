@@ -1004,43 +1004,46 @@
 
                             <!-- Today Suggestion -->
                             <div class="card hidden" id="today-suggestion-area" aria-live="polite">
-                                <div class="card-header">
+                                <div class="card-header pb-2">
                                     <h3 class="card-title flex items-center gap-2">
                                         <i data-lucide="lightbulb" class="lucide text-accent" style="color: var(--accent);"></i>
                                         今日建議
                                     </h3>
                                 </div>
-                                <div class="card-content">
-                                    <div id="today-suggestion-empty" class="text-xs text-center" style="color: var(--muted-foreground);">
-                                        執行回測後將顯示策略的最新操作建議
+                                <div class="card-content pt-0 space-y-4">
+                                    <div id="today-suggestion-empty" class="today-suggestion-empty">
+                                        執行回測後將依最新資料推導今日的操作指引
                                     </div>
-                                    <div id="today-suggestion-body" class="space-y-4 hidden">
+                                    <div id="today-suggestion-body" class="today-suggestion-body hidden">
                                         <div id="today-suggestion-banner" class="today-suggestion-highlight">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <span id="today-suggestion-label" class="text-sm font-semibold" style="color: var(--foreground);">計算中</span>
-                                                <span id="today-suggestion-date" class="text-xs" style="color: var(--muted-foreground);">—</span>
+                                            <div class="today-suggestion-topline">
+                                                <span id="today-suggestion-label" class="today-suggestion-chip">計算中</span>
+                                                <span id="today-suggestion-date" class="today-suggestion-date">—</span>
                                             </div>
-                                            <div id="today-suggestion-price" class="text-xs" style="color: var(--muted-foreground);">—</div>
+                                            <div id="today-suggestion-price" class="today-suggestion-price">—</div>
                                         </div>
-                                        <dl class="today-suggestion-stats grid grid-cols-2 gap-3 text-xs">
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">多單狀態</dt>
-                                                <dd id="today-suggestion-long" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                        <dl class="today-suggestion-stats">
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">多單概況</dt>
+                                                <dd id="today-suggestion-long" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">空單狀態</dt>
-                                                <dd id="today-suggestion-short" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">空單概況</dt>
+                                                <dd id="today-suggestion-short" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">部位概況</dt>
-                                                <dd id="today-suggestion-position" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">整體部位</dt>
+                                                <dd id="today-suggestion-position" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">模擬資金</dt>
-                                                <dd id="today-suggestion-portfolio" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">資產估值</dt>
+                                                <dd id="today-suggestion-portfolio" class="today-suggestion-stat-value">—</dd>
                                             </div>
                                         </dl>
-                                        <ul id="today-suggestion-notes" class="text-[11px] space-y-1 list-disc pl-5" style="color: var(--muted-foreground);"></ul>
+                                        <div id="today-suggestion-notes-container" class="today-suggestion-notes hidden">
+                                            <div class="today-suggestion-notes-title">備註</div>
+                                            <ul id="today-suggestion-notes" class="today-suggestion-notes-list"></ul>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

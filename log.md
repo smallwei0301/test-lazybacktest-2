@@ -1,4 +1,10 @@
 
+## 2025-09-04 — Patch LB-TODAY-SUGGESTION-20250904A
+- **Issue recap**: 今日建議卡片仍沿用早期版面，缺乏行動標籤與部位摘要，備註訊息也未集中管理，導致使用者無法一眼辨識最新操作與潛在風險。
+- **Fix**: 重構首頁今日建議卡為行動亮點＋多空統計＋備註清單的三段式結構，新增 `todaySuggestionUI` 控制器以統一處理載入、結果與錯誤狀態，並將主執行緒請求帶入 coverage/cachedMeta 供 Worker 直接推導 `runStrategy.finalEvaluation` 的建議內容。
+- **Diagnostics**: 於瀏覽器確認卡片在載入、成功與錯誤時皆能切換顯示狀態，備註列表會依實際訊息展開；同時查看 console 確認 getSuggestion 訊息包含 coverage fingerprint 與資料診斷摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
