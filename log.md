@@ -1,4 +1,10 @@
 
+## 2025-09-05 — Patch LB-TODAY-SUGGESTION-DEVLOG-20250905A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳「無法判斷今日操作」，但開發者區域缺乏對應 log，難以追蹤是哪個步驟產生 fallback 訊息。
+- **Fix**: 建立今日建議開發者紀錄面板，集中列出最新狀態、價格、部位摘要與訊息，並在 `showResult`、`showError` 中寫入 log 以保留錯誤脈絡。
+- **Diagnostics**: 透過 UI 驗證今日建議在成功、無資料與錯誤狀態下皆會將訊息同步至開發者紀錄區，清除按鈕可重置觀察環境。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-04 — Patch LB-TODAY-SUGGESTION-20250904A
 - **Issue recap**: 今日建議卡片仍沿用早期版面，缺乏行動標籤與部位摘要，備註訊息也未集中管理，導致使用者無法一眼辨識最新操作與潛在風險。
 - **Fix**: 重構首頁今日建議卡為行動亮點＋多空統計＋備註清單的三段式結構，新增 `todaySuggestionUI` 控制器以統一處理載入、結果與錯誤狀態，並將主執行緒請求帶入 coverage/cachedMeta 供 Worker 直接推導 `runStrategy.finalEvaluation` 的建議內容。

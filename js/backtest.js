@@ -6,6 +6,7 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
+// Patch Tag: LB-TODAY-SUGGESTION-DEVLOG-20250905A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -42,6 +43,230 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+
+const todaySuggestionDeveloperLog = (() => {
+    const MAX_ENTRIES = 30;
+    const entries = [];
+    let container = null;
+    let clearBtn = null;
+    let initialised = false;
+
+    const severityClassMap = {
+        success: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+        info: 'bg-sky-100 text-sky-700 border-sky-200',
+        warning: 'bg-amber-100 text-amber-700 border-amber-200',
+        error: 'bg-rose-100 text-rose-700 border-rose-200',
+        neutral: 'bg-slate-100 text-slate-700 border-slate-200',
+    };
+
+    const severityLabelMap = {
+        success: '成功',
+        info: '資訊',
+        warning: '提醒',
+        error: '錯誤',
+        neutral: '紀錄',
+    };
+
+    function ensureElements() {
+        if (initialised) return;
+        container = document.getElementById('today-suggestion-log-body');
+        clearBtn = document.getElementById('todaySuggestionLogClear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                entries.length = 0;
+                renderEntries();
+            });
+        }
+        initialised = true;
+    }
+
+    function cloneValue(value) {
+        if (value === null || typeof value !== 'object') return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                console.warn('[TodaySuggestionLog] structuredClone failed, fallback to JSON clone.', error);
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            if (Array.isArray(value)) {
+                return value.slice();
+            }
+            return { ...value };
+        }
+    }
+
+    function formatTimestamp(timestamp) {
+        const date = new Date(Number(timestamp));
+        if (Number.isNaN(date.getTime())) return '—';
+        if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+            try {
+                return new Intl.DateTimeFormat('zh-TW', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).format(date);
+            } catch (error) {
+                console.warn('[TodaySuggestionLog] Failed to format timestamp with Intl.', error);
+            }
+        }
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function resolveSeverity(entry) {
+        const statusKey = (entry?.payload?.status || '').toString().toLowerCase();
+        if (entry?.kind === 'error' || statusKey === 'error') {
+            return 'error';
+        }
+        if (statusKey === 'ok') {
+            return 'success';
+        }
+        if (statusKey === 'future_start') {
+            return 'info';
+        }
+        if (statusKey === 'no_data') {
+            return 'warning';
+        }
+        if (entry?.kind === 'warning') {
+            return 'warning';
+        }
+        if (entry?.payload?.tone === 'error') {
+            return 'error';
+        }
+        return 'neutral';
+    }
+
+    function buildSummaryParts(entry) {
+        const parts = [];
+        const latestDate = entry?.payload?.latestDate;
+        if (latestDate) {
+            parts.push(`最新 ${latestDate}`);
+        }
+        if (entry?.meta?.priceText) {
+            parts.push(entry.meta.priceText);
+        }
+        if (entry?.meta?.positionSummary && entry.meta.positionSummary !== '—') {
+            parts.push(`部位 ${entry.meta.positionSummary}`);
+        }
+        if (entry?.meta?.longText && entry.meta.longText !== '—') {
+            parts.push(`多單 ${entry.meta.longText}`);
+        }
+        if (entry?.meta?.shortText && entry.meta.shortText !== '—') {
+            parts.push(`空單 ${entry.meta.shortText}`);
+        }
+        if (Number.isFinite(entry?.meta?.dataLagDays) && entry.meta.dataLagDays > 0) {
+            parts.push(`資料延遲 ${entry.meta.dataLagDays} 日`);
+        }
+        return parts;
+    }
+
+    function buildDetails(entry) {
+        const notes = new Set();
+        if (entry?.payload?.message) {
+            notes.add(entry.payload.message);
+        }
+        if (Array.isArray(entry?.payload?.notes)) {
+            entry.payload.notes.forEach((note) => {
+                if (note) notes.add(note);
+            });
+        }
+        return Array.from(notes);
+    }
+
+    function renderEntries() {
+        ensureElements();
+        if (!container) return;
+        if (entries.length === 0) {
+            container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">執行回測後，會在此列出今日建議的狀態與錯誤訊息。</div>`;
+            return;
+        }
+
+        const html = entries
+            .map((entry) => {
+                const severity = resolveSeverity(entry);
+                const badgeClass = severityClassMap[severity] || severityClassMap.neutral;
+                const severityLabel = severityLabelMap[severity] || severityLabelMap.neutral;
+                const statusLabel = (entry?.payload?.status || entry?.meta?.status || severity).toString();
+                const label = entry?.payload?.label || (entry?.kind === 'error' ? '計算失敗' : '—');
+                const summaryParts = buildSummaryParts(entry)
+                    .map((part) => `<span>${escapeHtml(part)}</span>`)
+                    .join('');
+                const summaryHtml = summaryParts
+                    ? `<div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">${summaryParts}</div>`
+                    : '';
+                const detailItems = buildDetails(entry)
+                    .map((note) => `<li>${escapeHtml(note)}</li>`)
+                    .join('');
+                const detailsHtml = detailItems
+                    ? `<ul class="list-disc list-inside space-y-0.5">${detailItems}</ul>`
+                    : '';
+
+                return `
+                    <div class="border rounded-md px-3 py-2 space-y-1 text-[11px]" style="border-color: var(--border);">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="font-medium" style="color: var(--foreground);">${escapeHtml(label)}</span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${badgeClass}">
+                                    <span>${escapeHtml(severityLabel)}</span>
+                                    <span style="color: var(--muted-foreground);">${escapeHtml(statusLabel)}</span>
+                                </span>
+                            </div>
+                            <span class="text-[10px]" style="color: var(--muted-foreground);">${escapeHtml(formatTimestamp(entry.timestamp))}</span>
+                        </div>
+                        ${summaryHtml}
+                        ${detailsHtml}
+                    </div>
+                `;
+            })
+            .join('');
+        container.innerHTML = html;
+    }
+
+    return {
+        record(kind, payload = {}, meta = {}) {
+            ensureElements();
+            const entry = {
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                timestamp: Date.now(),
+                kind: kind || 'info',
+                payload: cloneValue(payload),
+                meta: cloneValue(meta),
+            };
+            entries.unshift(entry);
+            if (entries.length > MAX_ENTRIES) {
+                entries.length = MAX_ENTRIES;
+            }
+            renderEntries();
+        },
+        clear() {
+            entries.length = 0;
+            renderEntries();
+        },
+        render() {
+            renderEntries();
+        },
+        getEntries() {
+            return entries.slice();
+        },
+    };
+})();
+
+window.lazybacktestTodaySuggestionLog = todaySuggestionDeveloperLog;
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        todaySuggestionDeveloperLog.render();
+    } catch (error) {
+        console.warn('[TodaySuggestionLog] Failed to render on DOMContentLoaded.', error);
+    }
+});
 
 const todaySuggestionUI = (() => {
     const area = document.getElementById('today-suggestion-area');
@@ -213,12 +438,17 @@ const todaySuggestionUI = (() => {
             ensureAreaVisible();
             showBodyContent();
             const status = payload.status || 'ok';
+            const fallbackNotes = [];
+            let displayPayload = payload;
+            let tone = payload.tone || 'neutral';
             if (status !== 'ok') {
-                const fallbackNotes = [];
                 if (payload.message) fallbackNotes.push(payload.message);
                 if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
-                setTone(status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral');
-                applyResultPayload({
+                tone = status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral';
+                displayPayload = {
+                    ...payload,
+                    status,
+                    tone,
                     label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
                     latestDate: payload.latestDate || '—',
                     price: { text: payload.price?.text || payload.message || '—' },
@@ -226,19 +456,40 @@ const todaySuggestionUI = (() => {
                     shortPosition: { state: '空手' },
                     positionSummary: '—',
                     notes: fallbackNotes,
-                    evaluation: {},
-                });
-                return;
+                    evaluation: payload.evaluation || {},
+                };
             }
-            setTone(payload.tone || 'neutral');
-            applyResultPayload(payload);
+            setTone(tone);
+            applyResultPayload(displayPayload);
+            if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
+                const priceText = displayPayload.price?.text
+                    || formatPriceValue(displayPayload.price?.value, displayPayload.price?.type)
+                    || displayPayload.message
+                    || '—';
+                const meta = {
+                    status,
+                    priceText,
+                    longText: describePosition(displayPayload.longPosition),
+                    shortText: describePosition(displayPayload.shortPosition),
+                    positionSummary: displayPayload.positionSummary || '—',
+                };
+                if (Number.isFinite(displayPayload.dataLagDays)) {
+                    meta.dataLagDays = displayPayload.dataLagDays;
+                }
+                window.lazybacktestTodaySuggestionLog.record(
+                    status === 'ok' ? 'result' : 'warning',
+                    displayPayload,
+                    meta,
+                );
+            }
         },
         showError(message) {
             if (!area) return;
             ensureAreaVisible();
             showBodyContent();
             setTone('error');
-            applyResultPayload({
+            const displayPayload = {
+                status: 'error',
                 label: '計算失敗',
                 latestDate: '—',
                 price: { text: message || '計算建議時發生錯誤' },
@@ -247,7 +498,17 @@ const todaySuggestionUI = (() => {
                 positionSummary: '—',
                 notes: message ? [message] : [],
                 evaluation: {},
-            });
+            };
+            applyResultPayload(displayPayload);
+            if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
+                window.lazybacktestTodaySuggestionLog.record('error', displayPayload, {
+                    status: 'error',
+                    priceText: displayPayload.price?.text || '—',
+                    longText: describePosition(displayPayload.longPosition),
+                    shortText: describePosition(displayPayload.shortPosition),
+                    positionSummary: displayPayload.positionSummary || '—',
+                });
+            }
         },
         showPlaceholder() {
             if (!area) return;
