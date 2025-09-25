@@ -9467,8 +9467,97 @@ self.onmessage = async function (e) {
       });
       const evaluation = todayResult?.finalEvaluation || null;
       const latestDate = suggestionData[suggestionData.length - 1]?.date || null;
+      const datasetSummary =
+        todayResult?.diagnostics?.dataset ||
+        summariseDatasetRows(suggestionData, {
+          requestedStart: params.startDate || null,
+          effectiveStartDate,
+          warmupStartDate: dataStartDate,
+          dataStartDate,
+          endDate: todayISO,
+        });
+      const warmupSummary = todayResult?.diagnostics?.warmup || null;
+      const buyHoldSummary = todayResult?.diagnostics?.buyHold || null;
+      const coverage = computeCoverageFromRows(suggestionData);
+      const coverageFingerprint = computeCoverageFingerprint(coverage);
+      const priceModeKey =
+        suggestionOutcome?.priceMode ||
+        getPriceModeKey(Boolean(params.adjustedPrice));
+      const dataSource = suggestionOutcome?.dataSource || null;
+      const priceSource = suggestionOutcome?.priceSource || null;
+      const fetchRange =
+        suggestionOutcome?.fetchRange ||
+        {
+          start: dataStartDate,
+          end: todayISO,
+        };
+      const diagnosticsMeta =
+        suggestionOutcome?.diagnostics &&
+        typeof suggestionOutcome.diagnostics === "object"
+          ? suggestionOutcome.diagnostics
+          : null;
       if (!evaluation || !latestDate) {
         const message = "回測資料不足以推導今日建議。";
+        const notes = [message];
+        const developerNotes = [];
+        const rangeStart =
+          datasetSummary?.firstDate ||
+          datasetSummary?.firstRowOnOrAfterEffectiveStart?.date ||
+          null;
+        const rangeEnd = datasetSummary?.lastDate || latestDate || todayISO;
+        if (rangeStart || rangeEnd) {
+          const rangeText =
+            rangeStart && rangeEnd && rangeStart !== rangeEnd
+              ? `${rangeStart} ~ ${rangeEnd}`
+              : rangeStart || rangeEnd;
+          notes.push(`當前資料區間：${rangeText}。`);
+          developerNotes.push(`資料區間：${rangeText}`);
+        }
+        if (Number.isFinite(datasetSummary?.totalRows)) {
+          const priceLabel = priceModeKey === "ADJ" ? "調整後價格" : "原始收盤價";
+          notes.push(
+            `共有 ${datasetSummary.totalRows} 筆 ${priceLabel}，仍缺乏可推導的最終狀態。`,
+          );
+          developerNotes.push(
+            `總筆數 ${datasetSummary.totalRows}（${priceLabel}）`,
+          );
+        }
+        if (
+          datasetSummary?.firstValidCloseOnOrAfterEffectiveStart?.date &&
+          Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective)
+        ) {
+          const gapDays = datasetSummary.firstValidCloseGapFromEffective;
+          const firstValidDate =
+            datasetSummary.firstValidCloseOnOrAfterEffectiveStart.date;
+          developerNotes.push(
+            `暖身後第一筆有效收盤價：${firstValidDate}（落後 ${gapDays} 日）`,
+          );
+          if (gapDays > 0) {
+            notes.push(
+              `暖身結束後第 ${gapDays} 日（${firstValidDate}）才出現有效收盤價。`,
+            );
+          }
+        } else if (
+          !datasetSummary?.firstValidCloseOnOrAfterEffectiveStart?.date
+        ) {
+          notes.push("暖身後仍找不到有效收盤價，請確認資料是否完整。");
+          developerNotes.push("暖身後未找到有效收盤價");
+        }
+        if (Number.isFinite(datasetSummary?.rowsWithinRange)) {
+          developerNotes.push(
+            `使用者區間筆數 ${datasetSummary.rowsWithinRange}`,
+          );
+        }
+        if (Number.isFinite(datasetSummary?.warmupRows)) {
+          developerNotes.push(`暖身筆數 ${datasetSummary.warmupRows}`);
+        }
+        if (Array.isArray(coverage) && coverage.length > 0) {
+          developerNotes.push(
+            `覆蓋區段 ${coverage.length} 段，fingerprint ${
+              coverageFingerprint || "N/A"
+            }`,
+          );
+        }
         self.postMessage({
           type: "suggestionResult",
           data: {
@@ -9476,7 +9565,26 @@ self.onmessage = async function (e) {
             label: "無法判斷今日操作",
             latestDate: latestDate || todayISO,
             price: { text: message },
-            notes: [message],
+            notes,
+            developerNotes,
+            issueCode: !evaluation ? "final_evaluation_missing" : "latest_date_missing",
+            dataset: datasetSummary,
+            warmup: warmupSummary,
+            buyHold: buyHoldSummary,
+            rowCount: suggestionData.length,
+            coverage,
+            coverageFingerprint,
+            priceMode: priceModeKey,
+            dataSource,
+            priceSource,
+            fetchRange,
+            diagnostics: diagnosticsMeta,
+            todayISO,
+            requestedEndDate: params.endDate,
+            appliedEndDate: todayISO,
+            startDateUsed: strategyParams.startDate,
+            dataStartDateUsed: dataStartDate,
+            lookbackDaysUsed: resolvedLookback,
           },
         });
         return;
@@ -9543,6 +9651,19 @@ self.onmessage = async function (e) {
         appliedEndDate: todayISO,
         startDateUsed: strategyParams.startDate,
         dataStartDateUsed: dataStartDate,
+        lookbackDaysUsed: resolvedLookback,
+        dataset: datasetSummary,
+        warmup: warmupSummary,
+        buyHold: buyHoldSummary,
+        rowCount: suggestionData.length,
+        coverage,
+        coverageFingerprint,
+        priceMode: priceModeKey,
+        dataSource,
+        priceSource,
+        fetchRange,
+        diagnostics: diagnosticsMeta,
+        developerNotes: [],
       };
 
       self.postMessage({

@@ -1,4 +1,10 @@
 
+## 2025-09-07 — Patch LB-TODAY-SUGGESTION-DIAG-20250907A
+- **Issue recap**: 今日建議返回 `no_data` 時僅提示「回測資料不足」，開發者無法從 UI 看出實際資料區間、覆蓋段數或暖身缺口，難以判斷是哪個環節未產生最終倉位。
+- **Fix**: Worker 在建議結果中回傳 dataset/warmup/coverage 診斷、資料筆數、暖身天數與 issue code，並新增開發者專用備註；前端 developer log 會顯示區間範圍、價格模式、資料來源與暖身缺口，協助對照為何無法產出建議。
+- **Diagnostics**: 於開發者區域驗證 `no_data` 狀態會列出「資料區間」「總筆數」「暖身後首筆有效收盤」等資訊，並在 console 檢查 meta 內帶有 coverage fingerprint 與 fetch range，確保後續能追蹤快取與資料來源。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-05 — Patch LB-TODAY-SUGGESTION-DEVLOG-20250905A
 - **Issue recap**: 今日建議在資料充足時仍可能回傳「無法判斷今日操作」，但開發者區域缺乏對應 log，難以追蹤是哪個步驟產生 fallback 訊息。
 - **Fix**: 建立今日建議開發者紀錄面板，集中列出最新狀態、價格、部位摘要與訊息，並在 `showResult`、`showError` 中寫入 log 以保留錯誤脈絡。

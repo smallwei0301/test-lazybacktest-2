@@ -7,6 +7,7 @@
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DEVLOG-20250905A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -65,6 +66,11 @@ const todaySuggestionDeveloperLog = (() => {
         warning: '提醒',
         error: '錯誤',
         neutral: '紀錄',
+    };
+
+    const priceModeLabelMap = {
+        RAW: '原始收盤價',
+        ADJ: '調整後價格',
     };
 
     function ensureElements() {
@@ -143,6 +149,12 @@ const todaySuggestionDeveloperLog = (() => {
         return 'neutral';
     }
 
+    function resolvePriceModeLabel(modeKey) {
+        if (!modeKey) return null;
+        const key = typeof modeKey === 'string' ? modeKey.toUpperCase() : String(modeKey);
+        return priceModeLabelMap[key] || null;
+    }
+
     function buildSummaryParts(entry) {
         const parts = [];
         const latestDate = entry?.payload?.latestDate;
@@ -151,6 +163,26 @@ const todaySuggestionDeveloperLog = (() => {
         }
         if (entry?.meta?.priceText) {
             parts.push(entry.meta.priceText);
+        }
+        const datasetRange = entry?.meta?.datasetRange;
+        if (datasetRange) {
+            const rowCount = Number.isFinite(entry?.meta?.rowsWithinRange)
+                ? entry.meta.rowsWithinRange
+                : Number.isFinite(entry?.meta?.datasetRows)
+                    ? entry.meta.datasetRows
+                    : null;
+            const modeLabel = resolvePriceModeLabel(entry?.meta?.priceMode || entry?.payload?.priceMode);
+            const coverageText = Number.isFinite(entry?.meta?.coverageSegments) && entry.meta.coverageSegments > 0
+                ? `覆蓋 ${entry.meta.coverageSegments} 段`
+                : null;
+            const segmentParts = [`區間 ${datasetRange}`];
+            if (rowCount !== null) {
+                segmentParts.push(`${rowCount} 筆${modeLabel ? `（${modeLabel}）` : ''}`);
+            } else if (modeLabel) {
+                segmentParts.push(modeLabel);
+            }
+            if (coverageText) segmentParts.push(coverageText);
+            parts.push(segmentParts.join(' ・ '));
         }
         if (entry?.meta?.positionSummary && entry.meta.positionSummary !== '—') {
             parts.push(`部位 ${entry.meta.positionSummary}`);
@@ -176,6 +208,70 @@ const todaySuggestionDeveloperLog = (() => {
             entry.payload.notes.forEach((note) => {
                 if (note) notes.add(note);
             });
+        }
+        if (Array.isArray(entry?.payload?.developerNotes)) {
+            entry.payload.developerNotes.forEach((note) => {
+                if (note) notes.add(note);
+            });
+        }
+        const modeLabel = resolvePriceModeLabel(entry?.meta?.priceMode || entry?.payload?.priceMode);
+        if (modeLabel) {
+            notes.add(`價格模式：${modeLabel}`);
+        }
+        if (entry?.meta?.datasetRange) {
+            notes.add(`資料區間：${entry.meta.datasetRange}`);
+        }
+        if (Number.isFinite(entry?.meta?.datasetRows)) {
+            notes.add(`總筆數：${entry.meta.datasetRows}`);
+        }
+        if (Number.isFinite(entry?.meta?.rowsWithinRange)) {
+            notes.add(`使用者區間筆數：${entry.meta.rowsWithinRange}`);
+        }
+        if (Number.isFinite(entry?.meta?.warmupRows)) {
+            notes.add(`暖身筆數：${entry.meta.warmupRows}`);
+        }
+        if (Number.isFinite(entry?.meta?.rowCount)) {
+            notes.add(`回傳資料筆數：${entry.meta.rowCount}`);
+        }
+        if (Number.isFinite(entry?.meta?.lookbackDaysUsed)) {
+            notes.add(`計算暖身天數：${entry.meta.lookbackDaysUsed}`);
+        }
+        if (Number.isFinite(entry?.meta?.lookbackResolved)) {
+            notes.add(`暖身推算結果：${entry.meta.lookbackResolved}`);
+        }
+        if (entry?.meta?.startDateUsed) {
+            notes.add(`策略起算日：${entry.meta.startDateUsed}`);
+        }
+        if (entry?.meta?.dataStartDateUsed) {
+            notes.add(`暖身起點：${entry.meta.dataStartDateUsed}`);
+        }
+        if (entry?.meta?.todayISO) {
+            notes.add(`請求日期：${entry.meta.todayISO}`);
+        }
+        if (Number.isFinite(entry?.meta?.firstValidGap)) {
+            const firstValidDate = entry?.meta?.firstValidDate
+                ? `（${entry.meta.firstValidDate}）`
+                : '';
+            notes.add(`暖身後首筆有效收盤落後 ${entry.meta.firstValidGap} 日${firstValidDate}`);
+        } else if (entry?.meta?.firstValidDate) {
+            notes.add(`暖身後首筆有效收盤：${entry.meta.firstValidDate}`);
+        }
+        if (entry?.meta?.fetchRange) {
+            const start = entry.meta.fetchRange?.start || '未知';
+            const end = entry.meta.fetchRange?.end || '未知';
+            notes.add(`抓取範圍：${start} ~ ${end}`);
+        }
+        if (entry?.meta?.dataSource) {
+            notes.add(`資料來源：${entry.meta.dataSource}`);
+        }
+        if (entry?.meta?.priceSource) {
+            notes.add(`價格來源：${entry.meta.priceSource}`);
+        }
+        if (entry?.meta?.coverageFingerprint) {
+            notes.add(`Coverage Fingerprint：${entry.meta.coverageFingerprint}`);
+        }
+        if (entry?.meta?.issueCode) {
+            notes.add(`Issue Code：${entry.meta.issueCode}`);
         }
         return Array.from(notes);
     }
@@ -444,6 +540,12 @@ const todaySuggestionUI = (() => {
             if (status !== 'ok') {
                 if (payload.message) fallbackNotes.push(payload.message);
                 if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
+                const dedupedNotes = [];
+                fallbackNotes.forEach((note) => {
+                    if (!note) return;
+                    if (dedupedNotes.includes(note)) return;
+                    dedupedNotes.push(note);
+                });
                 tone = status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral';
                 displayPayload = {
                     ...payload,
@@ -455,7 +557,7 @@ const todaySuggestionUI = (() => {
                     longPosition: { state: '空手' },
                     shortPosition: { state: '空手' },
                     positionSummary: '—',
-                    notes: fallbackNotes,
+                    notes: dedupedNotes,
                     evaluation: payload.evaluation || {},
                 };
             }
@@ -475,6 +577,75 @@ const todaySuggestionUI = (() => {
                 };
                 if (Number.isFinite(displayPayload.dataLagDays)) {
                     meta.dataLagDays = displayPayload.dataLagDays;
+                }
+                if (Number.isFinite(displayPayload.lookbackDaysUsed)) {
+                    meta.lookbackDaysUsed = displayPayload.lookbackDaysUsed;
+                }
+                if (Number.isFinite(displayPayload.rowCount)) {
+                    meta.rowCount = displayPayload.rowCount;
+                }
+                if (displayPayload.priceMode) {
+                    meta.priceMode = displayPayload.priceMode;
+                }
+                if (displayPayload.dataSource) {
+                    meta.dataSource = displayPayload.dataSource;
+                }
+                if (displayPayload.priceSource) {
+                    meta.priceSource = displayPayload.priceSource;
+                }
+                if (displayPayload.issueCode) {
+                    meta.issueCode = displayPayload.issueCode;
+                }
+                if (displayPayload.startDateUsed) {
+                    meta.startDateUsed = displayPayload.startDateUsed;
+                }
+                if (displayPayload.dataStartDateUsed) {
+                    meta.dataStartDateUsed = displayPayload.dataStartDateUsed;
+                }
+                if (displayPayload.todayISO) {
+                    meta.todayISO = displayPayload.todayISO;
+                }
+                if (displayPayload.fetchRange && typeof displayPayload.fetchRange === 'object') {
+                    meta.fetchRange = displayPayload.fetchRange;
+                }
+                if (displayPayload.coverageFingerprint) {
+                    meta.coverageFingerprint = displayPayload.coverageFingerprint;
+                }
+                if (Array.isArray(displayPayload.coverage)) {
+                    meta.coverageSegments = displayPayload.coverage.length;
+                }
+                if (displayPayload.dataset && typeof displayPayload.dataset === 'object') {
+                    const ds = displayPayload.dataset;
+                    const rangeStart = ds.firstDate
+                        || ds.firstRowOnOrAfterEffectiveStart?.date
+                        || null;
+                    const rangeEnd = ds.lastDate || null;
+                    if (rangeStart || rangeEnd) {
+                        meta.datasetRange = rangeStart && rangeEnd && rangeStart !== rangeEnd
+                            ? `${rangeStart} ~ ${rangeEnd}`
+                            : rangeStart || rangeEnd;
+                    }
+                    if (Number.isFinite(ds.totalRows)) {
+                        meta.datasetRows = ds.totalRows;
+                    }
+                    if (Number.isFinite(ds.rowsWithinRange)) {
+                        meta.rowsWithinRange = ds.rowsWithinRange;
+                    }
+                    if (Number.isFinite(ds.warmupRows)) {
+                        meta.warmupRows = ds.warmupRows;
+                    }
+                    if (Number.isFinite(ds.firstValidCloseGapFromEffective)) {
+                        meta.firstValidGap = ds.firstValidCloseGapFromEffective;
+                    }
+                    if (ds.firstValidCloseOnOrAfterEffectiveStart?.date) {
+                        meta.firstValidDate = ds.firstValidCloseOnOrAfterEffectiveStart.date;
+                    }
+                }
+                if (displayPayload.warmup && typeof displayPayload.warmup === 'object') {
+                    const warmup = displayPayload.warmup;
+                    if (Number.isFinite(warmup.lookbackDays)) {
+                        meta.lookbackResolved = warmup.lookbackDays;
+                    }
                 }
                 window.lazybacktestTodaySuggestionLog.record(
                     status === 'ok' ? 'result' : 'warning',
