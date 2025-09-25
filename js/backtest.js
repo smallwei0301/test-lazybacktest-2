@@ -5,6 +5,14 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-PERFORMANCE-DIAGNOSTIC-20250713A
+
+const PERFORMANCE_ANALYSIS_VERSION = 'LB-PERFORMANCE-DIAGNOSTIC-20250713A';
+const performanceTabState = {
+    containerInitialClasses: null,
+    containerInitialBorderColor: null,
+    emptyMessage: '請先執行回測以生成期間績效數據。',
+};
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -41,6 +49,306 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+
+function capturePerformanceContainerState(container) {
+    if (!container || typeof container.classList === 'undefined') return;
+    if (!performanceTabState.containerInitialClasses) {
+        performanceTabState.containerInitialClasses = Array.from(container.classList);
+    }
+    if (performanceTabState.containerInitialBorderColor === null) {
+        performanceTabState.containerInitialBorderColor = container.style.borderColor || '';
+    }
+}
+
+function resetPerformanceAnalysis(message = performanceTabState.emptyMessage) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) return;
+    capturePerformanceContainerState(container);
+    if (Array.isArray(performanceTabState.containerInitialClasses)) {
+        container.className = performanceTabState.containerInitialClasses.join(' ');
+    }
+    if (performanceTabState.containerInitialBorderColor !== null) {
+        container.style.borderColor = performanceTabState.containerInitialBorderColor;
+    }
+    container.innerHTML = `<div class="py-12 px-4 text-sm text-center" style="color: var(--muted-foreground);">${escapeHtml(message)}</div>`;
+}
+
+function applyPerformanceContainerFilled(container) {
+    if (!container) return;
+    capturePerformanceContainerState(container);
+    const baseClasses = Array.isArray(performanceTabState.containerInitialClasses)
+        ? performanceTabState.containerInitialClasses
+        : Array.from(container.classList);
+    const filtered = baseClasses.filter((cls) => !['flex', 'items-center', 'justify-center', 'border-dashed'].includes(cls));
+    const classSet = new Set(filtered);
+    classSet.add('p-0');
+    container.className = Array.from(classSet).join(' ');
+    container.style.borderColor = 'color-mix(in srgb, var(--border) 70%, transparent)';
+}
+
+function toFiniteNumber(value) {
+    if (value === null || value === undefined) return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatPerformancePercent(value, { digits = 2, withSign = false, fallback = '—' } = {}) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return fallback;
+    const sign = withSign && numeric > 0 ? '+' : '';
+    return `${sign}${numeric.toFixed(digits)}%`;
+}
+
+function formatPerformanceRatio(value, digits = 2) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return '—';
+    return numeric.toFixed(digits);
+}
+
+function formatPerformanceSortino(value, digits = 2) {
+    if (value === Infinity) return '∞';
+    if (value === -Infinity) return '-∞';
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return '—';
+    return numeric.toFixed(digits);
+}
+
+function formatPerformanceDrawdown(value, digits = 2) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return '—';
+    if (numeric === 0) return '0.00%';
+    return `-${numeric.toFixed(digits)}%`;
+}
+
+function getTrendColorStyle(value) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return 'color: var(--muted-foreground);';
+    return numeric >= 0 ? 'color: #16a34a;' : 'color: #dc2626;';
+}
+
+function getSharpeColorStyle(value) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null) return 'color: var(--muted-foreground);';
+    if (numeric >= 1.5) return 'color: #047857;';
+    if (numeric >= 1) return 'color: #d97706;';
+    return 'color: #dc2626;';
+}
+
+function getDrawdownColorStyle(value) {
+    const numeric = toFiniteNumber(value);
+    if (numeric === null || numeric === 0) return 'color: var(--muted-foreground);';
+    return 'color: #dc2626;';
+}
+
+function getPerformancePeriodOrder(label) {
+    if (typeof label !== 'string') return 9999;
+    const upper = label.toUpperCase();
+    if (/^\d+M$/.test(upper)) return parseInt(upper.replace('M', ''), 10);
+    if (upper === 'YTD') return 60;
+    if (/^\d+Y$/.test(upper)) return parseInt(upper.replace('Y', ''), 10) * 12 + 100;
+    return 9999;
+}
+
+function formatPerformancePeriodLabel(label) {
+    if (typeof label !== 'string') return '—';
+    const upper = label.toUpperCase();
+    if (/^\d+M$/.test(upper)) {
+        const months = parseInt(upper.replace('M', ''), 10);
+        return `近 ${months} 個月`;
+    }
+    if (/^\d+Y$/.test(upper)) {
+        const years = parseInt(upper.replace('Y', ''), 10);
+        return `近 ${years} 年`;
+    }
+    if (upper === 'YTD') return '今年以來';
+    return label;
+}
+
+function computeOverallPerformanceMetrics(overallResult) {
+    if (!overallResult || typeof overallResult !== 'object') return null;
+    const buyHoldSeries = Array.isArray(overallResult.buyHoldReturns) ? overallResult.buyHoldReturns : [];
+    const buyHoldReturn = buyHoldSeries.length > 0 ? toFiniteNumber(buyHoldSeries[buyHoldSeries.length - 1]) : null;
+    return {
+        strategyReturn: toFiniteNumber(overallResult.returnRate),
+        buyHoldReturn,
+        annualizedReturn: toFiniteNumber(overallResult.annualizedReturn),
+        sharpeRatio: toFiniteNumber(overallResult.sharpeRatio),
+        sortinoRatio: overallResult.sortinoRatio === Infinity || overallResult.sortinoRatio === -Infinity
+            ? overallResult.sortinoRatio
+            : toFiniteNumber(overallResult.sortinoRatio),
+        maxDrawdown: toFiniteNumber(overallResult.maxDrawdown),
+        tradesCount: toFiniteNumber(overallResult.tradesCount),
+        winTrades: toFiniteNumber(overallResult.winTrades),
+        startDate: overallResult.effectiveStartDate || overallResult.startDate || (Array.isArray(overallResult.dates) && overallResult.dates.length > 0 ? overallResult.dates[0] : null),
+        endDate: overallResult.endDate || (Array.isArray(overallResult.dates) && overallResult.dates.length > 0 ? overallResult.dates[overallResult.dates.length - 1] : null),
+    };
+}
+
+function formatPerformanceRangeLabel(metrics) {
+    if (!metrics || (!metrics.startDate && !metrics.endDate)) return '資料期間：—';
+    const start = metrics.startDate || '—';
+    const end = metrics.endDate || '—';
+    return `資料期間：${start} → ${end}`;
+}
+
+function renderPerformanceSummary(overallResult, metrics) {
+    if (!overallResult || !metrics) {
+        return `
+        <section class="space-y-3">
+            <div class="flex items-center justify-between">
+                <h4 class="text-base font-semibold" style="color: var(--foreground);">整體績效摘要</h4>
+            </div>
+            <div class="p-6 text-sm rounded-lg border border-dashed" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: var(--muted-foreground);">
+                尚未取得有效的總體績效數據。
+            </div>
+        </section>`;
+    }
+
+    const cards = [
+        { label: '策略累積報酬', value: formatPerformancePercent(metrics.strategyReturn, { withSign: true }), style: getTrendColorStyle(metrics.strategyReturn) },
+        { label: '買入持有累積報酬', value: formatPerformancePercent(metrics.buyHoldReturn, { withSign: true }), style: getTrendColorStyle(metrics.buyHoldReturn) },
+        { label: '策略年化報酬', value: formatPerformancePercent(metrics.annualizedReturn, { withSign: true }), style: getTrendColorStyle(metrics.annualizedReturn) },
+        { label: '夏普比率', value: formatPerformanceRatio(metrics.sharpeRatio), style: getSharpeColorStyle(metrics.sharpeRatio) },
+        { label: '索提諾比率', value: formatPerformanceSortino(metrics.sortinoRatio), style: getSharpeColorStyle(metrics.sortinoRatio) },
+        { label: '最大回撤', value: formatPerformanceDrawdown(metrics.maxDrawdown), style: getDrawdownColorStyle(metrics.maxDrawdown) },
+    ];
+
+    const cardsHtml = cards.map((card) => `
+        <div class="p-4 rounded-lg border shadow-sm" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 75%, transparent);">
+            <p class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted-foreground);">${escapeHtml(card.label)}</p>
+            <p class="text-2xl font-semibold mt-2" style="${card.style}">${card.value}</p>
+        </div>
+    `).join('');
+
+    const tradeStats = [];
+    if (metrics.tradesCount !== null) {
+        tradeStats.push(`<div><p class="text-xs" style="color: var(--muted-foreground);">完成交易</p><p class="text-sm font-medium" style="color: var(--foreground);">${Math.round(metrics.tradesCount)}</p></div>`);
+    }
+    if (metrics.tradesCount && metrics.tradesCount > 0 && metrics.winTrades !== null) {
+        const winRate = (metrics.winTrades / metrics.tradesCount) * 100;
+        tradeStats.push(`<div><p class="text-xs" style="color: var(--muted-foreground);">勝率</p><p class="text-sm font-medium" style="${getTrendColorStyle(winRate - 50)}">${formatPerformancePercent(winRate, { digits: 1 })}</p></div>`);
+    }
+    const tradeStatsHtml = tradeStats.length > 0
+        ? `<div class="flex flex-wrap gap-4">${tradeStats.join('')}</div>`
+        : '';
+
+    return `
+    <section class="space-y-3">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <h4 class="text-base font-semibold" style="color: var(--foreground);">整體績效摘要</h4>
+            <span class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(formatPerformanceRangeLabel(metrics))}</span>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            ${cardsHtml}
+        </div>
+        ${tradeStatsHtml ? `<div class="rounded-lg border px-4 py-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--background) 92%, var(--muted) 8%);">${tradeStatsHtml}</div>` : ''}
+    </section>`;
+}
+
+function renderPerformanceTableSection(periodItems, overallResult, metrics) {
+    const rowsHtml = periodItems.length > 0
+        ? periodItems.map(({ label, value }) => {
+            const displayLabel = formatPerformancePeriodLabel(label);
+            if (!value || typeof value !== 'object') {
+                return `<tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);"><td class="px-4 py-3 font-medium" style="color: var(--foreground);">${escapeHtml(displayLabel)}</td><td class="px-4 py-3 text-center text-sm italic" colspan="5" style="color: var(--muted-foreground);">資料不足或期間低於計算需求</td></tr>`;
+            }
+            const totalReturn = formatPerformancePercent(value.totalReturn, { withSign: true });
+            const bhReturn = formatPerformancePercent(value.totalBuyHoldReturn, { withSign: true });
+            const sharpe = formatPerformanceRatio(value.sharpeRatio);
+            const sortino = formatPerformanceSortino(value.sortinoRatio);
+            const maxDD = formatPerformanceDrawdown(value.maxDrawdown);
+            return `<tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                <td class="px-4 py-3 font-medium" style="color: var(--foreground);">${escapeHtml(displayLabel)}</td>
+                <td class="px-4 py-3 text-right font-semibold" style="${getTrendColorStyle(value.totalReturn)}">${totalReturn}</td>
+                <td class="px-4 py-3 text-right font-semibold" style="${getTrendColorStyle(value.totalBuyHoldReturn)}">${bhReturn}</td>
+                <td class="px-4 py-3 text-right font-medium" style="${getSharpeColorStyle(value.sharpeRatio)}">${sharpe}</td>
+                <td class="px-4 py-3 text-right font-medium" style="${getSharpeColorStyle(value.sortinoRatio)}">${sortino}</td>
+                <td class="px-4 py-3 text-right font-medium" style="${getDrawdownColorStyle(value.maxDrawdown)}">${maxDD}</td>
+            </tr>`;
+        }).join('')
+        : `<tr><td class="px-4 py-4 text-center text-sm" colspan="6" style="color: var(--muted-foreground);">尚未累積足夠歷史資料以計算分段績效。</td></tr>`;
+
+    let overallRow = '';
+    if (overallResult && metrics) {
+        overallRow = `<tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 65%, transparent); background: color-mix(in srgb, var(--muted) 12%, transparent);">
+            <td class="px-4 py-3 font-semibold" style="color: var(--foreground);">回測總計</td>
+            <td class="px-4 py-3 text-right font-semibold" style="${getTrendColorStyle(metrics.strategyReturn)}">${formatPerformancePercent(metrics.strategyReturn, { withSign: true })}</td>
+            <td class="px-4 py-3 text-right font-semibold" style="${getTrendColorStyle(metrics.buyHoldReturn)}">${formatPerformancePercent(metrics.buyHoldReturn, { withSign: true })}</td>
+            <td class="px-4 py-3 text-right font-medium" style="${getSharpeColorStyle(metrics.sharpeRatio)}">${formatPerformanceRatio(metrics.sharpeRatio)}</td>
+            <td class="px-4 py-3 text-right font-medium" style="${getSharpeColorStyle(metrics.sortinoRatio)}">${formatPerformanceSortino(metrics.sortinoRatio)}</td>
+            <td class="px-4 py-3 text-right font-medium" style="${getDrawdownColorStyle(metrics.maxDrawdown)}">${formatPerformanceDrawdown(metrics.maxDrawdown)}</td>
+        </tr>`;
+    }
+
+    return `
+    <section class="space-y-3">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <h4 class="text-base font-semibold" style="color: var(--foreground);">期間績效分析</h4>
+            <span class="text-xs" style="color: var(--muted-foreground);">策略與買入持有比較</span>
+        </div>
+        <div class="overflow-x-auto rounded-lg border" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+            <table class="min-w-full text-sm">
+                <thead style="background: color-mix(in srgb, var(--muted) 18%, transparent);">
+                    <tr style="color: var(--muted-foreground);">
+                        <th class="px-4 py-3 text-left font-medium">期間</th>
+                        <th class="px-4 py-3 text-right font-medium">策略累積報酬</th>
+                        <th class="px-4 py-3 text-right font-medium">買入持有報酬</th>
+                        <th class="px-4 py-3 text-right font-medium">夏普值</th>
+                        <th class="px-4 py-3 text-right font-medium">索提諾比率</th>
+                        <th class="px-4 py-3 text-right font-medium">最大回撤</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                    ${overallRow}
+                </tbody>
+            </table>
+        </div>
+    </section>`;
+}
+
+function renderPerformanceAnalysis({ overallResult = null, subPeriodResults = null } = {}) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) return;
+
+    const resolvedOverall = overallResult || lastOverallResult || null;
+    const resolvedSubPeriods = subPeriodResults || lastSubPeriodResults || null;
+    const periodItems = resolvedSubPeriods && typeof resolvedSubPeriods === 'object'
+        ? Object.entries(resolvedSubPeriods).map(([label, value]) => ({ label, value }))
+        : [];
+
+    periodItems.sort((a, b) => getPerformancePeriodOrder(a.label) - getPerformancePeriodOrder(b.label));
+
+    const hasPeriodData = periodItems.some((item) => item.value && typeof item.value === 'object');
+
+    if (!resolvedOverall && !hasPeriodData) {
+        resetPerformanceAnalysis();
+        return;
+    }
+
+    applyPerformanceContainerFilled(container);
+    const metrics = computeOverallPerformanceMetrics(resolvedOverall);
+    const summaryHtml = renderPerformanceSummary(resolvedOverall, metrics);
+    const tableHtml = renderPerformanceTableSection(periodItems, resolvedOverall, metrics);
+
+    container.innerHTML = `
+        <div class="w-full p-4 md:p-6 space-y-6">
+            ${summaryHtml}
+            ${tableHtml}
+            <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-[11px]" style="color: var(--muted-foreground);">
+                <span>策略績效診斷版本：${PERFORMANCE_ANALYSIS_VERSION}</span>
+                <span>資料比較：策略 vs. 買入持有</span>
+            </div>
+        </div>
+    `;
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestPerformanceAnalysis = {
+        render: renderPerformanceAnalysis,
+        reset: resetPerformanceAnalysis,
+    };
+}
 
 const todaySuggestionUI = (() => {
     const area = document.getElementById('today-suggestion-area');
@@ -2591,7 +2899,7 @@ function clearPreviousResults() {
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    resetPerformanceAnalysis();
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -3602,6 +3910,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         trendAnalysisState.summary = null;
         renderTrendSummary();
         updateChartTrendOverlay();
+        resetPerformanceAnalysis('回測結果無效或無數據。');
         if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
         return;
@@ -3611,6 +3920,8 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastSubPeriodResults = result.subPeriodResults;
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
+
+        renderPerformanceAnalysis({ overallResult: result, subPeriodResults: result.subPeriodResults });
 
         trendAnalysisState.result = {
             dates: Array.isArray(result.dates) ? [...result.dates] : [],

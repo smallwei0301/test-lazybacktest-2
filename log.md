@@ -1,4 +1,10 @@
 
+## 2025-09-10 — Patch LB-PERFORMANCE-DIAGNOSTIC-20250713A
+- **Issue recap**: 「績效分析」分頁在回測完成後仍顯示預設提示，無法呈現各期間績效與總結指標，導致使用者誤以為回測失敗。
+- **Fix**: 新增績效診斷模組記錄容器初始狀態並動態渲染摘要卡、期間比較表與版本資訊；回測成功時即時注入資料，發生錯誤或重新清除時恢復預設訊息。
+- **Diagnostics**: 回測後切換至「績效分析」分頁，可看到整體績效摘要、各期間策略 vs. 買入持有比較與版本標籤；重新執行或回測失敗時容器恢復居中提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>new vm.Script(fs.readFileSync(file,'utf8'),{filename:file}));console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
