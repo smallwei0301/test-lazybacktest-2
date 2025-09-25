@@ -1,4 +1,10 @@
 
+## 2025-09-07 — Patch LB-STRATEGY-STATUS-20250907A
+- **Issue recap**: 策略狀態卡落後情境仍會顯示「快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。」的大字標語，與最新需求不符；差距徽章同時以 "-14.67pp" 顯示百分點，造成視覺干擾。
+- **Fix**: 移除落後狀態的強調標語，調整狀態套用器僅保留條列重點；差距徽章固定顯示破折號，避免輸出百分點文案。
+- **Diagnostics**: 回測後逐一檢查策略領先、平手、落後等情境，確認卡片只呈現條列戰況與體檢句，不再出現放大標語，差距徽章持續顯示破折號。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-07-10 — Patch LB-STRATEGY-STATUS-20250710B
 - **Issue recap**: 策略狀態卡的版本徽章佔據視覺重心且戰況條列一字排開，與回測摘要、趨勢評估卡緊貼排列，使用者難以掃描，也無法在落後時快速收合細節。
 - **Fix**: 移除版本號展示並以 `data-lb-strategy-status-version` 註記版本，將趨勢評估卡搬到策略狀態卡上方並為摘要區塊加入 `space-y-6` 間距；戰況條列改為 `<details>` 摺疊呈現，落後時保留放大激勵句，改寫逆風副標維持幽默語氣。

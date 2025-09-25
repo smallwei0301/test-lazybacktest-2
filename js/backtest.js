@@ -269,7 +269,7 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250710B';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250907A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
@@ -355,12 +355,6 @@ function formatPercentSigned(value, digits = 2) {
     if (!Number.isFinite(value)) return '—';
     const prefix = value >= 0 ? '+' : '';
     return `${prefix}${value.toFixed(digits)}%`;
-}
-
-function formatDiffPoints(value, digits = 2) {
-    if (!Number.isFinite(value)) return '—';
-    const prefix = value >= 0 ? '+' : '';
-    return `${prefix}${value.toFixed(digits)}pp`;
 }
 
 function splitSummaryIntoBulletLines(content) {
@@ -616,7 +610,7 @@ function updateStrategyStatusCard(result) {
     const comparison = buildStrategyComparisonSummary(result || {});
     const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
     const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
-    const diffText = comparisonAvailable ? formatDiffPoints(comparison.diff) : '—';
+    const diffText = '—';
     const health = buildStrategyHealthSummary(result || {});
 
     const detailLines = [];
@@ -630,14 +624,9 @@ function updateStrategyStatusCard(result) {
         detailLines.push(health.positiveLine);
     }
 
-    const emphasisedLine = state === 'behind'
-        ? '快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。'
-        : null;
-
     applyStrategyStatusState(state, {
         diffText,
         detail: {
-            emphasisedLine,
             bulletLines: detailLines,
             collapsible: detailLines.length > 0,
             collapsibleSummary: '展開完整戰況條列',
