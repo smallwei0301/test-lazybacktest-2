@@ -279,7 +279,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251001A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251002A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
@@ -486,11 +486,16 @@ function formatDecimal(value, digits = 2) {
     return value.toFixed(digits);
 }
 
+
 function computeTrendAnalysisFromResult(result, thresholds) {
     const dates = Array.isArray(result?.dates) ? result.dates : [];
     const returns = Array.isArray(result?.strategyReturns) ? result.strategyReturns : [];
     const length = Math.min(dates.length, returns.length);
     if (length === 0) {
+        if (thresholds && typeof thresholds === 'object') {
+            thresholds.highSensitivityFallbackApplied = false;
+            thresholds.trendCoverageRatio = null;
+        }
         return { segments: [], summary: null };
     }
     const netValues = new Array(length).fill(null);
@@ -508,11 +513,14 @@ function computeTrendAnalysisFromResult(result, thresholds) {
         }
     }
     if (validIndices.length < 2) {
+        if (thresholds && typeof thresholds === 'object') {
+            thresholds.highSensitivityFallbackApplied = false;
+            thresholds.trendCoverageRatio = null;
+        }
         return { segments: [], summary: null };
     }
     const startIdx = validIndices[0];
     const endIdx = validIndices[validIndices.length - 1];
-    const classifications = new Array(length).fill(null);
     const logDiffs = new Array(length).fill(null);
     for (let i = startIdx + 1; i <= endIdx; i += 1) {
         if (Number.isFinite(logValues[i]) && Number.isFinite(logValues[i - 1])) {
@@ -613,54 +621,7 @@ function computeTrendAnalysisFromResult(result, thresholds) {
         };
     };
 
-    for (let idx = startIdx; idx <= endIdx; idx += 1) {
-        if (!Number.isFinite(logValues[idx])) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        if (idx - windowSize + 1 < startIdx) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        let invalidWindow = false;
-        for (let j = idx - windowSize + 1; j <= idx; j += 1) {
-            if (!Number.isFinite(logValues[j])) {
-                invalidWindow = true;
-                break;
-            }
-        }
-        if (invalidWindow) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
-        if (!metrics) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        const {
-            slope,
-            slopeAbs,
-            r2,
-            trendRatioAbs,
-            strengthAbs,
-        } = metrics;
-        let classification = 'consolidation';
-        const passesStrict = slopeAbs >= slopeThreshold
-            && r2 >= r2Threshold
-            && trendRatioAbs >= ratioThreshold
-            && strengthAbs >= strengthThreshold;
-        const passesRelaxed = slopeAbs >= slopeRelaxed
-            && (
-                (r2 >= r2Relaxed && trendRatioAbs >= ratioRelaxed)
-                || (strengthAbs >= strengthRelaxed && trendRatioAbs >= ratioRelaxed)
-                || (strengthAbs >= strengthThreshold && r2 >= r2Relaxed)
-            );
-        if (passesStrict || passesRelaxed) {
-            classification = slope >= 0 ? 'uptrend' : 'downtrend';
-        }
-        classifications[idx] = classification;
-    }
+    const totalDays = Math.max(1, endIdx - startIdx + 1);
 
     const getNetValueBackward = (index) => {
         for (let i = Math.min(index, length - 1); i >= 0; i -= 1) {
@@ -670,27 +631,7 @@ function computeTrendAnalysisFromResult(result, thresholds) {
         return 1;
     };
 
-    const segments = [];
-    let segmentType = null;
-    let segmentStart = null;
-    for (let idx = startIdx; idx <= endIdx; idx += 1) {
-        const type = classifications[idx] || segmentType || 'consolidation';
-        if (segmentType === null) {
-            segmentType = type;
-            segmentStart = idx;
-            continue;
-        }
-        if (type !== segmentType) {
-            segments.push(buildSegment(segmentType, segmentStart, idx - 1));
-            segmentType = type;
-            segmentStart = idx;
-        }
-    }
-    if (segmentType !== null && segmentStart !== null) {
-        segments.push(buildSegment(segmentType, segmentStart, endIdx));
-    }
-
-    function buildSegment(type, startIndex, endIndex) {
+    const buildSegment = (type, startIndex, endIndex) => {
         const startDate = dates[startIndex] || null;
         const endDate = dates[endIndex] || null;
         const baseValue = startIndex > 0 ? getNetValueBackward(startIndex - 1) : 1;
@@ -710,42 +651,212 @@ function computeTrendAnalysisFromResult(result, thresholds) {
             returnPercent,
             overlay: TREND_STYLE_MAP[type]?.overlay || 'rgba(0,0,0,0.06)',
         };
-    }
-
-    const totalDays = Math.max(1, endIdx - startIdx + 1);
-    const aggregated = {
-        uptrend: { segments: 0, days: 0, factor: 1 },
-        consolidation: { segments: 0, days: 0, factor: 1 },
-        downtrend: { segments: 0, days: 0, factor: 1 },
     };
-    segments.forEach((segment) => {
-        const bucket = aggregated[segment.type];
-        if (!bucket) return;
-        bucket.segments += 1;
-        bucket.days += segment.days;
-        const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
-        bucket.factor *= segFactor;
+
+    const classifyWithThresholds = (params) => {
+        const slopeStrictValue = Number.isFinite(params?.slopeThreshold)
+            ? params.slopeThreshold
+            : slopeThreshold;
+        const slopeRelaxedValue = Number.isFinite(params?.slopeRelaxed)
+            ? params.slopeRelaxed
+            : slopeRelaxed;
+        const ratioStrictValue = Number.isFinite(params?.ratioThreshold)
+            ? params.ratioThreshold
+            : ratioThreshold;
+        const ratioRelaxedValue = Number.isFinite(params?.ratioRelaxed)
+            ? params.ratioRelaxed
+            : ratioRelaxed;
+        const strengthStrictValue = Number.isFinite(params?.strengthThreshold)
+            ? params.strengthThreshold
+            : strengthThreshold;
+        const strengthRelaxedValue = Number.isFinite(params?.strengthRelaxed)
+            ? params.strengthRelaxed
+            : strengthRelaxed;
+        const r2StrictValue = Number.isFinite(params?.r2Threshold)
+            ? params.r2Threshold
+            : r2Threshold;
+        const r2RelaxedValue = Number.isFinite(params?.r2Relaxed)
+            ? params.r2Relaxed
+            : r2Relaxed;
+
+        const localClassifications = new Array(length).fill(null);
+        for (let idx = startIdx; idx <= endIdx; idx += 1) {
+            if (!Number.isFinite(logValues[idx])) {
+                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
+                continue;
+            }
+            if (idx - windowSize + 1 < startIdx) {
+                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
+                continue;
+            }
+            let invalidWindow = false;
+            for (let j = idx - windowSize + 1; j <= idx; j += 1) {
+                if (!Number.isFinite(logValues[j])) {
+                    invalidWindow = true;
+                    break;
+                }
+            }
+            if (invalidWindow) {
+                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
+                continue;
+            }
+            const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
+            if (!metrics) {
+                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
+                continue;
+            }
+            const {
+                slope,
+                slopeAbs,
+                r2,
+                trendRatioAbs,
+                strengthAbs,
+            } = metrics;
+            let classification = 'consolidation';
+            const passesStrict = slopeAbs >= slopeStrictValue
+                && r2 >= r2StrictValue
+                && trendRatioAbs >= ratioStrictValue
+                && strengthAbs >= strengthStrictValue;
+            const passesRelaxed = slopeAbs >= slopeRelaxedValue
+                && (
+                    (r2 >= r2RelaxedValue && trendRatioAbs >= ratioRelaxedValue)
+                    || (strengthAbs >= strengthRelaxedValue && trendRatioAbs >= ratioRelaxedValue)
+                    || (strengthAbs >= strengthStrictValue && r2 >= r2RelaxedValue)
+                );
+            if (passesStrict || passesRelaxed) {
+                classification = slope >= 0 ? 'uptrend' : 'downtrend';
+            }
+            localClassifications[idx] = classification;
+        }
+
+        const segmentsLocal = [];
+        let segmentType = null;
+        let segmentStart = null;
+        for (let idx = startIdx; idx <= endIdx; idx += 1) {
+            const type = localClassifications[idx] || segmentType || 'consolidation';
+            if (segmentType === null) {
+                segmentType = type;
+                segmentStart = idx;
+                continue;
+            }
+            if (type !== segmentType) {
+                segmentsLocal.push(buildSegment(segmentType, segmentStart, idx - 1));
+                segmentType = type;
+                segmentStart = idx;
+            }
+        }
+        if (segmentType !== null && segmentStart !== null) {
+            segmentsLocal.push(buildSegment(segmentType, segmentStart, endIdx));
+        }
+
+        const aggregated = {
+            uptrend: { segments: 0, days: 0, factor: 1 },
+            consolidation: { segments: 0, days: 0, factor: 1 },
+            downtrend: { segments: 0, days: 0, factor: 1 },
+        };
+        segmentsLocal.forEach((segment) => {
+            const bucket = aggregated[segment.type];
+            if (!bucket) return;
+            bucket.segments += 1;
+            bucket.days += segment.days;
+            const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
+            bucket.factor *= segFactor;
+        });
+
+        const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
+            const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
+            acc[key] = {
+                segments: bucket.segments,
+                days: bucket.days,
+                coveragePct,
+                returnPct: (bucket.factor - 1) * 100,
+            };
+            return acc;
+        }, {});
+
+        const coverageRatioValue = totalDays > 0
+            ? ((aggregated.uptrend.days + aggregated.downtrend.days) / totalDays)
+            : 0;
+
+        return {
+            classifications: localClassifications,
+            segments: segmentsLocal,
+            aggregated,
+            summary: {
+                startIndex: startIdx,
+                endIndex: endIdx,
+                totalDays,
+                aggregatedByType,
+                trendCoverageRatio: coverageRatioValue,
+            },
+            coverageRatio: coverageRatioValue,
+        };
+    };
+
+    const mixTowards = (value, target, keepWeight) => {
+        const weight = Number.isFinite(keepWeight) ? Math.max(0, Math.min(1, keepWeight)) : 1;
+        return target + (value - target) * weight;
+    };
+
+    const buildFallbackThresholds = (keepWeight) => {
+        const weight = Number.isFinite(keepWeight) ? Math.max(0, Math.min(1, keepWeight)) : 1;
+        const slopeRelaxedTarget = Math.max(0.00008, slopeRelaxed * 0.9);
+        const ratioRelaxedTarget = 0.5;
+        const strengthRelaxedTarget = 0.55;
+        const r2RelaxedTarget = 0.12;
+        return {
+            slopeThreshold: Math.max(slopeRelaxed, mixTowards(slopeThreshold, slopeRelaxed, weight)),
+            slopeRelaxed: Math.max(slopeRelaxedTarget, mixTowards(slopeRelaxed, slopeRelaxedTarget, weight)),
+            ratioThreshold: Math.max(0.5, mixTowards(ratioThreshold, ratioRelaxed, weight)),
+            ratioRelaxed: Math.max(0.35, mixTowards(ratioRelaxed, ratioRelaxedTarget, weight)),
+            strengthThreshold: Math.max(strengthRelaxed, mixTowards(strengthThreshold, strengthRelaxed, weight)),
+            strengthRelaxed: Math.max(0.45, mixTowards(strengthRelaxed, strengthRelaxedTarget, weight)),
+            r2Threshold: Math.max(r2Relaxed, Math.min(0.88, mixTowards(r2Threshold, r2Relaxed, weight))),
+            r2Relaxed: Math.max(0.1, Math.min(0.86, mixTowards(r2Relaxed, r2RelaxedTarget, weight))),
+        };
+    };
+
+    const baseEvaluation = classifyWithThresholds({
+        slopeThreshold,
+        slopeRelaxed,
+        ratioThreshold,
+        ratioRelaxed,
+        strengthThreshold,
+        strengthRelaxed,
+        r2Threshold,
+        r2Relaxed,
     });
 
-    const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
-        const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
-        acc[key] = {
-            segments: bucket.segments,
-            days: bucket.days,
-            coveragePct,
-            returnPct: (bucket.factor - 1) * 100,
-        };
-        return acc;
-    }, {});
+    const sliderNormalized = Number.isFinite(thresholds?.sliderNormalized)
+        ? thresholds.sliderNormalized
+        : 0;
+    let finalEvaluation = baseEvaluation;
+    let coverageRatio = baseEvaluation.coverageRatio;
+    let fallbackApplied = false;
+
+    if (sliderNormalized >= 0.95 && coverageRatio < 0.8) {
+        const keepWeights = [0.55, 0.35, 0.15];
+        for (const keepWeight of keepWeights) {
+            const fallbackEvaluation = classifyWithThresholds(buildFallbackThresholds(keepWeight));
+            if (fallbackEvaluation.coverageRatio > coverageRatio) {
+                finalEvaluation = fallbackEvaluation;
+                coverageRatio = fallbackEvaluation.coverageRatio;
+                fallbackApplied = true;
+            }
+            if (coverageRatio >= 0.8) {
+                break;
+            }
+        }
+    }
+
+    if (thresholds && typeof thresholds === 'object') {
+        thresholds.highSensitivityFallbackApplied = fallbackApplied;
+        thresholds.trendCoverageRatio = coverageRatio;
+    }
 
     return {
-        segments,
-        summary: {
-            startIndex: startIdx,
-            endIndex: endIdx,
-            totalDays,
-            aggregatedByType,
-        },
+        segments: finalEvaluation.segments,
+        summary: finalEvaluation.summary,
     };
 }
 
@@ -824,6 +935,16 @@ function renderTrendSummary() {
             ? `滑桿 ${sliderDisplayMin}→${sliderDisplayMax} ≈ 舊版 ${equivalentMin}→${equivalentMax}`
             : `滑桿 ${sliderDisplayMin}→${sliderDisplayMax}`;
         const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
+        const coverageRatioValue = Number.isFinite(thresholds.trendCoverageRatio)
+            ? thresholds.trendCoverageRatio
+            : null;
+        let coverageNote = '';
+        if (coverageRatioValue !== null) {
+            const coveragePercentText = formatPercentPlain(coverageRatioValue * 100, 1);
+            coverageNote = thresholds.highSensitivityFallbackApplied
+                ? `系統已在高靈敏度端自動放寬門檻，維持趨勢覆蓋約 ${coveragePercentText}。`
+                : `趨勢覆蓋約 ${coveragePercentText}。`;
+        }
         thresholdTextEl.innerHTML = `
             <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
             起漲：斜率 ≥ ${formatPercentPlain(slopeDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeAnnualPct, 1)}），R² ≥ ${r2Strict}，
@@ -831,6 +952,7 @@ function renderTrendSummary() {
             若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
             並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
             門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${minMultiplier} → ${maxMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
+            ${coverageNote ? `<br><span class="text-[10px]" style="color: var(--muted-foreground);">${coverageNote}</span>` : ''}
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');

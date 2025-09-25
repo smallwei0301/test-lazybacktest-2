@@ -1,5 +1,11 @@
 
 ## 2025-10-01 — Patch LB-TREND-SENSITIVITY-20251001A
+## 2025-10-02 — Patch LB-TREND-SENSITIVITY-20251002A
+- **Issue recap**: 高靈敏度端擴大為 1→1000 後，滑桿拉到 1000 會把門檻推得過於嚴苛，趨勢底色幾乎消失，實際覆蓋遠低於預期的 80%。
+- **Fix**: 保留反向等效級距映射，但建立高靈敏度覆蓋回退機制，當覆蓋率低於 80% 時依序內插嚴格／寬鬆門檻至溫和區間，並把覆蓋比例與補償狀態揭露於卡片說明。
+- **Diagnostics**: 拖曳滑桿至 1000 檢查趨勢卡顯示「已自動放寬門檻」提示、覆蓋率維持 80% 以上，趨勢底色與統計卡同步刷新且不再消失。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 - **Issue recap**: 趨勢區間評估卡片的靈敏度滑桿上限僅 100，且高靈敏度門檻仍標示為 100，使使用者難以分辨新的縮放基準；同時起漲與跌落色塊需要與 UI 主色系同步。
 - **Fix**: 將滑桿重新對齊為 1→1000，讓新下限 1 對應舊版 100 並維持既有倍率縮放，更新門檻說明與預設值；同步交換起漲／跌落色票並調整圖例，確保紅色代表起漲、綠色代表跌落。
 - **Diagnostics**: 檢查趨勢卡片顯示「滑桿 1→1000 ≈ 舊版 100→70」與倍率差距提示，滑桿拖曳時門檻、倍率與版本章節同步刷新，圖例顯示紅色為起漲、綠色為跌落。
