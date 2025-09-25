@@ -279,7 +279,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-REGRESSION-20250903A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251001A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_BASE_THRESHOLDS = {
@@ -289,8 +289,8 @@ const TREND_BASE_THRESHOLDS = {
     r2Strict: 0.55,
 };
 const TREND_SENSITIVITY_MIN = 1;
-const TREND_SENSITIVITY_MAX = 100;
-const TREND_SENSITIVITY_DEFAULT = 40;
+const TREND_SENSITIVITY_MAX = 1000;
+const TREND_SENSITIVITY_DEFAULT = 606;
 const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.0063;
 const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
 const TREND_SENSITIVITY_EQUIVALENT_MIN = 70;
@@ -307,9 +307,9 @@ const TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED =
 const TREND_STYLE_MAP = {
     uptrend: {
         label: '起漲',
-        overlay: 'rgba(34, 197, 94, 0.18)',
-        accent: '#16a34a',
-        border: 'rgba(34, 197, 94, 0.35)',
+        overlay: 'rgba(239, 68, 68, 0.18)',
+        accent: '#dc2626',
+        border: 'rgba(239, 68, 68, 0.38)',
     },
     consolidation: {
         label: '盤整',
@@ -319,9 +319,9 @@ const TREND_STYLE_MAP = {
     },
     downtrend: {
         label: '跌落',
-        overlay: 'rgba(239, 68, 68, 0.18)',
-        accent: '#dc2626',
-        border: 'rgba(239, 68, 68, 0.38)',
+        overlay: 'rgba(34, 197, 94, 0.18)',
+        accent: '#16a34a',
+        border: 'rgba(34, 197, 94, 0.35)',
     },
 };
 
@@ -390,8 +390,9 @@ function computeTrendThresholds(sensitivity) {
     if (safe < min) safe = min;
     if (safe > max) safe = max;
     const sliderNormalized = span > 0 ? (safe - min) / span : 0;
+    const invertedNormalized = 1 - sliderNormalized;
     const effectiveNormalized = TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED
-        + sliderNormalized * (TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED);
+        + invertedNormalized * (TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED);
     const multiplierSpan = TREND_SENSITIVITY_MAX_MULTIPLIER - TREND_SENSITIVITY_MIN_MULTIPLIER;
     const rawMultiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - effectiveNormalized * multiplierSpan;
     const clampedMultiplier = Math.max(
@@ -399,11 +400,11 @@ function computeTrendThresholds(sensitivity) {
         Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, rawMultiplier),
     );
     const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
-    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + sliderNormalized * equivalentSpan;
+    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + invertedNormalized * equivalentSpan;
     const multiplierAtMinRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
-        - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED * multiplierSpan;
-    const multiplierAtMaxRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
         - TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED * multiplierSpan;
+    const multiplierAtMaxRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
+        - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED * multiplierSpan;
     const multiplierAtMin = Math.max(
         TREND_SENSITIVITY_MIN_MULTIPLIER,
         Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMinRaw),
@@ -413,8 +414,8 @@ function computeTrendThresholds(sensitivity) {
         Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMaxRaw),
     );
     let ratio = null;
-    if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMax > 0) {
-        ratio = multiplierAtMin / multiplierAtMax;
+    if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMin > 0) {
+        ratio = multiplierAtMax / multiplierAtMin;
     }
 
     const slopeThreshold = Math.max(
@@ -456,8 +457,10 @@ function computeTrendThresholds(sensitivity) {
         range: {
             min,
             max,
-            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
-            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
+            displayMin: TREND_SENSITIVITY_MIN,
+            displayMax: TREND_SENSITIVITY_MAX,
+            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
+            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
             multiplierAtMin,
             multiplierAtMax,
             ratio,
@@ -781,17 +784,23 @@ function renderTrendSummary() {
         const r2Relaxed = formatDecimal(thresholds.r2Relaxed, 2);
         const multiplierText = formatTrendMultiplier(thresholds.multiplier);
         const rangeInfo = thresholds.range || {};
-        const rangeMaxValue = Number.isFinite(rangeInfo.multiplierAtMin)
+        const sliderDisplayMin = Number.isFinite(rangeInfo.displayMin)
+            ? rangeInfo.displayMin
+            : TREND_SENSITIVITY_MIN;
+        const sliderDisplayMax = Number.isFinite(rangeInfo.displayMax)
+            ? rangeInfo.displayMax
+            : TREND_SENSITIVITY_MAX;
+        const sliderMinValue = Number.isFinite(rangeInfo.multiplierAtMin)
             ? rangeInfo.multiplierAtMin
-            : TREND_SENSITIVITY_MAX_MULTIPLIER;
-        const rangeMinValue = Number.isFinite(rangeInfo.multiplierAtMax)
-            ? rangeInfo.multiplierAtMax
             : TREND_SENSITIVITY_MIN_MULTIPLIER;
-        const maxMultiplier = formatTrendMultiplier(rangeMaxValue);
-        const minMultiplier = formatTrendMultiplier(rangeMinValue);
+        const sliderMaxValue = Number.isFinite(rangeInfo.multiplierAtMax)
+            ? rangeInfo.multiplierAtMax
+            : TREND_SENSITIVITY_MAX_MULTIPLIER;
+        const maxMultiplier = formatTrendMultiplier(sliderMaxValue);
+        const minMultiplier = formatTrendMultiplier(sliderMinValue);
         let ratio = Number.isFinite(rangeInfo.ratio) && rangeInfo.ratio > 0
             ? rangeInfo.ratio
-            : (rangeMinValue > 0 ? rangeMaxValue / rangeMinValue : null);
+            : (sliderMinValue > 0 ? sliderMaxValue / sliderMinValue : null);
         let ratioText = '—';
         if (Number.isFinite(ratio) && ratio > 0) {
             if (ratio >= 100) {
@@ -812,8 +821,8 @@ function renderTrendSummary() {
             ? Math.round(thresholds.equivalentSensitivity)
             : null;
         const sliderMappingText = (equivalentMin !== null && equivalentMax !== null)
-            ? `滑桿 1→100 ≈ 舊版 ${equivalentMin}→${equivalentMax}`
-            : '滑桿 1→100';
+            ? `滑桿 ${sliderDisplayMin}→${sliderDisplayMax} ≈ 舊版 ${equivalentMin}→${equivalentMax}`
+            : `滑桿 ${sliderDisplayMin}→${sliderDisplayMax}`;
         const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
         thresholdTextEl.innerHTML = `
             <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
@@ -821,7 +830,7 @@ function renderTrendSummary() {
             且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
             若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
             並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
-            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
+            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${minMultiplier} → ${maxMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
         `;
     }
     const placeholderEl = document.getElementById('trend-summary-placeholder');

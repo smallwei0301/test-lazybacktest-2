@@ -1,4 +1,10 @@
 
+## 2025-10-01 — Patch LB-TREND-SENSITIVITY-20251001A
+- **Issue recap**: 趨勢區間評估卡片的靈敏度滑桿上限僅 100，且高靈敏度門檻仍標示為 100，使使用者難以分辨新的縮放基準；同時起漲與跌落色塊需要與 UI 主色系同步。
+- **Fix**: 將滑桿重新對齊為 1→1000，讓新下限 1 對應舊版 100 並維持既有倍率縮放，更新門檻說明與預設值；同步交換起漲／跌落色票並調整圖例，確保紅色代表起漲、綠色代表跌落。
+- **Diagnostics**: 檢查趨勢卡片顯示「滑桿 1→1000 ≈ 舊版 100→70」與倍率差距提示，滑桿拖曳時門檻、倍率與版本章節同步刷新，圖例顯示紅色為起漲、綠色為跌落。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
