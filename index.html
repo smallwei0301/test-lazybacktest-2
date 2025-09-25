@@ -1011,36 +1011,44 @@
                                     </h3>
                                 </div>
                                 <div class="card-content">
-                                    <div id="today-suggestion-empty" class="text-xs text-center" style="color: var(--muted-foreground);">
-                                        執行回測後將顯示策略的最新操作建議
-                                    </div>
-                                    <div id="today-suggestion-body" class="space-y-4 hidden">
-                                        <div id="today-suggestion-banner" class="today-suggestion-highlight">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <span id="today-suggestion-label" class="text-sm font-semibold" style="color: var(--foreground);">計算中</span>
-                                                <span id="today-suggestion-date" class="text-xs" style="color: var(--muted-foreground);">—</span>
-                                            </div>
-                                            <div id="today-suggestion-price" class="text-xs" style="color: var(--muted-foreground);">—</div>
+                                    <div class="today-suggestion-card">
+                                        <div id="today-suggestion-empty" class="today-suggestion-empty text-xs text-center" style="color: var(--muted-foreground);">
+                                            執行回測後將顯示策略的最新操作建議
                                         </div>
-                                        <dl class="today-suggestion-stats grid grid-cols-2 gap-3 text-xs">
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">多單狀態</dt>
-                                                <dd id="today-suggestion-long" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                        <div id="today-suggestion-body" class="today-suggestion-body hidden space-y-4">
+                                            <div id="today-suggestion-banner" class="today-suggestion-banner today-suggestion-highlight">
+                                                <div class="today-suggestion-heading">
+                                                    <div class="today-suggestion-title">
+                                                        <span id="today-suggestion-label" class="today-suggestion-label">計算中</span>
+                                                        <span id="today-suggestion-date" class="today-suggestion-date">—</span>
+                                                    </div>
+                                                    <span id="today-suggestion-action" class="today-suggestion-tag">—</span>
+                                                </div>
+                                                <div id="today-suggestion-price" class="today-suggestion-price">—</div>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">空單狀態</dt>
-                                                <dd id="today-suggestion-short" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <dl class="today-suggestion-stats">
+                                                <div class="today-suggestion-stat">
+                                                    <dt>多單狀態</dt>
+                                                    <dd id="today-suggestion-long">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt>空單狀態</dt>
+                                                    <dd id="today-suggestion-short">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt>今日部位</dt>
+                                                    <dd id="today-suggestion-position">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt>資金概況</dt>
+                                                    <dd id="today-suggestion-portfolio">—</dd>
+                                                </div>
+                                            </dl>
+                                            <div class="today-suggestion-notes">
+                                                <p class="today-suggestion-notes-title">備註</p>
+                                                <ul id="today-suggestion-notes" class="today-suggestion-notes-list"></ul>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">部位概況</dt>
-                                                <dd id="today-suggestion-position" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
-                                            </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">模擬資金</dt>
-                                                <dd id="today-suggestion-portfolio" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
-                                            </div>
-                                        </dl>
-                                        <ul id="today-suggestion-notes" class="text-[11px] space-y-1 list-disc pl-5" style="color: var(--muted-foreground);"></ul>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

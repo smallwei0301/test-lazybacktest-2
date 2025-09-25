@@ -15,6 +15,7 @@ importScripts('config.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-TODAY-ACTION-20250913A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -1281,6 +1282,142 @@ function summarisePositionFromEvaluation(evaluation, side) {
       ? evaluation.close * shares
       : null;
   return { state, shares, averagePrice, marketValue };
+}
+
+function composeSuggestionDetails(options = {}) {
+  const details = [];
+  const {
+    actionInfo,
+    evaluation,
+    longPosition,
+    shortPosition,
+    latestDate,
+    requestedEndDate,
+    dataLagDays,
+  } = options;
+
+  if (actionInfo && actionInfo.label) {
+    details.push({
+      type: "action",
+      action: actionInfo.action || null,
+      label: actionInfo.label,
+    });
+  }
+
+  if (evaluation) {
+    if (evaluation.executedBuy) {
+      details.push({
+        type: "execution",
+        side: "long",
+        event: "enter",
+        price: Number.isFinite(evaluation.lastBuyPrice)
+          ? evaluation.lastBuyPrice
+          : Number.isFinite(evaluation.close)
+            ? evaluation.close
+            : null,
+        priceType: Number.isFinite(evaluation.lastBuyPrice) ? "close" : null,
+        shares: Number.isFinite(evaluation.longShares)
+          ? evaluation.longShares
+          : null,
+      });
+    }
+    if (evaluation.executedSell) {
+      details.push({
+        type: "execution",
+        side: "long",
+        event: "exit",
+        price: Number.isFinite(evaluation.close) ? evaluation.close : null,
+        priceType: "close",
+        shares: Number.isFinite(evaluation.longShares)
+          ? evaluation.longShares
+          : null,
+      });
+    }
+    if (evaluation.executedShort) {
+      details.push({
+        type: "execution",
+        side: "short",
+        event: "enter",
+        price: Number.isFinite(evaluation.lastShortPrice)
+          ? evaluation.lastShortPrice
+          : Number.isFinite(evaluation.close)
+            ? evaluation.close
+            : null,
+        priceType: Number.isFinite(evaluation.lastShortPrice) ? "close" : null,
+        shares: Number.isFinite(evaluation.shortShares)
+          ? evaluation.shortShares
+          : null,
+      });
+    }
+    if (evaluation.executedCover) {
+      details.push({
+        type: "execution",
+        side: "short",
+        event: "cover",
+        price: Number.isFinite(evaluation.close) ? evaluation.close : null,
+        priceType: "close",
+        shares: Number.isFinite(evaluation.shortShares)
+          ? evaluation.shortShares
+          : null,
+      });
+    }
+  }
+
+  if (longPosition && Number.isFinite(longPosition.shares) && longPosition.shares > 0) {
+    details.push({
+      type: "holding",
+      side: "long",
+      state: longPosition.state || "持有",
+      shares: longPosition.shares,
+      averagePrice: Number.isFinite(longPosition.averagePrice)
+        ? longPosition.averagePrice
+        : null,
+      marketValue: Number.isFinite(longPosition.marketValue)
+        ? longPosition.marketValue
+        : null,
+    });
+  }
+
+  if (shortPosition && Number.isFinite(shortPosition.shares) && shortPosition.shares > 0) {
+    details.push({
+      type: "holding",
+      side: "short",
+      state: shortPosition.state || "持有",
+      shares: shortPosition.shares,
+      averagePrice: Number.isFinite(shortPosition.averagePrice)
+        ? shortPosition.averagePrice
+        : null,
+      marketValue: Number.isFinite(shortPosition.marketValue)
+        ? shortPosition.marketValue
+        : null,
+    });
+  }
+
+  if (evaluation && Number.isFinite(evaluation.portfolioValue)) {
+    details.push({ type: "portfolio", value: evaluation.portfolioValue });
+  }
+
+  if (typeof dataLagDays === "number" && dataLagDays > 0 && latestDate) {
+    details.push({ type: "dataLag", latestDate, days: dataLagDays });
+  }
+
+  if (requestedEndDate && latestDate) {
+    if (requestedEndDate < latestDate) {
+      details.push({
+        type: "rangeExtension",
+        requestedEndDate,
+        appliedEndDate: latestDate,
+      });
+    } else if (requestedEndDate > latestDate) {
+      details.push({
+        type: "rangeShorter",
+        requestedEndDate,
+        appliedEndDate: latestDate,
+      });
+    }
+  }
+
+  return details;
 }
 
 function prepareDiagnosticsForCacheReplay(diagnostics, options = {}) {
@@ -9606,6 +9743,8 @@ self.onmessage = async function (e) {
             latestDate: todayISO,
             price: { text: message },
             notes: [message],
+            details: [],
+            actionTag: { text: "尚未開始", tone: "info", action: "future_start" },
           },
         });
         return;
@@ -9692,6 +9831,8 @@ self.onmessage = async function (e) {
             latestDate: targetEndDate,
             price: { text: message },
             notes: [message],
+            details: [],
+            actionTag: { text: "資料不足", tone: "warning", action: "no_data" },
           },
         });
         return;
@@ -9729,6 +9870,8 @@ self.onmessage = async function (e) {
             latestDate: latestDate || todayISO,
             price: { text: message },
             notes: [message],
+            details: [],
+            actionTag: { text: "資料不足", tone: "warning", action: "no_data" },
           },
         });
         return;
@@ -9782,11 +9925,26 @@ self.onmessage = async function (e) {
         }
       }
 
+      const details = composeSuggestionDetails({
+        actionInfo,
+        evaluation,
+        longPosition,
+        shortPosition,
+        latestDate,
+        requestedEndDate,
+        dataLagDays,
+      });
+
       const suggestionPayload = {
         status: "ok",
         action: actionInfo.action,
         label: actionInfo.label,
         tone: actionInfo.tone,
+        actionTag: {
+          text: actionInfo.label,
+          tone: actionInfo.tone,
+          action: actionInfo.action,
+        },
         latestDate,
         price: {
           value: Number.isFinite(evaluation.close)
@@ -9801,6 +9959,7 @@ self.onmessage = async function (e) {
         positionSummary,
         evaluation,
         notes,
+        details,
         dataLagDays,
         todayISO,
         requestedEndDate: params.endDate,

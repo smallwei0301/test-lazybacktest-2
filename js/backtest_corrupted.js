@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
 });
 
-// Patch Tag: LB-TODAY-ACTION-20250828A
+// Patch Tag: LB-TODAY-UI-20250913A
 const fallbackTodaySuggestionUI = (() => {
     const area = document.getElementById('today-suggestion-area');
     const body = document.getElementById('today-suggestion-body');
@@ -13,18 +13,14 @@ const fallbackTodaySuggestionUI = (() => {
     const labelEl = document.getElementById('today-suggestion-label');
     const dateEl = document.getElementById('today-suggestion-date');
     const priceEl = document.getElementById('today-suggestion-price');
+    const actionEl = document.getElementById('today-suggestion-action');
     const longEl = document.getElementById('today-suggestion-long');
     const shortEl = document.getElementById('today-suggestion-short');
     const positionEl = document.getElementById('today-suggestion-position');
     const portfolioEl = document.getElementById('today-suggestion-portfolio');
+    const notesContainer = area ? area.querySelector('.today-suggestion-notes') : null;
     const notesEl = document.getElementById('today-suggestion-notes');
     const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
-    const numberFormatter = typeof Intl !== 'undefined'
-        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
-        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
-    const integerFormatter = typeof Intl !== 'undefined'
-        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
-        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
     const toneMap = {
         bullish: 'is-bullish',
         bear: 'is-bearish',
@@ -35,6 +31,21 @@ const fallbackTodaySuggestionUI = (() => {
         warning: 'is-warning',
         error: 'is-error',
     };
+    const actionLabelMap = {
+        enter_long: '做多買入',
+        enter_short: '做空賣出',
+        exit_long: '做多賣出',
+        cover_short: '做空回補',
+        hold_long: '繼續持有多單',
+        hold_short: '繼續持有空單',
+        stay_flat: '維持空手',
+    };
+    const numberFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
+    const integerFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
     const priceTypeLabel = {
         close: '收盤',
         open: '開盤',
@@ -61,6 +72,25 @@ const fallbackTodaySuggestionUI = (() => {
         toneClasses.forEach((cls) => banner.classList.remove(cls));
         const resolved = toneMap[tone] || toneMap.neutral;
         banner.classList.add(resolved);
+    }
+
+    function setActionTag(payload) {
+        if (!actionEl) return;
+        const text = payload?.actionTag?.text
+            || payload?.actionLabel
+            || payload?.label
+            || '';
+        if (!text) {
+            actionEl.textContent = '';
+            toneClasses.forEach((cls) => actionEl.classList.remove(cls));
+            actionEl.style.display = 'none';
+            return;
+        }
+        actionEl.style.display = 'inline-flex';
+        actionEl.textContent = text;
+        toneClasses.forEach((cls) => actionEl.classList.remove(cls));
+        const tone = payload?.actionTag?.tone || payload?.tone || 'neutral';
+        actionEl.classList.add(toneMap[tone] || toneMap.neutral);
     }
 
     function setText(el, text) {
@@ -104,16 +134,93 @@ const fallbackTodaySuggestionUI = (() => {
         return parts.join('，');
     }
 
-    function setNotes(notes) {
-        if (!notesEl) return;
+    function formatDetail(detail, payload) {
+        if (!detail || typeof detail !== 'object') return null;
+        switch (detail.type) {
+        case 'action': {
+            const label = detail.label || actionLabelMap[detail.action] || payload?.label;
+            return label ? `今日策略：${label}` : null;
+        }
+        case 'execution': {
+            const sideLabel = detail.side === 'short' ? '空單' : '多單';
+            let actionLabel = '操作';
+            if (detail.event === 'enter') actionLabel = '進場';
+            else if (detail.event === 'exit') actionLabel = '平倉';
+            else if (detail.event === 'cover') actionLabel = '回補';
+            const parts = [`${sideLabel}${actionLabel}`];
+            const priceText = formatPriceValue(detail.price, detail.priceType);
+            if (priceText) parts.push(priceText);
+            const shareText = formatShares(detail.shares);
+            if (shareText) parts.push(shareText);
+            return parts.join('，');
+        }
+        case 'holding': {
+            const sideLabel = detail.side === 'short' ? '空單' : '多單';
+            const parts = [];
+            if (detail.state && detail.state !== '空手') {
+                parts.push(`${sideLabel}${detail.state}`);
+            }
+            const shareText = formatShares(detail.shares);
+            if (shareText) parts.push(shareText);
+            if (Number.isFinite(detail.averagePrice)) {
+                parts.push(`均價 ${numberFormatter.format(detail.averagePrice)}`);
+            }
+            if (Number.isFinite(detail.marketValue)) {
+                parts.push(`市值 ${numberFormatter.format(detail.marketValue)} 元`);
+            }
+            return parts.length ? parts.join('，') : null;
+        }
+        case 'portfolio':
+            return Number.isFinite(detail.value)
+                ? `策略資金估算約 ${numberFormatter.format(detail.value)} 元。`
+                : null;
+        case 'dataLag':
+            return detail.latestDate && Number.isFinite(detail.days)
+                ? `最新資料為 ${detail.latestDate}，距今日 ${detail.days} 日。`
+                : null;
+        case 'rangeExtension':
+            return detail.requestedEndDate && detail.appliedEndDate
+                ? `原設定結束日 ${detail.requestedEndDate}，已延伸至 ${detail.appliedEndDate} 以評估今日部位。`
+                : null;
+        case 'rangeShorter':
+            return detail.requestedEndDate && detail.appliedEndDate
+                ? `策略結束日為 ${detail.requestedEndDate}，最新資料僅至 ${detail.appliedEndDate}。`
+                : null;
+        case 'info':
+            return typeof detail.message === 'string' ? detail.message : null;
+        default:
+            return typeof detail.message === 'string' ? detail.message : null;
+        }
+    }
+
+    function buildNoteLines(payload) {
+        const lines = [];
+        const details = Array.isArray(payload?.details) ? payload.details : [];
+        details.forEach((detail) => {
+            const text = formatDetail(detail, payload);
+            if (text && !lines.includes(text)) {
+                lines.push(text);
+            }
+        });
+        const notes = Array.isArray(payload?.notes) ? payload.notes : [];
+        notes.forEach((note) => {
+            if (typeof note === 'string' && note.trim() && !lines.includes(note)) {
+                lines.push(note);
+            }
+        });
+        return lines;
+    }
+
+    function renderNotes(payload) {
+        if (!notesEl || !notesContainer) return;
+        const notes = buildNoteLines(payload);
         notesEl.innerHTML = '';
-        if (!Array.isArray(notes) || notes.length === 0) {
-            notesEl.style.display = 'none';
+        if (!notes.length) {
+            notesContainer.style.display = 'none';
             return;
         }
-        notesEl.style.display = 'block';
+        notesContainer.style.display = 'block';
         notes.forEach((note) => {
-            if (!note) return;
             const li = document.createElement('li');
             li.textContent = note;
             notesEl.appendChild(li);
@@ -125,8 +232,8 @@ const fallbackTodaySuggestionUI = (() => {
             || formatPriceValue(payload.price?.value, payload.price?.type)
             || payload.message
             || '—';
-        setText(labelEl, payload.label || '—');
         const displayDate = payload.latestTradingDate || payload.latestDate;
+        setText(labelEl, payload.label || '—');
         setText(dateEl, displayDate || '—');
         setText(priceEl, priceText);
         setText(longEl, describePosition(payload.longPosition));
@@ -136,7 +243,7 @@ const fallbackTodaySuggestionUI = (() => {
             const portfolioText = formatCurrency(payload.evaluation?.portfolioValue);
             setText(portfolioEl, portfolioText || '—');
         }
-        setNotes(payload.notes);
+        renderNotes(payload);
     }
 
     return {
@@ -145,6 +252,7 @@ const fallbackTodaySuggestionUI = (() => {
             ensureAreaVisible();
             showPlaceholderContent();
             setTone('neutral');
+            setActionTag({ label: '—', tone: 'neutral' });
             setText(labelEl, '尚未取得建議');
             setText(dateEl, '—');
             setText(priceEl, '—');
@@ -152,13 +260,14 @@ const fallbackTodaySuggestionUI = (() => {
             setText(shortEl, '—');
             setText(positionEl, '—');
             if (portfolioEl) setText(portfolioEl, '—');
-            setNotes([]);
+            renderNotes({ notes: [] });
         },
         showLoading() {
             if (!area) return;
             ensureAreaVisible();
             showBodyContent();
             setTone('info');
+            setActionTag({ actionTag: { text: '計算中', tone: 'info' } });
             setText(labelEl, '計算今日建議中...');
             setText(dateEl, '—');
             setText(priceEl, '資料計算中，請稍候');
@@ -166,7 +275,7 @@ const fallbackTodaySuggestionUI = (() => {
             setText(shortEl, '—');
             setText(positionEl, '—');
             if (portfolioEl) setText(portfolioEl, '—');
-            setNotes([]);
+            renderNotes({ notes: [] });
         },
         showResult(payload = {}) {
             if (!area) return;
@@ -177,11 +286,17 @@ const fallbackTodaySuggestionUI = (() => {
                 const fallbackNotes = [];
                 if (payload.message) fallbackNotes.push(payload.message);
                 if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
-                const tone = status === 'no_data' ? 'warning' : (status === 'future_start' ? 'info' : 'neutral');
+                const tone = status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral';
                 setTone(tone);
+                setActionTag({
+                    actionTag: {
+                        text: status === 'no_data' ? '資料不足' : status === 'future_start' ? '尚未開始' : '提醒',
+                        tone,
+                    },
+                });
                 applyResultPayload({
                     label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
-                    latestDate: payload.latestTradingDate || payload.latestDate || '—',
+                    latestDate: payload.latestDate || '—',
                     price: { text: payload.price?.text || payload.message || '—' },
                     longPosition: { state: '空手' },
                     shortPosition: { state: '空手' },
@@ -192,6 +307,7 @@ const fallbackTodaySuggestionUI = (() => {
                 return;
             }
             setTone(payload.tone || 'neutral');
+            setActionTag(payload);
             applyResultPayload(payload);
         },
         showError(message) {
@@ -199,6 +315,7 @@ const fallbackTodaySuggestionUI = (() => {
             ensureAreaVisible();
             showBodyContent();
             setTone('error');
+            setActionTag({ actionTag: { text: '計算失敗', tone: 'error' } });
             applyResultPayload({
                 label: '計算失敗',
                 latestDate: '—',

@@ -298,6 +298,8 @@ function buildSuggestionPayloadFallback({
     params = {},
     evaluation = {},
     dataLagDays = null,
+    details = [],
+    actionTag = null,
 }) {
     const price = Number.isFinite(priceValue)
         ? { value: priceValue, type: 'close' }
@@ -307,6 +309,7 @@ function buildSuggestionPayloadFallback({
         action,
         label,
         tone,
+        actionTag: actionTag || { text: label, tone, action },
         latestDate,
         price,
         longPosition: { state: '空手', shares: null, averagePrice: null, marketValue: null },
@@ -318,6 +321,7 @@ function buildSuggestionPayloadFallback({
             ...evaluation,
         },
         notes: Array.isArray(notes) ? notes.filter(Boolean) : [],
+        details: Array.isArray(details) ? details.filter(Boolean) : [],
         dataLagDays,
         todayISO,
         requestedEndDate: params?.endDate || null,
@@ -325,6 +329,68 @@ function buildSuggestionPayloadFallback({
         startDateUsed: params?.startDate || null,
         dataStartDateUsed: params?.startDate || null,
     };
+}
+
+function buildSuggestionDetailsFallback({
+    action,
+    label,
+    evaluation,
+    priceValue,
+    latestDate,
+    requestedEndDate,
+    dataLagDays,
+}) {
+    const details = [];
+    if (label) {
+        details.push({ type: 'action', action, label });
+    }
+    if (evaluation?.executedBuy) {
+        details.push({
+            type: 'execution',
+            side: 'long',
+            event: 'enter',
+            price: Number.isFinite(priceValue) ? priceValue : null,
+            priceType: Number.isFinite(priceValue) ? 'close' : null,
+        });
+    }
+    if (evaluation?.executedSell) {
+        details.push({
+            type: 'execution',
+            side: 'long',
+            event: 'exit',
+            price: Number.isFinite(priceValue) ? priceValue : null,
+            priceType: Number.isFinite(priceValue) ? 'close' : null,
+        });
+    }
+    if (evaluation?.executedShort) {
+        details.push({
+            type: 'execution',
+            side: 'short',
+            event: 'enter',
+            price: Number.isFinite(priceValue) ? priceValue : null,
+            priceType: Number.isFinite(priceValue) ? 'close' : null,
+        });
+    }
+    if (evaluation?.executedCover) {
+        details.push({
+            type: 'execution',
+            side: 'short',
+            event: 'cover',
+            price: Number.isFinite(priceValue) ? priceValue : null,
+            priceType: Number.isFinite(priceValue) ? 'close' : null,
+        });
+    }
+    if (typeof dataLagDays === 'number' && dataLagDays > 0 && latestDate) {
+        details.push({ type: 'dataLag', latestDate, days: dataLagDays });
+    }
+    if (requestedEndDate && latestDate) {
+        if (requestedEndDate < latestDate) {
+            details.push({ type: 'rangeExtension', requestedEndDate, appliedEndDate: latestDate });
+        } else if (requestedEndDate > latestDate) {
+            details.push({ type: 'rangeShorter', requestedEndDate, appliedEndDate: latestDate });
+        }
+    }
+    return details;
 }
 
 function runSuggestionSimulation(params, recentData) {
@@ -339,6 +405,8 @@ function runSuggestionSimulation(params, recentData) {
             notes: ['回測資料不足以推導今日建議。'],
             todayISO,
             params,
+            details: [],
+            actionTag: { text: '資料不足', tone: 'warning', action: 'no_data' },
         });
     }
     const { entryStrategy, exitStrategy, entryParams, exitParams, enableShorting, shortEntryStrategy, shortExitStrategy, shortEntryParams, shortExitParams, stopLoss: globalSL, takeProfit: globalTP } = params; // tradeTiming not needed for signal check
@@ -354,6 +422,8 @@ function runSuggestionSimulation(params, recentData) {
             notes: [`指標計算錯誤: ${e.message}`],
             todayISO,
             params,
+            details: [],
+            actionTag: { text: '計算失敗', tone: 'error', action: 'error' },
         });
     }
     const check=(v)=>v!==null&&!isNaN(v)&&isFinite(v);
@@ -374,6 +444,8 @@ function runSuggestionSimulation(params, recentData) {
             notes: [`資料筆數僅 ${n}，不足以推導今日建議。`],
             todayISO,
             params,
+            details: [],
+            actionTag: { text: '資料不足', tone: 'warning', action: 'no_data' },
         });
     }
 
@@ -441,6 +513,15 @@ function runSuggestionSimulation(params, recentData) {
     if (typeof dataLagDays === 'number' && dataLagDays > 0) {
         notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
     }
+    const details = buildSuggestionDetailsFallback({
+        action,
+        label,
+        evaluation,
+        priceValue,
+        latestDate,
+        requestedEndDate: params?.endDate || null,
+        dataLagDays,
+    });
     console.log(`[Worker Suggestion] Last Point Analysis: buy=${buySignal}, sell=${sellSignal}, short=${shortSignal}, cover=${coverSignal}. Action: ${action}`);
     return buildSuggestionPayloadFallback({
         status: 'ok',
@@ -452,6 +533,8 @@ function runSuggestionSimulation(params, recentData) {
         notes,
         todayISO,
         params,
+        details,
+        actionTag: { text: label, tone, action },
         evaluation,
         dataLagDays,
     });

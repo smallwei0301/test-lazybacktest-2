@@ -452,3 +452,13 @@
   後續檢視資料覆蓋情形。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js','js/worker_backup.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('primary scripts compile');NODE`
 
+
+# 2025-09-13 — Patch LB-TODAY-UI-20250913A / LB-TODAY-ACTION-20250913A
+- **Issue recap**: 首頁「今日建議」仍以單段文字呈現，容易出現「等待」字樣且缺乏行動標籤與倉位細節；Worker 僅回傳純文字訊息，無法辨識策略延伸
+  結束日或資料落後等狀態，使用者難以判讀今日操作重點。
+- **Fix**: 重構 `todaySuggestionUI`，加入行動標籤、長短倉統計與備註列表，並以格式化工具統一顯示價格、市值與分享數；主／備援 Worker
+  改以 `composeSuggestionDetails` 產生結構化 `details` 與 `actionTag`，延伸策略至最新交易日並揭露進出場事件、持有部位與資料落後天數。
+- **Diagnostics**: UI 會依 `details` 動態生成備註，若策略延伸或資料不足會標示來源與日期，錯誤情境則透過標籤顯示「資料不足」或「計算失敗」。
+- **Testing**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js','js/worker_backup.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('core scripts compile');NODE`
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');const code=fs.readFileSync('js/backtest_corrupted.js','utf8');const match=code.match(/const fallbackTodaySuggestionUI = \(\(\) => \{[\s\S]*?\}\)\(\);/);if(!match)throw new Error('fallback UI block not found');new vm.Script(match[0],{filename:'fallback_today_suggestion.js'});console.log('fallback UI block compiles');NODE`
