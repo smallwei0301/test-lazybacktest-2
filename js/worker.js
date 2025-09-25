@@ -16,6 +16,7 @@ importScripts('config.js');
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
+// Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -9590,7 +9591,7 @@ self.onmessage = async function (e) {
         forceFinalLiquidation: false,
         captureFinalState: true,
       });
-      const evaluation = todayResult?.finalEvaluation || null;
+      let evaluation = todayResult?.finalEvaluation || null;
       const latestDate = suggestionData[suggestionData.length - 1]?.date || null;
       const strategyDiagnostics = todayResult?.diagnostics || null;
       const datasetSummary =
@@ -9623,6 +9624,134 @@ self.onmessage = async function (e) {
         typeof suggestionOutcome.diagnostics === "object"
           ? suggestionOutcome.diagnostics
           : null;
+      let evaluationRecoveredFromFinalState = false;
+      let evaluationRecoveryNotes = [];
+      if (!evaluation && finalStateDiagnostics?.snapshot) {
+        const snapshot = finalStateDiagnostics.snapshot;
+        const candidateDates = [];
+        if (snapshot.latestValidDate) candidateDates.push(snapshot.latestValidDate);
+        if (snapshot.date) candidateDates.push(snapshot.date);
+        if (latestDate) candidateDates.push(latestDate);
+        const uniqueCandidates = Array.from(
+          new Set(candidateDates.filter((value) => typeof value === "string" && value)),
+        );
+        let fallbackRow = null;
+        let fallbackDate = null;
+        for (const candidate of uniqueCandidates) {
+          const found = suggestionData.find((row) => row?.date === candidate);
+          if (found) {
+            fallbackRow = found;
+            fallbackDate = candidate;
+            break;
+          }
+        }
+        if (!fallbackRow && suggestionData.length > 0) {
+          fallbackRow = suggestionData[suggestionData.length - 1];
+          fallbackDate = fallbackRow?.date || null;
+        }
+        const derivedDate = fallbackDate || snapshot.date || todayISO;
+        const fallbackClose = Number.isFinite(fallbackRow?.close)
+          ? fallbackRow.close
+          : Number.isFinite(snapshot.close)
+            ? snapshot.close
+            : null;
+        const finalStateReasonCode =
+          finalStateDiagnostics?.reason || "final_evaluation_missing";
+        const fallbackReason =
+          finalStateReasonCode === "final_evaluation_missing"
+            ? "final_evaluation_recovered_from_snapshot"
+            : finalStateReasonCode;
+        const fallbackMeta = {
+          fallback: true,
+          fallbackReason,
+          derivedFrom: "final_state_snapshot",
+          derivedAt: todayISO,
+          finalStateReason: finalStateReasonCode,
+        };
+        if (snapshot.latestValidDate) {
+          fallbackMeta.fallbackFromDate = snapshot.latestValidDate;
+        } else if (derivedDate) {
+          fallbackMeta.fallbackFromDate = derivedDate;
+        }
+        if (snapshot.requestedLastDate) {
+          fallbackMeta.requestedLastDate = snapshot.requestedLastDate;
+        } else if (latestDate) {
+          fallbackMeta.requestedLastDate = latestDate;
+        }
+        if (Number.isFinite(snapshot.fallbackLagDays)) {
+          fallbackMeta.fallbackLagDays = snapshot.fallbackLagDays;
+        } else if (
+          derivedDate &&
+          latestDate &&
+          derivedDate !== latestDate &&
+          typeof derivedDate === "string" &&
+          typeof latestDate === "string"
+        ) {
+          fallbackMeta.fallbackLagDays = diffIsoDays(derivedDate, latestDate);
+        }
+        if (Number.isFinite(snapshot.fallbackLagBars)) {
+          fallbackMeta.fallbackLagBars = snapshot.fallbackLagBars;
+        }
+        if (typeof snapshot.missingFinalClose === "boolean") {
+          fallbackMeta.missingFinalClose = snapshot.missingFinalClose;
+        }
+        const derivedLongPos = Number.isFinite(snapshot.longPos)
+          ? snapshot.longPos
+          : Number.isFinite(snapshot.longShares) && snapshot.longShares > 0
+            ? 1
+            : 0;
+        const derivedShortPos = Number.isFinite(snapshot.shortPos)
+          ? snapshot.shortPos
+          : Number.isFinite(snapshot.shortShares) && snapshot.shortShares > 0
+            ? 1
+            : 0;
+        evaluation = {
+          date: derivedDate,
+          open: Number.isFinite(fallbackRow?.open) ? fallbackRow.open : null,
+          high: Number.isFinite(fallbackRow?.high) ? fallbackRow.high : null,
+          low: Number.isFinite(fallbackRow?.low) ? fallbackRow.low : null,
+          close: fallbackClose,
+          longState:
+            snapshot.longState ||
+            (derivedLongPos === 1 ? "持有" : "空手"),
+          shortState:
+            snapshot.shortState ||
+            (derivedShortPos === 1 ? "持有" : "空手"),
+          executedBuy: false,
+          executedSell: false,
+          executedShort: false,
+          executedCover: false,
+          longPos: derivedLongPos,
+          shortPos: derivedShortPos,
+          longShares: Number.isFinite(snapshot.longShares) ? snapshot.longShares : 0,
+          shortShares: Number.isFinite(snapshot.shortShares) ? snapshot.shortShares : 0,
+          longAverageEntryPrice: null,
+          lastBuyPrice: null,
+          lastShortPrice: null,
+          longCapital: Number.isFinite(snapshot.longCapital) ? snapshot.longCapital : null,
+          shortCapital: Number.isFinite(snapshot.shortCapital)
+            ? snapshot.shortCapital
+            : null,
+          longProfit: null,
+          shortProfit: null,
+          portfolioValue: Number.isFinite(snapshot.portfolioValue)
+            ? snapshot.portfolioValue
+            : null,
+          strategyReturn: Number.isFinite(snapshot.strategyReturn)
+            ? snapshot.strategyReturn
+            : null,
+          longEntryState: null,
+          longExitState: null,
+          meta: fallbackMeta,
+        };
+        evaluationRecoveredFromFinalState = true;
+        evaluationRecoveryNotes = [
+          `finalEvaluation 由 finalState 快照重建：${
+            fallbackMeta.fallbackFromDate || derivedDate || "未知日期"
+          } → ${fallbackMeta.requestedLastDate || latestDate || "未知日期"}`,
+        ];
+        todayResult.finalEvaluation = evaluation;
+      }
       if (!evaluation || !latestDate) {
         const message = "回測資料不足以推導今日建議。";
         const notes = [message];
@@ -9787,6 +9916,10 @@ self.onmessage = async function (e) {
       const developerNotes = [];
       let issueCode = null;
       const notes = [];
+      if (evaluationRecoveredFromFinalState) {
+        notes.push("最新交易日缺少完整評估，已套用前一有效快照推導操作建議。");
+        developerNotes.push(...evaluationRecoveryNotes);
+      }
       switch (actionInfo.action) {
         case "enter_long":
           notes.push("今日訊號觸發多單進場，請依策略執行下單流程。");
@@ -9832,7 +9965,10 @@ self.onmessage = async function (e) {
           evaluationMeta.fallbackReason ===
           "final_evaluation_degraded_missing_price"
             ? "最新交易日缺少有效收盤價"
-            : "最終評估已回退至前一有效資料";
+            : evaluationMeta.fallbackReason ===
+              "final_evaluation_recovered_from_snapshot"
+              ? "最新評估來自前一有效快照"
+              : "最終評估已回退至前一有效資料";
         notes.push(
           `${fallbackReasonLabel}，已改以 ${fallbackFromDate || "前一交易日"} 的資料推導今日建議。`,
         );
@@ -9859,6 +9995,9 @@ self.onmessage = async function (e) {
         if (evaluationMeta.missingFinalClose) {
           developerNotes.push("最新資料列缺少有效收盤價");
         }
+      }
+      if (evaluationRecoveredFromFinalState) {
+        issueCode = "final_evaluation_recovered_from_snapshot";
       }
 
       const suggestionPayload = {

@@ -1,3 +1,9 @@
+## 2025-09-11 — Patch LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+- **Issue recap**: 今日建議在 `final_evaluation_missing` 案例仍會落入 `no_data`，即使 `strategyDiagnostics.finalState` 已回傳持有倉位、市值與快照日期，前端仍無法輸出操作建議。
+- **Fix**: Worker 於 `getSuggestion` 偵測 `finalState` 快照時自動重建 `finalEvaluation`，補齊多空部位、價格與 fallback meta，並在建議 notes 與開發者紀錄標註快照來源與落後天數；同時新增 issue code `final_evaluation_recovered_from_snapshot`。
+- **Diagnostics**: 以 2330、2412 等案例移除最後交易日收盤價，確認今日建議改為顯示「已套用前一有效快照」提示，長短倉摘要與 lag 診斷同步呈現，開發者區域列出重建路徑與 fallback 日期。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-10 — Patch LB-TODAY-SUGGESTION-FINALEVAL-20250910A
 - **Issue recap**: 今日建議在資料充足時仍可能回傳 `final_evaluation_missing`，原因為最新交易日缺少有效收盤價導致 `runStrategy` 未建立 `finalEvaluation`，前端雖有快照卻無法給出操作建議。
 - **Fix**: `runStrategy` 改為持續追蹤最後一筆有效評估並在最終收盤缺漏時回退，回傳 fallback 原因與 lag 診斷；Worker 將 fallback meta、issue code、開發者備註帶回主執行緒，前端 log 則優先採用實際評估日期並記錄缺價原因。
