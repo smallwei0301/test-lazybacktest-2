@@ -282,7 +282,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251023A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251024A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 10;
@@ -291,8 +291,9 @@ const TREND_SENSITIVITY_ANCHOR = 5;
 const TREND_SENSITIVITY_EFFECTIVE_MIN = 1;
 const TREND_SENSITIVITY_EFFECTIVE_MAX = 1000;
 const TREND_SENSITIVITY_CALIBRATION_STEPS = 1000;
-const TREND_SENSITIVITY_CALIBRATION_MIN_NORMALIZED = 0.05;
-const TREND_SENSITIVITY_CALIBRATION_MAX_NORMALIZED = 0.95;
+const TREND_SENSITIVITY_CALIBRATION_MARGIN_MIN = 0.001;
+const TREND_SENSITIVITY_CALIBRATION_MARGIN_MAX = 0.08;
+const TREND_SENSITIVITY_CALIBRATION_MARGIN_DEFAULT = 0.04;
 const TREND_SIGMOID_STEEPNESS = 7.2;
 const TREND_TARGET_TREND_MIN = 0.38;
 const TREND_TARGET_TREND_MAX = 0.86;
@@ -355,6 +356,7 @@ function createDefaultTrendSensitivityCalibration() {
         bestScore: null,
         bestEffective,
         steps: TREND_SENSITIVITY_CALIBRATION_STEPS,
+        normalizedMargin: TREND_SENSITIVITY_CALIBRATION_MARGIN_DEFAULT,
     };
 }
 
@@ -431,11 +433,15 @@ function calibrateTrendSensitivity(base) {
     }
     const range = Math.max(1e-9, TREND_SENSITIVITY_MAX - TREND_SENSITIVITY_MIN);
     let targetNormalized = clamp01((bestSlider - TREND_SENSITIVITY_MIN) / range);
-    targetNormalized = clampValue(
-        targetNormalized,
-        TREND_SENSITIVITY_CALIBRATION_MIN_NORMALIZED,
-        TREND_SENSITIVITY_CALIBRATION_MAX_NORMALIZED,
+    const dynamicMargin = clampValue(
+        Math.max(
+            TREND_SENSITIVITY_CALIBRATION_MARGIN_MIN,
+            1 / Math.max(4, steps * 2),
+        ),
+        TREND_SENSITIVITY_CALIBRATION_MARGIN_MIN,
+        TREND_SENSITIVITY_CALIBRATION_MARGIN_MAX,
     );
+    targetNormalized = clampValue(targetNormalized, dynamicMargin, 1 - dynamicMargin);
     return {
         anchorValue: TREND_SENSITIVITY_ANCHOR,
         anchorNormalized: calibration.anchorNormalized,
@@ -444,6 +450,7 @@ function calibrateTrendSensitivity(base) {
         bestScore: Number.isFinite(bestScore) ? bestScore : null,
         bestEffective,
         steps,
+        normalizedMargin: dynamicMargin,
     };
 }
 

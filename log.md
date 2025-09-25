@@ -488,3 +488,9 @@
 - **Fix**: 新增 20 日對數報酬偏態與成交量 Z-score 作為 HMM 觀測向量，並在送入模型前以 z-score 正規化每個維度，讓 regime 偵測同時考量波動、動能與量能結構，維持滑桿覆蓋率單調遞減。
 - **Diagnostics**: 回測摘要檢視 `result.regimeBase.hmm.normalization` 確認均值與標準差紀錄，並比對高靈敏度設定時趨勢段覆蓋仍可達 80% 以上且盤整覆蓋低於 20%；同時驗證 HMM 迭代收斂與平均信心未因特徵擴充而惡化。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-24 — Patch LB-TREND-SENSITIVITY-20251024A
+- **Issue recap**: 滑桿預設值維持在 5 時仍以固定 5%～95% 線性範圍對映，當 HMM 校準峰值落在極端位置時無法映射回預設點，導致最高平均信心參數與預設值脫鉤。
+- **Fix**: 依校準步數動態計算最小安全邊界（0.1% 起跳），取代原先固定區間並在校準資訊中保留邊界值，確保滑桿 5 會回推到峰值參數，同時避免 targetNormalized 達到 0 或 1 時的階梯化行為。
+- **Diagnostics**: 於本地透過 `mapSliderToEffectiveSensitivity` 比對校準前後的等效靈敏度，確認 anchor=5 時的 `effectiveSensitivity` 與 `bestSlider` 等值，並檢視 `trendSensitivityValue` 描述同步揭露峰值滑桿、信心與校準邊界。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
