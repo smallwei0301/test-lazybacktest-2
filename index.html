@@ -1190,7 +1190,6 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251020A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
                                             將價格序列拆成牛市・高波動、熊市・高波動與盤整三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
@@ -1200,7 +1199,7 @@
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">狀態精細度</label>
-                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">—</span>
+                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">平均狀態信心：—</span>
                                             </div>
                                             <div class="flex items-center gap-3">
                                                 <span class="text-[11px]" style="color: var(--muted-foreground);">0 寬鬆</span>

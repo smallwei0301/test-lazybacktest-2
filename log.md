@@ -1,4 +1,10 @@
 
+## 2025-10-28 — Patch LB-TREND-CARD-20251028A
+- **Issue recap**: 趨勢卡仍顯示版本章與「HMM 信心」字樣，使用者無法直接看到平均狀態信心；同時牛/盤整/熊卡片也未標示最新交易日，使得判讀即時 regime 辨識時缺乏焦點。
+- **Fix**: 隱藏版本章、將滑桿指標改為「平均狀態信心」，並在四態統計中依最新 regime 以主色藍字附上最後交易日，確保使用者一眼看出最新分類。
+- **Diagnostics**: 回測後確認趨勢卡標題無版本章，滑桿右側顯示「平均狀態信心：XX.X%」，且統計卡僅在最新 regime 卡片旁顯示藍色日期；若無結果則顯示破折號。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-23 — Patch LB-TREND-SENSITIVITY-20251023A
 - **Issue recap**: 先前僅將滑桿預設值設定為 5，未先掃描 1000 組靈敏度組合確認平均狀態信心峰值，導致預設門檻可能偏離最佳判定且高檔覆蓋行為不穩定。
 - **Fix**: 導入 0→10 滑桿 1000 組步進掃描，逐一計算四態 HMM 平均狀態信心並取最高參數，透過分段映射讓該參數對應滑桿值 5；同時更新門檻映射函式與卡片說明，揭露校準滑桿值、等效敏感度與信心峰值。

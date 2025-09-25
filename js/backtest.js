@@ -282,7 +282,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251024A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-CARD-20251028A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 10;
@@ -593,6 +593,16 @@ function formatPercentSigned(value, digits = 2) {
         return `+${fixed}%`;
     }
     return `${fixed}%`;
+}
+
+function formatTrendLatestDate(dateString) {
+    if (typeof dateString !== 'string' || dateString.length < 8) return null;
+    const parts = dateString.split('-');
+    if (parts.length < 3) return null;
+    const month = Number.parseInt(parts[1], 10);
+    const day = Number.parseInt(parts[2], 10);
+    if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
+    return `${month}／${day}`;
 }
 
 function computeMedian(values) {
@@ -1768,6 +1778,11 @@ function classifyRegimes(base, thresholds) {
     const targetRangePct = Number.isFinite(thresholds?.targetRangeCoverage)
         ? thresholds.targetRangeCoverage * 100
         : null;
+    const lastIndex = enforced.length > 0 ? enforced.length - 1 : -1;
+    const latestLabel = lastIndex >= 0 ? enforced[lastIndex] || null : null;
+    const latestDate = lastIndex >= 0 && Array.isArray(base.dates)
+        ? base.dates[lastIndex] || null
+        : null;
     const summary = {
         aggregatedByType: aggregation.aggregated,
         totalDays: aggregation.totalDays,
@@ -1786,6 +1801,10 @@ function classifyRegimes(base, thresholds) {
                 || (Number.isFinite(targetTrendPct)
                     ? (bullCoverage + bearCoverage) >= targetTrendPct - 0.5
                     : true),
+        },
+        latest: {
+            label: latestLabel,
+            date: latestDate,
         },
     };
     return {
@@ -1826,26 +1845,12 @@ function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
     const thresholds = trendAnalysisState.thresholds;
     const calibration = trendAnalysisState.calibration || createDefaultTrendSensitivityCalibration();
-    if (sliderValueEl && thresholds) {
-        const sensitivityLabel = thresholds.sensitivity % 1 === 0
-            ? thresholds.sensitivity.toFixed(0)
-            : thresholds.sensitivity.toFixed(1);
-        const targetText = Number.isFinite(thresholds.targetTrendCoverage)
-            ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
+    const summary = trendAnalysisState.summary;
+    if (sliderValueEl) {
+        const averageText = Number.isFinite(summary?.averageConfidence)
+            ? formatPercentPlain(summary.averageConfidence * 100, 1)
             : '—';
-        const bestSliderText = Number.isFinite(calibration?.bestSlider)
-            ? calibration.bestSlider.toFixed(1)
-            : '—';
-        const bestScoreText = Number.isFinite(calibration?.bestScore)
-            ? calibration.bestScore.toFixed(3)
-            : '—';
-        sliderValueEl.textContent = `HMM 信心 ${sensitivityLabel} ｜ 滑桿 5→校準 ${bestSliderText} ｜ 峰值信心 ${bestScoreText} ｜ 目標趨勢 ${targetText}`;
-    } else if (sliderValueEl) {
-        sliderValueEl.textContent = '—';
-    }
-    const badgeEl = document.getElementById('trend-version-badge');
-    if (badgeEl) {
-        badgeEl.textContent = trendAnalysisState.version;
+        sliderValueEl.textContent = `平均狀態信心：${averageText}`;
     }
     const thresholdTextEl = document.getElementById('trend-threshold-text');
     if (thresholdTextEl && thresholds) {
@@ -1880,7 +1885,6 @@ function renderTrendSummary() {
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
     const metaEl = document.getElementById('trend-summary-meta');
-    const summary = trendAnalysisState.summary;
     if (!container || !placeholder) return;
     if (!summary) {
         container.innerHTML = '';
@@ -1890,6 +1894,8 @@ function renderTrendSummary() {
     }
     placeholder.classList.add('hidden');
     const order = ['bullHighVol', 'rangeBound', 'bearHighVol'];
+    const latestLabel = summary.latest?.label || null;
+    const latestDateLabel = formatTrendLatestDate(summary.latest?.date);
     container.innerHTML = order.map((key) => {
         const style = TREND_STYLE_MAP[key] || {};
         const stats = summary.aggregatedByType?.[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: null };
@@ -1899,11 +1905,14 @@ function renderTrendSummary() {
         const background = style.overlay || 'rgba(148, 163, 184, 0.15)';
         const accent = style.accent || 'var(--foreground)';
         const label = style.label || key;
+        const latestTag = latestLabel === key && latestDateLabel
+            ? `<span class="trend-summary-latest-date">（${latestDateLabel}）</span>`
+            : '';
         return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-2" style="color: ${accent};">
                     <span class="trend-summary-chip" style="background-color: ${background}; border-color: ${accent};"></span>
-                    <strong>${label}</strong>
+                    <strong>${label}</strong>${latestTag}
                 </div>
                 <span class="trend-summary-meta">${stats.segments} 段</span>
             </div>
