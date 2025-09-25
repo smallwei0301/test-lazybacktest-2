@@ -35,6 +35,12 @@
 - **Diagnostics**: 今日建議回傳載明延伸至今日的資料日期、倉位摘要與 lag 天數，若策略起始日尚未到達亦會顯示提示訊息；Worker 快取保留 coverage fingerprint，後續重播時可比對資料區間。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
 
+## 2025-07-03 — Patch LB-STRATEGY-STATUS-20250703A
+- **Issue recap**: 策略狀態速報仍隸屬建議分頁，無法在摘要頁即時查看戰況，也缺乏與買入持有差距與指標體檢的條列敘述，散戶難以秒讀策略健康度。
+- **Fix**: 將卡片移至摘要頁淨值曲線下、回測摘要上方，新增幽默語氣的領先/落後徽章與差距顯示，並以 `buildStrategyHealthSummary`、`splitSummaryIntoBulletLines` 拆解年化報酬、夏普、索提諾、最大回撤、前後段穩定比的雙級診斷，落後時先輸出加粗激勵語再逐條列出注意事項。
+- **Diagnostics**: 手動檢查預設版本碼 `LB-STRATEGY-STATUS-20250703A`、回測啟動時的「戰況計算中」提示、失敗時的 `戰況暫停` 標章，以及策略領先/落後/平手時差距與指標巡檢是否依門檻切換口吻與條列格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 ## 2025-07-15 — Patch LB-SENSITIVITY-GRID-20250715A / LB-SENSITIVITY-UX-20250715B
 - **Issue recap**: ±10% 單點敏感度無法覆蓋均線等整數參數的小幅調整，前端表格也僅能呈現兩個情境，無法顯示多點擾動與方向性資訊。
