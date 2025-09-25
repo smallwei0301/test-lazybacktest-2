@@ -429,3 +429,8 @@
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
 
+# 2025-09-07 — Patch LB-TODAY-GUIDE-20250907A
+- **Issue recap**: 今日建議在最後一筆資料雖存在但收盤價缺失時，仍回傳「資料不足」訊息，導致使用者即使完成回測也看不到具體操作指引。
+- **Fix**: `runStrategy` 於每日迭代即擷取最終狀態快照並在缺價時回退至最近一次有效收盤價，確保 Worker 可輸出完整的今日部位與行動建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+

@@ -16,6 +16,7 @@ importScripts('config.js');
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-GUIDE-20250905A
+// Patch Tag: LB-TODAY-GUIDE-20250907A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -5460,6 +5461,56 @@ function runStrategy(data, params, options = {}) {
   const lastIdx = n - 1;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
+  const resolveSnapshotClose = (index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= n) {
+      return null;
+    }
+    const candidate = closes[index];
+    if (Number.isFinite(candidate) && candidate > 0) {
+      return candidate;
+    }
+    const prevIndex = findPreviousValidCloseIndex(data, index);
+    if (prevIndex >= 0) {
+      const prevCandidate = closes[prevIndex];
+      if (Number.isFinite(prevCandidate) && prevCandidate > 0) {
+        return prevCandidate;
+      }
+    }
+    return null;
+  };
+  const captureFinalEvaluationSnapshot = (index, flags = {}) => {
+    if (!captureFinalState) return;
+    if (!Number.isInteger(index) || index < 0 || index >= n) return;
+    const snapshotClose = resolveSnapshotClose(index);
+    finalEvaluation = {
+      date: dates[index] || null,
+      open: Number.isFinite(opens[index]) ? opens[index] : null,
+      high: Number.isFinite(highs[index]) ? highs[index] : null,
+      low: Number.isFinite(lows[index]) ? lows[index] : null,
+      close: Number.isFinite(snapshotClose) && snapshotClose > 0 ? snapshotClose : null,
+      longState: longStateSeries[index],
+      shortState: shortStateSeries[index],
+      executedBuy: Boolean(flags.executedBuy),
+      executedSell: Boolean(flags.executedSell),
+      executedShort: Boolean(flags.executedShort),
+      executedCover: Boolean(flags.executedCover),
+      longPos,
+      shortPos,
+      longShares,
+      shortShares,
+      longAverageEntryPrice,
+      lastBuyPrice: lastBuyP,
+      lastShortPrice: lastShortP,
+      longCapital: longCap,
+      shortCapital: shortCap,
+      longProfit: longPl[index],
+      shortProfit: shortPl[index],
+      portfolioValue: portfolioVal[index],
+      strategyReturn: strategyReturns[index],
+      longEntryState: longEntryStageStates[index],
+      longExitState: longExitStageStates[index],
+    };
+  };
     const {
       initialCapital,
       positionSize,
@@ -6097,6 +6148,12 @@ function runStrategy(data, params, options = {}) {
       longExitStageStates[i] = captureExitStageState();
       portfolioVal[i] = portfolioVal[i - 1] ?? initialCapital;
       strategyReturns[i] = strategyReturns[i - 1] ?? 0;
+      captureFinalEvaluationSnapshot(i, {
+        executedBuy: false,
+        executedSell: false,
+        executedShort: false,
+        executedCover: false,
+      });
       continue;
     }
     let tradePrice = null;
@@ -7475,36 +7532,12 @@ function runStrategy(data, params, options = {}) {
       initialCapital > 0
         ? ((portfolioVal[i] - initialCapital) / initialCapital) * 100
         : 0;
-    if (captureFinalState && i === lastIdx) {
-      finalEvaluation = {
-        date: dates[i],
-        open: curO,
-        high: curH,
-        low: curL,
-        close: curC,
-        longState,
-        shortState,
-        executedBuy,
-        executedSell,
-        executedShort,
-        executedCover,
-        longPos,
-        shortPos,
-        longShares,
-        shortShares,
-        longAverageEntryPrice,
-        lastBuyPrice: lastBuyP,
-        lastShortPrice: lastShortP,
-        longCapital: longCap,
-        shortCapital: shortCap,
-        longProfit: longPl[i],
-        shortProfit: shortPl[i],
-        portfolioValue: portfolioVal[i],
-        strategyReturn: strategyReturns[i],
-        longEntryState: longEntryStageStates[i],
-        longExitState: longExitStageStates[i],
-      };
-    }
+    captureFinalEvaluationSnapshot(i, {
+      executedBuy,
+      executedSell,
+      executedShort,
+      executedCover,
+    });
     peakCap = Math.max(peakCap, portfolioVal[i]);
     const drawdown =
       peakCap > 0 ? ((peakCap - portfolioVal[i]) / peakCap) * 100 : 0;
