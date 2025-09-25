@@ -1,6 +1,12 @@
 
 ## 2025-09-10 — Patch LB-PERFORMANCE-DIAGNOSTIC-20250713A
 - **Issue recap**: 「績效分析」分頁在回測完成後仍顯示預設提示，無法呈現各期間績效與總結指標，導致使用者誤以為回測失敗。
+
+## 2025-07-20 — Patch LB-PERFORMANCE-ANALYTICS-20250720A
+- **Fix**: 移除績效分析分頁的整體摘要卡，僅保留期間績效比較表並以最新版本標籤呈現；同步將 Worker 的期間統計改為依實際近 1 個月、6 個月、N 年資料切片計算報酬、夏普、索提諾與最大回撤。
+- **Diagnostics**: 回測完成後，「期間績效分析」表格會列出真實回測期間的策略與買入持有指標，若資料不足則顯示提示；清除結果或回測失敗會恢復預設訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>new vm.Script(fs.readFileSync(file,'utf8'),{filename:file}));console.log('scripts compile');NODE`
+
 - **Fix**: 新增績效診斷模組記錄容器初始狀態並動態渲染摘要卡、期間比較表與版本資訊；回測成功時即時注入資料，發生錯誤或重新清除時恢復預設訊息。
 - **Diagnostics**: 回測後切換至「績效分析」分頁，可看到整體績效摘要、各期間策略 vs. 買入持有比較與版本標籤；重新執行或回測失敗時容器恢復居中提示。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>new vm.Script(fs.readFileSync(file,'utf8'),{filename:file}));console.log('scripts compile');NODE`

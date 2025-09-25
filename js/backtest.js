@@ -6,8 +6,9 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-PERFORMANCE-DIAGNOSTIC-20250713A
+// Patch Tag: LB-PERFORMANCE-ANALYTICS-20250720A
 
-const PERFORMANCE_ANALYSIS_VERSION = 'LB-PERFORMANCE-DIAGNOSTIC-20250713A';
+const PERFORMANCE_ANALYSIS_VERSION = 'LB-PERFORMANCE-ANALYTICS-20250720A';
 const performanceTabState = {
     containerInitialClasses: null,
     containerInitialBorderColor: null,
@@ -191,60 +192,6 @@ function formatPerformanceRangeLabel(metrics) {
     return `資料期間：${start} → ${end}`;
 }
 
-function renderPerformanceSummary(overallResult, metrics) {
-    if (!overallResult || !metrics) {
-        return `
-        <section class="space-y-3">
-            <div class="flex items-center justify-between">
-                <h4 class="text-base font-semibold" style="color: var(--foreground);">整體績效摘要</h4>
-            </div>
-            <div class="p-6 text-sm rounded-lg border border-dashed" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: var(--muted-foreground);">
-                尚未取得有效的總體績效數據。
-            </div>
-        </section>`;
-    }
-
-    const cards = [
-        { label: '策略累積報酬', value: formatPerformancePercent(metrics.strategyReturn, { withSign: true }), style: getTrendColorStyle(metrics.strategyReturn) },
-        { label: '買入持有累積報酬', value: formatPerformancePercent(metrics.buyHoldReturn, { withSign: true }), style: getTrendColorStyle(metrics.buyHoldReturn) },
-        { label: '策略年化報酬', value: formatPerformancePercent(metrics.annualizedReturn, { withSign: true }), style: getTrendColorStyle(metrics.annualizedReturn) },
-        { label: '夏普比率', value: formatPerformanceRatio(metrics.sharpeRatio), style: getSharpeColorStyle(metrics.sharpeRatio) },
-        { label: '索提諾比率', value: formatPerformanceSortino(metrics.sortinoRatio), style: getSharpeColorStyle(metrics.sortinoRatio) },
-        { label: '最大回撤', value: formatPerformanceDrawdown(metrics.maxDrawdown), style: getDrawdownColorStyle(metrics.maxDrawdown) },
-    ];
-
-    const cardsHtml = cards.map((card) => `
-        <div class="p-4 rounded-lg border shadow-sm" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 75%, transparent);">
-            <p class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted-foreground);">${escapeHtml(card.label)}</p>
-            <p class="text-2xl font-semibold mt-2" style="${card.style}">${card.value}</p>
-        </div>
-    `).join('');
-
-    const tradeStats = [];
-    if (metrics.tradesCount !== null) {
-        tradeStats.push(`<div><p class="text-xs" style="color: var(--muted-foreground);">完成交易</p><p class="text-sm font-medium" style="color: var(--foreground);">${Math.round(metrics.tradesCount)}</p></div>`);
-    }
-    if (metrics.tradesCount && metrics.tradesCount > 0 && metrics.winTrades !== null) {
-        const winRate = (metrics.winTrades / metrics.tradesCount) * 100;
-        tradeStats.push(`<div><p class="text-xs" style="color: var(--muted-foreground);">勝率</p><p class="text-sm font-medium" style="${getTrendColorStyle(winRate - 50)}">${formatPerformancePercent(winRate, { digits: 1 })}</p></div>`);
-    }
-    const tradeStatsHtml = tradeStats.length > 0
-        ? `<div class="flex flex-wrap gap-4">${tradeStats.join('')}</div>`
-        : '';
-
-    return `
-    <section class="space-y-3">
-        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <h4 class="text-base font-semibold" style="color: var(--foreground);">整體績效摘要</h4>
-            <span class="text-xs" style="color: var(--muted-foreground);">${escapeHtml(formatPerformanceRangeLabel(metrics))}</span>
-        </div>
-        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            ${cardsHtml}
-        </div>
-        ${tradeStatsHtml ? `<div class="rounded-lg border px-4 py-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--background) 92%, var(--muted) 8%);">${tradeStatsHtml}</div>` : ''}
-    </section>`;
-}
-
 function renderPerformanceTableSection(periodItems, overallResult, metrics) {
     const rowsHtml = periodItems.length > 0
         ? periodItems.map(({ label, value }) => {
@@ -328,12 +275,10 @@ function renderPerformanceAnalysis({ overallResult = null, subPeriodResults = nu
 
     applyPerformanceContainerFilled(container);
     const metrics = computeOverallPerformanceMetrics(resolvedOverall);
-    const summaryHtml = renderPerformanceSummary(resolvedOverall, metrics);
     const tableHtml = renderPerformanceTableSection(periodItems, resolvedOverall, metrics);
 
     container.innerHTML = `
         <div class="w-full p-4 md:p-6 space-y-6">
-            ${summaryHtml}
             ${tableHtml}
             <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-[11px]" style="color: var(--muted-foreground);">
                 <span>策略績效診斷版本：${PERFORMANCE_ANALYSIS_VERSION}</span>
