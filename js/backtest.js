@@ -162,8 +162,9 @@ const todaySuggestionUI = (() => {
             || formatPriceValue(payload.price?.value, payload.price?.type)
             || payload.message
             || '—';
+        const displayDate = payload.latestTradingDate || payload.latestDate;
         setText(labelEl, payload.label || '—');
-        setText(dateEl, payload.latestDate || '—');
+        setText(dateEl, displayDate || '—');
         setText(priceEl, priceText);
         setText(longEl, describePosition(payload.longPosition));
         setText(shortEl, describePosition(payload.shortPosition));

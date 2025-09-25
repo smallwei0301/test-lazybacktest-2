@@ -1036,6 +1036,29 @@ function getTodayISODate() {
   return `${year}-${month}-${day}`;
 }
 
+function getMonthStartISOFromISO(iso) {
+  if (!iso || typeof iso !== "string") return null;
+  const parts = iso.split("-");
+  if (parts.length < 2) return null;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  if (Number.isNaN(year) || Number.isNaN(month)) return null;
+  if (month < 1 || month > 12) return null;
+  return `${year}-${pad2(month)}-01`;
+}
+
+function findLatestTradingRow(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (!row || typeof row !== "object") continue;
+    if (row.date && typeof row.date === "string") {
+      return row;
+    }
+  }
+  return null;
+}
+
 function deriveTodayAction(evaluation) {
   if (!evaluation) {
     return { action: "no_data", label: "無法取得建議", tone: "neutral" };
@@ -2814,6 +2837,11 @@ async function fetchStockData(
     optionEffectiveStart,
     marketKey,
   );
+  const suppressProgress = Boolean(options.suppressProgress);
+  const postProgress = (progress, message) => {
+    if (suppressProgress) return;
+    self.postMessage({ type: "progress", progress, message });
+  };
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
   const fetchDiagnostics = {
     stockNo,
@@ -2839,11 +2867,7 @@ async function fetchStockData(
     if (workerLastMeta && typeof workerLastMeta === "object") {
       workerLastMeta = { ...workerLastMeta, diagnostics: cacheDiagnostics };
     }
-    self.postMessage({
-      type: "progress",
-      progress: 15,
-      message: "命中背景快取...",
-    });
+    postProgress(15, "命中背景快取...");
     return {
       data: cachedEntry.data,
       dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
@@ -2914,11 +2938,7 @@ async function fetchStockData(
       optionLookbackDays,
     });
     if (supersetResult) {
-      self.postMessage({
-        type: "progress",
-        progress: 6,
-        message: "命中年度 Superset 快取...",
-      });
+      postProgress(6, "命中年度 Superset 快取...");
       return supersetResult;
     }
   }
@@ -2926,11 +2946,7 @@ async function fetchStockData(
   let blobRangeAttempted = false;
   if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
     blobRangeAttempted = true;
-    self.postMessage({
-      type: "progress",
-      progress: 8,
-      message: "檢查 Netlify Blob 範圍快取...",
-    });
+    postProgress(8, "檢查 Netlify Blob 範圍快取...");
     const blobRangeResult = await tryFetchRangeFromBlob({
       stockNo,
       startDate,
@@ -2952,16 +2968,8 @@ async function fetchStockData(
   }
 
   if (adjusted) {
-    self.postMessage({
-      type: "progress",
-      progress: 8,
-      message: "準備抓取還原股價...",
-    });
-    self.postMessage({
-      type: "progress",
-      progress: 18,
-      message: "呼叫還原股價服務...",
-    });
+    postProgress(8, "準備抓取還原股價...");
+    postProgress(18, "呼叫還原股價服務...");
     const adjustedResult = await fetchAdjustedPriceRange(
       stockNo,
       startDate,
@@ -3094,11 +3102,7 @@ async function fetchStockData(
     };
   }
 
-  self.postMessage({
-    type: "progress",
-    progress: blobRangeAttempted ? 12 : 5,
-    message: "準備抓取原始數據...",
-  });
+  postProgress(blobRangeAttempted ? 12 : 5, "準備抓取原始數據...");
 
   const months = enumerateMonths(startDateObj, endDateObj);
   if (months.length === 0) {
@@ -3475,11 +3479,7 @@ async function fetchStockData(
       const progress = 10 + Math.round((completedMonths / totalMonths) * 35);
       const phaseLabel =
         monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
-      self.postMessage({
-        type: "progress",
-        progress,
-        message: `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
-      });
+      postProgress(progress, `處理 ${phaseLabel} ${monthInfo.label} 數據...`);
     }
   }
 
@@ -3530,7 +3530,7 @@ async function fetchStockData(
     fetchDiagnostics.forcedSources = Array.from(fetchForcedSources);
   }
 
-  self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
+  postProgress(55, "整理數據...");
   const deduped = dedupeAndSortData(normalizedRows);
   const defaultRemoteLabel = isTpex
     ? adjusted
@@ -9366,9 +9366,11 @@ self.onmessage = async function (e) {
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
+      // Patch Tag: LB-TODAY-CURRENT-20250910A
       console.log("[Worker] Received getSuggestion request.");
       const todayISO = e.data?.todayISO || getTodayISODate();
-      const marketKey = getMarketKey(params.marketType || params.market || "TWSE");
+      const marketType = params.marketType || params.market || "TWSE";
+      const marketKey = getMarketKey(marketType);
       const adjusted = Boolean(params.adjustedPrice);
       const split = Boolean(params.splitAdjustment);
       const effectiveStartDate =
@@ -9380,6 +9382,7 @@ self.onmessage = async function (e) {
         params.dataStartDate ||
         effectiveStartDate ||
         params.startDate;
+      const requestedEndDate = params.endDate || null;
       const resolvedLookback = Number.isFinite(e.data?.lookbackDays)
         ? e.data.lookbackDays
         : lookbackDays;
@@ -9418,11 +9421,51 @@ self.onmessage = async function (e) {
         });
       }
 
+      const monthStartISO = getMonthStartISOFromISO(todayISO);
+      let latestMonthRow = null;
+      if (monthStartISO) {
+        try {
+          const monthSnapshot = await fetchStockData(
+            params.stockNo,
+            monthStartISO,
+            todayISO,
+            marketType,
+            {
+              adjusted: params.adjustedPrice,
+              splitAdjustment: params.splitAdjustment,
+              effectiveStartDate: monthStartISO,
+              lookbackDays: null,
+              suppressProgress: true,
+            },
+          );
+          const monthRows = Array.isArray(monthSnapshot?.data)
+            ? monthSnapshot.data
+            : [];
+          latestMonthRow = findLatestTradingRow(monthRows);
+        } catch (monthError) {
+          console.warn(
+            `[Worker] 取得 ${params.stockNo} 本月行情時發生錯誤:`,
+            monthError,
+          );
+        }
+      }
+
+      let targetEndDate =
+        (latestMonthRow && typeof latestMonthRow.date === "string"
+          ? latestMonthRow.date
+          : null) || todayISO;
+      if (effectiveStartDate && targetEndDate < effectiveStartDate) {
+        targetEndDate = effectiveStartDate;
+      }
+      if (dataStartDate && targetEndDate < dataStartDate) {
+        targetEndDate = dataStartDate;
+      }
+
       const suggestionOutcome = await fetchStockData(
         params.stockNo,
         dataStartDate,
-        todayISO,
-        params.marketType || params.market || "TWSE",
+        targetEndDate,
+        marketType,
         {
           adjusted: params.adjustedPrice,
           splitAdjustment: params.splitAdjustment,
@@ -9435,13 +9478,13 @@ self.onmessage = async function (e) {
         ? suggestionOutcome.data
         : [];
       if (suggestionData.length === 0) {
-        const message = `${params.stockNo} 在 ${dataStartDate} 至 ${todayISO} 無交易資料。`;
+        const message = `${params.stockNo} 在 ${dataStartDate} 至 ${targetEndDate} 無交易資料。`;
         self.postMessage({
           type: "suggestionResult",
           data: {
             status: "no_data",
-            label: "查無今日資料",
-            latestDate: todayISO,
+            label: "無法判斷今日操作",
+            latestDate: targetEndDate,
             price: { text: message },
             notes: [message],
           },
@@ -9458,7 +9501,7 @@ self.onmessage = async function (e) {
         startDate: effectiveStartDate,
         dataStartDate,
         effectiveStartDate,
-        endDate: todayISO,
+        endDate: targetEndDate,
         lookbackDays: resolvedLookback,
       };
       const todayResult = runStrategy(suggestionData, strategyParams, {
@@ -9466,7 +9509,11 @@ self.onmessage = async function (e) {
         captureFinalState: true,
       });
       const evaluation = todayResult?.finalEvaluation || null;
-      const latestDate = suggestionData[suggestionData.length - 1]?.date || null;
+      const latestRow = findLatestTradingRow(suggestionData);
+      const latestDate = latestRow?.date || null;
+      if (latestDate && targetEndDate < latestDate) {
+        targetEndDate = latestDate;
+      }
       if (!evaluation || !latestDate) {
         const message = "回測資料不足以推導今日建議。";
         self.postMessage({
@@ -9518,8 +9565,16 @@ self.onmessage = async function (e) {
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
         notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
       }
-      if (params.endDate && latestDate && latestDate > params.endDate) {
-        notes.push(`已延伸資料至 ${latestDate}，超過原設定結束日 ${params.endDate}。`);
+      if (requestedEndDate && latestDate) {
+        if (requestedEndDate < latestDate) {
+          notes.push(
+            `原設定結束日為 ${requestedEndDate}，已延伸至 ${latestDate} 以評估最新部位。`,
+          );
+        } else if (requestedEndDate > latestDate) {
+          notes.push(
+            `策略結束日為 ${requestedEndDate}，最新交易資料僅至 ${latestDate}。`,
+          );
+        }
       }
 
       const suggestionPayload = {
@@ -9529,7 +9584,11 @@ self.onmessage = async function (e) {
         tone: actionInfo.tone,
         latestDate,
         price: {
-          value: Number.isFinite(evaluation.close) ? evaluation.close : null,
+          value: Number.isFinite(evaluation.close)
+            ? evaluation.close
+            : Number.isFinite(latestRow?.close)
+              ? latestRow.close
+              : null,
           type: "close",
         },
         longPosition,
@@ -9540,9 +9599,11 @@ self.onmessage = async function (e) {
         dataLagDays,
         todayISO,
         requestedEndDate: params.endDate,
-        appliedEndDate: todayISO,
+        appliedEndDate: latestDate,
         startDateUsed: strategyParams.startDate,
         dataStartDateUsed: dataStartDate,
+        latestTradingDate: latestDate,
+        monthReference: monthStartISO,
       };
 
       self.postMessage({

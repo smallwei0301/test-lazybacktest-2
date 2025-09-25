@@ -126,7 +126,8 @@ const fallbackTodaySuggestionUI = (() => {
             || payload.message
             || '—';
         setText(labelEl, payload.label || '—');
-        setText(dateEl, payload.latestDate || '—');
+        const displayDate = payload.latestTradingDate || payload.latestDate;
+        setText(dateEl, displayDate || '—');
         setText(priceEl, priceText);
         setText(longEl, describePosition(payload.longPosition));
         setText(shortEl, describePosition(payload.shortPosition));
@@ -180,7 +181,7 @@ const fallbackTodaySuggestionUI = (() => {
                 setTone(tone);
                 applyResultPayload({
                     label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
-                    latestDate: payload.latestDate || '—',
+                    latestDate: payload.latestTradingDate || payload.latestDate || '—',
                     price: { text: payload.price?.text || payload.message || '—' },
                     longPosition: { state: '空手' },
                     shortPosition: { state: '空手' },

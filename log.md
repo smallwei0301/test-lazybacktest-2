@@ -1,4 +1,12 @@
 
+## 2025-09-10 — Patch LB-TODAY-CURRENT-20250910A
+- **Issue recap**: 今日建議卡片仍沿用使用者設定的結束日，未主動延伸到最新交易日，導致原策略已結束時無法告知今日應進出或持倉的動作。
+- **Fix**: Worker 會先抓取本月行情推導最後交易日，再以 `forceFinalLiquidation: false` 重跑策略到該日並產出多空進出指示；前端同步顯示解析後的交易日期與動作文案。
+- **Diagnostics**: 建議負載新增 `latestTradingDate`、`monthReference` 與結束日差異提醒，並保留資料落後天數提示，協助辨識延伸區間與資料時效。
+- **Testing**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('primary scripts compile');NODE`
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');const code=fs.readFileSync('js/backtest_corrupted.js','utf8');const match=code.match(/const FALLBACK_DAY_MS[\s\S]*?function getSuggestion\([\s\S]*?\n}\n/);if(!match)throw new Error('Unable to extract fallback suggestion module');new vm.Script(match[0],{filename:'fallback_today_suggestion.js'});console.log('fallback suggestion module compiles');NODE`
+
 ## 2025-09-05 — Patch LB-TODAY-ACTION-20250828A
 - **Issue recap**: 備援腳本 `backtest_corrupted.js` 仍僅渲染舊版文字訊息，遇到新結構的 `action/label/tone` 會落入空白，亦缺乏快取覆蓋資訊與延遲提示。
 - **Fix**: 導入與主版一致的 `todaySuggestionUI` 呈現邏輯、調整 Worker 訊息處理與錯誤復原，並補上快取覆蓋計算、lookback 解析與結構化請求，確保備援流程同樣拉齊到今日資料。
