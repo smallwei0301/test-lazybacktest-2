@@ -1,4 +1,10 @@
 
+## 2025-09-20 — Patch LB-STRATEGY-STATUS-20250920A
+- **Issue recap**: 策略狀態卡雖已改為推文語氣，但最新需求希望改成電玩宅式的戰報敘事，既有文案缺乏遊戲化比喻與補師/技能等語境。
+- **Fix**: 將版本更新為 `LB-STRATEGY-STATUS-20250920A`，重寫戰況卡各狀態標語、戰況比較句、體檢結論與敏感度建議，採用副本、Buff、滅團等電玩宅用語呈現策略優劣勢。
+- **Diagnostics**: 以模擬資料檢查領先、平手、落後、資料缺席與錯誤情境，確認卡片顯示新徽章與條列，落後時強調句會提示開技能補血，敏感度與體檢文案全面換成電玩宅語調。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-STRATEGY-STATUS-20250915A
 - **Issue recap**: 策略狀態卡文案仍偏向一般說明口吻，與最新要求的 PTT 爆文語氣不符；落後時的強調句與敏感度建議也缺乏推文式調侃提醒。
 - **Fix**: 將狀態卡版本更新為 `LB-STRATEGY-STATUS-20250915A`，重寫預設、載入、領先、平手、落後等狀態標語與子標題為 PTT 口吻，並改寫戰況條列、體檢結論與敏感度建議的文案讓散戶能用爆文語氣快速吸收重點。
