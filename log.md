@@ -1,4 +1,10 @@
 
+## 2025-07-10 — Patch LB-STRATEGY-STATUS-20250710B
+- **Issue recap**: 策略狀態卡的版本徽章佔據視覺重心且戰況條列一字排開，與回測摘要、趨勢評估卡緊貼排列，使用者難以掃描，也無法在落後時快速收合細節。
+- **Fix**: 移除版本號展示並以 `data-lb-strategy-status-version` 註記版本，將趨勢評估卡搬到策略狀態卡上方並為摘要區塊加入 `space-y-6` 間距；戰況條列改為 `<details>` 摺疊呈現，落後時保留放大激勵句，改寫逆風副標維持幽默語氣。
+- **Diagnostics**: 手動確認摘要頁卡片上下間距一致、趨勢卡順序調整成功，策略狀態卡落後時顯示加粗激勵句且條列需點擊展開；預設/載入階段仍以段落提示，無摺疊節點。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。

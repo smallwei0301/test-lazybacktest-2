@@ -269,7 +269,7 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250703A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250710B';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
@@ -315,7 +315,7 @@ const STRATEGY_STATUS_CONFIG = {
             color: 'rgb(220, 38, 38)',
         },
         title: '買入持有暫時領先',
-        subtitle: '目前輸給買入持有，準備新戰術再上。',
+        subtitle: '戰局逆風，但還有調整空間，檢視條列提示快速度過低潮。',
     },
     missing: {
         badgeText: '資料補眠',
@@ -348,7 +348,6 @@ const strategyStatusElements = (() => {
         title: document.getElementById('strategy-status-title') || null,
         subtitle: document.getElementById('strategy-status-subtitle') || null,
         detail: document.getElementById('strategy-status-detail') || null,
-        version: document.getElementById('strategy-status-version') || null,
     };
 })();
 
@@ -378,7 +377,13 @@ function splitSummaryIntoBulletLines(content) {
     return [];
 }
 
-function renderStrategyStatusDetail({ emphasisedLine = null, bulletLines = [], detailHTML = null } = {}) {
+function renderStrategyStatusDetail({
+    emphasisedLine = null,
+    bulletLines = [],
+    detailHTML = null,
+    collapsible = false,
+    collapsibleSummary = '展開戰況條列',
+} = {}) {
     const detailEl = strategyStatusElements.detail;
     if (!detailEl) return;
     if (typeof detailHTML === 'string' && detailHTML.length > 0) {
@@ -389,14 +394,29 @@ function renderStrategyStatusDetail({ emphasisedLine = null, bulletLines = [], d
     const htmlParts = [];
     if (emphasisedLine) {
         htmlParts.push(
-            `<p class="text-base font-semibold" style="color: var(--foreground);">${escapeHtml(emphasisedLine)}</p>`
+            `<p class="text-lg font-semibold leading-relaxed" style="color: var(--foreground);">${escapeHtml(
+                emphasisedLine
+            )}</p>`
         );
     }
     if (lines.length > 0) {
-        const items = lines
-            .map((line) => `<li>${escapeHtml(line)}</li>`)
-            .join('');
-        htmlParts.push(`<ul class="list-disc pl-5 space-y-1 text-sm" style="color: var(--muted-foreground);">${items}</ul>`);
+        const items = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+        if (collapsible) {
+            const summaryLabel = `${collapsibleSummary || '展開戰況條列'}（${lines.length} 則）`;
+            const summaryText = escapeHtml(summaryLabel);
+            htmlParts.push(
+                [
+                    '<details class="mt-2 rounded-md border border-dashed px-3 py-2" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">',
+                    `<summary class="text-xs font-semibold leading-relaxed cursor-pointer" style="color: var(--primary);">${summaryText}</summary>`,
+                    `<ul class="list-disc pl-5 mt-2 space-y-1 text-sm" style="color: var(--muted-foreground);">${items}</ul>`,
+                    '</details>',
+                ].join('')
+            );
+        } else {
+            htmlParts.push(
+                `<ul class="mt-2 list-disc pl-5 space-y-1 text-sm" style="color: var(--muted-foreground);">${items}</ul>`
+            );
+        }
     }
     if (htmlParts.length === 0) {
         htmlParts.push('<p class="text-sm" style="color: var(--muted-foreground);">—</p>');
@@ -407,8 +427,8 @@ function renderStrategyStatusDetail({ emphasisedLine = null, bulletLines = [], d
 function applyStrategyStatusState(stateKey, options = {}) {
     const elements = strategyStatusElements;
     const config = STRATEGY_STATUS_CONFIG[stateKey] || STRATEGY_STATUS_CONFIG.idle;
-    if (elements.version) {
-        elements.version.textContent = STRATEGY_STATUS_VERSION;
+    if (elements.card && STRATEGY_STATUS_VERSION) {
+        elements.card.dataset.lbStrategyStatusVersion = STRATEGY_STATUS_VERSION;
     }
     if (elements.badge) {
         elements.badge.textContent = config.badgeText;
@@ -619,6 +639,8 @@ function updateStrategyStatusCard(result) {
         detail: {
             emphasisedLine,
             bulletLines: detailLines,
+            collapsible: detailLines.length > 0,
+            collapsibleSummary: '展開完整戰況條列',
         },
     });
 }
