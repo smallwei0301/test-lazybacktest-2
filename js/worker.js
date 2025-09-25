@@ -959,6 +959,133 @@ function computeCoverageFingerprint(coverage) {
   return parts.join("|");
 }
 
+function convertIsoCoverageToNumericRanges(coverage) {
+  if (!Array.isArray(coverage) || coverage.length === 0) return [];
+  return coverage
+    .map((range) => {
+      if (!range || typeof range !== "object") return null;
+      const startMs = isoToUTC(range.start);
+      const endMs = isoToUTC(range.end);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+      return { start: startMs, end: endMs + DAY_MS };
+    })
+    .filter(Boolean);
+}
+
+function extractNumericCoverageFromEntry(entry) {
+  if (!entry) return [];
+  if (
+    Array.isArray(entry.coverage) &&
+    entry.coverage.length > 0 &&
+    typeof entry.coverage[0]?.start === "number"
+  ) {
+    return entry.coverage;
+  }
+  if (
+    entry.meta &&
+    Array.isArray(entry.meta.coverage) &&
+    entry.meta.coverage.length > 0
+  ) {
+    const converted = convertIsoCoverageToNumericRanges(entry.meta.coverage);
+    if (converted.length > 0) {
+      return converted;
+    }
+  }
+  const scratch = {
+    data: Array.isArray(entry.data) ? entry.data : [],
+    coverage: [],
+  };
+  rebuildCoverageFromData(scratch);
+  return Array.isArray(scratch.coverage) ? scratch.coverage : [];
+}
+
+function seedWorkerCachesFromRows({
+  marketKey,
+  stockNo,
+  adjusted = false,
+  splitAdjustment = false,
+  rows,
+  stockName = "",
+}) {
+  if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+  const normalizedRows = dedupeAndSortData(rows);
+  if (normalizedRows.length === 0) return;
+  const normalizedStockName = stockName || stockNo;
+  recordYearSupersetSlices({
+    marketKey,
+    stockNo,
+    priceModeKey: getPriceModeKey(adjusted),
+    split: Boolean(splitAdjustment),
+    rows: normalizedRows,
+  });
+  const monthGroups = new Map();
+  normalizedRows.forEach((row) => {
+    if (!row || typeof row.date !== "string") return;
+    const monthKey = `${row.date.slice(0, 4)}${row.date.slice(5, 7)}`;
+    if (!monthKey || monthKey.length !== 6) return;
+    if (!monthGroups.has(monthKey)) monthGroups.set(monthKey, []);
+    monthGroups.get(monthKey).push(row);
+  });
+  monthGroups.forEach((monthRows, monthKey) => {
+    const sortedMonthRows = monthRows
+      .filter((row) => row && typeof row.date === "string")
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (sortedMonthRows.length === 0) return;
+    let monthEntry = getMonthlyCacheEntry(
+      marketKey,
+      stockNo,
+      monthKey,
+      adjusted,
+      splitAdjustment,
+    );
+    if (!monthEntry) {
+      monthEntry = {
+        data: [],
+        coverage: [],
+        sources: new Set(),
+        stockName: normalizedStockName,
+        lastUpdated: 0,
+      };
+    }
+    const rowMap = new Map(
+      Array.isArray(monthEntry.data)
+        ? monthEntry.data.map((row) => [row.date, row])
+        : [],
+    );
+    sortedMonthRows.forEach((row) => {
+      if (row && row.date) {
+        rowMap.set(row.date, row);
+      }
+    });
+    monthEntry.data = Array.from(rowMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+    if (!monthEntry.stockName) monthEntry.stockName = normalizedStockName;
+    if (!(monthEntry.sources instanceof Set)) {
+      monthEntry.sources = new Set(monthEntry.sources || []);
+    }
+    monthEntry.sources.add("main-thread-cache");
+    monthEntry.lastUpdated = Date.now();
+    rebuildCoverageFromData(monthEntry);
+    ensureRangeFingerprints(monthEntry);
+    const firstDate = monthEntry.data[0]?.date;
+    const lastDate = monthEntry.data[monthEntry.data.length - 1]?.date;
+    if (firstDate && lastDate) {
+      addRangeFingerprint(monthEntry, firstDate, lastDate);
+    }
+    setMonthlyCacheEntry(
+      marketKey,
+      stockNo,
+      monthKey,
+      monthEntry,
+      adjusted,
+      splitAdjustment,
+    );
+  });
+}
+
 function hydrateWorkerCacheFromMainThread(options = {}) {
   const {
     stockNo,
@@ -975,30 +1102,50 @@ function hydrateWorkerCacheFromMainThread(options = {}) {
   if (!stockNo || !marketKey || !Array.isArray(cachedData) || cachedData.length === 0) {
     return;
   }
+  const sanitizedRows = dedupeAndSortData(cachedData);
+  if (sanitizedRows.length === 0) return;
+  const coverage = computeCoverageFromRows(sanitizedRows);
+  const firstRowDate =
+    sanitizedRows[0]?.date || dataStartDate || effectiveStartDate || null;
+  const lastRowDate =
+    sanitizedRows[sanitizedRows.length - 1]?.date || endDate || firstRowDate;
+  const resolvedDataStart = dataStartDate || coverage[0]?.start || firstRowDate;
+  const resolvedEffectiveStart =
+    effectiveStartDate || resolvedDataStart || firstRowDate;
+  const resolvedEndDate = coverage.length > 0
+    ? coverage[coverage.length - 1].end
+    : lastRowDate || resolvedEffectiveStart;
+  const priceMode = getPriceModeKey(adjusted);
   const cacheKey = buildCacheKey(
     stockNo,
-    dataStartDate,
-    endDate,
+    resolvedDataStart,
+    resolvedEndDate,
     adjusted,
     splitAdjustment,
-    effectiveStartDate,
+    resolvedEffectiveStart,
     marketKey,
   );
-  const coverage = computeCoverageFromRows(cachedData);
+  const stockName =
+    cachedMeta?.summary?.stockName ||
+    cachedMeta?.summary?.name ||
+    cachedMeta?.stockName ||
+    stockNo;
+  const numericCoverage = convertIsoCoverageToNumericRanges(coverage);
+  const coverageFingerprint = computeCoverageFingerprint(coverage);
   const cacheEntry = {
-    data: cachedData,
-    stockName: cachedMeta?.stockName || stockNo,
+    data: sanitizedRows,
+    stockName,
     dataSource: cachedMeta?.dataSource || "主執行緒快取",
     timestamp: Date.now(),
-    coverage,
-    coverageFingerprint: computeCoverageFingerprint(coverage),
+    coverage: numericCoverage,
+    coverageFingerprint,
     meta: {
       stockNo,
-      startDate: dataStartDate,
-      dataStartDate,
-      effectiveStartDate,
-      endDate,
-      priceMode: getPriceModeKey(adjusted),
+      startDate: resolvedDataStart,
+      dataStartDate: resolvedDataStart,
+      effectiveStartDate: resolvedEffectiveStart,
+      endDate: resolvedEndDate,
+      priceMode,
       splitAdjustment: Boolean(splitAdjustment),
       lookbackDays,
       summary: cachedMeta?.summary || null,
@@ -1006,13 +1153,23 @@ function hydrateWorkerCacheFromMainThread(options = {}) {
         ? cachedMeta.adjustments
         : [],
       priceSource: cachedMeta?.priceSource || null,
-      adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
+      adjustmentFallbackApplied: Boolean(
+        cachedMeta?.adjustmentFallbackApplied,
+      ),
       adjustmentFallbackInfo:
         cachedMeta?.adjustmentFallbackInfo &&
         typeof cachedMeta.adjustmentFallbackInfo === "object"
           ? cachedMeta.adjustmentFallbackInfo
           : null,
-      debugSteps: Array.isArray(cachedMeta?.debugSteps) ? cachedMeta.debugSteps : [],
+      debugSteps: Array.isArray(cachedMeta?.debugSteps)
+        ? cachedMeta.debugSteps
+        : [],
+      adjustmentDebugLog: Array.isArray(cachedMeta?.adjustmentDebugLog)
+        ? cachedMeta.adjustmentDebugLog
+        : [],
+      adjustmentChecks: Array.isArray(cachedMeta?.adjustmentChecks)
+        ? cachedMeta.adjustmentChecks
+        : [],
       diagnostics: cachedMeta?.diagnostics || null,
       finmindStatus:
         cachedMeta?.finmindStatus && typeof cachedMeta.finmindStatus === "object"
@@ -1023,9 +1180,23 @@ function hydrateWorkerCacheFromMainThread(options = {}) {
           ? cachedMeta.splitDiagnostics
           : null,
       coverage,
+      fetchRange:
+        cachedMeta?.fetchRange &&
+        cachedMeta.fetchRange.start &&
+        cachedMeta.fetchRange.end
+          ? cachedMeta.fetchRange
+          : { start: resolvedDataStart, end: resolvedEndDate },
     },
   };
   setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
+  seedWorkerCachesFromRows({
+    marketKey,
+    stockNo,
+    adjusted,
+    splitAdjustment,
+    rows: sanitizedRows,
+    stockName,
+  });
 }
 
 function getTodayISODate() {
@@ -2855,13 +3026,47 @@ async function fetchStockData(
     months: [],
     usedCache: Boolean(cachedEntry),
   };
-  if (cachedEntry) {
+  let cacheHitEntry = cachedEntry;
+  if (cacheHitEntry) {
+    seedWorkerCachesFromRows({
+      marketKey,
+      stockNo,
+      adjusted,
+      splitAdjustment: split,
+      rows: cacheHitEntry.data,
+      stockName: cacheHitEntry.stockName,
+    });
+    const numericCoverage = extractNumericCoverageFromEntry(cacheHitEntry);
+    const missingRanges = computeMissingRanges(
+      numericCoverage,
+      startDate,
+      endDate,
+    );
+    const toleranceMs = COVERAGE_GAP_TOLERANCE_DAYS * DAY_MS;
+    const significantMissing = missingRanges.some(
+      (range) => range.end - range.start > toleranceMs,
+    );
+    if (significantMissing) {
+      const gapText = missingRanges
+        .map((range) => {
+          const { startISO, endISO } = rangeBoundsToISO(range);
+          return `${startISO || "?"}~${endISO || "?"}`;
+        })
+        .join(", ");
+      console.warn(
+        `[Worker] ${stockNo} ${startDate}~${endDate} 的快取資料缺少 ${missingRanges.length} 段 (${gapText})，改以補抓填補缺口。`,
+      );
+      cacheHitEntry = null;
+      fetchDiagnostics.usedCache = false;
+    }
+  }
+  if (cacheHitEntry) {
     const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
-      cachedEntry?.meta?.diagnostics || null,
+      cacheHitEntry?.meta?.diagnostics || null,
       {
         source: "worker-cache",
         requestedRange: { start: startDate, end: endDate },
-        coverage: cachedEntry?.meta?.coverage || cachedEntry.coverage,
+        coverage: cacheHitEntry?.meta?.coverage || cacheHitEntry.coverage,
       },
     );
     if (workerLastMeta && typeof workerLastMeta === "object") {
@@ -2869,58 +3074,58 @@ async function fetchStockData(
     }
     postProgress(15, "命中背景快取...");
     return {
-      data: cachedEntry.data,
-      dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
-      stockName: cachedEntry.stockName || stockNo,
+      data: cacheHitEntry.data,
+      dataSource: `${cacheHitEntry.dataSource || marketKey} (Worker快取)`,
+      stockName: cacheHitEntry.stockName || stockNo,
       adjustmentFallbackApplied: Boolean(
-        cachedEntry?.meta?.adjustmentFallbackApplied,
+        cacheHitEntry?.meta?.adjustmentFallbackApplied,
       ),
-      adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
+      adjustmentFallbackInfo: cacheHitEntry?.meta?.adjustmentFallbackInfo || null,
       summary:
-        cachedEntry?.meta?.summary &&
-        typeof cachedEntry.meta.summary === "object"
-          ? cachedEntry.meta.summary
+        cacheHitEntry?.meta?.summary &&
+        typeof cacheHitEntry.meta.summary === "object"
+          ? cacheHitEntry.meta.summary
           : null,
-      adjustments: Array.isArray(cachedEntry?.meta?.adjustments)
-        ? cachedEntry.meta.adjustments
+      adjustments: Array.isArray(cacheHitEntry?.meta?.adjustments)
+        ? cacheHitEntry.meta.adjustments
         : [],
-      priceSource: cachedEntry?.meta?.priceSource || null,
-      debugSteps: Array.isArray(cachedEntry?.meta?.debugSteps)
-        ? cachedEntry.meta.debugSteps
+      priceSource: cacheHitEntry?.meta?.priceSource || null,
+      debugSteps: Array.isArray(cacheHitEntry?.meta?.debugSteps)
+        ? cacheHitEntry.meta.debugSteps
         : [],
       dividendDiagnostics:
-        cachedEntry?.meta?.dividendDiagnostics &&
-        typeof cachedEntry.meta.dividendDiagnostics === "object"
-          ? cachedEntry.meta.dividendDiagnostics
+        cacheHitEntry?.meta?.dividendDiagnostics &&
+        typeof cacheHitEntry.meta.dividendDiagnostics === "object"
+          ? cacheHitEntry.meta.dividendDiagnostics
           : null,
-      dividendEvents: Array.isArray(cachedEntry?.meta?.dividendEvents)
-        ? cachedEntry.meta.dividendEvents
+      dividendEvents: Array.isArray(cacheHitEntry?.meta?.dividendEvents)
+        ? cacheHitEntry.meta.dividendEvents
         : [],
       splitDiagnostics:
-        cachedEntry?.meta?.splitDiagnostics &&
-        typeof cachedEntry.meta.splitDiagnostics === "object"
-          ? cachedEntry.meta.splitDiagnostics
+        cacheHitEntry?.meta?.splitDiagnostics &&
+        typeof cacheHitEntry.meta.splitDiagnostics === "object"
+          ? cacheHitEntry.meta.splitDiagnostics
           : null,
       finmindStatus:
-        cachedEntry?.meta?.finmindStatus &&
-        typeof cachedEntry.meta.finmindStatus === "object"
-          ? cachedEntry.meta.finmindStatus
+        cacheHitEntry?.meta?.finmindStatus &&
+        typeof cacheHitEntry.meta.finmindStatus === "object"
+          ? cacheHitEntry.meta.finmindStatus
           : null,
-      adjustmentDebugLog: Array.isArray(cachedEntry?.meta?.adjustmentDebugLog)
-        ? cachedEntry.meta.adjustmentDebugLog
+      adjustmentDebugLog: Array.isArray(cacheHitEntry?.meta?.adjustmentDebugLog)
+        ? cacheHitEntry.meta.adjustmentDebugLog
         : [],
-      adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
-        ? cachedEntry.meta.adjustmentChecks
+      adjustmentChecks: Array.isArray(cacheHitEntry?.meta?.adjustmentChecks)
+        ? cacheHitEntry.meta.adjustmentChecks
         : [],
       fetchRange:
-        cachedEntry?.meta?.fetchRange ||
+        cacheHitEntry?.meta?.fetchRange ||
         { start: startDate, end: endDate },
       dataStartDate:
-        cachedEntry?.meta?.dataStartDate ||
-        cachedEntry?.meta?.startDate ||
+        cacheHitEntry?.meta?.dataStartDate ||
+        cacheHitEntry?.meta?.startDate ||
         startDate,
-      effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
-      lookbackDays: cachedEntry?.meta?.lookbackDays || null,
+      effectiveStartDate: cacheHitEntry?.meta?.effectiveStartDate || null,
+      lookbackDays: cacheHitEntry?.meta?.lookbackDays || null,
       diagnostics: cacheDiagnostics,
     };
   }

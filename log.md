@@ -443,3 +443,12 @@
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
 
+# 2025-09-12 — Patch LB-TODAY-CACHE-20250912A
+- **Issue recap**: 今日建議改版後僅在 Worker 端直接抓取最新行情，未善用使用者剛完成回測的快取資料；當遠端行情延伸到新的月份時，背景快取
+  仍以舊結束日為 cache key，導致 Worker 認定命中快取卻拿到不足區間，最終回傳「資料不足」訊息。
+- **Fix**: 將主執行緒帶入的回測資料去重排序後重新推入 Worker 快取，快取鍵以資料實際結束日建立並同步灌入月度／年度快取，若快取覆蓋不
+  足則即時回退補抓缺口，確保今日建議能沿用既有行情並僅補上差異日期。
+- **Diagnostics**: 快取命中時會紀錄缺口段落並於 console 警告，方便追蹤哪些日期需遠端補抓；月度快取也標記 `main-thread-cache` 來源，便於
+  後續檢視資料覆蓋情形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js','js/worker_backup.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('primary scripts compile');NODE`
+
