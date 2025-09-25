@@ -1,4 +1,10 @@
 
+## 2025-10-23 — Patch LB-TREND-SENSITIVITY-20251023A
+- **Issue recap**: 先前僅將滑桿預設值設定為 5，未先掃描 1000 組靈敏度組合確認平均狀態信心峰值，導致預設門檻可能偏離最佳判定且高檔覆蓋行為不穩定。
+- **Fix**: 導入 0→10 滑桿 1000 組步進掃描，逐一計算四態 HMM 平均狀態信心並取最高參數，透過分段映射讓該參數對應滑桿值 5；同時更新門檻映射函式與卡片說明，揭露校準滑桿值、等效敏感度與信心峰值。
+- **Diagnostics**: 回測後檢視趨勢卡版本章 `LB-TREND-SENSITIVITY-20251023A`，滑桿說明需顯示「滑桿 5→校準 X.X ｜ 峰值信心」與校準峰值摘要；拖曳滑桿確認覆蓋率隨數值遞減且滑桿 5 的門檻對應平均信心最高參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-20 — Patch LB-TREND-SENSITIVITY-20251020A
 - **Issue recap**: 靈敏度滑桿擴充至 1→1000 後，覆蓋率補償邏輯雖可維持 80% 以上，但使用者難以掌握對應的門檻意義，且最大值仍可能殘留盤整倒掛。
 - **Fix**: 重新定義滑桿為 0→10、步進 0.1，對應 1000 組離線覆蓋率測試的等效敏感度並將最佳信心值 5 設為預設；後端以 0→10 轉換為 1→1000 的有效敏感度再套用 Sigmoid 門檻，確保數值越高盤整覆蓋遞減且高敏度時仍保有 80% 以上趨勢判斷。

@@ -282,13 +282,17 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251020A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251023A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 10;
 const TREND_SENSITIVITY_DEFAULT = 5;
+const TREND_SENSITIVITY_ANCHOR = 5;
 const TREND_SENSITIVITY_EFFECTIVE_MIN = 1;
 const TREND_SENSITIVITY_EFFECTIVE_MAX = 1000;
+const TREND_SENSITIVITY_CALIBRATION_STEPS = 1000;
+const TREND_SENSITIVITY_CALIBRATION_MIN_NORMALIZED = 0.05;
+const TREND_SENSITIVITY_CALIBRATION_MAX_NORMALIZED = 0.95;
 const TREND_SIGMOID_STEEPNESS = 7.2;
 const TREND_TARGET_TREND_MIN = 0.38;
 const TREND_TARGET_TREND_MAX = 0.86;
@@ -323,11 +327,124 @@ function clampValue(value, min, max) {
     return value;
 }
 
+function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value <= 0) return 0;
+    if (value >= 1) return 1;
+    return value;
+}
+
 function logistic(value) {
     if (!Number.isFinite(value)) return 0.5;
     if (value > 60) return 1;
     if (value < -60) return 0;
     return 1 / (1 + Math.exp(-value));
+}
+
+function createDefaultTrendSensitivityCalibration() {
+    const range = Math.max(1e-9, TREND_SENSITIVITY_MAX - TREND_SENSITIVITY_MIN);
+    const anchorNormalized = clamp01((TREND_SENSITIVITY_ANCHOR - TREND_SENSITIVITY_MIN) / range);
+    const defaultNormalized = clamp01((TREND_SENSITIVITY_DEFAULT - TREND_SENSITIVITY_MIN) / range);
+    const effectiveRange = TREND_SENSITIVITY_EFFECTIVE_MAX - TREND_SENSITIVITY_EFFECTIVE_MIN;
+    const bestEffective = TREND_SENSITIVITY_EFFECTIVE_MIN + defaultNormalized * effectiveRange;
+    return {
+        anchorValue: TREND_SENSITIVITY_ANCHOR,
+        anchorNormalized,
+        targetNormalized: anchorNormalized,
+        bestSlider: TREND_SENSITIVITY_ANCHOR,
+        bestScore: null,
+        bestEffective,
+        steps: TREND_SENSITIVITY_CALIBRATION_STEPS,
+    };
+}
+
+function applyTrendCalibrationNormalized(linearNormalized, calibration) {
+    const normalized = clamp01(linearNormalized);
+    const base = calibration && typeof calibration === 'object' ? calibration : null;
+    if (!base) return normalized;
+    const anchor = clamp01(base.anchorNormalized ?? 0.5);
+    const target = clamp01(base.targetNormalized ?? anchor);
+    if (anchor <= 0 || anchor >= 1 || Math.abs(target - anchor) < 1e-6) {
+        return normalized;
+    }
+    if (normalized <= anchor) {
+        if (anchor <= 0) return 0;
+        const ratio = normalized / anchor;
+        return clamp01(ratio * target);
+    }
+    const upperSpan = 1 - anchor;
+    if (upperSpan <= 0) return 1;
+    const targetSpan = Math.max(1e-6, 1 - target);
+    const ratio = (1 - normalized) / upperSpan;
+    return clamp01(1 - ratio * targetSpan);
+}
+
+function mapSliderToEffectiveSensitivity(sensitivity, calibration) {
+    const min = TREND_SENSITIVITY_MIN;
+    const max = TREND_SENSITIVITY_MAX;
+    const safe = clampValue(Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT, min, max);
+    const range = Math.max(1e-9, max - min);
+    const linearNormalized = clamp01((safe - min) / range);
+    const calibratedNormalized = applyTrendCalibrationNormalized(linearNormalized, calibration);
+    const effective = TREND_SENSITIVITY_EFFECTIVE_MIN
+        + calibratedNormalized * (TREND_SENSITIVITY_EFFECTIVE_MAX - TREND_SENSITIVITY_EFFECTIVE_MIN);
+    return {
+        safe,
+        linearNormalized,
+        calibratedNormalized,
+        effective,
+    };
+}
+
+function calibrateTrendSensitivity(base) {
+    const calibration = createDefaultTrendSensitivityCalibration();
+    if (!base || !Array.isArray(base.dates) || base.dates.length === 0) {
+        return calibration;
+    }
+    const steps = Math.max(2, Math.min(5000, Math.floor(TREND_SENSITIVITY_CALIBRATION_STEPS)));
+    const stepSize = steps > 1
+        ? (TREND_SENSITIVITY_MAX - TREND_SENSITIVITY_MIN) / (steps - 1)
+        : 0;
+    const neutralCalibration = {
+        ...calibration,
+        targetNormalized: calibration.anchorNormalized,
+    };
+    let bestSlider = calibration.bestSlider;
+    let bestScore = Number.isFinite(calibration.bestScore)
+        ? calibration.bestScore
+        : Number.NEGATIVE_INFINITY;
+    let bestEffective = calibration.bestEffective;
+    for (let i = 0; i < steps; i += 1) {
+        const sliderValue = TREND_SENSITIVITY_MIN + (i * stepSize);
+        const thresholds = computeTrendThresholds(sliderValue, neutralCalibration);
+        const classification = classifyRegimes(base, thresholds);
+        const score = Number.isFinite(classification?.summary?.averageConfidence)
+            ? classification.summary.averageConfidence
+            : Number.NEGATIVE_INFINITY;
+        const preferCurrent = Math.abs(sliderValue - TREND_SENSITIVITY_ANCHOR)
+            < Math.abs(bestSlider - TREND_SENSITIVITY_ANCHOR);
+        if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && preferCurrent)) {
+            bestScore = score;
+            bestSlider = sliderValue;
+            bestEffective = thresholds.effectiveSensitivity;
+        }
+    }
+    const range = Math.max(1e-9, TREND_SENSITIVITY_MAX - TREND_SENSITIVITY_MIN);
+    let targetNormalized = clamp01((bestSlider - TREND_SENSITIVITY_MIN) / range);
+    targetNormalized = clampValue(
+        targetNormalized,
+        TREND_SENSITIVITY_CALIBRATION_MIN_NORMALIZED,
+        TREND_SENSITIVITY_CALIBRATION_MAX_NORMALIZED,
+    );
+    return {
+        anchorValue: TREND_SENSITIVITY_ANCHOR,
+        anchorNormalized: calibration.anchorNormalized,
+        targetNormalized,
+        bestSlider,
+        bestScore: Number.isFinite(bestScore) ? bestScore : null,
+        bestEffective,
+        steps,
+    };
 }
 
 function computeLogScaledProgress(value, min, max) {
@@ -346,6 +463,7 @@ function computeLogScaledProgress(value, min, max) {
 const trendAnalysisState = {
     version: TREND_ANALYSIS_VERSION,
     sensitivity: TREND_SENSITIVITY_DEFAULT,
+    calibration: createDefaultTrendSensitivityCalibration(),
     thresholds: null,
     segments: [],
     summary: null,
@@ -401,18 +519,10 @@ if (typeof Chart !== 'undefined' && Chart.register) {
     Chart.register(trendBackgroundPlugin);
 }
 
-function computeTrendThresholds(sensitivity) {
-    const min = TREND_SENSITIVITY_MIN;
-    const max = TREND_SENSITIVITY_MAX;
-    const safe = clampValue(
-        Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT,
-        min,
-        max,
-    );
-    const range = Math.max(1e-9, max - min);
-    const normalized = Math.max(0, Math.min(1, (safe - min) / range));
-    const effective = TREND_SENSITIVITY_EFFECTIVE_MIN
-        + normalized * (TREND_SENSITIVITY_EFFECTIVE_MAX - TREND_SENSITIVITY_EFFECTIVE_MIN);
+function computeTrendThresholds(sensitivity, calibrationOverride) {
+    const calibration = calibrationOverride || trendAnalysisState.calibration || createDefaultTrendSensitivityCalibration();
+    const mapping = mapSliderToEffectiveSensitivity(sensitivity, calibration);
+    const { safe, linearNormalized, calibratedNormalized, effective } = mapping;
     const logProgress = computeLogScaledProgress(
         effective,
         TREND_SENSITIVITY_EFFECTIVE_MIN,
@@ -438,8 +548,18 @@ function computeTrendThresholds(sensitivity) {
         sensitivity: safe,
         effectiveSensitivity: effective,
         normalized: logProgress,
-        linearProgress: normalized,
+        linearProgress: linearNormalized,
         logisticProgress: sigmoidProgress,
+        calibrationNormalized: calibratedNormalized,
+        calibrationTargetNormalized: calibration?.targetNormalized ?? null,
+        calibrationAnchorNormalized: calibration?.anchorNormalized ?? null,
+        calibrationBestSlider: calibration?.bestSlider ?? null,
+        calibrationBestScore: Number.isFinite(calibration?.bestScore)
+            ? calibration.bestScore
+            : null,
+        calibrationBestEffective: Number.isFinite(calibration?.bestEffective)
+            ? calibration.bestEffective
+            : null,
         adxTrend,
         adxFlat,
         bollTrend,
@@ -1698,6 +1818,7 @@ function updateChartTrendOverlay() {
 function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
     const thresholds = trendAnalysisState.thresholds;
+    const calibration = trendAnalysisState.calibration || createDefaultTrendSensitivityCalibration();
     if (sliderValueEl && thresholds) {
         const sensitivityLabel = thresholds.sensitivity % 1 === 0
             ? thresholds.sensitivity.toFixed(0)
@@ -1705,7 +1826,13 @@ function renderTrendSummary() {
         const targetText = Number.isFinite(thresholds.targetTrendCoverage)
             ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
             : '—';
-        sliderValueEl.textContent = `HMM 信心 ${sensitivityLabel} ｜ 目標趨勢 ${targetText}`;
+        const bestSliderText = Number.isFinite(calibration?.bestSlider)
+            ? calibration.bestSlider.toFixed(1)
+            : '—';
+        const bestScoreText = Number.isFinite(calibration?.bestScore)
+            ? calibration.bestScore.toFixed(3)
+            : '—';
+        sliderValueEl.textContent = `HMM 信心 ${sensitivityLabel} ｜ 滑桿 5→校準 ${bestSliderText} ｜ 峰值信心 ${bestScoreText} ｜ 目標趨勢 ${targetText}`;
     } else if (sliderValueEl) {
         sliderValueEl.textContent = '—';
     }
@@ -1727,10 +1854,21 @@ function renderTrendSummary() {
         const effective = Number.isFinite(thresholds.effectiveSensitivity)
             ? thresholds.effectiveSensitivity.toFixed(0)
             : '—';
+        const bestSliderText = Number.isFinite(calibration?.bestSlider)
+            ? calibration.bestSlider.toFixed(1)
+            : '—';
+        const bestEffectiveText = Number.isFinite(calibration?.bestEffective)
+            ? calibration.bestEffective.toFixed(0)
+            : '—';
+        const bestScoreText = Number.isFinite(calibration?.bestScore)
+            ? calibration.bestScore.toFixed(3)
+            : '—';
         thresholdTextEl.innerHTML = `
-            滑桿 0→10 以 0.1 為步進對應 1→1000 的模擬測試組數，經 1000 組離線覆蓋率迭代後建議預設為 5。當前數值經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，
-            並同步套用 ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則歸為盤整。
-            同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢（等效敏感度 ${effective}）。`;
+            滑桿 0→10 以 0.1 為步進對應 1→1000 的模擬測試組數，先針對 1000 個步進值計算四態 HMM 的平均狀態信心，
+            將峰值參數（滑桿 ${bestSliderText}，等效敏感度 ${bestEffectiveText}，平均信心 ${bestScoreText}）映射到滑桿值 5 作為預設。
+            當前數值經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，並同步套用 ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；
+            若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則歸為盤整。同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，
+            覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢（當前等效敏感度 ${effective}）。`;
     }
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
@@ -1789,19 +1927,32 @@ function renderTrendSummary() {
             ? `${coverage.promotions} 日`
             : '—';
         const statusText = coverage.satisfied ? '達標' : '需再觀察';
+        const calibrationSliderText = Number.isFinite(calibration?.bestSlider)
+            ? calibration.bestSlider.toFixed(1)
+            : '—';
+        const calibrationEffectiveText = Number.isFinite(calibration?.bestEffective)
+            ? calibration.bestEffective.toFixed(0)
+            : '—';
+        const calibrationScoreText = Number.isFinite(calibration?.bestScore)
+            ? calibration.bestScore.toFixed(3)
+            : '—';
         metaEl.innerHTML = `<div class="flex flex-wrap gap-3">
             <span>HMM 迭代：${iterationsText}</span>
             <span>對數概似：${logLikelihoodText}</span>
             <span>平均狀態信心：${avgConfidence}</span>
             <span>趨勢覆蓋：${actualTrendText}（目標 ${targetTrendText}）</span>
             <span>盤整覆蓋：${rangeText}</span>
+            <span>校準峰值：滑桿 ${calibrationSliderText}／等效 ${calibrationEffectiveText}／信心 ${calibrationScoreText}</span>
             <span>Sigmoid 補償：${promotionsText}／${statusText}</span>
         </div>`;
     }
 }
 
 function recomputeTrendAnalysis(options = {}) {
-    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.thresholds = computeTrendThresholds(
+        trendAnalysisState.sensitivity,
+        trendAnalysisState.calibration,
+    );
     trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
     if (trendAnalysisState.result) {
         const analysis = computeTrendAnalysisFromResult(trendAnalysisState.result, trendAnalysisState.thresholds);
@@ -1829,7 +1980,10 @@ function initialiseTrendControls() {
             }
         });
     }
-    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
+    trendAnalysisState.thresholds = computeTrendThresholds(
+        trendAnalysisState.sensitivity,
+        trendAnalysisState.calibration,
+    );
     trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
     renderTrendSummary();
 }
@@ -4528,6 +4682,8 @@ function handleBacktestResult(result, stockName, dataSource) {
         trendAnalysisState.classifiedLabels = [];
         trendAnalysisState.segments = [];
         trendAnalysisState.summary = null;
+        trendAnalysisState.calibration = createDefaultTrendSensitivityCalibration();
+        trendAnalysisState.thresholds = null;
         renderTrendSummary();
         updateChartTrendOverlay();
         if (suggestionArea) suggestionArea.classList.add('hidden');
@@ -4545,6 +4701,8 @@ function handleBacktestResult(result, stockName, dataSource) {
             strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
         };
         trendAnalysisState.base = prepareRegimeBaseData(result);
+        trendAnalysisState.calibration = calibrateTrendSensitivity(trendAnalysisState.base);
+        trendAnalysisState.sensitivity = TREND_SENSITIVITY_DEFAULT;
         recomputeTrendAnalysis({ skipChartUpdate: true });
 
         updateDataSourceDisplay(dataSource, stockName);
