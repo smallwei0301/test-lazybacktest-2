@@ -1,4 +1,54 @@
+
+# 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
+- **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
+- **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('strategy status patch scripts compile');NODE`
+
+## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
+- **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
+- **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
+- **Diagnostics**: 檢查趨勢卡公式說明是否顯示線性回歸條件、R² 與雙訊噪閾值，拖曳滑桿確認斜率門檻與訊噪數值會隨靈敏度同步刷新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-08-23 — Patch LB-TREND-SENSITIVITY-20250823A
+- **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。
+- **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。
+- **Diagnostics**: 確認趨勢卡說明顯示「滑桿 1→100 ≈ 舊版 70→100」與新的倍率差距，拖曳滑桿時可看到目前等效級距與倍率即時刷新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-08-17 — Patch LB-TREND-SENSITIVITY-20250817A
+- **Issue recap**: 靈敏度滑桿雖已擴充為 1-100 級距，但倍率縮放僅有 1.00→0.20，將滑桿推至 100 時仍難以明顯放大起漲／跌落分區。
+- **Fix**: 維持 1-100 級距但將倍率範圍拓展至 1.00→0.02（上下限差 50 倍），同步更新趨勢卡說明與倍率比值提示，確保高靈敏度時盤整區段明顯收斂。
+- **Diagnostics**: 手動檢視趨勢卡門檻說明顯示 50 倍差距、滑桿拖曳後倍率讀值同步刷新，並確認 Chart.js 底色插件會依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-07-26 — Patch LB-TREND-SENSITIVITY-20250726A
+- **Issue recap**: 使用者反映趨勢靈敏度滑桿僅有 0-10 級距，調整後仍難以顯示底色分段，盤整區塊覆蓋過大。
+- **Fix**: 將滑桿範圍放大至 1-100，改以線性內插 1.00→0.20 的門檻倍率縮放，更新趨勢版本代碼與公式說明，確保高靈敏度時起漲／跌落段能明顯放大。
+- **Diagnostics**: 手動調整滑桿確認數值顯示同步更新、趨勢卡描述出現新倍率區間，並檢查 Chart.js 插件背景確實依新閾值重新著色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`；待 Netlify 預覽站實際回測驗證 console 無錯誤。
+
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+- **Issue recap**: 淨值曲線缺乏趨勢分區與滑桿調節，使用者無法快速判讀起漲／盤整／跌落區段的績效差異，回測摘要也沒有提供分區報酬率。
+- **Fix**: 新增版本代碼 `LB-TREND-SEGMENT-20250714A`，在圖表套用 20 日淨值斜率／波動度判別並以底色標示各趨勢，摘要頁插入「趨勢區間評估」卡片與靈敏度滑桿，可即時重新計算起漲、盤整、跌落區段的複利報酬與覆蓋比例。
+- **Diagnostics**: 透過 DOM 檢視確認卡片顯示門檻公式、滑桿更新後重新渲染統計，Chart.js 插件背景亦會隨趨勢分段同步刷新；滑桿調至最大時盤整區縮小、起漲/跌落段落增加。
+- **Testing**: 受限於容器無法啟動實際回測代理，已以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'));console.log('backtest.js compiles');NODE` 驗證腳本語法，後續將於 Netlify 預覽站執行回測確認 console 無錯誤。
+
+## 2025-07-26 — Patch LB-TODAY-ACTION-20250726A
+- **Issue recap**: 今日建議卡片尚未對準最新交易日，Worker 仍沿用舊版 `runSuggestionSimulation` 並在回測結束日強制平倉，導致實際持倉狀態與操作訊號容易脫鉤。
+- **Fix**: 移除舊版模擬函式，改以 `runStrategy` 的 `finalEvaluation` 對今日資料延伸評估，產出多空持倉、最新價格與具體行動；同時補齊主執行緒快取 coverage 後灌入 Worker，確保建議計算命中現有資料並沿用最新 meta。
+- **Diagnostics**: 今日建議回傳載明延伸至今日的資料日期、倉位摘要與 lag 天數，若策略起始日尚未到達亦會顯示提示訊息；Worker 快取保留 coverage fingerprint，後續重播時可比對資料區間。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
+
+## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
+## 2025-07-15 — Patch LB-SENSITIVITY-GRID-20250715A / LB-SENSITIVITY-UX-20250715B
+- **Issue recap**: ±10% 單點敏感度無法覆蓋均線等整數參數的小幅調整，前端表格也僅能呈現兩個情境，無法顯示多點擾動與方向性資訊。
+- **Fix**: Worker 改為依策略參數型別生成 ±5%、±10%、±20% 與整數步階擾動，回傳多點平均漂移、最大偏移、方向偏移與樣本數；前端敏感度卡片改為動態網格與條列式指標，新增方向偏移卡、樣本統計與迷你圖例，手機版改為卡片堆疊呈現。
+- **Diagnostics**: 透過靜態輸出確認 `parameterSensitivity.summary` 帶有 `scenarioCount/maxDriftPercent/positiveDriftPercent/negativeDriftPercent`，前端卡片與 tooltip 改為敘述擾動網格與多點漂移；桌機與手機版皆不再出現固定 ±10% 欄位。
+- **Testing**: 受限於容器無法啟動實際回測代理，僅以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 確認語法正確，後續部署至 Netlify 預覽站再以真實策略驗證 console 與 UI 行為。
+
+
 - **Issue recap**: 摘要卡在手機僅能單欄呈現，績效與風險指標無法成對對照；敏感度分析的進出場表格在窄螢幕需左右捲動才能看完欄位。
 - **Fix**: 重新定義 `summary-metrics-grid` 讓績效、風險、交易統計與策略設定卡在手機預設雙欄排列並調整間距；敏感度卡片新增桌機表格與手機卡片雙視圖，移除橫向捲軸並壓縮字級與 padding 以完整顯示指標。
 - **Diagnostics**: 手機寬度下逐一比對績效、風險、交易統計與策略卡片皆兩欄呈現且不再被截斷；敏感度卡改為堆疊卡片後，+10%/-10%、漂移與穩定度指標無需橫向捲動即可閱讀，tooltip 仍保持對齊。
@@ -119,6 +169,18 @@
 - **Fix**: Worker 建立 `market｜priceMode｜年度` Superset 快取並在呼叫 Blob/Proxy 後分拆寫入，回測前先嘗試以 Superset 切片回覆；主執行緒新增年度 Superset 尋找與切片機制，若快取已涵蓋新區間直接回播不再啟動 Worker；月度快取加入 coverage 指紋記錄，命中即可跳過缺口計算並避免重複補抓。
 - **Diagnostics**: `fetchDiagnostics.rangeFetch` 新增 `worker-year-superset` 狀態，Superset 命中會標示 `Netlify 年度快取 (Worker Superset)`；主執行緒快取索引與 Session/YEAR 快取皆寫入 coverage 指紋，方便檢核 Superset 命中狀況。
 - **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢視與資料流推演；後續需於本機瀏覽器以 2330、2412、0050 等案例實測 18 個月跨年回測，確認 Blob 計量僅記錄年度切片且 console 無錯誤。
+
+# 2025-08-02 — Patch LB-BLOB-CURRENT-20250802B
+- **Issue recap**: Blob 範圍快取雖能偵測當月落後，但直接改走逐月 Proxy 補抓導致整個暖身排程被打斷，當日僅缺少 1~2 筆資料時仍需重跑全月。
+- **Fix**: `tryFetchRangeFromBlob` 在標記 `current-month-gap` 後改以 `fetchCurrentMonthGapPatch` 僅補抓缺漏日期，透過 proxy 月分 API 逐段合併資料並重新計算覆蓋狀態，同步記錄補抓診斷資訊。
+- **Diagnostics**: Blob 診斷新增 `patch` 區塊揭露嘗試月份、來源與筆數，回填後會更新 `lastDate`、`currentMonthGapDays` 與覆蓋落差；若補抓仍失敗則維持 `current-month-stale` 供前端顯示警示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'),{filename:'worker.js'});console.log('worker.js compiles');NODE`
+
+# 2025-07-30 — Patch LB-BLOB-CURRENT-20250730A
+- **Issue recap**: Netlify Blob 範圍快取若在月中寫入，隔日回測仍沿用舊快取，導致使用者以當日結束日期回測時僅看到前一交易日的最後一筆資料。
+- **Fix**: `tryFetchRangeFromBlob` 新增「當月資料新鮮度」檢查，當回測結束日在當月且 Blob 回應的最後日期落後於應到日期時，標記為 `current-month-gap` 並退回逐月 Proxy 補抓，確保快取不會卡在寫入日。
+- **Diagnostics**: Blob 診斷新增 `firstDate`、`lastDate`、`targetLatestDate` 與 `currentMonthGapDays` 欄位，可於資料暖身診斷卡確認是否觸發當月回補並追蹤差距天數。
+- **Testing**: 受限於容器無法啟動瀏覽器，僅完成程式碼檢閱與資料流程推演；後續需在本機以 2330、2412 等標的實測今日結束日回測，確認 Blob 命中時會在當月落後即回退 Proxy 且 console 無錯誤。
 
 # 2025-07-22 — Patch LB-DEV-BLOB-20250722A
 - **Issue recap**: 開發工具按鈕與 Blob 監控散落在基本設定卡片中，快取來源標籤仍顯示「(快取)/(部分快取)」，Blob 用量僅保留 6 筆記錄且未追蹤台股清單服務是否讀寫 Blob。
@@ -355,3 +417,15 @@
 - **Testing**: `node tests/dividend-normalisation.test.mjs`（新增調整係數驗證）。
 
 > 後續若再出現無法調整的案例，先在前台檢視「還原套用」步驟的略過原因與備援標記，再對照 `log.md` 上次修復時的調整內容。
+# 2025-07-24 — Patch LB-SENSITIVITY-RENDER-20250724A
+- **Issue recap**: 導入多點敏感度後僅在 Worker 與資料層回傳資訊，但回測摘要最終排版仍未插入敏感度卡片，造成使用者無法在結果頁看到新的穩定度與漂移指標。
+- **Fix**: 於 `displayBacktestResult` 的摘要版面中加入敏感度卡片段落，無論資料完整或缺漏都會顯示對應卡片，確保穩定度分數、平均漂移與各參數網格能與績效、風險指標並列呈現。
+- **Diagnostics**: 靜態檢視渲染函式確認敏感度段落掛載在績效、風險指標之後，回傳空集合時仍會顯示「暫無結果」卡片，避免再度被版面忽略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
+# 2025-07-29 — Patch LB-SENSITIVITY-METRIC-20250729A / LB-SENSITIVITY-UX-20250729B
+- **Issue recap**: 使用者反映敏感度卡僅顯示 ±10% 場景且未說明方向指標門檻，穩定度分數未考量 Sharpe Δ，摘要卡文案也與下方動態網格脫節。
+- **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
+- **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
+- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+

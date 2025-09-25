@@ -68,20 +68,32 @@
     white-space: nowrap;
 }
 
-.sensitivity-mobile-scenarios,
-.sensitivity-mobile-metrics {
+.sensitivity-mobile-section {
+    background: color-mix(in srgb, var(--muted) 6%, var(--background));
+    border-radius: 0.6rem;
+    padding: 0.75rem;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.sensitivity-mobile-grid {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.sensitivity-mobile-metrics--grid {
     display: grid;
     gap: 0.5rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.sensitivity-mobile-scenarios > div,
-.sensitivity-mobile-metrics > div {
+.sensitivity-mobile-metrics--grid > div {
     background: color-mix(in srgb, var(--muted) 6%, var(--background));
     border-radius: 0.6rem;
     padding: 0.75rem 0.5rem;
     display: grid;
-    gap: 0.4rem;
+    gap: 0.35rem;
+    justify-items: center;
 }
 
 .sensitivity-mobile-label {
@@ -89,6 +101,114 @@
     font-weight: 600;
     color: var(--muted-foreground);
     text-align: center;
+}
+
+.sensitivity-scenario-grid {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.sensitivity-scenario-chip {
+    position: relative;
+    background: color-mix(in srgb, #ffffff 90%, var(--background));
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    border-radius: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    display: grid;
+    gap: 0.4rem;
+    min-height: 92px;
+}
+
+.sensitivity-scenario-chip.tooltip { display: grid; }
+
+.sensitivity-scenario-chip__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.sensitivity-scenario-chip__label {
+    font-weight: 600;
+    color: var(--foreground);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.sensitivity-scenario-chip__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0.05rem 0.35rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+}
+
+.sensitivity-scenario-chip__delta {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.sensitivity-scenario-chip__metrics {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--muted-foreground);
+    gap: 0.5rem;
+}
+
+.sensitivity-scenario-chip--empty {
+    background: color-mix(in srgb, var(--muted) 6%, var(--background));
+    border-style: dashed;
+    justify-items: center;
+}
+
+.sensitivity-scenario-chip__empty {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
+
+.sensitivity-scenario-cell {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.sensitivity-scenario-count {
+    font-size: 0.7rem;
+    text-align: right;
+    color: var(--muted-foreground);
+}
+
+.sensitivity-direction-cell {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.sensitivity-direction-cell__item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
+
+.sensitivity-direction-cell__icon {
+    font-size: 0.7rem;
+}
+
+.sensitivity-direction-cell__icon--up { color: #059669; }
+.sensitivity-direction-cell__icon--down { color: #dc2626; }
+
+.sensitivity-direction-cell__value {
+    font-weight: 600;
 }
 
 @media (min-width: 640px) {
@@ -103,6 +223,55 @@
 .main-layout-shell, .main-grid, .left-panel, .right-panel { overflow: visible; }
 .left-panel { overflow-x: visible; }
 .right-panel { overflow-x: visible; }
+
+.trend-summary-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+    .trend-summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+    }
+}
+
+.trend-summary-item {
+    position: relative;
+    border-radius: 0.75rem;
+    padding: 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    background: color-mix(in srgb, var(--muted) 12%, var(--background));
+    display: grid;
+    gap: 0.5rem;
+}
+
+.trend-summary-item strong {
+    font-size: 0.95rem;
+    color: var(--foreground);
+}
+
+.trend-summary-item .trend-summary-meta {
+    font-size: 0.72rem;
+    color: var(--muted-foreground);
+}
+
+.trend-summary-chip {
+    width: 12px;
+    height: 12px;
+    border-radius: 0.35rem;
+    border: 1px solid currentColor;
+    flex-shrink: 0;
+}
+
+.trend-summary-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.trend-slider {
+    accent-color: var(--primary);
+}
 
 .main-grid {
     display: grid;
@@ -231,11 +400,18 @@
 
 .summary-metrics-grid.summary-metrics-grid--sensitivity {
     gap: 1rem;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
 }
 
 @media (min-width: 768px) {
     .summary-metrics-grid.summary-metrics-grid--sensitivity {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .summary-metrics-grid.summary-metrics-grid--sensitivity {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }
 #backtest-result { position: relative; overflow: visible; }
@@ -293,6 +469,7 @@
 .trade-list::-webkit-scrollbar-thumb:hover { background: #aaa; }
 html, body { overflow-x: hidden; }
 
+
 /* Suggestion Area Style */
 #today-suggestion-area {
      margin-top: 1rem;
@@ -321,9 +498,122 @@ html, body { overflow-x: hidden; }
      line-height: 1.75rem;
      font-weight: 700; /* font-bold */
  }
- #today-suggestion-area.hidden {
-     display: none;
- }
+
+#today-suggestion-area.hidden {
+    display: none;
+}
+
+
+/* Strategy Status Card */
+.strategy-status-version {
+    color: var(--muted-foreground);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.strategy-status-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    background-color: color-mix(in srgb, var(--muted) 18%, transparent);
+    color: var(--muted-foreground);
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.strategy-status-badge--idle {
+    background-color: color-mix(in srgb, var(--muted) 22%, transparent);
+    color: var(--muted-foreground);
+}
+
+.strategy-status-badge--loading {
+    background-color: color-mix(in srgb, var(--primary) 24%, transparent);
+    color: var(--primary);
+}
+
+.strategy-status-badge--lead {
+    background-color: color-mix(in srgb, #22c55e 24%, var(--background));
+    color: #166534;
+}
+
+.strategy-status-badge--tie {
+    background-color: color-mix(in srgb, var(--secondary) 22%, var(--background));
+    color: var(--secondary-foreground, var(--foreground));
+}
+
+.strategy-status-badge--lag {
+    background-color: color-mix(in srgb, #f97316 24%, var(--background));
+    color: #9a3412;
+}
+
+.strategy-status-badge--sleep {
+    background-color: color-mix(in srgb, #60a5fa 24%, var(--background));
+    color: #1d4ed8;
+}
+
+.strategy-status-badge--error {
+    background-color: color-mix(in srgb, #f87171 26%, var(--background));
+    color: #b91c1c;
+}
+
+.strategy-status-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--foreground);
+}
+
+.strategy-status-detail {
+    color: var(--muted-foreground);
+    line-height: 1.7;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.strategy-status-highlight {
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.5;
+}
+
+.strategy-status-card--lag .strategy-status-highlight {
+    color: #b91c1c;
+}
+
+.strategy-status-card--lead .strategy-status-highlight {
+    color: #047857;
+}
+
+.strategy-status-card--loading .strategy-status-highlight,
+.strategy-status-card--idle .strategy-status-highlight {
+    color: var(--foreground);
+}
+
+.strategy-status-list {
+    list-style: disc;
+    padding-left: 1.25rem;
+    margin: 0;
+    display: grid;
+    gap: 0.35rem;
+}
+
+.strategy-status-list li {
+    color: var(--foreground);
+    font-size: 0.95rem;
+}
+
+@media (max-width: 640px) {
+    .strategy-status-highlight {
+        font-size: 1.05rem;
+    }
+
+    .strategy-status-list li {
+        font-size: 0.9rem;
+    }
+
+}
 
 /* 批量策略優化樣式 */
 .batch-optimization-tab {
