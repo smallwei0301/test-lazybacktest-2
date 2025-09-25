@@ -5,6 +5,7 @@
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-US-BACKTEST-20250621A
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
+// Patch Tag: LB-TODAY-GUIDE-20250905A
 
 // 全局變量
 let stockChart = null;

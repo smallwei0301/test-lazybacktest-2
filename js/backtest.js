@@ -5,6 +5,7 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-TODAY-GUIDE-20250905A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {

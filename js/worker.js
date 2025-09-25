@@ -15,6 +15,7 @@ importScripts('config.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-TODAY-GUIDE-20250905A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -1034,6 +1035,173 @@ function getTodayISODate() {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+const suggestionFormatters = {
+  price:
+    typeof Intl !== "undefined" && typeof Intl.NumberFormat === "function"
+      ? new Intl.NumberFormat("zh-TW", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : null,
+  integer:
+    typeof Intl !== "undefined" && typeof Intl.NumberFormat === "function"
+      ? new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 })
+      : null,
+};
+
+function formatSuggestionPrice(value) {
+  if (!Number.isFinite(value)) return null;
+  if (suggestionFormatters.price) {
+    return suggestionFormatters.price.format(value);
+  }
+  return value.toFixed(2);
+}
+
+function formatSuggestionInteger(value) {
+  if (!Number.isFinite(value)) return null;
+  if (suggestionFormatters.integer) {
+    return suggestionFormatters.integer.format(value);
+  }
+  return Math.round(value).toString();
+}
+
+function formatSuggestionShares(value) {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const formatted = formatSuggestionInteger(value);
+  return formatted ? `${formatted} 股` : null;
+}
+
+function formatSuggestionAmount(value) {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const formatted = formatSuggestionInteger(value);
+  return formatted ? `${formatted} 元` : null;
+}
+
+function describePositionSnapshot(label, info) {
+  if (!info || typeof info !== "object") return null;
+  const state = info.state || "空手";
+  const sharesText = formatSuggestionShares(info.shares);
+  const avgText = formatSuggestionPrice(info.averagePrice);
+  const marketValueText = formatSuggestionAmount(info.marketValue);
+  const segments = [];
+  if (state && state !== "空手") {
+    segments.push(`${label}狀態：${state}`);
+  }
+  if (sharesText) segments.push(`部位約 ${sharesText}`);
+  if (avgText) segments.push(`均價 ${avgText} 元`);
+  if (marketValueText) segments.push(`市值約 ${marketValueText}`);
+  if (segments.length === 0) {
+    if (state === "空手") {
+      return `${label}狀態：空手。`;
+    }
+    return null;
+  }
+  return `${segments.join("，")}。`;
+}
+
+function buildSuggestionPriceLine(latestDate, evaluation, todayISO) {
+  const referencePrice = Number.isFinite(evaluation?.close)
+    ? evaluation.close
+    : null;
+  const isToday =
+    latestDate && todayISO ? String(latestDate) === String(todayISO) : false;
+  const dateLabel = latestDate
+    ? `${isToday ? "今日" : "最新交易日"}（${latestDate}）`
+    : isToday
+      ? "今日"
+      : todayISO
+        ? `最新交易日（${todayISO}）`
+        : null;
+  if (referencePrice !== null && dateLabel) {
+    const formattedPrice = formatSuggestionPrice(referencePrice);
+    return formattedPrice
+      ? `${dateLabel}收盤 ${formattedPrice} 元`
+      : `${dateLabel}收盤價資訊`;
+  }
+  if (referencePrice !== null) {
+    const formattedPrice = formatSuggestionPrice(referencePrice);
+    return formattedPrice ? `參考收盤 ${formattedPrice} 元` : null;
+  }
+  if (dateLabel) {
+    return `${dateLabel}價格資料不足`;
+  }
+  return null;
+}
+
+function buildSuggestionNotes({
+  evaluation,
+  actionInfo,
+  latestDate,
+  longPosition,
+  shortPosition,
+  todayISO,
+}) {
+  const notes = [];
+  const isToday =
+    latestDate && todayISO ? String(latestDate) === String(todayISO) : false;
+  const dayLabel = latestDate
+    ? `${isToday ? "今日" : "最新交易日"}（${latestDate}）`
+    : isToday
+      ? "今日"
+      : "最新交易日";
+
+  switch (actionInfo?.action) {
+    case "enter_long":
+      notes.push(
+        `${dayLabel}觸發多單進場訊號，請依策略配置資金建立部位並確實設好停損。`,
+      );
+      break;
+    case "enter_short":
+      notes.push(
+        `${dayLabel}觸發空單建立訊號，請確認券源並依策略放空，同步控管保證金。`,
+      );
+      break;
+    case "exit_long":
+      notes.push(
+        `${dayLabel}觸發多單出場訊號，請平倉多單並檢視滑價與交易成本。`,
+      );
+      break;
+    case "cover_short":
+      notes.push(
+        `${dayLabel}觸發空單回補訊號，請回補空單並確認借券費用結算。`,
+      );
+      break;
+    case "hold_long":
+      notes.push(
+        `${dayLabel}未出現多單出場條件，策略持續持有現有部位，請依停損／停利門檻追蹤風險。`,
+      );
+      break;
+    case "hold_short":
+      notes.push(
+        `${dayLabel}未出現空單回補條件，策略持續維持空單，請留意波動與保證金需求。`,
+      );
+      break;
+    case "stay_flat":
+    default:
+      notes.push(
+        `${dayLabel}未觸發進出場條件，請維持空手並於下一個交易日再次檢視訊號。`,
+      );
+      break;
+  }
+
+  const referencePrice = Number.isFinite(evaluation?.close)
+    ? evaluation.close
+    : null;
+  if (referencePrice !== null) {
+    const formattedPrice = formatSuggestionPrice(referencePrice);
+    if (formattedPrice) {
+      notes.push(`參考收盤價 ${formattedPrice} 元。`);
+    }
+  }
+
+  const longNote = describePositionSnapshot("多單", longPosition);
+  if (longNote) notes.push(longNote);
+  const shortNote = describePositionSnapshot("空單", shortPosition);
+  if (shortNote) notes.push(shortNote);
+
+  return notes;
 }
 
 function deriveTodayAction(evaluation) {
@@ -9389,7 +9557,7 @@ self.onmessage = async function (e) {
       }
 
       if (effectiveStartDate > todayISO) {
-        const message = `策略設定的起始日為 ${effectiveStartDate}，今日 (${todayISO}) 尚無需操作。`;
+        const message = `策略設定的起始日為 ${effectiveStartDate}，今日（${todayISO}）請維持空手，並於起始日重新檢視策略建議。`;
         self.postMessage({
           type: "suggestionResult",
           data: {
@@ -9491,35 +9659,33 @@ self.onmessage = async function (e) {
       );
       const dataLagDays =
         latestDate && todayISO ? diffIsoDays(latestDate, todayISO) : null;
-      const notes = [];
-      switch (actionInfo.action) {
-        case "enter_long":
-          notes.push("今日訊號觸發多單進場，請依策略執行下單流程。");
-          break;
-        case "enter_short":
-          notes.push("今日訊號觸發空單建立，請注意券源與風險控管。");
-          break;
-        case "exit_long":
-          notes.push("策略建議平倉多單，留意成交價差與手續費。");
-          break;
-        case "cover_short":
-          notes.push("策略建議回補空單，請同步檢查借券成本。");
-          break;
-        case "hold_long":
-          notes.push("今日未觸發出場訊號，請持續追蹤停損與停利條件。");
-          break;
-        case "hold_short":
-          notes.push("今日未觸發回補訊號，請注意市場波動與保證金需求。");
-          break;
-        default:
-          notes.push("策略目前維持空手，暫無倉位需要調整。");
-          break;
-      }
+      const notes = buildSuggestionNotes({
+        evaluation,
+        actionInfo,
+        latestDate,
+        longPosition,
+        shortPosition,
+        todayISO,
+      });
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
         notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
       }
       if (params.endDate && latestDate && latestDate > params.endDate) {
         notes.push(`已延伸資料至 ${latestDate}，超過原設定結束日 ${params.endDate}。`);
+      }
+
+      const priceHeadline = buildSuggestionPriceLine(
+        latestDate,
+        evaluation,
+        todayISO,
+      );
+      const pricePayload = {};
+      if (priceHeadline) {
+        pricePayload.text = priceHeadline;
+      }
+      if (Number.isFinite(evaluation.close)) {
+        pricePayload.value = evaluation.close;
+        pricePayload.type = "close";
       }
 
       const suggestionPayload = {
@@ -9528,10 +9694,7 @@ self.onmessage = async function (e) {
         label: actionInfo.label,
         tone: actionInfo.tone,
         latestDate,
-        price: {
-          value: Number.isFinite(evaluation.close) ? evaluation.close : null,
-          type: "close",
-        },
+        price: pricePayload,
         longPosition,
         shortPosition,
         positionSummary,

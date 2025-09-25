@@ -5,6 +5,12 @@
 - **Diagnostics**: 檢查趨勢卡公式說明是否顯示線性回歸條件、R² 與雙訊噪閾值，拖曳滑桿確認斜率門檻與訊噪數值會隨靈敏度同步刷新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-09-05 — Patch LB-TODAY-GUIDE-20250905A
+- **Issue recap**: 今日建議卡仍沿用舊版簡訊提示，缺乏日期、價格與部位細節，使用者難以判斷今日應採取的實際操作。
+- **Fix**: Worker 依最新交易日重構行動摘要與說明文字，回傳含日期的參考價與多空部位敘述；前端卡片沿用新結構顯示明確指示並維持原有色彩語彙。
+- **Diagnostics**: 回測後檢查「今日建議」卡，確認橫幅顯示「今日／最新交易日＋收盤價」，備註列出行動指示、多空部位與資料落差訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-08-23 — Patch LB-TREND-SENSITIVITY-20250823A
 - **Issue recap**: 靈敏度滑桿雖有 1-100 級距，但前 69 段對應的倍率過於鈍化，拉到最大時仍只有 0.02 倍上下，盤整區塊依舊大幅蓋住圖表。
 - **Fix**: 將滑桿 1 段改為對應舊版靈敏度 70，並把倍率下限壓縮到 0.0063，使 1→100 對應約 0.31→0.006 倍（約 50 倍差）；同步更新門檻計算函式回傳舊版等效級距、倍率範圍與解說文字。
