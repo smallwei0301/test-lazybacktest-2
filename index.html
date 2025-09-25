@@ -1190,10 +1190,10 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251002A</span>
+                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251005A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
-                                            參考多數量化平台以 20 日淨值斜率搭配波動度評估多空趨勢，並以滑桿調整靈敏度以取得更細緻或更粗獷的分區判斷。
+                                            依 20 日對數淨值線性回歸的 t 檢定（斜率÷殘差標準差）與趨勢訊噪比（斜率÷波動度）判斷起漲／跌落，滑桿向右會同步降低門檻並把趨勢覆蓋目標自 45% 緩步推升至 85%，確保 1000 時至少 80% 以上的區間具趨勢判定。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-4">
@@ -1208,7 +1208,7 @@
                                                 <span class="text-[11px]" style="color: var(--muted-foreground);">粗</span>
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                依 20 日淨值斜率 ÷ 波動度判別多空趨勢，執行回測後會顯示實際門檻值。
+                                                依 20 日對數淨值線性回歸斜率、R² 與兩種訊噪比（斜率÷波動度、斜率÷殘差）判別多空趨勢，並依滑桿自動調整趨勢覆蓋目標；執行回測後會顯示實際門檻值。
                                             </p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">

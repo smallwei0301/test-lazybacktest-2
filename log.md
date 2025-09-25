@@ -435,3 +435,9 @@
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
 
+## 2025-10-05 — Patch LB-TREND-SENSITIVITY-20251005A
+- **Issue recap**: 新增 1→1000 靈敏度後，高檔滑桿仍以嚴格門檻回傳盤整為主，1000 時盤整覆蓋反而超過 40%，未能達成「靈敏度越高趨勢段越多」的預期行為。
+- **Fix**: 重新採用線性回歸 t 統計與訊噪比作為核心門檻，將滑桿映射到 45%→85% 的趨勢覆蓋目標並動態放寬斜率、R² 與訊噪閾值，確保 1000 時盤整覆蓋低於 20%。
+- **Diagnostics**: 於本地輸入測試回測結果檢查門檻說明、覆蓋提示與倍率區間，拖曳滑桿確認趨勢覆蓋目標會隨數值遞減盤整比例，高段顯示「依滑桿目標調整門檻」提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
