@@ -269,53 +269,53 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250910A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250915A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
-        badgeText: '等待開賽',
+        badgeText: '準備暖身',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
             color: 'var(--muted-foreground)',
         },
-        title: '策略戰況尚未更新',
-        subtitle: '回測完成後會立刻比對策略與買入持有，給您一份幽默但實用的戰況簡報。',
+        title: '戰況串還沒開',
+        subtitle: '回測一跑完就會送上鄉民版戰況懶人包，敬請期待。',
     },
     loading: {
-        badgeText: '戰況計算中',
+        badgeText: '戰況烹煮中',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
             color: 'var(--accent)',
         },
-        title: '策略戰況計算中...',
-        subtitle: '指標體檢小隊正在加班整理戰報，請稍候。',
+        title: '策略戰況煮資料中...',
+        subtitle: '小編正在尻資料，馬上就把策略對上買入持有的八卦端上來。',
     },
     leading: {
-        badgeText: '策略領先',
+        badgeText: '策略發威',
         badgeStyle: {
             backgroundColor: 'rgba(16, 185, 129, 0.18)',
             color: 'rgb(5, 122, 85)',
         },
         title: '散戶部隊領先買入持有',
-        subtitle: '恭喜策略衝出盲點，記得守住停損停利別被反攻。',
+        subtitle: '恭喜策略暫時海放基準，記得守紀律別被回馬槍。',
     },
     tie: {
-        badgeText: '拉鋸戰',
+        badgeText: '互咬中',
         badgeStyle: {
             backgroundColor: 'rgba(251, 191, 36, 0.18)',
             color: 'rgb(180, 83, 9)',
         },
         title: '策略與買入持有平手膠著',
-        subtitle: '兩邊互有攻防，觀察下一根 K 棒再決定。',
+        subtitle: '兩邊互相拉鋸，先等等下一根 K 棒再決定要不要衝。',
     },
     behind: {
-        badgeText: '暫居下風',
+        badgeText: '策略被電',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.18)',
             color: 'rgb(220, 38, 38)',
         },
         title: '買入持有暫時領先',
-        subtitle: '戰局逆風，但還有調整空間，檢視條列提示快速度過低潮。',
+        subtitle: '戰況逆風但還能救，先看條列提示找出翻盤路線。',
     },
     missing: {
         badgeText: '資料補眠',
@@ -324,7 +324,7 @@ const STRATEGY_STATUS_CONFIG = {
             color: 'rgb(71, 85, 105)',
         },
         title: '等待完整戰況資料',
-        subtitle: '回測尚未完成或缺少買入持有基準，請先跑完一次回測。',
+        subtitle: '尚未拿到買入持有基準，請先跑完一次回測再回來爆料。',
     },
     error: {
         badgeText: '戰況暫停',
@@ -333,7 +333,7 @@ const STRATEGY_STATUS_CONFIG = {
             color: 'rgb(185, 28, 28)',
         },
         title: '策略戰況暫停更新',
-        subtitle: '計算戰況時遇到例外，請重新執行回測或調整參數。',
+        subtitle: '剛剛算戰況時撞到例外，請重跑回測或調整參數再上。',
     },
 };
 
@@ -454,8 +454,8 @@ function resetStrategyStatusCard(stateKey = 'idle') {
     applyStrategyStatusState(stateKey, {
         detail: {
             bulletLines: [
-                '等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。',
-                '完成回測後，這裡會用條列式寫給散戶看的戰況懶人包。',
+                '等你按下回測鍵，戰況小組就會開串直播策略對決買入持有。',
+                '回測結束後會送上懶人包條列，滑手機也能秒懂重點。',
             ],
         },
     });
@@ -466,8 +466,8 @@ function showStrategyStatusLoading() {
     applyStrategyStatusState('loading', {
         detail: {
             bulletLines: [
-                '策略戰況計算中，請給資料幾秒鐘組隊。',
-                '我們會將策略與買入持有的差距、關鍵指標用條列快速報告。',
+                '策略戰況火速運算中，先泡杯咖啡等資料上線。',
+                '稍後就把策略差距與指標重點用條列送上版面。',
             ],
         },
     });
@@ -487,13 +487,15 @@ function buildStrategyComparisonSummary(result) {
         : null;
     let line = null;
     if (Number.isFinite(strategyReturn) && Number.isFinite(buyHoldReturn)) {
-        const diffText = Number.isFinite(diff) ? `${Math.abs(diff).toFixed(2)}` : '0.00';
-        const direction = Number.isFinite(diff)
-            ? diff >= 0
-                ? '領先'
-                : '落後'
-            : '拉鋸';
-        line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前${direction} ${diffText} 個百分點。`;
+        const diffValue = Number.isFinite(diff) ? diff : 0;
+        const diffText = Math.abs(diffValue).toFixed(2);
+        if (diffValue >= 1.5) {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前海放 ${diffText} 個百分點，散戶可以先準備發恭喜文。`;
+        } else if (diffValue <= -1.5) {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前被電 ${diffText} 個百分點，快揪團調教策略。`;
+        } else {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前互咬在 ${diffText} 個百分點內，先觀察盤勢再決定。`;
+        }
     }
     return {
         strategyReturn,
@@ -524,50 +526,50 @@ function buildStrategyHealthSummary(result) {
     const positives = [];
 
     if (!Number.isFinite(annualizedReturn)) {
-        warnings.push('年化報酬資料不足，請確認回測區間是否涵蓋足夠交易日。');
+        warnings.push('年化報酬資料缺席，像爆文沒圖，先確認回測區間有沒有跑滿交易日。');
     } else if (annualizedReturn >= 12) {
         positives.push(`年化報酬 ${formatPercentSigned(annualizedReturn, 2)}`);
     } else {
-        warnings.push(`年化報酬只有 ${formatPercentSigned(annualizedReturn, 2)}，得想辦法提高獲利速度。`);
+        warnings.push(`年化報酬只有 ${formatPercentSigned(annualizedReturn, 2)}，獲利速度像慢速車道，節奏要再加速。`);
     }
 
     if (!Number.isFinite(sharpe)) {
-        warnings.push('夏普值缺資料，暫時無法評估風險調整後報酬。');
+        warnings.push('夏普值缺資料，像夜班沒板主，暫時看不出風險調整後報酬。');
     } else if (sharpe >= 1) {
         positives.push(`夏普值 ${sharpe.toFixed(2)}`);
     } else {
-        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力。`);
+        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬像洗三溫暖，散戶記得先綁安全帶。`);
     }
 
     if (!Number.isFinite(sortino)) {
-        warnings.push('索提諾比率缺資料，無法判斷下檔風險控管。');
+        warnings.push('索提諾比率缺資料，無法判斷下檔風險，建議再跑一次確認。');
     } else if (sortino >= 1) {
         positives.push(`索提諾比率 ${sortino.toFixed(2)}`);
     } else {
-        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，代表面對下檔風險時防守略鬆。`);
+        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，遇到回檔可能會手抖，別忘記防守策略。`);
     }
 
     if (!Number.isFinite(maxDrawdown)) {
-        warnings.push('最大回撤資料缺漏，請再次檢查回測結果。');
+        warnings.push('最大回撤資料缺漏，像戰報缺圖表，請再檢查結果。');
     } else if (maxDrawdown <= 15) {
         positives.push(`最大回撤僅 ${maxDrawdown.toFixed(2)}%`);
     } else {
-        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，回檔時記得系好安全帶。`);
+        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，回檔會痛，資金控管要先想好。`);
     }
 
     if (Number.isFinite(returnRatio)) {
         if (returnRatio >= 0.5 && returnRatio <= 1.5) {
-            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}`);
+            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，節奏沒走鐘。`);
         } else {
-            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證。`);
+            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，不同市況就變臉，記得多做滾動驗證免得被打臉。`);
         }
     }
 
     if (Number.isFinite(sharpeHalfRatio)) {
         if (sharpeHalfRatio >= 0.5 && sharpeHalfRatio <= 1.5) {
-            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}`);
+            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，體感算穩。`);
         } else {
-            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，請留意驗證樣本。`);
+            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，驗證樣本要補一波。`);
         }
     }
 
@@ -584,9 +586,9 @@ function buildStrategyHealthSummary(result) {
     if (positives.length > 0) {
         const unique = Array.from(new Set(positives));
         if (allGood) {
-            positiveLine = `體檢結論：${unique.join('、')} 全線亮眼，這套策略可以放心交給散戶執行。`;
+            positiveLine = `體檢結論：${unique.join('、')} 全面開紅盤，散戶可以準備發恭喜文。`;
         } else {
-            positiveLine = `${unique.join('、')} 表現還算給力，記得把優勢守住，請調整倉位或優化參數再上。`;
+            positiveLine = `${unique.join('、')} 表現還算有料，記得顧好優勢，調整倉位再衝。`;
         }
     }
 
@@ -619,22 +621,22 @@ function buildSensitivityScoreAdvice(result) {
     const segments = [];
 
     if (rawScore === null) {
-        segments.push('敏感度總分缺資料，建議重新執行擾動測試確認穩定度。');
+        segments.push('敏感度總分失聯，建議重新跑擾動測試確認穩定度');
     } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健等級`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，等級穩健，參數調校算挺罩`);
     } else if (rawScore >= 40) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，落在觀察區`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調整時請多留心`);
     } else {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數相當敏感`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超級敏感，稍微調就歪樓`);
     }
 
     if (averageDrift !== null) {
         if (averageDrift <= 20) {
-            segments.push('平均漂移控制在 ±20pp 內，變動幅度尚稱穩健');
+            segments.push('平均漂移守在 ±20pp，穩得像八卦版老梗');
         } else if (averageDrift <= 40) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險`);
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被甩車`);
         } else {
-            segments.push(`平均漂移放大到 ${averageDrift.toFixed(1)}pp，請盡速強化風控或縮小部位`);
+            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，請快強化風控或縮小部位免得被嘎`);
         }
     }
 
@@ -646,19 +648,19 @@ function buildSensitivityScoreAdvice(result) {
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
             if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，請優先檢查該方向的參數設定`);
+                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數要開檢討串`);
             } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證`);
+                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證免得下一波歪樓`);
             } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，屬常見穩健區間');
+                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊吃鹹酥雞邊調參');
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp`);
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可`);
             }
         }
     }
 
     if (sampleCount !== null) {
-        segments.push(`擾動樣本 ${sampleCount} 組`);
+        segments.push(`擾動樣本 ${sampleCount} 組，資料量夠熱鬧`);
     }
 
     if (segments.length === 0) {
@@ -708,7 +710,7 @@ function updateStrategyStatusCard(result) {
     }
 
     const emphasisedLine = state === 'behind'
-        ? '快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。'
+        ? '鄉民集合！策略被買入持有壓著打，快揪優化小隊救火。'
         : null;
 
     applyStrategyStatusState(state, {

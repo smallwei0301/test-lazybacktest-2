@@ -1,4 +1,10 @@
 
+## 2025-09-15 — Patch LB-STRATEGY-STATUS-20250915A
+- **Issue recap**: 策略狀態卡文案仍偏向一般說明口吻，與最新要求的 PTT 爆文語氣不符；落後時的強調句與敏感度建議也缺乏推文式調侃提醒。
+- **Fix**: 將狀態卡版本更新為 `LB-STRATEGY-STATUS-20250915A`，重寫預設、載入、領先、平手、落後等狀態標語與子標題為 PTT 口吻，並改寫戰況條列、體檢結論與敏感度建議的文案讓散戶能用爆文語氣快速吸收重點。
+- **Diagnostics**: 以模擬資料檢查落後、平手與領先情境，確認卡片顯示新的推文式標語、落後強調句與條列內容都採用 PTT 風格；敏感度資訊在各門檻下會輸出對應的新用語。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-10 — Patch LB-STRATEGY-STATUS-20250910A
 - **Issue recap**: 策略狀態卡落後時缺乏敏感度分數的提醒，無法向使用者交代參數穩定度；差距欄位仍以破折號佔位，與最新不顯示要求不符，落後狀態也未加粗標語引導注意力。
 - **Fix**: 新增 `buildSensitivityScoreAdvice` 將穩定度分數、平均漂移與方向偏移轉為戰況條列建議，更新狀態套用器隱藏差距欄破折號並於落後時插入「快呼叫策略優化…」強調句，版本碼調整為 `LB-STRATEGY-STATUS-20250910A`。
