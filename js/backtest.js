@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DEVLOG-20250905A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250908A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -238,6 +239,20 @@ const todaySuggestionDeveloperLog = (() => {
         if (Number.isFinite(entry?.meta?.dataLagDays) && entry.meta.dataLagDays > 0) {
             parts.push(`資料延遲 ${entry.meta.dataLagDays} 日`);
         }
+        if (entry?.meta?.finalStateLabel && entry.meta.finalStateDate) {
+            parts.push(`模擬最終狀態 ${entry.meta.finalStateLabel}（${entry.meta.finalStateDate}）`);
+        } else if (entry?.meta?.finalStateLabel) {
+            parts.push(`模擬最終狀態 ${entry.meta.finalStateLabel}`);
+        }
+        if (entry?.meta?.pendingTradeLabel) {
+            parts.push(`待執行交易 ${entry.meta.pendingTradeLabel}`);
+        }
+        if (entry?.meta?.finalEvaluationCaptured === false) {
+            parts.push('finalEvaluation 未捕捉');
+        }
+        if (entry?.meta?.finalStateReason) {
+            parts.push(entry.meta.finalStateReason);
+        }
         const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
         if (issueLabel) {
             parts.push(issueLabel);
@@ -260,6 +275,20 @@ const todaySuggestionDeveloperLog = (() => {
         const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
         if (issueLabel) {
             developerNotes.unshift(issueLabel);
+        }
+        if (entry?.meta?.finalStateLabel && entry.meta.finalStateDate) {
+            developerNotes.push(`模擬最終狀態：${entry.meta.finalStateLabel}（${entry.meta.finalStateDate}）`);
+        } else if (entry?.meta?.finalStateLabel) {
+            developerNotes.push(`模擬最終狀態：${entry.meta.finalStateLabel}`);
+        }
+        if (entry?.meta?.pendingTradeLabel) {
+            developerNotes.push(`待執行交易：${entry.meta.pendingTradeLabel}`);
+        }
+        if (entry?.meta?.finalEvaluationCaptured === false) {
+            developerNotes.push('runStrategy 未產生 finalEvaluation');
+        }
+        if (entry?.meta?.finalStateReason) {
+            developerNotes.push(`finalState 診斷：${entry.meta.finalStateReason}`);
         }
 
         const diagnostics = [];
@@ -321,6 +350,21 @@ const todaySuggestionDeveloperLog = (() => {
         }
         if (Number.isFinite(entry?.meta?.coverageSegments)) {
             diagnostics.push(`覆蓋區段 ${entry.meta.coverageSegments} 段`);
+        }
+        if (entry?.meta?.finalStateDate) {
+            diagnostics.push(`模擬最終日期：${entry.meta.finalStateDate}`);
+        }
+        if (entry?.meta?.finalPortfolioValue) {
+            diagnostics.push(`模擬最終市值：${entry.meta.finalPortfolioValue}`);
+        }
+        if (entry?.meta?.finalStrategyReturn) {
+            diagnostics.push(`模擬報酬率：${entry.meta.finalStrategyReturn}`);
+        }
+        if (entry?.meta?.finalLongShares) {
+            diagnostics.push(`多單股數：${entry.meta.finalLongShares}`);
+        }
+        if (entry?.meta?.finalShortShares) {
+            diagnostics.push(`空單股數：${entry.meta.finalShortShares}`);
         }
 
         const sections = [];
@@ -715,6 +759,67 @@ const todaySuggestionUI = (() => {
                     const warmup = displayPayload.warmup;
                     if (Number.isFinite(warmup.lookbackDays)) {
                         meta.lookbackResolved = warmup.lookbackDays;
+                    }
+                }
+                if (displayPayload.strategyDiagnostics && typeof displayPayload.strategyDiagnostics === 'object') {
+                    const finalState = displayPayload.strategyDiagnostics.finalState;
+                    if (finalState && typeof finalState === 'object') {
+                        if (finalState.snapshot && typeof finalState.snapshot === 'object') {
+                            const snapshot = finalState.snapshot;
+                            if (snapshot.date) {
+                                meta.finalStateDate = snapshot.date;
+                            }
+                            const stateParts = [];
+                            if (snapshot.longState) {
+                                stateParts.push(`多單 ${snapshot.longState}`);
+                            }
+                            if (snapshot.shortState) {
+                                stateParts.push(`空單 ${snapshot.shortState}`);
+                            }
+                            if (stateParts.length > 0) {
+                                meta.finalStateLabel = stateParts.join('，');
+                            }
+                            if (Number.isFinite(snapshot.portfolioValue)) {
+                                meta.finalPortfolioValue = `${numberFormatter.format(snapshot.portfolioValue)} 元`;
+                            }
+                            if (Number.isFinite(snapshot.strategyReturn)) {
+                                meta.finalStrategyReturn = `${numberFormatter.format(snapshot.strategyReturn)}%`;
+                            }
+                            if (Number.isFinite(snapshot.longShares)) {
+                                meta.finalLongShares = `${integerFormatter.format(snapshot.longShares)} 股`;
+                            }
+                            if (Number.isFinite(snapshot.shortShares)) {
+                                meta.finalShortShares = `${integerFormatter.format(snapshot.shortShares)} 股`;
+                            }
+                        }
+                        if (finalState.pendingNextDayTrade && typeof finalState.pendingNextDayTrade === 'object') {
+                            const pending = finalState.pendingNextDayTrade;
+                            const pendingParts = [];
+                            if (pending.type || pending.action) {
+                                pendingParts.push(pending.type || pending.action);
+                            }
+                            if (pending.strategy) {
+                                pendingParts.push(pending.strategy);
+                            }
+                            if (pending.reason) {
+                                pendingParts.push(pending.reason);
+                            }
+                            if (pending.triggeredAt) {
+                                pendingParts.push(`觸發於 ${pending.triggeredAt}`);
+                            }
+                            if (pending.plannedDate) {
+                                pendingParts.push(`預計日期 ${pending.plannedDate}`);
+                            }
+                            if (pendingParts.length > 0) {
+                                meta.pendingTradeLabel = pendingParts.join('｜');
+                            }
+                        }
+                        if (typeof finalState.captured === 'boolean') {
+                            meta.finalEvaluationCaptured = finalState.captured;
+                        }
+                        if (finalState.reason) {
+                            meta.finalStateReason = finalState.reason;
+                        }
                     }
                 }
                 window.lazybacktestTodaySuggestionLog.record(

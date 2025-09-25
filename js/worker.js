@@ -15,6 +15,7 @@ importScripts('config.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -7909,10 +7910,52 @@ function runStrategy(data, params, options = {}) {
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
     const trimmedEntryStageStates = sliceArray(longEntryStageStates);
     const trimmedExitStageStates = sliceArray(longExitStageStates);
+    let finalStateSnapshot = null;
+    if (n > 0 && lastIdx >= 0) {
+      finalStateSnapshot = {
+        date: dates[lastIdx] || null,
+        close: Number.isFinite(closes[lastIdx]) ? closes[lastIdx] : null,
+        longState: longStateSeries[lastIdx] || null,
+        shortState: shortStateSeries[lastIdx] || null,
+        longPos: Number.isFinite(longPos) ? longPos : null,
+        shortPos: Number.isFinite(shortPos) ? shortPos : null,
+        longShares: Number.isFinite(longShares) ? longShares : null,
+        shortShares: Number.isFinite(shortShares) ? shortShares : null,
+        longCapital: Number.isFinite(longCap) ? longCap : null,
+        shortCapital: Number.isFinite(shortCap) ? shortCap : null,
+        portfolioValue: Number.isFinite(portfolioVal[lastIdx])
+          ? portfolioVal[lastIdx]
+          : null,
+        strategyReturn: Number.isFinite(strategyReturns[lastIdx])
+          ? strategyReturns[lastIdx]
+          : null,
+      };
+    }
+    const pendingTradeSnapshot = pendingNextDayTrade
+      ? {
+          type: pendingNextDayTrade.type || pendingNextDayTrade.kind || null,
+          action: pendingNextDayTrade.action || null,
+          strategy: pendingNextDayTrade.strategy || null,
+          reason: pendingNextDayTrade.reason || null,
+          triggeredAt: pendingNextDayTrade.triggeredAt || null,
+          plannedDate:
+            pendingNextDayTrade.date || pendingNextDayTrade.nextDate || null,
+        }
+      : null;
+
     const runtimeDiagnostics = {
       dataset: datasetSummary,
       warmup: warmupSummary,
       buyHold: buyHoldSummary,
+      finalState: {
+        captured: Boolean(finalEvaluation),
+        snapshot: finalStateSnapshot,
+        pendingNextDayTrade: pendingTradeSnapshot,
+        reason:
+          !finalEvaluation && captureFinalState
+            ? "final_evaluation_missing"
+            : null,
+      },
     };
     if (typeof console.groupCollapsed === "function") {
       console.groupCollapsed(
@@ -9467,8 +9510,9 @@ self.onmessage = async function (e) {
       });
       const evaluation = todayResult?.finalEvaluation || null;
       const latestDate = suggestionData[suggestionData.length - 1]?.date || null;
+      const strategyDiagnostics = todayResult?.diagnostics || null;
       const datasetSummary =
-        todayResult?.diagnostics?.dataset ||
+        strategyDiagnostics?.dataset ||
         summariseDatasetRows(suggestionData, {
           requestedStart: params.startDate || null,
           effectiveStartDate,
@@ -9476,8 +9520,9 @@ self.onmessage = async function (e) {
           dataStartDate,
           endDate: todayISO,
         });
-      const warmupSummary = todayResult?.diagnostics?.warmup || null;
-      const buyHoldSummary = todayResult?.diagnostics?.buyHold || null;
+      const warmupSummary = strategyDiagnostics?.warmup || null;
+      const buyHoldSummary = strategyDiagnostics?.buyHold || null;
+      const finalStateDiagnostics = strategyDiagnostics?.finalState || null;
       const coverage = computeCoverageFromRows(suggestionData);
       const coverageFingerprint = computeCoverageFingerprint(coverage);
       const priceModeKey =
@@ -9558,6 +9603,54 @@ self.onmessage = async function (e) {
             }`,
           );
         }
+        if (finalStateDiagnostics?.snapshot?.date) {
+          const snapshot = finalStateDiagnostics.snapshot;
+          const stateParts = [];
+          if (snapshot.longState) {
+            stateParts.push(`多單 ${snapshot.longState}`);
+          }
+          if (snapshot.shortState) {
+            stateParts.push(`空單 ${snapshot.shortState}`);
+          }
+          const stateLabel = stateParts.length > 0 ? stateParts.join("，") : "無法取得";
+          developerNotes.push(
+            `模擬最終狀態：${stateLabel}（${snapshot.date}）`,
+          );
+          if (Number.isFinite(snapshot.portfolioValue)) {
+            developerNotes.push(
+              `模擬最終市值 ${snapshot.portfolioValue.toFixed(2)}`,
+            );
+          }
+          if (Number.isFinite(snapshot.strategyReturn)) {
+            developerNotes.push(
+              `模擬報酬率 ${snapshot.strategyReturn.toFixed(2)}%`,
+            );
+          }
+        } else if (!finalStateDiagnostics?.snapshot) {
+          developerNotes.push("finalState 快照未生成");
+        }
+        if (finalStateDiagnostics?.pendingNextDayTrade) {
+          const pending = finalStateDiagnostics.pendingNextDayTrade;
+          const pendingParts = [];
+          if (pending.type || pending.action) {
+            pendingParts.push(pending.type || pending.action);
+          }
+          if (pending.strategy) {
+            pendingParts.push(pending.strategy);
+          }
+          if (pending.reason) {
+            pendingParts.push(pending.reason);
+          }
+          developerNotes.push(
+            `待執行交易：${pendingParts.join("｜") || "資訊不足"}`,
+          );
+        }
+        if (finalStateDiagnostics && finalStateDiagnostics.captured === false) {
+          developerNotes.push("runStrategy 未產生 finalEvaluation（final_evaluation_missing）");
+        }
+        if (finalStateDiagnostics?.reason) {
+          developerNotes.push(`finalState 診斷：${finalStateDiagnostics.reason}`);
+        }
         self.postMessage({
           type: "suggestionResult",
           data: {
@@ -9579,6 +9672,7 @@ self.onmessage = async function (e) {
             priceSource,
             fetchRange,
             diagnostics: diagnosticsMeta,
+            strategyDiagnostics,
             todayISO,
             requestedEndDate: params.endDate,
             appliedEndDate: todayISO,
@@ -9663,6 +9757,7 @@ self.onmessage = async function (e) {
         priceSource,
         fetchRange,
         diagnostics: diagnosticsMeta,
+        strategyDiagnostics,
         developerNotes: [],
       };
 

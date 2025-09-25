@@ -1,4 +1,10 @@
 
+## 2025-09-09 — Patch LB-TODAY-SUGGESTION-DIAG-20250909A
+- **Issue recap**: 即使資料筆數充足，今日建議仍可能回傳 `final_evaluation_missing`，但開發者紀錄僅顯示一般暖身資訊，無法判斷回測最終狀態或是否存在待執行交易。
+- **Fix**: `runStrategy` 新增最終狀態快照與隔日交易診斷，Worker 在 `no_data` 時同步回傳並於開發者備註標示模擬部位、市值與待執行交易，前端 log 會彙整為「模擬最終狀態／待執行交易／finalEvaluation 捕捉狀態」等欄位。
+- **Diagnostics**: 於 `final_evaluation_missing` 案例確認開發者紀錄摘要包含模擬最終日期、倉位狀態、市值與待執行交易描述，並檢視 payload 內新增的 `strategyDiagnostics.finalState` 內容。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-08 — Patch LB-TODAY-SUGGESTION-DIAG-20250908A
 - **Issue recap**: 今日建議顯示 `no_data` 時，卡片與開發者紀錄會重複出現同樣訊息，缺乏 Issue Code 說明與分類，難以快速判讀暖身或資料診斷重點。
 - **Fix**: 導入文字去重工具並重構開發者紀錄為「使用者提示／開發者備註／資料診斷」三段式區塊，於摘要加入 Issue Code 解釋；今日建議卡片與 fallback 訊息也同步去重避免重複提醒。
