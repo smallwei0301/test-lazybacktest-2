@@ -279,14 +279,14 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251007A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251011A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
-const TREND_SENSITIVITY_MIN = 1;
-const TREND_SENSITIVITY_MAX = 1000;
-const TREND_SENSITIVITY_DEFAULT = 606;
+const TREND_SENSITIVITY_MIN = 0;
+const TREND_SENSITIVITY_MAX = 100;
+const TREND_SENSITIVITY_DEFAULT = 70;
 const TREND_SENSITIVITY_EQUIVALENT_MIN = 1;
-const TREND_SENSITIVITY_EQUIVALENT_MAX = 100;
+const TREND_SENSITIVITY_EQUIVALENT_MAX = 1000;
 
 const TREND_STYLE_MAP = {
     uptrend: {
@@ -427,7 +427,7 @@ function computeTrendThresholds(sensitivity) {
     const multiplier = slopeThreshold / slopeStrictMin;
     const ratio = multiplierAtMin / Math.max(multiplierAtMax, 1e-6);
 
-    const targetTrendCoverage = 0.45 + 0.4 * sliderNormalized;
+    const targetTrendCoverage = Math.max(0, Math.min(1, sliderNormalized));
     const coverageBlend = (value, strictFactor, lenientAbsolute, minAbsolute) => {
         if (!Number.isFinite(value)) return value;
         const strictFloor = value * strictFactor;
@@ -467,6 +467,7 @@ function computeTrendThresholds(sensitivity) {
             max,
             displayMin: TREND_SENSITIVITY_MIN,
             displayMax: TREND_SENSITIVITY_MAX,
+            displayUnit: '%',
             minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
             maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
             multiplierAtMin,
@@ -829,7 +830,7 @@ function computeTrendAnalysisFromResult(result, thresholds) {
         : 0;
     const targetTrendCoverage = Number.isFinite(thresholds?.targetTrendCoverage)
         ? thresholds.targetTrendCoverage
-        : (0.45 + 0.4 * sliderNormalized);
+        : sliderNormalized;
     const coverageFloors = thresholds?.coverageBoostFloors && typeof thresholds.coverageBoostFloors === 'object'
         ? thresholds.coverageBoostFloors
         : {
@@ -847,7 +848,9 @@ function computeTrendAnalysisFromResult(result, thresholds) {
     let coverageRatio = baseEvaluation.coverageRatio;
     let coverageBoostApplied = false;
 
-    const coverageTarget = Math.max(0.2, Math.min(0.92, targetTrendCoverage));
+    const wantsFullCoverage = targetTrendCoverage >= 0.95;
+    const coverageTargetLimit = wantsFullCoverage ? 1 : 0.95;
+    const coverageTarget = Math.max(0, Math.min(coverageTargetLimit, targetTrendCoverage));
     if (coverageRatio < coverageTarget) {
         const coverageGap = coverageTarget - coverageRatio;
         const baseMix = Math.min(1, Math.max(0, coverageGap / Math.max(0.05, coverageTarget)));
@@ -887,21 +890,40 @@ function computeTrendAnalysisFromResult(result, thresholds) {
     }
 
     if (coverageRatio < coverageTarget - 0.005) {
-        const degradePhases = [
-            { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
-            { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
-            { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
-        ];
-        const minThresholds = {
-            slopeThreshold: 0.000003,
-            slopeRelaxed: 0.0000022,
-            ratioThreshold: 0.006,
-            ratioRelaxed: 0.004,
-            strengthThreshold: 0.07,
-            strengthRelaxed: 0.05,
-            r2Threshold: 0.03,
-            r2Relaxed: 0.02,
-        };
+        const degradePhases = wantsFullCoverage
+            ? [
+                { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
+                { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
+                { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
+                { slope: 0.12, ratio: 0.2, strength: 0.2, r2: 0.2 },
+                { slope: 0, ratio: 0, strength: 0, r2: 0 },
+            ]
+            : [
+                { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
+                { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
+                { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
+            ];
+        const minThresholds = wantsFullCoverage
+            ? {
+                slopeThreshold: 0,
+                slopeRelaxed: 0,
+                ratioThreshold: 0,
+                ratioRelaxed: 0,
+                strengthThreshold: 0,
+                strengthRelaxed: 0,
+                r2Threshold: 0,
+                r2Relaxed: 0,
+            }
+            : {
+                slopeThreshold: 0.000003,
+                slopeRelaxed: 0.0000022,
+                ratioThreshold: 0.006,
+                ratioRelaxed: 0.004,
+                strengthThreshold: 0.07,
+                strengthRelaxed: 0.05,
+                r2Threshold: 0.03,
+                r2Relaxed: 0.02,
+            };
         for (const phase of degradePhases) {
             const degradedEvaluation = classifyWithThresholds({
                 slopeThreshold: Math.max(minThresholds.slopeThreshold, slopeThreshold * phase.slope),
@@ -925,16 +947,27 @@ function computeTrendAnalysisFromResult(result, thresholds) {
     }
 
     if (coverageRatio < coverageTarget - 0.01) {
-        const fallbackEvaluation = classifyWithThresholds({
-            slopeThreshold: 0.000002,
-            slopeRelaxed: 0.0000016,
-            ratioThreshold: 0.0045,
-            ratioRelaxed: 0.0032,
-            strengthThreshold: 0.055,
-            strengthRelaxed: 0.038,
-            r2Threshold: 0.024,
-            r2Relaxed: 0.018,
-        });
+        const fallbackEvaluation = classifyWithThresholds(wantsFullCoverage
+            ? {
+                slopeThreshold: 0,
+                slopeRelaxed: 0,
+                ratioThreshold: 0,
+                ratioRelaxed: 0,
+                strengthThreshold: 0,
+                strengthRelaxed: 0,
+                r2Threshold: 0,
+                r2Relaxed: 0,
+            }
+            : {
+                slopeThreshold: 0.000002,
+                slopeRelaxed: 0.0000016,
+                ratioThreshold: 0.0045,
+                ratioRelaxed: 0.0032,
+                strengthThreshold: 0.055,
+                strengthRelaxed: 0.038,
+                r2Threshold: 0.024,
+                r2Relaxed: 0.018,
+            });
         if (fallbackEvaluation.coverageRatio > coverageRatio) {
             finalEvaluation = fallbackEvaluation;
             coverageRatio = fallbackEvaluation.coverageRatio;
@@ -968,7 +1001,7 @@ function updateChartTrendOverlay() {
 function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
     if (sliderValueEl) {
-        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}`;
+        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}%`;
     }
     const badgeEl = document.getElementById('trend-version-badge');
     if (badgeEl) {
@@ -995,6 +1028,11 @@ function renderTrendSummary() {
         const sliderDisplayMax = Number.isFinite(rangeInfo.displayMax)
             ? rangeInfo.displayMax
             : TREND_SENSITIVITY_MAX;
+        const sliderDisplayUnit = typeof rangeInfo.displayUnit === 'string'
+            ? rangeInfo.displayUnit
+            : '';
+        const sliderDisplayMinText = `${sliderDisplayMin}${sliderDisplayUnit}`;
+        const sliderDisplayMaxText = `${sliderDisplayMax}${sliderDisplayUnit}`;
         const sliderMultiplierTight = Number.isFinite(rangeInfo.multiplierAtMin)
             ? rangeInfo.multiplierAtMin
             : 1;
@@ -1027,9 +1065,7 @@ function renderTrendSummary() {
         const equivalentCurrent = Number.isFinite(thresholds.equivalentSensitivity)
             ? Math.round(thresholds.equivalentSensitivity)
             : null;
-        const sliderMappingText = (equivalentMin !== null && equivalentMax !== null)
-            ? `滑桿 ${sliderDisplayMin}→${sliderDisplayMax} ≈ 舊版 ${equivalentMin}→${equivalentMax}`
-            : `滑桿 ${sliderDisplayMin}→${sliderDisplayMax}`;
+        const sliderMappingText = `滑桿 ${sliderDisplayMinText}→${sliderDisplayMaxText} 對應趨勢覆蓋目標 ${sliderDisplayMinText}→${sliderDisplayMaxText}`;
         const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
         const coverageRatioValue = Number.isFinite(thresholds.trendCoverageRatio)
             ? thresholds.trendCoverageRatio
@@ -1037,6 +1073,9 @@ function renderTrendSummary() {
         const coverageTargetValue = Number.isFinite(thresholds.trendCoverageTarget)
             ? thresholds.trendCoverageTarget
             : (Number.isFinite(thresholds.targetTrendCoverage) ? thresholds.targetTrendCoverage : null);
+        const targetCoverageText = coverageTargetValue !== null
+            ? formatPercentPlain(coverageTargetValue * 100, 1)
+            : '—';
         let coverageNote = '';
         if (coverageRatioValue !== null) {
             const coveragePercentText = formatPercentPlain(coverageRatioValue * 100, 1);
@@ -1055,7 +1094,7 @@ function renderTrendSummary() {
             且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
             若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
             並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
-            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越大越保守、越小越靈敏）。
+            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前覆蓋目標約 ${targetCoverageText}，數值越大越保守、越小越靈敏；舊版對應值約 ${equivalentCurrentText}）。
             ${coverageNote ? `<br><span class="text-[10px]" style="color: var(--muted-foreground);">${coverageNote}</span>` : ''}
         `;
     }

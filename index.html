@@ -1190,25 +1190,25 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251007A</span>
+                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251011A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
-                                            依 20 日對數淨值線性回歸的 t 檢定（斜率÷殘差標準差）與趨勢訊噪比（斜率÷波動度）判斷起漲／跌落，滑桿向右會同步下修門檻並把趨勢覆蓋目標自 45% 緩步推升至 85%，不足時會自動展開補償，確保 1000 時至少 80% 以上的區間具趨勢判定。
+                                            依 20 日對數淨值線性回歸的 t 檢定（斜率÷殘差標準差）與趨勢訊噪比（斜率÷波動度）判斷起漲／跌落，滑桿 0%→100% 直接代表趨勢覆蓋目標 0%→100%，不足時會分階段放寬門檻，確保高覆蓋設定仍能給出趨勢判定。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
-                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">趨勢靈敏度</label>
-                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">606</span>
+                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">趨勢覆蓋目標</label>
+                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">70%</span>
                                             </div>
                                             <div class="flex items-center gap-3">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">細</span>
-                                                <input type="range" id="trendSensitivitySlider" min="1" max="1000" step="1" value="606" class="flex-1 trend-slider">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">粗</span>
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">0%</span>
+                                                <input type="range" id="trendSensitivitySlider" min="0" max="100" step="1" value="70" class="flex-1 trend-slider">
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">100%</span>
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                依 20 日對數淨值線性回歸斜率、R² 與兩種訊噪比（斜率÷波動度、斜率÷殘差）判別多空趨勢，並依滑桿自動調整趨勢覆蓋目標；執行回測後會顯示實際門檻值。
+                                                依 20 日對數淨值線性回歸斜率、R² 與兩種訊噪比（斜率÷波動度、斜率÷殘差）判別多空趨勢，滑桿設定的百分比即為目標趨勢覆蓋率；執行回測後會顯示實際門檻值與覆蓋成果。
                                             </p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">

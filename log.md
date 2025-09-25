@@ -447,3 +447,9 @@
 - **Diagnostics**: 驗證門檻說明新增「自動展開補償」描述，並以多組回測結果觀察覆蓋提示訊息改為「系統已依滑桿目標調整門檻」，確認 1000 時趨勢段佔比維持在 80% 以上。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-11 — Patch LB-TREND-SENSITIVITY-20251011A
+- **Issue recap**: 1→1000 靈敏度滑桿在高端仍可能出現盤整覆蓋倒掛，且最大值會讓趨勢段完全消失，未能實現「調整數值=覆蓋目標」的期待。
+- **Fix**: 將趨勢滑桿改為 0%→100%，直接對應趨勢覆蓋目標，並重寫補償流程，在高覆蓋目標下逐層放寬門檻、必要時降至零門檻以確保至少 80% 以上區段被標示為趨勢。
+- **Diagnostics**: 檢查趨勢卡文案與門檻說明新增「覆蓋目標」提示，實際拉動滑桿觀察數值顯示百分比、覆蓋提示同步更新，並驗證 100% 設定會觸發最高階補償讓趨勢段仍保持。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
