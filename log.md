@@ -459,3 +459,9 @@
 - **Diagnostics**: `renderTrendSummary` 顯示各門檻數值、平滑窗與最小區段資訊，圖表疊層使用對應色塊；趨勢摘要呈現四態覆蓋率、區段數與複利報酬並揭露 HMM 迭代與平均信心。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-13 — Patch LB-REGIME-RANGEBOUND-20251013A
+- **Issue recap**: 牛／熊低波動狀態分別呈現，導致盤整覆蓋在滑桿高端反而上升，圖例亦未統一色塊，且 HMM 僅迭代 40 次在部分樣本上收斂不足。
+- **Fix**: 將牛／熊低波動整併為「盤整區域」灰色象限，趨勢圖與摘要卡同步改為三態呈現並調整文案、圖例與版本章；同時把 HMM 迭代上限提升至 100 次確保盤整覆蓋會隨滑桿放大而下降且 1000 時趨勢判定覆蓋 80% 以上。
+- **Diagnostics**: 檢視 `renderTrendSummary` 確認僅輸出牛高／盤整／熊高三態統計，平均信心仍可分別從牛／熊低波動 posterior 取最大值；圖表灰階背景與 legend 色塊對齊新分類。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

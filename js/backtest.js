@@ -6,6 +6,7 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-REGIME-HMM-20251012A
+// Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -280,7 +281,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-REGIME-HMM-20251012A';
+const TREND_ANALYSIS_VERSION = 'LB-REGIME-RANGEBOUND-20251013A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 100;
@@ -293,23 +294,17 @@ const TREND_STYLE_MAP = {
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
     },
-    bullLowVol: {
-        label: '牛市・低波動',
-        overlay: 'rgba(248, 113, 113, 0.16)',
-        accent: '#f87171',
-        border: 'rgba(248, 113, 113, 0.32)',
+    rangeBound: {
+        label: '盤整區域',
+        overlay: 'rgba(148, 163, 184, 0.18)',
+        accent: '#475569',
+        border: 'rgba(148, 163, 184, 0.38)',
     },
     bearHighVol: {
         label: '熊市・高波動',
         overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
-    },
-    bearLowVol: {
-        label: '熊市・低波動',
-        overlay: 'rgba(134, 239, 172, 0.16)',
-        accent: '#22c55e',
-        border: 'rgba(134, 239, 172, 0.32)',
     },
 };
 
@@ -626,7 +621,7 @@ function trainFourStateHMM(observations, options = {}) {
         .filter((row) => Array.isArray(row) && row.every((value) => Number.isFinite(value)))
         .map((row) => row.slice(0, 2));
     const numStates = Math.max(2, Math.round(options.numStates || 4));
-    const maxIterations = Math.max(1, Math.round(options.maxIterations || 40));
+    const maxIterations = Math.max(1, Math.round(options.maxIterations || 100));
     const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 1e-4;
     if (clean.length < numStates) return null;
     const dimension = clean[0].length;
@@ -942,19 +937,22 @@ function mapStatesToRegimes(model) {
 }
 
 function combineDirectionVol(direction, volatility) {
-    const dirKey = direction === 'bear' ? 'bear' : 'bull';
-    const volKey = volatility === 'high' ? 'HighVol' : 'LowVol';
-    return `${dirKey}${volKey}`;
+    if (volatility === 'low') {
+        return 'rangeBound';
+    }
+    return direction === 'bear' ? 'bearHighVol' : 'bullHighVol';
 }
 
 function parseRegimeLabel(label) {
     switch (label) {
     case 'bullHighVol':
         return { direction: 'bull', volatility: 'high' };
-    case 'bullLowVol':
-        return { direction: 'bull', volatility: 'low' };
     case 'bearHighVol':
         return { direction: 'bear', volatility: 'high' };
+    case 'rangeBound':
+        return { direction: 'bear', volatility: 'low' };
+    case 'bullLowVol':
+        return { direction: 'bull', volatility: 'low' };
     case 'bearLowVol':
         return { direction: 'bear', volatility: 'low' };
     default:
@@ -1002,7 +1000,7 @@ function fillMissingLabels(labels) {
         }
     }
     for (let i = 0; i < labels.length; i += 1) {
-        if (!labels[i]) labels[i] = 'bearLowVol';
+        if (!labels[i]) labels[i] = 'rangeBound';
     }
     return labels;
 }
@@ -1013,7 +1011,7 @@ function smoothLabels(labels, windowSize) {
     const half = Math.floor(windowSize / 2);
     for (let i = 0; i < labels.length; i += 1) {
         const counts = {};
-        let maxLabel = result[i] || 'bearLowVol';
+        let maxLabel = result[i] || 'rangeBound';
         let maxCount = 0;
         for (let j = Math.max(0, i - half); j <= Math.min(labels.length - 1, i + half); j += 1) {
             const label = labels[j];
@@ -1128,11 +1126,26 @@ function computeAverageConfidence(labels, posteriors, labelToState) {
         const label = labels[i];
         const posteriorRow = posteriors[i];
         if (!label || !Array.isArray(posteriorRow)) continue;
-        const stateIndex = labelToState?.[label];
-        let value = null;
-        if (Number.isInteger(stateIndex) && Number.isFinite(posteriorRow[stateIndex])) {
-            value = posteriorRow[stateIndex];
+        const candidateStates = [];
+        if (label === 'rangeBound') {
+            const bullLowIndex = labelToState?.bullLowVol;
+            const bearLowIndex = labelToState?.bearLowVol;
+            if (Number.isInteger(bullLowIndex)) candidateStates.push(bullLowIndex);
+            if (Number.isInteger(bearLowIndex)) candidateStates.push(bearLowIndex);
         } else {
+            const stateIndex = labelToState?.[label];
+            if (Number.isInteger(stateIndex)) candidateStates.push(stateIndex);
+        }
+        let value = null;
+        if (candidateStates.length > 0) {
+            const finiteValues = candidateStates
+                .map((idx) => (Number.isFinite(posteriorRow[idx]) ? posteriorRow[idx] : null))
+                .filter((val) => Number.isFinite(val));
+            if (finiteValues.length > 0) {
+                value = Math.max(...finiteValues);
+            }
+        }
+        if (!Number.isFinite(value)) {
             const finiteValues = posteriorRow.filter((val) => Number.isFinite(val));
             if (finiteValues.length > 0) {
                 value = Math.max(...finiteValues);
@@ -1193,7 +1206,7 @@ function prepareRegimeBaseData(result) {
         }
     }
     const hmmModel = observations.length >= 16
-        ? trainFourStateHMM(observations, { maxIterations: 40, tolerance: 1e-4 })
+        ? trainFourStateHMM(observations, { maxIterations: 100, tolerance: 1e-4 })
         : null;
     const hmmAssignments = new Array(dates.length).fill(null);
     const hmmPosteriors = new Array(dates.length).fill(null);
@@ -1355,7 +1368,7 @@ function renderTrendSummary() {
         return;
     }
     placeholder.classList.add('hidden');
-    const order = ['bullHighVol', 'bullLowVol', 'bearHighVol', 'bearLowVol'];
+    const order = ['bullHighVol', 'rangeBound', 'bearHighVol'];
     container.innerHTML = order.map((key) => {
         const style = TREND_STYLE_MAP[key] || {};
         const stats = summary.aggregatedByType?.[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: null };
