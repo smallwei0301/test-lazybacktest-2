@@ -1,5 +1,6 @@
 
 importScripts('shared-lookback.js');
+importScripts('config.js');
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
@@ -14,6 +15,12 @@ importScripts('shared-lookback.js');
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-BLOB-RANGE-20250708A
+
+// Patch Tag: LB-SENSITIVITY-GRID-20250715A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-BLOB-CURRENT-20250730A
+// Patch Tag: LB-BLOB-CURRENT-20250802B
+
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -25,6 +32,11 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
+const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
+const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
@@ -2166,6 +2178,182 @@ function tryResolveRangeFromYearSuperset({
   };
 }
 
+function addDaysIso(isoDate, days) {
+  if (!isoDate || typeof isoDate !== "string") return null;
+  const base = new Date(isoDate);
+  if (Number.isNaN(base.getTime())) return null;
+  const copy = new Date(base);
+  copy.setDate(copy.getDate() + days);
+  return copy.toISOString().split("T")[0];
+}
+
+async function fetchCurrentMonthGapPatch({
+  stockNo,
+  marketKey,
+  gapStartISO,
+  gapEndISO,
+  startDateObj,
+  endDateObj,
+  primaryForceSource,
+  fallbackForceSource,
+}) {
+  const patchInfo = {
+    status: "skipped",
+    start: gapStartISO,
+    end: gapEndISO,
+    months: [],
+    sources: [],
+    attempts: [],
+    rows: 0,
+  };
+  if (!gapStartISO || !gapEndISO) {
+    patchInfo.status = "invalid-range";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  const startObj = new Date(gapStartISO);
+  const endObj = new Date(gapEndISO);
+  if (
+    Number.isNaN(startObj.getTime()) ||
+    Number.isNaN(endObj.getTime()) ||
+    startObj > endObj
+  ) {
+    patchInfo.status = "invalid-range";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  const months = enumerateMonths(startObj, endObj);
+  if (!Array.isArray(months) || months.length === 0) {
+    patchInfo.status = "no-month";
+    return { diagnostics: patchInfo, rows: [] };
+  }
+
+  let proxyPath = "/api/twse/";
+  if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  const isTpex = marketKey === "TPEX";
+  const aggregatedRows = [];
+  const aggregatedSources = new Set();
+  patchInfo.status = "pending";
+  const startedAt = Date.now();
+
+  for (let m = 0; m < months.length; m += 1) {
+    const monthInfo = months[m];
+    const monthStartISO = monthInfo.rangeStartISO > gapStartISO
+      ? monthInfo.rangeStartISO
+      : gapStartISO;
+    const monthEndISO = monthInfo.rangeEndISO < gapEndISO
+      ? monthInfo.rangeEndISO
+      : gapEndISO;
+    patchInfo.months.push({
+      month: monthInfo.monthKey,
+      start: monthStartISO,
+      end: monthEndISO,
+    });
+
+    const candidateSources = [null];
+    if (primaryForceSource) candidateSources.push(primaryForceSource);
+    if (
+      fallbackForceSource &&
+      fallbackForceSource !== primaryForceSource
+    ) {
+      candidateSources.push(fallbackForceSource);
+    }
+
+    let payload = null;
+    let lastError = null;
+    for (let c = 0; c < candidateSources.length; c += 1) {
+      const forceSource = candidateSources[c];
+      const params = new URLSearchParams({
+        stockNo,
+        month: monthInfo.monthKey,
+        start: monthStartISO,
+        end: monthEndISO,
+      });
+      if (forceSource) {
+        params.set("forceSource", forceSource);
+        params.set(
+          "cacheBust",
+          `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        );
+      }
+      const attempt = {
+        month: monthInfo.monthKey,
+        source: forceSource || "auto",
+        url: `${proxyPath}?${params.toString()}`,
+        success: false,
+        error: null,
+      };
+      try {
+        const responsePayload = await fetchWithAdaptiveRetry(attempt.url, {
+          headers: { Accept: "application/json" },
+        });
+        if (responsePayload?.error) {
+          throw new Error(responsePayload.error);
+        }
+        payload = responsePayload;
+        attempt.success = true;
+        if (forceSource) {
+          aggregatedSources.add(`force:${forceSource}`);
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        attempt.error = error?.message || String(error);
+        payload = null;
+      } finally {
+        patchInfo.attempts.push(attempt);
+      }
+    }
+
+    if (!payload) {
+      if (lastError) {
+        console.warn(
+          `[Worker] ${stockNo} ${monthInfo.monthKey} ${monthStartISO}~${monthEndISO} 當月缺口補抓失敗：`,
+          lastError,
+        );
+      }
+      // 若該月份缺口抓取失敗，進入下一個月份
+      continue;
+    }
+
+    if (payload?.stockName) {
+      aggregatedSources.add(`name:${payload.stockName}`);
+    }
+    const rows = Array.isArray(payload?.aaData)
+      ? payload.aaData
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+    rows.forEach((row) => {
+      const normalized = normalizeProxyRow(
+        row,
+        isTpex,
+        startDateObj,
+        endDateObj,
+      );
+      if (
+        normalized &&
+        normalized.date &&
+        normalized.date >= gapStartISO &&
+        normalized.date <= gapEndISO
+      ) {
+        aggregatedRows.push(normalized);
+      }
+    });
+    if (typeof payload?.dataSource === "string" && payload.dataSource) {
+      aggregatedSources.add(payload.dataSource);
+    }
+  }
+
+  const dedupedRows = dedupeAndSortData(aggregatedRows);
+  patchInfo.rows = dedupedRows.length;
+  patchInfo.sources = Array.from(aggregatedSources);
+  patchInfo.durationMs = Date.now() - startedAt;
+  patchInfo.status = dedupedRows.length > 0 ? "success" : "no-data";
+
+  return { diagnostics: patchInfo, rows: dedupedRows };
+}
+
 async function tryFetchRangeFromBlob({
   stockNo,
   startDate,
@@ -2175,6 +2363,8 @@ async function tryFetchRangeFromBlob({
   endDateObj,
   optionEffectiveStart,
   optionLookbackDays,
+  primaryForceSource,
+  fallbackForceSource,
   fetchDiagnostics,
   cacheKey,
   split,
@@ -2266,7 +2456,7 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  const deduped = dedupeAndSortData(normalizedRows);
+  let deduped = dedupeAndSortData(normalizedRows);
   if (deduped.length === 0) {
     rangeFetchInfo.status = "empty";
     rangeFetchInfo.durationMs = Date.now() - startedAt;
@@ -2276,14 +2466,16 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  const firstDate = deduped[0]?.date || null;
-  const lastDate = deduped[deduped.length - 1]?.date || null;
-  const firstDateObj = firstDate ? new Date(firstDate) : null;
-  const lastDateObj = lastDate ? new Date(lastDate) : null;
-  const startGapRaw = firstDateObj ? differenceInDays(firstDateObj, startDateObj) : null;
-  const endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
-  const startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
-  const endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+  let firstDate = deduped[0]?.date || null;
+  let lastDate = deduped[deduped.length - 1]?.date || null;
+  let firstDateObj = firstDate ? new Date(firstDate) : null;
+  let lastDateObj = lastDate ? new Date(lastDate) : null;
+  let startGapRaw = firstDateObj
+    ? differenceInDays(firstDateObj, startDateObj)
+    : null;
+  let endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+  let startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+  let endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
   const blobMeta = payload?.meta || {};
   rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
@@ -2296,6 +2488,104 @@ async function tryFetchRangeFromBlob({
   rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
   rangeFetchInfo.durationMs = Date.now() - startedAt;
   rangeFetchInfo.dataSource = payload?.dataSource || null;
+  rangeFetchInfo.firstDate = firstDate;
+  rangeFetchInfo.lastDate = lastDate;
+
+  const now = new Date();
+  const todayUtcYear = now.getUTCFullYear();
+  const todayUtcMonth = now.getUTCMonth();
+  const todayUtcDate = now.getUTCDate();
+  const todayUtcMs = Date.UTC(todayUtcYear, todayUtcMonth, todayUtcDate);
+  const endUtcYear = endDateObj.getUTCFullYear();
+  const endUtcMonth = endDateObj.getUTCMonth();
+  const isCurrentMonthRequest =
+    endUtcYear === todayUtcYear && endUtcMonth === todayUtcMonth;
+  let targetLatestISO = null;
+  let currentMonthGapDays = null;
+  if (isCurrentMonthRequest) {
+    const targetLatestMs = Math.min(endDateObj.getTime(), todayUtcMs);
+    const targetLatestDate = new Date(targetLatestMs);
+    targetLatestISO = targetLatestDate.toISOString().split("T")[0];
+    if (lastDate) {
+      if (lastDate < targetLatestISO) {
+        const targetLatestObj = new Date(targetLatestISO);
+        const lastDateObjForGap = new Date(lastDate);
+        const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+        currentMonthGapDays = Number.isFinite(gapDays) ? Math.max(0, gapDays) : null;
+      } else {
+        currentMonthGapDays = 0;
+      }
+    }
+  }
+  let normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+    ? currentMonthGapDays
+    : null;
+  rangeFetchInfo.currentMonthGuard = isCurrentMonthRequest;
+  rangeFetchInfo.targetLatestDate = targetLatestISO;
+  rangeFetchInfo.currentMonthGapDays = normalizedCurrentMonthGap;
+
+  if (
+    isCurrentMonthRequest &&
+    Number.isFinite(normalizedCurrentMonthGap) &&
+    normalizedCurrentMonthGap > 0
+  ) {
+    const patchStartISO = lastDate ? addDaysIso(lastDate, 1) : targetLatestISO;
+    const patchResult = await fetchCurrentMonthGapPatch({
+      stockNo,
+      marketKey,
+      gapStartISO: patchStartISO,
+      gapEndISO: targetLatestISO,
+      startDateObj,
+      endDateObj,
+      primaryForceSource,
+      fallbackForceSource,
+    });
+    rangeFetchInfo.patch = patchResult.diagnostics || {
+      status: "unknown",
+      start: patchStartISO,
+      end: targetLatestISO,
+    };
+    fetchDiagnostics.patch = rangeFetchInfo.patch;
+    if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
+      deduped = dedupeAndSortData(deduped.concat(patchResult.rows));
+      firstDate = deduped[0]?.date || null;
+      lastDate = deduped[deduped.length - 1]?.date || null;
+      firstDateObj = firstDate ? new Date(firstDate) : null;
+      lastDateObj = lastDate ? new Date(lastDate) : null;
+      startGapRaw = firstDateObj
+        ? differenceInDays(firstDateObj, startDateObj)
+        : null;
+      endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+      startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+      endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+      if (targetLatestISO && lastDate) {
+        if (lastDate < targetLatestISO) {
+          const targetLatestObj = new Date(targetLatestISO);
+          const lastDateObjForGap = new Date(lastDate);
+          const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+          currentMonthGapDays = Number.isFinite(gapDays)
+            ? Math.max(0, gapDays)
+            : null;
+        } else {
+          currentMonthGapDays = 0;
+        }
+      }
+      normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+        ? currentMonthGapDays
+        : null;
+      rangeFetchInfo.rowCount = deduped.length;
+      rangeFetchInfo.firstDate = firstDate;
+      rangeFetchInfo.lastDate = lastDate;
+      rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
+      rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
+    }
+  } else {
+    rangeFetchInfo.patch = { status: "not-required" };
+    fetchDiagnostics.patch = rangeFetchInfo.patch;
+  }
+
+  rangeFetchInfo.currentMonthGapDays = normalizedCurrentMonthGap;
+  rangeFetchInfo.durationMs = Date.now() - startedAt;
 
   const startGapExceeded =
     Number.isFinite(startGap) && startGap > CRITICAL_START_GAP_TOLERANCE_DAYS;
@@ -2313,7 +2603,22 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
-  rangeFetchInfo.status = "success";
+  if (
+    isCurrentMonthRequest &&
+    Number.isFinite(normalizedCurrentMonthGap) &&
+    normalizedCurrentMonthGap > 0
+  ) {
+    rangeFetchInfo.status = "current-month-stale";
+    rangeFetchInfo.reason = "current-month-gap";
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
+        lastDate || "N/A"
+      } < expected=${targetLatestISO})，等待當日補齊。`,
+    );
+  } else {
+    rangeFetchInfo.status = "success";
+    delete rangeFetchInfo.reason;
+  }
 
   const dataStartDate = firstDate || startDate;
   const dataSourceFlags = new Set();
@@ -2635,6 +2940,8 @@ async function fetchStockData(
       endDateObj,
       optionEffectiveStart,
       optionLookbackDays,
+      primaryForceSource,
+      fallbackForceSource,
       fetchDiagnostics,
       cacheKey,
       split,
@@ -4967,13 +5274,17 @@ function runStrategy(data, params, options = {}) {
     console.error("傳遞給 runStrategy 的資料格式錯誤，收到了:", data);
     throw new TypeError("傳遞給 runStrategy 的資料格式錯誤，必須是陣列。");
   }
+  const { suppressProgress = false, skipSensitivity = false } =
+    typeof options === "object" && options !== null ? options : {};
   // --- 保護機制結束 ---
 
-  self.postMessage({
-    type: "progress",
-    progress: 70,
-    message: "回測模擬中...",
-  });
+  if (!suppressProgress) {
+    self.postMessage({
+      type: "progress",
+      progress: 70,
+      message: "回測模擬中...",
+    });
+  }
   const n = data.length;
   const { forceFinalLiquidation = true, captureFinalState = false } =
     typeof options === "object" && options ? options : {};
@@ -7577,7 +7888,9 @@ function runStrategy(data, params, options = {}) {
       }
     }
 
-    self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    if (!suppressProgress) {
+      self.postMessage({ type: "progress", progress: 100, message: "完成" });
+    }
     const visibleStartIdx = Math.max(0, effectiveStartIdx);
     const sliceArray = (arr) =>
       Array.isArray(arr) ? arr.slice(visibleStartIdx) : [];
@@ -7614,7 +7927,32 @@ function runStrategy(data, params, options = {}) {
       console.log("[Worker] Warmup summary", warmupSummary);
       console.log("[Worker] BuyHold summary", buyHoldSummary);
     }
-    const result = {
+
+
+    const shouldSkipSensitivity =
+      skipSensitivity || (params && params.__skipSensitivity);
+    let sensitivityAnalysis = null;
+    const baselineMetrics = {
+      returnRate: returnR,
+      annualizedReturn: annualR,
+      sharpeRatio: sharpeR,
+      sortinoRatio: sortinoR,
+    };
+    if (!shouldSkipSensitivity) {
+      try {
+        sensitivityAnalysis = computeParameterSensitivity({
+          data,
+          baseParams: params,
+          baselineMetrics,
+        });
+      } catch (sensitivityError) {
+        console.warn(
+          "[Worker] Failed to compute sensitivity grid:",
+          sensitivityError,
+        );
+      }
+    }
+    return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
       finalValue: finalV,
@@ -7668,6 +8006,8 @@ function runStrategy(data, params, options = {}) {
       longEntryStageStates: trimmedEntryStageStates,
       longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
+      parameterSensitivity: sensitivityAnalysis,
+      sensitivityAnalysis,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
@@ -7677,6 +8017,736 @@ function runStrategy(data, params, options = {}) {
     console.error("Final calculation error:", finalError);
     throw new Error(`計算最終結果錯誤: ${finalError.message}`);
   }
+}
+
+function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
+  if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
+    return {
+      score: null,
+      driftPenalty: null,
+      sharpePenalty: null,
+    };
+  }
+  const driftPenalty = Number.isFinite(averageDrift)
+    ? Math.max(0, averageDrift)
+    : 0;
+  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
+    ? Math.max(0, averageSharpeDrop) * 100
+    : 0;
+  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
+  const baseScore = 100 - driftPenalty - sharpePenalty;
+  const score = Math.max(0, Math.min(100, baseScore));
+  return {
+    score,
+    driftPenalty,
+    sharpePenalty,
+  };
+}
+
+function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
+  if (!Array.isArray(data) || data.length === 0 || !baseParams) {
+    return null;
+  }
+  const contexts = buildSensitivityContexts(baseParams);
+  if (!Array.isArray(contexts) || contexts.length === 0) {
+    return null;
+  }
+
+  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+    ? baselineMetrics.returnRate
+    : 0;
+  const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
+    ? baselineMetrics.sharpeRatio
+    : null;
+
+  const summaryAccumulator = {
+    driftValues: [],
+    positive: [],
+    negative: [],
+    sharpeDrops: [],
+    sharpeGains: [],
+    scenarioCount: 0,
+  };
+
+  const groups = contexts
+    .map((ctx) =>
+      buildSensitivityGroup({
+        context: ctx,
+        data,
+        baseParams,
+        baselineReturn,
+        baselineSharpe,
+        summaryAccumulator,
+      }),
+    )
+    .filter(Boolean);
+
+  if (groups.length === 0) {
+    return null;
+  }
+
+  const summaryAverage =
+    summaryAccumulator.driftValues.length > 0
+      ? summaryAccumulator.driftValues.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.driftValues.length
+      : null;
+  const summaryMax =
+    summaryAccumulator.driftValues.length > 0
+      ? Math.max(...summaryAccumulator.driftValues)
+      : null;
+  const summaryPositive =
+    summaryAccumulator.positive.length > 0
+      ? summaryAccumulator.positive.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.positive.length
+      : null;
+  const summaryNegative =
+    summaryAccumulator.negative.length > 0
+      ? summaryAccumulator.negative.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.negative.length
+      : null;
+  const summarySharpeDrop =
+    summaryAccumulator.sharpeDrops.length > 0
+      ? summaryAccumulator.sharpeDrops.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.sharpeDrops.length
+      : null;
+  const summarySharpeGain =
+    summaryAccumulator.sharpeGains.length > 0
+      ? summaryAccumulator.sharpeGains.reduce((sum, val) => sum + val, 0) /
+        summaryAccumulator.sharpeGains.length
+      : null;
+
+  const stabilityComponents = evaluateSensitivityStability(
+    summaryAverage,
+    summarySharpeDrop,
+  );
+  const stabilityScore = stabilityComponents.score;
+
+  return {
+    version: SENSITIVITY_GRID_VERSION,
+    gridConfig: {
+      relativeSteps: SENSITIVITY_RELATIVE_STEPS.map((step) =>
+        Number((step * 100).toFixed(1)),
+      ),
+      absoluteMultipliers: SENSITIVITY_ABSOLUTE_MULTIPLIERS.slice(),
+    },
+    summary: {
+      averageDriftPercent: summaryAverage,
+      maxDriftPercent: summaryMax,
+      stabilityScore,
+      stabilityComponents: {
+        version: SENSITIVITY_SCORE_VERSION,
+        driftPenalty: stabilityComponents.driftPenalty,
+        sharpePenalty: stabilityComponents.sharpePenalty,
+      },
+      positiveDriftPercent: summaryPositive,
+      negativeDriftPercent: summaryNegative,
+      averageSharpeDrop: summarySharpeDrop,
+      averageSharpeGain: summarySharpeGain,
+      scenarioCount: summaryAccumulator.scenarioCount,
+    },
+    baseline: {
+      returnRate: baselineReturn,
+      annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
+        ? baselineMetrics.annualizedReturn
+        : null,
+      sharpeRatio: baselineSharpe,
+    },
+    groups,
+  };
+}
+
+function buildSensitivityGroup({
+  context,
+  data,
+  baseParams,
+  baselineReturn,
+  baselineSharpe,
+  summaryAccumulator,
+}) {
+  const paramEntries = Object.entries(context.params || {})
+    .filter(([_, value]) => Number.isFinite(value))
+    .map(([key, value]) => ({ key, value }));
+  if (paramEntries.length === 0) {
+    return null;
+  }
+
+  const parameters = paramEntries
+    .map((entry) =>
+      evaluateSensitivityParameter({
+        context,
+        paramName: entry.key,
+        baseValue: entry.value,
+        data,
+        baseParams,
+        baselineReturn,
+        baselineSharpe,
+        summaryAccumulator,
+      }),
+    )
+    .filter(Boolean);
+
+  if (parameters.length === 0) {
+    return null;
+  }
+
+  const validAvg = parameters
+    .map((p) => (Number.isFinite(p.averageDriftPercent) ? p.averageDriftPercent : null))
+    .filter((value) => value !== null);
+  const groupAverage =
+    validAvg.length > 0
+      ? validAvg.reduce((sum, val) => sum + val, 0) / validAvg.length
+      : null;
+  const validMax = parameters
+    .map((p) => (Number.isFinite(p.maxDriftPercent) ? p.maxDriftPercent : null))
+    .filter((value) => value !== null);
+  const groupMax =
+    validMax.length > 0 ? Math.max(...validMax) : null;
+  const validPositive = parameters
+    .map((p) =>
+      Number.isFinite(p.positiveDriftPercent) ? p.positiveDriftPercent : null,
+    )
+    .filter((value) => value !== null);
+  const groupPositive =
+    validPositive.length > 0
+      ? validPositive.reduce((sum, val) => sum + val, 0) / validPositive.length
+      : null;
+  const validNegative = parameters
+    .map((p) =>
+      Number.isFinite(p.negativeDriftPercent) ? p.negativeDriftPercent : null,
+    )
+    .filter((value) => value !== null);
+  const groupNegative =
+    validNegative.length > 0
+      ? validNegative.reduce((sum, val) => sum + val, 0) / validNegative.length
+      : null;
+  const validSharpeDrop = parameters
+    .map((p) =>
+      Number.isFinite(p.averageSharpeDrop) ? p.averageSharpeDrop : null,
+    )
+    .filter((value) => value !== null);
+  const groupSharpeDrop =
+    validSharpeDrop.length > 0
+      ? validSharpeDrop.reduce((sum, val) => sum + val, 0) / validSharpeDrop.length
+      : null;
+  const validSharpeGain = parameters
+    .map((p) =>
+      Number.isFinite(p.averageSharpeGain) ? p.averageSharpeGain : null,
+    )
+    .filter((value) => value !== null);
+  const groupSharpeGain =
+    validSharpeGain.length > 0
+      ? validSharpeGain.reduce((sum, val) => sum + val, 0) /
+        validSharpeGain.length
+      : null;
+  const groupStabilityComponents = evaluateSensitivityStability(
+    groupAverage,
+    groupSharpeDrop,
+  );
+  const groupScore = groupStabilityComponents.score;
+
+  return {
+    key: context.key,
+    label: context.label,
+    strategy: context.strategy,
+    scenarioCount: parameters.reduce(
+      (sum, param) => sum + (param.scenarioCount || 0),
+      0,
+    ),
+    averageDriftPercent: groupAverage,
+    stabilityScore: groupScore,
+    maxDriftPercent: groupMax,
+    positiveDriftPercent: groupPositive,
+    negativeDriftPercent: groupNegative,
+    averageSharpeDrop: groupSharpeDrop,
+    averageSharpeGain: groupSharpeGain,
+    stabilityComponents: {
+      version: SENSITIVITY_SCORE_VERSION,
+      driftPenalty: groupStabilityComponents.driftPenalty,
+      sharpePenalty: groupStabilityComponents.sharpePenalty,
+    },
+    parameters,
+  };
+}
+
+function evaluateSensitivityParameter({
+  context,
+  paramName,
+  baseValue,
+  data,
+  baseParams,
+  baselineReturn,
+  baselineSharpe,
+  summaryAccumulator,
+}) {
+  if (!Number.isFinite(baseValue)) {
+    return null;
+  }
+  const meta = context.metaMap.get(paramName) || null;
+  const adjustments = generateSensitivityAdjustments(baseValue, meta);
+  if (adjustments.length === 0) {
+    return null;
+  }
+
+  const absoluteDrifts = [];
+  const positiveDeltas = [];
+  const negativeDeltas = [];
+  const sharpeDrops = [];
+  const sharpeGains = [];
+  const scenarios = [];
+
+  adjustments.forEach((adjustment) => {
+    const scenarioParams = cloneParamsForSensitivity(baseParams);
+    applyParamValueForContext(scenarioParams, context, paramName, adjustment.value);
+    let scenarioResult = null;
+    try {
+      scenarioResult = runStrategy(data, scenarioParams, {
+        suppressProgress: true,
+        skipSensitivity: true,
+      });
+    } catch (scenarioError) {
+      console.warn(
+        `[Worker Sensitivity] ${context.key}.${paramName} ${adjustment.label} 失敗:`,
+        scenarioError,
+      );
+    }
+
+    if (scenarioResult && typeof scenarioResult === "object") {
+      const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
+        ? scenarioResult.returnRate
+        : null;
+      const deltaReturn =
+        Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
+          ? scenarioReturn - baselineReturn
+          : null;
+      const driftPercent =
+        Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
+      const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
+        ? scenarioResult.sharpeRatio
+        : null;
+      let deltaSharpe = null;
+      if (Number.isFinite(scenarioSharpe) && Number.isFinite(baselineSharpe)) {
+        deltaSharpe = scenarioSharpe - baselineSharpe;
+      } else if (Number.isFinite(scenarioSharpe) && baselineSharpe === null) {
+        deltaSharpe = scenarioSharpe;
+      } else if (
+        scenarioSharpe === null &&
+        Number.isFinite(baselineSharpe)
+      ) {
+        deltaSharpe = -baselineSharpe;
+      }
+
+      if (Number.isFinite(driftPercent)) {
+        absoluteDrifts.push(driftPercent);
+        summaryAccumulator.driftValues.push(driftPercent);
+        summaryAccumulator.scenarioCount += 1;
+      }
+      if (Number.isFinite(deltaReturn)) {
+        if (deltaReturn >= 0) {
+          positiveDeltas.push(deltaReturn);
+          summaryAccumulator.positive.push(deltaReturn);
+        } else {
+          negativeDeltas.push(deltaReturn);
+          summaryAccumulator.negative.push(deltaReturn);
+        }
+      }
+      if (Number.isFinite(deltaSharpe)) {
+        if (deltaSharpe >= 0) {
+          sharpeGains.push(deltaSharpe);
+          summaryAccumulator.sharpeGains.push(deltaSharpe);
+        } else {
+          const sharpeDrop = Math.abs(deltaSharpe);
+          sharpeDrops.push(sharpeDrop);
+          summaryAccumulator.sharpeDrops.push(sharpeDrop);
+        }
+      }
+
+      scenarios.push({
+        label: adjustment.label,
+        type: adjustment.type,
+        direction: adjustment.direction,
+        value: adjustment.value,
+        deltaReturn,
+        driftPercent,
+        deltaSharpe,
+        run: {
+          returnRate: scenarioReturn,
+          annualizedReturn: Number.isFinite(
+            scenarioResult.annualizedReturn
+          )
+            ? scenarioResult.annualizedReturn
+            : null,
+          sharpeRatio: scenarioSharpe,
+        },
+      });
+    } else {
+      scenarios.push({
+        label: adjustment.label,
+        type: adjustment.type,
+        direction: adjustment.direction,
+        value: adjustment.value,
+        deltaReturn: null,
+        driftPercent: null,
+        deltaSharpe: null,
+        run: null,
+        error: true,
+      });
+    }
+  });
+
+  if (scenarios.length === 0) {
+    return null;
+  }
+
+  const avgDrift =
+    absoluteDrifts.length > 0
+      ? absoluteDrifts.reduce((sum, val) => sum + val, 0) /
+        absoluteDrifts.length
+      : null;
+  const maxDrift =
+    absoluteDrifts.length > 0 ? Math.max(...absoluteDrifts) : null;
+  const positiveBias =
+    positiveDeltas.length > 0
+      ? positiveDeltas.reduce((sum, val) => sum + val, 0) /
+        positiveDeltas.length
+      : null;
+  const negativeBias =
+    negativeDeltas.length > 0
+      ? negativeDeltas.reduce((sum, val) => sum + val, 0) /
+        negativeDeltas.length
+      : null;
+  const avgSharpeDrop =
+    sharpeDrops.length > 0
+      ? sharpeDrops.reduce((sum, val) => sum + val, 0) / sharpeDrops.length
+      : null;
+  const avgSharpeGain =
+    sharpeGains.length > 0
+      ? sharpeGains.reduce((sum, val) => sum + val, 0) / sharpeGains.length
+      : null;
+  const stabilityComponents = evaluateSensitivityStability(
+    avgDrift,
+    avgSharpeDrop,
+  );
+  const stabilityScore = stabilityComponents.score;
+
+  return {
+    key: paramName,
+    name: resolveParamLabel(paramName, meta, context),
+    baseValue,
+    scenarios,
+    scenarioCount: scenarios.filter((s) => s && s.run).length,
+    averageDriftPercent: avgDrift,
+    maxDriftPercent: maxDrift,
+    positiveDriftPercent: positiveBias,
+    negativeDriftPercent: negativeBias,
+    averageSharpeDrop: avgSharpeDrop,
+    averageSharpeGain: avgSharpeGain,
+    stabilityScore,
+    stabilityComponents: {
+      version: SENSITIVITY_SCORE_VERSION,
+      driftPenalty: stabilityComponents.driftPenalty,
+      sharpePenalty: stabilityComponents.sharpePenalty,
+    },
+  };
+}
+
+function buildSensitivityContexts(baseParams) {
+  const contexts = [];
+  if (
+    baseParams.entryStrategy &&
+    baseParams.entryParams &&
+    typeof baseParams.entryParams === "object"
+  ) {
+    contexts.push({
+      key: "entry",
+      type: "entry",
+      label: `進場｜${resolveStrategyName(baseParams.entryStrategy)}`,
+      strategy: baseParams.entryStrategy,
+      params: baseParams.entryParams,
+      metaMap: buildParamMetaMap(baseParams.entryStrategy),
+    });
+  }
+  if (
+    baseParams.exitStrategy &&
+    baseParams.exitParams &&
+    typeof baseParams.exitParams === "object"
+  ) {
+    contexts.push({
+      key: "exit",
+      type: "exit",
+      label: `出場｜${resolveStrategyName(baseParams.exitStrategy)}`,
+      strategy: baseParams.exitStrategy,
+      params: baseParams.exitParams,
+      metaMap: buildParamMetaMap(baseParams.exitStrategy),
+    });
+  }
+  if (
+    baseParams.enableShorting &&
+    baseParams.shortEntryStrategy &&
+    baseParams.shortEntryParams &&
+    typeof baseParams.shortEntryParams === "object"
+  ) {
+    contexts.push({
+      key: "shortEntry",
+      type: "shortEntry",
+      label: `做空進場｜${resolveStrategyName(baseParams.shortEntryStrategy)}`,
+      strategy: baseParams.shortEntryStrategy,
+      params: baseParams.shortEntryParams,
+      metaMap: buildParamMetaMap(baseParams.shortEntryStrategy),
+    });
+  }
+  if (
+    baseParams.enableShorting &&
+    baseParams.shortExitStrategy &&
+    baseParams.shortExitParams &&
+    typeof baseParams.shortExitParams === "object"
+  ) {
+    contexts.push({
+      key: "shortExit",
+      type: "shortExit",
+      label: `回補出場｜${resolveStrategyName(baseParams.shortExitStrategy)}`,
+      strategy: baseParams.shortExitStrategy,
+      params: baseParams.shortExitParams,
+      metaMap: buildParamMetaMap(baseParams.shortExitStrategy),
+    });
+  }
+
+  const riskParams = {};
+  if (Number.isFinite(baseParams.stopLoss)) {
+    riskParams.stopLoss = baseParams.stopLoss;
+  }
+  if (Number.isFinite(baseParams.takeProfit)) {
+    riskParams.takeProfit = baseParams.takeProfit;
+  }
+  if (Object.keys(riskParams).length > 0) {
+    contexts.push({
+      key: "risk",
+      type: "risk",
+      label: "風險管理",
+      strategy: "global_risk",
+      params: riskParams,
+      metaMap: buildRiskMetaMap(),
+    });
+  }
+
+  return contexts;
+}
+
+function resolveStrategyName(strategyKey) {
+  if (!strategyKey) return "未設定";
+  if (typeof strategyDescriptions === "object" && strategyDescriptions) {
+    const desc = strategyDescriptions[strategyKey];
+    if (desc && typeof desc.name === "string") {
+      return desc.name;
+    }
+  }
+  return strategyKey;
+}
+
+function resolveParamLabel(paramName, meta, context) {
+  if (meta && typeof meta.label === "string") {
+    return meta.label;
+  }
+  if (
+    context &&
+    context.metaMap &&
+    typeof context.metaMap.get === "function" &&
+    context.metaMap.get(paramName)
+  ) {
+    const metaEntry = context.metaMap.get(paramName);
+    if (metaEntry && typeof metaEntry.label === "string") {
+      return metaEntry.label;
+    }
+  }
+  return paramName;
+}
+
+function buildParamMetaMap(strategyKey) {
+  const map = new Map();
+  if (
+    typeof strategyDescriptions === "object" &&
+    strategyDescriptions &&
+    strategyDescriptions[strategyKey] &&
+    Array.isArray(strategyDescriptions[strategyKey].optimizeTargets)
+  ) {
+    strategyDescriptions[strategyKey].optimizeTargets.forEach((target) => {
+      if (target && target.name) {
+        map.set(target.name, target);
+      }
+    });
+  }
+  return map;
+}
+
+function buildRiskMetaMap() {
+  const map = new Map();
+  if (
+    typeof globalOptimizeTargets === "object" &&
+    globalOptimizeTargets !== null
+  ) {
+    Object.entries(globalOptimizeTargets).forEach(([key, target]) => {
+      if (target && target.label) {
+        map.set(key, target);
+      }
+    });
+  }
+  return map;
+}
+
+function cloneParamsForSensitivity(baseParams) {
+  const clone = {
+    ...baseParams,
+    entryParams: {
+      ...(baseParams.entryParams && typeof baseParams.entryParams === "object"
+        ? baseParams.entryParams
+        : {}),
+    },
+    exitParams: {
+      ...(baseParams.exitParams && typeof baseParams.exitParams === "object"
+        ? baseParams.exitParams
+        : {}),
+    },
+    shortEntryParams: {
+      ...(baseParams.shortEntryParams &&
+      typeof baseParams.shortEntryParams === "object"
+        ? baseParams.shortEntryParams
+        : {}),
+    },
+    shortExitParams: {
+      ...(baseParams.shortExitParams &&
+      typeof baseParams.shortExitParams === "object"
+        ? baseParams.shortExitParams
+        : {}),
+    },
+  };
+  if (Array.isArray(baseParams.entryStages)) {
+    clone.entryStages = baseParams.entryStages.slice();
+  }
+  if (Array.isArray(baseParams.exitStages)) {
+    clone.exitStages = baseParams.exitStages.slice();
+  }
+  clone.__skipSensitivity = true;
+  return clone;
+}
+
+function applyParamValueForContext(targetParams, context, paramName, value) {
+  if (!context || !paramName) return;
+  switch (context.type) {
+    case "entry":
+      targetParams.entryParams = {
+        ...(targetParams.entryParams || {}),
+        [paramName]: value,
+      };
+      break;
+    case "exit":
+      targetParams.exitParams = {
+        ...(targetParams.exitParams || {}),
+        [paramName]: value,
+      };
+      break;
+    case "shortEntry":
+      targetParams.shortEntryParams = {
+        ...(targetParams.shortEntryParams || {}),
+        [paramName]: value,
+      };
+      break;
+    case "shortExit":
+      targetParams.shortExitParams = {
+        ...(targetParams.shortExitParams || {}),
+        [paramName]: value,
+      };
+      break;
+    case "risk":
+      targetParams[paramName] = value;
+      break;
+    default:
+      targetParams[paramName] = value;
+      break;
+  }
+}
+
+function generateSensitivityAdjustments(baseValue, meta) {
+  const candidates = new Map();
+  const range = meta && typeof meta.range === "object" ? meta.range : null;
+  const stepCandidate =
+    range && Number.isFinite(range.step) && range.step > 0 ? range.step : null;
+
+  const addCandidate = (label, value, type, direction) => {
+    if (!Number.isFinite(value)) return;
+    if (baseValue > 0 && value <= 0) return;
+    const normalised = normaliseCandidateValue(
+      value,
+      range,
+      baseValue,
+      stepCandidate,
+    );
+    if (!Number.isFinite(normalised)) return;
+    const key = normalised.toFixed(6);
+    if (candidates.has(key)) return;
+    candidates.set(key, {
+      label,
+      value: normalised,
+      type,
+      direction,
+    });
+  };
+
+  SENSITIVITY_RELATIVE_STEPS.forEach((ratio) => {
+    const positiveValue = baseValue * (1 + ratio);
+    const negativeValue = baseValue * (1 - ratio);
+    addCandidate(`+${Math.round(ratio * 100)}%`, positiveValue, "relative", "increase");
+    addCandidate(`-${Math.round(ratio * 100)}%`, negativeValue, "relative", "decrease");
+  });
+
+  let stepValue = stepCandidate;
+  if (!Number.isFinite(stepValue) || stepValue <= 0) {
+    stepValue = Number.isInteger(baseValue) ? 1 : 0;
+  }
+  if (Number.isFinite(stepValue) && stepValue > 0) {
+    SENSITIVITY_ABSOLUTE_MULTIPLIERS.forEach((multiplier) => {
+      const delta = stepValue * multiplier;
+      const labelValue = formatAbsoluteLabel(delta);
+      addCandidate(`+${labelValue}`, baseValue + delta, "absolute", "increase");
+      addCandidate(`-${labelValue}`, baseValue - delta, "absolute", "decrease");
+    });
+  }
+
+  const ordered = Array.from(candidates.values());
+  return ordered.slice(0, SENSITIVITY_MAX_SCENARIOS_PER_PARAM);
+}
+
+function normaliseCandidateValue(value, range, baseValue, stepCandidate) {
+  let candidate = value;
+  if (Number.isFinite(stepCandidate) && stepCandidate > 0) {
+    candidate = Math.round(candidate / stepCandidate) * stepCandidate;
+  }
+  if (
+    Number.isInteger(baseValue) &&
+    (!Number.isFinite(stepCandidate) || Number.isInteger(stepCandidate))
+  ) {
+    candidate = Math.round(candidate);
+  }
+  candidate = Number(candidate.toFixed(6));
+  if (!Number.isFinite(candidate)) return NaN;
+  if (range) {
+    if (Number.isFinite(range.from) && candidate < range.from) {
+      return NaN;
+    }
+    if (Number.isFinite(range.to) && candidate > range.to) {
+      return NaN;
+    }
+  }
+  if (Math.abs(candidate - baseValue) < 1e-6) {
+    return NaN;
+  }
+  return candidate;
+}
+
+function formatAbsoluteLabel(value) {
+  if (!Number.isFinite(value)) return value;
+  if (Math.abs(value) >= 1) {
+    return Number(value.toFixed(0)).toString();
+  }
+  return Number(value.toFixed(2)).toString();
 }
 
 // --- 參數優化邏輯 ---
@@ -8451,6 +9521,7 @@ self.onmessage = async function (e) {
       if (params.endDate && latestDate && latestDate > params.endDate) {
         notes.push(`已延伸資料至 ${latestDate}，超過原設定結束日 ${params.endDate}。`);
       }
+
 
       const suggestionPayload = {
         status: "ok",
