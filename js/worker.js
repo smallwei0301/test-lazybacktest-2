@@ -5290,6 +5290,13 @@ function runStrategy(data, params, options = {}) {
   const { forceFinalLiquidation = true, captureFinalState = false } =
     typeof options === "object" && options ? options : {};
   let finalEvaluation = null;
+  let finalEvaluationIndex = null;
+  let lastValidEvaluation = null;
+  let lastValidEvaluationIndex = null;
+  let finalEvaluationFallbackReason = null;
+  let finalEvaluationFallbackMeta = null;
+  let finalStateReason = null;
+  let finalStateFallback = null;
   const lastIdx = n - 1;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
@@ -7308,8 +7315,8 @@ function runStrategy(data, params, options = {}) {
       initialCapital > 0
         ? ((portfolioVal[i] - initialCapital) / initialCapital) * 100
         : 0;
-    if (captureFinalState && i === lastIdx) {
-      finalEvaluation = {
+    if (captureFinalState) {
+      const evaluationSnapshot = {
         date: dates[i],
         open: curO,
         high: curH,
@@ -7337,6 +7344,12 @@ function runStrategy(data, params, options = {}) {
         longEntryState: longEntryStageStates[i],
         longExitState: longExitStageStates[i],
       };
+      lastValidEvaluation = evaluationSnapshot;
+      lastValidEvaluationIndex = i;
+      if (i === lastIdx) {
+        finalEvaluation = evaluationSnapshot;
+        finalEvaluationIndex = i;
+      }
     }
     peakCap = Math.max(peakCap, portfolioVal[i]);
     const drawdown =
@@ -7526,6 +7539,51 @@ function runStrategy(data, params, options = {}) {
       } else {
         curCL = 0;
       }
+    }
+
+    if (captureFinalState && !finalEvaluation && lastValidEvaluation) {
+      const requestedLastDate = dates[lastIdx] || null;
+      const fallbackFromDate =
+        lastValidEvaluation?.date ||
+        (lastValidEvaluationIndex !== null && lastValidEvaluationIndex >= 0
+          ? dates[lastValidEvaluationIndex] || null
+          : null);
+      const fallbackLagBars =
+        lastValidEvaluationIndex !== null && lastValidEvaluationIndex >= 0
+          ? lastIdx - lastValidEvaluationIndex
+          : null;
+      const fallbackLagDays =
+        fallbackFromDate && requestedLastDate
+          ? diffIsoDays(fallbackFromDate, requestedLastDate)
+          : null;
+      const missingFinalClose =
+        lastIdx >= 0 && (!check(closes[lastIdx]) || closes[lastIdx] <= 0);
+      finalEvaluationFallbackReason = "final_evaluation_degraded_missing_price";
+      finalEvaluationFallbackMeta = {
+        fallback: true,
+        fallbackReason: finalEvaluationFallbackReason,
+        fallbackFromIndex: lastValidEvaluationIndex,
+        fallbackFromDate,
+        requestedLastIndex: lastIdx,
+        requestedLastDate,
+        fallbackLagBars,
+        fallbackLagDays,
+        missingFinalClose,
+      };
+      const fallbackEvaluation = { ...lastValidEvaluation };
+      fallbackEvaluation.meta = {
+        ...(lastValidEvaluation?.meta || {}),
+        ...finalEvaluationFallbackMeta,
+      };
+      finalEvaluation = fallbackEvaluation;
+      finalEvaluationIndex = lastValidEvaluationIndex;
+    }
+    if (!finalEvaluation && captureFinalState) {
+      finalStateReason = "final_evaluation_missing";
+    }
+    if (finalEvaluationFallbackMeta) {
+      finalStateReason = finalEvaluationFallbackReason;
+      finalStateFallback = finalEvaluationFallbackMeta;
     }
 
   let annualR = 0;
@@ -7910,6 +7968,7 @@ function runStrategy(data, params, options = {}) {
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
     const trimmedEntryStageStates = sliceArray(longEntryStageStates);
     const trimmedExitStageStates = sliceArray(longExitStageStates);
+    const datasetLastDate = dates[lastIdx] || null;
     let finalStateSnapshot = null;
     if (n > 0 && lastIdx >= 0) {
       finalStateSnapshot = {
@@ -7931,6 +7990,24 @@ function runStrategy(data, params, options = {}) {
           : null,
       };
     }
+    if (finalStateSnapshot && finalEvaluationFallbackMeta) {
+      finalStateSnapshot.latestValidDate =
+        finalEvaluationFallbackMeta.fallbackFromDate || finalStateSnapshot.date;
+      finalStateSnapshot.requestedLastDate =
+        finalEvaluationFallbackMeta.requestedLastDate || finalStateSnapshot.date;
+      if (Number.isFinite(finalEvaluationFallbackMeta.fallbackLagDays)) {
+        finalStateSnapshot.fallbackLagDays =
+          finalEvaluationFallbackMeta.fallbackLagDays;
+      }
+      if (Number.isFinite(finalEvaluationFallbackMeta.fallbackLagBars)) {
+        finalStateSnapshot.fallbackLagBars =
+          finalEvaluationFallbackMeta.fallbackLagBars;
+      }
+      if (typeof finalEvaluationFallbackMeta.missingFinalClose === "boolean") {
+        finalStateSnapshot.missingFinalClose =
+          finalEvaluationFallbackMeta.missingFinalClose;
+      }
+    }
     const pendingTradeSnapshot = pendingNextDayTrade
       ? {
           type: pendingNextDayTrade.type || pendingNextDayTrade.kind || null,
@@ -7951,10 +8028,15 @@ function runStrategy(data, params, options = {}) {
         captured: Boolean(finalEvaluation),
         snapshot: finalStateSnapshot,
         pendingNextDayTrade: pendingTradeSnapshot,
-        reason:
-          !finalEvaluation && captureFinalState
-            ? "final_evaluation_missing"
-            : null,
+        reason: finalStateReason,
+        fallback: finalStateFallback,
+        evaluationIndex: finalEvaluationIndex,
+        datasetLastDate,
+        lastValidEvaluationDate:
+          lastValidEvaluation?.date ||
+          (lastValidEvaluationIndex !== null && lastValidEvaluationIndex >= 0
+            ? dates[lastValidEvaluationIndex] || null
+            : null),
       },
     };
     if (typeof console.groupCollapsed === "function") {
@@ -9691,8 +9773,19 @@ self.onmessage = async function (e) {
         evaluation.longState || (evaluation.longPos === 1 ? "持有" : "空手"),
         evaluation.shortState || (evaluation.shortPos === 1 ? "持有" : "空手"),
       );
+      const datasetLastDate = latestDate;
+      const evaluationMeta =
+        evaluation && typeof evaluation.meta === "object"
+          ? evaluation.meta
+          : {};
+      const evaluationDate = evaluation?.date || null;
+      const displayLatestDate = evaluationDate || datasetLastDate;
       const dataLagDays =
-        latestDate && todayISO ? diffIsoDays(latestDate, todayISO) : null;
+        displayLatestDate && todayISO
+          ? diffIsoDays(displayLatestDate, todayISO)
+          : null;
+      const developerNotes = [];
+      let issueCode = null;
       const notes = [];
       switch (actionInfo.action) {
         case "enter_long":
@@ -9718,10 +9811,54 @@ self.onmessage = async function (e) {
           break;
       }
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
-        notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
+        notes.push(`最新資料為 ${displayLatestDate}，距今日 ${dataLagDays} 日。`);
       }
-      if (params.endDate && latestDate && latestDate > params.endDate) {
-        notes.push(`已延伸資料至 ${latestDate}，超過原設定結束日 ${params.endDate}。`);
+      if (
+        params.endDate &&
+        datasetLastDate &&
+        datasetLastDate > params.endDate
+      ) {
+        notes.push(
+          `已延伸資料至 ${datasetLastDate}，超過原設定結束日 ${params.endDate}。`,
+        );
+      }
+      if (evaluationMeta && evaluationMeta.fallback) {
+        issueCode = evaluationMeta.fallbackReason || "final_evaluation_degraded";
+        const fallbackFromDate =
+          evaluationMeta.fallbackFromDate || evaluationDate || datasetLastDate;
+        const requestedLastDate =
+          evaluationMeta.requestedLastDate || datasetLastDate;
+        const fallbackReasonLabel =
+          evaluationMeta.fallbackReason ===
+          "final_evaluation_degraded_missing_price"
+            ? "最新交易日缺少有效收盤價"
+            : "最終評估已回退至前一有效資料";
+        notes.push(
+          `${fallbackReasonLabel}，已改以 ${fallbackFromDate || "前一交易日"} 的資料推導今日建議。`,
+        );
+        developerNotes.push(
+          `finalEvaluation fallback：${fallbackFromDate || "N/A"} ← ${
+            requestedLastDate || "N/A"
+          }`,
+        );
+        if (
+          Number.isFinite(evaluationMeta.fallbackLagDays) &&
+          evaluationMeta.fallbackLagDays > 0
+        ) {
+          notes.push(
+            `最新有效資料落後資料最後日期 ${evaluationMeta.fallbackLagDays} 日。`,
+          );
+          developerNotes.push(
+            `fallback 落後 ${evaluationMeta.fallbackLagDays} 日（bars=${
+              Number.isFinite(evaluationMeta.fallbackLagBars)
+                ? evaluationMeta.fallbackLagBars
+                : "N/A"
+            }）。`,
+          );
+        }
+        if (evaluationMeta.missingFinalClose) {
+          developerNotes.push("最新資料列缺少有效收盤價");
+        }
       }
 
       const suggestionPayload = {
@@ -9729,7 +9866,7 @@ self.onmessage = async function (e) {
         action: actionInfo.action,
         label: actionInfo.label,
         tone: actionInfo.tone,
-        latestDate,
+        latestDate: displayLatestDate,
         price: {
           value: Number.isFinite(evaluation.close) ? evaluation.close : null,
           type: "close",
@@ -9746,6 +9883,8 @@ self.onmessage = async function (e) {
         startDateUsed: strategyParams.startDate,
         dataStartDateUsed: dataStartDate,
         lookbackDaysUsed: resolvedLookback,
+        datasetLastDate,
+        evaluationDate,
         dataset: datasetSummary,
         warmup: warmupSummary,
         buyHold: buyHoldSummary,
@@ -9758,7 +9897,16 @@ self.onmessage = async function (e) {
         fetchRange,
         diagnostics: diagnosticsMeta,
         strategyDiagnostics,
-        developerNotes: [],
+        developerNotes,
+        issueCode,
+        evaluationLagFromDatasetDays:
+          Number.isFinite(evaluationMeta?.fallbackLagDays)
+            ? evaluationMeta.fallbackLagDays
+            : evaluationDate &&
+              datasetLastDate &&
+              evaluationDate !== datasetLastDate
+              ? diffIsoDays(evaluationDate, datasetLastDate)
+              : null,
       };
 
       self.postMessage({

@@ -104,6 +104,7 @@ const todaySuggestionDeveloperLog = (() => {
     const issueCodeDescriptions = {
         final_evaluation_missing: '回測未產生最終評估結果，需檢查暖身或策略是否產生倉位',
         latest_date_missing: '回傳資料缺少最新日期，請確認抓取範圍與資料筆數',
+        final_evaluation_degraded_missing_price: '最新資料缺少有效收盤價，已回退至前一有效交易日',
     };
 
     function resolveIssueLabel(issueCode) {
@@ -289,6 +290,27 @@ const todaySuggestionDeveloperLog = (() => {
         }
         if (entry?.meta?.finalStateReason) {
             developerNotes.push(`finalState 診斷：${entry.meta.finalStateReason}`);
+        }
+        if (entry?.meta?.datasetLastDate && entry?.meta?.finalEvaluationDate && entry.meta.datasetLastDate !== entry.meta.finalEvaluationDate) {
+            developerNotes.push(`資料最後日期 ${entry.meta.datasetLastDate} 缺少有效收盤價，已回退至 ${entry.meta.finalEvaluationDate} 推導建議。`);
+        }
+        if (Number.isFinite(entry?.meta?.finalEvaluationFallbackLagDays)) {
+            developerNotes.push(`最新有效建議日期落後資料最後日期 ${entry.meta.finalEvaluationFallbackLagDays} 日。`);
+        }
+        if (Number.isFinite(entry?.meta?.finalEvaluationFallbackLagBars)) {
+            developerNotes.push(`資料索引落後 ${entry.meta.finalEvaluationFallbackLagBars} 筆。`);
+        }
+        if (entry?.meta?.finalEvaluationFallbackFromDate && entry?.meta?.finalEvaluationRequestedLastDate) {
+            developerNotes.push(`finalEvaluation fallback ${entry.meta.finalEvaluationFallbackFromDate} ← ${entry.meta.finalEvaluationRequestedLastDate}`);
+        }
+        if (entry?.meta?.finalStateSnapshotDate && entry.meta.finalStateSnapshotDate !== entry.meta.finalStateDate) {
+            developerNotes.push(`finalState 快照原始日期：${entry.meta.finalStateSnapshotDate}`);
+        }
+        if (entry?.meta?.finalStateLatestValidDate && entry.meta.finalStateLatestValidDate !== entry.meta.finalStateDate) {
+            developerNotes.push(`最新有效倉位日期：${entry.meta.finalStateLatestValidDate}`);
+        }
+        if (entry?.meta?.missingFinalClose) {
+            developerNotes.push('最新資料列缺少有效收盤價');
         }
 
         const diagnostics = [];
@@ -728,6 +750,15 @@ const todaySuggestionUI = (() => {
                 if (Array.isArray(displayPayload.coverage)) {
                     meta.coverageSegments = displayPayload.coverage.length;
                 }
+                if (displayPayload.datasetLastDate) {
+                    meta.datasetLastDate = displayPayload.datasetLastDate;
+                }
+                if (displayPayload.evaluationDate) {
+                    meta.finalEvaluationDate = displayPayload.evaluationDate;
+                }
+                if (Number.isFinite(displayPayload.evaluationLagFromDatasetDays)) {
+                    meta.finalEvaluationFallbackLagDays = displayPayload.evaluationLagFromDatasetDays;
+                }
                 if (displayPayload.dataset && typeof displayPayload.dataset === 'object') {
                     const ds = displayPayload.dataset;
                     const rangeStart = ds.firstDate
@@ -764,10 +795,30 @@ const todaySuggestionUI = (() => {
                 if (displayPayload.strategyDiagnostics && typeof displayPayload.strategyDiagnostics === 'object') {
                     const finalState = displayPayload.strategyDiagnostics.finalState;
                     if (finalState && typeof finalState === 'object') {
+                        const evaluationDate = displayPayload.evaluation?.date || null;
                         if (finalState.snapshot && typeof finalState.snapshot === 'object') {
                             const snapshot = finalState.snapshot;
-                            if (snapshot.date) {
-                                meta.finalStateDate = snapshot.date;
+                            const snapshotDate = snapshot.date || null;
+                            const resolvedFinalDate = evaluationDate || snapshotDate;
+                            if (resolvedFinalDate) {
+                                meta.finalStateDate = resolvedFinalDate;
+                            } else if (snapshotDate) {
+                                meta.finalStateDate = snapshotDate;
+                            }
+                            if (snapshotDate && evaluationDate && snapshotDate !== evaluationDate) {
+                                meta.finalStateSnapshotDate = snapshotDate;
+                            }
+                            if (snapshot.latestValidDate) {
+                                meta.finalStateLatestValidDate = snapshot.latestValidDate;
+                            }
+                            if (Number.isFinite(snapshot.fallbackLagDays)) {
+                                meta.finalEvaluationFallbackLagDays = snapshot.fallbackLagDays;
+                            }
+                            if (Number.isFinite(snapshot.fallbackLagBars)) {
+                                meta.finalEvaluationFallbackLagBars = snapshot.fallbackLagBars;
+                            }
+                            if (typeof snapshot.missingFinalClose === 'boolean') {
+                                meta.missingFinalClose = snapshot.missingFinalClose;
                             }
                             const stateParts = [];
                             if (snapshot.longState) {
@@ -790,6 +841,27 @@ const todaySuggestionUI = (() => {
                             }
                             if (Number.isFinite(snapshot.shortShares)) {
                                 meta.finalShortShares = `${integerFormatter.format(snapshot.shortShares)} 股`;
+                            }
+                        }
+                        if (displayPayload.evaluation && typeof displayPayload.evaluation.meta === 'object') {
+                            const evalMeta = displayPayload.evaluation.meta;
+                            if (evalMeta.fallbackReason && !meta.finalStateReason) {
+                                meta.finalStateReason = evalMeta.fallbackReason;
+                            }
+                            if (evalMeta.fallbackFromDate) {
+                                meta.finalEvaluationFallbackFromDate = evalMeta.fallbackFromDate;
+                            }
+                            if (evalMeta.requestedLastDate) {
+                                meta.finalEvaluationRequestedLastDate = evalMeta.requestedLastDate;
+                            }
+                            if (Number.isFinite(evalMeta.fallbackLagDays)) {
+                                meta.finalEvaluationFallbackLagDays = evalMeta.fallbackLagDays;
+                            }
+                            if (Number.isFinite(evalMeta.fallbackLagBars)) {
+                                meta.finalEvaluationFallbackLagBars = evalMeta.fallbackLagBars;
+                            }
+                            if (typeof evalMeta.missingFinalClose === 'boolean') {
+                                meta.missingFinalClose = evalMeta.missingFinalClose;
                             }
                         }
                         if (finalState.pendingNextDayTrade && typeof finalState.pendingNextDayTrade === 'object') {
@@ -819,6 +891,21 @@ const todaySuggestionUI = (() => {
                         }
                         if (finalState.reason) {
                             meta.finalStateReason = finalState.reason;
+                        }
+                        if (finalState.fallback && typeof finalState.fallback === 'object') {
+                            meta.finalStateFallback = finalState.fallback;
+                            if (!meta.finalStateReason && finalState.fallback.fallbackReason) {
+                                meta.finalStateReason = finalState.fallback.fallbackReason;
+                            }
+                        }
+                        if (Number.isFinite(finalState.evaluationIndex)) {
+                            meta.finalEvaluationIndex = finalState.evaluationIndex;
+                        }
+                        if (finalState.datasetLastDate) {
+                            meta.datasetLastDate = finalState.datasetLastDate;
+                        }
+                        if (finalState.lastValidEvaluationDate && !meta.finalEvaluationDate) {
+                            meta.finalEvaluationDate = finalState.lastValidEvaluationDate;
                         }
                     }
                 }

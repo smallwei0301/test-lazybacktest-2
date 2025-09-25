@@ -1,3 +1,9 @@
+## 2025-09-10 — Patch LB-TODAY-SUGGESTION-FINALEVAL-20250910A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳 `final_evaluation_missing`，原因為最新交易日缺少有效收盤價導致 `runStrategy` 未建立 `finalEvaluation`，前端雖有快照卻無法給出操作建議。
+- **Fix**: `runStrategy` 改為持續追蹤最後一筆有效評估並在最終收盤缺漏時回退，回傳 fallback 原因與 lag 診斷；Worker 將 fallback meta、issue code、開發者備註帶回主執行緒，前端 log 則優先採用實際評估日期並記錄缺價原因。
+- **Diagnostics**: 模擬 2330 等案例刻意移除最後一日收盤，確認今日建議仍能顯示前一有效交易日的操作、notes 加註缺價提示，開發者紀錄也標示 fallback 日與落後天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 
 ## 2025-09-09 — Patch LB-TODAY-SUGGESTION-DIAG-20250909A
 - **Issue recap**: 即使資料筆數充足，今日建議仍可能回傳 `final_evaluation_missing`，但開發者紀錄僅顯示一般暖身資訊，無法判斷回測最終狀態或是否存在待執行交易。
