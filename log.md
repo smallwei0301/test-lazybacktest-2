@@ -453,3 +453,9 @@
 - **Diagnostics**: 檢查趨勢卡文案與門檻說明新增「覆蓋目標」提示，實際拉動滑桿觀察數值顯示百分比、覆蓋提示同步更新，並驗證 100% 設定會觸發最高階補償讓趨勢段仍保持。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-12 — Patch LB-REGIME-HMM-20251012A
+- **Issue recap**: 趨勢卡仍僅提供三態（起漲／盤整／跌落）與覆蓋率映射，無法反映多空與波動組合的四象限結果，也缺少 ADX/布林/ATR 門檻模板與 HMM 分段落地程式。
+- **Fix**: 於前端重寫趨勢分析流程，導入 ADX、布林帶寬、ATR 比率與二維 HMM 建立牛高／牛低／熊高／熊低四態分類，滑桿改為 0→100 精細度並影響門檻、平滑與最小區段長度；同步更新 UI 文案、圖例與版本章。
+- **Diagnostics**: `renderTrendSummary` 顯示各門檻數值、平滑窗與最小區段資訊，圖表疊層使用對應色塊；趨勢摘要呈現四態覆蓋率、區段數與複利報酬並揭露 HMM 迭代與平均信心。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

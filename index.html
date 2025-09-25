@@ -1166,18 +1166,22 @@
                                                 <p>執行回測後將顯示淨值曲線</p>
                                             </div>
                                         </div>
-                                        <div id="trend-legend" class="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
+                                        <div id="trend-legend" class="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.24); border-color: rgba(239, 68, 68, 0.45);"></span>
-                                                <span>紅色：起漲區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
+                                                <span>牛市・高波動</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(107, 114, 128, 0.22); border-color: rgba(107, 114, 128, 0.4);"></span>
-                                                <span>灰色：盤整區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(248, 113, 113, 0.16); border-color: rgba(248, 113, 113, 0.32);"></span>
+                                                <span>牛市・低波動</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.45);"></span>
-                                                <span>綠色：跌落區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
+                                                <span>熊市・高波動</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(134, 239, 172, 0.16); border-color: rgba(134, 239, 172, 0.32);"></span>
+                                                <span>熊市・低波動</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1190,29 +1194,29 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20251011A</span>
+                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-REGIME-HMM-20251012A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
-                                            依 20 日對數淨值線性回歸的 t 檢定（斜率÷殘差標準差）與趨勢訊噪比（斜率÷波動度）判斷起漲／跌落，滑桿 0%→100% 直接代表趨勢覆蓋目標 0%→100%，不足時會分階段放寬門檻，確保高覆蓋設定仍能給出趨勢判定。
+                                            將價格序列拆成牛／熊 × 高／低波動四態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→100 可調整精細度（越高門檻越寬鬆、區段越細）。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
-                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">趨勢覆蓋目標</label>
-                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">70%</span>
+                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">狀態精細度</label>
+                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">50</span>
                                             </div>
                                             <div class="flex items-center gap-3">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">0%</span>
-                                                <input type="range" id="trendSensitivitySlider" min="0" max="100" step="1" value="70" class="flex-1 trend-slider">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">100%</span>
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">0 寬鬆</span>
+                                                <input type="range" id="trendSensitivitySlider" min="0" max="100" step="1" value="50" class="flex-1 trend-slider">
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">100 精細</span>
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                依 20 日對數淨值線性回歸斜率、R² 與兩種訊噪比（斜率÷波動度、斜率÷殘差）判別多空趨勢，滑桿設定的百分比即為目標趨勢覆蓋率；執行回測後會顯示實際門檻值與覆蓋成果。
+                                                會根據 ADX、布林帶寬與 ATR 比率計算趨勢／盤整門檻並自動調整平滑視窗與最小區段長度；精細度越高時，ADX・布林・ATR 門檻會下修，區段分割也會更細。
                                             </p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示起漲、盤整、跌落區段的複利報酬與覆蓋比例。
+                                            執行回測後會顯示牛高／牛低／熊高／熊低四態的覆蓋率、複利報酬與分段統計。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>

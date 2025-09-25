@@ -5,6 +5,7 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-REGIME-HMM-20251012A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -279,33 +280,36 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251011A';
+const TREND_ANALYSIS_VERSION = 'LB-REGIME-HMM-20251012A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
-const TREND_WINDOW_SIZE = 20;
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 100;
-const TREND_SENSITIVITY_DEFAULT = 70;
-const TREND_SENSITIVITY_EQUIVALENT_MIN = 1;
-const TREND_SENSITIVITY_EQUIVALENT_MAX = 1000;
+const TREND_SENSITIVITY_DEFAULT = 50;
 
 const TREND_STYLE_MAP = {
-    uptrend: {
-        label: '起漲',
-        overlay: 'rgba(239, 68, 68, 0.18)',
+    bullHighVol: {
+        label: '牛市・高波動',
+        overlay: 'rgba(239, 68, 68, 0.2)',
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
     },
-    consolidation: {
-        label: '盤整',
-        overlay: 'rgba(107, 114, 128, 0.16)',
-        accent: '#4b5563',
-        border: 'rgba(107, 114, 128, 0.32)',
+    bullLowVol: {
+        label: '牛市・低波動',
+        overlay: 'rgba(248, 113, 113, 0.16)',
+        accent: '#f87171',
+        border: 'rgba(248, 113, 113, 0.32)',
     },
-    downtrend: {
-        label: '跌落',
-        overlay: 'rgba(34, 197, 94, 0.18)',
+    bearHighVol: {
+        label: '熊市・高波動',
+        overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
+    },
+    bearLowVol: {
+        label: '熊市・低波動',
+        overlay: 'rgba(134, 239, 172, 0.16)',
+        accent: '#22c55e',
+        border: 'rgba(134, 239, 172, 0.32)',
     },
 };
 
@@ -316,6 +320,7 @@ const trendAnalysisState = {
     segments: [],
     summary: null,
     result: null,
+    base: null,
 };
 
 const trendBackgroundPlugin = {
@@ -369,113 +374,29 @@ if (typeof Chart !== 'undefined' && Chart.register) {
 function computeTrendThresholds(sensitivity) {
     const min = TREND_SENSITIVITY_MIN;
     const max = TREND_SENSITIVITY_MAX;
-    const span = Math.max(1, max - min);
     let safe = Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT;
     if (safe < min) safe = min;
     if (safe > max) safe = max;
-    const sliderNormalized = span > 0 ? (safe - min) / span : 0;
-    const invertedNormalized = 1 - sliderNormalized;
-    const strictCurve = Math.pow(invertedNormalized, 1.28);
-    const relaxedCurve = Math.pow(invertedNormalized, 1.05);
-
-    const slopeStrictMin = Math.max(0.000012, Math.log1p(0.0045) / 252);
-    const slopeStrictMax = Math.log1p(1.18) / 252;
-    const slopeThreshold = slopeStrictMin + (slopeStrictMax - slopeStrictMin) * strictCurve;
-    const slopeRelaxFloor = Math.max(0.00002, slopeStrictMin * 0.62);
-    const slopeRelaxed = Math.max(
-        slopeRelaxFloor,
-        slopeThreshold * (0.58 + 0.14 * relaxedCurve),
-    );
-
-    const trendRatioStrictMin = 0.08;
-    const trendRatioStrictMax = 2.6;
-    const trendRatioThreshold = trendRatioStrictMin + (trendRatioStrictMax - trendRatioStrictMin) * strictCurve;
-    const trendRatioRelaxFloor = 0.05;
-    const trendRatioRelaxed = Math.max(
-        trendRatioRelaxFloor,
-        trendRatioThreshold * (0.46 + 0.18 * relaxedCurve),
-    );
-
-    const strengthStrictMin = 0.42;
-    const strengthStrictMax = 6.4;
-    const strengthThreshold = strengthStrictMin + (strengthStrictMax - strengthStrictMin) * strictCurve;
-    const strengthRelaxFloor = 0.2;
-    const strengthRelaxed = Math.max(
-        strengthRelaxFloor,
-        strengthThreshold * (0.44 + 0.22 * relaxedCurve),
-    );
-
-    const r2StrictMin = 0.1;
-    const r2StrictMax = 0.92;
-    const r2Threshold = Math.max(
-        r2StrictMin,
-        Math.min(0.94, r2StrictMin + (r2StrictMax - r2StrictMin) * strictCurve),
-    );
-    const r2RelaxFloor = 0.05;
-    const r2Relaxed = Math.max(
-        r2RelaxFloor,
-        Math.min(0.9, r2Threshold * (0.55 + 0.2 * relaxedCurve)),
-    );
-
-    const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
-    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + sliderNormalized * equivalentSpan;
-
-    const slopeAtMin = slopeStrictMax;
-    const slopeAtMax = slopeStrictMin;
-    const multiplierAtMin = slopeAtMin / slopeStrictMin;
-    const multiplierAtMax = slopeAtMax / slopeStrictMin;
-    const multiplier = slopeThreshold / slopeStrictMin;
-    const ratio = multiplierAtMin / Math.max(multiplierAtMax, 1e-6);
-
-    const targetTrendCoverage = Math.max(0, Math.min(1, sliderNormalized));
-    const coverageBlend = (value, strictFactor, lenientAbsolute, minAbsolute) => {
-        if (!Number.isFinite(value)) return value;
-        const strictFloor = value * strictFactor;
-        const lenientFloor = Math.min(value, Math.max(minAbsolute, lenientAbsolute));
-        const blended = strictFloor + (lenientFloor - strictFloor) * sliderNormalized;
-        return Math.min(value, Math.max(minAbsolute, blended));
-    };
-
-    const coverageBoostFloors = {
-        slopeThreshold: coverageBlend(slopeThreshold, 0.78, 0.0000045, 0.0000035),
-        slopeRelaxed: coverageBlend(slopeRelaxed, 0.74, 0.0000035, 0.0000025),
-        ratioThreshold: coverageBlend(trendRatioThreshold, 0.82, 0.012, 0.008),
-        ratioRelaxed: coverageBlend(trendRatioRelaxed, 0.78, 0.008, 0.005),
-        strengthThreshold: coverageBlend(strengthThreshold, 0.78, 0.12, 0.08),
-        strengthRelaxed: coverageBlend(strengthRelaxed, 0.74, 0.08, 0.05),
-        r2Threshold: coverageBlend(r2Threshold, 0.8, 0.05, 0.035),
-        r2Relaxed: coverageBlend(r2Relaxed, 0.76, 0.04, 0.025),
-    };
-
+    const normalized = Math.max(0, Math.min(1, (safe - min) / Math.max(1, max - min)));
+    const adxTrend = 32 - normalized * 18;
+    const adxFlat = Math.max(8, adxTrend * 0.55);
+    const bollTrend = Math.max(0.06, 0.14 - normalized * 0.06);
+    const bollFlat = Math.max(0.02, bollTrend * 0.5);
+    const atrTrend = Math.max(0.02, 0.055 - normalized * 0.025);
+    const atrFlat = Math.max(0.005, atrTrend * 0.45);
+    const smoothingWindow = Math.max(1, Math.round(9 - normalized * 5));
+    const minSegmentLength = Math.max(2, Math.round(8 - normalized * 4));
     return {
-        windowSize: TREND_WINDOW_SIZE,
         sensitivity: safe,
-        sliderNormalized,
-        normalizedSensitivity: invertedNormalized,
-        equivalentSensitivity,
-        multiplier,
-        slopeThreshold,
-        slopeRelaxed,
-        trendRatioThreshold,
-        trendRatioRelaxed,
-        strengthThreshold,
-        strengthRelaxed,
-        r2Threshold,
-        r2Relaxed,
-        range: {
-            min,
-            max,
-            displayMin: TREND_SENSITIVITY_MIN,
-            displayMax: TREND_SENSITIVITY_MAX,
-            displayUnit: '%',
-            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
-            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
-            multiplierAtMin,
-            multiplierAtMax,
-            ratio,
-        },
-        targetTrendCoverage,
-        coverageBoostFloors,
+        normalized,
+        adxTrend,
+        adxFlat,
+        bollTrend,
+        bollFlat,
+        atrTrend,
+        atrFlat,
+        smoothingWindow,
+        minSegmentLength,
     };
 }
 
@@ -484,506 +405,903 @@ function formatPercentPlain(value, digits = 1) {
     return `${value.toFixed(digits)}%`;
 }
 
-function formatTrendMultiplier(value) {
+function formatPercentSigned(value, digits = 2) {
     if (!Number.isFinite(value)) return '—';
-    if (value >= 1) return value.toFixed(1);
-    if (value >= 0.1) return value.toFixed(2);
-    if (value >= 0.01) return value.toFixed(3);
-    return value.toFixed(4);
+    const fixed = value.toFixed(digits);
+    if (value > 0 && !fixed.startsWith('+')) {
+        return `+${fixed}%`;
+    }
+    return `${fixed}%`;
 }
 
-function formatDecimal(value, digits = 2) {
-    if (!Number.isFinite(value)) return '—';
-    return value.toFixed(digits);
+function computeMedian(values) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const filtered = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+    if (filtered.length === 0) return null;
+    const mid = Math.floor(filtered.length / 2);
+    if (filtered.length % 2 === 0) {
+        return (filtered[mid - 1] + filtered[mid]) / 2;
+    }
+    return filtered[mid];
+}
+
+function computeLogReturns(closes) {
+    const length = Array.isArray(closes) ? closes.length : 0;
+    const result = new Array(length).fill(null);
+    for (let i = 1; i < length; i += 1) {
+        const prev = Number(closes[i - 1]);
+        const current = Number(closes[i]);
+        if (Number.isFinite(prev) && prev > 0 && Number.isFinite(current) && current > 0) {
+            result[i] = Math.log(current / prev);
+        }
+    }
+    return result;
+}
+
+function computeTrueRangeSeries(highs, lows, closes) {
+    const length = Math.min(
+        Array.isArray(highs) ? highs.length : 0,
+        Array.isArray(lows) ? lows.length : 0,
+        Array.isArray(closes) ? closes.length : 0,
+    );
+    const result = new Array(length).fill(null);
+    for (let i = 0; i < length; i += 1) {
+        const high = Number(highs[i]);
+        const low = Number(lows[i]);
+        const currentClose = Number(closes[i]);
+        const previousClose = i > 0 ? Number(closes[i - 1]) : null;
+        if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(currentClose)) {
+            continue;
+        }
+        let tr = high - low;
+        if (Number.isFinite(previousClose)) {
+            tr = Math.max(tr, Math.abs(high - previousClose), Math.abs(low - previousClose));
+        }
+        result[i] = tr;
+    }
+    return result;
+}
+
+function computeATRSeries(highs, lows, closes, period = 14) {
+    const trSeries = computeTrueRangeSeries(highs, lows, closes);
+    const length = trSeries.length;
+    const p = Math.max(1, Math.round(Number(period) || 14));
+    const result = new Array(length).fill(null);
+    let sum = 0;
+    let count = 0;
+    let prevAtr = null;
+    for (let i = 0; i < length; i += 1) {
+        const tr = trSeries[i];
+        if (!Number.isFinite(tr)) {
+            result[i] = prevAtr;
+            continue;
+        }
+        if (prevAtr === null) {
+            sum += tr;
+            count += 1;
+            if (count >= p) {
+                prevAtr = sum / p;
+                result[i] = prevAtr;
+            }
+        } else {
+            prevAtr = ((prevAtr * (p - 1)) + tr) / p;
+            result[i] = prevAtr;
+        }
+    }
+    return result;
+}
+
+function computeBollingerBandwidth(closes, period = 20, deviations = 2) {
+    const length = Array.isArray(closes) ? closes.length : 0;
+    const p = Math.max(1, Math.round(Number(period) || 20));
+    const dev = Number.isFinite(deviations) ? deviations : 2;
+    const result = new Array(length).fill(null);
+    const window = [];
+    let sum = 0;
+    let sumSquares = 0;
+    let validCount = 0;
+    for (let i = 0; i < length; i += 1) {
+        const price = Number(closes[i]);
+        window.push(price);
+        if (Number.isFinite(price)) {
+            sum += price;
+            sumSquares += price * price;
+            validCount += 1;
+        }
+        if (window.length > p) {
+            const removed = window.shift();
+            if (Number.isFinite(removed)) {
+                sum -= removed;
+                sumSquares -= removed * removed;
+                validCount -= 1;
+            }
+        }
+        if (window.length === p && validCount === p) {
+            const mean = sum / p;
+            const variance = Math.max(0, sumSquares / p - mean * mean);
+            const std = Math.sqrt(variance);
+            const upper = mean + dev * std;
+            const lower = mean - dev * std;
+            const bandwidth = mean !== 0 ? (upper - lower) / mean : null;
+            result[i] = Number.isFinite(bandwidth) ? bandwidth : null;
+        } else {
+            result[i] = null;
+        }
+    }
+    return result;
+}
+
+function computeADXSeries(highs, lows, closes, period = 14) {
+    const length = Math.min(
+        Array.isArray(highs) ? highs.length : 0,
+        Array.isArray(lows) ? lows.length : 0,
+        Array.isArray(closes) ? closes.length : 0,
+    );
+    const p = Math.max(1, Math.round(Number(period) || 14));
+    const result = new Array(length).fill(null);
+    if (length < p + 1) {
+        return result;
+    }
+    const plusDM = new Array(length).fill(0);
+    const minusDM = new Array(length).fill(0);
+    const trSeries = new Array(length).fill(null);
+    for (let i = 1; i < length; i += 1) {
+        const high = Number(highs[i]);
+        const low = Number(lows[i]);
+        const prevHigh = Number(highs[i - 1]);
+        const prevLow = Number(lows[i - 1]);
+        const prevClose = Number(closes[i - 1]);
+        if (!Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(prevHigh)
+            || !Number.isFinite(prevLow) || !Number.isFinite(prevClose)) {
+            continue;
+        }
+        const upMove = high - prevHigh;
+        const downMove = prevLow - low;
+        plusDM[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+        minusDM[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+        const range1 = high - low;
+        const range2 = Math.abs(high - prevClose);
+        const range3 = Math.abs(low - prevClose);
+        trSeries[i] = Math.max(range1, range2, range3);
+    }
+    let atr = null;
+    let plusSmoothed = null;
+    let minusSmoothed = null;
+    let trSum = 0;
+    let plusSum = 0;
+    let minusSum = 0;
+    const dxSeries = new Array(length).fill(null);
+    for (let i = 1; i < length; i += 1) {
+        const tr = trSeries[i];
+        if (!Number.isFinite(tr)) {
+            continue;
+        }
+        trSum += tr;
+        plusSum += plusDM[i];
+        minusSum += minusDM[i];
+        if (i === p) {
+            atr = trSum / p;
+            plusSmoothed = plusSum / p;
+            minusSmoothed = minusSum / p;
+        } else if (i > p && atr !== null) {
+            atr = ((atr * (p - 1)) + tr) / p;
+            plusSmoothed = ((plusSmoothed * (p - 1)) + plusDM[i]) / p;
+            minusSmoothed = ((minusSmoothed * (p - 1)) + minusDM[i]) / p;
+        }
+        if (atr !== null && atr > 0 && plusSmoothed !== null && minusSmoothed !== null) {
+            const plusDI = (plusSmoothed / atr) * 100;
+            const minusDI = (minusSmoothed / atr) * 100;
+            const denominator = plusDI + minusDI;
+            const dx = denominator > 0 ? (Math.abs(plusDI - minusDI) / denominator) * 100 : 0;
+            dxSeries[i] = dx;
+        }
+    }
+    let dxSum = 0;
+    let dxCount = 0;
+    let adx = null;
+    for (let i = 0; i < length; i += 1) {
+        const dx = dxSeries[i];
+        if (!Number.isFinite(dx)) {
+            result[i] = adx;
+            continue;
+        }
+        if (adx === null) {
+            dxSum += dx;
+            dxCount += 1;
+            if (dxCount >= p) {
+                adx = dxSum / p;
+                result[i] = adx;
+            }
+        } else {
+            adx = ((adx * (p - 1)) + dx) / p;
+            result[i] = adx;
+        }
+    }
+    return result;
+}
+
+function trainFourStateHMM(observations, options = {}) {
+    if (!Array.isArray(observations) || observations.length === 0) return null;
+    const clean = observations
+        .filter((row) => Array.isArray(row) && row.every((value) => Number.isFinite(value)))
+        .map((row) => row.slice(0, 2));
+    const numStates = Math.max(2, Math.round(options.numStates || 4));
+    const maxIterations = Math.max(1, Math.round(options.maxIterations || 40));
+    const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 1e-4;
+    if (clean.length < numStates) return null;
+    const dimension = clean[0].length;
+
+    const initialProbabilities = new Array(numStates).fill(1 / numStates);
+    const transitionMatrix = new Array(numStates).fill(null).map((_, stateIndex) => {
+        const row = new Array(numStates).fill((1 - 0.7) / Math.max(1, numStates - 1));
+        row[stateIndex] = 0.7;
+        return row;
+    });
+
+    const returns = clean.map((row) => row[0]);
+    const vols = clean.map((row) => row[1]);
+    const returnMedian = computeMedian(returns) ?? 0;
+    const volMedian = computeMedian(vols) ?? 0;
+
+    const assignments = clean.map((row) => {
+        const direction = row[0] >= returnMedian ? 0 : 1; // 0 bull, 1 bear
+        const volClass = row[1] >= volMedian ? 0 : 1; // 0 high, 1 low
+        if (direction === 0 && volClass === 0) return 0; // bull high
+        if (direction === 0 && volClass === 1) return 1; // bull low
+        if (direction === 1 && volClass === 0) return 2; // bear high
+        return 3; // bear low
+    }).map((state) => state % numStates);
+
+    const stateSamples = new Array(numStates).fill(null).map(() => []);
+    assignments.forEach((stateIndex, idx) => {
+        stateSamples[stateIndex].push(clean[idx]);
+    });
+    for (let i = 0; i < numStates; i += 1) {
+        if (stateSamples[i].length === 0) {
+            stateSamples[i].push(clean[i % clean.length]);
+        }
+    }
+
+    const means = stateSamples.map((samples) => {
+        const mean = new Array(dimension).fill(0);
+        samples.forEach((row) => {
+            row.forEach((value, idx) => {
+                mean[idx] += value;
+            });
+        });
+        return mean.map((value) => value / samples.length);
+    });
+
+    const variances = stateSamples.map((samples, stateIndex) => {
+        const variance = new Array(dimension).fill(0);
+        samples.forEach((row) => {
+            row.forEach((value, idx) => {
+                const diff = value - means[stateIndex][idx];
+                variance[idx] += diff * diff;
+            });
+        });
+        return variance.map((value) => Math.max(value / samples.length, 1e-6));
+    });
+
+    let prevLogLikelihood = -Infinity;
+    let logLikelihood = -Infinity;
+    let iterations = 0;
+    let gamma = null;
+
+    const gaussianProbability = (vector, mean, variance) => {
+        let logProb = 0;
+        for (let i = 0; i < vector.length; i += 1) {
+            const varValue = Math.max(variance[i] || 1e-6, 1e-6);
+            const diff = vector[i] - mean[i];
+            logProb += -0.5 * (Math.log(2 * Math.PI * varValue) + (diff * diff) / varValue);
+        }
+        return Math.exp(logProb);
+    };
+
+    const forwardBackward = (emissions) => {
+        const T = emissions.length;
+        const K = initialProbabilities.length;
+        const alpha = new Array(T).fill(null).map(() => new Array(K).fill(0));
+        const beta = new Array(T).fill(null).map(() => new Array(K).fill(0));
+        const xi = new Array(Math.max(0, T - 1)).fill(null).map(() => new Array(K).fill(null).map(() => new Array(K).fill(0)));
+        const scales = new Array(T).fill(1);
+
+        let sumAlpha = 0;
+        for (let k = 0; k < K; k += 1) {
+            alpha[0][k] = initialProbabilities[k] * emissions[0][k];
+            sumAlpha += alpha[0][k];
+        }
+        if (!Number.isFinite(sumAlpha) || sumAlpha <= 0) sumAlpha = 1e-12;
+        scales[0] = sumAlpha;
+        for (let k = 0; k < K; k += 1) {
+            alpha[0][k] /= sumAlpha;
+        }
+
+        for (let t = 1; t < T; t += 1) {
+            let rowSum = 0;
+            for (let j = 0; j < K; j += 1) {
+                let accum = 0;
+                for (let i = 0; i < K; i += 1) {
+                    accum += alpha[t - 1][i] * transitionMatrix[i][j];
+                }
+                alpha[t][j] = accum * emissions[t][j];
+                rowSum += alpha[t][j];
+            }
+            if (!Number.isFinite(rowSum) || rowSum <= 0) rowSum = 1e-12;
+            scales[t] = rowSum;
+            for (let j = 0; j < K; j += 1) {
+                alpha[t][j] /= rowSum;
+            }
+        }
+
+        for (let k = 0; k < K; k += 1) {
+            beta[T - 1][k] = 1;
+        }
+        for (let t = T - 2; t >= 0; t -= 1) {
+            for (let i = 0; i < K; i += 1) {
+                let accum = 0;
+                for (let j = 0; j < K; j += 1) {
+                    accum += transitionMatrix[i][j] * emissions[t + 1][j] * beta[t + 1][j];
+                }
+                beta[t][i] = accum / scales[t + 1];
+            }
+        }
+
+        gamma = new Array(T).fill(null).map(() => new Array(K).fill(0));
+        for (let t = 0; t < T; t += 1) {
+            let denom = 0;
+            for (let i = 0; i < K; i += 1) {
+                gamma[t][i] = alpha[t][i] * beta[t][i];
+                denom += gamma[t][i];
+            }
+            if (!Number.isFinite(denom) || denom <= 0) denom = 1e-12;
+            for (let i = 0; i < K; i += 1) {
+                gamma[t][i] /= denom;
+            }
+        }
+
+        for (let t = 0; t < T - 1; t += 1) {
+            let denom = 0;
+            for (let i = 0; i < K; i += 1) {
+                for (let j = 0; j < K; j += 1) {
+                    xi[t][i][j] = alpha[t][i] * transitionMatrix[i][j] * emissions[t + 1][j] * beta[t + 1][j];
+                    denom += xi[t][i][j];
+                }
+            }
+            if (!Number.isFinite(denom) || denom <= 0) denom = 1e-12;
+            for (let i = 0; i < K; i += 1) {
+                for (let j = 0; j < K; j += 1) {
+                    xi[t][i][j] /= denom;
+                }
+            }
+        }
+
+        const logLik = scales.reduce((acc, value) => acc + Math.log(value), 0);
+        return { gamma, xi, logLikelihood: logLik };
+    };
+
+    while (iterations < maxIterations) {
+        iterations += 1;
+        const emissions = clean.map((row) => {
+            const emissionRow = new Array(numStates).fill(0);
+            for (let stateIndex = 0; stateIndex < numStates; stateIndex += 1) {
+                const probability = gaussianProbability(row, means[stateIndex], variances[stateIndex]);
+                emissionRow[stateIndex] = Number.isFinite(probability) && probability > 0 ? probability : 1e-12;
+            }
+            return emissionRow;
+        });
+
+        const fb = forwardBackward(emissions);
+        if (!fb || !fb.gamma) break;
+        gamma = fb.gamma;
+        logLikelihood = fb.logLikelihood;
+
+        const K = numStates;
+        const T = clean.length;
+        const gammaSums = new Array(K).fill(0);
+        for (let t = 0; t < T; t += 1) {
+            for (let k = 0; k < K; k += 1) {
+                gammaSums[k] += gamma[t][k];
+            }
+        }
+
+        for (let k = 0; k < K; k += 1) {
+            initialProbabilities[k] = gamma[0][k];
+        }
+
+        for (let i = 0; i < K; i += 1) {
+            const denom = gammaSums[i] - gamma[T - 1][i];
+            for (let j = 0; j < K; j += 1) {
+                let numerator = 0;
+                for (let t = 0; t < T - 1; t += 1) {
+                    numerator += fb.xi[t][i][j];
+                }
+                transitionMatrix[i][j] = denom > 0 ? numerator / denom : 1 / K;
+            }
+            let rowSum = transitionMatrix[i].reduce((acc, value) => acc + value, 0);
+            if (!Number.isFinite(rowSum) || rowSum <= 0) {
+                transitionMatrix[i] = new Array(K).fill(1 / K);
+            } else {
+                transitionMatrix[i] = transitionMatrix[i].map((value) => {
+                    const normalized = value / rowSum;
+                    return Number.isFinite(normalized) ? Math.max(1e-6, normalized) : 1 / K;
+                });
+                const renorm = transitionMatrix[i].reduce((acc, value) => acc + value, 0);
+                transitionMatrix[i] = transitionMatrix[i].map((value) => value / renorm);
+            }
+        }
+
+        for (let stateIndex = 0; stateIndex < numStates; stateIndex += 1) {
+            const sumGamma = gammaSums[stateIndex];
+            const mean = new Array(dimension).fill(0);
+            for (let t = 0; t < clean.length; t += 1) {
+                const weight = gamma[t][stateIndex];
+                for (let d = 0; d < dimension; d += 1) {
+                    mean[d] += weight * clean[t][d];
+                }
+            }
+            if (sumGamma > 0) {
+                for (let d = 0; d < dimension; d += 1) {
+                    mean[d] /= sumGamma;
+                }
+            } else {
+                for (let d = 0; d < dimension; d += 1) {
+                    mean[d] = means[stateIndex][d];
+                }
+            }
+            means[stateIndex] = mean;
+
+            const variance = new Array(dimension).fill(0);
+            for (let t = 0; t < clean.length; t += 1) {
+                const weight = gamma[t][stateIndex];
+                for (let d = 0; d < dimension; d += 1) {
+                    const diff = clean[t][d] - mean[d];
+                    variance[d] += weight * diff * diff;
+                }
+            }
+            for (let d = 0; d < dimension; d += 1) {
+                variance[d] = sumGamma > 0 ? Math.max(variance[d] / sumGamma, 1e-6) : variances[stateIndex][d];
+            }
+            variances[stateIndex] = variance;
+        }
+
+        if (Number.isFinite(logLikelihood) && Number.isFinite(prevLogLikelihood)) {
+            if (Math.abs(logLikelihood - prevLogLikelihood) < tolerance) {
+                break;
+            }
+        }
+        prevLogLikelihood = logLikelihood;
+    }
+
+    const sequence = Array.isArray(gamma)
+        ? gamma.map((row) => {
+            let maxValue = -Infinity;
+            let index = 0;
+            row.forEach((value, idx) => {
+                if (value > maxValue) {
+                    maxValue = value;
+                    index = idx;
+                }
+            });
+            return index;
+        })
+        : [];
+
+    return {
+        iterations,
+        logLikelihood,
+        initial: initialProbabilities,
+        transition: transitionMatrix,
+        means,
+        variances,
+        posteriors: gamma,
+        sequence,
+    };
+}
+
+function mapStatesToRegimes(model) {
+    if (!model || !Array.isArray(model.means)) return null;
+    const descriptors = model.means.map((mean, index) => ({
+        index,
+        returnMean: Number(mean?.[0]) || 0,
+        volMean: Number(mean?.[1]) || 0,
+    }));
+    if (descriptors.length === 0) return null;
+    const sortedByReturn = descriptors.slice().sort((a, b) => a.returnMean - b.returnMean);
+    const bears = sortedByReturn.slice(0, Math.min(2, sortedByReturn.length));
+    const bulls = sortedByReturn.slice(-Math.min(2, sortedByReturn.length));
+    bears.sort((a, b) => a.volMean - b.volMean);
+    bulls.sort((a, b) => a.volMean - b.volMean);
+    const labelToState = {
+        bearLowVol: bears[0]?.index,
+        bearHighVol: bears[1]?.index,
+        bullLowVol: bulls[0]?.index,
+        bullHighVol: bulls[1]?.index,
+    };
+    const used = new Set();
+    const allIndices = descriptors.map((item) => item.index);
+    Object.keys(labelToState).forEach((label) => {
+        const stateIndex = labelToState[label];
+        if (Number.isInteger(stateIndex) && !used.has(stateIndex)) {
+            used.add(stateIndex);
+        } else {
+            const fallback = allIndices.find((idx) => !used.has(idx));
+            if (fallback !== undefined) {
+                labelToState[label] = fallback;
+                used.add(fallback);
+            }
+        }
+    });
+    const stateToLabel = {};
+    Object.entries(labelToState).forEach(([label, index]) => {
+        if (Number.isInteger(index)) {
+            stateToLabel[index] = label;
+        }
+    });
+    return { labelToState, stateToLabel, descriptors };
+}
+
+function combineDirectionVol(direction, volatility) {
+    const dirKey = direction === 'bear' ? 'bear' : 'bull';
+    const volKey = volatility === 'high' ? 'HighVol' : 'LowVol';
+    return `${dirKey}${volKey}`;
+}
+
+function parseRegimeLabel(label) {
+    switch (label) {
+    case 'bullHighVol':
+        return { direction: 'bull', volatility: 'high' };
+    case 'bullLowVol':
+        return { direction: 'bull', volatility: 'low' };
+    case 'bearHighVol':
+        return { direction: 'bear', volatility: 'high' };
+    case 'bearLowVol':
+        return { direction: 'bear', volatility: 'low' };
+    default:
+        return { direction: 'bear', volatility: 'low' };
+    }
+}
+
+function resolveVolatilityClass(adx, bollWidth, atrRatio, thresholds) {
+    if (!thresholds) return null;
+    let highScore = 0;
+    let lowScore = 0;
+    if (Number.isFinite(adx)) {
+        if (adx >= thresholds.adxTrend) highScore += 1;
+        if (adx <= thresholds.adxFlat) lowScore += 1;
+    }
+    if (Number.isFinite(bollWidth)) {
+        if (bollWidth >= thresholds.bollTrend) highScore += 1;
+        if (bollWidth <= thresholds.bollFlat) lowScore += 1;
+    }
+    if (Number.isFinite(atrRatio)) {
+        if (atrRatio >= thresholds.atrTrend) highScore += 1;
+        if (atrRatio <= thresholds.atrFlat) lowScore += 1;
+    }
+    if (highScore >= 2) return 'high';
+    if (lowScore >= 2) return 'low';
+    return null;
+}
+
+function fillMissingLabels(labels) {
+    if (!Array.isArray(labels)) return [];
+    let last = null;
+    for (let i = 0; i < labels.length; i += 1) {
+        if (labels[i]) {
+            last = labels[i];
+        } else if (last) {
+            labels[i] = last;
+        }
+    }
+    let next = null;
+    for (let i = labels.length - 1; i >= 0; i -= 1) {
+        if (labels[i]) {
+            next = labels[i];
+        } else if (next) {
+            labels[i] = next;
+        }
+    }
+    for (let i = 0; i < labels.length; i += 1) {
+        if (!labels[i]) labels[i] = 'bearLowVol';
+    }
+    return labels;
+}
+
+function smoothLabels(labels, windowSize) {
+    if (!Array.isArray(labels) || windowSize <= 1) return Array.isArray(labels) ? labels.slice() : [];
+    const result = labels.slice();
+    const half = Math.floor(windowSize / 2);
+    for (let i = 0; i < labels.length; i += 1) {
+        const counts = {};
+        let maxLabel = result[i] || 'bearLowVol';
+        let maxCount = 0;
+        for (let j = Math.max(0, i - half); j <= Math.min(labels.length - 1, i + half); j += 1) {
+            const label = labels[j];
+            if (!label) continue;
+            counts[label] = (counts[label] || 0) + 1;
+            if (counts[label] > maxCount) {
+                maxCount = counts[label];
+                maxLabel = label;
+            }
+        }
+        result[i] = maxLabel;
+    }
+    return result;
+}
+
+function enforceMinSegmentLength(labels, minLength) {
+    if (!Array.isArray(labels) || minLength <= 1) return Array.isArray(labels) ? labels.slice() : [];
+    const result = labels.slice();
+    let index = 0;
+    while (index < result.length) {
+        const label = result[index];
+        let end = index + 1;
+        while (end < result.length && result[end] === label) {
+            end += 1;
+        }
+        const segmentLength = end - index;
+        if (segmentLength > 0 && segmentLength < minLength) {
+            const prev = index > 0 ? result[index - 1] : null;
+            const next = end < result.length ? result[end] : null;
+            const replacement = next ?? prev ?? label;
+            for (let i = index; i < end; i += 1) {
+                result[i] = replacement;
+            }
+        }
+        index = end;
+    }
+    return result;
+}
+
+function buildSegmentsAndAggregate(labels, logReturns) {
+    const length = Array.isArray(labels) ? labels.length : 0;
+    const aggregated = {};
+    const returnCounts = {};
+    Object.keys(TREND_STYLE_MAP).forEach((key) => {
+        aggregated[key] = {
+            segments: 0,
+            days: 0,
+            logReturnSum: 0,
+            coveragePct: 0,
+            returnPct: null,
+        };
+        returnCounts[key] = 0;
+    });
+    const segments = [];
+    if (length === 0) {
+        return { segments, aggregated, totalDays: 0 };
+    }
+    let current = labels[0];
+    let start = 0;
+    let totalDays = 0;
+    for (let i = 0; i < length; i += 1) {
+        const label = labels[i];
+        if (!label || !TREND_STYLE_MAP[label]) continue;
+        totalDays += 1;
+        aggregated[label].days += 1;
+        if (Number.isFinite(logReturns?.[i])) {
+            aggregated[label].logReturnSum += logReturns[i];
+            returnCounts[label] += 1;
+        }
+        if (i === 0) {
+            current = label;
+            start = 0;
+        } else if (label !== current) {
+            segments.push({
+                type: current,
+                startIndex: start,
+                endIndex: i - 1,
+                overlay: TREND_STYLE_MAP[current]?.overlay,
+            });
+            aggregated[current].segments += 1;
+            current = label;
+            start = i;
+        }
+    }
+    if (current && TREND_STYLE_MAP[current]) {
+        segments.push({
+            type: current,
+            startIndex: start,
+            endIndex: length - 1,
+            overlay: TREND_STYLE_MAP[current]?.overlay,
+        });
+        aggregated[current].segments += 1;
+    }
+    Object.keys(aggregated).forEach((key) => {
+        const entry = aggregated[key];
+        const count = returnCounts[key];
+        if (count > 0) {
+            entry.returnPct = Math.expm1(entry.logReturnSum) * 100;
+        } else {
+            entry.returnPct = null;
+        }
+        entry.coveragePct = totalDays > 0 ? (entry.days / totalDays) * 100 : 0;
+    });
+    return { segments, aggregated, totalDays };
+}
+
+function computeAverageConfidence(labels, posteriors, labelToState) {
+    if (!Array.isArray(labels) || !Array.isArray(posteriors)) return null;
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < labels.length; i += 1) {
+        const label = labels[i];
+        const posteriorRow = posteriors[i];
+        if (!label || !Array.isArray(posteriorRow)) continue;
+        const stateIndex = labelToState?.[label];
+        let value = null;
+        if (Number.isInteger(stateIndex) && Number.isFinite(posteriorRow[stateIndex])) {
+            value = posteriorRow[stateIndex];
+        } else {
+            const finiteValues = posteriorRow.filter((val) => Number.isFinite(val));
+            if (finiteValues.length > 0) {
+                value = Math.max(...finiteValues);
+            }
+        }
+        if (Number.isFinite(value)) {
+            sum += value;
+            count += 1;
+        }
+    }
+    if (count === 0) return null;
+    return sum / count;
+}
+
+function prepareRegimeBaseData(result) {
+    const dates = Array.isArray(result?.dates) ? result.dates.slice() : [];
+    if (dates.length === 0) return null;
+    const rawRows = Array.isArray(result?.rawData) ? result.rawData : [];
+    const rowByDate = new Map();
+    rawRows.forEach((row) => {
+        if (row && typeof row.date === 'string') {
+            rowByDate.set(row.date, row);
+        }
+    });
+    const opens = [];
+    const highs = [];
+    const lows = [];
+    const closes = [];
+    const volumes = [];
+    dates.forEach((date) => {
+        const row = rowByDate.get(date) || null;
+        const open = Number(row?.open);
+        const high = Number(row?.high);
+        const low = Number(row?.low);
+        const close = Number(row?.close);
+        const volume = Number(row?.volume);
+        opens.push(Number.isFinite(open) ? open : null);
+        highs.push(Number.isFinite(high) ? high : null);
+        lows.push(Number.isFinite(low) ? low : null);
+        closes.push(Number.isFinite(close) ? close : null);
+        volumes.push(Number.isFinite(volume) ? volume : null);
+    });
+    const logReturns = computeLogReturns(closes);
+    const atrSeries = computeATRSeries(highs, lows, closes, 14);
+    const atrRatio = atrSeries.map((atr, idx) => {
+        const close = closes[idx];
+        if (!Number.isFinite(atr) || !Number.isFinite(close) || close === 0) return null;
+        return atr / close;
+    });
+    const bollWidth = computeBollingerBandwidth(closes, 20, 2);
+    const adx = computeADXSeries(highs, lows, closes, 14);
+    const observations = [];
+    const indices = [];
+    for (let i = 0; i < dates.length; i += 1) {
+        if (Number.isFinite(logReturns[i]) && Number.isFinite(atrRatio[i])) {
+            observations.push([logReturns[i], atrRatio[i]]);
+            indices.push(i);
+        }
+    }
+    const hmmModel = observations.length >= 16
+        ? trainFourStateHMM(observations, { maxIterations: 40, tolerance: 1e-4 })
+        : null;
+    const hmmAssignments = new Array(dates.length).fill(null);
+    const hmmPosteriors = new Array(dates.length).fill(null);
+    let mapping = null;
+    if (hmmModel) {
+        mapping = mapStatesToRegimes(hmmModel);
+        const reverseMap = mapping?.stateToLabel || {};
+        indices.forEach((targetIndex, seqIndex) => {
+            const stateIndex = Array.isArray(hmmModel.sequence) ? hmmModel.sequence[seqIndex] : null;
+            const label = Number.isInteger(stateIndex) ? reverseMap[stateIndex] : null;
+            hmmAssignments[targetIndex] = label || null;
+            const posteriorRow = Array.isArray(hmmModel.posteriors?.[seqIndex])
+                ? hmmModel.posteriors[seqIndex].slice()
+                : null;
+            if (posteriorRow) {
+                hmmPosteriors[targetIndex] = posteriorRow;
+            }
+        });
+    }
+
+    return {
+        dates,
+        opens,
+        highs,
+        lows,
+        closes,
+        volumes,
+        logReturns,
+        atrSeries,
+        atrRatio,
+        bollWidth,
+        adx,
+        hmm: {
+            model: hmmModel,
+            assignments: hmmAssignments,
+            posteriors: hmmPosteriors,
+            mapping,
+            iterations: hmmModel?.iterations ?? null,
+            logLikelihood: hmmModel?.logLikelihood ?? null,
+        },
+    };
+}
+
+function classifyRegimes(base, thresholds) {
+    if (!base || !Array.isArray(base.dates) || base.dates.length === 0) {
+        return { labels: [], segments: [], summary: null };
+    }
+    const length = base.dates.length;
+    const baseAssignments = Array.isArray(base.hmm?.assignments) ? base.hmm.assignments : [];
+    const posteriors = Array.isArray(base.hmm?.posteriors) ? base.hmm.posteriors : [];
+    const labelToState = base.hmm?.mapping?.labelToState || null;
+    const finalLabels = new Array(length).fill(null);
+    const atrMedian = computeMedian(base.atrRatio);
+    for (let i = 0; i < length; i += 1) {
+        const baseLabel = baseAssignments[i];
+        const parsed = parseRegimeLabel(baseLabel);
+        let direction = parsed.direction;
+        let volatility = parsed.volatility;
+        if (!baseLabel) {
+            direction = Number.isFinite(base.logReturns?.[i]) && base.logReturns[i] >= 0 ? 'bull' : 'bear';
+            if (Number.isFinite(base.atrRatio?.[i]) && Number.isFinite(atrMedian)) {
+                volatility = base.atrRatio[i] >= atrMedian ? 'high' : 'low';
+            }
+        }
+        const override = resolveVolatilityClass(base.adx?.[i], base.bollWidth?.[i], base.atrRatio?.[i], thresholds);
+        if (override) {
+            volatility = override;
+        }
+        finalLabels[i] = combineDirectionVol(direction, volatility);
+    }
+    fillMissingLabels(finalLabels);
+    const smoothed = thresholds?.smoothingWindow > 1
+        ? smoothLabels(finalLabels, thresholds.smoothingWindow)
+        : finalLabels.slice();
+    const enforced = thresholds?.minSegmentLength > 1
+        ? enforceMinSegmentLength(smoothed, thresholds.minSegmentLength)
+        : smoothed;
+    const aggregation = buildSegmentsAndAggregate(enforced, base.logReturns);
+    const averageConfidence = computeAverageConfidence(enforced, posteriors, labelToState);
+    const summary = {
+        aggregatedByType: aggregation.aggregated,
+        totalDays: aggregation.totalDays,
+        averageConfidence,
+        hmm: {
+            iterations: base.hmm?.iterations ?? null,
+            logLikelihood: base.hmm?.logLikelihood ?? null,
+        },
+    };
+    return {
+        labels: enforced,
+        segments: aggregation.segments,
+        summary,
+    };
 }
 
 
 function computeTrendAnalysisFromResult(result, thresholds) {
-    const dates = Array.isArray(result?.dates) ? result.dates : [];
-    const returns = Array.isArray(result?.strategyReturns) ? result.strategyReturns : [];
-    const length = Math.min(dates.length, returns.length);
-    if (length === 0) {
-        if (thresholds && typeof thresholds === 'object') {
-            thresholds.coverageBoostApplied = false;
-            thresholds.trendCoverageRatio = null;
-            if (!Number.isFinite(thresholds?.trendCoverageTarget)) {
-                thresholds.trendCoverageTarget = Number.isFinite(thresholds?.targetTrendCoverage)
-                    ? thresholds.targetTrendCoverage
-                    : null;
-            }
-        }
+    if (!trendAnalysisState.base) {
+        trendAnalysisState.base = prepareRegimeBaseData(result);
+    }
+    if (!trendAnalysisState.base) {
         return { segments: [], summary: null };
     }
-    const netValues = new Array(length).fill(null);
-    const logValues = new Array(length).fill(null);
-    const validIndices = [];
-    for (let i = 0; i < length; i += 1) {
-        const parsed = Number.parseFloat(returns[i]);
-        if (Number.isFinite(parsed)) {
-            const net = 1 + parsed / 100;
-            if (net > 0) {
-                netValues[i] = net;
-                logValues[i] = Math.log(net);
-                validIndices.push(i);
-            }
-        }
-    }
-    if (validIndices.length < 2) {
-        if (thresholds && typeof thresholds === 'object') {
-            thresholds.coverageBoostApplied = false;
-            thresholds.trendCoverageRatio = null;
-            if (!Number.isFinite(thresholds?.trendCoverageTarget)) {
-                thresholds.trendCoverageTarget = Number.isFinite(thresholds?.targetTrendCoverage)
-                    ? thresholds.targetTrendCoverage
-                    : null;
-            }
-        }
-        return { segments: [], summary: null };
-    }
-    const startIdx = validIndices[0];
-    const endIdx = validIndices[validIndices.length - 1];
-    const logDiffs = new Array(length).fill(null);
-    for (let i = startIdx + 1; i <= endIdx; i += 1) {
-        if (Number.isFinite(logValues[i]) && Number.isFinite(logValues[i - 1])) {
-            logDiffs[i] = logValues[i] - logValues[i - 1];
-        }
-    }
-    const windowSize = Math.max(5, Math.round(thresholds?.windowSize || TREND_WINDOW_SIZE));
-    const slopeThreshold = Number.isFinite(thresholds?.slopeThreshold)
-        ? thresholds.slopeThreshold
-        : 0.0012;
-    const slopeRelaxed = Number.isFinite(thresholds?.slopeRelaxed)
-        ? thresholds.slopeRelaxed
-        : slopeThreshold * 0.6;
-    const ratioThreshold = Number.isFinite(thresholds?.trendRatioThreshold)
-        ? thresholds.trendRatioThreshold
-        : 1.0;
-    const ratioRelaxed = Number.isFinite(thresholds?.trendRatioRelaxed)
-        ? thresholds.trendRatioRelaxed
-        : ratioThreshold * 0.7;
-    const strengthThreshold = Number.isFinite(thresholds?.strengthThreshold)
-        ? thresholds.strengthThreshold
-        : 1.2;
-    const strengthRelaxed = Number.isFinite(thresholds?.strengthRelaxed)
-        ? thresholds.strengthRelaxed
-        : strengthThreshold * 0.7;
-    const r2Threshold = Number.isFinite(thresholds?.r2Threshold)
-        ? thresholds.r2Threshold
-        : 0.35;
-    const r2Relaxed = Number.isFinite(thresholds?.r2Relaxed)
-        ? thresholds.r2Relaxed
-        : Math.max(0.08, r2Threshold * 0.75);
-
-    const computeWindowMetrics = (startIndex, endIndex) => {
-        const count = endIndex - startIndex + 1;
-        if (count < 3) return null;
-        let sumX = 0;
-        let sumY = 0;
-        let sumXX = 0;
-        let sumXY = 0;
-        for (let offset = 0; offset < count; offset += 1) {
-            const value = logValues[startIndex + offset];
-            if (!Number.isFinite(value)) {
-                return null;
-            }
-            const x = offset;
-            sumX += x;
-            sumY += value;
-            sumXX += x * x;
-            sumXY += x * value;
-        }
-        const denominator = count * sumXX - sumX * sumX;
-        if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-9) {
-            return null;
-        }
-        const slope = (count * sumXY - sumX * sumY) / denominator;
-        const intercept = (sumY - slope * sumX) / count;
-        const meanY = sumY / count;
-        let ssTot = 0;
-        let ssRes = 0;
-        for (let offset = 0; offset < count; offset += 1) {
-            const y = logValues[startIndex + offset];
-            const x = offset;
-            const fitted = slope * x + intercept;
-            const diffMean = y - meanY;
-            const residual = y - fitted;
-            ssTot += diffMean * diffMean;
-            ssRes += residual * residual;
-        }
-        const r2 = ssTot > 0 ? Math.max(0, 1 - (ssRes / ssTot)) : 0;
-        const residualStd = Math.sqrt(ssRes / Math.max(1, count - 2));
-        let diffSum = 0;
-        let diffSq = 0;
-        let diffCount = 0;
-        for (let idx = startIndex + 1; idx <= endIndex; idx += 1) {
-            const diff = logDiffs[idx];
-            if (!Number.isFinite(diff)) continue;
-            diffSum += diff;
-            diffSq += diff * diff;
-            diffCount += 1;
-        }
-        const diffMean = diffCount > 0 ? diffSum / diffCount : 0;
-        const diffVariance = diffCount > 0 ? Math.max(0, diffSq / diffCount - diffMean * diffMean) : 0;
-        const volatility = Math.sqrt(diffVariance);
-        const trendRatio = volatility > 0
-            ? slope / volatility
-            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-        const strength = residualStd > 0
-            ? slope / residualStd
-            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-        return {
-            slope,
-            slopeAbs: Math.abs(slope),
-            r2,
-            trendRatio,
-            trendRatioAbs: Math.abs(trendRatio),
-            strength,
-            strengthAbs: Math.abs(strength),
-        };
-    };
-
-    const totalDays = Math.max(1, endIdx - startIdx + 1);
-
-    const getNetValueBackward = (index) => {
-        for (let i = Math.min(index, length - 1); i >= 0; i -= 1) {
-            const value = netValues[i];
-            if (Number.isFinite(value) && value > 0) return value;
-        }
-        return 1;
-    };
-
-    const buildSegment = (type, startIndex, endIndex) => {
-        const startDate = dates[startIndex] || null;
-        const endDate = dates[endIndex] || null;
-        const baseValue = startIndex > 0 ? getNetValueBackward(startIndex - 1) : 1;
-        const endValue = getNetValueBackward(endIndex);
-        const safeBase = baseValue > 0 ? baseValue : 1e-6;
-        const safeEnd = endValue > 0 ? endValue : 1e-6;
-        const factor = safeEnd / safeBase;
-        const returnPercent = (factor - 1) * 100;
-        return {
-            type,
-            startIndex,
-            endIndex,
-            startDate,
-            endDate,
-            days: Math.max(1, endIndex - startIndex + 1),
-            factor,
-            returnPercent,
-            overlay: TREND_STYLE_MAP[type]?.overlay || 'rgba(0,0,0,0.06)',
-        };
-    };
-
-    const classifyWithThresholds = (params) => {
-        const slopeStrictValue = Number.isFinite(params?.slopeThreshold)
-            ? params.slopeThreshold
-            : slopeThreshold;
-        const slopeRelaxedValue = Number.isFinite(params?.slopeRelaxed)
-            ? params.slopeRelaxed
-            : slopeRelaxed;
-        const ratioStrictValue = Number.isFinite(params?.ratioThreshold)
-            ? params.ratioThreshold
-            : ratioThreshold;
-        const ratioRelaxedValue = Number.isFinite(params?.ratioRelaxed)
-            ? params.ratioRelaxed
-            : ratioRelaxed;
-        const strengthStrictValue = Number.isFinite(params?.strengthThreshold)
-            ? params.strengthThreshold
-            : strengthThreshold;
-        const strengthRelaxedValue = Number.isFinite(params?.strengthRelaxed)
-            ? params.strengthRelaxed
-            : strengthRelaxed;
-        const r2StrictValue = Number.isFinite(params?.r2Threshold)
-            ? params.r2Threshold
-            : r2Threshold;
-        const r2RelaxedValue = Number.isFinite(params?.r2Relaxed)
-            ? params.r2Relaxed
-            : r2Relaxed;
-
-        const localClassifications = new Array(length).fill(null);
-        for (let idx = startIdx; idx <= endIdx; idx += 1) {
-            if (!Number.isFinite(logValues[idx])) {
-                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
-                continue;
-            }
-            if (idx - windowSize + 1 < startIdx) {
-                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
-                continue;
-            }
-            let invalidWindow = false;
-            for (let j = idx - windowSize + 1; j <= idx; j += 1) {
-                if (!Number.isFinite(logValues[j])) {
-                    invalidWindow = true;
-                    break;
-                }
-            }
-            if (invalidWindow) {
-                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
-                continue;
-            }
-            const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
-            if (!metrics) {
-                localClassifications[idx] = localClassifications[idx - 1] || 'consolidation';
-                continue;
-            }
-            const {
-                slope,
-                slopeAbs,
-                r2,
-                trendRatioAbs,
-                strengthAbs,
-            } = metrics;
-            let classification = 'consolidation';
-            const passesStrict = slopeAbs >= slopeStrictValue
-                && r2 >= r2StrictValue
-                && trendRatioAbs >= ratioStrictValue
-                && strengthAbs >= strengthStrictValue;
-            const passesRelaxed = slopeAbs >= slopeRelaxedValue
-                && (
-                    (r2 >= r2RelaxedValue && trendRatioAbs >= ratioRelaxedValue)
-                    || (strengthAbs >= strengthRelaxedValue && trendRatioAbs >= ratioRelaxedValue)
-                    || (strengthAbs >= strengthStrictValue && r2 >= r2RelaxedValue)
-                );
-            if (passesStrict || passesRelaxed) {
-                classification = slope >= 0 ? 'uptrend' : 'downtrend';
-            }
-            localClassifications[idx] = classification;
-        }
-
-        const segmentsLocal = [];
-        let segmentType = null;
-        let segmentStart = null;
-        for (let idx = startIdx; idx <= endIdx; idx += 1) {
-            const type = localClassifications[idx] || segmentType || 'consolidation';
-            if (segmentType === null) {
-                segmentType = type;
-                segmentStart = idx;
-                continue;
-            }
-            if (type !== segmentType) {
-                segmentsLocal.push(buildSegment(segmentType, segmentStart, idx - 1));
-                segmentType = type;
-                segmentStart = idx;
-            }
-        }
-        if (segmentType !== null && segmentStart !== null) {
-            segmentsLocal.push(buildSegment(segmentType, segmentStart, endIdx));
-        }
-
-        const aggregated = {
-            uptrend: { segments: 0, days: 0, factor: 1 },
-            consolidation: { segments: 0, days: 0, factor: 1 },
-            downtrend: { segments: 0, days: 0, factor: 1 },
-        };
-        segmentsLocal.forEach((segment) => {
-            const bucket = aggregated[segment.type];
-            if (!bucket) return;
-            bucket.segments += 1;
-            bucket.days += segment.days;
-            const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
-            bucket.factor *= segFactor;
-        });
-
-        const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
-            const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
-            acc[key] = {
-                segments: bucket.segments,
-                days: bucket.days,
-                coveragePct,
-                returnPct: (bucket.factor - 1) * 100,
-            };
-            return acc;
-        }, {});
-
-        const coverageRatioValue = totalDays > 0
-            ? ((aggregated.uptrend.days + aggregated.downtrend.days) / totalDays)
-            : 0;
-
-        return {
-            classifications: localClassifications,
-            segments: segmentsLocal,
-            aggregated,
-            summary: {
-                startIndex: startIdx,
-                endIndex: endIdx,
-                totalDays,
-                aggregatedByType,
-                trendCoverageRatio: coverageRatioValue,
-            },
-            coverageRatio: coverageRatioValue,
-        };
-    };
-
-    const baseEvaluation = classifyWithThresholds({
-        slopeThreshold,
-        slopeRelaxed,
-        ratioThreshold,
-        ratioRelaxed,
-        strengthThreshold,
-        strengthRelaxed,
-        r2Threshold,
-        r2Relaxed,
-    });
-
-    const sliderNormalized = Number.isFinite(thresholds?.sliderNormalized)
-        ? thresholds.sliderNormalized
-        : 0;
-    const targetTrendCoverage = Number.isFinite(thresholds?.targetTrendCoverage)
-        ? thresholds.targetTrendCoverage
-        : sliderNormalized;
-    const coverageFloors = thresholds?.coverageBoostFloors && typeof thresholds.coverageBoostFloors === 'object'
-        ? thresholds.coverageBoostFloors
-        : {
-            slopeThreshold: Math.max(0.00003, slopeThreshold * 0.65),
-            slopeRelaxed: Math.max(0.000025, slopeRelaxed * 0.65),
-            ratioThreshold: 0.8,
-            ratioRelaxed: 0.55,
-            strengthThreshold: 1.05,
-            strengthRelaxed: 0.85,
-            r2Threshold: 0.22,
-            r2Relaxed: 0.15,
-        };
-
-    let finalEvaluation = baseEvaluation;
-    let coverageRatio = baseEvaluation.coverageRatio;
-    let coverageBoostApplied = false;
-
-    const wantsFullCoverage = targetTrendCoverage >= 0.95;
-    const coverageTargetLimit = wantsFullCoverage ? 1 : 0.95;
-    const coverageTarget = Math.max(0, Math.min(coverageTargetLimit, targetTrendCoverage));
-    if (coverageRatio < coverageTarget) {
-        const coverageGap = coverageTarget - coverageRatio;
-        const baseMix = Math.min(1, Math.max(0, coverageGap / Math.max(0.05, coverageTarget)));
-        const mixes = [baseMix, Math.min(1, baseMix * 1.6), 1];
-
-        const buildBoostThresholds = (mix) => {
-            const safeMix = Math.max(0, Math.min(1, mix));
-            const mixValue = (value, floor) => {
-                if (!Number.isFinite(value)) return value;
-                const safeFloor = Number.isFinite(floor) ? Math.min(value, floor) : value;
-                return safeFloor + (value - safeFloor) * (1 - safeMix);
-            };
-            return {
-                slopeThreshold: mixValue(slopeThreshold, coverageFloors.slopeThreshold),
-                slopeRelaxed: mixValue(slopeRelaxed, coverageFloors.slopeRelaxed),
-                ratioThreshold: mixValue(ratioThreshold, coverageFloors.ratioThreshold),
-                ratioRelaxed: mixValue(ratioRelaxed, coverageFloors.ratioRelaxed),
-                strengthThreshold: mixValue(strengthThreshold, coverageFloors.strengthThreshold),
-                strengthRelaxed: mixValue(strengthRelaxed, coverageFloors.strengthRelaxed),
-                r2Threshold: mixValue(r2Threshold, coverageFloors.r2Threshold),
-                r2Relaxed: mixValue(r2Relaxed, coverageFloors.r2Relaxed),
-            };
-        };
-
-        for (const mix of mixes) {
-            if (!(mix > 0)) continue;
-            const boostedEvaluation = classifyWithThresholds(buildBoostThresholds(mix));
-            if (boostedEvaluation.coverageRatio > coverageRatio + 0.003) {
-                finalEvaluation = boostedEvaluation;
-                coverageRatio = boostedEvaluation.coverageRatio;
-                coverageBoostApplied = true;
-            }
-            if (coverageRatio >= coverageTarget - 0.01) {
-                break;
-            }
-        }
-    }
-
-    if (coverageRatio < coverageTarget - 0.005) {
-        const degradePhases = wantsFullCoverage
-            ? [
-                { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
-                { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
-                { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
-                { slope: 0.12, ratio: 0.2, strength: 0.2, r2: 0.2 },
-                { slope: 0, ratio: 0, strength: 0, r2: 0 },
-            ]
-            : [
-                { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
-                { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
-                { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
-            ];
-        const minThresholds = wantsFullCoverage
-            ? {
-                slopeThreshold: 0,
-                slopeRelaxed: 0,
-                ratioThreshold: 0,
-                ratioRelaxed: 0,
-                strengthThreshold: 0,
-                strengthRelaxed: 0,
-                r2Threshold: 0,
-                r2Relaxed: 0,
-            }
-            : {
-                slopeThreshold: 0.000003,
-                slopeRelaxed: 0.0000022,
-                ratioThreshold: 0.006,
-                ratioRelaxed: 0.004,
-                strengthThreshold: 0.07,
-                strengthRelaxed: 0.05,
-                r2Threshold: 0.03,
-                r2Relaxed: 0.02,
-            };
-        for (const phase of degradePhases) {
-            const degradedEvaluation = classifyWithThresholds({
-                slopeThreshold: Math.max(minThresholds.slopeThreshold, slopeThreshold * phase.slope),
-                slopeRelaxed: Math.max(minThresholds.slopeRelaxed, slopeRelaxed * phase.slope),
-                ratioThreshold: Math.max(minThresholds.ratioThreshold, ratioThreshold * phase.ratio),
-                ratioRelaxed: Math.max(minThresholds.ratioRelaxed, ratioRelaxed * phase.ratio),
-                strengthThreshold: Math.max(minThresholds.strengthThreshold, strengthThreshold * phase.strength),
-                strengthRelaxed: Math.max(minThresholds.strengthRelaxed, strengthRelaxed * phase.strength),
-                r2Threshold: Math.max(minThresholds.r2Threshold, r2Threshold * phase.r2),
-                r2Relaxed: Math.max(minThresholds.r2Relaxed, r2Relaxed * phase.r2),
-            });
-            if (degradedEvaluation.coverageRatio > coverageRatio + 0.002) {
-                finalEvaluation = degradedEvaluation;
-                coverageRatio = degradedEvaluation.coverageRatio;
-                coverageBoostApplied = true;
-            }
-            if (coverageRatio >= coverageTarget - 0.005) {
-                break;
-            }
-        }
-    }
-
-    if (coverageRatio < coverageTarget - 0.01) {
-        const fallbackEvaluation = classifyWithThresholds(wantsFullCoverage
-            ? {
-                slopeThreshold: 0,
-                slopeRelaxed: 0,
-                ratioThreshold: 0,
-                ratioRelaxed: 0,
-                strengthThreshold: 0,
-                strengthRelaxed: 0,
-                r2Threshold: 0,
-                r2Relaxed: 0,
-            }
-            : {
-                slopeThreshold: 0.000002,
-                slopeRelaxed: 0.0000016,
-                ratioThreshold: 0.0045,
-                ratioRelaxed: 0.0032,
-                strengthThreshold: 0.055,
-                strengthRelaxed: 0.038,
-                r2Threshold: 0.024,
-                r2Relaxed: 0.018,
-            });
-        if (fallbackEvaluation.coverageRatio > coverageRatio) {
-            finalEvaluation = fallbackEvaluation;
-            coverageRatio = fallbackEvaluation.coverageRatio;
-            coverageBoostApplied = true;
-        }
-    }
-
-    if (thresholds && typeof thresholds === 'object') {
-        thresholds.coverageBoostApplied = coverageBoostApplied;
-        thresholds.trendCoverageRatio = coverageRatio;
-        thresholds.trendCoverageTarget = coverageTarget;
-    }
-
+    const classification = classifyRegimes(trendAnalysisState.base, thresholds);
+    trendAnalysisState.classifiedLabels = classification.labels || [];
     return {
-        segments: finalEvaluation.segments,
-        summary: finalEvaluation.summary,
+        segments: classification.segments || [],
+        summary: classification.summary || null,
     };
 }
 
@@ -1000,139 +1318,53 @@ function updateChartTrendOverlay() {
 
 function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
-    if (sliderValueEl) {
-        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}%`;
+    const thresholds = trendAnalysisState.thresholds;
+    if (sliderValueEl && thresholds) {
+        sliderValueEl.textContent = `${Math.round(thresholds.sensitivity)}`;
+    } else if (sliderValueEl) {
+        sliderValueEl.textContent = '—';
     }
     const badgeEl = document.getElementById('trend-version-badge');
     if (badgeEl) {
         badgeEl.textContent = trendAnalysisState.version;
     }
-    const thresholds = trendAnalysisState.thresholds;
     const thresholdTextEl = document.getElementById('trend-threshold-text');
     if (thresholdTextEl && thresholds) {
-        const slopeDailyPct = Math.expm1(thresholds.slopeThreshold) * 100;
-        const slopeAnnualPct = Math.expm1(thresholds.slopeThreshold * 252) * 100;
-        const slopeRelaxDailyPct = Math.expm1(thresholds.slopeRelaxed) * 100;
-        const slopeRelaxAnnualPct = Math.expm1(thresholds.slopeRelaxed * 252) * 100;
-        const trendRatioStrict = formatDecimal(thresholds.trendRatioThreshold, 2);
-        const trendRatioRelaxed = formatDecimal(thresholds.trendRatioRelaxed, 2);
-        const strengthStrict = formatDecimal(thresholds.strengthThreshold, 2);
-        const strengthRelaxed = formatDecimal(thresholds.strengthRelaxed, 2);
-        const r2Strict = formatDecimal(thresholds.r2Threshold, 2);
-        const r2Relaxed = formatDecimal(thresholds.r2Relaxed, 2);
-        const multiplierText = formatTrendMultiplier(thresholds.multiplier);
-        const rangeInfo = thresholds.range || {};
-        const sliderDisplayMin = Number.isFinite(rangeInfo.displayMin)
-            ? rangeInfo.displayMin
-            : TREND_SENSITIVITY_MIN;
-        const sliderDisplayMax = Number.isFinite(rangeInfo.displayMax)
-            ? rangeInfo.displayMax
-            : TREND_SENSITIVITY_MAX;
-        const sliderDisplayUnit = typeof rangeInfo.displayUnit === 'string'
-            ? rangeInfo.displayUnit
-            : '';
-        const sliderDisplayMinText = `${sliderDisplayMin}${sliderDisplayUnit}`;
-        const sliderDisplayMaxText = `${sliderDisplayMax}${sliderDisplayUnit}`;
-        const sliderMultiplierTight = Number.isFinite(rangeInfo.multiplierAtMin)
-            ? rangeInfo.multiplierAtMin
-            : 1;
-        const sliderMultiplierLoose = Number.isFinite(rangeInfo.multiplierAtMax)
-            ? rangeInfo.multiplierAtMax
-            : 1;
-        const coarseMultiplier = Math.max(sliderMultiplierTight, sliderMultiplierLoose);
-        const fineMultiplier = Math.min(sliderMultiplierTight, sliderMultiplierLoose);
-        const maxMultiplier = formatTrendMultiplier(coarseMultiplier);
-        const minMultiplier = formatTrendMultiplier(fineMultiplier);
-        let ratio = Number.isFinite(rangeInfo.ratio) && rangeInfo.ratio > 0
-            ? rangeInfo.ratio
-            : (fineMultiplier > 0 ? coarseMultiplier / fineMultiplier : null);
-        let ratioText = '—';
-        if (Number.isFinite(ratio) && ratio > 0) {
-            if (ratio >= 100) {
-                ratioText = ratio.toFixed(0);
-            } else if (ratio >= 10) {
-                ratioText = ratio.toFixed(0);
-            } else {
-                ratioText = ratio.toFixed(1);
-            }
-        }
-        const equivalentMin = Number.isFinite(rangeInfo.minEquivalent)
-            ? Math.round(rangeInfo.minEquivalent)
-            : null;
-        const equivalentMax = Number.isFinite(rangeInfo.maxEquivalent)
-            ? Math.round(rangeInfo.maxEquivalent)
-            : null;
-        const equivalentCurrent = Number.isFinite(thresholds.equivalentSensitivity)
-            ? Math.round(thresholds.equivalentSensitivity)
-            : null;
-        const sliderMappingText = `滑桿 ${sliderDisplayMinText}→${sliderDisplayMaxText} 對應趨勢覆蓋目標 ${sliderDisplayMinText}→${sliderDisplayMaxText}`;
-        const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
-        const coverageRatioValue = Number.isFinite(thresholds.trendCoverageRatio)
-            ? thresholds.trendCoverageRatio
-            : null;
-        const coverageTargetValue = Number.isFinite(thresholds.trendCoverageTarget)
-            ? thresholds.trendCoverageTarget
-            : (Number.isFinite(thresholds.targetTrendCoverage) ? thresholds.targetTrendCoverage : null);
-        const targetCoverageText = coverageTargetValue !== null
-            ? formatPercentPlain(coverageTargetValue * 100, 1)
-            : '—';
-        let coverageNote = '';
-        if (coverageRatioValue !== null) {
-            const coveragePercentText = formatPercentPlain(coverageRatioValue * 100, 1);
-            if (coverageTargetValue !== null) {
-                const coverageTargetText = formatPercentPlain(coverageTargetValue * 100, 1);
-                coverageNote = thresholds.coverageBoostApplied
-                    ? `系統已依滑桿目標調整門檻，趨勢覆蓋 ${coveragePercentText}（目標 ${coverageTargetText}）。`
-                    : `趨勢覆蓋 ${coveragePercentText}（目標 ${coverageTargetText}）。`;
-            } else {
-                coverageNote = `趨勢覆蓋約 ${coveragePercentText}。`;
-            }
-        }
+        const adxText = thresholds.adxTrend.toFixed(1);
+        const adxFlat = thresholds.adxFlat.toFixed(1);
+        const bollHigh = (thresholds.bollTrend * 100).toFixed(1);
+        const bollLow = (thresholds.bollFlat * 100).toFixed(1);
+        const atrHigh = (thresholds.atrTrend * 100).toFixed(2);
+        const atrLow = (thresholds.atrFlat * 100).toFixed(2);
+        const precisionLabel = Math.round(thresholds.sensitivity);
         thresholdTextEl.innerHTML = `
-            <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
-            起漲：斜率 ≥ ${formatPercentPlain(slopeDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeAnnualPct, 1)}），R² ≥ ${r2Strict}，
-            且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
-            若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
-            並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
-            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前覆蓋目標約 ${targetCoverageText}，數值越大越保守、越小越靈敏；舊版對應值約 ${equivalentCurrentText}）。
-            ${coverageNote ? `<br><span class="text-[10px]" style="color: var(--muted-foreground);">${coverageNote}</span>` : ''}
+            精細度 ${precisionLabel} 時：ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}% 或 ATR 比 ≥ ${atrHigh}% 判定為高波動；
+            若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則視為盤整。
+            同時使用 ${thresholds.smoothingWindow} 日平滑窗與最少 ${thresholds.minSegmentLength} 日區段限制協助穩定分類。
         `;
     }
-    const placeholderEl = document.getElementById('trend-summary-placeholder');
-    const metaEl = document.getElementById('trend-summary-meta');
     const container = document.getElementById('trend-summary-container');
-    if (!container) return;
+    const placeholder = document.getElementById('trend-summary-placeholder');
+    const metaEl = document.getElementById('trend-summary-meta');
     const summary = trendAnalysisState.summary;
-    const segments = trendAnalysisState.segments;
-    if (!summary || !segments || segments.length === 0) {
+    if (!container || !placeholder) return;
+    if (!summary) {
         container.innerHTML = '';
-        if (placeholderEl) placeholderEl.classList.remove('hidden');
-        if (metaEl) {
-            metaEl.classList.add('hidden');
-            metaEl.textContent = '';
-        }
+        placeholder.classList.remove('hidden');
+        if (metaEl) metaEl.classList.add('hidden');
         return;
     }
-    if (placeholderEl) placeholderEl.classList.add('hidden');
-    if (metaEl) {
-        const firstSegment = segments[0];
-        const lastSegment = segments[segments.length - 1];
-        const rangeText = firstSegment?.startDate && lastSegment?.endDate
-            ? `${firstSegment.startDate} ~ ${lastSegment.endDate}`
-            : '—';
-        metaEl.textContent = `統計範圍：${rangeText}（共 ${summary.totalDays} 個交易日）`;
-        metaEl.classList.remove('hidden');
-    }
-    const order = ['uptrend', 'consolidation', 'downtrend'];
-    const cards = order.map((key) => {
-        const style = TREND_STYLE_MAP[key];
-        const stats = summary.aggregatedByType[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: 0 };
-        const returnText = formatPercent(stats.returnPct);
-        const coverageText = formatPercentPlain(stats.coveragePct, 1);
-        const borderColor = style?.border || 'rgba(148, 163, 184, 0.35)';
-        const background = style?.overlay || 'rgba(148, 163, 184, 0.15)';
-        const accent = style?.accent || 'var(--foreground)';
-        const label = style?.label || key;
+    placeholder.classList.add('hidden');
+    const order = ['bullHighVol', 'bullLowVol', 'bearHighVol', 'bearLowVol'];
+    container.innerHTML = order.map((key) => {
+        const style = TREND_STYLE_MAP[key] || {};
+        const stats = summary.aggregatedByType?.[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: null };
+        const coverageText = formatPercentPlain(stats.coveragePct || 0, 1);
+        const returnText = Number.isFinite(stats.returnPct) ? formatPercentSigned(stats.returnPct, 2) : '—';
+        const borderColor = style.border || 'rgba(148, 163, 184, 0.35)';
+        const background = style.overlay || 'rgba(148, 163, 184, 0.15)';
+        const accent = style.accent || 'var(--foreground)';
+        const label = style.label || key;
         return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-2" style="color: ${accent};">
@@ -1145,7 +1377,21 @@ function renderTrendSummary() {
             <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
         </div>`;
     }).join('');
-    container.innerHTML = cards;
+    if (metaEl) {
+        const avgConfidence = Number.isFinite(summary.averageConfidence)
+            ? formatPercentPlain(summary.averageConfidence * 100, 1)
+            : '—';
+        const iterationsText = Number.isFinite(summary.hmm?.iterations) ? summary.hmm.iterations : '—';
+        const logLikelihoodText = Number.isFinite(summary.hmm?.logLikelihood)
+            ? summary.hmm.logLikelihood.toFixed(1)
+            : '—';
+        metaEl.classList.remove('hidden');
+        metaEl.innerHTML = `<div class="flex flex-wrap gap-3">
+            <span>HMM 迭代：${iterationsText}</span>
+            <span>對數概似：${logLikelihoodText}</span>
+            <span>平均狀態信心：${avgConfidence}</span>
+        </div>`;
+    }
 }
 
 function recomputeTrendAnalysis(options = {}) {
@@ -3872,6 +4118,8 @@ function handleBacktestResult(result, stockName, dataSource) {
         showError("回測結果無效或無數據");
         lastOverallResult = null; lastSubPeriodResults = null;
         trendAnalysisState.result = null;
+        trendAnalysisState.base = null;
+        trendAnalysisState.classifiedLabels = [];
         trendAnalysisState.segments = [];
         trendAnalysisState.summary = null;
         renderTrendSummary();
@@ -3890,6 +4138,7 @@ function handleBacktestResult(result, stockName, dataSource) {
             dates: Array.isArray(result.dates) ? [...result.dates] : [],
             strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
         };
+        trendAnalysisState.base = prepareRegimeBaseData(result);
         recomputeTrendAnalysis({ skipChartUpdate: true });
 
         updateDataSourceDisplay(dataSource, stockName);
