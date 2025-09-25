@@ -471,3 +471,8 @@
 - **Diagnostics**: 趨勢卡片顯示目標與實際趨勢覆蓋、Sigmoid 補償日數與是否達標；門檻說明同步揭露對數映射後的 ADX／布林／ATR 判準與平滑視窗，滑桿拖曳時覆蓋指標與補償統計會隨即更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-18 — Patch LB-REGIME-FEATURES-20250718A
+- **Issue recap**: 現行四態 HMM 僅採用日對數報酬與 ATR 比率兩項特徵，對成交量動能與報酬分布偏態的掌握不足，滑桿在高靈敏度端偶爾出現盤整覆蓋倒掛，未完全呼應多維特徵可提升 regime 判別精準度的研究建議。
+- **Fix**: 新增 20 日對數報酬偏態與成交量 Z-score 作為 HMM 觀測向量，並在送入模型前以 z-score 正規化每個維度，讓 regime 偵測同時考量波動、動能與量能結構，維持滑桿覆蓋率單調遞減。
+- **Diagnostics**: 回測摘要檢視 `result.regimeBase.hmm.normalization` 確認均值與標準差紀錄，並比對高靈敏度設定時趨勢段覆蓋仍可達 80% 以上且盤整覆蓋低於 20%；同時驗證 HMM 迭代收斂與平均信心未因特徵擴充而惡化。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

@@ -7,6 +7,7 @@
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
+// Patch Tag: LB-REGIME-FEATURES-20250718A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -481,6 +482,114 @@ function computeLogReturns(closes) {
     return result;
 }
 
+function computeRollingSkewness(values, period = 20) {
+    const length = Array.isArray(values) ? values.length : 0;
+    const windowSize = Math.max(1, Math.round(Number(period) || 20));
+    const result = new Array(length).fill(null);
+    const window = [];
+    for (let i = 0; i < length; i += 1) {
+        const value = Number(values[i]);
+        if (Number.isFinite(value)) {
+            window.push({ index: i, value });
+        } else {
+            window.push({ index: i, value: null });
+        }
+        while (window.length > 0 && window[0].index < i - windowSize + 1) {
+            window.shift();
+        }
+        const finiteValues = window
+            .map((entry) => entry.value)
+            .filter((val) => Number.isFinite(val));
+        const n = finiteValues.length;
+        if (n >= 3) {
+            const mean = finiteValues.reduce((acc, val) => acc + val, 0) / n;
+            let m2 = 0;
+            let m3 = 0;
+            finiteValues.forEach((val) => {
+                const diff = val - mean;
+                m2 += diff * diff;
+                m3 += diff * diff * diff;
+            });
+            const variance = m2 / n;
+            const std = Math.sqrt(variance);
+            if (std > 0) {
+                const adjustment = n / ((n - 1) * (n - 2));
+                result[i] = adjustment * (m3 / (std * std * std));
+            } else {
+                result[i] = 0;
+            }
+        }
+    }
+    return result;
+}
+
+function computeRollingZScore(values, period = 20) {
+    const length = Array.isArray(values) ? values.length : 0;
+    const windowSize = Math.max(1, Math.round(Number(period) || 20));
+    const result = new Array(length).fill(null);
+    const window = [];
+    let sum = 0;
+    let sumSquares = 0;
+    let count = 0;
+    for (let i = 0; i < length; i += 1) {
+        const raw = Number(values[i]);
+        const value = Number.isFinite(raw) ? raw : null;
+        window.push({ index: i, value });
+        if (Number.isFinite(value)) {
+            sum += value;
+            sumSquares += value * value;
+            count += 1;
+        }
+        while (window.length > 0 && window[0].index < i - windowSize + 1) {
+            const removed = window.shift();
+            if (Number.isFinite(removed.value)) {
+                sum -= removed.value;
+                sumSquares -= removed.value * removed.value;
+                count -= 1;
+            }
+        }
+        if (Number.isFinite(value) && count >= 2) {
+            const mean = sum / count;
+            const variance = Math.max((sumSquares / count) - (mean * mean), 0);
+            const std = Math.sqrt(variance);
+            result[i] = std > 0 ? (value - mean) / std : 0;
+        }
+    }
+    return result;
+}
+
+function normalizeObservationMatrix(observations) {
+    if (!Array.isArray(observations) || observations.length === 0) {
+        return { normalized: [], mean: [], std: [] };
+    }
+    const dimension = observations[0].length;
+    const mean = new Array(dimension).fill(0);
+    observations.forEach((row) => {
+        row.forEach((value, idx) => {
+            mean[idx] += value;
+        });
+    });
+    for (let i = 0; i < dimension; i += 1) {
+        mean[i] /= observations.length;
+    }
+    const variance = new Array(dimension).fill(0);
+    observations.forEach((row) => {
+        row.forEach((value, idx) => {
+            const diff = value - mean[idx];
+            variance[idx] += diff * diff;
+        });
+    });
+    const std = variance.map((value) => {
+        const computed = Math.sqrt(value / observations.length);
+        return Number.isFinite(computed) && computed > 0 ? computed : 1;
+    });
+    const normalized = observations.map((row) => row.map((value, idx) => {
+        const divisor = std[idx] || 1;
+        return (value - mean[idx]) / divisor;
+    }));
+    return { normalized, mean, std };
+}
+
 function computeTrueRangeSeries(highs, lows, closes) {
     const length = Math.min(
         Array.isArray(highs) ? highs.length : 0,
@@ -667,7 +776,7 @@ function trainFourStateHMM(observations, options = {}) {
     if (!Array.isArray(observations) || observations.length === 0) return null;
     const clean = observations
         .filter((row) => Array.isArray(row) && row.every((value) => Number.isFinite(value)))
-        .map((row) => row.slice(0, 2));
+        .map((row) => row.slice());
     const numStates = Math.max(2, Math.round(options.numStates || 4));
     const maxIterations = Math.max(1, Math.round(options.maxIterations || 100));
     const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 1e-4;
@@ -1396,17 +1505,32 @@ function prepareRegimeBaseData(result) {
     });
     const bollWidth = computeBollingerBandwidth(closes, 20, 2);
     const adx = computeADXSeries(highs, lows, closes, 14);
+    const logReturnSkewness = computeRollingSkewness(logReturns, 20);
+    const volumeZScore = computeRollingZScore(volumes, 20);
     const observations = [];
     const indices = [];
     for (let i = 0; i < dates.length; i += 1) {
-        if (Number.isFinite(logReturns[i]) && Number.isFinite(atrRatio[i])) {
-            observations.push([logReturns[i], atrRatio[i]]);
+        if (
+            Number.isFinite(logReturns[i])
+            && Number.isFinite(atrRatio[i])
+            && Number.isFinite(logReturnSkewness[i])
+            && Number.isFinite(volumeZScore[i])
+        ) {
+            observations.push([
+                logReturns[i],
+                atrRatio[i],
+                logReturnSkewness[i],
+                volumeZScore[i],
+            ]);
             indices.push(i);
         }
     }
-    const hmmModel = observations.length >= 16
-        ? trainFourStateHMM(observations, { maxIterations: 100, tolerance: 1e-4 })
-        : null;
+    let normalization = null;
+    let hmmModel = null;
+    if (observations.length >= 16) {
+        normalization = normalizeObservationMatrix(observations);
+        hmmModel = trainFourStateHMM(normalization.normalized, { maxIterations: 100, tolerance: 1e-4 });
+    }
     const hmmAssignments = new Array(dates.length).fill(null);
     const hmmPosteriors = new Array(dates.length).fill(null);
     let mapping = null;
@@ -1438,6 +1562,8 @@ function prepareRegimeBaseData(result) {
         atrRatio,
         bollWidth,
         adx,
+        logReturnSkewness,
+        volumeZScore,
         hmm: {
             model: hmmModel,
             assignments: hmmAssignments,
@@ -1445,6 +1571,9 @@ function prepareRegimeBaseData(result) {
             mapping,
             iterations: hmmModel?.iterations ?? null,
             logLikelihood: hmmModel?.logLikelihood ?? null,
+            normalization: normalization
+                ? { mean: normalization.mean, std: normalization.std }
+                : null,
         },
     };
 }
