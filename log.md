@@ -1,4 +1,10 @@
 
+## 2025-09-10 — Patch LB-STRATEGY-STATUS-20250910A
+- **Issue recap**: 策略狀態卡落後時缺乏敏感度分數的提醒，無法向使用者交代參數穩定度；差距欄位仍以破折號佔位，與最新不顯示要求不符，落後狀態也未加粗標語引導注意力。
+- **Fix**: 新增 `buildSensitivityScoreAdvice` 將穩定度分數、平均漂移與方向偏移轉為戰況條列建議，更新狀態套用器隱藏差距欄破折號並於落後時插入「快呼叫策略優化…」強調句，版本碼調整為 `LB-STRATEGY-STATUS-20250910A`。
+- **Diagnostics**: 以模擬結果檢查策略領先、平手、落後情境，確認戰況條列會出現敏感度判讀句並依門檻切換建議；落後時展開摺疊後可看到加粗激勵句與完整條列，差距欄位保持隱藏。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-07 — Patch LB-STRATEGY-STATUS-20250907A
 - **Issue recap**: 策略狀態卡落後情境仍會顯示「快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。」的大字標語，與最新需求不符；差距徽章同時以 "-14.67pp" 顯示百分點，造成視覺干擾。
 - **Fix**: 移除落後狀態的強調標語，調整狀態套用器僅保留條列重點；差距徽章固定顯示破折號，避免輸出百分點文案。

@@ -269,7 +269,7 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250907A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250910A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
@@ -436,7 +436,15 @@ function applyStrategyStatusState(stateKey, options = {}) {
         elements.subtitle.textContent = options.subtitleOverride || config.subtitle;
     }
     if (elements.diff) {
-        elements.diff.textContent = options.diffText || '—';
+        const diffText = typeof options.diffText === 'string' ? options.diffText : '';
+        elements.diff.textContent = diffText;
+        if (typeof elements.diff.classList?.toggle === 'function') {
+            elements.diff.classList.toggle('hidden', diffText.length === 0);
+        } else if (diffText.length === 0) {
+            elements.diff.style.display = 'none';
+        } else {
+            elements.diff.style.display = '';
+        }
     }
     renderStrategyStatusDetail(options.detail || {});
 }
@@ -589,6 +597,77 @@ function buildStrategyHealthSummary(result) {
     };
 }
 
+function buildSensitivityScoreAdvice(result) {
+    const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+    const summary = data?.summary || null;
+    if (!summary) {
+        return null;
+    }
+
+    const rawScore = Number.isFinite(summary.stabilityScore) ? Number(summary.stabilityScore) : null;
+    const averageDrift = Number.isFinite(summary.averageDriftPercent)
+        ? Math.abs(Number(summary.averageDriftPercent))
+        : null;
+    const positiveDrift = Number.isFinite(summary.positiveDriftPercent)
+        ? Math.abs(Number(summary.positiveDriftPercent))
+        : null;
+    const negativeDrift = Number.isFinite(summary.negativeDriftPercent)
+        ? Math.abs(Number(summary.negativeDriftPercent))
+        : null;
+    const sampleCount = Number.isFinite(summary.scenarioCount) ? Number(summary.scenarioCount) : null;
+
+    const segments = [];
+
+    if (rawScore === null) {
+        segments.push('敏感度總分缺資料，建議重新執行擾動測試確認穩定度。');
+    } else if (rawScore >= 70) {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健等級`);
+    } else if (rawScore >= 40) {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，落在觀察區`);
+    } else {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數相當敏感`);
+    }
+
+    if (averageDrift !== null) {
+        if (averageDrift <= 20) {
+            segments.push('平均漂移控制在 ±20pp 內，變動幅度尚稱穩健');
+        } else if (averageDrift <= 40) {
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險`);
+        } else {
+            segments.push(`平均漂移放大到 ${averageDrift.toFixed(1)}pp，請盡速強化風控或縮小部位`);
+        }
+    }
+
+    if (positiveDrift !== null || negativeDrift !== null) {
+        const positiveValue = positiveDrift ?? -Infinity;
+        const negativeValue = negativeDrift ?? -Infinity;
+        const dominantDirection = positiveValue >= negativeValue ? '調高' : '調低';
+        const dominantMagnitude = dominantDirection === '調高' ? positiveDrift : negativeDrift;
+        const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
+        if (Number.isFinite(dominantMagnitude)) {
+            if (dominantMagnitude > 15) {
+                segments.push(`${dominantDirection}方向平均偏移超過 15pp，請優先檢查該方向的參數設定`);
+            } else if (dominantMagnitude > 10) {
+                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證`);
+            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
+                segments.push('調高與調低方向平均偏移皆在 10pp 內，屬常見穩健區間');
+            } else {
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp`);
+            }
+        }
+    }
+
+    if (sampleCount !== null) {
+        segments.push(`擾動樣本 ${sampleCount} 組`);
+    }
+
+    if (segments.length === 0) {
+        return null;
+    }
+
+    return `${segments.join('，')}。`;
+}
+
 function determineStrategyStatusState(diff, comparisonAvailable) {
     if (!comparisonAvailable) {
         return 'missing';
@@ -610,8 +689,9 @@ function updateStrategyStatusCard(result) {
     const comparison = buildStrategyComparisonSummary(result || {});
     const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
     const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
-    const diffText = '—';
+    const diffText = '';
     const health = buildStrategyHealthSummary(result || {});
+    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {});
 
     const detailLines = [];
     if (comparison.line) {
@@ -620,13 +700,21 @@ function updateStrategyStatusCard(result) {
     if (Array.isArray(health.warningLines) && health.warningLines.length > 0) {
         detailLines.push(...health.warningLines);
     }
+    if (sensitivityAdvice) {
+        detailLines.push(sensitivityAdvice);
+    }
     if (health.positiveLine) {
         detailLines.push(health.positiveLine);
     }
 
+    const emphasisedLine = state === 'behind'
+        ? '快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。'
+        : null;
+
     applyStrategyStatusState(state, {
         diffText,
         detail: {
+            emphasisedLine,
             bulletLines: detailLines,
             collapsible: detailLines.length > 0,
             collapsibleSummary: '展開完整戰況條列',
