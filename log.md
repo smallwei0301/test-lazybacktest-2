@@ -441,3 +441,9 @@
 - **Diagnostics**: 於本地輸入測試回測結果檢查門檻說明、覆蓋提示與倍率區間，拖曳滑桿確認趨勢覆蓋目標會隨數值遞減盤整比例，高段顯示「依滑桿目標調整門檻」提示。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-07 — Patch LB-TREND-SENSITIVITY-20251007A
+- **Issue recap**: 依滑桿目標調整後，仍有案例在靈敏度 1000 僅判出 0.4% 趨勢段，盤整覆蓋明顯超標，未達「高靈敏度至少 80% 判定」的目標。
+- **Fix**: 重新校準 20 日斜率、t 統計與雙訊噪比門檻，下修高靈敏度端的基準值並導入階段性補償與最後防線，確保不足時自動放寬至極低門檻，使趨勢覆蓋與滑桿目標同步提升。
+- **Diagnostics**: 驗證門檻說明新增「自動展開補償」描述，並以多組回測結果觀察覆蓋提示訊息改為「系統已依滑桿目標調整門檻」，確認 1000 時趨勢段佔比維持在 80% 以上。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

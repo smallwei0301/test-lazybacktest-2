@@ -279,7 +279,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251005A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251007A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_WINDOW_SIZE = 20;
 const TREND_SENSITIVITY_MIN = 1;
@@ -375,46 +375,46 @@ function computeTrendThresholds(sensitivity) {
     if (safe > max) safe = max;
     const sliderNormalized = span > 0 ? (safe - min) / span : 0;
     const invertedNormalized = 1 - sliderNormalized;
-    const strictCurve = Math.pow(invertedNormalized, 1.35);
-    const relaxedCurve = Math.pow(invertedNormalized, 1.1);
+    const strictCurve = Math.pow(invertedNormalized, 1.28);
+    const relaxedCurve = Math.pow(invertedNormalized, 1.05);
 
-    const slopeStrictMin = Math.max(0.000055, Math.log1p(0.02) / 252);
-    const slopeStrictMax = Math.log1p(1.08) / 252;
+    const slopeStrictMin = Math.max(0.000012, Math.log1p(0.0045) / 252);
+    const slopeStrictMax = Math.log1p(1.18) / 252;
     const slopeThreshold = slopeStrictMin + (slopeStrictMax - slopeStrictMin) * strictCurve;
-    const slopeRelaxFloor = Math.max(0.000038, slopeStrictMin * 0.62);
+    const slopeRelaxFloor = Math.max(0.00002, slopeStrictMin * 0.62);
     const slopeRelaxed = Math.max(
         slopeRelaxFloor,
         slopeThreshold * (0.58 + 0.14 * relaxedCurve),
     );
 
-    const trendRatioStrictMin = 0.9;
-    const trendRatioStrictMax = 5.4;
+    const trendRatioStrictMin = 0.08;
+    const trendRatioStrictMax = 2.6;
     const trendRatioThreshold = trendRatioStrictMin + (trendRatioStrictMax - trendRatioStrictMin) * strictCurve;
-    const trendRatioRelaxFloor = 0.58;
+    const trendRatioRelaxFloor = 0.05;
     const trendRatioRelaxed = Math.max(
         trendRatioRelaxFloor,
-        trendRatioThreshold * (0.54 + 0.12 * relaxedCurve),
+        trendRatioThreshold * (0.46 + 0.18 * relaxedCurve),
     );
 
-    const strengthStrictMin = 1.15;
-    const strengthStrictMax = 7.6;
+    const strengthStrictMin = 0.42;
+    const strengthStrictMax = 6.4;
     const strengthThreshold = strengthStrictMin + (strengthStrictMax - strengthStrictMin) * strictCurve;
-    const strengthRelaxFloor = 0.92;
+    const strengthRelaxFloor = 0.2;
     const strengthRelaxed = Math.max(
         strengthRelaxFloor,
-        strengthThreshold * (0.52 + 0.16 * relaxedCurve),
+        strengthThreshold * (0.44 + 0.22 * relaxedCurve),
     );
 
-    const r2StrictMin = 0.24;
-    const r2StrictMax = 0.88;
+    const r2StrictMin = 0.1;
+    const r2StrictMax = 0.92;
     const r2Threshold = Math.max(
         r2StrictMin,
         Math.min(0.94, r2StrictMin + (r2StrictMax - r2StrictMin) * strictCurve),
     );
-    const r2RelaxFloor = 0.16;
+    const r2RelaxFloor = 0.05;
     const r2Relaxed = Math.max(
         r2RelaxFloor,
-        Math.min(0.9, r2Threshold * (0.58 + 0.1 * relaxedCurve)),
+        Math.min(0.9, r2Threshold * (0.55 + 0.2 * relaxedCurve)),
     );
 
     const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
@@ -428,15 +428,23 @@ function computeTrendThresholds(sensitivity) {
     const ratio = multiplierAtMin / Math.max(multiplierAtMax, 1e-6);
 
     const targetTrendCoverage = 0.45 + 0.4 * sliderNormalized;
+    const coverageBlend = (value, strictFactor, lenientAbsolute, minAbsolute) => {
+        if (!Number.isFinite(value)) return value;
+        const strictFloor = value * strictFactor;
+        const lenientFloor = Math.min(value, Math.max(minAbsolute, lenientAbsolute));
+        const blended = strictFloor + (lenientFloor - strictFloor) * sliderNormalized;
+        return Math.min(value, Math.max(minAbsolute, blended));
+    };
+
     const coverageBoostFloors = {
-        slopeThreshold: Math.max(0.00003, slopeStrictMin * 0.85),
-        slopeRelaxed: Math.max(0.000025, slopeStrictMin * 0.6),
-        ratioThreshold: 0.8,
-        ratioRelaxed: 0.55,
-        strengthThreshold: 1.05,
-        strengthRelaxed: 0.85,
-        r2Threshold: 0.22,
-        r2Relaxed: 0.15,
+        slopeThreshold: coverageBlend(slopeThreshold, 0.78, 0.0000045, 0.0000035),
+        slopeRelaxed: coverageBlend(slopeRelaxed, 0.74, 0.0000035, 0.0000025),
+        ratioThreshold: coverageBlend(trendRatioThreshold, 0.82, 0.012, 0.008),
+        ratioRelaxed: coverageBlend(trendRatioRelaxed, 0.78, 0.008, 0.005),
+        strengthThreshold: coverageBlend(strengthThreshold, 0.78, 0.12, 0.08),
+        strengthRelaxed: coverageBlend(strengthRelaxed, 0.74, 0.08, 0.05),
+        r2Threshold: coverageBlend(r2Threshold, 0.8, 0.05, 0.035),
+        r2Relaxed: coverageBlend(r2Relaxed, 0.76, 0.04, 0.025),
     };
 
     return {
@@ -875,6 +883,62 @@ function computeTrendAnalysisFromResult(result, thresholds) {
             if (coverageRatio >= coverageTarget - 0.01) {
                 break;
             }
+        }
+    }
+
+    if (coverageRatio < coverageTarget - 0.005) {
+        const degradePhases = [
+            { slope: 0.62, ratio: 0.66, strength: 0.66, r2: 0.66 },
+            { slope: 0.45, ratio: 0.5, strength: 0.5, r2: 0.5 },
+            { slope: 0.28, ratio: 0.36, strength: 0.36, r2: 0.36 },
+        ];
+        const minThresholds = {
+            slopeThreshold: 0.000003,
+            slopeRelaxed: 0.0000022,
+            ratioThreshold: 0.006,
+            ratioRelaxed: 0.004,
+            strengthThreshold: 0.07,
+            strengthRelaxed: 0.05,
+            r2Threshold: 0.03,
+            r2Relaxed: 0.02,
+        };
+        for (const phase of degradePhases) {
+            const degradedEvaluation = classifyWithThresholds({
+                slopeThreshold: Math.max(minThresholds.slopeThreshold, slopeThreshold * phase.slope),
+                slopeRelaxed: Math.max(minThresholds.slopeRelaxed, slopeRelaxed * phase.slope),
+                ratioThreshold: Math.max(minThresholds.ratioThreshold, ratioThreshold * phase.ratio),
+                ratioRelaxed: Math.max(minThresholds.ratioRelaxed, ratioRelaxed * phase.ratio),
+                strengthThreshold: Math.max(minThresholds.strengthThreshold, strengthThreshold * phase.strength),
+                strengthRelaxed: Math.max(minThresholds.strengthRelaxed, strengthRelaxed * phase.strength),
+                r2Threshold: Math.max(minThresholds.r2Threshold, r2Threshold * phase.r2),
+                r2Relaxed: Math.max(minThresholds.r2Relaxed, r2Relaxed * phase.r2),
+            });
+            if (degradedEvaluation.coverageRatio > coverageRatio + 0.002) {
+                finalEvaluation = degradedEvaluation;
+                coverageRatio = degradedEvaluation.coverageRatio;
+                coverageBoostApplied = true;
+            }
+            if (coverageRatio >= coverageTarget - 0.005) {
+                break;
+            }
+        }
+    }
+
+    if (coverageRatio < coverageTarget - 0.01) {
+        const fallbackEvaluation = classifyWithThresholds({
+            slopeThreshold: 0.000002,
+            slopeRelaxed: 0.0000016,
+            ratioThreshold: 0.0045,
+            ratioRelaxed: 0.0032,
+            strengthThreshold: 0.055,
+            strengthRelaxed: 0.038,
+            r2Threshold: 0.024,
+            r2Relaxed: 0.018,
+        });
+        if (fallbackEvaluation.coverageRatio > coverageRatio) {
+            finalEvaluation = fallbackEvaluation;
+            coverageRatio = fallbackEvaluation.coverageRatio;
+            coverageBoostApplied = true;
         }
     }
 
