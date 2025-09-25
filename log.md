@@ -1,4 +1,9 @@
 
+# 2025-07-26 — Patch LB-STRATEGY-STATUS-20250726A
+- **Feature**: 摘要分頁新增「策略狀態速報」卡片，搬移戰況提示至淨值曲線下方，預設揭示版本碼與即將提供的對戰資訊。
+- **Logic**: 建立 `resetStrategyStatusCard`、`updateStrategyStatusCard` 與 `buildStrategyHealthSummary`，以報酬差距與年化/夏普/索提諾/最大回撤/前後段穩定度評分，輸出領先、拉鋸、落後與資料補眠狀態；落後時以強調句開場並改為條列句型。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('strategy status patch scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
@@ -34,6 +39,7 @@
 - **Fix**: 移除舊版模擬函式，改以 `runStrategy` 的 `finalEvaluation` 對今日資料延伸評估，產出多空持倉、最新價格與具體行動；同時補齊主執行緒快取 coverage 後灌入 Worker，確保建議計算命中現有資料並沿用最新 meta。
 - **Diagnostics**: 今日建議回傳載明延伸至今日的資料日期、倉位摘要與 lag 天數，若策略起始日尚未到達亦會顯示提示訊息；Worker 快取保留 coverage fingerprint，後續重播時可比對資料區間。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
 
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 ## 2025-07-15 — Patch LB-SENSITIVITY-GRID-20250715A / LB-SENSITIVITY-UX-20250715B
