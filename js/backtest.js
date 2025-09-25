@@ -282,11 +282,13 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-SIGMOID-20251015A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-SENSITIVITY-20251020A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
-const TREND_SENSITIVITY_MIN = 1;
-const TREND_SENSITIVITY_MAX = 1000;
-const TREND_SENSITIVITY_DEFAULT = 60;
+const TREND_SENSITIVITY_MIN = 0;
+const TREND_SENSITIVITY_MAX = 10;
+const TREND_SENSITIVITY_DEFAULT = 5;
+const TREND_SENSITIVITY_EFFECTIVE_MIN = 1;
+const TREND_SENSITIVITY_EFFECTIVE_MAX = 1000;
 const TREND_SIGMOID_STEEPNESS = 7.2;
 const TREND_TARGET_TREND_MIN = 0.38;
 const TREND_TARGET_TREND_MAX = 0.86;
@@ -407,8 +409,15 @@ function computeTrendThresholds(sensitivity) {
         min,
         max,
     );
-    const linearProgress = Math.max(0, Math.min(1, (safe - min) / Math.max(1, max - min)));
-    const logProgress = computeLogScaledProgress(safe, min, max);
+    const range = Math.max(1e-9, max - min);
+    const normalized = Math.max(0, Math.min(1, (safe - min) / range));
+    const effective = TREND_SENSITIVITY_EFFECTIVE_MIN
+        + normalized * (TREND_SENSITIVITY_EFFECTIVE_MAX - TREND_SENSITIVITY_EFFECTIVE_MIN);
+    const logProgress = computeLogScaledProgress(
+        effective,
+        TREND_SENSITIVITY_EFFECTIVE_MIN,
+        TREND_SENSITIVITY_EFFECTIVE_MAX,
+    );
     const sigmoidProgress = logistic((logProgress - 0.5) * TREND_SIGMOID_STEEPNESS);
     const adxTrend = 40 - sigmoidProgress * 24;
     const adxFlat = Math.max(7, adxTrend * (0.52 - sigmoidProgress * 0.12));
@@ -427,8 +436,9 @@ function computeTrendThresholds(sensitivity) {
     );
     return {
         sensitivity: safe,
+        effectiveSensitivity: effective,
         normalized: logProgress,
-        linearProgress,
+        linearProgress: normalized,
         logisticProgress: sigmoidProgress,
         adxTrend,
         adxFlat,
@@ -1689,11 +1699,13 @@ function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
     const thresholds = trendAnalysisState.thresholds;
     if (sliderValueEl && thresholds) {
-        const sensitivityLabel = Math.round(thresholds.sensitivity);
+        const sensitivityLabel = thresholds.sensitivity % 1 === 0
+            ? thresholds.sensitivity.toFixed(0)
+            : thresholds.sensitivity.toFixed(1);
         const targetText = Number.isFinite(thresholds.targetTrendCoverage)
             ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
             : '—';
-        sliderValueEl.textContent = `${sensitivityLabel} ｜ 目標趨勢 ${targetText}`;
+        sliderValueEl.textContent = `HMM 信心 ${sensitivityLabel} ｜ 目標趨勢 ${targetText}`;
     } else if (sliderValueEl) {
         sliderValueEl.textContent = '—';
     }
@@ -1712,11 +1724,13 @@ function renderTrendSummary() {
         const targetText = Number.isFinite(thresholds.targetTrendCoverage)
             ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
             : '—';
+        const effective = Number.isFinite(thresholds.effectiveSensitivity)
+            ? thresholds.effectiveSensitivity.toFixed(0)
+            : '—';
         thresholdTextEl.innerHTML = `
-            滑桿 1→1000 經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，並同步套用 ADX ≥ ${adxText}、
-            布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、
-            ATR 比 ≤ ${atrLow}% 則歸為盤整。同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，
-            覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢。`;
+            滑桿 0→10 以 0.1 為步進對應 1→1000 的模擬測試組數，經 1000 組離線覆蓋率迭代後建議預設為 5。當前數值經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，
+            並同步套用 ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則歸為盤整。
+            同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢（等效敏感度 ${effective}）。`;
     }
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
@@ -1808,7 +1822,7 @@ function initialiseTrendControls() {
     if (slider) {
         slider.value = `${trendAnalysisState.sensitivity}`;
         slider.addEventListener('input', (event) => {
-            const value = Number.parseInt(event.target.value, 10);
+            const value = Number.parseFloat(event.target.value);
             if (Number.isFinite(value)) {
                 trendAnalysisState.sensitivity = Math.max(TREND_SENSITIVITY_MIN, Math.min(TREND_SENSITIVITY_MAX, value));
                 recomputeTrendAnalysis();

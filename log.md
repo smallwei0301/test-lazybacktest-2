@@ -1,4 +1,10 @@
 
+## 2025-10-20 — Patch LB-TREND-SENSITIVITY-20251020A
+- **Issue recap**: 靈敏度滑桿擴充至 1→1000 後，覆蓋率補償邏輯雖可維持 80% 以上，但使用者難以掌握對應的門檻意義，且最大值仍可能殘留盤整倒掛。
+- **Fix**: 重新定義滑桿為 0→10、步進 0.1，對應 1000 組離線覆蓋率測試的等效敏感度並將最佳信心值 5 設為預設；後端以 0→10 轉換為 1→1000 的有效敏感度再套用 Sigmoid 門檻，確保數值越高盤整覆蓋遞減且高敏度時仍保有 80% 以上趨勢判斷。
+- **Diagnostics**: 檢查趨勢卡顯示版本章 `LB-TREND-SENSITIVITY-20251020A`、滑桿刻度 0→10 與預設值 5；拖曳滑桿觀察門檻文案顯示等效敏感度與覆蓋目標會同步刷新，趨勢底色在數值 10 時維持趨勢覆蓋 ≥80%。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-01 — Patch LB-TREND-SENSITIVITY-20251001A
 ## 2025-10-02 — Patch LB-TREND-SENSITIVITY-20251002A
 - **Issue recap**: 高靈敏度端擴大為 1→1000 後，滑桿拉到 1000 會把門檻推得過於嚴苛，趨勢底色幾乎消失，實際覆蓋遠低於預期的 80%。
