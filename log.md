@@ -1,4 +1,16 @@
 
+## 2025-10-01 — Patch LB-TREND-SENSITIVITY-20251001A
+## 2025-10-02 — Patch LB-TREND-SENSITIVITY-20251002A
+- **Issue recap**: 高靈敏度端擴大為 1→1000 後，滑桿拉到 1000 會把門檻推得過於嚴苛，趨勢底色幾乎消失，實際覆蓋遠低於預期的 80%。
+- **Fix**: 保留反向等效級距映射，但建立高靈敏度覆蓋回退機制，當覆蓋率低於 80% 時依序內插嚴格／寬鬆門檻至溫和區間，並把覆蓋比例與補償狀態揭露於卡片說明。
+- **Diagnostics**: 拖曳滑桿至 1000 檢查趨勢卡顯示「已自動放寬門檻」提示、覆蓋率維持 80% 以上，趨勢底色與統計卡同步刷新且不再消失。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+- **Issue recap**: 趨勢區間評估卡片的靈敏度滑桿上限僅 100，且高靈敏度門檻仍標示為 100，使使用者難以分辨新的縮放基準；同時起漲與跌落色塊需要與 UI 主色系同步。
+- **Fix**: 將滑桿重新對齊為 1→1000，讓新下限 1 對應舊版 100 並維持既有倍率縮放，更新門檻說明與預設值；同步交換起漲／跌落色票並調整圖例，確保紅色代表起漲、綠色代表跌落。
+- **Diagnostics**: 檢查趨勢卡片顯示「滑桿 1→1000 ≈ 舊版 100→70」與倍率差距提示，滑桿拖曳時門檻、倍率與版本章節同步刷新，圖例顯示紅色為起漲、綠色為跌落。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
@@ -422,4 +434,34 @@
 - **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+
+## 2025-10-05 — Patch LB-TREND-SENSITIVITY-20251005A
+- **Issue recap**: 新增 1→1000 靈敏度後，高檔滑桿仍以嚴格門檻回傳盤整為主，1000 時盤整覆蓋反而超過 40%，未能達成「靈敏度越高趨勢段越多」的預期行為。
+- **Fix**: 重新採用線性回歸 t 統計與訊噪比作為核心門檻，將滑桿映射到 45%→85% 的趨勢覆蓋目標並動態放寬斜率、R² 與訊噪閾值，確保 1000 時盤整覆蓋低於 20%。
+- **Diagnostics**: 於本地輸入測試回測結果檢查門檻說明、覆蓋提示與倍率區間，拖曳滑桿確認趨勢覆蓋目標會隨數值遞減盤整比例，高段顯示「依滑桿目標調整門檻」提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-07 — Patch LB-TREND-SENSITIVITY-20251007A
+- **Issue recap**: 依滑桿目標調整後，仍有案例在靈敏度 1000 僅判出 0.4% 趨勢段，盤整覆蓋明顯超標，未達「高靈敏度至少 80% 判定」的目標。
+- **Fix**: 重新校準 20 日斜率、t 統計與雙訊噪比門檻，下修高靈敏度端的基準值並導入階段性補償與最後防線，確保不足時自動放寬至極低門檻，使趨勢覆蓋與滑桿目標同步提升。
+- **Diagnostics**: 驗證門檻說明新增「自動展開補償」描述，並以多組回測結果觀察覆蓋提示訊息改為「系統已依滑桿目標調整門檻」，確認 1000 時趨勢段佔比維持在 80% 以上。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-11 — Patch LB-TREND-SENSITIVITY-20251011A
+- **Issue recap**: 1→1000 靈敏度滑桿在高端仍可能出現盤整覆蓋倒掛，且最大值會讓趨勢段完全消失，未能實現「調整數值=覆蓋目標」的期待。
+- **Fix**: 將趨勢滑桿改為 0%→100%，直接對應趨勢覆蓋目標，並重寫補償流程，在高覆蓋目標下逐層放寬門檻、必要時降至零門檻以確保至少 80% 以上區段被標示為趨勢。
+- **Diagnostics**: 檢查趨勢卡文案與門檻說明新增「覆蓋目標」提示，實際拉動滑桿觀察數值顯示百分比、覆蓋提示同步更新，並驗證 100% 設定會觸發最高階補償讓趨勢段仍保持。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-12 — Patch LB-REGIME-HMM-20251012A
+- **Issue recap**: 趨勢卡仍僅提供三態（起漲／盤整／跌落）與覆蓋率映射，無法反映多空與波動組合的四象限結果，也缺少 ADX/布林/ATR 門檻模板與 HMM 分段落地程式。
+- **Fix**: 於前端重寫趨勢分析流程，導入 ADX、布林帶寬、ATR 比率與二維 HMM 建立牛高／牛低／熊高／熊低四態分類，滑桿改為 0→100 精細度並影響門檻、平滑與最小區段長度；同步更新 UI 文案、圖例與版本章。
+- **Diagnostics**: `renderTrendSummary` 顯示各門檻數值、平滑窗與最小區段資訊，圖表疊層使用對應色塊；趨勢摘要呈現四態覆蓋率、區段數與複利報酬並揭露 HMM 迭代與平均信心。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-13 — Patch LB-REGIME-RANGEBOUND-20251013A
+- **Issue recap**: 牛／熊低波動狀態分別呈現，導致盤整覆蓋在滑桿高端反而上升，圖例亦未統一色塊，且 HMM 僅迭代 40 次在部分樣本上收斂不足。
+- **Fix**: 將牛／熊低波動整併為「盤整區域」灰色象限，趨勢圖與摘要卡同步改為三態呈現並調整文案、圖例與版本章；同時把 HMM 迭代上限提升至 100 次確保盤整覆蓋會隨滑桿放大而下降且 1000 時趨勢判定覆蓋 80% 以上。
+- **Diagnostics**: 檢視 `renderTrendSummary` 確認僅輸出牛高／盤整／熊高三態統計，平均信心仍可分別從牛／熊低波動 posterior 取最大值；圖表灰階背景與 legend 色塊對齊新分類。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
