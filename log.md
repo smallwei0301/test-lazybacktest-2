@@ -1,4 +1,16 @@
 
+## 2025-09-05 — Patch LB-TODAY-ACTION-20250828A
+- **Issue recap**: 備援腳本 `backtest_corrupted.js` 仍僅渲染舊版文字訊息，遇到新結構的 `action/label/tone` 會落入空白，亦缺乏快取覆蓋資訊與延遲提示。
+- **Fix**: 導入與主版一致的 `todaySuggestionUI` 呈現邏輯、調整 Worker 訊息處理與錯誤復原，並補上快取覆蓋計算、lookback 解析與結構化請求，確保備援流程同樣拉齊到今日資料。
+- **Diagnostics**: 備援模式下 `getSuggestion` 會將快取指紋與 coverage fingerprint 一併送往 Worker，UI 顯示多空倉位、市值、筆記與落後天數；錯誤時改以卡片顯示明確訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');const code=fs.readFileSync('js/backtest_corrupted.js','utf8');const match=code.match(/const FALLBACK_DAY_MS[\s\S]*?function getSuggestion\([\s\S]*?\n}\n/);if(!match)throw new Error('Unable to extract fallback suggestion module');new vm.Script(match[0],{filename:'fallback_today_suggestion.js'});console.log('fallback suggestion module compiles');NODE`
+
+## 2025-09-04 — Patch LB-TODAY-ACTION-20250727B
+- **Issue recap**: 備援 worker 仍回傳單純的文字建議與「等待」訊息，前端解析新結構時會顯示空白內容，也缺乏資料不足與延遲提示。
+- **Fix**: 在 `worker_backup.js` 新增今日日期與日差計算工具，將建議輸出包裝為含行動、色彩、價格與備註的物件，遇到資料不足或指標失敗時改以結構化狀態回傳。
+- **Diagnostics**: 呼叫備援建議時，應看到 `action/label/tone/notes` 等欄位且 console 會標示對應行動；若資料落後將附註最新日期與落後天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker_backup.js'].forEach(f=>new vm.Script(fs.readFileSync(f,'utf8'),{filename:f}));console.log('backup worker compiles');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。

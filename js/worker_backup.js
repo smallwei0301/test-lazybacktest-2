@@ -1,8 +1,9 @@
-// --- Web Worker (backtest-worker.js) - v3.4.1 ---
+// --- Web Worker (backtest-worker.js) - v3.4.2 ---
 // 變更:
 // - getSuggestion: 修正建議邏輯，確保正確反映賣出/回補/等待狀態
 // - runStrategy: 驗證年化報酬率計算
 // - 確保 workerCachedStockData 正確傳遞和使用
+// - Patch LB-TODAY-ACTION-20250727B: 備援建議流程輸出統一結構與說明
 
 // 全局變數 (Worker 範圍)
 let workerCachedStockData = null; // 在 Worker 中快取數據
@@ -268,13 +269,93 @@ async function runOptimization(baseParams, optimizeTargetStrategy, optParamName,
 }
 
 // --- 執行策略建議模擬 (修正建議邏輯) ---
+function getTodayISODateFallback() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function diffIsoDaysFallback(a, b) {
+    if (!a || !b) return null;
+    const start = new Date(a);
+    const end = new Date(b);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const diffMs = end.getTime() - start.getTime();
+    return Math.floor(diffMs / (24 * 60 * 60 * 1000));
+}
+
+function buildSuggestionPayloadFallback({
+    status = 'ok',
+    action = 'stay_flat',
+    label = '維持空手',
+    tone = 'neutral',
+    latestDate = null,
+    priceValue = null,
+    notes = [],
+    todayISO = getTodayISODateFallback(),
+    params = {},
+    evaluation = {},
+    dataLagDays = null,
+}) {
+    const price = Number.isFinite(priceValue)
+        ? { value: priceValue, type: 'close' }
+        : { text: priceValue === null ? '無法取得收盤價' : String(priceValue) };
+    return {
+        status,
+        action,
+        label,
+        tone,
+        latestDate,
+        price,
+        longPosition: { state: '空手', shares: null, averagePrice: null, marketValue: null },
+        shortPosition: { state: '空手', shares: null, averagePrice: null, marketValue: null },
+        positionSummary: '空手',
+        evaluation: {
+            date: latestDate,
+            close: Number.isFinite(priceValue) ? priceValue : null,
+            ...evaluation,
+        },
+        notes: Array.isArray(notes) ? notes.filter(Boolean) : [],
+        dataLagDays,
+        todayISO,
+        requestedEndDate: params?.endDate || null,
+        appliedEndDate: todayISO,
+        startDateUsed: params?.startDate || null,
+        dataStartDateUsed: params?.startDate || null,
+    };
+}
+
 function runSuggestionSimulation(params, recentData) {
     console.log("[Worker Suggestion] Starting simulation for suggestion...");
+    const todayISO = getTodayISODateFallback();
     const n = recentData.length;
-    if (!recentData || n === 0) { console.error("[Worker Suggestion] No recent data provided."); return "數據不足無法產生建議"; }
+    if (!recentData || n === 0) {
+        console.error("[Worker Suggestion] No recent data provided.");
+        return buildSuggestionPayloadFallback({
+            status: 'no_data',
+            label: '無法判斷今日操作',
+            notes: ['回測資料不足以推導今日建議。'],
+            todayISO,
+            params,
+        });
+    }
     const { entryStrategy, exitStrategy, entryParams, exitParams, enableShorting, shortEntryStrategy, shortExitStrategy, shortEntryParams, shortExitParams, stopLoss: globalSL, takeProfit: globalTP } = params; // tradeTiming not needed for signal check
     const dates = recentData.map(d=>d.date); const opens = recentData.map(d=>d.open); const highs = recentData.map(d=>d.high); const lows = recentData.map(d=>d.low); const closes = recentData.map(d=>d.close); const volumes = recentData.map(d=>d.volume);
-    let indicators; try { indicators = calculateAllIndicators(recentData, params); } catch(e) { console.error("[Worker Suggestion] Error calculating indicators:", e); return `指標計算錯誤: ${e.message}`; }
+    let indicators;
+    try {
+        indicators = calculateAllIndicators(recentData, params);
+    } catch(e) {
+        console.error("[Worker Suggestion] Error calculating indicators:", e);
+        return buildSuggestionPayloadFallback({
+            status: 'error',
+            label: '計算失敗',
+            notes: [`指標計算錯誤: ${e.message}`],
+            todayISO,
+            params,
+        });
+    }
     const check=(v)=>v!==null&&!isNaN(v)&&isFinite(v);
 
      let minLookbackSuggestion = 1; 
@@ -285,7 +366,16 @@ function runSuggestionSimulation(params, recentData) {
      if (entryStrategy.includes('k_d') || exitStrategy.includes('k_d') || (enableShorting && (shortEntryStrategy.includes('k_d') || shortExitStrategy.includes('k_d')))) minLookbackSuggestion = Math.max(minLookbackSuggestion, (entryParams?.period || 9));
      if (entryStrategy.includes('turtle') || exitStrategy.includes('turtle') || (enableShorting && (shortEntryStrategy.includes('turtle') || shortExitStrategy.includes('turtle')))) minLookbackSuggestion = Math.max(minLookbackSuggestion, (entryParams?.breakoutPeriod || 20), (exitParams?.stopLossPeriod || 10));
 
-    if(n <= minLookbackSuggestion){ console.warn(`[Worker Suggestion] Data length ${n} <= minLookback ${minLookbackSuggestion}`); return "近期數據不足"; }
+    if(n <= minLookbackSuggestion){
+        console.warn(`[Worker Suggestion] Data length ${n} <= minLookback ${minLookbackSuggestion}`);
+        return buildSuggestionPayloadFallback({
+            status: 'no_data',
+            label: '資料不足',
+            notes: [`資料筆數僅 ${n}，不足以推導今日建議。`],
+            todayISO,
+            params,
+        });
+    }
 
     let longPos = 0; 
     let shortPos = 0;
@@ -310,14 +400,61 @@ function runSuggestionSimulation(params, recentData) {
          switch (shortExitStrategy) { case 'cover_ma_cross': case 'cover_ema_cross': coverSignal=check(indicators.maShort[i])&&check(indicators.maLong[i])&&check(indicators.maShort[i-1])&&check(indicators.maLong[i-1])&&indicators.maShort[i]>indicators.maLong[i]&&indicators.maShort[i-1]<=indicators.maLong[i-1]; break; case 'cover_ma_above': coverSignal=check(indicators.maExit[i])&&check(prevC)&&check(indicators.maExit[i-1])&&curC>indicators.maExit[i]&&prevC<=indicators.maExit[i-1]; break; case 'cover_rsi_oversold': const rC=indicators.rsiCover[i],rPC=indicators.rsiCover[i-1],rThC=shortExitParams.threshold||30; coverSignal=check(rC)&&check(rPC)&&rC>rThC&&rPC<=rThC; break; case 'cover_macd_cross': const difC=indicators.macdCover[i],deaC=indicators.macdSignalCover[i],difPC=indicators.macdCover[i-1],deaPC=indicators.macdSignalCover[i-1]; coverSignal=check(difC)&&check(deaC)&&check(difPC)&&check(deaPC)&&difC>deaC&&difPC<=deaPC; break; case 'cover_bollinger_breakout': const upperC = indicators.bollingerUpperCover[i]; const upperPC = indicators.bollingerUpperCover[i-1]; coverSignal=check(upperC)&&check(prevC)&&check(upperPC)&&curC>upperC&&prevC<=upperPC; break; case 'cover_k_d_cross': const kC=indicators.kCover[i],dC=indicators.dCover[i],kPC=indicators.kCover[i-1],dPC=indicators.dCover[i-1],thXC=shortExitParams.thresholdX||30; coverSignal=check(kC)&&check(dC)&&check(kPC)&&check(dPC)&&kC>dC&&kPC<=dPC&&dC<thXC; break; case 'cover_price_breakout': const bpC=shortExitParams.period||20; if(i>=bpC){const hsC=highs.slice(i-bpC,i).filter(h=>check(h)); if(hsC.length>0){const periodHighC = Math.max(...hsC); coverSignal=check(curC) && curC>periodHighC; }} break; case 'cover_williams_oversold': const wrC=indicators.williamsCover[i],wrPC=indicators.williamsCover[i-1],wrThC=shortExitParams.threshold||-80; coverSignal=check(wrC)&&check(wrPC)&&wrC>wrThC&&wrPC<=wrThC; break; case 'cover_turtle_breakout': const tpC=shortExitParams.breakoutPeriod||20; if(i>=tpC){const hsCT=highs.slice(i-tpC,i).filter(h=>check(h)); if(hsCT.length>0){const periodHighCT = Math.max(...hsCT); coverSignal=check(curC) && curC>periodHighCT;}} break; case 'cover_trailing_stop': coverSignal = false; break; case 'cover_fixed_stop_loss': coverSignal=false; break; }
      }
 
-    let suggestion = "等待"; 
-    if (buySignal) { suggestion = "做多買入"; }
-    else if (shortSignal) { suggestion = "做空賣出"; }
-    else if (sellSignal) { suggestion = "做多賣出"; } 
-    else if (coverSignal) { suggestion = "做空回補"; } 
-
-    console.log(`[Worker Suggestion] Last Point Analysis: buy=${buySignal}, sell=${sellSignal}, short=${shortSignal}, cover=${coverSignal}. Suggestion: ${suggestion}`);
-    return suggestion;
+    const latestDate = recentData[n - 1]?.date || params?.endDate || todayISO;
+    const priceValue = Number.isFinite(curC) ? curC : null;
+    const evaluation = {
+        executedBuy: buySignal,
+        executedSell: sellSignal,
+        executedShort: shortSignal,
+        executedCover: coverSignal,
+        longPos: 0,
+        shortPos: 0,
+    };
+    let action = 'stay_flat';
+    let label = '維持空手';
+    let tone = 'neutral';
+    const notes = [];
+    if (buySignal) {
+        action = 'enter_long';
+        label = '做多買入';
+        tone = 'bullish';
+        notes.push('今日訊號觸發多單進場，請依策略執行下單流程。');
+    } else if (shortSignal) {
+        action = 'enter_short';
+        label = '做空賣出';
+        tone = 'bearish';
+        notes.push('今日訊號觸發空單建立，請注意券源與風險控管。');
+    } else if (sellSignal) {
+        action = 'exit_long';
+        label = '做多賣出';
+        tone = 'exit';
+        notes.push('策略建議平倉多單，留意成交價差與手續費。');
+    } else if (coverSignal) {
+        action = 'cover_short';
+        label = '做空回補';
+        tone = 'exit';
+        notes.push('策略建議回補空單，請同步檢查借券成本。');
+    } else {
+        notes.push('策略目前維持空手，暫無倉位需要調整。');
+    }
+    const dataLagDays = diffIsoDaysFallback(latestDate, todayISO);
+    if (typeof dataLagDays === 'number' && dataLagDays > 0) {
+        notes.push(`最新資料為 ${latestDate}，距今日 ${dataLagDays} 日。`);
+    }
+    console.log(`[Worker Suggestion] Last Point Analysis: buy=${buySignal}, sell=${sellSignal}, short=${shortSignal}, cover=${coverSignal}. Action: ${action}`);
+    return buildSuggestionPayloadFallback({
+        status: 'ok',
+        action,
+        label,
+        tone,
+        latestDate,
+        priceValue,
+        notes,
+        todayISO,
+        params,
+        evaluation,
+        dataLagDays,
+    });
 }
 
 // --- Worker 消息處理 ---
@@ -361,8 +498,8 @@ self.onmessage = async function(e) {
               if (self.workerCachedStockData.length < lookbackDays) { throw new Error(`Worker 快取數據不足 (${self.workerCachedStockData.length})，無法回看 ${lookbackDays} 天。`); }
 
               const recentData = self.workerCachedStockData.slice(-lookbackDays);
-              const suggestionTextResult = runSuggestionSimulation(params, recentData);
-              self.postMessage({ type: 'suggestionResult', data: { suggestion: suggestionTextResult } });
+              const suggestionResult = runSuggestionSimulation(params, recentData);
+              self.postMessage({ type: 'suggestionResult', data: suggestionResult });
          }
      } catch (error) {
           console.error(`Worker 執行 ${type} 期間錯誤:`, error);

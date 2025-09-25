@@ -4,6 +4,407 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Available Chart plugins:', Chart.registry ? Object.keys(Chart.registry.plugins.items) : 'No registry');
 });
 
+// Patch Tag: LB-TODAY-ACTION-20250828A
+const fallbackTodaySuggestionUI = (() => {
+    const area = document.getElementById('today-suggestion-area');
+    const body = document.getElementById('today-suggestion-body');
+    const empty = document.getElementById('today-suggestion-empty');
+    const banner = document.getElementById('today-suggestion-banner');
+    const labelEl = document.getElementById('today-suggestion-label');
+    const dateEl = document.getElementById('today-suggestion-date');
+    const priceEl = document.getElementById('today-suggestion-price');
+    const longEl = document.getElementById('today-suggestion-long');
+    const shortEl = document.getElementById('today-suggestion-short');
+    const positionEl = document.getElementById('today-suggestion-position');
+    const portfolioEl = document.getElementById('today-suggestion-portfolio');
+    const notesEl = document.getElementById('today-suggestion-notes');
+    const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
+    const numberFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
+    const integerFormatter = typeof Intl !== 'undefined'
+        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
+        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
+    const toneMap = {
+        bullish: 'is-bullish',
+        bear: 'is-bearish',
+        bearish: 'is-bearish',
+        exit: 'is-exit',
+        neutral: 'is-neutral',
+        info: 'is-info',
+        warning: 'is-warning',
+        error: 'is-error',
+    };
+    const priceTypeLabel = {
+        close: '收盤',
+        open: '開盤',
+        high: '最高',
+        low: '最低',
+    };
+
+    function ensureAreaVisible() {
+        if (area) area.classList.remove('hidden');
+    }
+
+    function showBodyContent() {
+        if (body) body.classList.remove('hidden');
+        if (empty) empty.classList.add('hidden');
+    }
+
+    function showPlaceholderContent() {
+        if (body) body.classList.add('hidden');
+        if (empty) empty.classList.remove('hidden');
+    }
+
+    function setTone(tone) {
+        if (!banner) return;
+        toneClasses.forEach((cls) => banner.classList.remove(cls));
+        const resolved = toneMap[tone] || toneMap.neutral;
+        banner.classList.add(resolved);
+    }
+
+    function setText(el, text) {
+        if (!el) return;
+        el.textContent = text ?? '—';
+    }
+
+    function formatPriceValue(value, type) {
+        if (!Number.isFinite(value)) return null;
+        const formatted = numberFormatter.format(value);
+        if (!type) return formatted;
+        const label = priceTypeLabel[type] || '價格';
+        return `${label} ${formatted}`;
+    }
+
+    function formatShares(shares) {
+        if (!Number.isFinite(shares) || shares <= 0) return null;
+        return `${integerFormatter.format(shares)} 股`;
+    }
+
+    function formatCurrency(value) {
+        if (!Number.isFinite(value)) return null;
+        return `${numberFormatter.format(value)} 元`;
+    }
+
+    function describePosition(info) {
+        if (!info) return '—';
+        const parts = [];
+        if (info.state && info.state !== '空手') {
+            parts.push(info.state);
+        }
+        const shareText = formatShares(info.shares);
+        if (shareText) parts.push(shareText);
+        if (Number.isFinite(info.averagePrice)) {
+            parts.push(`均價 ${numberFormatter.format(info.averagePrice)}`);
+        }
+        if (Number.isFinite(info.marketValue)) {
+            parts.push(`市值 ${numberFormatter.format(info.marketValue)}`);
+        }
+        if (parts.length === 0) return '空手';
+        return parts.join('，');
+    }
+
+    function setNotes(notes) {
+        if (!notesEl) return;
+        notesEl.innerHTML = '';
+        if (!Array.isArray(notes) || notes.length === 0) {
+            notesEl.style.display = 'none';
+            return;
+        }
+        notesEl.style.display = 'block';
+        notes.forEach((note) => {
+            if (!note) return;
+            const li = document.createElement('li');
+            li.textContent = note;
+            notesEl.appendChild(li);
+        });
+    }
+
+    function applyResultPayload(payload) {
+        const priceText = payload.price?.text
+            || formatPriceValue(payload.price?.value, payload.price?.type)
+            || payload.message
+            || '—';
+        setText(labelEl, payload.label || '—');
+        setText(dateEl, payload.latestDate || '—');
+        setText(priceEl, priceText);
+        setText(longEl, describePosition(payload.longPosition));
+        setText(shortEl, describePosition(payload.shortPosition));
+        setText(positionEl, payload.positionSummary || '—');
+        if (portfolioEl) {
+            const portfolioText = formatCurrency(payload.evaluation?.portfolioValue);
+            setText(portfolioEl, portfolioText || '—');
+        }
+        setNotes(payload.notes);
+    }
+
+    return {
+        reset() {
+            if (!area) return;
+            ensureAreaVisible();
+            showPlaceholderContent();
+            setTone('neutral');
+            setText(labelEl, '尚未取得建議');
+            setText(dateEl, '—');
+            setText(priceEl, '—');
+            setText(longEl, '—');
+            setText(shortEl, '—');
+            setText(positionEl, '—');
+            if (portfolioEl) setText(portfolioEl, '—');
+            setNotes([]);
+        },
+        showLoading() {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            setTone('info');
+            setText(labelEl, '計算今日建議中...');
+            setText(dateEl, '—');
+            setText(priceEl, '資料計算中，請稍候');
+            setText(longEl, '—');
+            setText(shortEl, '—');
+            setText(positionEl, '—');
+            if (portfolioEl) setText(portfolioEl, '—');
+            setNotes([]);
+        },
+        showResult(payload = {}) {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            const status = payload.status || 'ok';
+            if (status !== 'ok') {
+                const fallbackNotes = [];
+                if (payload.message) fallbackNotes.push(payload.message);
+                if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
+                const tone = status === 'no_data' ? 'warning' : (status === 'future_start' ? 'info' : 'neutral');
+                setTone(tone);
+                applyResultPayload({
+                    label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
+                    latestDate: payload.latestDate || '—',
+                    price: { text: payload.price?.text || payload.message || '—' },
+                    longPosition: { state: '空手' },
+                    shortPosition: { state: '空手' },
+                    positionSummary: '—',
+                    notes: fallbackNotes,
+                    evaluation: {},
+                });
+                return;
+            }
+            setTone(payload.tone || 'neutral');
+            applyResultPayload(payload);
+        },
+        showError(message) {
+            if (!area) return;
+            ensureAreaVisible();
+            showBodyContent();
+            setTone('error');
+            applyResultPayload({
+                label: '計算失敗',
+                latestDate: '—',
+                price: { text: message || '計算建議時發生錯誤' },
+                longPosition: { state: '空手' },
+                shortPosition: { state: '空手' },
+                positionSummary: '—',
+                notes: message ? [message] : [],
+                evaluation: {},
+            });
+        },
+        showPlaceholder() {
+            if (!area) return;
+            ensureAreaVisible();
+            showPlaceholderContent();
+        },
+    };
+})();
+
+window.lazybacktestTodaySuggestion = fallbackTodaySuggestionUI;
+
+const FALLBACK_DAY_MS = 24 * 60 * 60 * 1000;
+
+function isoDateToUTC(iso) {
+    if (typeof iso !== 'string' || iso.length < 10) return NaN;
+    const parts = iso.split('-');
+    if (parts.length < 3) return NaN;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return NaN;
+    return Date.UTC(year, month - 1, day);
+}
+
+function utcToISODate(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+}
+
+function computeCoverageFromRowsForSuggestion(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const sorted = rows
+        .map((row) => (row && row.date ? isoDateToUTC(row.date) : NaN))
+        .filter((ms) => Number.isFinite(ms))
+        .sort((a, b) => a - b);
+    if (sorted.length === 0) return [];
+    const tolerance = FALLBACK_DAY_MS * 6;
+    const segments = [];
+    let segStart = sorted[0];
+    let segEnd = segStart + FALLBACK_DAY_MS;
+    for (let i = 1; i < sorted.length; i += 1) {
+        const current = sorted[i];
+        if (!Number.isFinite(current)) continue;
+        if (current <= segEnd + tolerance) {
+            if (current + FALLBACK_DAY_MS > segEnd) {
+                segEnd = current + FALLBACK_DAY_MS;
+            }
+        } else {
+            segments.push({ start: utcToISODate(segStart), end: utcToISODate(segEnd - FALLBACK_DAY_MS) });
+            segStart = current;
+            segEnd = current + FALLBACK_DAY_MS;
+        }
+    }
+    segments.push({ start: utcToISODate(segStart), end: utcToISODate(segEnd - FALLBACK_DAY_MS) });
+    return segments;
+}
+
+function computeCoverageFingerprintForSuggestion(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    const parts = coverage
+        .map((range) => {
+            if (!range || (!range.start && !range.end)) return null;
+            const start = range.start || '';
+            const end = range.end || '';
+            return `${start}~${end}`;
+        })
+        .filter(Boolean);
+    if (parts.length === 0) return null;
+    return parts.join('|');
+}
+
+function getSuggestion() {
+    console.log('[Fallback Main] getSuggestion called');
+    const suggestionUI = window.lazybacktestTodaySuggestion;
+    if (!suggestionUI || typeof suggestionUI.showLoading !== 'function') {
+        console.warn('[Fallback Main] Suggestion UI controller not available.');
+        return;
+    }
+
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        suggestionUI.showError('請先執行回測以建立建議所需的資料。');
+        return;
+    }
+
+    if (!workerUrl || !backtestWorker) {
+        console.warn('[Fallback Suggestion] Worker not ready or busy.');
+        suggestionUI.showError('引擎未就緒或忙碌中');
+        return;
+    }
+
+    suggestionUI.showLoading();
+
+    try {
+        const params = getBacktestParams();
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared)
+            ? lazybacktestShared
+            : null;
+        const windowOptions = {
+            minBars: 90,
+            multiplier: 2,
+            marginTradingDays: 12,
+            extraCalendarDays: 7,
+            minDate: sharedUtils?.MIN_DATA_DATE,
+            defaultStartDate: params.startDate,
+        };
+
+        let lookbackDecision = null;
+        if (sharedUtils && typeof sharedUtils.resolveDataWindow === 'function') {
+            lookbackDecision = sharedUtils.resolveDataWindow(params, windowOptions);
+        }
+
+        const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(params)
+            : 0;
+
+        let lookbackDays = Number.isFinite(lookbackDecision?.lookbackDays)
+            ? lookbackDecision.lookbackDays
+            : null;
+
+        if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0)
+            && sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+            const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
+            if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
+                lookbackDays = fallbackDecision.lookbackDays;
+                if (!lookbackDecision) lookbackDecision = fallbackDecision;
+            }
+        }
+
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
+                ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, fallbackMaxPeriod * 2 || 0);
+        }
+
+        if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            lookbackDays = 120;
+        }
+
+        const effectiveStartDate = lastFetchSettings?.effectiveStartDate
+            || lookbackDecision?.effectiveStartDate
+            || params.effectiveStartDate
+            || params.startDate;
+
+        const dataStartDate = lastFetchSettings?.dataStartDate
+            || lookbackDecision?.dataStartDate
+            || params.dataStartDate
+            || effectiveStartDate
+            || params.startDate;
+
+        const request = {
+            type: 'getSuggestion',
+            params: {
+                ...params,
+                dataStartDate,
+                effectiveStartDate,
+                lookbackDays,
+            },
+            lookbackDays,
+            dataStartDate,
+            effectiveStartDate,
+            cachedData: Array.isArray(cachedStockData) ? cachedStockData : null,
+            lastBacktestRange: { start: params.startDate, end: params.endDate },
+        };
+
+        const coverage = computeCoverageFromRowsForSuggestion(cachedStockData);
+        const coverageFingerprint = computeCoverageFingerprintForSuggestion(coverage);
+
+        request.cachedMeta = {
+            summary: null,
+            adjustments: [],
+            debugSteps: [],
+            adjustmentFallbackApplied: false,
+            adjustmentFallbackInfo: null,
+            priceSource: null,
+            dataSource: null,
+            splitDiagnostics: null,
+            finmindStatus: null,
+            fetchRange: null,
+            diagnostics: null,
+            lookbackDays,
+            coverage,
+            coverageFingerprint,
+        };
+
+        backtestWorker.postMessage(request);
+    } catch (error) {
+        console.error('[Fallback Main] Error getting suggestion:', error);
+        if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+            window.lazybacktestTodaySuggestion.showError(error?.message || '計算建議時出錯');
+        }
+        if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+        hideLoading();
+    }
+}
+
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
@@ -71,48 +472,39 @@ function runBacktestInternal() {
                 getSuggestion();
 
             } else if(type==='suggestionResult'){
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                const suggestionText = document.getElementById('suggestion-text');
-                if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.suggestion || '無法取得建議';
-                    suggestionArea.classList.remove('hidden', 'loading');
-                     suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center'; // Base classes
-                    if (data.suggestion === '做多買入' || data.suggestion === '持有 (多)') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
-                    else if (data.suggestion === '做空賣出' || data.suggestion === '持有 (空)') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
-                    else if (data.suggestion === '做多賣出' || data.suggestion === '做空回補') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
-                    else if (data.suggestion === '等待') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
-                     else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
-
-                    hideLoading();
-                    showSuccess("回測完成！");
-                    if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showResult === 'function') {
+                    window.lazybacktestTodaySuggestion.showResult(data || {});
                 }
+                hideLoading();
+                showSuccess("回測完成！");
+                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='suggestionError'){
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                const suggestionText = document.getElementById('suggestion-text');
-                if(suggestionArea && suggestionText){
-                    suggestionText.textContent = data.message || '計算建議時發生錯誤';
-                    suggestionArea.classList.remove('hidden', 'loading');
-                    suggestionArea.className = 'my-4 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md text-center';
+                const message = data?.message || '計算建議時發生錯誤';
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+                    window.lazybacktestTodaySuggestion.showError(message);
                 }
-                 hideLoading();
-                 showError("回測完成，但計算建議時發生錯誤。");
-                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+                hideLoading();
+                showError("回測完成，但計算建議時發生錯誤。");
+                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
-                showError(data?.message||"回測過程錯誤");
+                const message = data?.message || "回測過程錯誤";
+                showError(message);
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
-                const suggestionArea = document.getElementById('today-suggestion-area');
-                 if (suggestionArea) suggestionArea.classList.add('hidden');
+                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+                    window.lazybacktestTodaySuggestion.showError(message);
+                }
             }
         };
 
         backtestWorker.onerror=e=>{
-             showError(`Worker錯誤: ${e.message}`); console.error("[Main] Worker Error:",e);
+             const message = `Worker錯誤: ${e.message}`;
+             showError(message); console.error("[Main] Worker Error:",e);
              if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
              hideLoading();
-             const suggestionArea = document.getElementById('today-suggestion-area');
-              if (suggestionArea) suggestionArea.classList.add('hidden');
+             if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+                 window.lazybacktestTodaySuggestion.showError(message);
+             }
         };
 
         const workerMsg={type:'runBacktest', params:params, useCachedData:useCache};
@@ -126,10 +518,12 @@ function runBacktestInternal() {
 
     } catch (error) {
         console.error("[Main] Error in runBacktestInternal:", error);
-        showError(`執行回測時發生錯誤: ${error.message}`);
+        const message = `執行回測時發生錯誤: ${error.message}`;
+        showError(message);
         hideLoading();
-        const suggestionArea = document.getElementById('today-suggestion-area');
-        if (suggestionArea) suggestionArea.classList.add('hidden');
+        if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+            window.lazybacktestTodaySuggestion.showError(message);
+        }
         if(backtestWorker)backtestWorker.terminate(); backtestWorker = null;
     }
 }
@@ -160,24 +554,22 @@ function clearPreviousResults() {
     // 不要在這裡隱藏優化進度，讓優化函數自己控制
     // hideOptimizationProgress();
     
-    const suggestionArea = document.getElementById('today-suggestion-area');
-    const suggestionText = document.getElementById('suggestion-text');
-    if (suggestionArea && suggestionText) {
-        suggestionArea.classList.add('hidden');
-        suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden'; // Reset style and hide
-        suggestionText.textContent = "-";
+    if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.reset === 'function') {
+        window.lazybacktestTodaySuggestion.reset();
     }
 }
 // --- 結果顯示函數 ---
 function displayPerformanceTable(subPeriodResults) { const container = document.getElementById('performance-table-container'); if (!lastOverallResult) { container.innerHTML = `<p class="text-gray-500">請先執行回測以生成績效數據。</p>`; return; } const periods = subPeriodResults ? Object.keys(subPeriodResults) : []; const periodOrder = {'1M': 1, '6M': 2, '1Y': 3, '2Y': 4, '3Y': 5, '4Y': 6, '5Y': 7, '6Y': 8, '7Y': 9, '8Y': 10, '9Y': 11, '10Y': 12}; periods.sort((a, b) => (periodOrder[a] || 99) - (periodOrder[b] || 99)); let tableHtml = ` <div class="overflow-x-auto"> <table class="w-full text-sm text-left text-gray-500"> <thead class="text-xs text-gray-700 uppercase bg-gray-50"> <tr> <th scope="col" class="px-4 py-3">期間</th> <th scope="col" class="px-4 py-3">策略累積報酬 (%)</th> <th scope="col" class="px-4 py-3">買入持有累積報酬 (%)</th> <th scope="col" class="px-4 py-3">夏普值 (策略)</th> <th scope="col" class="px-4 py-3">索提諾比率 (策略)</th> <th scope="col" class="px-4 py-3">最大回撤 (策略 %)</th> </tr> </thead> <tbody>`; periods.forEach(period => { const data = subPeriodResults ? subPeriodResults[period] : null; if (data) { const totalReturn = data.totalReturn?.toFixed(2) ?? 'N/A'; const totalBhReturn = data.totalBuyHoldReturn?.toFixed(2) ?? 'N/A'; const sharpe = data.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = data.sortinoRatio ? (isFinite(data.sortinoRatio) ? data.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = data.maxDrawdown?.toFixed(2) ?? 'N/A'; const returnClass = (data.totalReturn ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'; const bhReturnClass = (data.totalBuyHoldReturn ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'; tableHtml += ` <tr class="border-b hover:bg-gray-50"> <td class="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">${period}</td> <td class="px-4 py-2 ${returnClass}">${totalReturn === 'N/A' ? totalReturn : totalReturn + '%'}</td> <td class="px-4 py-2 ${bhReturnClass}">${totalBhReturn === 'N/A' ? totalBhReturn : totalBhReturn + '%'}</td> <td class="px-4 py-2">${sharpe}</td> <td class="px-4 py-2">${sortino}</td> <td class="px-4 py-2">${maxDD === 'N/A' ? maxDD : maxDD + '%'}</td> </tr>`; } else { tableHtml += ` <tr class="border-b hover:bg-gray-50"> <td class="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">${period}</td> <td class="px-4 py-2 text-gray-400 italic" colspan="5">數據不足或未計算</td> </tr>`; } }); const overallReturn = lastOverallResult.returnRate?.toFixed(2) ?? 'N/A'; const overallBHReturn = parseFloat(lastOverallResult.buyHoldReturns?.[lastOverallResult.buyHoldReturns.length - 1] ?? 0).toFixed(2) ?? 'N/A'; const overallSharpe = lastOverallResult.sharpeRatio?.toFixed(2) ?? 'N/A'; const overallSortino = lastOverallResult.sortinoRatio ? (isFinite(lastOverallResult.sortinoRatio) ? lastOverallResult.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const overallMaxDD = lastOverallResult.maxDrawdown?.toFixed(2) ?? 'N/A'; const overallReturnClass = (lastOverallResult.returnRate ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'; const overallBHReturnClass = (parseFloat(lastOverallResult.buyHoldReturns?.[lastOverallResult.buyHoldReturns.length - 1] ?? 0) >= 0) ? 'text-green-600' : 'text-red-600'; tableHtml += ` <tr class="border-b bg-gray-100 font-semibold hover:bg-gray-200"> <td class="px-4 py-2 text-gray-900 whitespace-nowrap">最後 (總計)</td> <td class="px-4 py-2 ${overallReturnClass}">${overallReturn === 'N/A' ? overallReturn : overallReturn + '%'}</td> <td class="px-4 py-2 ${overallBHReturnClass}">${overallBHReturn === 'N/A' ? overallBHReturn : overallBHReturn + '%'}</td> <td class="px-4 py-2">${overallSharpe}</td> <td class="px-4 py-2">${overallSortino}</td> <td class="px-4 py-2">${overallMaxDD === 'N/A' ? overallMaxDD : overallMaxDD + '%'}</td> </tr>`; tableHtml += `</tbody></table></div>`; container.innerHTML = tableHtml; }
 function handleBacktestResult(result) {
     console.log("[Main] handleBacktestResult received:", result);
-    const suggestionArea = document.getElementById('today-suggestion-area');
     if(!result||!result.dates||result.dates.length===0){
-        showError("回測結果無效或無數據");
+        const message = "回測結果無效或無數據";
+        showError(message);
+        if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+            window.lazybacktestTodaySuggestion.showError(message);
+        }
         lastOverallResult = null; lastSubPeriodResults = null;
-         if (suggestionArea) suggestionArea.classList.add('hidden');
-         hideLoading();
+        hideLoading();
         return;
     }
     try {
@@ -200,8 +592,11 @@ function handleBacktestResult(result) {
 
     } catch (error) {
          console.error("[Main] Error processing backtest result:", error);
-         showError(`處理回測結果時發生錯誤: ${error.message}`);
-         if (suggestionArea) suggestionArea.classList.add('hidden');
+         const message = `處理回測結果時發生錯誤: ${error.message}`;
+         showError(message);
+         if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
+             window.lazybacktestTodaySuggestion.showError(message);
+         }
          hideLoading();
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
