@@ -8,6 +8,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DEVLOG-20250905A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250908A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -45,6 +46,32 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+function normaliseTextKey(value) {
+    if (value === null || value === undefined) return '';
+    const text = typeof value === 'string' ? value : String(value);
+    return text
+        .trim()
+        .replace(/[\s\u3000]+/g, '')
+        .replace(/[。，．,.、；;！!？?（）()【】\[\]{}<>「」『』“”"'`~]/g, '')
+        .toLowerCase();
+}
+
+function dedupeTextList(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const result = [];
+    list.forEach((item) => {
+        if (!item && item !== 0) return;
+        const text = typeof item === 'string' ? item.trim() : String(item).trim();
+        if (!text) return;
+        const key = normaliseTextKey(text);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        result.push(text);
+    });
+    return result;
+}
+
 const todaySuggestionDeveloperLog = (() => {
     const MAX_ENTRIES = 30;
     const entries = [];
@@ -72,6 +99,21 @@ const todaySuggestionDeveloperLog = (() => {
         RAW: '原始收盤價',
         ADJ: '調整後價格',
     };
+
+    const issueCodeDescriptions = {
+        final_evaluation_missing: '回測未產生最終評估結果，需檢查暖身或策略是否產生倉位',
+        latest_date_missing: '回傳資料缺少最新日期，請確認抓取範圍與資料筆數',
+    };
+
+    function resolveIssueLabel(issueCode) {
+        if (!issueCode) return null;
+        const code = issueCode.toString();
+        const description = issueCodeDescriptions[code];
+        if (description) {
+            return `${description}（${code}）`;
+        }
+        return `Issue Code：${code}`;
+    }
 
     function ensureElements() {
         if (initialised) return;
@@ -196,84 +238,106 @@ const todaySuggestionDeveloperLog = (() => {
         if (Number.isFinite(entry?.meta?.dataLagDays) && entry.meta.dataLagDays > 0) {
             parts.push(`資料延遲 ${entry.meta.dataLagDays} 日`);
         }
-        return parts;
+        const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
+        if (issueLabel) {
+            parts.push(issueLabel);
+        }
+        return dedupeTextList(parts);
     }
 
-    function buildDetails(entry) {
-        const notes = new Set();
+    function buildDetailSections(entry) {
+        const userFacing = [];
         if (entry?.payload?.message) {
-            notes.add(entry.payload.message);
+            userFacing.push(entry.payload.message);
         }
         if (Array.isArray(entry?.payload?.notes)) {
-            entry.payload.notes.forEach((note) => {
-                if (note) notes.add(note);
-            });
+            userFacing.push(...entry.payload.notes);
         }
+        const developerNotes = [];
         if (Array.isArray(entry?.payload?.developerNotes)) {
-            entry.payload.developerNotes.forEach((note) => {
-                if (note) notes.add(note);
-            });
+            developerNotes.push(...entry.payload.developerNotes);
         }
+        const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
+        if (issueLabel) {
+            developerNotes.unshift(issueLabel);
+        }
+
+        const diagnostics = [];
         const modeLabel = resolvePriceModeLabel(entry?.meta?.priceMode || entry?.payload?.priceMode);
         if (modeLabel) {
-            notes.add(`價格模式：${modeLabel}`);
+            diagnostics.push(`價格模式：${modeLabel}`);
         }
         if (entry?.meta?.datasetRange) {
-            notes.add(`資料區間：${entry.meta.datasetRange}`);
+            diagnostics.push(`資料區間：${entry.meta.datasetRange}`);
         }
         if (Number.isFinite(entry?.meta?.datasetRows)) {
-            notes.add(`總筆數：${entry.meta.datasetRows}`);
+            diagnostics.push(`總筆數：${entry.meta.datasetRows}`);
         }
         if (Number.isFinite(entry?.meta?.rowsWithinRange)) {
-            notes.add(`使用者區間筆數：${entry.meta.rowsWithinRange}`);
+            diagnostics.push(`使用者區間筆數：${entry.meta.rowsWithinRange}`);
         }
         if (Number.isFinite(entry?.meta?.warmupRows)) {
-            notes.add(`暖身筆數：${entry.meta.warmupRows}`);
+            diagnostics.push(`暖身筆數：${entry.meta.warmupRows}`);
         }
         if (Number.isFinite(entry?.meta?.rowCount)) {
-            notes.add(`回傳資料筆數：${entry.meta.rowCount}`);
+            diagnostics.push(`回傳資料筆數：${entry.meta.rowCount}`);
         }
         if (Number.isFinite(entry?.meta?.lookbackDaysUsed)) {
-            notes.add(`計算暖身天數：${entry.meta.lookbackDaysUsed}`);
+            diagnostics.push(`計算暖身天數：${entry.meta.lookbackDaysUsed}`);
         }
         if (Number.isFinite(entry?.meta?.lookbackResolved)) {
-            notes.add(`暖身推算結果：${entry.meta.lookbackResolved}`);
+            diagnostics.push(`暖身推算結果：${entry.meta.lookbackResolved}`);
         }
         if (entry?.meta?.startDateUsed) {
-            notes.add(`策略起算日：${entry.meta.startDateUsed}`);
+            diagnostics.push(`策略起算日：${entry.meta.startDateUsed}`);
         }
         if (entry?.meta?.dataStartDateUsed) {
-            notes.add(`暖身起點：${entry.meta.dataStartDateUsed}`);
+            diagnostics.push(`暖身起點：${entry.meta.dataStartDateUsed}`);
         }
         if (entry?.meta?.todayISO) {
-            notes.add(`請求日期：${entry.meta.todayISO}`);
+            diagnostics.push(`請求日期：${entry.meta.todayISO}`);
         }
         if (Number.isFinite(entry?.meta?.firstValidGap)) {
             const firstValidDate = entry?.meta?.firstValidDate
                 ? `（${entry.meta.firstValidDate}）`
                 : '';
-            notes.add(`暖身後首筆有效收盤落後 ${entry.meta.firstValidGap} 日${firstValidDate}`);
+            diagnostics.push(`暖身後首筆有效收盤落後 ${entry.meta.firstValidGap} 日${firstValidDate}`);
         } else if (entry?.meta?.firstValidDate) {
-            notes.add(`暖身後首筆有效收盤：${entry.meta.firstValidDate}`);
+            diagnostics.push(`暖身後首筆有效收盤：${entry.meta.firstValidDate}`);
         }
         if (entry?.meta?.fetchRange) {
             const start = entry.meta.fetchRange?.start || '未知';
             const end = entry.meta.fetchRange?.end || '未知';
-            notes.add(`抓取範圍：${start} ~ ${end}`);
+            diagnostics.push(`抓取範圍：${start} ~ ${end}`);
         }
         if (entry?.meta?.dataSource) {
-            notes.add(`資料來源：${entry.meta.dataSource}`);
+            diagnostics.push(`資料來源：${entry.meta.dataSource}`);
         }
         if (entry?.meta?.priceSource) {
-            notes.add(`價格來源：${entry.meta.priceSource}`);
+            diagnostics.push(`價格來源：${entry.meta.priceSource}`);
         }
         if (entry?.meta?.coverageFingerprint) {
-            notes.add(`Coverage Fingerprint：${entry.meta.coverageFingerprint}`);
+            diagnostics.push(`Coverage Fingerprint：${entry.meta.coverageFingerprint}`);
         }
-        if (entry?.meta?.issueCode) {
-            notes.add(`Issue Code：${entry.meta.issueCode}`);
+        if (Number.isFinite(entry?.meta?.coverageSegments)) {
+            diagnostics.push(`覆蓋區段 ${entry.meta.coverageSegments} 段`);
         }
-        return Array.from(notes);
+
+        const sections = [];
+        const dedupedUserFacing = dedupeTextList(userFacing);
+        if (dedupedUserFacing.length > 0) {
+            sections.push({ title: '使用者提示', items: dedupedUserFacing });
+        }
+        const dedupedDeveloper = dedupeTextList(developerNotes);
+        if (dedupedDeveloper.length > 0) {
+            sections.push({ title: '開發者備註', items: dedupedDeveloper });
+        }
+        const dedupedDiagnostics = dedupeTextList(diagnostics);
+        if (dedupedDiagnostics.length > 0) {
+            sections.push({ title: '資料診斷', items: dedupedDiagnostics });
+        }
+
+        return sections;
     }
 
     function renderEntries() {
@@ -297,11 +361,21 @@ const todaySuggestionDeveloperLog = (() => {
                 const summaryHtml = summaryParts
                     ? `<div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">${summaryParts}</div>`
                     : '';
-                const detailItems = buildDetails(entry)
-                    .map((note) => `<li>${escapeHtml(note)}</li>`)
+                const detailSections = buildDetailSections(entry)
+                    .map((section) => {
+                        const itemsHtml = section.items
+                            .map((note) => `<li>${escapeHtml(note)}</li>`)
+                            .join('');
+                        return `
+                            <div class="space-y-0.5">
+                                <div class="font-medium" style="color: var(--foreground);">${escapeHtml(section.title)}</div>
+                                <ul class="list-disc list-inside space-y-0.5">${itemsHtml}</ul>
+                            </div>
+                        `;
+                    })
                     .join('');
-                const detailsHtml = detailItems
-                    ? `<ul class="list-disc list-inside space-y-0.5">${detailItems}</ul>`
+                const detailsHtml = detailSections
+                    ? `<div class="space-y-1.5">${detailSections}</div>`
                     : '';
 
                 return `
@@ -467,14 +541,15 @@ const todaySuggestionUI = (() => {
     function setNotes(notes) {
         if (!notesEl) return;
         notesEl.innerHTML = '';
-        if (!Array.isArray(notes) || notes.length === 0) {
+        const dedupedNotes = dedupeTextList(Array.isArray(notes) ? notes : []);
+        if (dedupedNotes.length === 0) {
             notesEl.style.display = 'none';
             if (notesContainer) notesContainer.classList.add('hidden');
             return;
         }
         notesEl.style.display = 'block';
         if (notesContainer) notesContainer.classList.remove('hidden');
-        notes.forEach((note) => {
+        dedupedNotes.forEach((note) => {
             if (!note) return;
             const li = document.createElement('li');
             li.textContent = note;
@@ -540,12 +615,7 @@ const todaySuggestionUI = (() => {
             if (status !== 'ok') {
                 if (payload.message) fallbackNotes.push(payload.message);
                 if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
-                const dedupedNotes = [];
-                fallbackNotes.forEach((note) => {
-                    if (!note) return;
-                    if (dedupedNotes.includes(note)) return;
-                    dedupedNotes.push(note);
-                });
+                const dedupedNotes = dedupeTextList(fallbackNotes);
                 tone = status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral';
                 displayPayload = {
                     ...payload,
