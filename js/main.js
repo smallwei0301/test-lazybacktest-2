@@ -2225,109 +2225,79 @@ function needsDataFetch(cur) {
 // --- 新增：請求並顯示策略建議 ---
 function getSuggestion() {
     console.log("[Main] getSuggestion called");
-    const suggestionUI = window.lazybacktestTodaySuggestion;
-    if (!suggestionUI || typeof suggestionUI.showLoading !== 'function') {
-        console.warn('[Main] Suggestion UI controller not available.');
+    const suggestionArea = document.getElementById('today-suggestion-area');
+    const suggestionText = document.getElementById('suggestion-text');
+    if (!suggestionArea || !suggestionText) return;
+
+    if (!cachedStockData || cachedStockData.length < 2) {
+        suggestionText.textContent = "請先執行回測獲取數據";
+        suggestionArea.className = 'my-4 p-4 bg-gray-100 border-l-4 border-gray-400 text-gray-600 rounded-md text-center'; // Neutral color
+        suggestionArea.classList.remove('hidden');
         return;
     }
 
-    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
-        suggestionUI.showError('請先執行回測以建立建議所需的資料。');
-        return;
-    }
+    suggestionText.textContent = "計算中...";
+    suggestionArea.classList.remove('hidden');
+    suggestionArea.className = 'my-4 p-4 bg-sky-50 border-l-4 border-sky-500 text-sky-800 rounded-md text-center loading'; // Loading style
 
     if (!workerUrl || !backtestWorker) {
-        console.warn('[Suggestion] Worker not ready or busy.');
-        suggestionUI.showError('引擎未就緒或忙碌中');
+        console.warn("[Suggestion] Worker not ready or busy.");
+        suggestionText.textContent = "引擎未就緒或忙碌中";
+        suggestionArea.classList.remove('loading');
+        suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
         return;
     }
-
-    suggestionUI.showLoading();
 
     try {
         const params = getBacktestParams();
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        const windowOptions = {
-            minBars: 90,
-            multiplier: 2,
-            marginTradingDays: 12,
-            extraCalendarDays: 7,
-            minDate: sharedUtils?.MIN_DATA_DATE,
-            defaultStartDate: params.startDate,
-        };
         let lookbackDecision = null;
-        if (sharedUtils && typeof sharedUtils.resolveDataWindow === 'function') {
-            lookbackDecision = sharedUtils.resolveDataWindow(params, windowOptions);
+        if (sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
+            lookbackDecision = sharedUtils.resolveLookbackDays(params, { minBars: 90, multiplier: 2 });
         }
         const fallbackMaxPeriod = sharedUtils && typeof sharedUtils.getMaxIndicatorPeriod === 'function'
             ? sharedUtils.getMaxIndicatorPeriod(params)
             : 0;
+        const maxPeriod = Number.isFinite(lookbackDecision?.maxIndicatorPeriod)
+            ? lookbackDecision.maxIndicatorPeriod
+            : fallbackMaxPeriod;
         let lookbackDays = Number.isFinite(lookbackDecision?.lookbackDays)
             ? lookbackDecision.lookbackDays
             : null;
-        if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && sharedUtils && typeof sharedUtils.resolveLookbackDays === 'function') {
-            const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
-            if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
-                lookbackDays = fallbackDecision.lookbackDays;
-                if (!lookbackDecision) lookbackDecision = fallbackDecision;
-            }
-        }
         if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
             lookbackDays = sharedUtils && typeof sharedUtils.estimateLookbackBars === 'function'
-                ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
-                : Math.max(90, fallbackMaxPeriod * 2);
+                ? sharedUtils.estimateLookbackBars(maxPeriod, { minBars: 90, multiplier: 2 })
+                : Math.max(90, maxPeriod * 2);
+        }
+        console.log(`[Main] Max Period: ${maxPeriod}, Lookback Days for Suggestion: ${lookbackDays}`);
+
+        if (cachedStockData.length < lookbackDays) {
+            suggestionText.textContent = `數據不足 (${cachedStockData.length} < ${lookbackDays})`;
+            suggestionArea.classList.remove('loading');
+            suggestionArea.classList.add('bg-yellow-100', 'border-yellow-500', 'text-yellow-800');
+            console.warn(`[Suggestion] Insufficient cached data for lookback: ${cachedStockData.length} < ${lookbackDays}`);
+            if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+            return;
         }
 
-        const effectiveStartDate = lastFetchSettings?.effectiveStartDate
-            || lookbackDecision?.effectiveStartDate
-            || params.effectiveStartDate
-            || params.startDate;
-        const dataStartDate = lastFetchSettings?.dataStartDate
-            || lookbackDecision?.dataStartDate
-            || params.dataStartDate
-            || effectiveStartDate
-            || params.startDate;
+        // 檢查 worker 是否可用
+        if (backtestWorker && workerUrl) {
+            backtestWorker.postMessage({
+                type: 'getSuggestion',
+                params: params,
+                lookbackDays: lookbackDays
+            });
+        } else {
+            suggestionText.textContent = "回測引擎未就緒";
+            suggestionArea.classList.remove('loading');
+            suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
+        }
 
-        const request = {
-            type: 'getSuggestion',
-            params: {
-                ...params,
-                dataStartDate,
-                effectiveStartDate,
-                lookbackDays,
-            },
-            lookbackDays,
-            dataStartDate,
-            effectiveStartDate,
-            cachedData: Array.isArray(cachedStockData) ? cachedStockData : null,
-            lastBacktestRange: { start: params.startDate, end: params.endDate },
-        };
-
-        const dataDebug = (lastOverallResult && lastOverallResult.dataDebug) || {};
-        const diagnostics = lastDatasetDiagnostics || null;
-        const cacheCoverage = computeCoverageFromRows(cachedStockData);
-        const coverageFingerprint = computeCoverageFingerprint(cacheCoverage);
-        request.cachedMeta = {
-            summary: dataDebug.summary || null,
-            adjustments: Array.isArray(dataDebug.adjustments) ? dataDebug.adjustments : [],
-            debugSteps: Array.isArray(dataDebug.debugSteps) ? dataDebug.debugSteps : [],
-            adjustmentFallbackApplied: Boolean(dataDebug.adjustmentFallbackApplied),
-            adjustmentFallbackInfo: dataDebug.adjustmentFallbackInfo || null,
-            priceSource: dataDebug.priceSource || null,
-            dataSource: dataDebug.dataSource || null,
-            splitDiagnostics: dataDebug.splitDiagnostics || null,
-            finmindStatus: dataDebug.finmindStatus || null,
-            fetchRange: dataDebug.fetchRange || null,
-            diagnostics,
-            lookbackDays,
-            coverage: cacheCoverage,
-            coverageFingerprint,
-        };
-
-        backtestWorker.postMessage(request);
     } catch (error) {
-        console.error('[Main] Error getting suggestion:', error);
-        suggestionUI.showError(error?.message || '計算建議時出錯');
+        console.error("[Main] Error getting suggestion:", error);
+        suggestionText.textContent = "計算建議時出錯";
+        suggestionArea.classList.remove('loading');
+        suggestionArea.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
         if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }

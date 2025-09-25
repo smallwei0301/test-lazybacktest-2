@@ -2,9 +2,6 @@
 // Patch Tag: LB-TW-DIRECTORY-20250620A
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
-// Patch Tag: LB-TREND-SENSITIVITY-20250726A
-// Patch Tag: LB-TREND-SENSITIVITY-20250817A
-// Patch Tag: LB-TREND-REGRESSION-20250903A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -24,10 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
     renderBlobUsageCard();
 });
 
-document.addEventListener('DOMContentLoaded', () => {
-    resetStrategyStatusCard('idle');
-});
-
 let lastPriceDebug = {
     steps: [],
     summary: null,
@@ -45,219 +38,6 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
-
-const todaySuggestionUI = (() => {
-    const area = document.getElementById('today-suggestion-area');
-    const body = document.getElementById('today-suggestion-body');
-    const empty = document.getElementById('today-suggestion-empty');
-    const banner = document.getElementById('today-suggestion-banner');
-    const labelEl = document.getElementById('today-suggestion-label');
-    const dateEl = document.getElementById('today-suggestion-date');
-    const priceEl = document.getElementById('today-suggestion-price');
-    const longEl = document.getElementById('today-suggestion-long');
-    const shortEl = document.getElementById('today-suggestion-short');
-    const positionEl = document.getElementById('today-suggestion-position');
-    const portfolioEl = document.getElementById('today-suggestion-portfolio');
-    const notesEl = document.getElementById('today-suggestion-notes');
-    const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
-    const numberFormatter = typeof Intl !== 'undefined'
-        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
-        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
-    const integerFormatter = typeof Intl !== 'undefined'
-        ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 })
-        : { format: (value) => (Number.isFinite(value) ? value.toString() : '—') };
-    const toneMap = {
-        bullish: 'is-bullish',
-        bear: 'is-bearish',
-        bearish: 'is-bearish',
-        exit: 'is-exit',
-        neutral: 'is-neutral',
-        info: 'is-info',
-        warning: 'is-warning',
-        error: 'is-error',
-    };
-    const priceTypeLabel = {
-        close: '收盤',
-        open: '開盤',
-        high: '最高',
-        low: '最低',
-    };
-
-    function ensureAreaVisible() {
-        if (area) area.classList.remove('hidden');
-    }
-
-    function showBodyContent() {
-        if (body) body.classList.remove('hidden');
-        if (empty) empty.classList.add('hidden');
-    }
-
-    function showPlaceholderContent() {
-        if (body) body.classList.add('hidden');
-        if (empty) empty.classList.remove('hidden');
-    }
-
-    function setTone(tone) {
-        if (!banner) return;
-        toneClasses.forEach((cls) => banner.classList.remove(cls));
-        const resolved = toneMap[tone] || toneMap.neutral;
-        banner.classList.add(resolved);
-    }
-
-    function setText(el, text) {
-        if (!el) return;
-        el.textContent = text ?? '—';
-    }
-
-    function formatPriceValue(value, type) {
-        if (!Number.isFinite(value)) return null;
-        const formatted = numberFormatter.format(value);
-        if (!type) return formatted;
-        const label = priceTypeLabel[type] || '價格';
-        return `${label} ${formatted}`;
-    }
-
-    function formatShares(shares) {
-        if (!Number.isFinite(shares) || shares <= 0) return null;
-        return `${integerFormatter.format(shares)} 股`;
-    }
-
-    function formatCurrency(value) {
-        if (!Number.isFinite(value)) return null;
-        return `${numberFormatter.format(value)} 元`;
-    }
-
-    function describePosition(info) {
-        if (!info) return '—';
-        const parts = [];
-        if (info.state && info.state !== '空手') {
-            parts.push(info.state);
-        }
-        const shareText = formatShares(info.shares);
-        if (shareText) parts.push(shareText);
-        if (Number.isFinite(info.averagePrice)) {
-            parts.push(`均價 ${numberFormatter.format(info.averagePrice)}`);
-        }
-        if (Number.isFinite(info.marketValue)) {
-            parts.push(`市值 ${numberFormatter.format(info.marketValue)}`);
-        }
-        if (parts.length === 0) return '空手';
-        return parts.join('，');
-    }
-
-    function setNotes(notes) {
-        if (!notesEl) return;
-        notesEl.innerHTML = '';
-        if (!Array.isArray(notes) || notes.length === 0) {
-            notesEl.style.display = 'none';
-            return;
-        }
-        notesEl.style.display = 'block';
-        notes.forEach((note) => {
-            if (!note) return;
-            const li = document.createElement('li');
-            li.textContent = note;
-            notesEl.appendChild(li);
-        });
-    }
-
-    function applyResultPayload(payload) {
-        const priceText = payload.price?.text
-            || formatPriceValue(payload.price?.value, payload.price?.type)
-            || payload.message
-            || '—';
-        setText(labelEl, payload.label || '—');
-        setText(dateEl, payload.latestDate || '—');
-        setText(priceEl, priceText);
-        setText(longEl, describePosition(payload.longPosition));
-        setText(shortEl, describePosition(payload.shortPosition));
-        setText(positionEl, payload.positionSummary || '—');
-        if (portfolioEl) {
-            const portfolioText = formatCurrency(payload.evaluation?.portfolioValue);
-            setText(portfolioEl, portfolioText || '—');
-        }
-        setNotes(payload.notes);
-    }
-
-    return {
-        reset() {
-            if (!area) return;
-            ensureAreaVisible();
-            showPlaceholderContent();
-            setTone('neutral');
-            setText(labelEl, '尚未取得建議');
-            setText(dateEl, '—');
-            setText(priceEl, '—');
-            setText(longEl, '—');
-            setText(shortEl, '—');
-            setText(positionEl, '—');
-            if (portfolioEl) setText(portfolioEl, '—');
-            setNotes([]);
-        },
-        showLoading() {
-            if (!area) return;
-            ensureAreaVisible();
-            showBodyContent();
-            setTone('info');
-            setText(labelEl, '計算今日建議中...');
-            setText(dateEl, '—');
-            setText(priceEl, '資料計算中，請稍候');
-            setText(longEl, '—');
-            setText(shortEl, '—');
-            setText(positionEl, '—');
-            if (portfolioEl) setText(portfolioEl, '—');
-            setNotes([]);
-        },
-        showResult(payload = {}) {
-            if (!area) return;
-            ensureAreaVisible();
-            showBodyContent();
-            const status = payload.status || 'ok';
-            if (status !== 'ok') {
-                const fallbackNotes = [];
-                if (payload.message) fallbackNotes.push(payload.message);
-                if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
-                setTone(status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral');
-                applyResultPayload({
-                    label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
-                    latestDate: payload.latestDate || '—',
-                    price: { text: payload.price?.text || payload.message || '—' },
-                    longPosition: { state: '空手' },
-                    shortPosition: { state: '空手' },
-                    positionSummary: '—',
-                    notes: fallbackNotes,
-                    evaluation: {},
-                });
-                return;
-            }
-            setTone(payload.tone || 'neutral');
-            applyResultPayload(payload);
-        },
-        showError(message) {
-            if (!area) return;
-            ensureAreaVisible();
-            showBodyContent();
-            setTone('error');
-            applyResultPayload({
-                label: '計算失敗',
-                latestDate: '—',
-                price: { text: message || '計算建議時發生錯誤' },
-                longPosition: { state: '空手' },
-                shortPosition: { state: '空手' },
-                positionSummary: '—',
-                notes: message ? [message] : [],
-                evaluation: {},
-            });
-        },
-        showPlaceholder() {
-            if (!area) return;
-            ensureAreaVisible();
-            showPlaceholderContent();
-        },
-    };
-})();
-
-window.lazybacktestTodaySuggestion = todaySuggestionUI;
 
 const BACKTEST_DAY_MS = 24 * 60 * 60 * 1000;
 const START_GAP_TOLERANCE_DAYS = 7;
@@ -282,639 +62,6 @@ const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
-
-
-const TREND_ANALYSIS_VERSION = 'LB-TREND-REGRESSION-20250903A';
-const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
-const TREND_WINDOW_SIZE = 20;
-const TREND_BASE_THRESHOLDS = {
-    slopeStrict: 0.0024,
-    trendRatioStrict: 2.1,
-    strengthStrict: 2.8,
-    r2Strict: 0.55,
-};
-const TREND_SENSITIVITY_MIN = 1;
-const TREND_SENSITIVITY_MAX = 100;
-const TREND_SENSITIVITY_DEFAULT = 40;
-const TREND_SENSITIVITY_MIN_MULTIPLIER = 0.0063;
-const TREND_SENSITIVITY_MAX_MULTIPLIER = 1;
-const TREND_SENSITIVITY_EQUIVALENT_MIN = 70;
-const TREND_SENSITIVITY_EQUIVALENT_MAX = 100;
-const TREND_SENSITIVITY_ORIGINAL_MIN = 1;
-const TREND_SENSITIVITY_ORIGINAL_MAX = 100;
-const TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED =
-    (TREND_SENSITIVITY_EQUIVALENT_MIN - TREND_SENSITIVITY_ORIGINAL_MIN)
-    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
-const TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED =
-    (TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_ORIGINAL_MIN)
-    / Math.max(1, TREND_SENSITIVITY_ORIGINAL_MAX - TREND_SENSITIVITY_ORIGINAL_MIN);
-
-const TREND_STYLE_MAP = {
-    uptrend: {
-        label: '起漲',
-        overlay: 'rgba(34, 197, 94, 0.18)',
-        accent: '#16a34a',
-        border: 'rgba(34, 197, 94, 0.35)',
-    },
-    consolidation: {
-        label: '盤整',
-        overlay: 'rgba(107, 114, 128, 0.16)',
-        accent: '#4b5563',
-        border: 'rgba(107, 114, 128, 0.32)',
-    },
-    downtrend: {
-        label: '跌落',
-        overlay: 'rgba(239, 68, 68, 0.18)',
-        accent: '#dc2626',
-        border: 'rgba(239, 68, 68, 0.38)',
-    },
-};
-
-const trendAnalysisState = {
-    version: TREND_ANALYSIS_VERSION,
-    sensitivity: TREND_SENSITIVITY_DEFAULT,
-    thresholds: null,
-    segments: [],
-    summary: null,
-    result: null,
-};
-
-const trendBackgroundPlugin = {
-    id: TREND_BACKGROUND_PLUGIN_ID,
-    beforeDatasetsDraw(chart, _args, opts) {
-        const chartArea = chart.chartArea;
-        const xScale = chart.scales?.x;
-        if (!chartArea || !xScale) return;
-        const pluginOptions = chart.options?.plugins?.[TREND_BACKGROUND_PLUGIN_ID] || opts || {};
-        const segments = Array.isArray(pluginOptions.segments) ? pluginOptions.segments : [];
-        if (!segments.length) return;
-        const labels = chart.data?.labels || [];
-        if (!labels.length) return;
-        let step = 0;
-        if (labels.length > 1) {
-            const firstPixel = xScale.getPixelForValue(labels[0], 0);
-            const secondPixel = xScale.getPixelForValue(labels[1], 1);
-            step = secondPixel - firstPixel;
-        } else {
-            step = chartArea.width;
-        }
-        const halfStep = step / 2;
-        const { top, bottom } = chartArea;
-        const ctx = chart.ctx;
-        ctx.save();
-        segments.forEach((segment) => {
-            const startIdx = segment?.startIndex;
-            const endIdx = segment?.endIndex;
-            if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
-            const boundedEndIdx = Math.min(endIdx, labels.length - 1);
-            const startLabel = labels[startIdx];
-            const endLabel = labels[boundedEndIdx];
-            const startCenter = xScale.getPixelForValue(startLabel, startIdx);
-            const endCenter = xScale.getPixelForValue(endLabel, boundedEndIdx);
-            if (!Number.isFinite(startCenter) || !Number.isFinite(endCenter)) return;
-            const left = startCenter - halfStep;
-            const right = endCenter + halfStep;
-            const width = Math.max(1, right - left);
-            const fillStyle = segment.overlay || TREND_STYLE_MAP[segment.type]?.overlay || 'rgba(0,0,0,0.06)';
-            ctx.fillStyle = fillStyle;
-            ctx.fillRect(left, top, width, bottom - top);
-        });
-        ctx.restore();
-    },
-};
-
-if (typeof Chart !== 'undefined' && Chart.register) {
-    Chart.register(trendBackgroundPlugin);
-}
-
-function computeTrendThresholds(sensitivity) {
-    const min = TREND_SENSITIVITY_MIN;
-    const max = TREND_SENSITIVITY_MAX;
-    const span = Math.max(1, max - min);
-    let safe = Number.isFinite(sensitivity) ? sensitivity : TREND_SENSITIVITY_DEFAULT;
-    if (safe < min) safe = min;
-    if (safe > max) safe = max;
-    const sliderNormalized = span > 0 ? (safe - min) / span : 0;
-    const effectiveNormalized = TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED
-        + sliderNormalized * (TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED);
-    const multiplierSpan = TREND_SENSITIVITY_MAX_MULTIPLIER - TREND_SENSITIVITY_MIN_MULTIPLIER;
-    const rawMultiplier = TREND_SENSITIVITY_MAX_MULTIPLIER - effectiveNormalized * multiplierSpan;
-    const clampedMultiplier = Math.max(
-        TREND_SENSITIVITY_MIN_MULTIPLIER,
-        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, rawMultiplier),
-    );
-    const equivalentSpan = TREND_SENSITIVITY_EQUIVALENT_MAX - TREND_SENSITIVITY_EQUIVALENT_MIN;
-    const equivalentSensitivity = TREND_SENSITIVITY_EQUIVALENT_MIN + sliderNormalized * equivalentSpan;
-    const multiplierAtMinRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
-        - TREND_SENSITIVITY_EQUIVALENT_MIN_NORMALIZED * multiplierSpan;
-    const multiplierAtMaxRaw = TREND_SENSITIVITY_MAX_MULTIPLIER
-        - TREND_SENSITIVITY_EQUIVALENT_MAX_NORMALIZED * multiplierSpan;
-    const multiplierAtMin = Math.max(
-        TREND_SENSITIVITY_MIN_MULTIPLIER,
-        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMinRaw),
-    );
-    const multiplierAtMax = Math.max(
-        TREND_SENSITIVITY_MIN_MULTIPLIER,
-        Math.min(TREND_SENSITIVITY_MAX_MULTIPLIER, multiplierAtMaxRaw),
-    );
-    let ratio = null;
-    if (Number.isFinite(multiplierAtMin) && Number.isFinite(multiplierAtMax) && multiplierAtMax > 0) {
-        ratio = multiplierAtMin / multiplierAtMax;
-    }
-
-    const slopeThreshold = Math.max(
-        0.00012,
-        TREND_BASE_THRESHOLDS.slopeStrict * Math.pow(clampedMultiplier, 0.35),
-    );
-    const slopeRelaxed = Math.max(0.00008, slopeThreshold * 0.6);
-    const trendRatioThreshold = Math.max(
-        0.45,
-        TREND_BASE_THRESHOLDS.trendRatioStrict * Math.pow(clampedMultiplier, 0.2),
-    );
-    const trendRatioRelaxed = Math.max(0.35, trendRatioThreshold * 0.65);
-    const strengthThreshold = Math.max(
-        0.55,
-        TREND_BASE_THRESHOLDS.strengthStrict * Math.pow(clampedMultiplier, 0.25),
-    );
-    const strengthRelaxed = Math.max(0.45, strengthThreshold * 0.6);
-    const r2Threshold = Math.max(
-        0.12,
-        Math.min(0.92, TREND_BASE_THRESHOLDS.r2Strict * Math.pow(clampedMultiplier, 0.15)),
-    );
-    const r2Relaxed = Math.max(0.08, Math.min(0.9, r2Threshold * 0.75));
-
-    return {
-        windowSize: TREND_WINDOW_SIZE,
-        sensitivity: safe,
-        sliderNormalized,
-        normalizedSensitivity: effectiveNormalized,
-        equivalentSensitivity,
-        multiplier: clampedMultiplier,
-        slopeThreshold,
-        slopeRelaxed,
-        trendRatioThreshold,
-        trendRatioRelaxed,
-        strengthThreshold,
-        strengthRelaxed,
-        r2Threshold,
-        r2Relaxed,
-        range: {
-            min,
-            max,
-            minEquivalent: TREND_SENSITIVITY_EQUIVALENT_MIN,
-            maxEquivalent: TREND_SENSITIVITY_EQUIVALENT_MAX,
-            multiplierAtMin,
-            multiplierAtMax,
-            ratio,
-        },
-    };
-}
-
-function formatPercentPlain(value, digits = 1) {
-    if (!Number.isFinite(value)) return '—';
-    return `${value.toFixed(digits)}%`;
-}
-
-function formatTrendMultiplier(value) {
-    if (!Number.isFinite(value)) return '—';
-    if (value >= 1) return value.toFixed(1);
-    if (value >= 0.1) return value.toFixed(2);
-    if (value >= 0.01) return value.toFixed(3);
-    return value.toFixed(4);
-}
-
-function formatDecimal(value, digits = 2) {
-    if (!Number.isFinite(value)) return '—';
-    return value.toFixed(digits);
-}
-
-function computeTrendAnalysisFromResult(result, thresholds) {
-    const dates = Array.isArray(result?.dates) ? result.dates : [];
-    const returns = Array.isArray(result?.strategyReturns) ? result.strategyReturns : [];
-    const length = Math.min(dates.length, returns.length);
-    if (length === 0) {
-        return { segments: [], summary: null };
-    }
-    const netValues = new Array(length).fill(null);
-    const logValues = new Array(length).fill(null);
-    const validIndices = [];
-    for (let i = 0; i < length; i += 1) {
-        const parsed = Number.parseFloat(returns[i]);
-        if (Number.isFinite(parsed)) {
-            const net = 1 + parsed / 100;
-            if (net > 0) {
-                netValues[i] = net;
-                logValues[i] = Math.log(net);
-                validIndices.push(i);
-            }
-        }
-    }
-    if (validIndices.length < 2) {
-        return { segments: [], summary: null };
-    }
-    const startIdx = validIndices[0];
-    const endIdx = validIndices[validIndices.length - 1];
-    const classifications = new Array(length).fill(null);
-    const logDiffs = new Array(length).fill(null);
-    for (let i = startIdx + 1; i <= endIdx; i += 1) {
-        if (Number.isFinite(logValues[i]) && Number.isFinite(logValues[i - 1])) {
-            logDiffs[i] = logValues[i] - logValues[i - 1];
-        }
-    }
-    const windowSize = Math.max(5, Math.round(thresholds?.windowSize || TREND_WINDOW_SIZE));
-    const slopeThreshold = Number.isFinite(thresholds?.slopeThreshold)
-        ? thresholds.slopeThreshold
-        : 0.0012;
-    const slopeRelaxed = Number.isFinite(thresholds?.slopeRelaxed)
-        ? thresholds.slopeRelaxed
-        : slopeThreshold * 0.6;
-    const ratioThreshold = Number.isFinite(thresholds?.trendRatioThreshold)
-        ? thresholds.trendRatioThreshold
-        : 1.0;
-    const ratioRelaxed = Number.isFinite(thresholds?.trendRatioRelaxed)
-        ? thresholds.trendRatioRelaxed
-        : ratioThreshold * 0.7;
-    const strengthThreshold = Number.isFinite(thresholds?.strengthThreshold)
-        ? thresholds.strengthThreshold
-        : 1.2;
-    const strengthRelaxed = Number.isFinite(thresholds?.strengthRelaxed)
-        ? thresholds.strengthRelaxed
-        : strengthThreshold * 0.7;
-    const r2Threshold = Number.isFinite(thresholds?.r2Threshold)
-        ? thresholds.r2Threshold
-        : 0.35;
-    const r2Relaxed = Number.isFinite(thresholds?.r2Relaxed)
-        ? thresholds.r2Relaxed
-        : Math.max(0.08, r2Threshold * 0.75);
-
-    const computeWindowMetrics = (startIndex, endIndex) => {
-        const count = endIndex - startIndex + 1;
-        if (count < 3) return null;
-        let sumX = 0;
-        let sumY = 0;
-        let sumXX = 0;
-        let sumXY = 0;
-        for (let offset = 0; offset < count; offset += 1) {
-            const value = logValues[startIndex + offset];
-            if (!Number.isFinite(value)) {
-                return null;
-            }
-            const x = offset;
-            sumX += x;
-            sumY += value;
-            sumXX += x * x;
-            sumXY += x * value;
-        }
-        const denominator = count * sumXX - sumX * sumX;
-        if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-9) {
-            return null;
-        }
-        const slope = (count * sumXY - sumX * sumY) / denominator;
-        const intercept = (sumY - slope * sumX) / count;
-        const meanY = sumY / count;
-        let ssTot = 0;
-        let ssRes = 0;
-        for (let offset = 0; offset < count; offset += 1) {
-            const y = logValues[startIndex + offset];
-            const x = offset;
-            const fitted = slope * x + intercept;
-            const diffMean = y - meanY;
-            const residual = y - fitted;
-            ssTot += diffMean * diffMean;
-            ssRes += residual * residual;
-        }
-        const r2 = ssTot > 0 ? Math.max(0, 1 - (ssRes / ssTot)) : 0;
-        const residualStd = Math.sqrt(ssRes / Math.max(1, count - 2));
-        let diffSum = 0;
-        let diffSq = 0;
-        let diffCount = 0;
-        for (let idx = startIndex + 1; idx <= endIndex; idx += 1) {
-            const diff = logDiffs[idx];
-            if (!Number.isFinite(diff)) continue;
-            diffSum += diff;
-            diffSq += diff * diff;
-            diffCount += 1;
-        }
-        const diffMean = diffCount > 0 ? diffSum / diffCount : 0;
-        const diffVariance = diffCount > 0 ? Math.max(0, diffSq / diffCount - diffMean * diffMean) : 0;
-        const volatility = Math.sqrt(diffVariance);
-        const trendRatio = volatility > 0
-            ? slope / volatility
-            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-        const strength = residualStd > 0
-            ? slope / residualStd
-            : (slope >= 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
-        return {
-            slope,
-            slopeAbs: Math.abs(slope),
-            r2,
-            trendRatio,
-            trendRatioAbs: Math.abs(trendRatio),
-            strength,
-            strengthAbs: Math.abs(strength),
-        };
-    };
-
-    for (let idx = startIdx; idx <= endIdx; idx += 1) {
-        if (!Number.isFinite(logValues[idx])) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        if (idx - windowSize + 1 < startIdx) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        let invalidWindow = false;
-        for (let j = idx - windowSize + 1; j <= idx; j += 1) {
-            if (!Number.isFinite(logValues[j])) {
-                invalidWindow = true;
-                break;
-            }
-        }
-        if (invalidWindow) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        const metrics = computeWindowMetrics(idx - windowSize + 1, idx);
-        if (!metrics) {
-            classifications[idx] = classifications[idx - 1] || 'consolidation';
-            continue;
-        }
-        const {
-            slope,
-            slopeAbs,
-            r2,
-            trendRatioAbs,
-            strengthAbs,
-        } = metrics;
-        let classification = 'consolidation';
-        const passesStrict = slopeAbs >= slopeThreshold
-            && r2 >= r2Threshold
-            && trendRatioAbs >= ratioThreshold
-            && strengthAbs >= strengthThreshold;
-        const passesRelaxed = slopeAbs >= slopeRelaxed
-            && (
-                (r2 >= r2Relaxed && trendRatioAbs >= ratioRelaxed)
-                || (strengthAbs >= strengthRelaxed && trendRatioAbs >= ratioRelaxed)
-                || (strengthAbs >= strengthThreshold && r2 >= r2Relaxed)
-            );
-        if (passesStrict || passesRelaxed) {
-            classification = slope >= 0 ? 'uptrend' : 'downtrend';
-        }
-        classifications[idx] = classification;
-    }
-
-    const getNetValueBackward = (index) => {
-        for (let i = Math.min(index, length - 1); i >= 0; i -= 1) {
-            const value = netValues[i];
-            if (Number.isFinite(value) && value > 0) return value;
-        }
-        return 1;
-    };
-
-    const segments = [];
-    let segmentType = null;
-    let segmentStart = null;
-    for (let idx = startIdx; idx <= endIdx; idx += 1) {
-        const type = classifications[idx] || segmentType || 'consolidation';
-        if (segmentType === null) {
-            segmentType = type;
-            segmentStart = idx;
-            continue;
-        }
-        if (type !== segmentType) {
-            segments.push(buildSegment(segmentType, segmentStart, idx - 1));
-            segmentType = type;
-            segmentStart = idx;
-        }
-    }
-    if (segmentType !== null && segmentStart !== null) {
-        segments.push(buildSegment(segmentType, segmentStart, endIdx));
-    }
-
-    function buildSegment(type, startIndex, endIndex) {
-        const startDate = dates[startIndex] || null;
-        const endDate = dates[endIndex] || null;
-        const baseValue = startIndex > 0 ? getNetValueBackward(startIndex - 1) : 1;
-        const endValue = getNetValueBackward(endIndex);
-        const safeBase = baseValue > 0 ? baseValue : 1e-6;
-        const safeEnd = endValue > 0 ? endValue : 1e-6;
-        const factor = safeEnd / safeBase;
-        const returnPercent = (factor - 1) * 100;
-        return {
-            type,
-            startIndex,
-            endIndex,
-            startDate,
-            endDate,
-            days: Math.max(1, endIndex - startIndex + 1),
-            factor,
-            returnPercent,
-            overlay: TREND_STYLE_MAP[type]?.overlay || 'rgba(0,0,0,0.06)',
-        };
-    }
-
-    const totalDays = Math.max(1, endIdx - startIdx + 1);
-    const aggregated = {
-        uptrend: { segments: 0, days: 0, factor: 1 },
-        consolidation: { segments: 0, days: 0, factor: 1 },
-        downtrend: { segments: 0, days: 0, factor: 1 },
-    };
-    segments.forEach((segment) => {
-        const bucket = aggregated[segment.type];
-        if (!bucket) return;
-        bucket.segments += 1;
-        bucket.days += segment.days;
-        const segFactor = segment.factor > 0 ? segment.factor : 1e-6;
-        bucket.factor *= segFactor;
-    });
-
-    const aggregatedByType = Object.entries(aggregated).reduce((acc, [key, bucket]) => {
-        const coveragePct = bucket.days > 0 ? (bucket.days / totalDays) * 100 : 0;
-        acc[key] = {
-            segments: bucket.segments,
-            days: bucket.days,
-            coveragePct,
-            returnPct: (bucket.factor - 1) * 100,
-        };
-        return acc;
-    }, {});
-
-    return {
-        segments,
-        summary: {
-            startIndex: startIdx,
-            endIndex: endIdx,
-            totalDays,
-            aggregatedByType,
-        },
-    };
-}
-
-function updateChartTrendOverlay() {
-    if (!stockChart) return;
-    if (!stockChart.options) stockChart.options = {};
-    if (!stockChart.options.plugins) stockChart.options.plugins = {};
-    stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] = {
-        ...(stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] || {}),
-        segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
-    };
-    stockChart.update('none');
-}
-
-function renderTrendSummary() {
-    const sliderValueEl = document.getElementById('trendSensitivityValue');
-    if (sliderValueEl) {
-        sliderValueEl.textContent = `${trendAnalysisState.sensitivity}`;
-    }
-    const badgeEl = document.getElementById('trend-version-badge');
-    if (badgeEl) {
-        badgeEl.textContent = trendAnalysisState.version;
-    }
-    const thresholds = trendAnalysisState.thresholds;
-    const thresholdTextEl = document.getElementById('trend-threshold-text');
-    if (thresholdTextEl && thresholds) {
-        const slopeDailyPct = Math.expm1(thresholds.slopeThreshold) * 100;
-        const slopeAnnualPct = Math.expm1(thresholds.slopeThreshold * 252) * 100;
-        const slopeRelaxDailyPct = Math.expm1(thresholds.slopeRelaxed) * 100;
-        const slopeRelaxAnnualPct = Math.expm1(thresholds.slopeRelaxed * 252) * 100;
-        const trendRatioStrict = formatDecimal(thresholds.trendRatioThreshold, 2);
-        const trendRatioRelaxed = formatDecimal(thresholds.trendRatioRelaxed, 2);
-        const strengthStrict = formatDecimal(thresholds.strengthThreshold, 2);
-        const strengthRelaxed = formatDecimal(thresholds.strengthRelaxed, 2);
-        const r2Strict = formatDecimal(thresholds.r2Threshold, 2);
-        const r2Relaxed = formatDecimal(thresholds.r2Relaxed, 2);
-        const multiplierText = formatTrendMultiplier(thresholds.multiplier);
-        const rangeInfo = thresholds.range || {};
-        const rangeMaxValue = Number.isFinite(rangeInfo.multiplierAtMin)
-            ? rangeInfo.multiplierAtMin
-            : TREND_SENSITIVITY_MAX_MULTIPLIER;
-        const rangeMinValue = Number.isFinite(rangeInfo.multiplierAtMax)
-            ? rangeInfo.multiplierAtMax
-            : TREND_SENSITIVITY_MIN_MULTIPLIER;
-        const maxMultiplier = formatTrendMultiplier(rangeMaxValue);
-        const minMultiplier = formatTrendMultiplier(rangeMinValue);
-        let ratio = Number.isFinite(rangeInfo.ratio) && rangeInfo.ratio > 0
-            ? rangeInfo.ratio
-            : (rangeMinValue > 0 ? rangeMaxValue / rangeMinValue : null);
-        let ratioText = '—';
-        if (Number.isFinite(ratio) && ratio > 0) {
-            if (ratio >= 100) {
-                ratioText = ratio.toFixed(0);
-            } else if (ratio >= 10) {
-                ratioText = ratio.toFixed(0);
-            } else {
-                ratioText = ratio.toFixed(1);
-            }
-        }
-        const equivalentMin = Number.isFinite(rangeInfo.minEquivalent)
-            ? Math.round(rangeInfo.minEquivalent)
-            : null;
-        const equivalentMax = Number.isFinite(rangeInfo.maxEquivalent)
-            ? Math.round(rangeInfo.maxEquivalent)
-            : null;
-        const equivalentCurrent = Number.isFinite(thresholds.equivalentSensitivity)
-            ? Math.round(thresholds.equivalentSensitivity)
-            : null;
-        const sliderMappingText = (equivalentMin !== null && equivalentMax !== null)
-            ? `滑桿 1→100 ≈ 舊版 ${equivalentMin}→${equivalentMax}`
-            : '滑桿 1→100';
-        const equivalentCurrentText = equivalentCurrent !== null ? `${equivalentCurrent}` : '—';
-        thresholdTextEl.innerHTML = `
-            <span class="font-semibold">判別公式：</span>以 20 日對數淨值線性回歸斜率、R² 與趨勢訊噪比（斜率÷波動度、斜率÷殘差）判斷。<br>
-            起漲：斜率 ≥ ${formatPercentPlain(slopeDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeAnnualPct, 1)}），R² ≥ ${r2Strict}，
-            且斜率÷波動度 ≥ ${trendRatioStrict}、斜率÷殘差標準差 ≥ ${strengthStrict}。跌落條件相同但斜率改為負值。<br>
-            若 R² ≥ ${r2Relaxed} 且斜率 ≥ ${formatPercentPlain(slopeRelaxDailyPct, 2)}／日（年化約 ${formatPercentPlain(slopeRelaxAnnualPct, 1)}），
-            並達到趨勢訊噪門檻（波動度比 ≥ ${trendRatioRelaxed} 或殘差比 ≥ ${strengthRelaxed}），亦視為趨勢段。<br>
-            門檻倍率 = ${multiplierText}（${sliderMappingText}；倍率 ${maxMultiplier} → ${minMultiplier}，上下限相差 ${ratioText} 倍；目前約等於舊版 ${equivalentCurrentText}，數值越小越靈敏）。
-        `;
-    }
-    const placeholderEl = document.getElementById('trend-summary-placeholder');
-    const metaEl = document.getElementById('trend-summary-meta');
-    const container = document.getElementById('trend-summary-container');
-    if (!container) return;
-    const summary = trendAnalysisState.summary;
-    const segments = trendAnalysisState.segments;
-    if (!summary || !segments || segments.length === 0) {
-        container.innerHTML = '';
-        if (placeholderEl) placeholderEl.classList.remove('hidden');
-        if (metaEl) {
-            metaEl.classList.add('hidden');
-            metaEl.textContent = '';
-        }
-        return;
-    }
-    if (placeholderEl) placeholderEl.classList.add('hidden');
-    if (metaEl) {
-        const firstSegment = segments[0];
-        const lastSegment = segments[segments.length - 1];
-        const rangeText = firstSegment?.startDate && lastSegment?.endDate
-            ? `${firstSegment.startDate} ~ ${lastSegment.endDate}`
-            : '—';
-        metaEl.textContent = `統計範圍：${rangeText}（共 ${summary.totalDays} 個交易日）`;
-        metaEl.classList.remove('hidden');
-    }
-    const order = ['uptrend', 'consolidation', 'downtrend'];
-    const cards = order.map((key) => {
-        const style = TREND_STYLE_MAP[key];
-        const stats = summary.aggregatedByType[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: 0 };
-        const returnText = formatPercent(stats.returnPct);
-        const coverageText = formatPercentPlain(stats.coveragePct, 1);
-        const borderColor = style?.border || 'rgba(148, 163, 184, 0.35)';
-        const background = style?.overlay || 'rgba(148, 163, 184, 0.15)';
-        const accent = style?.accent || 'var(--foreground)';
-        const label = style?.label || key;
-        return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
-            <div class="flex items-center justify-between gap-3">
-                <div class="flex items-center gap-2" style="color: ${accent};">
-                    <span class="trend-summary-chip" style="background-color: ${background}; border-color: ${accent};"></span>
-                    <strong>${label}</strong>
-                </div>
-                <span class="trend-summary-meta">${stats.segments} 段</span>
-            </div>
-            <div class="trend-summary-value" style="color: ${accent};">${returnText}</div>
-            <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
-        </div>`;
-    }).join('');
-    container.innerHTML = cards;
-}
-
-function recomputeTrendAnalysis(options = {}) {
-    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
-    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
-    if (trendAnalysisState.result) {
-        const analysis = computeTrendAnalysisFromResult(trendAnalysisState.result, trendAnalysisState.thresholds);
-        trendAnalysisState.segments = analysis.segments;
-        trendAnalysisState.summary = analysis.summary;
-    } else {
-        trendAnalysisState.segments = [];
-        trendAnalysisState.summary = null;
-    }
-    renderTrendSummary();
-    if (!options.skipChartUpdate) {
-        updateChartTrendOverlay();
-    }
-}
-
-function initialiseTrendControls() {
-    const slider = document.getElementById('trendSensitivitySlider');
-    if (slider) {
-        slider.value = `${trendAnalysisState.sensitivity}`;
-        slider.addEventListener('input', (event) => {
-            const value = Number.parseInt(event.target.value, 10);
-            if (Number.isFinite(value)) {
-                trendAnalysisState.sensitivity = Math.max(TREND_SENSITIVITY_MIN, Math.min(TREND_SENSITIVITY_MAX, value));
-                recomputeTrendAnalysis();
-            }
-        });
-    }
-    trendAnalysisState.thresholds = computeTrendThresholds(trendAnalysisState.sensitivity);
-    trendAnalysisState.sensitivity = trendAnalysisState.thresholds.sensitivity;
-    renderTrendSummary();
-}
-
-document.addEventListener('DOMContentLoaded', initialiseTrendControls);
-
 
 function cloneArrayOfRanges(ranges) {
     if (!Array.isArray(ranges)) return undefined;
@@ -2210,7 +1357,6 @@ function runBacktestInternal() {
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
         }
         clearPreviousResults(); // Clear previous results including suggestion
-        resetStrategyStatusCard('loading');
 
         if(backtestWorker) { // Ensure previous worker is terminated
             backtestWorker.terminate();
@@ -2232,7 +1378,6 @@ function runBacktestInternal() {
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
-                resetStrategyStatusCard('error', { message });
                 if (window.showMarketSwitchModal) {
                     window.showMarketSwitchModal(message, marketType, stockNo);
                 } else {
@@ -2519,29 +1664,39 @@ function runBacktestInternal() {
                 getSuggestion();
 
             } else if(type==='suggestionResult'){
-                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showResult === 'function') {
-                    window.lazybacktestTodaySuggestion.showResult(data || {});
+                const suggestionArea = document.getElementById('today-suggestion-area');
+                const suggestionText = document.getElementById('suggestion-text');
+                if(suggestionArea && suggestionText){
+                    suggestionText.textContent = data.suggestion || '無法取得建議';
+                    suggestionArea.classList.remove('hidden', 'loading');
+                     suggestionArea.className = 'my-4 p-4 border-l-4 rounded-md text-center'; // Base classes
+                    if (data.suggestion === '做多買入' || data.suggestion === '持有 (多)') { suggestionArea.classList.add('bg-green-50', 'border-green-500', 'text-green-800'); }
+                    else if (data.suggestion === '做空賣出' || data.suggestion === '持有 (空)') { suggestionArea.classList.add('bg-red-50', 'border-red-500', 'text-red-800'); }
+                    else if (data.suggestion === '做多賣出' || data.suggestion === '做空回補') { suggestionArea.classList.add('bg-yellow-50', 'border-yellow-500', 'text-yellow-800'); }
+                    else if (data.suggestion === '等待') { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
+                     else { suggestionArea.classList.add('bg-gray-100', 'border-gray-400', 'text-gray-600'); }
+
+                    hideLoading();
+                    showSuccess("回測完成！");
+                    if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
                 }
-                hideLoading();
-                showSuccess("回測完成！");
-                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='suggestionError'){
-                const message = data?.message || '計算建議時發生錯誤';
-                if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
-                    window.lazybacktestTodaySuggestion.showError(message);
+                const suggestionArea = document.getElementById('today-suggestion-area');
+                const suggestionText = document.getElementById('suggestion-text');
+                if(suggestionArea && suggestionText){
+                    suggestionText.textContent = data.message || '計算建議時發生錯誤';
+                    suggestionArea.classList.remove('hidden', 'loading');
+                    suggestionArea.className = 'my-4 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md text-center';
                 }
-                hideLoading();
-                showError("回測完成，但計算建議時發生錯誤。");
-                if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+                 hideLoading();
+                 showError("回測完成，但計算建議時發生錯誤。");
+                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
                 showError(data?.message||'回測過程錯誤');
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
-
                 const suggestionArea = document.getElementById('today-suggestion-area');
                  if (suggestionArea) suggestionArea.classList.add('hidden');
-                resetStrategyStatusCard('error', { message: data?.message || '回測過程錯誤' });
-
             }
         };
 
@@ -2621,13 +1776,13 @@ function clearPreviousResults() {
     lastPositionStates = [];
     lastDatasetDiagnostics = null;
 
-    if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.reset === 'function') {
-        window.lazybacktestTodaySuggestion.reset();
-    } else {
-        const suggestionArea = document.getElementById('today-suggestion-area');
-        if (suggestionArea) suggestionArea.classList.add('hidden');
+    const suggestionArea = document.getElementById('today-suggestion-area');
+    const suggestionText = document.getElementById('suggestion-text');
+    if (suggestionArea && suggestionText) {
+        suggestionArea.classList.add('hidden');
+        suggestionArea.className = 'my-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 rounded-md text-center hidden';
+        suggestionText.textContent = "-";
     }
-    resetStrategyStatusCard('idle');
     visibleStockData = [];
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
@@ -2648,319 +1803,6 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
-}
-
-const STRATEGY_STATUS_BADGE_CLASSES = {
-    idle: 'strategy-status-badge--idle',
-    loading: 'strategy-status-badge--loading',
-    lead: 'strategy-status-badge--lead',
-    tie: 'strategy-status-badge--tie',
-    lag: 'strategy-status-badge--lag',
-    sleep: 'strategy-status-badge--sleep',
-    error: 'strategy-status-badge--error',
-};
-
-const STRATEGY_STATUS_BADGE_TEXT = {
-    idle: '待命',
-    loading: '計算中',
-    lead: '領先',
-    tie: '拉鋸',
-    lag: '落後',
-    sleep: '補眠',
-    error: '暫停',
-};
-
-const STRATEGY_STATUS_CARD_CLASSNAMES = [
-    'strategy-status-card--lead',
-    'strategy-status-card--lag',
-    'strategy-status-card--tie',
-    'strategy-status-card--loading',
-    'strategy-status-card--idle',
-    'strategy-status-card--sleep',
-    'strategy-status-card--error',
-];
-
-function getStrategyStatusElements() {
-    const card = document.getElementById('strategy-status-card');
-    if (!card) return null;
-    return {
-        card,
-        badge: card.querySelector('[data-strategy-status-badge]'),
-        title: card.querySelector('[data-strategy-status-title]'),
-        detail: card.querySelector('[data-strategy-status-detail]'),
-        version: card.querySelector('[data-strategy-status-version]'),
-    };
-}
-
-function formatPercentSignedValue(value, digits = 2) {
-    if (!Number.isFinite(value)) return '—';
-    const sign = value > 0 ? '+' : value < 0 ? '-' : '';
-    return `${sign}${Math.abs(value).toFixed(digits)}%`;
-}
-
-function formatPercentMagnitudeValue(value, digits = 2) {
-    if (!Number.isFinite(value)) return '—';
-    return `${Math.abs(value).toFixed(digits)}%`;
-}
-
-function toFiniteNumber(value) {
-    const num = Number.parseFloat(value);
-    return Number.isFinite(num) ? num : null;
-}
-
-function pickLastFiniteNumber(values) {
-    if (!Array.isArray(values)) return null;
-    for (let i = values.length - 1; i >= 0; i -= 1) {
-        const candidate = Number.parseFloat(values[i]);
-        if (Number.isFinite(candidate)) {
-            return candidate;
-        }
-    }
-    return null;
-}
-
-function splitSummaryIntoBulletLines(content) {
-    if (!content) return [];
-    const text = Array.isArray(content) ? content.join(' ') : String(content);
-    const sentences = [];
-    let buffer = '';
-    const commit = () => {
-        const trimmed = buffer.trim();
-        if (trimmed) {
-            sentences.push(trimmed);
-        }
-        buffer = '';
-    };
-    for (let i = 0; i < text.length; i += 1) {
-        const char = text[i];
-        buffer += char;
-        if ('。！？'.includes(char)) {
-            commit();
-        }
-    }
-    commit();
-    return sentences
-        .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
-        .filter((sentence) => sentence.length > 0)
-        .map((sentence) => (/[。！？]$/.test(sentence) ? sentence : `${sentence}。`));
-}
-
-function renderStrategyStatusDetail(detailEl, config = {}) {
-    if (!detailEl) return;
-    if (config.detailHTML) {
-        detailEl.innerHTML = config.detailHTML;
-        return;
-    }
-    const fragments = [];
-    if (config.highlight) {
-        fragments.push(`<p class="strategy-status-highlight">${escapeHtml(config.highlight)}</p>`);
-    }
-    let bulletLines = [];
-    if (Array.isArray(config.bulletLines)) {
-        bulletLines = config.bulletLines
-            .map((line) => (typeof line === 'string' ? line.trim() : ''))
-            .filter((line) => line.length > 0)
-            .map((line) => (/[。！？]$/.test(line) ? line : `${line}。`));
-    } else if (typeof config.bulletText === 'string') {
-        bulletLines = splitSummaryIntoBulletLines(config.bulletText);
-    }
-    if (bulletLines.length > 0) {
-        const items = bulletLines
-            .map((line) => `<li>${escapeHtml(line)}</li>`)
-            .join('');
-        fragments.push(`<ul class="strategy-status-list">${items}</ul>`);
-    }
-    const fallbackText = config.text || config.detailText;
-    if (fallbackText && bulletLines.length === 0) {
-        fragments.push(`<p>${escapeHtml(fallbackText)}</p>`);
-    }
-    detailEl.innerHTML = fragments.join('');
-}
-
-function applyStrategyStatusState(state, config = {}) {
-    const elements = getStrategyStatusElements();
-    if (!elements) return;
-    const { card, badge, title, detail, version } = elements;
-    if (version) {
-        version.textContent = STRATEGY_STATUS_VERSION;
-    }
-    if (card) {
-        STRATEGY_STATUS_CARD_CLASSNAMES.forEach((className) => card.classList.remove(className));
-        if (state) {
-            card.classList.add(`strategy-status-card--${state}`);
-        }
-    }
-    if (badge) {
-        const badgeClass = STRATEGY_STATUS_BADGE_CLASSES[state] || STRATEGY_STATUS_BADGE_CLASSES.idle;
-        badge.className = `strategy-status-badge ${badgeClass}`;
-        badge.textContent = config.badgeText || STRATEGY_STATUS_BADGE_TEXT[state] || STRATEGY_STATUS_BADGE_TEXT.idle;
-    }
-    if (title) {
-        title.textContent = config.title || '';
-    }
-    renderStrategyStatusDetail(detail, config);
-}
-
-function buildStrategyHealthSummary(result = {}) {
-    const warnings = [];
-    const positiveParts = [];
-
-    const annual = toFiniteNumber(result?.annualizedReturn);
-    const sharpe = toFiniteNumber(result?.sharpeRatio);
-    const sortino = toFiniteNumber(result?.sortinoRatio);
-    const maxDD = toFiniteNumber(result?.maxDrawdown);
-    const annHalf1 = toFiniteNumber(result?.annReturnHalf1);
-    const annHalf2 = toFiniteNumber(result?.annReturnHalf2);
-    const sharpeHalf1 = toFiniteNumber(result?.sharpeHalf1);
-    const sharpeHalf2 = toFiniteNumber(result?.sharpeHalf2);
-
-    const indicatorAlerts = [];
-    if (annual !== null && annual < 6) {
-        indicatorAlerts.push(`年化報酬僅 ${formatPercentSignedValue(annual, 2)}，需要檢查訊號是否過度保守或進場過慢`);
-    }
-    if (sharpe !== null && sharpe < 0.8) {
-        indicatorAlerts.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬不夠漂亮，震盪時要留意資金壓力`);
-    }
-    if (sortino !== null && sortino < 0.9) {
-        indicatorAlerts.push(`索提諾比率只有 ${sortino.toFixed(2)}，代表下檔風險偏高，請搭配停損或對沖`);
-    }
-    if (maxDD !== null && maxDD > 25) {
-        indicatorAlerts.push(`最大回撤高達 ${formatPercentMagnitudeValue(maxDD, 1)}，資金要預留防震緩衝`);
-    }
-    if (indicatorAlerts.length > 0) {
-        warnings.push(`指標巡檢：${indicatorAlerts.join('；')}。`);
-    }
-
-    if (annHalf1 !== null && Math.abs(annHalf1) > 1e-6 && annHalf2 !== null) {
-        const returnStability = annHalf2 / annHalf1;
-        if (Number.isFinite(returnStability)) {
-            const absReturnStability = Math.abs(returnStability);
-            if (absReturnStability < 0.6 || absReturnStability > 1.6 || returnStability < 0) {
-                warnings.push(`前後段報酬比僅 ${returnStability.toFixed(2)}，策略在不同市況易變臉，建議多做滾動驗證。`);
-            }
-        }
-    }
-
-    if (sharpeHalf1 !== null && Math.abs(sharpeHalf1) > 1e-6 && sharpeHalf2 !== null) {
-        const sharpeStability = sharpeHalf2 / sharpeHalf1;
-        if (Number.isFinite(sharpeStability)) {
-            const absSharpeStability = Math.abs(sharpeStability);
-            if (absSharpeStability < 0.6 || absSharpeStability > 1.6 || sharpeStability < 0) {
-                warnings.push(`前後段夏普比只有 ${sharpeStability.toFixed(2)}，可能存在過擬合，請留意驗證樣本。`);
-            }
-        }
-    }
-
-    if (annual !== null && annual >= 12) {
-        positiveParts.push(`年化報酬 ${formatPercentSignedValue(annual, 2)}`);
-    }
-    if (sharpe !== null && sharpe >= 1) {
-        positiveParts.push(`夏普值 ${sharpe.toFixed(2)}`);
-    }
-    if (sortino !== null && sortino >= 1) {
-        positiveParts.push(`索提諾比率 ${sortino.toFixed(2)}`);
-    }
-    if (maxDD !== null && maxDD <= 15) {
-        positiveParts.push(`最大回撤僅 ${formatPercentMagnitudeValue(maxDD, 2)}`);
-    }
-
-    let positiveLine = null;
-    if (positiveParts.length > 0) {
-        const base = positiveParts.join('、');
-        if (warnings.length === 0) {
-            positiveLine = `${base}，全部站在甜蜜區，持續維持紀律就能穩穩收割。`;
-        } else {
-            positiveLine = `${base} 表現還算給力，記得把優勢守住，請調整倉位或優化參數再上。`;
-        }
-    }
-
-    return {
-        warnings,
-        positiveLine,
-    };
-}
-
-function resetStrategyStatusCard(state = 'idle', config = {}) {
-    const defaults = { badgeText: STRATEGY_STATUS_BADGE_TEXT[state] || STRATEGY_STATUS_BADGE_TEXT.idle };
-    if (state === 'idle') {
-        defaults.title = '等待開賽信號';
-        defaults.text = `版本碼 ${STRATEGY_STATUS_VERSION} 已就緒，回測完成後將送上策略對決戰況與指標體檢結論。`;
-    } else if (state === 'loading') {
-        defaults.title = '策略計算中';
-        defaults.text = '已派出模擬交易員比對策略與買入持有的勝負差距，請稍候片刻。';
-    } else if (state === 'error') {
-        defaults.title = '速報暫停播放';
-        const message = typeof config.message === 'string' && config.message.trim().length > 0
-            ? config.message.trim()
-            : '回測遇到例外狀況';
-        defaults.text = `${message}，請檢查參數或稍後再試。`;
-    } else if (state === 'sleep') {
-        defaults.title = '資料補眠中';
-        defaults.text = config.message
-            || '尚未取得完整的策略或買入持有成果，請確認資料暖身診斷是否顯示成功。';
-    }
-    applyStrategyStatusState(state, { ...defaults, ...config });
-}
-
-function updateStrategyStatusCard(result) {
-    const strategyReturn = toFiniteNumber(result?.returnRate);
-    const buyHoldReturn = toFiniteNumber(pickLastFiniteNumber(result?.buyHoldReturns));
-
-    if (strategyReturn === null && buyHoldReturn === null) {
-        resetStrategyStatusCard('sleep', { message: '策略與基準尚未完成計算，稍後再查看速報。' });
-        return;
-    }
-    if (strategyReturn === null || buyHoldReturn === null) {
-        resetStrategyStatusCard('sleep', { message: '資料尚未齊備，請重新執行回測或檢查資料診斷。' });
-        return;
-    }
-
-    const difference = strategyReturn - buyHoldReturn;
-    const diffAbs = Math.abs(difference);
-    const health = buildStrategyHealthSummary(result || {});
-
-    const differenceLine = `策略總報酬率 ${formatPercentSignedValue(strategyReturn, 2)}，買入持有 ${formatPercentSignedValue(buyHoldReturn, 2)}，目前${difference >= 0 ? `領先 ${formatPercentMagnitudeValue(difference, 2)} 個百分點` : `落後 ${formatPercentMagnitudeValue(difference, 2)} 個百分點`}。`;
-
-    const detailLines = [];
-    if (Array.isArray(health.warnings) && health.warnings.length > 0) {
-        detailLines.push(...health.warnings);
-    }
-    if (typeof health.positiveLine === 'string' && health.positiveLine.trim().length > 0) {
-        const line = health.positiveLine.trim();
-        detailLines.push(line.endsWith('。') ? line : `${line}。`);
-    }
-
-    if (difference <= -1) {
-        const combinedText = [differenceLine, ...detailLines].filter(Boolean).join(' ');
-        const bulletLines = splitSummaryIntoBulletLines(combinedText);
-        applyStrategyStatusState('lag', {
-            badgeText: STRATEGY_STATUS_BADGE_TEXT.lag,
-            title: '策略暫時落後基準，準備反攻。',
-            highlight: '快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。',
-            bulletLines,
-        });
-        return;
-    }
-
-    if (difference >= 1) {
-        const bulletLines = [differenceLine, ...detailLines].filter(Boolean);
-        applyStrategyStatusState('lead', {
-            badgeText: STRATEGY_STATUS_BADGE_TEXT.lead,
-            title: '策略火力全開，暫時超車買入持有。',
-            bulletLines,
-        });
-        return;
-    }
-
-    const neutralTitle = diffAbs < 0.5
-        ? '策略與買入持有呈現拉鋸戰。'
-        : '策略與買入持有分差接近，請持續觀察。';
-    const bulletLines = [differenceLine, ...detailLines].filter(Boolean);
-    applyStrategyStatusState('tie', {
-        badgeText: STRATEGY_STATUS_BADGE_TEXT.tie,
-        title: neutralTitle,
-        bulletLines,
-    });
 }
 
 function formatSkipReasons(skipReasons) {
@@ -3921,14 +2763,8 @@ function handleBacktestResult(result, stockName, dataSource) {
     if(!result||!result.dates||result.dates.length===0){
         showError("回測結果無效或無數據");
         lastOverallResult = null; lastSubPeriodResults = null;
-        trendAnalysisState.result = null;
-        trendAnalysisState.segments = [];
-        trendAnalysisState.summary = null;
-        renderTrendSummary();
-        updateChartTrendOverlay();
-        if (suggestionArea) suggestionArea.classList.add('hidden');
+         if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
-        resetStrategyStatusCard('error', { message: '回測結果無效或無數據' });
         return;
     }
     try {
@@ -3937,18 +2773,10 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
-        trendAnalysisState.result = {
-            dates: Array.isArray(result.dates) ? [...result.dates] : [],
-            strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
-        };
-        recomputeTrendAnalysis({ skipChartUpdate: true });
-
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
-        updateStrategyStatusCard(result);
         displayTradeResults(result);
         renderChart(result);
-        updateChartTrendOverlay();
         activateTab('summary');
 
         setTimeout(() => {
@@ -3963,7 +2791,6 @@ function handleBacktestResult(result, stockName, dataSource) {
          showError(`處理回測結果時發生錯誤: ${error.message}`);
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
-         resetStrategyStatusCard('error', { message: error?.message || '處理回測結果時發生錯誤' });
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
@@ -4100,7 +2927,6 @@ function displayBacktestResult(result) {
             </div>
         </div>`;
 
-    // Patch Tag: LB-SENSITIVITY-RENDER-20250724A
     const sensitivityHtml = (() => {
         const data =
             sensitivityData && Array.isArray(sensitivityData.groups) && sensitivityData.groups.length > 0
@@ -4167,151 +2993,77 @@ function displayBacktestResult(result) {
             returnRate: Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null,
             sharpeRatio: Number.isFinite(data?.baseline?.sharpeRatio) ? data.baseline.sharpeRatio : null,
         };
-        const renderScenarioChip = (scenario) => {
-            if (!scenario) {
-                return `<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>`;
+        const renderScenario = (scenario) => {
+            if (!scenario || scenario.run === null) {
+                return `<div class="text-xs" style="color: var(--muted-foreground);">—</div>`;
             }
-            const label = escapeHtml(scenario.label || '變動');
-            const directionIcon = scenario.direction === 'decrease' ? '▼' : '▲';
-            const badge = scenario.type === 'absolute' ? 'Δ' : '%';
-            if (!scenario.run) {
-                const status = scenario.error ? '計算失敗' : '無結果';
-                return `<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">
-                    <div class="sensitivity-scenario-chip__header">
-                        <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
-                    </div>
-                    <p class="sensitivity-scenario-chip__empty">${status}</p>
-                </div>`;
-            }
-            const deltaText = formatDelta(scenario.deltaReturn);
             const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
+            const deltaText = formatDelta(scenario.deltaReturn);
             const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
-            const deltaCls = Number.isFinite(scenario.deltaReturn)
-                ? (scenario.deltaReturn >= 0 ? 'text-emerald-600' : 'text-rose-600')
-                : 'text-muted-foreground';
             const driftCls = driftClass(scenario.driftPercent);
             const returnText = formatPercentSigned(scenario.run?.returnRate ?? NaN, 2);
-            const baselineReturnText = formatPercentSigned(baselineMetrics.returnRate, 2);
-            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${baselineReturnText})。`;
-            const sharpeBase = Number.isFinite(baselineMetrics.sharpeRatio)
-                ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
-                : '';
-            const tooltipContent = [
-                `調整值：${formatParamValue(scenario.value)}`,
-                `回報：${returnText}`,
-                ppTooltip,
-                `漂移：${driftText}`,
-                `Sharpe Δ：${sharpeText}${sharpeBase}`
-            ].join('<br>');
-            return `<div class="sensitivity-scenario-chip tooltip">
-                <div class="sensitivity-scenario-chip__header">
-                    <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
-                    <span class="sensitivity-scenario-chip__delta ${deltaCls}">${deltaText}</span>
-                </div>
-                <div class="sensitivity-scenario-chip__metrics">
-                    <span class="${driftCls}">漂移 ${driftText}</span>
-                    <span class="text-[11px]" style="color: var(--muted-foreground);">Sharpe ${sharpeText}</span>
-                </div>
-                <span class="tooltiptext tooltiptext--sensitivity">${tooltipContent}</span>
-            </div>`;
-        };
-        const renderDirectionalCell = (param) => {
-            const positiveText = formatDelta(param.positiveDriftPercent);
-            const negativeText = formatDelta(param.negativeDriftPercent);
-            const positiveCls = Number.isFinite(param.positiveDriftPercent) ? 'text-emerald-600' : 'text-muted-foreground';
-            const negativeCls = Number.isFinite(param.negativeDriftPercent) ? 'text-rose-600' : 'text-muted-foreground';
-            return `<div class="sensitivity-direction-cell">
-                <div class="sensitivity-direction-cell__item">
-                    <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--up">▲</span>
-                    <span class="sensitivity-direction-cell__value ${positiveCls}">${positiveText}</span>
-                </div>
-                <div class="sensitivity-direction-cell__item">
-                    <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--down">▼</span>
-                    <span class="sensitivity-direction-cell__value ${negativeCls}">${negativeText}</span>
+            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${formatPercentSigned(baselineMetrics.returnRate, 2)})。`;
+            const tooltip = `調整值：${formatParamValue(scenario.value)}<br>回報：${returnText}<br>${ppTooltip}<br>Sharpe Δ：${sharpeText}${
+                Number.isFinite(baselineMetrics.sharpeRatio)
+                    ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
+                    : ''
+            }<br>漂移：${driftText}（回報與基準的偏移幅度）`;
+            return `<div class="space-y-1 text-center">
+                <p class="text-sm font-semibold ${driftCls}">
+                    ${deltaText}
+                    <span class="tooltip ml-1 align-middle">
+                        <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${ppTooltip}<br>正值代表調整後績效優於原設定，負值表示略遜於基準。</span>
+                    </span>
+                </p>
+                <p class="text-[11px]" style="color: var(--muted-foreground);">漂移 ${driftText}</p>
+                <div class="flex items-center justify-center gap-1 text-[11px]" style="color: var(--muted-foreground);">
+                    Sharpe ${sharpeText}
+                    <span class="tooltip">
+                        <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                        <span class="tooltiptext tooltiptext--sensitivity">${tooltip}</span>
+                    </span>
                 </div>
             </div>`;
         };
         const renderGroup = (group) => {
             const params = Array.isArray(group.parameters) ? group.parameters : [];
             if (params.length === 0) return '';
-            const groupAvgDriftValues = params
+            const groupDriftValues = params
                 .map((item) => (Number.isFinite(item.averageDriftPercent) ? item.averageDriftPercent : null))
                 .filter((value) => value !== null);
-            const computedGroupAvgDrift = groupAvgDriftValues.length > 0
-                ? groupAvgDriftValues.reduce((sum, cur) => sum + cur, 0) / groupAvgDriftValues.length
+            const groupAvgDrift = groupDriftValues.length > 0
+                ? groupDriftValues.reduce((sum, cur) => sum + cur, 0) / groupDriftValues.length
                 : null;
-            const groupScoreValues = params
+            const scoreValues = params
                 .map((item) => (Number.isFinite(item.stabilityScore) ? item.stabilityScore : null))
                 .filter((value) => value !== null);
-            const computedGroupScore = groupScoreValues.length > 0
-                ? groupScoreValues.reduce((sum, cur) => sum + cur, 0) / groupScoreValues.length
+            const groupScore = scoreValues.length > 0
+                ? scoreValues.reduce((sum, cur) => sum + cur, 0) / scoreValues.length
                 : null;
-            const groupMaxValues = params
-                .map((item) => (Number.isFinite(item.maxDriftPercent) ? item.maxDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupMaxDrift = groupMaxValues.length > 0 ? Math.max(...groupMaxValues) : null;
-            const groupPositiveValues = params
-                .map((item) => (Number.isFinite(item.positiveDriftPercent) ? item.positiveDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupPositive = groupPositiveValues.length > 0
-                ? groupPositiveValues.reduce((sum, cur) => sum + cur, 0) / groupPositiveValues.length
-                : null;
-            const groupNegativeValues = params
-                .map((item) => (Number.isFinite(item.negativeDriftPercent) ? item.negativeDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupNegative = groupNegativeValues.length > 0
-                ? groupNegativeValues.reduce((sum, cur) => sum + cur, 0) / groupNegativeValues.length
-                : null;
-            const groupAvgDrift = Number.isFinite(group.averageDriftPercent)
-                ? group.averageDriftPercent
-                : computedGroupAvgDrift;
-            const groupScore = Number.isFinite(group.stabilityScore)
-                ? group.stabilityScore
-                : computedGroupScore;
-            const groupMaxDrift = Number.isFinite(group.maxDriftPercent)
-                ? group.maxDriftPercent
-                : computedGroupMaxDrift;
-            const groupPositive = Number.isFinite(group.positiveDriftPercent)
-                ? group.positiveDriftPercent
-                : computedGroupPositive;
-            const groupNegative = Number.isFinite(group.negativeDriftPercent)
-                ? group.negativeDriftPercent
-                : computedGroupNegative;
-            const scenarioSamples = params.reduce((sum, param) => sum + (param.scenarioCount || 0), 0);
             const strategyKey = group.strategy || '';
             const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
             const rowPairs = params.map((param) => {
+                const plusScenario = Array.isArray(param.scenarios)
+                    ? param.scenarios.find((s) => s.label === '+10%')
+                    : null;
+                const minusScenario = Array.isArray(param.scenarios)
+                    ? param.scenarios.find((s) => s.label === '-10%')
+                    : null;
                 const driftCls = driftClass(param.averageDriftPercent);
                 const driftValue = formatPercentMagnitude(param.averageDriftPercent, 1);
-                const maxValue = formatPercentMagnitude(param.maxDriftPercent, 1);
                 const scoreCls = scoreClass(param.stabilityScore);
                 const scoreValue = formatScore(param.stabilityScore);
                 const baseValueText = formatParamValue(param.baseValue);
-                const scenarioHtml = Array.isArray(param.scenarios)
-                    ? param.scenarios.map((scenario) => renderScenarioChip(scenario)).join('')
-                    : '';
-                const scenarioGrid = `<div class="sensitivity-scenario-grid">${scenarioHtml || '<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>'}</div>`;
-                const scenarioCountText = Number.isFinite(param.scenarioCount) && param.scenarioCount > 0
-                    ? `<p class="sensitivity-scenario-count">樣本 ${param.scenarioCount}</p>`
-                    : '';
                 const tableRow = `<tr class="border-t" style="border-color: var(--border);">
                     <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(param.name)}</td>
                     <td class="px-3 py-2 text-center" style="color: var(--foreground);">${baseValueText}</td>
-                    <td class="px-3 py-2">
-                        <div class="sensitivity-scenario-cell">
-                            ${scenarioGrid}
-                            ${scenarioCountText}
-                        </div>
-                    </td>
+                    <td class="px-3 py-2">${renderScenario(plusScenario)}</td>
+                    <td class="px-3 py-2">${renderScenario(minusScenario)}</td>
                     <td class="px-3 py-2 text-center">
                         <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">漂移幅度</p>
                     </td>
-                    <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${driftClass(param.maxDriftPercent)}">${maxValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">最大偏移</p>
-                    </td>
-                    <td class="px-3 py-2 text-center">${renderDirectionalCell(param)}</td>
                     <td class="px-3 py-2 text-center">
                         <span class="text-sm font-semibold ${scoreCls}">${scoreValue}</span>
                         <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
@@ -4322,23 +3074,21 @@ function displayBacktestResult(result) {
                         <span class="sensitivity-mobile-param">${escapeHtml(param.name)}</span>
                         <span class="sensitivity-mobile-base">基準值 ${baseValueText}</span>
                     </div>
-                    <div class="sensitivity-mobile-section">
-                        <p class="sensitivity-mobile-label">擾動網格</p>
-                        <div class="sensitivity-mobile-grid">${scenarioGrid}</div>
-                        ${scenarioCountText}
+                    <div class="sensitivity-mobile-scenarios">
+                        <div>
+                            <p class="sensitivity-mobile-label">+10%</p>
+                            ${renderScenario(plusScenario)}
+                        </div>
+                        <div>
+                            <p class="sensitivity-mobile-label">-10%</p>
+                            ${renderScenario(minusScenario)}
+                        </div>
                     </div>
-                    <div class="sensitivity-mobile-metrics sensitivity-mobile-metrics--grid">
+                    <div class="sensitivity-mobile-metrics">
                         <div>
-                            <p class="sensitivity-mobile-label">平均漂移</p>
+                            <p class="sensitivity-mobile-label">漂移幅度</p>
                             <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
-                        </div>
-                        <div>
-                            <p class="sensitivity-mobile-label">最大偏移</p>
-                            <span class="text-sm font-semibold ${driftClass(param.maxDriftPercent)}">${maxValue}</span>
-                        </div>
-                        <div>
-                            <p class="sensitivity-mobile-label">方向偏移</p>
-                            ${renderDirectionalCell(param)}
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">±10% 平均</p>
                         </div>
                         <div>
                             <p class="sensitivity-mobile-label">穩定度</p>
@@ -4357,26 +3107,14 @@ function displayBacktestResult(result) {
                         <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(group.label)}</p>
                         <p class="text-xs" style="color: var(--muted-foreground);">策略：${escapeHtml(strategyInfo.name || String(strategyKey || 'N/A'))}</p>
                     </div>
-                    <div class="flex items-center gap-4 flex-wrap">
+                    <div class="flex items-center gap-4">
                         <div class="text-right">
                             <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
                             <p class="text-base font-semibold ${driftClass(groupAvgDrift)}">${formatPercentMagnitude(groupAvgDrift, 1)}</p>
                         </div>
                         <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">最大偏移</p>
-                            <p class="text-base font-semibold ${driftClass(groupMaxDrift)}">${formatPercentMagnitude(groupMaxDrift, 1)}</p>
-                        </div>
-                        <div class="text-right">
                             <p class="text-[11px]" style="color: var(--muted-foreground);">平均穩定度</p>
                             <p class="text-base font-semibold ${scoreClass(groupScore)}">${formatScore(groupScore)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">偏移方向</p>
-                            <p class="text-sm font-semibold" style="color: var(--foreground);">▲ ${formatDelta(groupPositive)}／▼ ${formatDelta(groupNegative)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">擾動樣本</p>
-                            <p class="text-base font-semibold" style="color: var(--foreground);">${scenarioSamples}</p>
                         </div>
                     </div>
                 </div>
@@ -4388,16 +3126,23 @@ function displayBacktestResult(result) {
                                 <th class="px-3 py-2 text-center font-medium">基準值</th>
                                 <th class="px-3 py-2 text-center font-medium">
                                     <span class="inline-flex items-center justify-center gap-1">
-                                        擾動網格
+                                        +10%
                                         <span class="tooltip">
                                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數放大 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
+                                        </span>
+                                    </span>
+                                </th>
+                                <th class="px-3 py-2 text-center font-medium">
+                                    <span class="inline-flex items-center justify-center gap-1">
+                                        -10%
+                                        <span class="tooltip">
+                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">將此參數縮小 10% 後重新回測，觀察績效、PP 與 Sharpe 變化。</span>
                                         </span>
                                     </span>
                                 </th>
                                 <th class="px-3 py-2 text-center font-medium">平均漂移</th>
-                                <th class="px-3 py-2 text-center font-medium">最大偏移</th>
-                                <th class="px-3 py-2 text-center font-medium">方向偏移</th>
                                 <th class="px-3 py-2 text-center font-medium">穩定度</th>
                             </tr>
                         </thead>
@@ -4411,136 +3156,31 @@ function displayBacktestResult(result) {
         };
         const overallScore = data?.summary?.stabilityScore ?? null;
         const overallDrift = data?.summary?.averageDriftPercent ?? null;
-        const overallMaxDrift = data?.summary?.maxDriftPercent ?? null;
-        const overallPositive = data?.summary?.positiveDriftPercent ?? null;
-        const overallNegative = data?.summary?.negativeDriftPercent ?? null;
-        const overallSamples = data?.summary?.scenarioCount ?? null;
-        const summarySharpeDrop = Number.isFinite(data?.summary?.averageSharpeDrop)
-            ? data.summary.averageSharpeDrop
-            : null;
-        const summarySharpeGain = Number.isFinite(data?.summary?.averageSharpeGain)
-            ? data.summary.averageSharpeGain
-            : null;
-        const stabilityComponents = data?.summary?.stabilityComponents || null;
-        const stabilityDriftPenalty = Number.isFinite(stabilityComponents?.driftPenalty)
-            ? stabilityComponents.driftPenalty
-            : null;
-        const stabilitySharpePenalty = Number.isFinite(stabilityComponents?.sharpePenalty)
-            ? stabilityComponents.sharpePenalty
-            : null;
-        const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
-            Number.isFinite(stabilityDriftPenalty)
-                ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
-                : null,
-            Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
-                ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
-                : Number.isFinite(summarySharpeDrop)
-                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
-                    : null,
-            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
-        ].filter(Boolean);
-        const stabilityTooltip = stabilityTooltipLines.join('<br>');
-        const directionAdvice = (() => {
-            const safeThreshold = 10;
-            const warnThreshold = 15;
-            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
-            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
-            if (positiveAbs === null && negativeAbs === null) {
-                return '需更多樣本才能評估調高／調低方向的敏感度。';
-            }
-            const dominantDirection = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs)
-                ? '調高'
-                : '調低';
-            const dominantAbs = dominantDirection === '調高' ? positiveAbs : negativeAbs;
-            if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
-                ? (negativeAbs === null || negativeAbs <= safeThreshold)
-                : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                return '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
-            }
-            if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
-            }
-            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
-        })();
-        const summarySentence = (() => {
-            const parts = [];
-            if (Number.isFinite(overallDrift)) {
-                parts.push(`平均漂移 ${formatPercentMagnitude(overallDrift, 1)}`);
-            }
-            if (Number.isFinite(overallMaxDrift)) {
-                parts.push(`最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}`);
-            }
-            if (Number.isFinite(summarySharpeDrop) && Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}／下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeDrop)) {
-                parts.push(`Sharpe Δ 下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}`);
-            }
-            const safeThreshold = 10;
-            const warnThreshold = 15;
-            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
-            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
-            if (positiveAbs !== null || negativeAbs !== null) {
-                const usePositive = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs);
-                const focusLabel = usePositive
-                    ? `調高方向 ${formatDelta(overallPositive)}`
-                    : `調低方向 ${formatDelta(overallNegative)}`;
-                const focusAbs = usePositive ? positiveAbs : negativeAbs;
-                if (Number.isFinite(focusAbs)) {
-                    if (focusAbs > warnThreshold) {
-                        parts.push(`${focusLabel}，超過 15pp 建議優先檢視`);
-                    } else if (focusAbs > safeThreshold) {
-                        parts.push(`${focusLabel}，落在 10～15pp 建議再驗證`);
-                    } else {
-                        parts.push(`${focusLabel}，雙側仍在 ±10pp 內`);
-                    }
-                } else {
-                    parts.push(focusLabel);
-                }
-            }
-            return parts.join('，') || '敏感度樣本不足，建議重新執行擾動測試。';
-        })();
+        const baselineReturn = data?.baseline?.returnRate ?? null;
+        const baselineAnnual = data?.baseline?.annualizedReturn ?? null;
+        const baselineSharpe = data?.baseline?.sharpeRatio ?? null;
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <div class="flex items-start justify-between gap-2">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
-                        <span class="tooltip">
-                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
-                        </span>
-                    </div>
+                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
                     <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健；Sharpe 下滑會同步扣分</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
                     <div class="flex items-center gap-2">
                         <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                         <span class="tooltip">
                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 觀察參數 ±10% 兩個情境的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
                         </span>
                     </div>
                     <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
-                    <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
-                        <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
-                        <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
-                    </div>
-                </div>
-                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #60a5fa 10%, var(--background)) 0%, color-mix(in srgb, #3b82f6 4%, var(--background)) 100%); border-color: color-mix(in srgb, #3b82f6 20%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
-                    <div class="flex items-center gap-4 text-lg font-semibold">
-                        <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
-                        <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
-                    </div>
-                    <p class="text-xs" style="color: var(--muted-foreground);">指標 = 多點擾動後的報酬差異平均值；絕對值 ≤ 10pp 為常見穩健區間。</p>
-                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">${directionAdvice}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">參數 ±10% 時，回報率平均偏離</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
-                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
+                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">基準績效 (±10% 視窗)</p>
+                    <p class="text-base font-semibold" style="color: var(--foreground);">報酬 ${formatPercentSigned(baselineReturn, 2)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">年化 ${formatPercentSigned(baselineAnnual, 2)} ・ Sharpe ${Number.isFinite(baselineSharpe) ? baselineSharpe.toFixed(2) : '—'}</p>
                 </div>
             </div>`;
         const interpretationHint = `
@@ -4551,12 +3191,10 @@ function displayBacktestResult(result) {
                         <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
                         <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
                             <li><strong>PP（百分點）</strong>：調整後報酬率與原始回測報酬率的差異，正值代表績效提升，負值代表下滑。</li>
-                            <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
-                            <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
-                            <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
-                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
+                            <li><strong>+10% / -10%</strong>：以基準參數為中心，上調或下調 10% 後重新回測的結果。</li>
+                            <li><strong>漂移幅度</strong>：兩個調整案例的報酬偏移平均值，越小代表策略對參數較不敏感。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，約等於 100 − 平均漂移，≥ 70 為穩健；40 ~ 69 需再驗證；< 40 需謹慎。</li>
+                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值，可觀察風險調整後報酬的改變。</li>
                         </ul>
                     </div>
                 </div>
@@ -4718,7 +3356,6 @@ function displayBacktestResult(result) {
             <div class="space-y-8">
                 ${performanceHtml}
                 ${riskHtml}
-                ${sensitivityHtml}
                 ${tradeStatsHtml}
                 ${strategySettingsHtml}
             </div>
@@ -5012,9 +3649,6 @@ function renderChart(result) {
                 intersect: false,
             },
             plugins: {
-                [TREND_BACKGROUND_PLUGIN_ID]: {
-                    segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
-                },
                 legend: {
                     position: 'top',
                     labels: { usePointStyle: true }
