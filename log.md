@@ -434,3 +434,8 @@
 - **Fix**: `runStrategy` 於每日迭代即擷取最終狀態快照並在缺價時回退至最近一次有效收盤價，確保 Worker 可輸出完整的今日部位與行動建議。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
 
+# 2025-09-09 — Patch LB-TODAY-GUIDE-20250909A
+- **Issue recap**: 今日建議在回測數據完整時仍偶爾顯示「資料不足」，原因是 `runStrategy` 於暖身條件不足時直接回傳結果未帶入最終快照，導致建議卡缺少當日部位資訊。
+- **Fix**: 新增最小快照生成邏輯，當資料不足以啟動迴圈時仍回傳最近交易日的價格與持倉概況，確保今日建議可以輸出維持空手或持續持倉的指引。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+

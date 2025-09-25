@@ -17,6 +17,7 @@ importScripts('config.js');
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-GUIDE-20250905A
 // Patch Tag: LB-TODAY-GUIDE-20250907A
+// Patch Tag: LB-TODAY-GUIDE-20250909A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -5435,6 +5436,118 @@ function combinePositionLabel(longState, shortState) {
   return parts.join("｜");
 }
 
+function buildMinimalFinalEvaluationSnapshot({
+  data,
+  index,
+  opens,
+  highs,
+  lows,
+  closes,
+  longStateSeries,
+  shortStateSeries,
+  longEntryStageStates,
+  longExitStageStates,
+  portfolioVal,
+  strategyReturns,
+  longPl,
+  shortPl,
+  initialCapital,
+  longPos,
+  shortPos,
+  longShares,
+  shortShares,
+  longAverageEntryPrice,
+  lastBuyPrice,
+  lastShortPrice,
+  longCapital,
+  shortCapital,
+}) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return {
+      date: null,
+      open: null,
+      high: null,
+      low: null,
+      close: null,
+      longState: "空手",
+      shortState: "空手",
+      executedBuy: false,
+      executedSell: false,
+      executedShort: false,
+      executedCover: false,
+      longPos: 0,
+      shortPos: 0,
+      longShares: 0,
+      shortShares: 0,
+      longAverageEntryPrice: null,
+      lastBuyPrice: null,
+      lastShortPrice: null,
+      longCapital: initialCapital,
+      shortCapital: 0,
+      longProfit: 0,
+      shortProfit: 0,
+      portfolioValue: initialCapital,
+      strategyReturn: 0,
+      longEntryState: null,
+      longExitState: null,
+    };
+  }
+
+  const safeIndex = Number.isInteger(index) && index >= 0 ? index : data.length - 1;
+  const boundedIndex = Math.min(Math.max(0, safeIndex), data.length - 1);
+  const row = data[boundedIndex] || {};
+  const resolvePrice = () => {
+    const direct = Number.isFinite(closes?.[boundedIndex]) && closes[boundedIndex] > 0
+      ? closes[boundedIndex]
+      : null;
+    if (direct !== null) return direct;
+    const prevIndex = findPreviousValidCloseIndex(data, boundedIndex);
+    if (prevIndex >= 0 && Number.isFinite(closes?.[prevIndex]) && closes[prevIndex] > 0) {
+      return closes[prevIndex];
+    }
+    return null;
+  };
+
+  return {
+    date: row.date || null,
+    open: Number.isFinite(opens?.[boundedIndex]) ? opens[boundedIndex] : null,
+    high: Number.isFinite(highs?.[boundedIndex]) ? highs[boundedIndex] : null,
+    low: Number.isFinite(lows?.[boundedIndex]) ? lows[boundedIndex] : null,
+    close: resolvePrice(),
+    longState:
+      longStateSeries?.[boundedIndex] || (longPos === 1 ? "持有" : "空手"),
+    shortState:
+      shortStateSeries?.[boundedIndex] || (shortPos === 1 ? "持有" : "空手"),
+    executedBuy: false,
+    executedSell: false,
+    executedShort: false,
+    executedCover: false,
+    longPos: Number.isFinite(longPos) ? longPos : 0,
+    shortPos: Number.isFinite(shortPos) ? shortPos : 0,
+    longShares: Number.isFinite(longShares) ? longShares : 0,
+    shortShares: Number.isFinite(shortShares) ? shortShares : 0,
+    longAverageEntryPrice: Number.isFinite(longAverageEntryPrice)
+      ? longAverageEntryPrice
+      : null,
+    lastBuyPrice: Number.isFinite(lastBuyPrice) ? lastBuyPrice : null,
+    lastShortPrice: Number.isFinite(lastShortPrice) ? lastShortPrice : null,
+    longCapital: Number.isFinite(longCapital) ? longCapital : initialCapital,
+    shortCapital: Number.isFinite(shortCapital) ? shortCapital : 0,
+    longProfit: Number.isFinite(longPl?.[boundedIndex]) ? longPl[boundedIndex] : 0,
+    shortProfit: Number.isFinite(shortPl?.[boundedIndex])
+      ? shortPl[boundedIndex]
+      : 0,
+    portfolioValue: Number.isFinite(portfolioVal?.[boundedIndex])
+      ? portfolioVal[boundedIndex]
+      : initialCapital,
+    strategyReturn: Number.isFinite(strategyReturns?.[boundedIndex])
+      ? strategyReturns[boundedIndex]
+      : 0,
+    longEntryState: longEntryStageStates?.[boundedIndex] || null,
+    longExitState: longExitStageStates?.[boundedIndex] || null,
+  };
+}
+
 // --- 運行策略回測 (修正年化報酬率計算) ---
 function runStrategy(data, params, options = {}) {
   // --- 新增的保護機制 ---
@@ -5809,7 +5922,33 @@ function runStrategy(data, params, options = {}) {
   const shortPl = Array(n).fill(0);
 
   if (startIdx >= n || n < 2) {
-    return {
+    const minimalEvaluation = buildMinimalFinalEvaluationSnapshot({
+      data,
+      index: n - 1,
+      opens,
+      highs,
+      lows,
+      closes,
+      longStateSeries,
+      shortStateSeries,
+      longEntryStageStates,
+      longExitStageStates,
+      portfolioVal,
+      strategyReturns,
+      longPl,
+      shortPl,
+      initialCapital,
+      longPos,
+      shortPos,
+      longShares,
+      shortShares,
+      longAverageEntryPrice,
+      lastBuyPrice: lastBuyP,
+      lastShortPrice: lastShortP,
+      longCapital: longCap,
+      shortCapital: shortCap,
+    });
+    const baseResult = {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
       finalValue: initialCapital,
@@ -5828,15 +5967,15 @@ function runStrategy(data, params, options = {}) {
       buyHoldReturns: Array(n).fill(0),
       strategyReturns: Array(n).fill(0),
       dates: dates,
-        chartBuySignals: [],
-        chartSellSignals: [],
-        chartShortSignals: [],
-        chartCoverSignals: [],
-        entryStrategy: params.entryStrategy,
-        exitStrategy: params.exitStrategy,
-        entryParams: params.entryParams,
-        entryStages: entryStagePercents.slice(),
-        exitParams: params.exitParams,
+      chartBuySignals: [],
+      chartSellSignals: [],
+      chartShortSignals: [],
+      chartCoverSignals: [],
+      entryStrategy: params.entryStrategy,
+      exitStrategy: params.exitStrategy,
+      entryParams: params.entryParams,
+      entryStages: entryStagePercents.slice(),
+      exitParams: params.exitParams,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -5856,6 +5995,10 @@ function runStrategy(data, params, options = {}) {
       annReturnHalf2: null,
       sharpeHalf2: null,
     };
+    if (captureFinalState) {
+      baseResult.finalEvaluation = minimalEvaluation;
+    }
+    return baseResult;
   }
 
     console.log(
