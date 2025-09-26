@@ -1723,7 +1723,7 @@ async function fetchAdjustedPriceRange(
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: normalizeVolumeUnits(volumeRaw),
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -1800,6 +1800,18 @@ async function fetchAdjustedPriceRange(
   };
 }
 
+function normalizeVolumeUnits(volumeRaw) {
+  if (!Number.isFinite(volumeRaw) || volumeRaw <= 0) return 0;
+  const scaled = volumeRaw / 1000;
+  if (scaled >= 1) {
+    return Math.round(scaled);
+  }
+  if (scaled >= 0.1) {
+    return Math.round(scaled * 10) / 10;
+  }
+  return Math.round(scaled * 100) / 100;
+}
+
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   try {
     let dateStr = null;
@@ -1866,7 +1878,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume: normalizeVolumeUnits(volNumber),
     };
   } catch (error) {
     return null;
