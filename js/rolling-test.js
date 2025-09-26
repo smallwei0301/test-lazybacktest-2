@@ -1,5 +1,6 @@
 // --- 滾動測試模組 - v1.1 ---
 // Patch Tag: LB-ROLLING-TEST-20250912A
+// Patch Tag: LB-ICON-A11Y-20241003A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -171,9 +172,7 @@
         }
         renderRollingReport();
         updateRollingPlanPreview();
-        if (typeof lucide !== 'undefined') {
-            lucide.createIcons();
-        }
+        renderLucideIcons();
     }
 
     function toggleRollingControls(running) {

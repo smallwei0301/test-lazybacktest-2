@@ -7,6 +7,82 @@
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
+// Patch Tag: LB-ICON-A11Y-20241003A
+
+function applyIconAccessibility(context = document) {
+    const targetRoot = context instanceof Document ? context : (context?.ownerDocument || document);
+    const icons = (context || document).querySelectorAll ? (context || document).querySelectorAll('.lucide') : [];
+    icons.forEach((icon) => {
+        const svgElement = icon instanceof SVGElement ? icon : icon.querySelector?.('svg');
+        const element = svgElement || icon;
+        element?.setAttribute('aria-hidden', 'true');
+        element?.setAttribute('focusable', 'false');
+        element?.setAttribute('role', 'presentation');
+    });
+    return targetRoot;
+}
+
+function syncButtonAriaLabel(button) {
+    if (!button || button.disabled) {
+        return;
+    }
+    if (button.hasAttribute('aria-label') && button.dataset.ariaSync !== 'auto') {
+        return;
+    }
+    const customLabel = button.dataset.label || button.dataset.ariaLabel;
+    const textLabel = (customLabel || button.textContent || '').replace(/\s+/g, ' ').trim();
+    if (textLabel.length > 0) {
+        button.setAttribute('aria-label', textLabel);
+        button.dataset.ariaSync = 'auto';
+    }
+}
+
+function syncToggleAriaLabel(toggle, context = document) {
+    if (!toggle || toggle.hasAttribute('aria-label') && toggle.dataset.ariaSync !== 'auto') {
+        return;
+    }
+    let labelText = toggle.dataset.label || '';
+    if (!labelText && toggle.id) {
+        const relatedLabel = context.querySelector(`label[for="${toggle.id}"]`);
+        if (relatedLabel) {
+            labelText = relatedLabel.textContent.replace(/\s+/g, ' ').trim();
+        }
+    }
+    if (labelText) {
+        toggle.setAttribute('aria-label', labelText);
+        toggle.dataset.ariaSync = 'auto';
+    }
+}
+
+function applyInteractionAccessibility(context = document) {
+    const scope = context || document;
+    if (scope instanceof HTMLButtonElement) {
+        syncButtonAriaLabel(scope);
+    }
+    if (scope instanceof HTMLInputElement && ['checkbox', 'radio', 'range'].includes(scope.type)) {
+        syncToggleAriaLabel(scope, scope.ownerDocument || document);
+    }
+    scope.querySelectorAll?.('button').forEach(syncButtonAriaLabel);
+    scope.querySelectorAll?.('input[type="checkbox"], input[type="radio"], input[type="switch"], input[type="range"]').forEach((toggle) => {
+        syncToggleAriaLabel(toggle, scope);
+    });
+}
+
+function renderLucideIcons(context = document) {
+    const scope = context || document;
+    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+        if (scope instanceof Element || scope instanceof DocumentFragment) {
+            lucide.createIcons({ icons: Array.from(scope.querySelectorAll('[data-lucide]')) });
+        } else {
+            lucide.createIcons();
+        }
+    }
+    applyIconAccessibility(scope);
+    applyInteractionAccessibility(scope);
+}
+
+window.renderLucideIcons = renderLucideIcons;
+window.applyInteractionAccessibility = applyInteractionAccessibility;
 
 // 全局變量
 let stockChart = null;
@@ -1562,9 +1638,7 @@ function initDataSourceTester() {
         });
     }
 
-    if (typeof lucide !== 'undefined' && lucide.createIcons) {
-        lucide.createIcons();
-    }
+    renderLucideIcons();
 
     syncSplitAdjustmentState();
     refreshDataSourceTester();
@@ -2373,8 +2447,10 @@ function initRollingTestFeature() {
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
+        renderLucideIcons();
+
         // 初始化日期
         initDates();
 
