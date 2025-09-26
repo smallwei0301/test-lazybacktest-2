@@ -616,3 +616,9 @@
 - **Fix**: 依校準步數動態計算最小安全邊界（0.1% 起跳），取代原先固定區間並在校準資訊中保留邊界值，確保滑桿 5 會回推到峰值參數，同時避免 targetNormalized 達到 0 或 1 時的階梯化行為。
 - **Diagnostics**: 於本地透過 `mapSliderToEffectiveSensitivity` 比對校準前後的等效靈敏度，確認 anchor=5 時的 `effectiveSensitivity` 與 `bestSlider` 等值，並檢視 `trendSensitivityValue` 描述同步揭露峰值滑桿、信心與校準邊界。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-08 — Patch LB-UI-STRATEGY-TREND-20251108A
+- **Issue recap**: 策略戰況逆風狀態的激勵句與風控提醒分離呈現，字重落差造成閱讀中斷；趨勢卡滑桿標籤與門檻說明未符合最新 UX 要求；敏感度摘要在行動裝置仍為單欄排列且 tooltip 與標題分離，易造成資訊負擔。
+- **Fix**: 將逆風提醒併入副標維持同一字型層級；滑桿標籤改為「0 精細／10 寬鬆」並隱藏門檻解說段落；敏感度卡預設雙欄起跳並調整穩定度分數 tooltip 與標題並排，維持小螢幕可掃描性。
+- **Diagnostics**: 本地檢視摘要頁確認戰況卡副標連貫呈現無額外段落；趨勢區間折疊後不再顯示詳細門檻字串；縮小視窗觀察敏感度四卡維持兩欄排列且 tooltip 位置緊貼標題。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

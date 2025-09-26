@@ -1125,7 +1125,7 @@ const STRATEGY_STATUS_CONFIG = {
             color: 'rgb(220, 38, 38)',
         },
         title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。',
+        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
     },
     missing: {
         badgeText: '資料載入',
@@ -1519,14 +1519,10 @@ function updateStrategyStatusCard(result) {
         detailLines.push(health.positiveLine);
     }
 
-    const emphasisedLine = state === 'behind'
-        ? '落後時請檢視優化與風控建議，盯緊分段資金配置。'
-        : null;
-
     applyStrategyStatusState(state, {
         diffText,
         detail: {
-            emphasisedLine,
+            emphasisedLine: null,
             bulletLines: detailLines,
             collapsible: detailLines.length > 0,
             collapsibleSummary: '展開完整戰況條列',
@@ -3121,7 +3117,6 @@ function updateChartTrendOverlay() {
 
 function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
-    const thresholds = trendAnalysisState.thresholds;
     const calibration = trendAnalysisState.calibration || createDefaultTrendSensitivityCalibration();
     const summary = trendAnalysisState.summary;
     if (sliderValueEl) {
@@ -3131,34 +3126,9 @@ function renderTrendSummary() {
         sliderValueEl.textContent = `平均狀態信心：${averageText}`;
     }
     const thresholdTextEl = document.getElementById('trend-threshold-text');
-    if (thresholdTextEl && thresholds) {
-        const adxText = thresholds.adxTrend.toFixed(1);
-        const adxFlat = thresholds.adxFlat.toFixed(1);
-        const bollHigh = (thresholds.bollTrend * 100).toFixed(1);
-        const bollLow = (thresholds.bollFlat * 100).toFixed(1);
-        const atrHigh = (thresholds.atrTrend * 100).toFixed(2);
-        const atrLow = (thresholds.atrFlat * 100).toFixed(2);
-        const targetText = Number.isFinite(thresholds.targetTrendCoverage)
-            ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
-            : '—';
-        const effective = Number.isFinite(thresholds.effectiveSensitivity)
-            ? thresholds.effectiveSensitivity.toFixed(0)
-            : '—';
-        const bestSliderText = Number.isFinite(calibration?.bestSlider)
-            ? calibration.bestSlider.toFixed(1)
-            : '—';
-        const bestEffectiveText = Number.isFinite(calibration?.bestEffective)
-            ? calibration.bestEffective.toFixed(0)
-            : '—';
-        const bestScoreText = Number.isFinite(calibration?.bestScore)
-            ? calibration.bestScore.toFixed(3)
-            : '—';
-        thresholdTextEl.innerHTML = `
-            滑桿 0→10 以 0.1 為步進對應 1→1000 的模擬測試組數，先針對 1000 個步進值計算四態 HMM 的平均狀態信心，
-            將峰值參數（滑桿 ${bestSliderText}，等效敏感度 ${bestEffectiveText}，平均信心 ${bestScoreText}）映射到滑桿值 5 作為預設。
-            當前數值經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，並同步套用 ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；
-            若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則歸為盤整。同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，
-            覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢（當前等效敏感度 ${effective}）。`;
+    if (thresholdTextEl) {
+        thresholdTextEl.textContent = '';
+        thresholdTextEl.classList.add('hidden');
     }
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
@@ -6668,7 +6638,7 @@ function displayBacktestResult(result) {
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <div class="flex items-start justify-between gap-2">
+                    <div class="flex items-center gap-2">
                         <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
                         <span class="tooltip">
                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
