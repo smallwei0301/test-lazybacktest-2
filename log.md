@@ -1,3 +1,9 @@
+## 2025-11-11 — Patch LB-BATCH-POOL-20251111A
+- **Scope**: 批量優化工作流程（`batch-optimization.js`）。
+- **Fix**: 建立可重用的 Worker pool，統一由 `runWorkerTask` 派發回測與參數優化任務，避免每次優化都重新建立 Worker；所有優化與回測訊息都改用快取資料，禁止重複抓取 Proxy；停止批量優化時同步釋放 Pool，確保不遺留背景任務。
+- **Impact**: 參數優化階段共用快取資料，避免重複 fetch；Worker 初始化成本隨組合數成倍遞減，實際等待時間可隨 CPU 核心線性縮放。
+- **Testing**: 目前容器僅進行靜態檢查，待能啟動瀏覽器後於本地批量優化流程執行回測確認 console 無錯誤。
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。
