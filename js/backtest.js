@@ -1638,10 +1638,22 @@ function sanitizeTrendRawRow(row) {
     };
 }
 
-function captureTrendAnalysisSource(result) {
+function areSameTrendDateSequence(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i] !== b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function captureTrendAnalysisSource(result, options = {}) {
     if (!result || typeof result !== 'object') {
         return { dates: [], strategyReturns: [], rawData: [] };
     }
+    const previous = options.previousResult || null;
     const dates = Array.isArray(result.dates)
         ? result.dates.map((value) => (typeof value === 'string' ? value : null))
         : [];
@@ -1651,11 +1663,14 @@ function captureTrendAnalysisSource(result) {
             return Number.isFinite(numeric) ? numeric : null;
         })
         : [];
-    const rawSource = Array.isArray(result.rawData) && result.rawData.length > 0
+    let rawSource = Array.isArray(result.rawData) && result.rawData.length > 0
         ? result.rawData
         : Array.isArray(result.rawDataUsed) && result.rawDataUsed.length > 0
             ? result.rawDataUsed
             : [];
+    if (rawSource.length === 0 && previous && areSameTrendDateSequence(dates, previous.dates)) {
+        rawSource = Array.isArray(previous.rawData) ? previous.rawData : [];
+    }
     const rawData = rawSource
         .map((row) => sanitizeTrendRawRow(row))
         .filter((row) => row !== null);
@@ -2921,16 +2936,47 @@ function computeAverageConfidence(labels, posteriors, labelToState) {
     return sum / count;
 }
 
-function prepareRegimeBaseData(result) {
+function prepareRegimeBaseData(result, options = {}) {
     const dates = Array.isArray(result?.dates) ? result.dates.slice() : [];
     if (dates.length === 0) return null;
-    const rawRows = Array.isArray(result?.rawData) ? result.rawData : [];
+    const previousBase = options.previousBase || null;
+    const fallbackRawData = Array.isArray(options.fallbackRawData) ? options.fallbackRawData : null;
+    const rawCandidates = [];
+    if (Array.isArray(result?.rawData) && result.rawData.length > 0) {
+        rawCandidates.push(result.rawData);
+    }
+    if (Array.isArray(result?.rawDataUsed) && result.rawDataUsed.length > 0) {
+        rawCandidates.push(result.rawDataUsed);
+    }
+    if (fallbackRawData && fallbackRawData.length > 0) {
+        rawCandidates.push(fallbackRawData);
+    }
+    let rawRows = [];
+    for (let i = 0; i < rawCandidates.length; i += 1) {
+        if (Array.isArray(rawCandidates[i]) && rawCandidates[i].length > 0) {
+            rawRows = rawCandidates[i];
+            break;
+        }
+    }
+    if (rawRows.length === 0) {
+        if (previousBase && areSameTrendDateSequence(dates, previousBase.dates)) {
+            return previousBase;
+        }
+        return null;
+    }
     const rowByDate = new Map();
     rawRows.forEach((row) => {
-        if (row && typeof row.date === 'string') {
-            rowByDate.set(row.date, row);
+        const sanitized = sanitizeTrendRawRow(row);
+        if (sanitized) {
+            rowByDate.set(sanitized.date, sanitized);
         }
     });
+    if (rowByDate.size === 0) {
+        if (previousBase && areSameTrendDateSequence(dates, previousBase.dates)) {
+            return previousBase;
+        }
+        return null;
+    }
     const opens = [];
     const highs = [];
     const lows = [];
@@ -3122,7 +3168,15 @@ function classifyRegimes(base, thresholds) {
 
 
 function computeTrendAnalysisFromResult(result, thresholds) {
-    let base = prepareRegimeBaseData(result);
+    const fallbackRawData = Array.isArray(result?.rawData) && result.rawData.length > 0
+        ? result.rawData
+        : Array.isArray(result?.rawDataUsed) && result.rawDataUsed.length > 0
+            ? result.rawDataUsed
+            : trendAnalysisState.result?.rawData || null;
+    let base = prepareRegimeBaseData(result, {
+        previousBase: trendAnalysisState.base || null,
+        fallbackRawData,
+    });
     if (base) {
         trendAnalysisState.base = base;
     } else if (trendAnalysisState.base) {
@@ -6110,8 +6164,13 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
-        trendAnalysisState.result = captureTrendAnalysisSource(result);
-        trendAnalysisState.base = prepareRegimeBaseData(result);
+        const previousTrendResult = trendAnalysisState.result || null;
+        const previousTrendBase = trendAnalysisState.base || null;
+        trendAnalysisState.result = captureTrendAnalysisSource(result, { previousResult: previousTrendResult });
+        trendAnalysisState.base = prepareRegimeBaseData(result, {
+            previousBase: previousTrendBase,
+            fallbackRawData: trendAnalysisState.result?.rawData || null,
+        });
         trendAnalysisState.calibration = calibrateTrendSensitivity(trendAnalysisState.base);
         trendAnalysisState.sensitivity = TREND_SENSITIVITY_DEFAULT;
         recomputeTrendAnalysis({ skipChartUpdate: true });

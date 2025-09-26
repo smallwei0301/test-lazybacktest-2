@@ -633,3 +633,9 @@
 - **Fix**: 重新初始化趨勢底層資料並在回測完成後自動聚焦戰況卡，同步重置滑桿；調整敏感度摘要為置中佈局、將 ±10pp 文案移入 tooltip 並改以語句式提醒；移除查看區間價格的來源尾註。
 - **Diagnostics**: 多次以相同標的重跑確認趨勢信心與底色維持輸出；檢視敏感度卡僅顯示一句摘要且 tooltip 提供補充；查看區間價格文字僅留筆數與模式資訊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-10 — Patch LB-TREND-CALIBRATION-20251110A
+- **Issue recap**: 相同參數重跑回測時，趨勢區間滑桿的預設值 5 可能不再對應首次回測找到的最高平均狀態信心，重開回測後需要手動調整滑桿才能回到最佳點。
+- **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
+- **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
