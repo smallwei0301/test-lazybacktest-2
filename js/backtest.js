@@ -5972,6 +5972,7 @@ function openPriceInspectorModal() {
     const subtitle = document.getElementById('priceInspectorSubtitle');
     if (!modal || !tbody) return;
 
+    const sourceLabel = resolvePriceInspectorSourceLabel();
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
     if (subtitle) {

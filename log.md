@@ -1,3 +1,8 @@
+## 2025-11-11 — Patch LB-PRICE-INSPECTOR-20251111A
+- **Issue recap**: 區間價格檢視按鈕搬移到淨值卡片後，打開彈窗時未初始化 `sourceLabel`，在填入價格來源欄位時觸發 `ReferenceError`，導致彈窗仍維持隱藏狀態、使用者看不到表格。
+- **Fix**: 於 `openPriceInspectorModal` 重新導入 `resolvePriceInspectorSourceLabel()` 的結果，確保渲染價格來源欄位時具備預設值，避免錯誤中斷。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。
