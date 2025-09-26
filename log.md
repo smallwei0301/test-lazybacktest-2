@@ -1,3 +1,8 @@
+## 2025-11-12 — Patch LB-DATA-VOLUME-20251112A
+- **Issue recap**: 00631L 等標的在 Worker 控制台出現「暖身後首個有效收盤價落後」與「偵測到 1216 筆無效資料 (volume)」警示，追查發現還原股價 API 回傳的成交量帶有千分位逗號，`fetchAdjustedPriceRange` 直接以 `Number()` 解析導致一律得到 `NaN`→0，於是整段資料被判定為無效成交量並進一步拖累買入持有首筆有效收盤的檢查。
+- **Fix**: 擴充 `fetchAdjustedPriceRange` 內的 `toNumber`，在解析前先 `trim` 並移除千分位逗號與破折號占位字元，僅在轉換結果為有限數值時才回傳。確保成交量與價格欄位能正確保留原始數值，避免再度誤判為無效資料。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。

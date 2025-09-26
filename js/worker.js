@@ -1668,8 +1668,20 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const normalized = trimmed.replace(/,/g, "");
+      if (!normalized || /^[-–—]+$/.test(normalized)) {
+        return null;
+      }
+      const num = Number(normalized);
+      return Number.isFinite(num) ? num : null;
+    }
+    return null;
   };
 
   const rows = Array.isArray(payload?.data) ? payload.data : [];
