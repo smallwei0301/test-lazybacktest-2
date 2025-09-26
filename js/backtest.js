@@ -3076,13 +3076,12 @@ function classifyRegimes(base, thresholds) {
 
 
 function computeTrendAnalysisFromResult(result, thresholds) {
-    if (!trendAnalysisState.base) {
-        trendAnalysisState.base = prepareRegimeBaseData(result);
-    }
-    if (!trendAnalysisState.base) {
+    const base = prepareRegimeBaseData(result);
+    trendAnalysisState.base = base;
+    if (!base) {
         return { segments: [], summary: null };
     }
-    const classification = classifyRegimes(trendAnalysisState.base, thresholds);
+    const classification = classifyRegimes(base, thresholds);
     trendAnalysisState.classifiedLabels = classification.labels || [];
     return {
         segments: classification.segments || [],
@@ -5704,7 +5703,6 @@ function refreshPriceInspectorControls() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
-    const sourceLabel = resolvePriceInspectorSourceLabel();
     const lastStartFallback = lastFetchSettings?.effectiveStartDate || lastFetchSettings?.startDate || '';
     const displayData = visibleStockData.length > 0 ? visibleStockData : [];
     const firstDate = displayData[0]?.date || lastStartFallback;
@@ -5714,9 +5712,6 @@ function refreshPriceInspectorControls() {
     openBtn.disabled = false;
     if (summaryEl) {
         const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 筆 (${modeLabel})`];
-        if (sourceLabel) {
-            summaryParts.push(sourceLabel);
-        }
         summaryEl.textContent = summaryParts.join(' ・ ');
     }
     renderPricePipelineSteps();
@@ -5872,13 +5867,9 @@ function openPriceInspectorModal() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
-    const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
         const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
-        if (sourceLabel) {
-            subtitleParts.push(sourceLabel);
-        }
         subtitle.textContent = subtitleParts.join(' ・ ');
     }
     renderPriceInspectorDebug();
@@ -6074,6 +6065,10 @@ function handleBacktestResult(result, stockName, dataSource) {
         trendAnalysisState.calibration = calibrateTrendSensitivity(trendAnalysisState.base);
         trendAnalysisState.sensitivity = TREND_SENSITIVITY_DEFAULT;
         recomputeTrendAnalysis({ skipChartUpdate: true });
+        const trendSlider = document.getElementById('trendSensitivitySlider');
+        if (trendSlider) {
+            trendSlider.value = `${trendAnalysisState.sensitivity}`;
+        }
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
@@ -6083,11 +6078,16 @@ function handleBacktestResult(result, stockName, dataSource) {
         activateTab('summary');
 
         setTimeout(() => {
+            const strategyCard = document.getElementById('strategy-status-card');
+            if (strategyCard) {
+                strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
             const chartContainer = document.getElementById('chart-container');
             if (chartContainer) {
-                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
-        }, 500);
+        }, 400);
 
     } catch (error) {
          console.error("[Main] Error processing backtest result:", error);
@@ -6574,6 +6574,7 @@ function displayBacktestResult(result) {
             '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
+        let directionSafeTooltip = null;
         const directionAdvice = (() => {
             const safeThreshold = 10;
             const warnThreshold = 15;
@@ -6589,7 +6590,8 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                return '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+                return '方向偏移穩健，維持現行節奏即可。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
                 return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
@@ -6597,83 +6599,72 @@ function displayBacktestResult(result) {
             return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
         })();
         const summarySentence = (() => {
-            const parts = [];
-            if (Number.isFinite(overallDrift)) {
-                parts.push(`平均漂移 ${formatPercentMagnitude(overallDrift, 1)}`);
+            const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
+            const driftAbs = Number.isFinite(overallDrift) ? Math.abs(overallDrift) : null;
+            const maxAbs = Number.isFinite(overallMaxDrift) ? Math.abs(overallMaxDrift) : null;
+            if (stabilityScore === null && driftAbs === null && maxAbs === null) {
+                return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
             }
-            if (Number.isFinite(overallMaxDrift)) {
-                parts.push(`最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}`);
+            if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
+                return '整體擾動反應平穩，可照現有參數持續觀察。';
             }
-            if (Number.isFinite(summarySharpeDrop) && Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}／下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeDrop)) {
-                parts.push(`Sharpe Δ 下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}`);
+            if (stabilityScore !== null && stabilityScore >= 55) {
+                return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
             }
-            const safeThreshold = 10;
-            const warnThreshold = 15;
-            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
-            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
-            if (positiveAbs !== null || negativeAbs !== null) {
-                const usePositive = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs);
-                const focusLabel = usePositive
-                    ? `調高方向 ${formatDelta(overallPositive)}`
-                    : `調低方向 ${formatDelta(overallNegative)}`;
-                const focusAbs = usePositive ? positiveAbs : negativeAbs;
-                if (Number.isFinite(focusAbs)) {
-                    if (focusAbs > warnThreshold) {
-                        parts.push(`${focusLabel}，超過 15pp 建議優先檢視`);
-                    } else if (focusAbs > safeThreshold) {
-                        parts.push(`${focusLabel}，落在 10～15pp 建議再驗證`);
-                    } else {
-                        parts.push(`${focusLabel}，雙側仍在 ±10pp 內`);
-                    }
-                } else {
-                    parts.push(focusLabel);
-                }
-            }
-            return parts.join('，') || '敏感度樣本不足，建議重新執行擾動測試。';
+            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
         })();
+        const directionTooltipHtml = directionSafeTooltip
+            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
+            : '';
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <div class="flex items-center gap-2">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
-                        <span class="tooltip">
-                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
-                        </span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                            <span class="tooltip">
+                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
+                            </span>
+                        </div>
+                        <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
                     </div>
-                    <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健；Sharpe 下滑會同步扣分</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
-                    <div class="flex items-center gap-2">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
-                        <span class="tooltip">
-                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
-                        </span>
-                    </div>
-                    <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
-                    <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
-                        <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
-                        <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                            <span class="tooltip">
+                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                            </span>
+                        </div>
+                        <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
+                        <div class="text-xs text-muted-foreground leading-relaxed flex flex-col items-center gap-1">
+                            <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
+                            <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
+                        </div>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #60a5fa 10%, var(--background)) 0%, color-mix(in srgb, #3b82f6 4%, var(--background)) 100%); border-color: color-mix(in srgb, #3b82f6 20%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
-                    <div class="flex items-center gap-4 text-lg font-semibold">
-                        <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
-                        <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
+                            ${directionTooltipHtml}
+                        </div>
+                        <div class="flex items-center justify-center gap-4 text-lg font-semibold">
+                            <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
+                            <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
+                        </div>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${directionAdvice}</p>
                     </div>
-                    <p class="text-xs" style="color: var(--muted-foreground);">兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。</p>
-                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">${directionAdvice}</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
-                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
+                    </div>
                 </div>
             </div>`;
         const interpretationHint = `

@@ -622,3 +622,9 @@
 - **Fix**: 將逆風提醒併入副標維持同一字型層級；滑桿標籤改為「0 精細／10 寬鬆」並隱藏門檻解說段落；敏感度卡預設雙欄起跳並調整穩定度分數 tooltip 與標題並排，維持小螢幕可掃描性。
 - **Diagnostics**: 本地檢視摘要頁確認戰況卡副標連貫呈現無額外段落；趨勢區間折疊後不再顯示詳細門檻字串；縮小視窗觀察敏感度四卡維持兩欄排列且 tooltip 位置緊貼標題。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-09 — Patch LB-UI-SUMMARY-FOCUS-20251109A
+- **Issue recap**: 回測重跑同參數時趨勢區間卡出現空白統計、摘要仍預設捲至淨值圖；敏感度摘要文案過度數字化且重複提示佔版；價格檢視工具在主畫面露出多餘資料來源字串。
+- **Fix**: 重新初始化趨勢底層資料並在回測完成後自動聚焦戰況卡，同步重置滑桿；調整敏感度摘要為置中佈局、將 ±10pp 文案移入 tooltip 並改以語句式提醒；移除查看區間價格的來源尾註。
+- **Diagnostics**: 多次以相同標的重跑確認趨勢信心與底色維持輸出；檢視敏感度卡僅顯示一句摘要且 tooltip 提供補充；查看區間價格文字僅留筆數與模式資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
