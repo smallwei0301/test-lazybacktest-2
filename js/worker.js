@@ -17,6 +17,7 @@ importScripts('config.js');
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -2951,6 +2952,11 @@ async function fetchStockData(
     if (blobRangeResult) {
       return blobRangeResult;
     }
+    self.postMessage({
+      type: "progress",
+      progress: 10,
+      message: "Netlify Blob 範圍快取未命中，改用 Proxy 逐月補抓...",
+    });
   }
 
   if (adjusted) {
