@@ -340,11 +340,11 @@
                 <div class="container mx-auto px-4 h-16 flex items-center justify-between">
                     <div class="flex items-center space-x-3">
                         <a href="/" class="brand-logo-container" aria-label="LazyBacktest 首頁">
-                            <img src="assets/lazybacktest-logo.svg" alt="LazyBacktest 品牌圖示：量化回測箭頭與 K 線" class="brand-logo-image" width="40" height="40" decoding="async" />
+                            <img src="assets/lazybacktest-logo.svg" alt="LazyBacktest 品牌識別：沙發搭配上揚趨勢螢幕的字標" class="brand-logo-image" width="360" height="132" decoding="async" />
                         </a>
-                        <div>
-                            <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
-                            <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
+                        <div class="hidden sm:flex flex-col leading-tight">
+                            <span class="text-sm font-semibold uppercase tracking-widest" style="color: var(--foreground); color: color-mix(in srgb, var(--foreground) 74%, transparent);">Quant Backtesting</span>
+                            <span class="text-xs" style="color: var(--muted-foreground);">台灣投資人專屬的回測工具</span>
                         </div>
                     </div>
                     <nav class="hidden md:flex items-center space-x-6">
@@ -2007,14 +2007,11 @@
                     <div class="grid md:grid-cols-4 gap-8">
                         <div>
                             <div class="flex items-center space-x-3 mb-4">
-                                <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
-                                    <!-- simple brand mark -->
-                                    <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                                        <rect width="28" height="20" rx="4" fill="#0EA5A4" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <a href="/" class="brand-logo-container brand-logo-container--static" aria-label="LazyBacktest 品牌首頁">
+                                    <img src="assets/lazybacktest-logo.svg" alt="LazyBacktest 品牌識別：沙發搭配上揚趨勢螢幕的字標" class="brand-logo-image brand-logo-image--compact" width="320" height="118" decoding="async" />
+                                </a>
+                                <div class="hidden sm:block">
+                                    <span class="text-sm font-semibold uppercase tracking-widest" style="color: #1f2937;">Lazybacktest</span>
                                     <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
                                 </div>
                             </div>

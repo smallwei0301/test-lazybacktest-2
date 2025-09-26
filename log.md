@@ -657,3 +657,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-BRAND-WORDMARK-20251116A
+- **Issue recap**: 導覽列更新後仍沿用舊的方形 K 線圖示，頁腳也未同步品牌化，與最新提供的 Lazybacktest 字標不符且 favicon 缺乏字標識別。
+- **Fix**: 依照提供的標誌重新繪製 SVG（沙發與螢幕箭頭字標）並裁切邊界，將導覽列與頁腳皆改為嵌入新字標；同時調整品牌容器樣式，提供響應式高度與靜態版陰影配置，確保 header/footer 對齊。
+- **Diagnostics**: 檢視桌機與行動寬度確認字標高度於 2.2rem～2.75rem 間自動縮放且 focus-outline 存在；favicon 連結維持指向新 SVG。
+- **Testing**: `python3 -m http.server 4173`

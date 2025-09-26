@@ -1,28 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="lazybacktestLogoTitle lazybacktestLogoDesc">
-  <title id="lazybacktestLogoTitle">LazyBacktest 品牌圖示</title>
-  <desc id="lazybacktestLogoDesc">深色背景內含 K 線與回測箭頭，象徵量化回測與持續優化。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 260" role="img" aria-labelledby="lazybacktestLogoTitle lazybacktestLogoDesc">
+  <title id="lazybacktestLogoTitle">LazyBacktest 品牌識別標誌</title>
+  <desc id="lazybacktestLogoDesc">舒適沙發前的螢幕顯示上揚趨勢，搭配 LazyBacktest 英文字標，象徵輕鬆掌握量化回測。</desc>
   <defs>
-    <linearGradient id="lazybacktestLogoGradient" x1="8" y1="56" x2="56" y2="8" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0f172a" />
-      <stop offset="0.45" stop-color="#0b3a5d" />
-      <stop offset="1" stop-color="#0ea5e9" />
+    <linearGradient id="lazybacktestWordmarkGradient" x1="280" y1="190" x2="628" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9AA0AC" />
+      <stop offset="0.32" stop-color="#7F8B9F" />
+      <stop offset="0.68" stop-color="#446489" />
+      <stop offset="1" stop-color="#1C3F73" />
     </linearGradient>
-    <linearGradient id="lazybacktestHighlight" x1="20" y1="14" x2="44" y2="50" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f8fafc" stop-opacity="0.95" />
-      <stop offset="1" stop-color="#bae6fd" stop-opacity="0.75" />
+    <linearGradient id="lazybacktestBackrestGradient" x1="80" y1="44" x2="222" y2="154" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E4A74" />
+      <stop offset="1" stop-color="#15365B" />
     </linearGradient>
+    <linearGradient id="lazybacktestSeatGradient" x1="86" y1="120" x2="230" y2="208" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#173C64" />
+      <stop offset="1" stop-color="#0F2846" />
+    </linearGradient>
+    <linearGradient id="lazybacktestUnderlineGradient" x1="284" y1="210" x2="632" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C7CBD2" stop-opacity="0.6" />
+      <stop offset="1" stop-color="#5A7496" stop-opacity="0.9" />
+    </linearGradient>
+    <linearGradient id="lazybacktestMonitorGradient" x1="226" y1="30" x2="394" y2="146" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F1F6FF" />
+      <stop offset="1" stop-color="#D4E6FB" />
+    </linearGradient>
+    <clipPath id="lazybacktestClipSafe">
+      <rect x="20" y="20" width="680" height="220" rx="24" />
+    </clipPath>
   </defs>
-  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#lazybacktestLogoGradient)" />
-  <g stroke-linecap="round">
-    <path d="M18 42v-9" stroke="#bae6fd" stroke-width="3" />
-    <path d="M28 47V23" stroke="#38bdf8" stroke-width="3.5" />
-    <path d="M38 37v-14" stroke="#f8fafc" stroke-width="3" />
-    <path d="M48 46V30" stroke="#facc15" stroke-width="3" />
+  <g clip-path="url(#lazybacktestClipSafe)">
+    <g transform="translate(32,28)">
+      <rect x="224" y="14" width="184" height="128" rx="22" fill="url(#lazybacktestMonitorGradient)" stroke="#1E4A74" stroke-width="6" />
+      <path d="M260 128h112l18 38H242z" fill="#102B49" opacity="0.28" />
+      <path d="M254 56l36 36 32-28 32 32" fill="none" stroke="#2CB1A8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M354 92h36l-10-34" fill="none" stroke="#2CB1A8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M122 12h72c28 0 52 22 52 50v70c0 11-9 20-20 20H168a42 42 0 0 0-42 42v6H114c-35 0-64-29-64-64V62c0-27 22-50 48-50z" fill="url(#lazybacktestBackrestGradient)" />
+      <path d="M52 116h170c20 0 36 16 36 36v30c0 20-16 36-36 36H154l-10 32H98l-10-32H52c-20 0-36-16-36-36v-30c0-20 16-36 36-36z" fill="url(#lazybacktestSeatGradient)" />
+      <path d="M60 214h48l8 24H52z" fill="#0E213B" />
+      <path d="M174 214h48l-16 24h-40z" fill="#0E213B" />
+      <rect x="86" y="142" width="46" height="40" rx="18" fill="#1E4A74" opacity="0.65" />
+      <rect x="154" y="142" width="46" height="40" rx="18" fill="#1E4A74" opacity="0.65" />
+      <path d="M80 200h114" fill="none" stroke="#2CB1A8" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+      <path d="M110 86c0-18 14-32 32-32s32 14 32 32v34h-64z" fill="#1E4A74" opacity="0.58" />
+    </g>
+    <g transform="translate(292,60)">
+      <text x="0" y="96" font-family="'Inter', 'Noto Sans TC', 'Segoe UI', sans-serif" font-size="88" font-weight="700" fill="url(#lazybacktestWordmarkGradient)">LAZY</text>
+      <text x="230" y="96" font-family="'Inter', 'Noto Sans TC', 'Segoe UI', sans-serif" font-size="88" font-weight="700" fill="#14355C">BACKTEST</text>
+      <rect x="0" y="114" width="500" height="12" rx="6" fill="url(#lazybacktestUnderlineGradient)" />
+    </g>
   </g>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M16 34c6.2-6.5 11.1-9.5 17.5-9.5 6 0 10.8 2.7 14.8 8" stroke="url(#lazybacktestHighlight)" stroke-width="2.6" />
-    <path d="M44 32l6.5 1.4-1.6-6.6" stroke="#f8fafc" stroke-width="2.6" />
-  </g>
-  <circle cx="20" cy="20" r="5" fill="#0ea5e9" opacity="0.2" />
-  <circle cx="45" cy="45" r="6" fill="#facc15" opacity="0.16" />
 </svg>
