@@ -651,3 +651,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-12 — Patch LB-PRICE-INSPECTOR-20250924A
+- **Issue recap**: 使用者未輸入結束日期時 `extractRangeData` 仍以空字串比較上下限，導致 `visibleStockData` 為空，前端始終隱藏查看區間價格控制項。
+- **Fix**: 更新 `extractRangeData` 僅在起訖日期存在時才套用過濾條件，確保開放式區間仍能取得完整回測資料並顯示檢視器按鈕。
+- **Diagnostics**: 以無結束日期的設定重新整理 `priceInspectorControls`，確認筆數摘要與 modal 正常顯示，且 `visibleStockData` 維持含有效價格列。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

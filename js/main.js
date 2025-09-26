@@ -2105,9 +2105,19 @@ function coverageCoversRange(coverage, targetRange) {
     return cursor >= targetBounds.end;
 }
 
+// Patch Tag: LB-PRICE-INSPECTOR-20250924A
 function extractRangeData(data, startISO, endISO) {
     if (!Array.isArray(data)) return [];
-    return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
+
+    const hasStart = typeof startISO === 'string' && startISO.trim().length > 0;
+    const hasEnd = typeof endISO === 'string' && endISO.trim().length > 0;
+
+    return data.filter((row) => {
+        if (!row || !row.date) return false;
+        if (hasStart && row.date < startISO) return false;
+        if (hasEnd && row.date > endISO) return false;
+        return true;
+    });
 }
 
 function parseSourceLabelDescriptor(label) {
