@@ -382,13 +382,27 @@
 
                             <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
                                 <!-- 一鍵回測按鈕 -->
+                                <!-- Patch Tag: LB-QUICK-EDIT-20250713A -->
                                 <button
                                     id="quickBacktestBtn"
-                                    class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
+                                    class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center gap-1"
                                     style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
                                 >
                                     <i data-lucide="zap" class="lucide mr-3"></i>
-                                    一鍵回測台積電
+                                    <span class="flex items-center gap-1">
+                                        <span>一鍵回測</span>
+                                        <span
+                                            id="quickStockKeyword"
+                                            class="quick-backtest-keyword"
+                                            contenteditable="true"
+                                            role="textbox"
+                                            aria-label="輸入要快速回測的股票名稱或代碼"
+                                            aria-controls="stockNo"
+                                            spellcheck="false"
+                                            data-empty="false"
+                                        >台積電</span>
+                                        <span id="quickStockCaret" class="quick-backtest-caret" aria-hidden="true"></span>
+                                    </span>
                                 </button>
 
                                 <button
@@ -2086,50 +2100,419 @@
                 lucide.createIcons();
             }
             
-            // 一鍵回測台積電功能
+            // 一鍵回測台積電功能（LB-QUICK-EDIT-20250713A）
+            const QUICK_EDIT_VERSION = 'LB-QUICK-EDIT-20250713A';
             const quickBacktestBtn = document.getElementById('quickBacktestBtn');
             if (quickBacktestBtn) {
-                let originalButtonContent = quickBacktestBtn.innerHTML;
+                const originalButtonContent = quickBacktestBtn.innerHTML;
                 let progressInterval;
                 let currentProgress = 0;
-                
-                quickBacktestBtn.addEventListener('click', function() {
-                    // 禁用按鈕並改變樣式
+                let resolveTimeout = null;
+                let resolvePromise = null;
+                let quickEditable = null;
+                let quickCaret = null;
+
+                const quickState = {
+                    version: QUICK_EDIT_VERSION,
+                    defaultQuery: '台積電',
+                    defaultCode: '2330',
+                    defaultMarket: 'TWSE',
+                    queryText: '台積電',
+                    lastResolvedQuery: '台積電',
+                    resolvedCode: '2330',
+                    resolvedMarket: 'TWSE',
+                    resolvedName: '台積電',
+                };
+
+                const sanitizeKeyword = (text) => {
+                    return (text || '')
+                        .replace(/\u00a0/g, ' ')
+                        .replace(/[\r\n]+/g, '')
+                        .trim()
+                        .slice(0, 16);
+                };
+
+                const placeCaretAtEnd = (element) => {
+                    if (!element) return;
+                    const selection = window.getSelection();
+                    if (!selection) return;
+                    const range = document.createRange();
+                    range.selectNodeContents(element);
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                };
+
+                const toggleCaret = (shouldShow) => {
+                    if (!quickCaret) return;
+                    quickCaret.classList.toggle('is-hidden', !shouldShow);
+                };
+
+                const updateKeywordEmptyState = () => {
+                    if (!quickEditable) return;
+                    const sanitized = sanitizeKeyword(quickEditable.textContent);
+                    const isEmpty = sanitized.length === 0;
+                    quickEditable.dataset.empty = isEmpty ? 'true' : 'false';
+                    if (!quickEditable.dataset.placeholder) {
+                        quickEditable.dataset.placeholder = '輸入股票';
+                    }
+                };
+
+                const setEditableValue = (value, options = {}) => {
+                    if (!quickEditable) return;
+                    const sanitized = sanitizeKeyword(value);
+                    if (quickEditable.textContent !== sanitized) {
+                        quickEditable.textContent = sanitized;
+                    }
+                    quickState.queryText = sanitized;
+                    updateKeywordEmptyState();
+                    if (options.focusEnd) {
+                        placeCaretAtEnd(quickEditable);
+                    }
+                };
+
+                const ensureDirectoryReady = async () => {
+                    try {
+                        if (typeof taiwanDirectoryState === 'object' && taiwanDirectoryState.ready) {
+                            return taiwanDirectoryState;
+                        }
+                        if (typeof ensureTaiwanDirectoryReady === 'function') {
+                            return await ensureTaiwanDirectoryReady({ skipNetwork: false });
+                        }
+                    } catch (error) {
+                        console.warn('[Quick Backtest] 台股清單載入失敗:', error);
+                    }
+                    return null;
+                };
+
+                const findTaiwanStockByKeyword = async (keyword) => {
+                    const trimmed = sanitizeKeyword(keyword);
+                    if (!trimmed) return null;
+                    const compact = trimmed.replace(/\s+/g, '');
+                    if (!compact) return null;
+                    const directory = await ensureDirectoryReady();
+                    if (!directory || !(directory.entries instanceof Map)) return null;
+
+                    const normalized = compact.toLowerCase();
+                    const matches = [];
+                    directory.entries.forEach((entry) => {
+                        if (!entry || !entry.name) return;
+                        const nameCompact = entry.name.replace(/\s+/g, '').toLowerCase();
+                        if (!nameCompact) return;
+                        let score = 0;
+                        if (nameCompact === normalized) score = 3;
+                        else if (nameCompact.startsWith(normalized)) score = 2;
+                        else if (nameCompact.includes(normalized)) score = 1;
+                        if (score === 0) return;
+                        matches.push({
+                            entry,
+                            score,
+                            lengthDiff: Math.abs(nameCompact.length - normalized.length),
+                        });
+                    });
+
+                    if (matches.length === 0) return null;
+                    matches.sort((a, b) => {
+                        if (b.score !== a.score) return b.score - a.score;
+                        if (a.lengthDiff !== b.lengthDiff) return a.lengthDiff - b.lengthDiff;
+                        return a.entry.stockId.localeCompare(b.entry.stockId);
+                    });
+                    const best = matches[0]?.entry;
+                    if (!best) return null;
+                    const resolvedMarket = best.market
+                        ? best.market
+                        : best.board === '上櫃'
+                            ? 'TPEX'
+                            : 'TWSE';
+                    return {
+                        code: best.stockId,
+                        market: resolvedMarket,
+                        name: best.name,
+                    };
+                };
+
+                const resolveCodeCandidate = async (code, options = {}) => {
+                    let market = quickState.resolvedMarket || quickState.defaultMarket;
+                    let name = null;
+                    const directory = await ensureDirectoryReady();
+                    if (directory && directory.entries instanceof Map) {
+                        const entry = directory.entries.get(code) || null;
+                        if (entry) {
+                            market = entry.market || market;
+                            name = entry.name || name;
+                        }
+                    }
+
+                    if (!name && typeof resolveCachedStockNameInfo === 'function') {
+                        const cached = resolveCachedStockNameInfo(code, market);
+                        if (cached?.info) {
+                            market = cached.market || market;
+                            name = cached.info.name || name;
+                        }
+                    }
+
+                    if (!name && typeof debouncedFetchStockName === 'function' && !options.deferNameLookup) {
+                        debouncedFetchStockName(code, { force: true, immediate: true });
+                    }
+
+                    return { code, market, name };
+                };
+
+                const applyStockSelection = (resolution, options = {}) => {
+                    if (!resolution || !resolution.code) return null;
+                    const normalizedMarket = typeof normalizeMarketValue === 'function'
+                        ? normalizeMarketValue(resolution.market || quickState.defaultMarket)
+                        : (resolution.market || quickState.defaultMarket);
+
+                    quickState.resolvedCode = resolution.code;
+                    quickState.resolvedMarket = normalizedMarket;
+                    quickState.resolvedName = resolution.name || quickState.resolvedName;
+                    quickState.lastResolvedQuery = sanitizeKeyword(resolution.query ?? quickState.queryText);
+
+                    const stockInput = document.getElementById('stockNo');
+                    if (stockInput && stockInput.value.trim().toUpperCase() !== resolution.code) {
+                        stockInput.value = resolution.code;
+                        stockInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+
+                    const marketSelect = document.getElementById('marketSelect');
+                    if (marketSelect) {
+                        const currentMarket = typeof normalizeMarketValue === 'function'
+                            ? normalizeMarketValue(marketSelect.value || '')
+                            : (marketSelect.value || 'TWSE');
+                        if (currentMarket !== normalizedMarket) {
+                            marketSelect.value = normalizedMarket;
+                            marketSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+
+                    if (!options.skipName) {
+                        if (resolution.name && typeof showStockName === 'function') {
+                            showStockName(resolution.name, 'success');
+                        } else if (typeof debouncedFetchStockName === 'function') {
+                            debouncedFetchStockName(resolution.code, { force: true, immediate: true });
+                        }
+                    }
+
+                    return resolution;
+                };
+
+                const resolveQuickStock = async (rawQuery, options = {}) => {
+                    const sanitized = sanitizeKeyword(rawQuery);
+                    quickState.queryText = sanitized;
+                    if (quickEditable && quickEditable.textContent !== sanitized) {
+                        quickEditable.textContent = sanitized;
+                    }
+                    updateKeywordEmptyState();
+
+                    const compact = sanitized.replace(/\s+/g, '');
+                    if (!compact) {
+                        setEditableValue(quickState.defaultQuery);
+                        const resolution = {
+                            code: quickState.defaultCode,
+                            market: quickState.defaultMarket,
+                            name: quickState.defaultQuery,
+                            query: quickState.defaultQuery,
+                        };
+                        applyStockSelection(resolution, options);
+                        return resolution;
+                    }
+
+                    const candidate = compact.toUpperCase();
+                    if (typeof TAIWAN_STOCK_PATTERN !== 'undefined' && TAIWAN_STOCK_PATTERN.test(candidate)) {
+                        const resolution = await resolveCodeCandidate(candidate, options);
+                        resolution.query = sanitized;
+                        applyStockSelection(resolution, options);
+                        return resolution;
+                    }
+
+                    if (typeof US_STOCK_PATTERN !== 'undefined' && US_STOCK_PATTERN.test(candidate)) {
+                        const resolution = { code: candidate, market: 'US', name: null, query: sanitized };
+                        applyStockSelection(resolution, options);
+                        return resolution;
+                    }
+
+                    const keywordResult = await findTaiwanStockByKeyword(sanitized);
+                    if (keywordResult) {
+                        setEditableValue(keywordResult.name || sanitized);
+                        const resolution = {
+                            ...keywordResult,
+                            query: sanitizeKeyword(keywordResult.name || sanitized),
+                        };
+                        applyStockSelection(resolution, options);
+                        return resolution;
+                    }
+
+                    if (!options.silent) {
+                        showError(`找不到「${sanitized}」對應的股票代碼，請重新輸入。`);
+                    }
+                    return null;
+                };
+
+                const scheduleResolve = (options = {}) => {
+                    if (resolveTimeout) {
+                        clearTimeout(resolveTimeout);
+                        resolveTimeout = null;
+                    }
+                    const delay = options.immediate ? 0 : 420;
+                    resolveTimeout = setTimeout(() => {
+                        resolveTimeout = null;
+                        const pending = resolveQuickStock(quickState.queryText, {
+                            silent: options.silent !== false,
+                            deferNameLookup: true,
+                        });
+                        resolvePromise = pending;
+                        pending.finally(() => {
+                            if (resolvePromise === pending) {
+                                resolvePromise = null;
+                            }
+                        });
+                    }, delay);
+                };
+
+                const ensureQuickSelection = async (options = {}) => {
+                    if (resolvePromise) {
+                        try {
+                            const pendingResult = await resolvePromise;
+                            if (pendingResult && !options.forceResolve) {
+                                return pendingResult;
+                            }
+                        } catch (error) {
+                            console.warn('[Quick Backtest] 前次關鍵字解析失敗:', error);
+                        }
+                    }
+
+                    const sanitizedQuery = sanitizeKeyword(quickState.queryText);
+                    const needsResolve = options.forceResolve
+                        || !quickState.resolvedCode
+                        || sanitizeKeyword(quickState.lastResolvedQuery) !== sanitizedQuery;
+
+                    if (!needsResolve) {
+                        return {
+                            code: quickState.resolvedCode,
+                            market: quickState.resolvedMarket,
+                            name: quickState.resolvedName,
+                            query: sanitizedQuery,
+                        };
+                    }
+
+                    const result = await resolveQuickStock(sanitizedQuery, options);
+                    return result;
+                };
+
+                const resetQuickButton = () => {
+                    quickBacktestBtn.innerHTML = originalButtonContent;
+                    if (typeof lucide !== 'undefined') {
+                        lucide.createIcons();
+                    }
+                    setupQuickBacktestEditable();
+                    toggleCaret(true);
+                };
+
+                const setupQuickBacktestEditable = () => {
+                    quickEditable = document.getElementById('quickStockKeyword');
+                    quickCaret = document.getElementById('quickStockCaret');
+                    if (!quickEditable) return;
+                    quickEditable.dataset.placeholder = quickEditable.dataset.placeholder || '輸入股票';
+                    quickEditable.dataset.empty = quickState.queryText ? 'false' : 'true';
+                    quickEditable.textContent = quickState.queryText;
+                    updateKeywordEmptyState();
+                    toggleCaret(true);
+
+                    quickEditable.addEventListener('input', () => {
+                        const sanitized = sanitizeKeyword(quickEditable.textContent);
+                        if (quickEditable.textContent !== sanitized) {
+                            quickEditable.textContent = sanitized;
+                            placeCaretAtEnd(quickEditable);
+                        }
+                        quickState.queryText = sanitized;
+                        updateKeywordEmptyState();
+                        scheduleResolve({ silent: true });
+                    });
+
+                    quickEditable.addEventListener('focus', () => {
+                        toggleCaret(false);
+                    });
+
+                    quickEditable.addEventListener('blur', () => {
+                        quickState.queryText = sanitizeKeyword(quickEditable.textContent);
+                        updateKeywordEmptyState();
+                        toggleCaret(true);
+                        scheduleResolve({ immediate: true });
+                    });
+
+                    quickEditable.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            quickEditable.blur();
+                        }
+                    });
+
+                    ['mousedown', 'click'].forEach((evt) => {
+                        quickEditable.addEventListener(evt, (event) => {
+                            event.stopPropagation();
+                        });
+                    });
+                };
+
+                setupQuickBacktestEditable();
+                scheduleResolve({ immediate: true, silent: true });
+                console.log(`[Quick Backtest] ${QUICK_EDIT_VERSION} ready`);
+
+                quickBacktestBtn.addEventListener('click', async (event) => {
+                    if (event.target.closest('#quickStockKeyword')) {
+                        return;
+                    }
+
+                    if (resolveTimeout) {
+                        clearTimeout(resolveTimeout);
+                        resolveTimeout = null;
+                    }
+
+                    const resolution = await ensureQuickSelection({ forceResolve: true });
+                    if (!resolution) {
+                        toggleCaret(true);
+                        return;
+                    }
+
                     quickBacktestBtn.disabled = true;
                     quickBacktestBtn.style.opacity = '0.7';
+                    toggleCaret(false);
                     currentProgress = 0;
-                    
-                    // 更新按鈕內容為回測中狀態
+
                     const updateProgress = () => {
-                        currentProgress += Math.random() * 15 + 5; // 隨機增加 5-20%
-                        if (currentProgress > 95) currentProgress = 95; // 最多到 95%
-                        
+                        currentProgress += Math.random() * 15 + 5;
+                        if (currentProgress > 95) currentProgress = 95;
+
                         quickBacktestBtn.innerHTML = `
                             <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
                             回測中...${Math.round(currentProgress)}%
                         `;
-                        
-                        // 重新初始化圖標
+
                         if (typeof lucide !== 'undefined') {
                             lucide.createIcons();
                         }
                     };
-                    
-                    // 立即顯示進度並開始定期更新
+
                     updateProgress();
                     progressInterval = setInterval(updateProgress, 800);
-                    
-                    // 設定台積電的默認參數
-                    const stockInput = document.getElementById('stockInput');
+
+                    const stockInput = document.getElementById('stockNo');
                     if (stockInput) {
-                        stockInput.value = '2330';
+                        stockInput.value = resolution.code;
+                        stockInput.dispatchEvent(new Event('input', { bubbles: true }));
                     }
-                    
-                    // 設定默認日期範圍（最近一年）
+
+                    const marketSelect = document.getElementById('marketSelect');
+                    if (marketSelect && marketSelect.value !== resolution.market) {
+                        marketSelect.value = resolution.market;
+                        marketSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+
                     const endDate = new Date();
                     const startDate = new Date();
                     startDate.setFullYear(endDate.getFullYear() - 1);
-                    
+
                     const startDateInput = document.getElementById('startDate');
                     const endDateInput = document.getElementById('endDate');
                     if (startDateInput) {
@@ -2138,61 +2521,49 @@
                     if (endDateInput) {
                         endDateInput.value = endDate.toISOString().split('T')[0];
                     }
-                    
-                    // 監聽回測完成事件
+
                     const checkBacktestComplete = () => {
                         const resultElement = document.getElementById('backtest-result');
-                        const tradeResultsElement = document.getElementById('trade-results');
-                        
-                        // 檢查是否有結果顯示（簡單檢查文本內容是否改變）
                         if (resultElement && resultElement.textContent.trim() !== '執行回測後將顯示詳細結果') {
-                            // 回測完成
                             clearInterval(progressInterval);
-                            
-                            // 顯示完成狀態
+
                             quickBacktestBtn.innerHTML = `
                                 <i data-lucide="check-circle" class="lucide mr-3"></i>
                                 完成！請看下面績效表現
                             `;
-                            
-                            // 重新初始化圖標
+
                             if (typeof lucide !== 'undefined') {
                                 lucide.createIcons();
                             }
-                            
-                            // 3秒後恢復原始狀態
+
                             setTimeout(() => {
-                                quickBacktestBtn.innerHTML = originalButtonContent;
+                                resetQuickButton();
                                 quickBacktestBtn.disabled = false;
                                 quickBacktestBtn.style.opacity = '1';
-                                if (typeof lucide !== 'undefined') {
-                                    lucide.createIcons();
-                                }
                             }, 3000);
-                            
                         } else {
-                            // 繼續檢查
                             setTimeout(checkBacktestComplete, 500);
                         }
                     };
-                    
-                    // 觸發回測
+
                     const backtestBtn = document.getElementById('backtestBtn');
                     if (backtestBtn) {
-                        // 滾動到左邊畫面的開始回測按鈕
-                        backtestBtn.scrollIntoView({ 
-                            behavior: 'smooth', 
+                        backtestBtn.scrollIntoView({
+                            behavior: 'smooth',
                             block: 'center',
-                            inline: 'nearest'
+                            inline: 'nearest',
                         });
-                        
-                        // 稍微延遲後觸發回測，確保滾動完成
+
                         setTimeout(() => {
                             backtestBtn.click();
                         }, 800);
-                        
-                        // 開始檢查回測狀態
+
                         setTimeout(checkBacktestComplete, 1800);
+                    } else {
+                        clearInterval(progressInterval);
+                        resetQuickButton();
+                        quickBacktestBtn.disabled = false;
+                        quickBacktestBtn.style.opacity = '1';
                     }
                 });
             }

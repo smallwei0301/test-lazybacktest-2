@@ -1,3 +1,9 @@
+## 2025-07-13 — Patch LB-QUICK-EDIT-20250713A
+- **Scope**: 首頁一鍵回測按鈕改為可編輯的股票關鍵字，加入底線與閃爍游標指示可輸入，並導入台股官方清單比對自動解析股票代碼與市場。
+- **UX**: 使用者編輯關鍵字時會即時尋找名稱或代碼並同步更新左側代碼欄位，保留一鍵設定近一年期間的體驗，完成後按鈕自動回復原狀。
+- **Diagnostics**: 新增快取與清單查找流程記錄，可在 console 觀察 `LB-QUICK-EDIT-20250713A` 相關日誌以追蹤解析結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。
