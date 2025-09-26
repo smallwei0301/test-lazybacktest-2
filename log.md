@@ -1,3 +1,9 @@
+## 2025-11-12 — Patch LB-PROGRESS-20251112A
+- **Scope**: 回測進度條與快取檢查提示。
+- **Progress Bar**: 重寫主畫面回測進度動畫，直接採用 Worker 回傳百分比並同步更新訊息，避免尚未完成時即顯示 100%。進度文字改為附帶百分比，維持使用者對目前階段的掌握。
+- **Blob Cache Messaging**: Netlify Blob 範圍快取未命中時立即推送「切換遠端資料源」提示，縮短舊訊息停留時間並顯示後續工作項目。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-11 — Patch LB-PRICE-INSPECTOR-20251111A
 - **Issue recap**: 區間價格檢視按鈕搬移到淨值卡片後，打開彈窗時未初始化 `sourceLabel`，在填入價格來源欄位時觸發 `ReferenceError`，導致彈窗仍維持隱藏狀態、使用者看不到表格。
 - **Fix**: 於 `openPriceInspectorModal` 重新導入 `resolvePriceInspectorSourceLabel()` 的結果，確保渲染價格來源欄位時具備預設值，避免錯誤中斷。
