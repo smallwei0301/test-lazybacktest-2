@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-OPT-REUSE-DATA-20250913A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -7422,12 +7423,12 @@ function hideOptimizationProgress() {
     }
 }
 
-function runOptimizationInternal(optimizeType) { 
-    if (!workerUrl) { 
-        showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); 
-        return; 
-    } 
-    
+function runOptimizationInternal(optimizeType) {
+    if (!workerUrl) {
+        showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。");
+        return;
+    }
+
     console.log(`[Main] runOptimizationInternal called for ${optimizeType}`); 
     
     // 立即切換到優化頁面
@@ -7453,26 +7454,32 @@ function runOptimizationInternal(optimizeType) {
     // 顯示初始準備狀態
     showOptimizationProgress('⌛ 正在驗證參數...');
     
-    const params=getBacktestParams(); 
-    let targetStratKey, paramSelectId, selectedParamName, optLabel, optRange, msgAction, configKey, config; 
-    const isShortOpt = optimizeType === 'shortEntry' || optimizeType === 'shortExit'; 
-    const isRiskOpt = optimizeType === 'risk'; 
-    
-    if (isShortOpt && !params.enableShorting) { 
+    const params=getBacktestParams();
+    let targetStratKey, paramSelectId, selectedParamName, optLabel, optRange, msgAction, configKey, config;
+    const isShortOpt = optimizeType === 'shortEntry' || optimizeType === 'shortExit';
+    const isRiskOpt = optimizeType === 'risk';
+
+    if (isShortOpt && !params.enableShorting) {
         hideOptimizationProgress();
-        showError("請先啟用做空策略才能進行做空相關優化。"); 
-        return; 
-    } 
-    
+        showError("請先啟用做空策略才能進行做空相關優化。");
+        return;
+    }
+
     if (!validateBacktestParams(params)) {
         hideOptimizationProgress();
         return;
     }
-    
-    const msgActionMap = {'entry': '多單進場', 'exit': '多單出場', 'shortEntry': '做空進場', 'shortExit': '回補出場', 'risk': '風險控制'}; 
-    msgAction = msgActionMap[optimizeType] || '未知'; 
-    
-    if (isRiskOpt) { 
+
+    if (!lastFetchSettings || !Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        hideOptimizationProgress();
+        showError('請先完成一次回測以建立資料快取，再執行參數優化。');
+        return;
+    }
+
+    const msgActionMap = {'entry': '多單進場', 'exit': '多單出場', 'shortEntry': '做空進場', 'shortExit': '回補出場', 'risk': '風險控制'};
+    msgAction = msgActionMap[optimizeType] || '未知';
+
+    if (isRiskOpt) {
         paramSelectId = 'optimizeRiskParamSelect'; 
         selectedParamName = document.getElementById(paramSelectId)?.value; 
         config = globalOptimizeTargets[selectedParamName]; 
@@ -7522,28 +7529,69 @@ function runOptimizationInternal(optimizeType) {
             console.error(`Optimization config not found for key: ${configKey}, param: ${selectedParamName}`); 
             return; 
         } 
-        config = optTarget; 
-    } 
-    
-    optLabel = config.label; 
-    optRange = config.range; 
-    console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
-    
+        config = optTarget;
+    }
+
+    optLabel = config.label;
+    optRange = config.range;
+    console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange);
+
+    const currentMarketKey = (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase();
+    const lastMarketKey = (lastFetchSettings.market || lastFetchSettings.marketType || currentMarketKey || 'TWSE').toUpperCase();
+    const requestedMode = (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase();
+    const lastMode = (lastFetchSettings.priceMode || (lastFetchSettings.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase();
+    const effectiveStart = lastFetchSettings.effectiveStartDate || params.startDate || '';
+    const dataStartFromLast = lastFetchSettings.dataStartDate || lastFetchSettings.startDate || effectiveStart;
+    const mismatchReasons = [];
+    if ((lastFetchSettings.stockNo || '').toUpperCase() !== (params.stockNo || '').toUpperCase()) {
+        mismatchReasons.push('股票代碼不同');
+    }
+    if (currentMarketKey !== lastMarketKey) {
+        mismatchReasons.push('市場選擇不同');
+    }
+    if (requestedMode !== lastMode) {
+        mismatchReasons.push('價格模式不同');
+    }
+    if (Boolean(params.adjustedPrice) !== Boolean(lastFetchSettings.adjustedPrice)) {
+        mismatchReasons.push('還原價格設定不同');
+    }
+    if (Boolean(params.splitAdjustment) !== Boolean(lastFetchSettings.splitAdjustment)) {
+        mismatchReasons.push('拆分調整設定不同');
+    }
+    if (params.endDate && lastFetchSettings.endDate && params.endDate !== lastFetchSettings.endDate) {
+        mismatchReasons.push('結束日期不同');
+    }
+    if (params.startDate && effectiveStart && params.startDate !== effectiveStart) {
+        mismatchReasons.push('開始日期不同');
+    }
+
+    if (mismatchReasons.length > 0) {
+        hideOptimizationProgress();
+        showError(`請先重新執行回測以更新資料（${mismatchReasons.join('、')}）。`);
+        return;
+    }
+
     const curSettings={
-        stockNo: params.stockNo,
-        startDate: params.startDate,
-        endDate: params.endDate,
-        market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
-        adjustedPrice: Boolean(params.adjustedPrice),
-        priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+        ...lastFetchSettings,
+        market: lastMarketKey,
+        priceMode: lastMode,
+        adjustedPrice: Boolean(lastFetchSettings.adjustedPrice),
+        splitAdjustment: Boolean(lastFetchSettings.splitAdjustment),
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
-    
+
+    params.market = params.market || normalizeMarketValue(currentMarketKey);
+    params.marketType = currentMarketKey;
+    params.dataStartDate = dataStartFromLast;
+    params.effectiveStartDate = effectiveStart || params.startDate;
+    params.lookbackDays = lastFetchSettings.lookbackDays;
+
+    const useCache=true;
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel})（沿用最近回測資料）...`;
+
     // 先清除之前的結果，但不隱藏優化進度
-    clearPreviousResults(); 
+    clearPreviousResults();
     console.log('[Main] 已清除之前的結果');
-    
+
     // 然後更新進度顯示為實際的優化信息
     showOptimizationProgress(msg);
     console.log('[Main] 已更新進度顯示為:', msg);
@@ -7555,13 +7603,13 @@ function runOptimizationInternal(optimizeType) {
         if (btn) btn.disabled = true;
     }); 
     
-    if(optimizationWorker) optimizationWorker.terminate(); 
-    console.log("[Main] Creating opt worker..."); 
-    
-    try { 
-        optimizationWorker=new Worker(workerUrl); 
-        const workerMsg={ 
-            type:'runOptimization', 
+    if(optimizationWorker) optimizationWorker.terminate();
+    console.log('[Main] Creating opt worker（reuse cached dataset）...');
+
+    try {
+        optimizationWorker=new Worker(workerUrl);
+        const workerMsg={
+            type:'runOptimization',
             params, 
             optimizeTargetStrategy: optimizeType, 
             optimizeParamName:selectedParamName, 
@@ -7571,51 +7619,38 @@ function runOptimizationInternal(optimizeType) {
         
         if(useCache && cachedStockData) {
             workerMsg.cachedData=cachedStockData;
-            const cacheEntry = ensureDatasetCacheEntryFresh(
-                buildCacheKey(curSettings),
-                cachedDataStore.get(buildCacheKey(curSettings)),
-                curSettings.market,
-            );
-                if (cacheEntry) {
-                    workerMsg.cachedMeta = {
-                        summary: cacheEntry.summary || null,
-                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                        priceSource: cacheEntry.priceSource || null,
-                        dataSource: cacheEntry.dataSource || null,
-                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
-                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
-                        finmindStatus: cacheEntry.finmindStatus || null,
-                    };
-                }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
-        
-        optimizationWorker.postMessage(workerMsg); 
-        
-        optimizationWorker.onmessage=e=>{ 
-            const{type,data,progress,message}=e.data; 
-            
+            const cacheKey = buildCacheKey(curSettings);
+            const cacheEntry = cachedDataStore.get(cacheKey);
+            if (cacheEntry) {
+                workerMsg.cachedMeta = {
+                    summary: cacheEntry.summary || null,
+                    adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
+                    debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
+                    priceSource: cacheEntry.priceSource || null,
+                    dataSource: cacheEntry.dataSource || null,
+                    splitAdjustment: Boolean(cacheEntry.splitAdjustment),
+                    splitDiagnostics: cacheEntry.splitDiagnostics || null,
+                    finmindStatus: cacheEntry.finmindStatus || null,
+                };
+            }
+            console.log(`[Main] Reusing cached dataset for optimization，cacheKey=${cacheKey}`);
+        }
+
+        optimizationWorker.postMessage(workerMsg);
+
+        optimizationWorker.onmessage=e=>{
+            const{type,data,progress,message}=e.data;
+
             if(type==='progress'){
                 // 使用優化專用的進度更新
                 updateOptimizationProgress(progress, message);
-            } else if(type==='result'){ 
-                if(!useCache&&data?.rawDataUsed){
-                    cachedStockData=data.rawDataUsed;
-                    if (Array.isArray(data.rawDataUsed)) {
-                        visibleStockData = data.rawDataUsed;
-                    }
-                    lastFetchSettings={ ...curSettings };
-                    console.log(`[Main] Data cached after ${optimizeType} opt.`);
-                } else if(!useCache&&data&&!data.rawDataUsed) {
-                    console.warn("[Main] Opt worker no rawData returned.");
-                }
-                
-                document.getElementById('optimization-title').textContent=`${msgAction}優化 (${optLabel})`; 
-                handleOptimizationResult(data.results || data, selectedParamName, optLabel); 
-                
-                if(optimizationWorker) optimizationWorker.terminate(); 
-                optimizationWorker=null; 
+            } else if(type==='result'){
+                document.getElementById('optimization-title').textContent=`${msgAction}優化 (${optLabel})`;
+                handleOptimizationResult(data.results || data, selectedParamName, optLabel);
+
+                if(optimizationWorker) optimizationWorker.terminate();
+                optimizationWorker=null;
                 
                 hideOptimizationProgress();
                 

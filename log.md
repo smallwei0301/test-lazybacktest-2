@@ -651,3 +651,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-11 — Patch LB-OPT-REUSE-DATA-20250913A
+- **Issue recap**: 參數優化啟動時仍會重新檢查資料覆蓋並可能觸發重新抓取，無法完全沿用最近一次回測的價格序列，導致流程冗長且違背「僅使用既有快取」的需求。
+- **Fix**: `runOptimizationInternal` 強制比對當前設定與最近回測的一致性，只要條件相符便直接注入 `cachedStockData` 與 `cachedMeta` 給 Worker，並改以沿用資料的狀態訊息取代重新驗證流程。
+- **Diagnostics**: 變更後若修改日期或市場將即時阻擋並提示重新回測；相同設定下則可立即進入優化進度且主控台記錄 `Reusing cached dataset`，確認未觸發重新抓取。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
