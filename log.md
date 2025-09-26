@@ -1,3 +1,8 @@
+## 2025-11-12 — Patch LB-OPTIMIZATION-CACHE-20251112A
+- **Scope**: 參數優化頁面與 Worker 資料取得策略。
+- **Change**: 主執行緒參數優化流程改為僅在已有回測快取時啟動，訊息明確標示「重用最近回測資料」，Worker 亦統一以現有快取資料執行掃描並回報來源，不再重新檢查 coverage 或重新抓取股價；批量優化僅檢查快取是否存在而不再套用資料筆數門檻。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。

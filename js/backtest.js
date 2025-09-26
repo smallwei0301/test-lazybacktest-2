@@ -7537,13 +7537,21 @@ function runOptimizationInternal(optimizeType) {
         adjustedPrice: Boolean(params.adjustedPrice),
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
-    
+    // Patch LB-OPTIMIZATION-CACHE-20251112A: 強制使用最新回測快取避免重新抓取
+    const hasCachedDataset = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    if (!hasCachedDataset) {
+        hideOptimizationProgress();
+        showError('請先在主畫面完成一次回測以建立資料，再進行參數優化。');
+        return;
+    }
+
+    const useCache = true;
+    const msg = `⌛ 開始優化 ${msgAction} (${optLabel})（重用最近回測資料）...`;
+
     // 先清除之前的結果，但不隱藏優化進度
-    clearPreviousResults(); 
+    clearPreviousResults();
     console.log('[Main] 已清除之前的結果');
-    
+
     // 然後更新進度顯示為實際的優化信息
     showOptimizationProgress(msg);
     console.log('[Main] 已更新進度顯示為:', msg);
@@ -7589,7 +7597,7 @@ function runOptimizationInternal(optimizeType) {
                         finmindStatus: cacheEntry.finmindStatus || null,
                     };
                 }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
+        }
         
         optimizationWorker.postMessage(workerMsg); 
         
@@ -7599,20 +7607,9 @@ function runOptimizationInternal(optimizeType) {
             if(type==='progress'){
                 // 使用優化專用的進度更新
                 updateOptimizationProgress(progress, message);
-            } else if(type==='result'){ 
-                if(!useCache&&data?.rawDataUsed){
-                    cachedStockData=data.rawDataUsed;
-                    if (Array.isArray(data.rawDataUsed)) {
-                        visibleStockData = data.rawDataUsed;
-                    }
-                    lastFetchSettings={ ...curSettings };
-                    console.log(`[Main] Data cached after ${optimizeType} opt.`);
-                } else if(!useCache&&data&&!data.rawDataUsed) {
-                    console.warn("[Main] Opt worker no rawData returned.");
-                }
-                
-                document.getElementById('optimization-title').textContent=`${msgAction}優化 (${optLabel})`; 
-                handleOptimizationResult(data.results || data, selectedParamName, optLabel); 
+            } else if(type==='result'){
+                document.getElementById('optimization-title').textContent=`${msgAction}優化 (${optLabel})`;
+                handleOptimizationResult(data.results || data, selectedParamName, optLabel);
                 
                 if(optimizationWorker) optimizationWorker.terminate(); 
                 optimizationWorker=null; 

@@ -380,7 +380,7 @@ function startBatchOptimization() {
     }
     
     // 檢查是否有足夠的股票數據
-    if (!cachedStockData || cachedStockData.length < 20) {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
         showError('請先執行回測以建立快取股票數據，然後再進行批量優化');
         restoreBatchOptimizationUI();
         return;
@@ -3334,7 +3334,7 @@ function checkAllStrategyParameters() {
 function testFullRiskManagementOptimization() {
     console.log('[Test] Testing full batch optimization with risk management...');
     
-    if (!cachedStockData || cachedStockData.length < 20) {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
         console.error('[Test] No cached stock data available. Please run a backtest first.');
         return;
     }

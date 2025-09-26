@@ -8900,69 +8900,43 @@ async function runOptimization(
   });
   const results = [];
   let stockData = null;
-  let dataFetched = false;
+  let datasetSource = null;
+  const datasetCandidates = [
+    {
+      label: "主執行緒快取",
+      data:
+        Array.isArray(cachedData) && cachedData.length > 0 ? cachedData : null,
+    },
+    {
+      label: "Worker 最近回測",
+      data:
+        Array.isArray(workerLastDataset) && workerLastDataset.length > 0
+          ? workerLastDataset
+          : null,
+    },
+  ];
 
-  // Data acquisition policy:
-  // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
-  // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
-  if (useCache) {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      throw new Error(
-        "優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。",
-      );
-    }
-  } else {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      const fetched = await fetchStockData(
-        baseParams.stockNo,
-        optDataStart,
-        baseParams.endDate,
-        baseParams.marketType || baseParams.market || "TWSE",
-        {
-          adjusted: baseParams.adjustedPrice,
-          splitAdjustment: baseParams.splitAdjustment,
-          effectiveStartDate: optEffectiveStart,
-          lookbackDays: optLookback,
-        },
-      );
-      stockData = fetched?.data || [];
-      dataFetched = true;
-      if (!Array.isArray(stockData) || stockData.length === 0)
-        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
-        type: "progress",
-        progress: 50,
-        message: "數據獲取完成，開始優化...",
-      });
+  for (const candidate of datasetCandidates) {
+    if (Array.isArray(candidate.data) && candidate.data.length > 0) {
+      stockData = candidate.data;
+      datasetSource = candidate.label;
+      break;
     }
   }
 
-  if (!stockData) {
-    throw new Error("優化失敗：無可用數據");
+  if (!Array.isArray(stockData) || stockData.length === 0) {
+    throw new Error(
+      "優化失敗：尚未建立可用的回測數據，請先在主頁執行回測。",
+    );
   }
+
+  self.postMessage({
+    type: "progress",
+    progress: 10,
+    message: datasetSource
+      ? `已載入最近回測資料（${datasetSource}）`
+      : "已載入最近回測資料",
+  });
 
   const range = optRange || { from: 1, to: 20, step: 1 };
   const totalSteps = Math.max(
@@ -9064,7 +9038,7 @@ async function runOptimization(
     return sB - sA;
   });
   self.postMessage({ type: "progress", progress: 100, message: "優化完成" });
-  return { results: results, rawDataUsed: dataFetched ? stockData : null };
+  return { results: results, datasetSource };
 }
 
 // --- Worker 消息處理 ---
