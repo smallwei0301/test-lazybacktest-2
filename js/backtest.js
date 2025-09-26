@@ -1620,6 +1620,52 @@ function createDefaultTrendSensitivityCalibration() {
     };
 }
 
+function sanitizeTrendRawRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    const date = typeof row.date === 'string' ? row.date : null;
+    if (!date) return null;
+    const parseValue = (value) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+    return {
+        date,
+        open: parseValue(row.open),
+        high: parseValue(row.high),
+        low: parseValue(row.low),
+        close: parseValue(row.close),
+        volume: parseValue(row.volume),
+    };
+}
+
+function captureTrendAnalysisSource(result) {
+    if (!result || typeof result !== 'object') {
+        return { dates: [], strategyReturns: [], rawData: [] };
+    }
+    const dates = Array.isArray(result.dates)
+        ? result.dates.map((value) => (typeof value === 'string' ? value : null))
+        : [];
+    const strategyReturns = Array.isArray(result.strategyReturns)
+        ? result.strategyReturns.map((value) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : null;
+        })
+        : [];
+    const rawSource = Array.isArray(result.rawData) && result.rawData.length > 0
+        ? result.rawData
+        : Array.isArray(result.rawDataUsed) && result.rawDataUsed.length > 0
+            ? result.rawDataUsed
+            : [];
+    const rawData = rawSource
+        .map((row) => sanitizeTrendRawRow(row))
+        .filter((row) => row !== null);
+    return {
+        dates,
+        strategyReturns,
+        rawData,
+    };
+}
+
 function applyTrendCalibrationNormalized(linearNormalized, calibration) {
     const normalized = clamp01(linearNormalized);
     const base = calibration && typeof calibration === 'object' ? calibration : null;
@@ -3076,9 +3122,16 @@ function classifyRegimes(base, thresholds) {
 
 
 function computeTrendAnalysisFromResult(result, thresholds) {
-    const base = prepareRegimeBaseData(result);
-    trendAnalysisState.base = base;
+    let base = prepareRegimeBaseData(result);
+    if (base) {
+        trendAnalysisState.base = base;
+    } else if (trendAnalysisState.base) {
+        base = trendAnalysisState.base;
+    } else {
+        trendAnalysisState.base = null;
+    }
     if (!base) {
+        trendAnalysisState.classifiedLabels = [];
         return { segments: [], summary: null };
     }
     const classification = classifyRegimes(base, thresholds);
@@ -6057,10 +6110,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
-        trendAnalysisState.result = {
-            dates: Array.isArray(result.dates) ? [...result.dates] : [],
-            strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
-        };
+        trendAnalysisState.result = captureTrendAnalysisSource(result);
         trendAnalysisState.base = prepareRegimeBaseData(result);
         trendAnalysisState.calibration = calibrateTrendSensitivity(trendAnalysisState.base);
         trendAnalysisState.sensitivity = TREND_SENSITIVITY_DEFAULT;
