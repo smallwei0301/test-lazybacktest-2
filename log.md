@@ -1,3 +1,10 @@
+## 2025-11-13 — Patch LB-UI-ACCESSIBLE-PALETTE-20251113A
+- **Scope**: 色彩系統更新（主配色、CTA 按鈕、通知/警示底色與首屏漸層）。
+- **Palette Refresh**: 以石墨藍 `--secondary`、焦糖橙 `--accent` 重新定義 :root 色票，新增 `--neutral` 作為中性卡片底色，全面拉高卡片與文字對比。
+- **UI States**: `.btn-secondary`、`.btn-outline`、CTA hover/focus 皆對齊 WCAG AA 對比，調整卡片邊框與核心流程卡背景使資訊層次更清晰。
+- **Hero Gradient**: 重算 `main` 首屏漸層色權重，增加深度同時維持視覺平衡，確保初次載入即呈現新版品牌色。
+- **Testing**: `npx http-server` 因 registry 權限受限無法啟動，改用 `python -m http.server` 配合 Playwright 造訪首頁、檢查 CTA hover 與 console，僅留意本地缺少 Netlify Functions 時出現的預期 404。
+
 ## 2025-11-11 — Patch LB-PRICE-INSPECTOR-20251111A
 - **Issue recap**: 區間價格檢視按鈕搬移到淨值卡片後，打開彈窗時未初始化 `sourceLabel`，在填入價格來源欄位時觸發 `ReferenceError`，導致彈窗仍維持隱藏狀態、使用者看不到表格。
 - **Fix**: 於 `openPriceInspectorModal` 重新導入 `resolvePriceInspectorSourceLabel()` 的結果，確保渲染價格來源欄位時具備預設值，避免錯誤中斷。
