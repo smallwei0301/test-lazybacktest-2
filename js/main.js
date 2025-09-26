@@ -2357,6 +2357,19 @@ function initBatchOptimizationFeature() {
     }
 }
 
+function initRollingTestFeature() {
+    const initHandler = () => {
+        if (window.rollingTest && typeof window.rollingTest.init === 'function') {
+            window.rollingTest.init();
+        }
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initHandler);
+    } else {
+        initHandler();
+    }
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -2389,8 +2402,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
+            initRollingTestFeature();
         }, 100);
-        
+
         console.log('[Main] Initialization completed');
     } catch (error) {
         console.error('[Main] Initialization failed:', error);
