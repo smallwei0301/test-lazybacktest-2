@@ -493,6 +493,29 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="todaySuggestionLogContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="message-square-warning" class="lucide w-4 h-4"></i>
+                                                    今日建議記錄
+                                                </div>
+                                                <button
+                                                    id="todaySuggestionLogClear"
+                                                    type="button"
+                                                    class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                    style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                >
+                                                    清除紀錄
+                                                </button>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div
+                                                    id="today-suggestion-log-body"
+                                                    class="px-3 py-3 space-y-3 text-[11px]"
+                                                    style="color: var(--foreground);"
+                                                ></div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
@@ -1004,43 +1027,46 @@
 
                             <!-- Today Suggestion -->
                             <div class="card hidden" id="today-suggestion-area" aria-live="polite">
-                                <div class="card-header">
+                                <div class="card-header pb-2">
                                     <h3 class="card-title flex items-center gap-2">
                                         <i data-lucide="lightbulb" class="lucide text-accent" style="color: var(--accent);"></i>
                                         今日建議
                                     </h3>
                                 </div>
-                                <div class="card-content">
-                                    <div id="today-suggestion-empty" class="text-xs text-center" style="color: var(--muted-foreground);">
-                                        執行回測後將顯示策略的最新操作建議
+                                <div class="card-content pt-0 space-y-4">
+                                    <div id="today-suggestion-empty" class="today-suggestion-empty">
+                                        執行回測後將依最新資料推導今日的操作指引
                                     </div>
-                                    <div id="today-suggestion-body" class="space-y-4 hidden">
+                                    <div id="today-suggestion-body" class="today-suggestion-body hidden">
                                         <div id="today-suggestion-banner" class="today-suggestion-highlight">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <span id="today-suggestion-label" class="text-sm font-semibold" style="color: var(--foreground);">計算中</span>
-                                                <span id="today-suggestion-date" class="text-xs" style="color: var(--muted-foreground);">—</span>
+                                            <div class="today-suggestion-topline">
+                                                <span id="today-suggestion-label" class="today-suggestion-chip">計算中</span>
+                                                <span id="today-suggestion-date" class="today-suggestion-date">—</span>
                                             </div>
-                                            <div id="today-suggestion-price" class="text-xs" style="color: var(--muted-foreground);">—</div>
+                                            <div id="today-suggestion-price" class="today-suggestion-price">—</div>
                                         </div>
-                                        <dl class="today-suggestion-stats grid grid-cols-2 gap-3 text-xs">
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">多單狀態</dt>
-                                                <dd id="today-suggestion-long" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                        <dl class="today-suggestion-stats">
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">多單概況</dt>
+                                                <dd id="today-suggestion-long" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">空單狀態</dt>
-                                                <dd id="today-suggestion-short" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">空單概況</dt>
+                                                <dd id="today-suggestion-short" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">部位概況</dt>
-                                                <dd id="today-suggestion-position" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">整體部位</dt>
+                                                <dd id="today-suggestion-position" class="today-suggestion-stat-value">—</dd>
                                             </div>
-                                            <div>
-                                                <dt class="text-[10px] uppercase tracking-wide" style="color: var(--muted-foreground);">模擬資金</dt>
-                                                <dd id="today-suggestion-portfolio" class="text-sm font-medium" style="color: var(--foreground);">—</dd>
+                                            <div class="today-suggestion-stat">
+                                                <dt class="today-suggestion-stat-label">資產估值</dt>
+                                                <dd id="today-suggestion-portfolio" class="today-suggestion-stat-value">—</dd>
                                             </div>
                                         </dl>
-                                        <ul id="today-suggestion-notes" class="text-[11px] space-y-1 list-disc pl-5" style="color: var(--muted-foreground);"></ul>
+                                        <div id="today-suggestion-notes-container" class="today-suggestion-notes hidden">
+                                            <div class="today-suggestion-notes-title">備註</div>
+                                            <ul id="today-suggestion-notes" class="today-suggestion-notes-list"></ul>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1168,16 +1194,16 @@
                                         </div>
                                         <div id="trend-legend" class="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.45);"></span>
-                                                <span>綠色：起漲區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
+                                                <span>牛市・高波動</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(107, 114, 128, 0.22); border-color: rgba(107, 114, 128, 0.4);"></span>
-                                                <span>灰色：盤整區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.38);"></span>
+                                                <span>盤整區域</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.24); border-color: rgba(239, 68, 68, 0.45);"></span>
-                                                <span>紅色：跌落區段</span>
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
+                                                <span>熊市・高波動</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1190,29 +1216,28 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </h3>
-                                            <span id="trend-version-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--muted-foreground);">LB-TREND-SENSITIVITY-20250823A</span>
                                         </div>
                                         <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
-                                            參考多數量化平台以 20 日淨值斜率搭配波動度評估多空趨勢，並以滑桿調整靈敏度以取得更細緻或更粗獷的分區判斷。
+                                            將價格序列拆成牛市・高波動、熊市・高波動與盤整三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
-                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">趨勢靈敏度</label>
-                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">40</span>
+                                                <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">狀態精細度</label>
+                                                <span id="trendSensitivityValue" class="text-xs font-semibold" style="color: var(--primary);">平均狀態信心：—</span>
                                             </div>
                                             <div class="flex items-center gap-3">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">細</span>
-                                                <input type="range" id="trendSensitivitySlider" min="1" max="100" step="1" value="40" class="flex-1 trend-slider">
-                                                <span class="text-[11px]" style="color: var(--muted-foreground);">粗</span>
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">0 寬鬆</span>
+                                                <input type="range" id="trendSensitivitySlider" min="0" max="10" step="0.1" value="5" class="flex-1 trend-slider">
+                                                <span class="text-[11px]" style="color: var(--muted-foreground);">10 精細</span>
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                依 20 日淨值斜率 ÷ 波動度判別多空趨勢，執行回測後會顯示實際門檻值。
+                                                會依滑桿設定的覆蓋目標自動推算 ADX・布林帶寬・ATR 門檻，並採用 Sigmoid 補償維持高靈敏度時的趨勢覆蓋；同時調整平滑視窗與最小區段長度，確保分類穩定。
                                             </p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示起漲、盤整、跌落區段的複利報酬與覆蓋比例。
+                                            執行回測後會顯示牛市・高波動／盤整／熊市・高波動三態的覆蓋率、複利報酬與 Sigmoid 補償統計。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>

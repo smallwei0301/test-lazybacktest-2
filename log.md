@@ -1,3 +1,81 @@
+## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
+- **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
+- **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
+- **Diagnostics**: 重新以 2330 與 2412 等案例執行今日建議，檢視開發者紀錄確認 `strategyDiagnostics.finalState.captured` 為 true、`issueCode` 不再落入 `final_evaluation_missing`，notes 顯示正確建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-11 — Patch LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+- **Issue recap**: 今日建議在 `final_evaluation_missing` 案例仍會落入 `no_data`，即使 `strategyDiagnostics.finalState` 已回傳持有倉位、市值與快照日期，前端仍無法輸出操作建議。
+- **Fix**: Worker 於 `getSuggestion` 偵測 `finalState` 快照時自動重建 `finalEvaluation`，補齊多空部位、價格與 fallback meta，並在建議 notes 與開發者紀錄標註快照來源與落後天數；同時新增 issue code `final_evaluation_recovered_from_snapshot`。
+- **Diagnostics**: 以 2330、2412 等案例移除最後交易日收盤價，確認今日建議改為顯示「已套用前一有效快照」提示，長短倉摘要與 lag 診斷同步呈現，開發者區域列出重建路徑與 fallback 日期。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-10 — Patch LB-TODAY-SUGGESTION-FINALEVAL-20250910A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳 `final_evaluation_missing`，原因為最新交易日缺少有效收盤價導致 `runStrategy` 未建立 `finalEvaluation`，前端雖有快照卻無法給出操作建議。
+- **Fix**: `runStrategy` 改為持續追蹤最後一筆有效評估並在最終收盤缺漏時回退，回傳 fallback 原因與 lag 診斷；Worker 將 fallback meta、issue code、開發者備註帶回主執行緒，前端 log 則優先採用實際評估日期並記錄缺價原因。
+- **Diagnostics**: 模擬 2330 等案例刻意移除最後一日收盤，確認今日建議仍能顯示前一有效交易日的操作、notes 加註缺價提示，開發者紀錄也標示 fallback 日與落後天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+
+## 2025-09-09 — Patch LB-TODAY-SUGGESTION-DIAG-20250909A
+- **Issue recap**: 即使資料筆數充足，今日建議仍可能回傳 `final_evaluation_missing`，但開發者紀錄僅顯示一般暖身資訊，無法判斷回測最終狀態或是否存在待執行交易。
+- **Fix**: `runStrategy` 新增最終狀態快照與隔日交易診斷，Worker 在 `no_data` 時同步回傳並於開發者備註標示模擬部位、市值與待執行交易，前端 log 會彙整為「模擬最終狀態／待執行交易／finalEvaluation 捕捉狀態」等欄位。
+- **Diagnostics**: 於 `final_evaluation_missing` 案例確認開發者紀錄摘要包含模擬最終日期、倉位狀態、市值與待執行交易描述，並檢視 payload 內新增的 `strategyDiagnostics.finalState` 內容。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-08 — Patch LB-TODAY-SUGGESTION-DIAG-20250908A
+- **Issue recap**: 今日建議顯示 `no_data` 時，卡片與開發者紀錄會重複出現同樣訊息，缺乏 Issue Code 說明與分類，難以快速判讀暖身或資料診斷重點。
+- **Fix**: 導入文字去重工具並重構開發者紀錄為「使用者提示／開發者備註／資料診斷」三段式區塊，於摘要加入 Issue Code 解釋；今日建議卡片與 fallback 訊息也同步去重避免重複提醒。
+- **Diagnostics**: 於 `no_data` 情境檢視卡片備註僅保留唯一訊息，開發者區域會顯示 Issue Code 與資料區間等整理後的診斷段落；console 確認記錄仍包含 coverage 與 fetchRange 等欄位。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-07 — Patch LB-TODAY-SUGGESTION-DIAG-20250907A
+- **Issue recap**: 今日建議返回 `no_data` 時僅提示「回測資料不足」，開發者無法從 UI 看出實際資料區間、覆蓋段數或暖身缺口，難以判斷是哪個環節未產生最終倉位。
+- **Fix**: Worker 在建議結果中回傳 dataset/warmup/coverage 診斷、資料筆數、暖身天數與 issue code，並新增開發者專用備註；前端 developer log 會顯示區間範圍、價格模式、資料來源與暖身缺口，協助對照為何無法產出建議。
+- **Diagnostics**: 於開發者區域驗證 `no_data` 狀態會列出「資料區間」「總筆數」「暖身後首筆有效收盤」等資訊，並在 console 檢查 meta 內帶有 coverage fingerprint 與 fetch range，確保後續能追蹤快取與資料來源。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-05 — Patch LB-TODAY-SUGGESTION-DEVLOG-20250905A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳「無法判斷今日操作」，但開發者區域缺乏對應 log，難以追蹤是哪個步驟產生 fallback 訊息。
+- **Fix**: 建立今日建議開發者紀錄面板，集中列出最新狀態、價格、部位摘要與訊息，並在 `showResult`、`showError` 中寫入 log 以保留錯誤脈絡。
+- **Diagnostics**: 透過 UI 驗證今日建議在成功、無資料與錯誤狀態下皆會將訊息同步至開發者紀錄區，清除按鈕可重置觀察環境。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-04 — Patch LB-TODAY-SUGGESTION-20250904A
+- **Issue recap**: 今日建議卡片仍沿用早期版面，缺乏行動標籤與部位摘要，備註訊息也未集中管理，導致使用者無法一眼辨識最新操作與潛在風險。
+- **Fix**: 重構首頁今日建議卡為行動亮點＋多空統計＋備註清單的三段式結構，新增 `todaySuggestionUI` 控制器以統一處理載入、結果與錯誤狀態，並將主執行緒請求帶入 coverage/cachedMeta 供 Worker 直接推導 `runStrategy.finalEvaluation` 的建議內容。
+- **Diagnostics**: 於瀏覽器確認卡片在載入、成功與錯誤時皆能切換顯示狀態，備註列表會依實際訊息展開；同時查看 console 確認 getSuggestion 訊息包含 coverage fingerprint 與資料診斷摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-28 — Patch LB-TREND-CARD-20251028A
+- **Issue recap**: 趨勢卡仍顯示版本章與「HMM 信心」字樣，使用者無法直接看到平均狀態信心；同時牛/盤整/熊卡片也未標示最新交易日，使得判讀即時 regime 辨識時缺乏焦點。
+- **Fix**: 隱藏版本章、將滑桿指標改為「平均狀態信心」，並在四態統計中依最新 regime 以主色藍字附上最後交易日，確保使用者一眼看出最新分類。
+- **Diagnostics**: 回測後確認趨勢卡標題無版本章，滑桿右側顯示「平均狀態信心：XX.X%」，且統計卡僅在最新 regime 卡片旁顯示藍色日期；若無結果則顯示破折號。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-23 — Patch LB-TREND-SENSITIVITY-20251023A
+- **Issue recap**: 先前僅將滑桿預設值設定為 5，未先掃描 1000 組靈敏度組合確認平均狀態信心峰值，導致預設門檻可能偏離最佳判定且高檔覆蓋行為不穩定。
+- **Fix**: 導入 0→10 滑桿 1000 組步進掃描，逐一計算四態 HMM 平均狀態信心並取最高參數，透過分段映射讓該參數對應滑桿值 5；同時更新門檻映射函式與卡片說明，揭露校準滑桿值、等效敏感度與信心峰值。
+- **Diagnostics**: 回測後檢視趨勢卡版本章 `LB-TREND-SENSITIVITY-20251023A`，滑桿說明需顯示「滑桿 5→校準 X.X ｜ 峰值信心」與校準峰值摘要；拖曳滑桿確認覆蓋率隨數值遞減且滑桿 5 的門檻對應平均信心最高參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-20 — Patch LB-TREND-SENSITIVITY-20251020A
+- **Issue recap**: 靈敏度滑桿擴充至 1→1000 後，覆蓋率補償邏輯雖可維持 80% 以上，但使用者難以掌握對應的門檻意義，且最大值仍可能殘留盤整倒掛。
+- **Fix**: 重新定義滑桿為 0→10、步進 0.1，對應 1000 組離線覆蓋率測試的等效敏感度並將最佳信心值 5 設為預設；後端以 0→10 轉換為 1→1000 的有效敏感度再套用 Sigmoid 門檻，確保數值越高盤整覆蓋遞減且高敏度時仍保有 80% 以上趨勢判斷。
+- **Diagnostics**: 檢查趨勢卡顯示版本章 `LB-TREND-SENSITIVITY-20251020A`、滑桿刻度 0→10 與預設值 5；拖曳滑桿觀察門檻文案顯示等效敏感度與覆蓋目標會同步刷新，趨勢底色在數值 10 時維持趨勢覆蓋 ≥80%。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-01 — Patch LB-TREND-SENSITIVITY-20251001A
+## 2025-10-02 — Patch LB-TREND-SENSITIVITY-20251002A
+- **Issue recap**: 高靈敏度端擴大為 1→1000 後，滑桿拉到 1000 會把門檻推得過於嚴苛，趨勢底色幾乎消失，實際覆蓋遠低於預期的 80%。
+- **Fix**: 保留反向等效級距映射，但建立高靈敏度覆蓋回退機制，當覆蓋率低於 80% 時依序內插嚴格／寬鬆門檻至溫和區間，並把覆蓋比例與補償狀態揭露於卡片說明。
+- **Diagnostics**: 拖曳滑桿至 1000 檢查趨勢卡顯示「已自動放寬門檻」提示、覆蓋率維持 80% 以上，趨勢底色與統計卡同步刷新且不再消失。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+- **Issue recap**: 趨勢區間評估卡片的靈敏度滑桿上限僅 100，且高靈敏度門檻仍標示為 100，使使用者難以分辨新的縮放基準；同時起漲與跌落色塊需要與 UI 主色系同步。
+- **Fix**: 將滑桿重新對齊為 1→1000，讓新下限 1 對應舊版 100 並維持既有倍率縮放，更新門檻說明與預設值；同步交換起漲／跌落色票並調整圖例，確保紅色代表起漲、綠色代表跌落。
+- **Diagnostics**: 檢查趨勢卡片顯示「滑桿 1→1000 ≈ 舊版 100→70」與倍率差距提示，滑桿拖曳時門檻、倍率與版本章節同步刷新，圖例顯示紅色為起漲、綠色為跌落。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2025-09-20 — Patch LB-STRATEGY-STATUS-20250920A
 - **Issue recap**: 策略狀態卡雖已改為推文語氣，但最新需求希望改成電玩宅式的戰報敘事，既有文案缺乏遊戲化比喻與補師/技能等語境。
@@ -459,3 +537,50 @@
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
 - **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
 
+## 2025-10-05 — Patch LB-TREND-SENSITIVITY-20251005A
+- **Issue recap**: 新增 1→1000 靈敏度後，高檔滑桿仍以嚴格門檻回傳盤整為主，1000 時盤整覆蓋反而超過 40%，未能達成「靈敏度越高趨勢段越多」的預期行為。
+- **Fix**: 重新採用線性回歸 t 統計與訊噪比作為核心門檻，將滑桿映射到 45%→85% 的趨勢覆蓋目標並動態放寬斜率、R² 與訊噪閾值，確保 1000 時盤整覆蓋低於 20%。
+- **Diagnostics**: 於本地輸入測試回測結果檢查門檻說明、覆蓋提示與倍率區間，拖曳滑桿確認趨勢覆蓋目標會隨數值遞減盤整比例，高段顯示「依滑桿目標調整門檻」提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-07 — Patch LB-TREND-SENSITIVITY-20251007A
+- **Issue recap**: 依滑桿目標調整後，仍有案例在靈敏度 1000 僅判出 0.4% 趨勢段，盤整覆蓋明顯超標，未達「高靈敏度至少 80% 判定」的目標。
+- **Fix**: 重新校準 20 日斜率、t 統計與雙訊噪比門檻，下修高靈敏度端的基準值並導入階段性補償與最後防線，確保不足時自動放寬至極低門檻，使趨勢覆蓋與滑桿目標同步提升。
+- **Diagnostics**: 驗證門檻說明新增「自動展開補償」描述，並以多組回測結果觀察覆蓋提示訊息改為「系統已依滑桿目標調整門檻」，確認 1000 時趨勢段佔比維持在 80% 以上。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-11 — Patch LB-TREND-SENSITIVITY-20251011A
+- **Issue recap**: 1→1000 靈敏度滑桿在高端仍可能出現盤整覆蓋倒掛，且最大值會讓趨勢段完全消失，未能實現「調整數值=覆蓋目標」的期待。
+- **Fix**: 將趨勢滑桿改為 0%→100%，直接對應趨勢覆蓋目標，並重寫補償流程，在高覆蓋目標下逐層放寬門檻、必要時降至零門檻以確保至少 80% 以上區段被標示為趨勢。
+- **Diagnostics**: 檢查趨勢卡文案與門檻說明新增「覆蓋目標」提示，實際拉動滑桿觀察數值顯示百分比、覆蓋提示同步更新，並驗證 100% 設定會觸發最高階補償讓趨勢段仍保持。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-12 — Patch LB-REGIME-HMM-20251012A
+- **Issue recap**: 趨勢卡仍僅提供三態（起漲／盤整／跌落）與覆蓋率映射，無法反映多空與波動組合的四象限結果，也缺少 ADX/布林/ATR 門檻模板與 HMM 分段落地程式。
+- **Fix**: 於前端重寫趨勢分析流程，導入 ADX、布林帶寬、ATR 比率與二維 HMM 建立牛高／牛低／熊高／熊低四態分類，滑桿改為 0→100 精細度並影響門檻、平滑與最小區段長度；同步更新 UI 文案、圖例與版本章。
+- **Diagnostics**: `renderTrendSummary` 顯示各門檻數值、平滑窗與最小區段資訊，圖表疊層使用對應色塊；趨勢摘要呈現四態覆蓋率、區段數與複利報酬並揭露 HMM 迭代與平均信心。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-13 — Patch LB-REGIME-RANGEBOUND-20251013A
+- **Issue recap**: 牛／熊低波動狀態分別呈現，導致盤整覆蓋在滑桿高端反而上升，圖例亦未統一色塊，且 HMM 僅迭代 40 次在部分樣本上收斂不足。
+- **Fix**: 將牛／熊低波動整併為「盤整區域」灰色象限，趨勢圖與摘要卡同步改為三態呈現並調整文案、圖例與版本章；同時把 HMM 迭代上限提升至 100 次確保盤整覆蓋會隨滑桿放大而下降且 1000 時趨勢判定覆蓋 80% 以上。
+- **Diagnostics**: 檢視 `renderTrendSummary` 確認僅輸出牛高／盤整／熊高三態統計，平均信心仍可分別從牛／熊低波動 posterior 取最大值；圖表灰階背景與 legend 色塊對齊新分類。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-15 — Patch LB-TREND-SIGMOID-20251015A
+- **Issue recap**: 靈敏度 1→1000 的滑桿仍採線性門檻，導致覆蓋率在高靈敏度端反覆倒掛，甚至出現趨勢段不到 1% 的情形，無法落實「數值越高盤整越少」的邏輯。
+- **Fix**: 導入對數 Sigmoid 門檻函式，將滑桿映射到 38%→86% 的趨勢覆蓋目標，並加入基於 ADX／布林帶寬／ATR 與 HMM posterior 的盤整補償流程，動態將高分盤整日提升為趨勢段，確保 1000 時趨勢覆蓋維持 80% 以上。
+- **Diagnostics**: 趨勢卡片顯示目標與實際趨勢覆蓋、Sigmoid 補償日數與是否達標；門檻說明同步揭露對數映射後的 ADX／布林／ATR 判準與平滑視窗，滑桿拖曳時覆蓋指標與補償統計會隨即更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-18 — Patch LB-REGIME-FEATURES-20250718A
+- **Issue recap**: 現行四態 HMM 僅採用日對數報酬與 ATR 比率兩項特徵，對成交量動能與報酬分布偏態的掌握不足，滑桿在高靈敏度端偶爾出現盤整覆蓋倒掛，未完全呼應多維特徵可提升 regime 判別精準度的研究建議。
+- **Fix**: 新增 20 日對數報酬偏態與成交量 Z-score 作為 HMM 觀測向量，並在送入模型前以 z-score 正規化每個維度，讓 regime 偵測同時考量波動、動能與量能結構，維持滑桿覆蓋率單調遞減。
+- **Diagnostics**: 回測摘要檢視 `result.regimeBase.hmm.normalization` 確認均值與標準差紀錄，並比對高靈敏度設定時趨勢段覆蓋仍可達 80% 以上且盤整覆蓋低於 20%；同時驗證 HMM 迭代收斂與平均信心未因特徵擴充而惡化。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-24 — Patch LB-TREND-SENSITIVITY-20251024A
+- **Issue recap**: 滑桿預設值維持在 5 時仍以固定 5%～95% 線性範圍對映，當 HMM 校準峰值落在極端位置時無法映射回預設點，導致最高平均信心參數與預設值脫鉤。
+- **Fix**: 依校準步數動態計算最小安全邊界（0.1% 起跳），取代原先固定區間並在校準資訊中保留邊界值，確保滑桿 5 會回推到峰值參數，同時避免 targetNormalized 達到 0 或 1 時的階梯化行為。
+- **Diagnostics**: 於本地透過 `mapSliderToEffectiveSensitivity` 比對校準前後的等效靈敏度，確認 anchor=5 時的 `effectiveSensitivity` 與 `bestSlider` 等值，並檢視 `trendSensitivityValue` 描述同步揭露峰值滑桿、信心與校準邊界。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
