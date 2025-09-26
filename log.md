@@ -656,3 +656,27 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-12 — Patch LB-QUICK-KEYIN-20251112A
+- **Issue recap**: 首頁「一鍵回測台積電」按鈕文字固定且無輸入提示，使用者難以察覺可替換標的；就算輸入其他名稱也無法同步至代碼欄，回測仍鎖在 2330。
+- **Fix**: 在按鈕內嵌可編輯欄位與閃爍光標，支援即時輸入並透過台股官方清單比對關鍵字，自動更新股票代碼與市場設定；回測進度改以狀態區塊呈現避免破壞可編輯元件，同步新增提示文案。
+- **Diagnostics**: 驗證 `resolveKeywordToStock` 能對照台股清單並回傳市場資訊，`updateHintDisplay` 會顯示最終代碼與名稱；測試清空、中文名稱、台/美股代碼皆能更新 `#stockNo` 並觸發名稱查詢。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-13 — Patch LB-QUICK-KEYIN-20251113A
+- **Issue recap**: 一鍵回測按鈕內的可編輯區域仍偏窄，行動裝置上難以察覺可點擊範圍，亦容易誤觸其他按鈕。
+- **Fix**: 擴大可編輯區最小寬度與高度、補強內距與間距並加入聚焦陰影，確保輸入區塊在桌機與手機皆有明確點擊範圍，同時調整預設標籤間距。
+- **Diagnostics**: 本地檢視首頁 Hero 區塊確認輸入欄位維持底線樣式但寬度顯著放大，聚焦時顯示色塊與陰影提示，光標與提示文案位置穩定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-14 — Patch LB-QUICK-KEYIN-20251114A
+- **Issue recap**: 快捷回測輸入欄的閃爍指示仍位於底線之外，使用者無法直覺理解「台積電」三字可自訂，亦與底線分離造成視覺跳動。
+- **Fix**: 改以可編輯欄位的偽元素呈現插入符號，讓光標緊貼關鍵字結尾並隨聚焦狀態自動隱藏，維持底線整體性且避免額外節點。
+- **Diagnostics**: 在桌機與行動版檢視英雄區，確認未聚焦時插入符號緊貼最後一字且共享底線，聚焦後交還原生輸入游標、失焦時恢復動畫。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-15 — Patch LB-QUICK-KEYIN-20251115A
+- **Issue recap**: 快捷回測預設範例「台積電」與使用者輸入在底線區塊內偏向左側，未能直觀呈現可編輯範圍的中心位置。
+- **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
+- **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
