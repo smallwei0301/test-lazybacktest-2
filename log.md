@@ -1,3 +1,10 @@
+## 2025-11-12 — Patch LB-ICON-A11Y-20251112A
+- **Scope**: 全域圖示設計 token 與互動可及性調整。
+- **Design Tokens**: 新增 `--icon-size-sm/md/lg` 與 `--icon-color`，建立 `.lucide-sm/.lucide-md/.lucide-lg` 統一控管尺寸並維持黑色筆畫。
+- **UI Alignment**: 將功能卡片與進度面板的 Lucide 圖示改用語意化尺寸類別、移除舊有 `w-4 h-4` 與色彩樣式，確保 hover/active 狀態與主題一致。
+- **Accessibility**: 為主要切換按鈕補齊 `aria-label`，所有裝飾性圖示改以 `aria-hidden="true"` 隱藏，保持螢幕閱讀器指引精簡。
+- **Testing**: 手動檢視桌機與行動視窗佈局，確認圖示尺寸、顏色與互動狀態一致，無自動化測試腳本可執行。
+
 ## 2025-11-11 — Patch LB-PRICE-INSPECTOR-20251111A
 - **Issue recap**: 區間價格檢視按鈕搬移到淨值卡片後，打開彈窗時未初始化 `sourceLabel`，在填入價格來源欄位時觸發 `ReferenceError`，導致彈窗仍維持隱藏狀態、使用者看不到表格。
 - **Fix**: 於 `openPriceInspectorModal` 重新導入 `resolvePriceInspectorSourceLabel()` 的結果，確保渲染價格來源欄位時具備預設值，避免錯誤中斷。

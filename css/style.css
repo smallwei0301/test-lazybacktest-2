@@ -1,4 +1,37 @@
 /* --- 自訂 CSS --- */
+.lucide {
+    width: var(--icon-size-md);
+    height: var(--icon-size-md);
+    stroke: currentColor;
+    color: var(--icon-color);
+    vertical-align: middle;
+    transition: color 0.2s ease, stroke-width 0.2s ease;
+}
+
+.lucide-sm {
+    width: var(--icon-size-sm);
+    height: var(--icon-size-sm);
+}
+
+.lucide-md {
+    width: var(--icon-size-md);
+    height: var(--icon-size-md);
+}
+
+.lucide-lg {
+    width: var(--icon-size-lg);
+    height: var(--icon-size-lg);
+}
+
+button .lucide,
+button:focus .lucide,
+button:hover .lucide,
+[role="button"] .lucide,
+.interactive-toggle .lucide {
+    stroke-width: 1.75;
+    color: var(--icon-color);
+}
+
 .tooltip { position: relative; display: inline-block; vertical-align: middle; }
 .tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
