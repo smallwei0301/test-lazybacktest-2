@@ -42,6 +42,8 @@ function getWorkerStrategyName(batchStrategyName) {
     return strategyNameMap[batchStrategyName] || batchStrategyName;
 }
 
+// Patch Tag: LB-BATCH-OPT-CACHE-20250914A — 批量優化改用主回測快取避免重複抓取
+
 // 全局變量
 let batchOptimizationWorker = null;
 let batchOptimizationResults = [];
@@ -49,12 +51,64 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+const BATCH_OPT_CACHE_PATCH_VERSION = 'LB-BATCH-OPT-CACHE-20250914A';
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
     inFlightCount: 0,
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
+
+function buildBatchOptimizationCachedMeta() {
+    try {
+        const diagnostics = (typeof lastDatasetDiagnostics !== 'undefined' && lastDatasetDiagnostics)
+            ? lastDatasetDiagnostics
+            : null;
+        const dataDebug = (typeof lastOverallResult === 'object' && lastOverallResult)
+            ? (lastOverallResult.dataDebug || null)
+            : null;
+
+        let coverage = null;
+        if (typeof computeCoverageFromRows === 'function' && Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+            coverage = computeCoverageFromRows(cachedStockData);
+        } else if (diagnostics && Array.isArray(diagnostics.coverage)) {
+            coverage = diagnostics.coverage;
+        }
+
+        const coverageFingerprint = (typeof computeCoverageFingerprint === 'function' && coverage)
+            ? computeCoverageFingerprint(coverage)
+            : (diagnostics && diagnostics.coverageFingerprint) || null;
+
+        const meta = {
+            summary: dataDebug?.summary || null,
+            adjustments: Array.isArray(dataDebug?.adjustments) ? dataDebug.adjustments : [],
+            debugSteps: Array.isArray(dataDebug?.debugSteps) ? dataDebug.debugSteps : [],
+            adjustmentFallbackApplied: Boolean(dataDebug?.adjustmentFallbackApplied),
+            adjustmentFallbackInfo: dataDebug?.adjustmentFallbackInfo || null,
+            priceSource: dataDebug?.priceSource || null,
+            dataSource: dataDebug?.dataSource || null,
+            splitDiagnostics: dataDebug?.splitDiagnostics || null,
+            finmindStatus: dataDebug?.finmindStatus || null,
+            fetchRange: dataDebug?.fetchRange || null,
+            diagnostics,
+            coverage,
+            coverageFingerprint,
+            patchVersion: BATCH_OPT_CACHE_PATCH_VERSION,
+        };
+
+        if (typeof lastFetchSettings === 'object' && lastFetchSettings) {
+            if (lastFetchSettings.lookbackDays) meta.lookbackDays = lastFetchSettings.lookbackDays;
+            if (lastFetchSettings.dataStartDate) meta.dataStartDate = lastFetchSettings.dataStartDate;
+            if (lastFetchSettings.effectiveStartDate) meta.effectiveStartDate = lastFetchSettings.effectiveStartDate;
+        }
+
+        return meta;
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to build cached meta:', error);
+        return null;
+    }
+}
 
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
@@ -1285,12 +1339,17 @@ async function executeBacktestForCombination(combination) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
-                tempWorker.postMessage({
+                const message = {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData: true,
                     cachedData: cachedStockData
-                });
+                };
+                const cachedMeta = buildBatchOptimizationCachedMeta();
+                if (cachedMeta) {
+                    message.cachedMeta = cachedMeta;
+                }
+                tempWorker.postMessage(message);
 
                 // 設定超時
                 setTimeout(() => {
@@ -2578,11 +2637,20 @@ function performSingleBacktest(params) {
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
             const preparedParams = enrichParamsWithLookback(params);
-            worker.postMessage({
+            const hasCache = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+            const message = {
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: false
-            });
+                useCachedData: hasCache
+            };
+            if (hasCache) {
+                message.cachedData = cachedStockData;
+                const cachedMeta = buildBatchOptimizationCachedMeta();
+                if (cachedMeta) {
+                    message.cachedMeta = cachedMeta;
+                }
+            }
+            worker.postMessage(message);
             
         } catch (error) {
             console.error('[Cross Optimization] Error in performSingleBacktest:', error);
@@ -3679,12 +3747,20 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
-            worker.postMessage({
+            const hasCache = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+            const message = {
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
-            });
+                useCachedData: hasCache
+            };
+            if (hasCache) {
+                message.cachedData = cachedStockData;
+                const cachedMeta = buildBatchOptimizationCachedMeta();
+                if (cachedMeta) {
+                    message.cachedMeta = cachedMeta;
+                }
+            }
+            worker.postMessage(message);
             
         } catch (error) {
             console.error('[Cross Optimization] Error in performSingleBacktestFast:', error);

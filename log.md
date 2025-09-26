@@ -120,6 +120,11 @@
 - **Diagnostics**: 以模擬資料檢查領先、平手、落後、資料缺席與錯誤情境，確認卡片顯示新徽章與條列，落後時強調句會提示開技能補血，敏感度與體檢文案全面換成電玩宅語調。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-09-14 — Patch LB-BATCH-OPT-CACHE-20250914A
+- **Issue recap**: 批量優化與交叉優化階段會為每次回測重新建立 Worker 並強迫抓取遠端資料，導致參數掃描時間暴增且與主回測快取脫鉤。
+- **Fix**: 新增 `buildBatchOptimizationCachedMeta` 將主回測快取與診斷封裝後重複利用，執行單次回測及快速回測改為偵測快取並附帶 `cachedData/cachedMeta`，避免 Worker 再次對 Proxy 發出請求。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/batch-optimization.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-STRATEGY-STATUS-20250915A
 - **Issue recap**: 策略狀態卡文案仍偏向一般說明口吻，與最新要求的 PTT 爆文語氣不符；落後時的強調句與敏感度建議也缺乏推文式調侃提醒。
 - **Fix**: 將狀態卡版本更新為 `LB-STRATEGY-STATUS-20250915A`，重寫預設、載入、領先、平手、落後等狀態標語與子標題為 PTT 口吻，並改寫戰況條列、體檢結論與敏感度建議的文案讓散戶能用爆文語氣快速吸收重點。
