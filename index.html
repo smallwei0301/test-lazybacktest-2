@@ -27,24 +27,25 @@
     <style>
       :root {
         --background: #ffffff;
-        --foreground: #4b5563;
-        --card: #f9fafb;
-        --card-foreground: #374151;
+        --foreground: #1f2937;
+        --neutral: #f3f4f6;
+        --card: var(--neutral);
+        --card-foreground: #1f2937;
         --popover: #ffffff;
-        --popover-foreground: #4b5563;
+        --popover-foreground: #1f2937;
         --primary: #0891b2;
         --primary-foreground: #ffffff;
-        --secondary: #f59e0b;
-        --secondary-foreground: #ffffff;
-        --muted: #b0b0b0;
-        --muted-foreground: #4b5563;
-        --accent: #f59e0b;
+        --secondary: #1f3a5f;
+        --secondary-foreground: #f8fafc;
+        --muted: #e5e7eb;
+        --muted-foreground: #475569;
+        --accent: #c2410c;
         --accent-foreground: #ffffff;
         --destructive: #dc2626;
         --destructive-foreground: #ffffff;
-        --border: #e5e7eb;
+        --border: #cbd5e1;
         --input: #ffffff;
-        --ring: rgba(8, 145, 178, 0.5);
+        --ring: rgba(31, 58, 95, 0.35);
         --radius: 0.5rem;
       }
       
@@ -52,8 +53,8 @@
         background-color: var(--card);
         color: var(--card-foreground);
         border-radius: calc(var(--radius) + 2px);
-        border: 1px solid var(--border);
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        border: 1px solid color-mix(in srgb, var(--secondary) 16%, var(--border));
+        box-shadow: 0 8px 18px 0 rgb(15 23 42 / 0.05);
       }
       
       .card-header {
@@ -99,7 +100,7 @@
       }
       
       .trade-list .trade-signal:hover {
-        background-color: var(--muted);
+        background-color: color-mix(in srgb, var(--neutral) 65%, white);
       }
       
       .trade-list .trade-signal:last-child {
@@ -283,26 +284,48 @@
         color: var(--primary-foreground);
         border: 1px solid var(--primary);
       }
-      
+
       .btn-primary:hover {
-        background-color: color-mix(in srgb, var(--primary) 90%, black);
+        background-color: color-mix(in srgb, var(--primary) 88%, black);
+        border-color: color-mix(in srgb, var(--primary) 70%, black);
       }
-      
+
+      .btn-primary:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--primary) 35%, transparent);
+        outline-offset: 2px;
+      }
+
       .btn-secondary {
         background-color: var(--secondary);
         color: var(--secondary-foreground);
-        border: 1px solid var(--secondary);
+        border: 1px solid color-mix(in srgb, var(--secondary) 80%, black);
       }
-      
+
+      .btn-secondary:hover {
+        background-color: color-mix(in srgb, var(--secondary) 86%, black);
+        border-color: color-mix(in srgb, var(--secondary) 65%, black);
+      }
+
+      .btn-secondary:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--secondary) 40%, transparent);
+        outline-offset: 2px;
+      }
+
       .btn-outline {
         background-color: transparent;
         color: var(--foreground);
-        border: 1px solid var(--border);
+        border: 1px solid color-mix(in srgb, var(--foreground) 18%, var(--border));
       }
-      
+
       .btn-outline:hover {
         background-color: var(--accent);
         color: var(--accent-foreground);
+        border-color: color-mix(in srgb, var(--accent) 78%, black);
+      }
+
+      .btn-outline:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
+        outline-offset: 2px;
       }
       
       .text-primary { color: var(--primary); }
@@ -366,7 +389,7 @@
             </header>
 
             <!-- Main Content -->
-            <main class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
+            <main class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 18%, var(--background)) 0%, color-mix(in srgb, var(--primary) 12%, var(--background)) 48%, color-mix(in srgb, var(--accent) 16%, var(--background)) 100%);">
                 <!-- Hero Section -->
                 <div class="bg-background border-b flex-shrink-0" style="background-color: var(--background); border-color: var(--border);">
                     <div class="container mx-auto px-4 py-12">
@@ -407,14 +430,14 @@
                                     <span id="quickBacktestStatusText" class="hidden items-center gap-2 text-base font-semibold"></span>
                                 </button>
 
-                                <button
-                                    id="developerAreaToggle"
-                                    type="button"
-                                    class="btn-outline px-6 py-4 text-sm font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
-                                    style="color: var(--foreground); border: 1px solid var(--border); background-color: var(--input);"
-                                    aria-expanded="false"
-                                    aria-controls="developerAreaWrapper"
-                                >
+                                  <button
+                                      id="developerAreaToggle"
+                                      type="button"
+                                      class="btn-outline px-6 py-4 text-sm font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
+                                      style="color: var(--foreground); border: 1px solid color-mix(in srgb, var(--foreground) 18%, var(--border)); background-color: var(--input);"
+                                      aria-expanded="false"
+                                      aria-controls="developerAreaWrapper"
+                                  >
                                     <i data-lucide="wrench" class="lucide mr-2"></i>
                                     開發者區域
                                 </button>
@@ -1514,7 +1537,7 @@
                                                     <h5 class="text-md font-semibold text-foreground mb-3" style="color: var(--foreground);">做多策略優化</h5>
                                                     <div class="grid md:grid-cols-3 gap-4">
                                                         <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
-                                                            <button id="optimizeEntryBtn" class="btn-primary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                            <button id="optimizeEntryBtn" class="btn-primary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--primary);">
                                                                 <i data-lucide="settings" class="lucide-sm mr-1"></i>
                                                                 優化進場
                                                             </button>
@@ -1526,7 +1549,7 @@
                                                         </div>
 
                                                         <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
-                                                            <button id="optimizeExitBtn" class="btn-secondary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                            <button id="optimizeExitBtn" class="btn-secondary text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: color-mix(in srgb, var(--secondary) 80%, black);">
                                                                 <i data-lucide="wrench" class="lucide-sm mr-1"></i>
                                                                 優化出場
                                                             </button>
@@ -1538,7 +1561,7 @@
                                                         </div>
 
                                                         <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
-                                                            <button id="optimizeRiskBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                            <button id="optimizeRiskBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: color-mix(in srgb, var(--foreground) 18%, var(--border));">
                                                                 <i data-lucide="sliders-horizontal" class="lucide-sm mr-1"></i>
                                                                 優化風控
                                                             </button>
@@ -1559,7 +1582,7 @@
                                                     <h5 class="text-md font-semibold text-foreground mb-3" style="color: var(--foreground);">做空策略優化</h5>
                                                     <div class="grid md:grid-cols-2 gap-4">
                                                         <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
-                                                            <button id="optimizeShortEntryBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                            <button id="optimizeShortEntryBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: color-mix(in srgb, var(--foreground) 18%, var(--border));">
                                                                 <i data-lucide="trending-down" class="lucide-sm mr-1"></i>
                                                                 優化做空進場
                                                             </button>
@@ -1570,7 +1593,7 @@
                                                             ></select>
                                                         </div>
                                                         <div class="flex items-center border border-border rounded-md" style="border-color: var(--border);">
-                                                            <button id="optimizeShortExitBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: var(--border);">
+                                                            <button id="optimizeShortExitBtn" class="btn-outline text-sm font-medium rounded-l-md px-4 py-2 flex items-center whitespace-nowrap border-r border-border" style="border-color: color-mix(in srgb, var(--foreground) 18%, var(--border));">
                                                                 <i data-lucide="trending-up" class="lucide-sm mr-1"></i>
                                                                 優化回補出場
                                                             </button>
@@ -2577,35 +2600,39 @@
                 button.addEventListener('mouseenter', function() {
                     this.style.backgroundColor = 'var(--accent)';
                     this.style.color = 'var(--accent-foreground)';
-                    this.style.borderColor = 'var(--accent)';
+                    this.style.borderColor = 'color-mix(in srgb, var(--accent) 78%, black)';
                 });
-                
+
                 button.addEventListener('mouseleave', function() {
                     this.style.backgroundColor = 'transparent';
                     this.style.color = 'var(--foreground)';
-                    this.style.borderColor = 'var(--border)';
+                    this.style.borderColor = 'color-mix(in srgb, var(--foreground) 18%, var(--border))';
                 });
             });
             
             // Primary button hover effects
             document.querySelectorAll('.btn-primary').forEach(button => {
                 button.addEventListener('mouseenter', function() {
-                    this.style.backgroundColor = 'color-mix(in srgb, var(--primary) 90%, black)';
+                    this.style.backgroundColor = 'color-mix(in srgb, var(--primary) 88%, black)';
+                    this.style.borderColor = 'color-mix(in srgb, var(--primary) 70%, black)';
                 });
-                
+
                 button.addEventListener('mouseleave', function() {
                     this.style.backgroundColor = 'var(--primary)';
+                    this.style.borderColor = 'var(--primary)';
                 });
             });
             
             // Secondary button hover effects  
             document.querySelectorAll('.btn-secondary').forEach(button => {
                 button.addEventListener('mouseenter', function() {
-                    this.style.backgroundColor = 'color-mix(in srgb, var(--secondary) 90%, black)';
+                    this.style.backgroundColor = 'color-mix(in srgb, var(--secondary) 86%, black)';
+                    this.style.borderColor = 'color-mix(in srgb, var(--secondary) 65%, black)';
                 });
-                
+
                 button.addEventListener('mouseleave', function() {
                     this.style.backgroundColor = 'var(--secondary)';
+                    this.style.borderColor = 'color-mix(in srgb, var(--secondary) 80%, black)';
                 });
             });
             
