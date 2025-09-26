@@ -971,6 +971,463 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250920A';
+
+const STRATEGY_STATUS_CONFIG = {
+    idle: {
+        badgeText: '等待開局',
+        badgeStyle: {
+            backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
+            color: 'var(--muted-foreground)',
+        },
+        title: '戰況房間尚未開啟',
+        subtitle: '回測一跑完就會推送戰術戰報，先在大廳補給一下。',
+    },
+    loading: {
+        badgeText: '戰況載入中',
+        badgeStyle: {
+            backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
+            color: 'var(--accent)',
+        },
+        title: '策略戰況加載進度條...',
+        subtitle: '資料正在背景練等，馬上就能看到策略對上買入持有的實況。',
+    },
+    leading: {
+        badgeText: '策略超神',
+        badgeStyle: {
+            backgroundColor: 'rgba(16, 185, 129, 0.18)',
+            color: 'rgb(5, 122, 85)',
+        },
+        title: '策略暫時打爆買入持有',
+        subtitle: '恭喜這局先搶下 MVP，記得補好防禦別被逆轉。',
+    },
+    tie: {
+        badgeText: '僵持對決',
+        badgeStyle: {
+            backgroundColor: 'rgba(251, 191, 36, 0.18)',
+            color: 'rgb(180, 83, 9)',
+        },
+        title: '策略與買入持有互卡血條',
+        subtitle: '雙方血量貼著走，先看下一波波段再決定要不要衝。',
+    },
+    behind: {
+        badgeText: '策略逆風',
+        badgeStyle: {
+            backgroundColor: 'rgba(248, 113, 113, 0.18)',
+            color: 'rgb(220, 38, 38)',
+        },
+        title: '買入持有暫時壓著打',
+        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。',
+    },
+    missing: {
+        badgeText: '資料載入',
+        badgeStyle: {
+            backgroundColor: 'rgba(148, 163, 184, 0.2)',
+            color: 'rgb(71, 85, 105)',
+        },
+        title: '戰報還在整理',
+        subtitle: '買入持有基準尚未回傳，請先跑完一次回測再回來看戰況。',
+    },
+    error: {
+        badgeText: '戰況當機',
+        badgeStyle: {
+            backgroundColor: 'rgba(248, 113, 113, 0.24)',
+            color: 'rgb(185, 28, 28)',
+        },
+        title: '策略戰況暫停更新',
+        subtitle: '剛剛算戰況時跳出例外，重跑回測或調整參數再挑戰。',
+    },
+};
+
+const strategyStatusElements = (() => {
+    if (typeof document === 'undefined') {
+        return {};
+    }
+    return {
+        card: document.getElementById('strategy-status-card') || null,
+        badge: document.getElementById('strategy-status-badge') || null,
+        diff: document.getElementById('strategy-status-diff') || null,
+        title: document.getElementById('strategy-status-title') || null,
+        subtitle: document.getElementById('strategy-status-subtitle') || null,
+        detail: document.getElementById('strategy-status-detail') || null,
+    };
+})();
+
+function formatPercentSigned(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    const prefix = value >= 0 ? '+' : '';
+    return `${prefix}${value.toFixed(digits)}%`;
+}
+
+function splitSummaryIntoBulletLines(content) {
+    if (!content) return [];
+    if (Array.isArray(content)) {
+        return content.flatMap((item) => splitSummaryIntoBulletLines(item));
+    }
+    if (typeof content === 'string') {
+        return content
+            .split(/\n+/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+    }
+    return [];
+}
+
+function renderStrategyStatusDetail({
+    emphasisedLine = null,
+    bulletLines = [],
+    detailHTML = null,
+    collapsible = false,
+    collapsibleSummary = '展開戰況條列',
+} = {}) {
+    const detailEl = strategyStatusElements.detail;
+    if (!detailEl) return;
+    if (typeof detailHTML === 'string' && detailHTML.length > 0) {
+        detailEl.innerHTML = detailHTML;
+        return;
+    }
+    const lines = splitSummaryIntoBulletLines(bulletLines);
+    const htmlParts = [];
+    if (emphasisedLine) {
+        htmlParts.push(
+            `<p class="text-lg font-semibold leading-relaxed" style="color: var(--foreground);">${escapeHtml(
+                emphasisedLine
+            )}</p>`
+        );
+    }
+    if (lines.length > 0) {
+        const items = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+        if (collapsible) {
+            const summaryLabel = `${collapsibleSummary || '展開戰況條列'}（${lines.length} 則）`;
+            const summaryText = escapeHtml(summaryLabel);
+            htmlParts.push(
+                [
+                    '<details class="mt-2 rounded-md border border-dashed px-3 py-2" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">',
+                    `<summary class="text-xs font-semibold leading-relaxed cursor-pointer" style="color: var(--primary);">${summaryText}</summary>`,
+                    `<ul class="list-disc pl-5 mt-2 space-y-1 text-sm" style="color: var(--muted-foreground);">${items}</ul>`,
+                    '</details>',
+                ].join('')
+            );
+        } else {
+            htmlParts.push(
+                `<ul class="mt-2 list-disc pl-5 space-y-1 text-sm" style="color: var(--muted-foreground);">${items}</ul>`
+            );
+        }
+    }
+    if (htmlParts.length === 0) {
+        htmlParts.push('<p class="text-sm" style="color: var(--muted-foreground);">—</p>');
+    }
+    detailEl.innerHTML = htmlParts.join('');
+}
+
+function applyStrategyStatusState(stateKey, options = {}) {
+    const elements = strategyStatusElements;
+    const config = STRATEGY_STATUS_CONFIG[stateKey] || STRATEGY_STATUS_CONFIG.idle;
+    if (elements.card && STRATEGY_STATUS_VERSION) {
+        elements.card.dataset.lbStrategyStatusVersion = STRATEGY_STATUS_VERSION;
+    }
+    if (elements.badge) {
+        elements.badge.textContent = config.badgeText;
+        elements.badge.style.backgroundColor = config.badgeStyle.backgroundColor;
+        elements.badge.style.color = config.badgeStyle.color;
+    }
+    if (elements.title) {
+        elements.title.textContent = options.titleOverride || config.title;
+    }
+    if (elements.subtitle) {
+        elements.subtitle.textContent = options.subtitleOverride || config.subtitle;
+    }
+    if (elements.diff) {
+        const diffText = typeof options.diffText === 'string' ? options.diffText : '';
+        elements.diff.textContent = diffText;
+        if (typeof elements.diff.classList?.toggle === 'function') {
+            elements.diff.classList.toggle('hidden', diffText.length === 0);
+        } else if (diffText.length === 0) {
+            elements.diff.style.display = 'none';
+        } else {
+            elements.diff.style.display = '';
+        }
+    }
+    renderStrategyStatusDetail(options.detail || {});
+}
+
+function resetStrategyStatusCard(stateKey = 'idle') {
+    if (!strategyStatusElements.card) return;
+    applyStrategyStatusState(stateKey, {
+        detail: {
+            bulletLines: [
+                '等你按下回測鍵，戰況小組就會開串直播策略對決買入持有。',
+                '回測結束後會送上懶人包條列，滑手機也能秒懂重點。',
+            ],
+        },
+    });
+}
+
+function showStrategyStatusLoading() {
+    if (!strategyStatusElements.card) return;
+    applyStrategyStatusState('loading', {
+        detail: {
+            bulletLines: [
+                '策略戰況火速運算中，先泡杯咖啡等資料上線。',
+                '稍後就把策略差距與指標重點用條列送上版面。',
+            ],
+        },
+    });
+}
+
+function buildStrategyComparisonSummary(result) {
+    const strategyReturn = Number.isFinite(result?.returnRate) ? Number(result.returnRate) : null;
+    let buyHoldReturn = null;
+    if (Array.isArray(result?.buyHoldReturns) && result.buyHoldReturns.length > 0) {
+        const last = Number.parseFloat(result.buyHoldReturns[result.buyHoldReturns.length - 1]);
+        if (Number.isFinite(last)) buyHoldReturn = last;
+    } else if (Number.isFinite(result?.buyHoldReturn)) {
+        buyHoldReturn = Number(result.buyHoldReturn);
+    }
+    const diff = Number.isFinite(strategyReturn) && Number.isFinite(buyHoldReturn)
+        ? strategyReturn - buyHoldReturn
+        : null;
+    let line = null;
+    if (Number.isFinite(strategyReturn) && Number.isFinite(buyHoldReturn)) {
+        const diffValue = Number.isFinite(diff) ? diff : 0;
+        const diffText = Math.abs(diffValue).toFixed(2);
+        if (diffValue >= 1.5) {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前領先 ${diffText} 個百分點，這局暫時吃雞但別忘記補裝備。`;
+        } else if (diffValue <= -1.5) {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前落後 ${diffText} 個百分點，被買入持有打成殘血，快調整戰術。`;
+        } else {
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前差距壓在 ${diffText} 個百分點內，雙方血條黏著走先觀察盤勢。`;
+        }
+    }
+    return {
+        strategyReturn,
+        buyHoldReturn,
+        diff,
+        line,
+    };
+}
+
+function buildStrategyHealthSummary(result) {
+    const annualizedReturn = Number.isFinite(result?.annualizedReturn) ? Number(result.annualizedReturn) : null;
+    const sharpe = Number.isFinite(result?.sharpeRatio) ? Number(result.sharpeRatio) : null;
+    const sortino = Number.isFinite(result?.sortinoRatio) ? Number(result.sortinoRatio) : null;
+    const maxDrawdown = Number.isFinite(result?.maxDrawdown) ? Number(result.maxDrawdown) : null;
+    const halfReturn1 = Number.isFinite(result?.annReturnHalf1) ? Number(result.annReturnHalf1) : null;
+    const halfReturn2 = Number.isFinite(result?.annReturnHalf2) ? Number(result.annReturnHalf2) : null;
+    const halfSharpe1 = Number.isFinite(result?.sharpeHalf1) ? Number(result.sharpeHalf1) : null;
+    const halfSharpe2 = Number.isFinite(result?.sharpeHalf2) ? Number(result.sharpeHalf2) : null;
+
+    const returnRatio = Number.isFinite(halfReturn1) && Math.abs(halfReturn1) > 1e-6
+        ? halfReturn2 / halfReturn1
+        : null;
+    const sharpeHalfRatio = Number.isFinite(halfSharpe1) && Math.abs(halfSharpe1) > 1e-6
+        ? halfSharpe2 / halfSharpe1
+        : null;
+
+    const warnings = [];
+    const positives = [];
+
+    if (!Number.isFinite(annualizedReturn)) {
+        warnings.push('年化報酬資料缺席，像副本沒存檔，先確認回測區間有沒有跑滿交易日。');
+    } else if (annualizedReturn >= 12) {
+        positives.push(`年化報酬 ${formatPercentSigned(annualizedReturn, 2)}`);
+    } else {
+        warnings.push(`年化報酬只有 ${formatPercentSigned(annualizedReturn, 2)}，輸出速度像被拖慢的練等，節奏要再加速。`);
+    }
+
+    if (!Number.isFinite(sharpe)) {
+        warnings.push('夏普值缺資料，像團隊沒有補師，暫時看不出風險調整後報酬。');
+    } else if (sharpe >= 1) {
+        positives.push(`夏普值 ${sharpe.toFixed(2)}`);
+    } else {
+        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬像狂按換線，請先把防禦裝備穿好。`);
+    }
+
+    if (!Number.isFinite(sortino)) {
+        warnings.push('索提諾比率缺資料，像副本沒有仇恨條，無法判斷下檔風險。');
+    } else if (sortino >= 1) {
+        positives.push(`索提諾比率 ${sortino.toFixed(2)}`);
+    } else {
+        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，遇到回檔可能直接被打斷連段，記得留好防守技能。`);
+    }
+
+    if (!Number.isFinite(maxDrawdown)) {
+        warnings.push('最大回撤資料缺漏，像戰報沒錄影，請再檢查結果。');
+    } else if (maxDrawdown <= 15) {
+        positives.push(`最大回撤僅 ${maxDrawdown.toFixed(2)}%`);
+    } else {
+        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，一旦回檔就會掉裝備，資金控管務必先排好。`);
+    }
+
+    if (Number.isFinite(returnRatio)) {
+        if (returnRatio >= 0.5 && returnRatio <= 1.5) {
+            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，節奏穩得像自動掛機。`);
+        } else {
+            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，不同場景就卡手，記得多做滾動驗證免得翻車。`);
+        }
+    }
+
+    if (Number.isFinite(sharpeHalfRatio)) {
+        if (sharpeHalfRatio >= 0.5 && sharpeHalfRatio <= 1.5) {
+            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，體感穩如常駐 buff。`);
+        } else {
+            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，驗證樣本要再補一輪。`);
+        }
+    }
+
+    const warningLines = warnings.slice();
+    if (warningLines.length > 0) {
+        warningLines[0] = warningLines[0].startsWith('指標巡檢：')
+            ? warningLines[0]
+            : `指標巡檢：${warningLines[0]}`;
+    }
+
+    const allGood = warningLines.length === 0 && positives.length > 0;
+
+    let positiveLine = null;
+    if (positives.length > 0) {
+        const unique = Array.from(new Set(positives));
+        if (allGood) {
+            positiveLine = `體檢結論：${unique.join('、')} 全面滿 Buff，策略狀態神勇請維持輸出。`;
+        } else {
+            positiveLine = `${unique.join('、')} 表現還算有料，記得顧好核心裝備並調整倉位避免被反打。`;
+        }
+    }
+
+    return {
+        warningLines,
+        positiveLine,
+        allGood,
+    };
+}
+
+function buildSensitivityScoreAdvice(result) {
+    const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+    const summary = data?.summary || null;
+    if (!summary) {
+        return null;
+    }
+
+    const rawScore = Number.isFinite(summary.stabilityScore) ? Number(summary.stabilityScore) : null;
+    const averageDrift = Number.isFinite(summary.averageDriftPercent)
+        ? Math.abs(Number(summary.averageDriftPercent))
+        : null;
+    const positiveDrift = Number.isFinite(summary.positiveDriftPercent)
+        ? Math.abs(Number(summary.positiveDriftPercent))
+        : null;
+    const negativeDrift = Number.isFinite(summary.negativeDriftPercent)
+        ? Math.abs(Number(summary.negativeDriftPercent))
+        : null;
+    const sampleCount = Number.isFinite(summary.scenarioCount) ? Number(summary.scenarioCount) : null;
+
+    const segments = [];
+
+    if (rawScore === null) {
+        segments.push('敏感度總分失聯，像存檔壞軌，請重跑擾動測試確認穩定度');
+    } else if (rawScore >= 70) {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，參數調校像滿級裝備`);
+    } else if (rawScore >= 40) {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調參時請像打副本一樣小心`);
+    } else {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超敏感，碰一下就暴擊先開保護`);
+    }
+
+    if (averageDrift !== null) {
+        if (averageDrift <= 20) {
+            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
+        } else if (averageDrift <= 40) {
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
+        } else {
+            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
+        }
+    }
+
+    if (positiveDrift !== null || negativeDrift !== null) {
+        const positiveValue = positiveDrift ?? -Infinity;
+        const negativeValue = negativeDrift ?? -Infinity;
+        const dominantDirection = positiveValue >= negativeValue ? '調高' : '調低';
+        const dominantMagnitude = dominantDirection === '調高' ? positiveDrift : negativeDrift;
+        const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
+        if (Number.isFinite(dominantMagnitude)) {
+            if (dominantMagnitude > 15) {
+                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
+            } else if (dominantMagnitude > 10) {
+                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
+            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
+                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+            } else {
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
+            }
+        }
+    }
+
+    if (sampleCount !== null) {
+        segments.push(`擾動樣本 ${sampleCount} 組，資料量夠組團分析`);
+    }
+
+    if (segments.length === 0) {
+        return null;
+    }
+
+    return `${segments.join('，')}。`;
+}
+
+function determineStrategyStatusState(diff, comparisonAvailable) {
+    if (!comparisonAvailable) {
+        return 'missing';
+    }
+    if (!Number.isFinite(diff)) {
+        return 'missing';
+    }
+    if (Math.abs(diff) < 1.5) {
+        return 'tie';
+    }
+    if (diff >= 1.5) {
+        return 'leading';
+    }
+    return 'behind';
+}
+
+function updateStrategyStatusCard(result) {
+    if (!strategyStatusElements.card) return;
+    const comparison = buildStrategyComparisonSummary(result || {});
+    const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
+    const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
+    const diffText = '';
+    const health = buildStrategyHealthSummary(result || {});
+    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {});
+
+    const detailLines = [];
+    if (comparison.line) {
+        detailLines.push(comparison.line);
+    }
+    if (Array.isArray(health.warningLines) && health.warningLines.length > 0) {
+        detailLines.push(...health.warningLines);
+    }
+    if (sensitivityAdvice) {
+        detailLines.push(sensitivityAdvice);
+    }
+    if (health.positiveLine) {
+        detailLines.push(health.positiveLine);
+    }
+
+    const emphasisedLine = state === 'behind'
+        ? '召喚增援！策略被買入持有打出暈眩，快開優化與風控技能補血。'
+        : null;
+
+    applyStrategyStatusState(state, {
+        diffText,
+        detail: {
+            emphasisedLine,
+            bulletLines: detailLines,
+            collapsible: detailLines.length > 0,
+            collapsibleSummary: '展開完整戰況條列',
+        },
+    });
+}
+
+resetStrategyStatusCard();
+
 const YEAR_STORAGE_VERSION = 'LB-CACHE-TIER-20250720A';
 const YEAR_STORAGE_PREFIX = 'LB_YEAR_DATA_CACHE_V20250720A';
 const YEAR_STORAGE_TW_TTL_MS = 1000 * 60 * 60 * 24 * 3;
@@ -3863,7 +4320,7 @@ function ensureDatasetCacheEntryFresh(cacheKey, entry, market) {
 // --- 主回測函數 ---
 function runBacktestInternal() {
     console.log("[Main] runBacktestInternal called");
-    if (!workerUrl) { showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); hideLoading(); return; }
+    if (!workerUrl) { showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); hideLoading(); resetStrategyStatusCard('error'); return; }
     try {
         const params=getBacktestParams();
         console.log("[Main] Params:", params);
@@ -3977,6 +4434,7 @@ function runBacktestInternal() {
         }
         const msg=useCache?"⌛ 使用快取執行回測...":"⌛ 獲取數據並回測...";
         showLoading(msg);
+        showStrategyStatusLoading();
         if (useCache && cachedEntry && Array.isArray(cachedEntry.data)) {
             const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(
                 cachedEntry.fetchDiagnostics || null,
@@ -4322,6 +4780,7 @@ function runBacktestInternal() {
                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
             } else if(type==='error'){
                 showError(data?.message||'回測過程錯誤');
+                resetStrategyStatusCard('error');
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
                 if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
@@ -4332,6 +4791,7 @@ function runBacktestInternal() {
 
         backtestWorker.onerror=e=>{
              showError(`Worker錯誤: ${e.message}`); console.error("[Main] Worker Error:",e);
+             resetStrategyStatusCard('error');
              if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
              hideLoading();
              const suggestionArea = document.getElementById('today-suggestion-area');
@@ -5437,23 +5897,26 @@ function handleBacktestResult(result, stockName, dataSource) {
     } catch (error) {
          console.error("[Main] Error processing backtest result:", error);
          showError(`處理回測結果時發生錯誤: ${error.message}`);
+         resetStrategyStatusCard('error');
          if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
-function displayBacktestResult(result) { 
-    console.log("[Main] displayBacktestResult called."); 
+function displayBacktestResult(result) {
+    console.log("[Main] displayBacktestResult called.");
     const el = document.getElementById("backtest-result");
     if (!el) {
         console.error("[Main] Element 'backtest-result' not found");
         return;
     }
-    
-    if (!result) { 
-        el.innerHTML = `<p class="text-gray-500">無效結果</p>`; 
-        return; 
-    } 
+
+    if (!result) {
+        resetStrategyStatusCard('missing');
+        el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
+        return;
+    }
+    updateStrategyStatusCard(result);
     const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
