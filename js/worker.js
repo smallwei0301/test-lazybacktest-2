@@ -8875,6 +8875,8 @@ function formatAbsoluteLabel(value) {
   return Number(value.toFixed(2)).toString();
 }
 
+const WORKER_OPTIMIZATION_REUSE_VERSION = "LB-PARAM-OPT-20250709A";
+
 // --- 參數優化邏輯 ---
 async function runOptimization(
   baseParams,
@@ -8883,6 +8885,7 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
+  cachedMeta,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -8899,70 +8902,45 @@ async function runOptimization(
     message: `開始優化 ${targetLbl}策略 ${optParamName}...`,
   });
   const results = [];
-  let stockData = null;
-  let dataFetched = false;
 
-  // Data acquisition policy:
-  // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
-  // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
-  if (useCache) {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
+  if (!useCache) {
+    console.warn(
+      `[Worker Opt][${WORKER_OPTIMIZATION_REUSE_VERSION}] 收到 useCache=false，但依照政策仍僅使用既有資料執行優化。`,
+    );
+  }
+
+  const normalisedBase = JSON.parse(JSON.stringify(baseParams || {}));
+  if (cachedMeta) {
+    if (
+      cachedMeta.effectiveStartDate &&
+      !normalisedBase.effectiveStartDate
     ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      throw new Error(
-        "優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。",
-      );
+      normalisedBase.effectiveStartDate = cachedMeta.effectiveStartDate;
     }
-  } else {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      const fetched = await fetchStockData(
-        baseParams.stockNo,
-        optDataStart,
-        baseParams.endDate,
-        baseParams.marketType || baseParams.market || "TWSE",
-        {
-          adjusted: baseParams.adjustedPrice,
-          splitAdjustment: baseParams.splitAdjustment,
-          effectiveStartDate: optEffectiveStart,
-          lookbackDays: optLookback,
-        },
-      );
-      stockData = fetched?.data || [];
-      dataFetched = true;
-      if (!Array.isArray(stockData) || stockData.length === 0)
-        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
-        type: "progress",
-        progress: 50,
-        message: "數據獲取完成，開始優化...",
-      });
+    if (cachedMeta.lookbackDays && !normalisedBase.lookbackDays) {
+      normalisedBase.lookbackDays = cachedMeta.lookbackDays;
+    }
+    if (cachedMeta.fetchRange?.start && !normalisedBase.dataStartDate) {
+      normalisedBase.dataStartDate = cachedMeta.fetchRange.start;
     }
   }
 
-  if (!stockData) {
-    throw new Error("優化失敗：無可用數據");
+  const stockData = Array.isArray(cachedData) && cachedData.length > 0
+    ? cachedData
+    : Array.isArray(workerLastDataset) && workerLastDataset.length > 0
+      ? workerLastDataset
+      : null;
+
+  if (!Array.isArray(stockData) || stockData.length === 0) {
+    throw new Error(
+      "優化失敗：缺少最近回測資料，請先於主畫面完成回測後再進行參數優化。",
+    );
   }
+
+  workerLastDataset = stockData;
+  console.log(
+    `[Worker Opt][${WORKER_OPTIMIZATION_REUSE_VERSION}] 使用 ${stockData.length} 筆回測資料進行參數優化。`,
+  );
 
   const range = optRange || { from: 1, to: 20, step: 1 };
   const totalSteps = Math.max(
@@ -8980,7 +8958,7 @@ async function runOptimization(
       progress: Math.min(100, prog),
       message: `測試 ${optParamName}=${curVal}`,
     });
-    const testParams = JSON.parse(JSON.stringify(baseParams));
+    const testParams = JSON.parse(JSON.stringify(normalisedBase));
     if (optimizeTargetStrategy === "risk") {
       if (optParamName === "stopLoss" || optParamName === "takeProfit") {
         testParams[optParamName] = curVal;
@@ -9064,7 +9042,7 @@ async function runOptimization(
     return sB - sA;
   });
   self.postMessage({ type: "progress", progress: 100, message: "優化完成" });
-  return { results: results, rawDataUsed: dataFetched ? stockData : null };
+  return { results, datasetVersion: WORKER_OPTIMIZATION_REUSE_VERSION };
 }
 
 // --- Worker 消息處理 ---
@@ -9489,6 +9467,7 @@ self.onmessage = async function (e) {
         optimizeRange,
         useCachedData,
         cachedData || workerLastDataset,
+        cachedMeta || workerLastMeta || null,
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
