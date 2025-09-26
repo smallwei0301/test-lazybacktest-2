@@ -1,3 +1,40 @@
+## 2025-11-10 — Patch LB-TREND-STATE-20251110A
+- **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
+- **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-07 — Patch LB-UI-SUMMARY-TREND-20251107A
+- **Scope**: 基本設定介面、今日建議訊息與趨勢／敏感度資訊層同步優化。
+- **Basic Settings**: 重新配置股票代碼與市場下拉寬度，更新文案為「台灣/美國股票代碼 (目前無提供指數)」，避免窄螢幕時的選單重疊。
+- **Today Suggestion**: 資料落後天數改附註於日期後方，取消備註區的重複提醒，並調整續抱文案為「請持續來本站追蹤」。
+- **Trend Overlay**: 趨勢底色與圖例僅在趨勢區間評估展開時顯示，新增水平捲動支援與摺疊對稱間距。
+- **Sensitivity Analysis**: 將「如何解讀敏感度結果」移入摺疊內容，調整偏移方向說明文字並維持表格預設收合。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-06 — Patch LB-UI-TODAY-TREND-20251106A
+- **Scope**: 今日建議資訊層與趨勢圖例互動調整，優化行動訊息展示與小螢幕可讀性。
+- **Today Suggestion**:
+  - 改為以重點訊息填入原本價格欄位，保留第一則備註作為主體文案並同步寫入開發者紀錄。
+  - 調整 UI 控制，部位概況與錯誤時的提示仍預設折疊，載入狀態改顯示文字提醒；開發者紀錄摘要改以 highlight 訊息為主。
+- **Charts & Trend**:
+  - 趨勢區間評估按鈕將圓形「＋」指示器搬到標題前並新增狀態文字，僅在展開時顯示趨勢圖例且支援橫向捲動並排顯示於窄螢幕。
+- **Developer Tools**:
+  - 今日建議開發者 log 更新摘要欄位，優先顯示主體訊息並沿用 highlight 值於詳情段落。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-30 — Patch LB-UI-REFRESH-20251030A
+- **Scope**: 主頁版面與診斷工具整體調整，強化敏感度與今日建議的可讀性與互動設計。
+- **UI**:
+  - 策略戰報卡移至淨值曲線圖上方，並更新導引文案提醒使用者回測完成後優先查看戰報。
+  - 今日建議改為以備註摘要取代價格文字，新增部位概況摺疊按鈕並預設收合，同時讓今日建議記錄面板改為預設摺疊。
+  - 將區間價格檢視按鈕搬移至淨值卡片下方；市場下拉選單移除英文代碼；資料來源資訊改至開發者區塊顯示。
+- **Charts & Analytics**:
+  - 趨勢區間評估卡改為「＋」圓形按鈕控制的摺疊模式，開啟時同步顯示淨值底色圖例；淨值圖例支援小螢幕並僅在趨勢卡展開時顯示。
+  - 敏感度分析在「如何解讀」段落後新增摺疊控制，預設收合所有表格內容。
+- **Diagnostics**:
+  - Blob 監控新增寫入摘要卡，揭露本月寫入次數與最近寫入事件；資料來源卡支援顯示主來源與命中資訊。
+- **Testing**: `node - <<'NODE' ...` 檢查主要腳本語法無誤（同既有回歸命令）。
+
 ## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
 - **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
 - **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
@@ -583,4 +620,22 @@
 - **Issue recap**: 滑桿預設值維持在 5 時仍以固定 5%～95% 線性範圍對映，當 HMM 校準峰值落在極端位置時無法映射回預設點，導致最高平均信心參數與預設值脫鉤。
 - **Fix**: 依校準步數動態計算最小安全邊界（0.1% 起跳），取代原先固定區間並在校準資訊中保留邊界值，確保滑桿 5 會回推到峰值參數，同時避免 targetNormalized 達到 0 或 1 時的階梯化行為。
 - **Diagnostics**: 於本地透過 `mapSliderToEffectiveSensitivity` 比對校準前後的等效靈敏度，確認 anchor=5 時的 `effectiveSensitivity` 與 `bestSlider` 等值，並檢視 `trendSensitivityValue` 描述同步揭露峰值滑桿、信心與校準邊界。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-08 — Patch LB-UI-STRATEGY-TREND-20251108A
+- **Issue recap**: 策略戰況逆風狀態的激勵句與風控提醒分離呈現，字重落差造成閱讀中斷；趨勢卡滑桿標籤與門檻說明未符合最新 UX 要求；敏感度摘要在行動裝置仍為單欄排列且 tooltip 與標題分離，易造成資訊負擔。
+- **Fix**: 將逆風提醒併入副標維持同一字型層級；滑桿標籤改為「0 精細／10 寬鬆」並隱藏門檻解說段落；敏感度卡預設雙欄起跳並調整穩定度分數 tooltip 與標題並排，維持小螢幕可掃描性。
+- **Diagnostics**: 本地檢視摘要頁確認戰況卡副標連貫呈現無額外段落；趨勢區間折疊後不再顯示詳細門檻字串；縮小視窗觀察敏感度四卡維持兩欄排列且 tooltip 位置緊貼標題。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-09 — Patch LB-UI-SUMMARY-FOCUS-20251109A
+- **Issue recap**: 回測重跑同參數時趨勢區間卡出現空白統計、摘要仍預設捲至淨值圖；敏感度摘要文案過度數字化且重複提示佔版；價格檢視工具在主畫面露出多餘資料來源字串。
+- **Fix**: 重新初始化趨勢底層資料並在回測完成後自動聚焦戰況卡，同步重置滑桿；調整敏感度摘要為置中佈局、將 ±10pp 文案移入 tooltip 並改以語句式提醒；移除查看區間價格的來源尾註。
+- **Diagnostics**: 多次以相同標的重跑確認趨勢信心與底色維持輸出；檢視敏感度卡僅顯示一句摘要且 tooltip 提供補充；查看區間價格文字僅留筆數與模式資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-10 — Patch LB-TREND-CALIBRATION-20251110A
+- **Issue recap**: 相同參數重跑回測時，趨勢區間滑桿的預設值 5 可能不再對應首次回測找到的最高平均狀態信心，重開回測後需要手動調整滑桿才能回到最佳點。
+- **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
+- **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

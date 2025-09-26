@@ -9934,7 +9934,7 @@ self.onmessage = async function (e) {
           notes.push("策略建議回補空單，請同步檢查借券成本。");
           break;
         case "hold_long":
-          notes.push("今日未觸發出場訊號，請持續追蹤停損與停利條件。");
+          notes.push("今日未觸發出場訊號，請持續來本站追蹤。");
           break;
         case "hold_short":
           notes.push("今日未觸發回補訊號，請注意市場波動與保證金需求。");
@@ -9944,7 +9944,7 @@ self.onmessage = async function (e) {
           break;
       }
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
-        notes.push(`最新資料為 ${displayLatestDate}，距今日 ${dataLagDays} 日。`);
+        developerNotes.push(`最新資料為 ${displayLatestDate}，距今日 ${dataLagDays} 日。`);
       }
       if (
         params.endDate &&

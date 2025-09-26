@@ -30,6 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('DOMContentLoaded', () => {
     renderBlobUsageCard();
+    initTrendAnalysisToggle();
+    updateDataSourceDisplay(null, null);
 });
 
 let lastPriceDebug = {
@@ -81,6 +83,10 @@ const todaySuggestionDeveloperLog = (() => {
     const entries = [];
     let container = null;
     let clearBtn = null;
+    let panel = null;
+    let toggleBtn = null;
+    let toggleLabel = null;
+    let panelExpanded = false;
     let initialised = false;
 
     const severityClassMap = {
@@ -120,16 +126,45 @@ const todaySuggestionDeveloperLog = (() => {
         return `Issue Code：${code}`;
     }
 
+    function setPanelExpanded(open) {
+        panelExpanded = Boolean(open);
+        if (panel) {
+            panel.classList.toggle('hidden', !panelExpanded);
+            panel.setAttribute('aria-hidden', panelExpanded ? 'false' : 'true');
+        }
+        if (toggleBtn) {
+            toggleBtn.setAttribute('aria-expanded', panelExpanded ? 'true' : 'false');
+        }
+        if (toggleLabel) {
+            toggleLabel.textContent = panelExpanded ? '收合' : '展開';
+        }
+        if (toggleBtn) {
+            const indicator = toggleBtn.querySelector('.toggle-indicator');
+            if (indicator) {
+                indicator.textContent = panelExpanded ? '－' : '＋';
+            }
+        }
+    }
+
     function ensureElements() {
         if (initialised) return;
         container = document.getElementById('today-suggestion-log-body');
         clearBtn = document.getElementById('todaySuggestionLogClear');
+        panel = document.getElementById('todaySuggestionLogPanel');
+        toggleBtn = document.getElementById('todaySuggestionLogToggle');
+        toggleLabel = toggleBtn ? toggleBtn.querySelector('.toggle-label') : null;
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
                 entries.length = 0;
                 renderEntries();
             });
         }
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                setPanelExpanded(!panelExpanded);
+            });
+        }
+        setPanelExpanded(false);
         initialised = true;
     }
 
@@ -208,8 +243,9 @@ const todaySuggestionDeveloperLog = (() => {
         if (latestDate) {
             parts.push(`最新 ${latestDate}`);
         }
-        if (entry?.meta?.priceText) {
-            parts.push(entry.meta.priceText);
+        const highlight = entry?.meta?.highlightMessage || entry?.meta?.priceText;
+        if (highlight) {
+            parts.push(highlight);
         }
         const datasetRange = entry?.meta?.datasetRange;
         if (datasetRange) {
@@ -514,13 +550,17 @@ const todaySuggestionUI = (() => {
     const banner = document.getElementById('today-suggestion-banner');
     const labelEl = document.getElementById('today-suggestion-label');
     const dateEl = document.getElementById('today-suggestion-date');
-    const priceEl = document.getElementById('today-suggestion-price');
+    const messageEl = document.getElementById('today-suggestion-message');
     const longEl = document.getElementById('today-suggestion-long');
     const shortEl = document.getElementById('today-suggestion-short');
     const positionEl = document.getElementById('today-suggestion-position');
     const portfolioEl = document.getElementById('today-suggestion-portfolio');
     const notesEl = document.getElementById('today-suggestion-notes');
     const notesContainer = document.getElementById('today-suggestion-notes-container');
+    const statsWrapper = document.getElementById('today-suggestion-stats-wrapper');
+    const statsToggle = document.getElementById('today-suggestion-stats-toggle');
+    const statsToggleLabel = statsToggle ? statsToggle.querySelector('.toggle-label') : null;
+    const statsControls = document.getElementById('today-suggestion-controls');
     const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
     const numberFormatter = typeof Intl !== 'undefined'
         ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
@@ -544,6 +584,44 @@ const todaySuggestionUI = (() => {
         high: '最高',
         low: '最低',
     };
+
+    let statsExpanded = false;
+
+    function setStatsExpanded(open) {
+        statsExpanded = Boolean(open);
+        if (statsWrapper) {
+            statsWrapper.classList.toggle('hidden', !statsExpanded);
+            statsWrapper.setAttribute('aria-hidden', statsExpanded ? 'false' : 'true');
+        }
+        if (statsToggle) {
+            statsToggle.setAttribute('aria-expanded', statsExpanded ? 'true' : 'false');
+            const indicator = statsToggle.querySelector('.toggle-indicator');
+            if (indicator) {
+                indicator.textContent = statsExpanded ? '－' : '＋';
+            }
+        }
+        if (statsToggleLabel) {
+            statsToggleLabel.textContent = statsExpanded ? '收合部位概況' : '展開部位概況';
+        }
+    }
+
+    function setStatsControlsVisible(visible) {
+        if (statsControls) {
+            statsControls.classList.toggle('hidden', !visible);
+        }
+        if (statsToggle) {
+            statsToggle.disabled = !visible;
+        }
+        if (!visible) {
+            setStatsExpanded(false);
+        }
+    }
+
+    if (statsToggle) {
+        statsToggle.addEventListener('click', () => {
+            setStatsExpanded(!statsExpanded);
+        });
+    }
 
     function ensureAreaVisible() {
         if (area) area.classList.remove('hidden');
@@ -607,10 +685,18 @@ const todaySuggestionUI = (() => {
         return parts.join('，');
     }
 
-    function setNotes(notes) {
+    function setNotes(notes, options = {}) {
         if (!notesEl) return;
         notesEl.innerHTML = '';
-        const dedupedNotes = dedupeTextList(Array.isArray(notes) ? notes : []);
+        const source = Array.isArray(notes) ? notes : [];
+        const dedupedNotes = options.skipDedup
+            ? source
+                .map((note) => {
+                    if (note === null || note === undefined) return '';
+                    return typeof note === 'string' ? note.trim() : String(note).trim();
+                })
+                .filter((note) => note.length > 0)
+            : dedupeTextList(source);
         if (dedupedNotes.length === 0) {
             notesEl.style.display = 'none';
             if (notesContainer) notesContainer.classList.add('hidden');
@@ -627,13 +713,22 @@ const todaySuggestionUI = (() => {
     }
 
     function applyResultPayload(payload) {
-        const priceText = payload.price?.text
-            || formatPriceValue(payload.price?.value, payload.price?.type)
-            || payload.message
-            || '—';
+        setStatsExpanded(false);
+        const statusKey = (payload.status || 'ok').toString().toLowerCase();
+        const dedupedNotes = dedupeTextList(Array.isArray(payload.notes) ? payload.notes : []);
+        const highlightText = dedupedNotes.length > 0
+            ? dedupedNotes[0]
+            : (payload.message || '—');
         setText(labelEl, payload.label || '—');
-        setText(dateEl, payload.latestDate || '—');
-        setText(priceEl, priceText);
+        const lagDays = Number.isFinite(payload.dataLagDays) ? payload.dataLagDays : null;
+        let dateText = payload.latestDate || '';
+        if (lagDays !== null && lagDays > 0) {
+            const dayLabel = lagDays === 1 ? '距今日 1 日' : `距今日 ${lagDays} 日`;
+            dateText = dateText ? `${dateText}（${dayLabel}）` : dayLabel;
+        }
+        setText(dateEl, dateText || '—');
+        setText(messageEl, highlightText || '—');
+        payload.highlightMessage = highlightText;
         setText(longEl, describePosition(payload.longPosition));
         setText(shortEl, describePosition(payload.shortPosition));
         setText(positionEl, payload.positionSummary || '—');
@@ -641,8 +736,11 @@ const todaySuggestionUI = (() => {
             const portfolioText = formatCurrency(payload.evaluation?.portfolioValue);
             setText(portfolioEl, portfolioText || '—');
         }
-        setNotes(payload.notes);
+        setNotes(dedupedNotes.slice(1), { skipDedup: true });
+        setStatsControlsVisible(statusKey === 'ok');
     }
+
+    setStatsControlsVisible(false);
 
     return {
         reset() {
@@ -652,12 +750,13 @@ const todaySuggestionUI = (() => {
             setTone('neutral');
             setText(labelEl, '尚未取得建議');
             setText(dateEl, '—');
-            setText(priceEl, '—');
+            setText(messageEl, '—');
             setText(longEl, '—');
             setText(shortEl, '—');
             setText(positionEl, '—');
             if (portfolioEl) setText(portfolioEl, '—');
             setNotes([]);
+            setStatsControlsVisible(false);
         },
         showLoading() {
             if (!area) return;
@@ -666,12 +765,13 @@ const todaySuggestionUI = (() => {
             setTone('info');
             setText(labelEl, '計算今日建議中...');
             setText(dateEl, '—');
-            setText(priceEl, '資料計算中，請稍候');
+            setText(messageEl, '資料計算中，請稍候');
             setText(longEl, '—');
             setText(shortEl, '—');
             setText(positionEl, '—');
             if (portfolioEl) setText(portfolioEl, '—');
             setNotes([]);
+            setStatsControlsVisible(false);
         },
         showResult(payload = {}) {
             if (!area) return;
@@ -703,13 +803,15 @@ const todaySuggestionUI = (() => {
             setTone(tone);
             applyResultPayload(displayPayload);
             if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
-                const priceText = displayPayload.price?.text
-                    || formatPriceValue(displayPayload.price?.value, displayPayload.price?.type)
+                const highlightMessage = displayPayload.highlightMessage
                     || displayPayload.message
+                    || displayPayload.price?.text
+                    || formatPriceValue(displayPayload.price?.value, displayPayload.price?.type)
                     || '—';
                 const meta = {
                     status,
-                    priceText,
+                    highlightMessage,
+                    priceText: highlightMessage,
                     longText: describePosition(displayPayload.longPosition),
                     shortText: describePosition(displayPayload.shortPosition),
                     positionSummary: displayPayload.positionSummary || '—',
@@ -937,9 +1039,14 @@ const todaySuggestionUI = (() => {
             };
             applyResultPayload(displayPayload);
             if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
+                const highlightMessage = displayPayload.highlightMessage
+                    || displayPayload.message
+                    || displayPayload.price?.text
+                    || '—';
                 window.lazybacktestTodaySuggestionLog.record('error', displayPayload, {
                     status: 'error',
-                    priceText: displayPayload.price?.text || '—',
+                    highlightMessage,
+                    priceText: highlightMessage,
                     longText: describePosition(displayPayload.longPosition),
                     shortText: describePosition(displayPayload.shortPosition),
                     positionSummary: displayPayload.positionSummary || '—',
@@ -951,6 +1058,7 @@ const todaySuggestionUI = (() => {
             ensureAreaVisible();
             showPlaceholderContent();
             setNotes([]);
+            setStatsControlsVisible(false);
         },
     };
 })();
@@ -1017,7 +1125,7 @@ const STRATEGY_STATUS_CONFIG = {
             color: 'rgb(220, 38, 38)',
         },
         title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。',
+        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
     },
     missing: {
         badgeText: '資料載入',
@@ -1411,14 +1519,10 @@ function updateStrategyStatusCard(result) {
         detailLines.push(health.positiveLine);
     }
 
-    const emphasisedLine = state === 'behind'
-        ? '召喚增援！策略被買入持有打出暈眩，快開優化與風控技能補血。'
-        : null;
-
     applyStrategyStatusState(state, {
         diffText,
         detail: {
-            emphasisedLine,
+            emphasisedLine: null,
             bulletLines: detailLines,
             collapsible: detailLines.length > 0,
             collapsibleSummary: '展開完整戰況條列',
@@ -1438,7 +1542,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-CARD-20251028A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-CARD-20251107A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 10;
@@ -1513,6 +1617,67 @@ function createDefaultTrendSensitivityCalibration() {
         bestEffective,
         steps: TREND_SENSITIVITY_CALIBRATION_STEPS,
         normalizedMargin: TREND_SENSITIVITY_CALIBRATION_MARGIN_DEFAULT,
+    };
+}
+
+function sanitizeTrendRawRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    const date = typeof row.date === 'string' ? row.date : null;
+    if (!date) return null;
+    const parseValue = (value) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+    return {
+        date,
+        open: parseValue(row.open),
+        high: parseValue(row.high),
+        low: parseValue(row.low),
+        close: parseValue(row.close),
+        volume: parseValue(row.volume),
+    };
+}
+
+function areSameTrendDateSequence(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i] !== b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function captureTrendAnalysisSource(result, options = {}) {
+    if (!result || typeof result !== 'object') {
+        return { dates: [], strategyReturns: [], rawData: [] };
+    }
+    const previous = options.previousResult || null;
+    const dates = Array.isArray(result.dates)
+        ? result.dates.map((value) => (typeof value === 'string' ? value : null))
+        : [];
+    const strategyReturns = Array.isArray(result.strategyReturns)
+        ? result.strategyReturns.map((value) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : null;
+        })
+        : [];
+    let rawSource = Array.isArray(result.rawData) && result.rawData.length > 0
+        ? result.rawData
+        : Array.isArray(result.rawDataUsed) && result.rawDataUsed.length > 0
+            ? result.rawDataUsed
+            : [];
+    if (rawSource.length === 0 && previous && areSameTrendDateSequence(dates, previous.dates)) {
+        rawSource = Array.isArray(previous.rawData) ? previous.rawData : [];
+    }
+    const rawData = rawSource
+        .map((row) => sanitizeTrendRawRow(row))
+        .filter((row) => row !== null);
+    return {
+        dates,
+        strategyReturns,
+        rawData,
     };
 }
 
@@ -2771,16 +2936,47 @@ function computeAverageConfidence(labels, posteriors, labelToState) {
     return sum / count;
 }
 
-function prepareRegimeBaseData(result) {
+function prepareRegimeBaseData(result, options = {}) {
     const dates = Array.isArray(result?.dates) ? result.dates.slice() : [];
     if (dates.length === 0) return null;
-    const rawRows = Array.isArray(result?.rawData) ? result.rawData : [];
+    const previousBase = options.previousBase || null;
+    const fallbackRawData = Array.isArray(options.fallbackRawData) ? options.fallbackRawData : null;
+    const rawCandidates = [];
+    if (Array.isArray(result?.rawData) && result.rawData.length > 0) {
+        rawCandidates.push(result.rawData);
+    }
+    if (Array.isArray(result?.rawDataUsed) && result.rawDataUsed.length > 0) {
+        rawCandidates.push(result.rawDataUsed);
+    }
+    if (fallbackRawData && fallbackRawData.length > 0) {
+        rawCandidates.push(fallbackRawData);
+    }
+    let rawRows = [];
+    for (let i = 0; i < rawCandidates.length; i += 1) {
+        if (Array.isArray(rawCandidates[i]) && rawCandidates[i].length > 0) {
+            rawRows = rawCandidates[i];
+            break;
+        }
+    }
+    if (rawRows.length === 0) {
+        if (previousBase && areSameTrendDateSequence(dates, previousBase.dates)) {
+            return previousBase;
+        }
+        return null;
+    }
     const rowByDate = new Map();
     rawRows.forEach((row) => {
-        if (row && typeof row.date === 'string') {
-            rowByDate.set(row.date, row);
+        const sanitized = sanitizeTrendRawRow(row);
+        if (sanitized) {
+            rowByDate.set(sanitized.date, sanitized);
         }
     });
+    if (rowByDate.size === 0) {
+        if (previousBase && areSameTrendDateSequence(dates, previousBase.dates)) {
+            return previousBase;
+        }
+        return null;
+    }
     const opens = [];
     const highs = [];
     const lows = [];
@@ -2972,18 +3168,46 @@ function classifyRegimes(base, thresholds) {
 
 
 function computeTrendAnalysisFromResult(result, thresholds) {
-    if (!trendAnalysisState.base) {
-        trendAnalysisState.base = prepareRegimeBaseData(result);
+    const fallbackRawData = Array.isArray(result?.rawData) && result.rawData.length > 0
+        ? result.rawData
+        : Array.isArray(result?.rawDataUsed) && result.rawDataUsed.length > 0
+            ? result.rawDataUsed
+            : trendAnalysisState.result?.rawData || null;
+    let base = prepareRegimeBaseData(result, {
+        previousBase: trendAnalysisState.base || null,
+        fallbackRawData,
+    });
+    if (base) {
+        trendAnalysisState.base = base;
+    } else if (trendAnalysisState.base) {
+        base = trendAnalysisState.base;
+    } else {
+        trendAnalysisState.base = null;
     }
-    if (!trendAnalysisState.base) {
+    if (!base) {
+        trendAnalysisState.classifiedLabels = [];
         return { segments: [], summary: null };
     }
-    const classification = classifyRegimes(trendAnalysisState.base, thresholds);
+    const classification = classifyRegimes(base, thresholds);
     trendAnalysisState.classifiedLabels = classification.labels || [];
     return {
         segments: classification.segments || [],
         summary: classification.summary || null,
     };
+}
+
+function isTrendAnalysisCardExpanded() {
+    if (typeof document === 'undefined') return true;
+    const card = document.getElementById('trend-analysis-card');
+    if (!card) return true;
+    return (card.dataset.collapsed || 'true') !== 'true';
+}
+
+function resolveTrendOverlaySegments() {
+    if (!isTrendAnalysisCardExpanded()) {
+        return [];
+    }
+    return Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [];
 }
 
 function updateChartTrendOverlay() {
@@ -2992,14 +3216,13 @@ function updateChartTrendOverlay() {
     if (!stockChart.options.plugins) stockChart.options.plugins = {};
     stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] = {
         ...(stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] || {}),
-        segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+        segments: resolveTrendOverlaySegments(),
     };
     stockChart.update('none');
 }
 
 function renderTrendSummary() {
     const sliderValueEl = document.getElementById('trendSensitivityValue');
-    const thresholds = trendAnalysisState.thresholds;
     const calibration = trendAnalysisState.calibration || createDefaultTrendSensitivityCalibration();
     const summary = trendAnalysisState.summary;
     if (sliderValueEl) {
@@ -3009,34 +3232,9 @@ function renderTrendSummary() {
         sliderValueEl.textContent = `平均狀態信心：${averageText}`;
     }
     const thresholdTextEl = document.getElementById('trend-threshold-text');
-    if (thresholdTextEl && thresholds) {
-        const adxText = thresholds.adxTrend.toFixed(1);
-        const adxFlat = thresholds.adxFlat.toFixed(1);
-        const bollHigh = (thresholds.bollTrend * 100).toFixed(1);
-        const bollLow = (thresholds.bollFlat * 100).toFixed(1);
-        const atrHigh = (thresholds.atrTrend * 100).toFixed(2);
-        const atrLow = (thresholds.atrFlat * 100).toFixed(2);
-        const targetText = Number.isFinite(thresholds.targetTrendCoverage)
-            ? formatPercentPlain(thresholds.targetTrendCoverage * 100, 0)
-            : '—';
-        const effective = Number.isFinite(thresholds.effectiveSensitivity)
-            ? thresholds.effectiveSensitivity.toFixed(0)
-            : '—';
-        const bestSliderText = Number.isFinite(calibration?.bestSlider)
-            ? calibration.bestSlider.toFixed(1)
-            : '—';
-        const bestEffectiveText = Number.isFinite(calibration?.bestEffective)
-            ? calibration.bestEffective.toFixed(0)
-            : '—';
-        const bestScoreText = Number.isFinite(calibration?.bestScore)
-            ? calibration.bestScore.toFixed(3)
-            : '—';
-        thresholdTextEl.innerHTML = `
-            滑桿 0→10 以 0.1 為步進對應 1→1000 的模擬測試組數，先針對 1000 個步進值計算四態 HMM 的平均狀態信心，
-            將峰值參數（滑桿 ${bestSliderText}，等效敏感度 ${bestEffectiveText}，平均信心 ${bestScoreText}）映射到滑桿值 5 作為預設。
-            當前數值經對數 Sigmoid 映射後設定目標趨勢覆蓋 ${targetText}，並同步套用 ADX ≥ ${adxText}、布林帶寬 ≥ ${bollHigh}%、ATR 比 ≥ ${atrHigh}% 的高波動門檻；
-            若 ADX ≤ ${adxFlat}、布林帶寬 ≤ ${bollLow}%、ATR 比 ≤ ${atrLow}% 則歸為盤整。同時使用 ${thresholds.smoothingWindow} 日平滑與最少 ${thresholds.minSegmentLength} 日區段，
-            覆蓋不足時會依 Sigmoid 分數自動將高分盤整日補償為趨勢（當前等效敏感度 ${effective}）。`;
+    if (thresholdTextEl) {
+        thresholdTextEl.textContent = '';
+        thresholdTextEl.classList.add('hidden');
     }
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
@@ -5322,6 +5520,7 @@ function renderBlobUsageCard() {
     const events = Array.isArray(monthRecord.events) ? monthRecord.events : [];
     const grouped = [];
     const groupMap = new Map();
+    const writeEventsList = events.filter((event) => (event?.action || event?.type) === 'write');
     events.forEach((event) => {
         const when = new Date(Number(event.timestamp) || Date.now());
         const dateKey = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
@@ -5335,6 +5534,27 @@ function renderBlobUsageCard() {
         }
         groupMap.get(dateKey).rows.push({ raw: event, when });
     });
+
+    const writeSummaryHtml = writeEventsList.length > 0
+        ? writeEventsList.slice(0, 5).map((event) => {
+            const when = new Date(Number(event.timestamp) || Date.now());
+            const timeLabel = `${String(when.getMonth() + 1).padStart(2, '0')}/${String(when.getDate()).padStart(2, '0')} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
+            const stockParts = [];
+            if (event.stockNo) {
+                stockParts.push(escapeHtml(event.stockNo));
+            }
+            if (event.market) {
+                stockParts.push(`<span style="color: var(--muted-foreground);">${escapeHtml(event.market)}</span>`);
+            }
+            const stockLabel = stockParts.length > 0 ? stockParts.join('・') : '系統';
+            const sourceLabel = event.source ? escapeHtml(event.source) : '—';
+            const keyLabel = event.key ? `｜${escapeHtml(event.key)}` : '';
+            return `<div class="flex items-center justify-between text-[11px]" style="gap: 0.5rem;">
+                <span>${stockLabel}</span>
+                <span style="color: var(--muted-foreground); white-space: nowrap;">${timeLabel}｜${sourceLabel}${keyLabel}</span>
+            </div>`;
+        }).join('')
+        : '<div style="color: var(--muted-foreground);">本月尚未發生寫入操作。</div>';
 
     const eventsHtml = grouped.length > 0
         ? grouped.map((group) => {
@@ -5393,6 +5613,11 @@ function renderBlobUsageCard() {
         <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
             <div class="font-medium mb-1" style="color: var(--foreground);">熱門股票</div>
             <div class="space-y-1">${topStocksHtml}</div>
+        </div>
+        <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
+            <div class="font-medium mb-1" style="color: var(--foreground);">寫入監控</div>
+            <div class="text-[11px]" style="color: var(--muted-foreground);">本月寫入 ${formatNumberWithComma(monthRecord.writeOps || 0)} 次</div>
+            <div class="mt-2 space-y-1">${writeSummaryHtml}</div>
         </div>
         <div class="rounded-md border px-3 py-2" style="border-color: var(--border);">
             <div class="font-medium mb-1" style="color: var(--foreground);">近期操作</div>
@@ -5454,14 +5679,90 @@ function initDataDiagnosticsPanel() {
     window.refreshDataDiagnosticsPanel = refreshDataDiagnosticsPanel;
 }
 
+function initTrendAnalysisToggle() {
+    const toggleBtn = document.getElementById('trendAnalysisToggle');
+    const content = document.getElementById('trend-analysis-content');
+    const legend = document.getElementById('trend-legend');
+    const card = document.getElementById('trend-analysis-card');
+    if (!toggleBtn || !content || !card) return;
+
+    const indicator = toggleBtn.querySelector('.trend-toggle-indicator');
+    const labelEl = toggleBtn.querySelector('[data-trend-toggle-label]');
+    let expanded = false;
+
+    const applyState = (open) => {
+        expanded = Boolean(open);
+        content.classList.toggle('hidden', !expanded);
+        content.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        card.dataset.collapsed = expanded ? 'false' : 'true';
+        if (indicator) {
+            indicator.classList.toggle('open', expanded);
+        }
+        if (labelEl) {
+            labelEl.textContent = expanded ? '收合分析' : '展開分析';
+            labelEl.classList.toggle('open', expanded);
+        }
+        if (legend) {
+            legend.classList.toggle('hidden', !expanded);
+            legend.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        }
+        updateChartTrendOverlay();
+    };
+
+    applyState(false);
+
+    toggleBtn.addEventListener('click', () => {
+        applyState(!expanded);
+    });
+}
+
+function initSensitivityCollapse(rootEl) {
+    const scope = rootEl || document;
+    const toggleBtn = scope.querySelector('[data-sensitivity-toggle]');
+    const body = scope.querySelector('[data-sensitivity-body]');
+    if (!toggleBtn || !body) return;
+    const indicator = toggleBtn.querySelector('.toggle-indicator');
+    const label = toggleBtn.querySelector('.toggle-label');
+    let expanded = false;
+
+    const applyState = (open) => {
+        expanded = Boolean(open);
+        body.classList.toggle('hidden', !expanded);
+        body.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (indicator) {
+            indicator.textContent = expanded ? '－' : '＋';
+        }
+        if (label) {
+            label.textContent = expanded ? '收合敏感度表格' : '展開敏感度表格';
+        }
+    };
+
+    applyState(false);
+
+    toggleBtn.addEventListener('click', () => {
+        applyState(!expanded);
+    });
+}
+
 function updateDataSourceDisplay(dataSource, stockName) {
     const displayEl = document.getElementById('dataSourceDisplay');
+    const tagEl = document.getElementById('dataSourceSummaryTag');
     if (!displayEl) return;
 
+    if (tagEl) {
+        tagEl.textContent = stockName ? `標的 ${stockName}` : '';
+    }
+
     if (dataSource) {
-        let sourceText = `數據來源: ${dataSource}`;
-        displayEl.textContent = sourceText;
-        displayEl.classList.remove('hidden');
+        const segments = Array.isArray(dataSource)
+            ? dataSource
+            : dataSource.toString().split(/\s*\n\s*/).filter((segment) => segment && segment.trim().length > 0);
+        const list = (segments.length > 0 ? segments : [dataSource])
+            .map((segment) => `<div>${escapeHtml(segment)}</div>`)
+            .join('');
+        displayEl.innerHTML = list;
         if (typeof window.refreshDataSourceTester === 'function') {
             try {
                 window.refreshDataSourceTester();
@@ -5470,7 +5771,7 @@ function updateDataSourceDisplay(dataSource, stockName) {
             }
         }
     } else {
-        displayEl.classList.add('hidden');
+        displayEl.innerHTML = '<div style="color: var(--muted-foreground);">執行回測後會顯示最新的主來源、快取命中與備援情況。</div>';
     }
 }
 
@@ -5509,7 +5810,6 @@ function refreshPriceInspectorControls() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '還原價格' : '原始收盤價';
-    const sourceLabel = resolvePriceInspectorSourceLabel();
     const lastStartFallback = lastFetchSettings?.effectiveStartDate || lastFetchSettings?.startDate || '';
     const displayData = visibleStockData.length > 0 ? visibleStockData : [];
     const firstDate = displayData[0]?.date || lastStartFallback;
@@ -5519,9 +5819,6 @@ function refreshPriceInspectorControls() {
     openBtn.disabled = false;
     if (summaryEl) {
         const summaryParts = [`${firstDate} ~ ${lastDate}`, `${displayData.length} 筆 (${modeLabel})`];
-        if (sourceLabel) {
-            summaryParts.push(sourceLabel);
-        }
         summaryEl.textContent = summaryParts.join(' ・ ');
     }
     renderPricePipelineSteps();
@@ -5677,13 +5974,9 @@ function openPriceInspectorModal() {
 
     const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
     const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
-    const sourceLabel = resolvePriceInspectorSourceLabel();
     if (subtitle) {
         const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
         const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
-        if (sourceLabel) {
-            subtitleParts.push(sourceLabel);
-        }
         subtitle.textContent = subtitleParts.join(' ・ ');
     }
     renderPriceInspectorDebug();
@@ -5871,14 +6164,20 @@ function handleBacktestResult(result, stockName, dataSource) {
         lastIndicatorSeries = result.priceIndicatorSeries || null;
         lastPositionStates = Array.isArray(result.positionStates) ? result.positionStates : [];
 
-        trendAnalysisState.result = {
-            dates: Array.isArray(result.dates) ? [...result.dates] : [],
-            strategyReturns: Array.isArray(result.strategyReturns) ? [...result.strategyReturns] : [],
-        };
-        trendAnalysisState.base = prepareRegimeBaseData(result);
+        const previousTrendResult = trendAnalysisState.result || null;
+        const previousTrendBase = trendAnalysisState.base || null;
+        trendAnalysisState.result = captureTrendAnalysisSource(result, { previousResult: previousTrendResult });
+        trendAnalysisState.base = prepareRegimeBaseData(result, {
+            previousBase: previousTrendBase,
+            fallbackRawData: trendAnalysisState.result?.rawData || null,
+        });
         trendAnalysisState.calibration = calibrateTrendSensitivity(trendAnalysisState.base);
         trendAnalysisState.sensitivity = TREND_SENSITIVITY_DEFAULT;
         recomputeTrendAnalysis({ skipChartUpdate: true });
+        const trendSlider = document.getElementById('trendSensitivitySlider');
+        if (trendSlider) {
+            trendSlider.value = `${trendAnalysisState.sensitivity}`;
+        }
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
@@ -5888,11 +6187,16 @@ function handleBacktestResult(result, stockName, dataSource) {
         activateTab('summary');
 
         setTimeout(() => {
+            const strategyCard = document.getElementById('strategy-status-card');
+            if (strategyCard) {
+                strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
             const chartContainer = document.getElementById('chart-container');
             if (chartContainer) {
-                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
-        }, 500);
+        }, 400);
 
     } catch (error) {
          console.error("[Main] Error processing backtest result:", error);
@@ -6379,6 +6683,7 @@ function displayBacktestResult(result) {
             '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
+        let directionSafeTooltip = null;
         const directionAdvice = (() => {
             const safeThreshold = 10;
             const warnThreshold = 15;
@@ -6394,7 +6699,8 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                return '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+                return '方向偏移穩健，維持現行節奏即可。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
                 return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
@@ -6402,83 +6708,72 @@ function displayBacktestResult(result) {
             return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
         })();
         const summarySentence = (() => {
-            const parts = [];
-            if (Number.isFinite(overallDrift)) {
-                parts.push(`平均漂移 ${formatPercentMagnitude(overallDrift, 1)}`);
+            const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
+            const driftAbs = Number.isFinite(overallDrift) ? Math.abs(overallDrift) : null;
+            const maxAbs = Number.isFinite(overallMaxDrift) ? Math.abs(overallMaxDrift) : null;
+            if (stabilityScore === null && driftAbs === null && maxAbs === null) {
+                return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
             }
-            if (Number.isFinite(overallMaxDrift)) {
-                parts.push(`最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}`);
+            if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
+                return '整體擾動反應平穩，可照現有參數持續觀察。';
             }
-            if (Number.isFinite(summarySharpeDrop) && Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}／下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeDrop)) {
-                parts.push(`Sharpe Δ 下調 -${summarySharpeDrop.toFixed(2)}`);
-            } else if (Number.isFinite(summarySharpeGain)) {
-                parts.push(`Sharpe Δ 上調 +${summarySharpeGain.toFixed(2)}`);
+            if (stabilityScore !== null && stabilityScore >= 55) {
+                return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
             }
-            const safeThreshold = 10;
-            const warnThreshold = 15;
-            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
-            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
-            if (positiveAbs !== null || negativeAbs !== null) {
-                const usePositive = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs);
-                const focusLabel = usePositive
-                    ? `調高方向 ${formatDelta(overallPositive)}`
-                    : `調低方向 ${formatDelta(overallNegative)}`;
-                const focusAbs = usePositive ? positiveAbs : negativeAbs;
-                if (Number.isFinite(focusAbs)) {
-                    if (focusAbs > warnThreshold) {
-                        parts.push(`${focusLabel}，超過 15pp 建議優先檢視`);
-                    } else if (focusAbs > safeThreshold) {
-                        parts.push(`${focusLabel}，落在 10～15pp 建議再驗證`);
-                    } else {
-                        parts.push(`${focusLabel}，雙側仍在 ±10pp 內`);
-                    }
-                } else {
-                    parts.push(focusLabel);
-                }
-            }
-            return parts.join('，') || '敏感度樣本不足，建議重新執行擾動測試。';
+            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
         })();
+        const directionTooltipHtml = directionSafeTooltip
+            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
+            : '';
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <div class="flex items-start justify-between gap-2">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
-                        <span class="tooltip">
-                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
-                        </span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                            <span class="tooltip">
+                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
+                            </span>
+                        </div>
+                        <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
                     </div>
-                    <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                    <p class="text-xs" style="color: var(--muted-foreground);">滿分 100，≥ 70 為穩健；Sharpe 下滑會同步扣分</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
-                    <div class="flex items-center gap-2">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
-                        <span class="tooltip">
-                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                            <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
-                        </span>
-                    </div>
-                    <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
-                    <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
-                        <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
-                        <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                            <span class="tooltip">
+                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                            </span>
+                        </div>
+                        <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
+                        <div class="text-xs text-muted-foreground leading-relaxed flex flex-col items-center gap-1">
+                            <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
+                            <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
+                        </div>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #60a5fa 10%, var(--background)) 0%, color-mix(in srgb, #3b82f6 4%, var(--background)) 100%); border-color: color-mix(in srgb, #3b82f6 20%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
-                    <div class="flex items-center gap-4 text-lg font-semibold">
-                        <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
-                        <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
+                            ${directionTooltipHtml}
+                        </div>
+                        <div class="flex items-center justify-center gap-4 text-lg font-semibold">
+                            <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
+                            <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
+                        </div>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${directionAdvice}</p>
                     </div>
-                    <p class="text-xs" style="color: var(--muted-foreground);">指標 = 多點擾動後的報酬差異平均值；絕對值 ≤ 10pp 為常見穩健區間。</p>
-                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">${directionAdvice}</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                    <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
-                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
+                    <div class="flex flex-col items-center text-center gap-3">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
+                    </div>
                 </div>
             </div>`;
         const interpretationHint = `
@@ -6507,8 +6802,14 @@ function displayBacktestResult(result) {
         <div class="mb-8">
             ${headerHtml}
             ${summaryCards}
-            ${interpretationHint}
-            <div class="space-y-4">
+            <div class="sensitivity-collapse-controls flex justify-end mt-4">
+                <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
+                    <span class="toggle-indicator">＋</span>
+                    <span class="toggle-label">展開敏感度表格</span>
+                </button>
+            </div>
+            <div class="space-y-4 sensitivity-collapse-body hidden" data-sensitivity-body aria-hidden="true">
+                ${interpretationHint}
                 ${groupSection}
             </div>
         </div>`;
@@ -6661,8 +6962,10 @@ function displayBacktestResult(result) {
                 ${strategySettingsHtml}
             </div>
         `;
-        
-        console.log("[Main] displayBacktestResult finished."); 
+
+        initSensitivityCollapse(el);
+
+        console.log("[Main] displayBacktestResult finished.");
     }
 const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
 
@@ -6951,7 +7254,7 @@ function renderChart(result) {
             },
             plugins: {
                 [TREND_BACKGROUND_PLUGIN_ID]: {
-                    segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+                    segments: resolveTrendOverlaySegments(),
                 },
                 legend: {
                     position: 'top',
