@@ -1,3 +1,9 @@
+## 2025-11-15 — Patch LB-BRAND-IDENTITY-20251115A
+- **Scope**: 建立 LazyBacktest 品牌識別向量圖示，並將導覽列、favicon 與 Netlify PWA 標籤更新為一致的品牌素材。
+- **Logo**: 新增 `assets/lazybacktest-logo.svg`，以高對比漸層結合 K 線與回測箭頭，提供 `title/desc` 文字輔助螢幕閱讀器。
+- **Header**: 導覽列改為載入 SVG 圖示並加上可聚焦的首頁連結，補齊 `prefers-reduced-motion` 降噪與固定容器尺寸。
+- **Testing**: 以本地靜態伺服器檢視桌機與行動裝置寬度，確認導覽列對齊與圖示清晰度。
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。

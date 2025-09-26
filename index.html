@@ -330,7 +330,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
-    <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
+    <link rel="icon" type="image/svg+xml" sizes="any" href="assets/lazybacktest-logo.svg" />
+    <link rel="alternate icon" href="assets/lazybacktest-logo.svg" type="image/svg+xml" />
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
     <div class="relative flex size-full min-h-screen flex-col overflow-x-hidden">
@@ -338,22 +339,11 @@
             <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
                 <div class="container mx-auto px-4 h-16 flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-                            <div class="w-5 h-5 flex flex-col justify-between">
-                                <div class="flex justify-between">
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                                <div class="flex justify-between items-end">
-                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                            </div>
-                        </div>
+                        <a href="/" class="brand-logo-container" aria-label="LazyBacktest 首頁">
+                            <img src="assets/lazybacktest-logo.svg" alt="LazyBacktest 品牌圖示：量化回測箭頭與 K 線" class="brand-logo-image" width="40" height="40" decoding="async" />
+                        </a>
                         <div>
-                                    <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
+                            <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
                             <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
                         </div>
                     </div>
