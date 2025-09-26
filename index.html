@@ -493,22 +493,52 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="dataSourceSummaryContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="layers" class="lucide w-4 h-4"></i>
+                                                    數據來源摘要
+                                                </div>
+                                                <span id="dataSourceSummaryTag" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div id="dataSourceDisplay" class="px-3 py-3 space-y-2 text-[11px]" style="color: var(--foreground);"></div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
                                                     <i data-lucide="message-square-warning" class="lucide w-4 h-4"></i>
                                                     今日建議記錄
                                                 </div>
-                                                <button
-                                                    id="todaySuggestionLogClear"
-                                                    type="button"
-                                                    class="px-2 py-1 text-[11px] rounded-md border transition-colors"
-                                                    style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
-                                                >
-                                                    清除紀錄
-                                                </button>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="todaySuggestionLogToggle"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors flex items-center gap-1"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        aria-expanded="false"
+                                                        aria-controls="todaySuggestionLogPanel"
+                                                    >
+                                                        <span class="toggle-indicator">＋</span>
+                                                        <span class="toggle-label">展開</span>
+                                                    </button>
+                                                    <button
+                                                        id="todaySuggestionLogClear"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        清除紀錄
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                            <div
+                                                id="todaySuggestionLogPanel"
+                                                class="rounded-md border bg-white/70 shadow-sm hidden"
+                                                style="border-color: var(--border);"
+                                                aria-hidden="true"
+                                            >
                                                 <div
                                                     id="today-suggestion-log-body"
                                                     class="px-3 py-3 space-y-3 text-[11px]"
@@ -573,9 +603,9 @@
                                                         class="px-2 py-1 border border-border rounded-md text-xs bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                                                         style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                     >
-                                                        <option value="TWSE">上市 (TWSE)</option>
-                                                        <option value="TPEX">上櫃 (TPEX)</option>
-                                                        <option value="US">美股 (US)</option>
+                                                        <option value="TWSE">上市</option>
+                                                        <option value="TPEX">上櫃</option>
+                                                        <option value="US">美股</option>
                                                     </select>
                                                 </div>
                                             </div>
@@ -584,22 +614,6 @@
                                             </div>
                                             <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
                                                 <!-- 股票名稱和市場切換提示將顯示在這裡 -->
-                                            </div>
-                                            <p id="dataSourceDisplay" class="text-xs text-gray-500 mt-1 hidden"></p>
-                                            <div id="priceInspectorControls" class="mt-2 hidden flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    id="openPriceInspector"
-                                                    class="px-3 py-1.5 text-[11px] font-medium rounded-md border transition-colors"
-                                                    style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
-                                                >
-                                                    查看區間價格
-                                                </button>
-                                                <span
-                                                    id="priceInspectorSummary"
-                                                    class="text-[11px] text-muted-foreground"
-                                                    style="color: var(--muted-foreground);"
-                                                ></span>
                                             </div>
                                             <div
                                                 id="pricePipelineSteps"
@@ -1043,26 +1057,40 @@
                                                 <span id="today-suggestion-label" class="today-suggestion-chip">計算中</span>
                                                 <span id="today-suggestion-date" class="today-suggestion-date">—</span>
                                             </div>
-                                            <div id="today-suggestion-price" class="today-suggestion-price">—</div>
+                                            <div id="today-suggestion-message" class="today-suggestion-message">—</div>
                                         </div>
-                                        <dl class="today-suggestion-stats">
-                                            <div class="today-suggestion-stat">
-                                                <dt class="today-suggestion-stat-label">多單概況</dt>
-                                                <dd id="today-suggestion-long" class="today-suggestion-stat-value">—</dd>
-                                            </div>
-                                            <div class="today-suggestion-stat">
-                                                <dt class="today-suggestion-stat-label">空單概況</dt>
-                                                <dd id="today-suggestion-short" class="today-suggestion-stat-value">—</dd>
-                                            </div>
-                                            <div class="today-suggestion-stat">
-                                                <dt class="today-suggestion-stat-label">整體部位</dt>
-                                                <dd id="today-suggestion-position" class="today-suggestion-stat-value">—</dd>
-                                            </div>
-                                            <div class="today-suggestion-stat">
-                                                <dt class="today-suggestion-stat-label">資產估值</dt>
-                                                <dd id="today-suggestion-portfolio" class="today-suggestion-stat-value">—</dd>
-                                            </div>
-                                        </dl>
+                                        <div id="today-suggestion-controls" class="today-suggestion-controls">
+                                            <button
+                                                id="today-suggestion-stats-toggle"
+                                                type="button"
+                                                class="today-suggestion-toggle"
+                                                aria-expanded="false"
+                                                aria-controls="today-suggestion-stats-wrapper"
+                                            >
+                                                <span class="toggle-indicator">＋</span>
+                                                <span class="toggle-label">展開部位概況</span>
+                                            </button>
+                                        </div>
+                                        <div id="today-suggestion-stats-wrapper" class="today-suggestion-stats-wrapper hidden" aria-hidden="true">
+                                            <dl class="today-suggestion-stats">
+                                                <div class="today-suggestion-stat">
+                                                    <dt class="today-suggestion-stat-label">多單概況</dt>
+                                                    <dd id="today-suggestion-long" class="today-suggestion-stat-value">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt class="today-suggestion-stat-label">空單概況</dt>
+                                                    <dd id="today-suggestion-short" class="today-suggestion-stat-value">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt class="today-suggestion-stat-label">整體部位</dt>
+                                                    <dd id="today-suggestion-position" class="today-suggestion-stat-value">—</dd>
+                                                </div>
+                                                <div class="today-suggestion-stat">
+                                                    <dt class="today-suggestion-stat-label">資產估值</dt>
+                                                    <dd id="today-suggestion-portfolio" class="today-suggestion-stat-value">—</dd>
+                                                </div>
+                                            </dl>
+                                        </div>
                                         <div id="today-suggestion-notes-container" class="today-suggestion-notes hidden">
                                             <div class="today-suggestion-notes-title">備註</div>
                                             <ul id="today-suggestion-notes" class="today-suggestion-notes-list"></ul>
@@ -1179,6 +1207,28 @@
                             
                             <!-- Summary Tab -->
                             <div class="tab-content active space-y-6" id="summary-tab">
+                                <!-- Strategy Status Card -->
+                                <div class="card shadow-lg summary-card" id="strategy-status-card">
+                                    <div class="card-header pb-4">
+                                        <div class="space-y-2">
+                                            <div class="flex items-center gap-2">
+                                                <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 28%, transparent); color: var(--muted-foreground);">等待開賽</span>
+                                                <span id="strategy-status-diff" class="text-xs font-semibold hidden" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                            <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">策略戰況尚未更新</h3>
+                                            <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                完成回測後，這張戰報會綜合策略與買入持有的差距、指標體檢與建議行動，請優先回到此卡片檢視結果。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-3">
+                                        <div id="strategy-status-detail" class="text-sm leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                            <p>• 等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。</p>
+                                            <p>• 回測完成後，這裡會用條列式寫給散戶看的戰況懶人包。</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Chart Area -->
                                 <div class="card shadow-lg summary-card">
                                     <div class="card-header">
@@ -1192,7 +1242,22 @@
                                                 <p>執行回測後將顯示淨值曲線</p>
                                             </div>
                                         </div>
-                                        <div id="trend-legend" class="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
+                                        <div id="priceInspectorControls" class="mt-4 hidden flex flex-wrap items-center gap-2 justify-between sm:justify-start">
+                                            <button
+                                                type="button"
+                                                id="openPriceInspector"
+                                                class="px-3 py-1.5 text-[11px] font-medium rounded-md border transition-colors"
+                                                style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                                            >
+                                                查看區間價格
+                                            </button>
+                                            <span
+                                                id="priceInspectorSummary"
+                                                class="text-[11px] text-muted-foreground"
+                                                style="color: var(--muted-foreground);"
+                                            ></span>
+                                        </div>
+                                        <div id="trend-legend" class="mt-3 hidden flex flex-wrap items-center gap-3 text-xs text-muted-foreground" aria-hidden="true">
                                             <div class="flex items-center gap-2">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
                                                 <span>牛市・高波動</span>
@@ -1209,19 +1274,41 @@
                                     </div>
                                 </div>
 
-                                <div class="card shadow-lg summary-card" id="trend-analysis-card">
+                                <div class="card shadow-lg summary-card" id="trend-analysis-card" data-collapsed="true">
                                     <div class="card-header">
-                                        <div class="flex items-center justify-between gap-2">
-                                            <h3 class="card-title flex items-center gap-2">
+                                        <button
+                                            id="trendAnalysisToggle"
+                                            type="button"
+                                            class="w-full flex items-center justify-between gap-3 text-left"
+                                            aria-expanded="false"
+                                            aria-controls="trend-analysis-content"
+                                        >
+                                            <span class="card-title flex items-center gap-3">
+                                                <span class="trend-toggle-indicator" aria-hidden="true">＋</span>
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
-                                            </h3>
-                                        </div>
-                                        <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
+                                            </span>
+                                            <span class="text-xs text-muted-foreground" data-trend-toggle-label>展開分析</span>
+                                        </button>
+                                    </div>
+                                    <div id="trend-analysis-content" class="card-content space-y-4 hidden" aria-hidden="true">
+                                        <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
                                             將價格序列拆成牛市・高波動、熊市・高波動與盤整三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
                                         </p>
-                                    </div>
-                                    <div class="card-content space-y-4">
+                                        <div id="trend-card-legend" class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
+                                                <span>牛市・高波動</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.38);"></span>
+                                                <span>盤整區域</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
+                                                <span>熊市・高波動</span>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <label for="trendSensitivitySlider" class="text-xs font-medium" style="color: var(--foreground);">狀態精細度</label>
@@ -1241,27 +1328,6 @@
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>
-                                    </div>
-                                </div>
-
-                                <div class="card shadow-lg summary-card" id="strategy-status-card">
-                                    <div class="card-header pb-4">
-                                        <div class="space-y-2">
-                                            <div class="flex items-center gap-2">
-                                                <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 28%, transparent); color: var(--muted-foreground);">等待開賽</span>
-                                                <span id="strategy-status-diff" class="text-xs font-semibold hidden" style="color: var(--muted-foreground);"></span>
-                                            </div>
-                                            <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">策略戰況尚未更新</h3>
-                                            <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                回測完成後會立刻比對策略與買入持有，給您一份幽默但實用的戰況簡報。
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div class="card-content space-y-3">
-                                        <div id="strategy-status-detail" class="text-sm leading-relaxed space-y-2" style="color: var(--muted-foreground);">
-                                            <p>• 等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。</p>
-                                            <p>• 完成回測後，這裡會用條列式寫給散戶看的戰況懶人包。</p>
-                                        </div>
                                     </div>
                                 </div>
 

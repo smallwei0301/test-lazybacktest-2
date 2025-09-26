@@ -1,3 +1,27 @@
+## 2025-11-06 — Patch LB-UI-TODAY-TREND-20251106A
+- **Scope**: 今日建議資訊層與趨勢圖例互動調整，優化行動訊息展示與小螢幕可讀性。
+- **Today Suggestion**:
+  - 改為以重點訊息填入原本價格欄位，保留第一則備註作為主體文案並同步寫入開發者紀錄。
+  - 調整 UI 控制，部位概況與錯誤時的提示仍預設折疊，載入狀態改顯示文字提醒；開發者紀錄摘要改以 highlight 訊息為主。
+- **Charts & Trend**:
+  - 趨勢區間評估按鈕將圓形「＋」指示器搬到標題前並新增狀態文字，僅在展開時顯示趨勢圖例且支援橫向捲動並排顯示於窄螢幕。
+- **Developer Tools**:
+  - 今日建議開發者 log 更新摘要欄位，優先顯示主體訊息並沿用 highlight 值於詳情段落。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-10-30 — Patch LB-UI-REFRESH-20251030A
+- **Scope**: 主頁版面與診斷工具整體調整，強化敏感度與今日建議的可讀性與互動設計。
+- **UI**:
+  - 策略戰報卡移至淨值曲線圖上方，並更新導引文案提醒使用者回測完成後優先查看戰報。
+  - 今日建議改為以備註摘要取代價格文字，新增部位概況摺疊按鈕並預設收合，同時讓今日建議記錄面板改為預設摺疊。
+  - 將區間價格檢視按鈕搬移至淨值卡片下方；市場下拉選單移除英文代碼；資料來源資訊改至開發者區塊顯示。
+- **Charts & Analytics**:
+  - 趨勢區間評估卡改為「＋」圓形按鈕控制的摺疊模式，開啟時同步顯示淨值底色圖例；淨值圖例支援小螢幕並僅在趨勢卡展開時顯示。
+  - 敏感度分析在「如何解讀」段落後新增摺疊控制，預設收合所有表格內容。
+- **Diagnostics**:
+  - Blob 監控新增寫入摘要卡，揭露本月寫入次數與最近寫入事件；資料來源卡支援顯示主來源與命中資訊。
+- **Testing**: `node - <<'NODE' ...` 檢查主要腳本語法無誤（同既有回歸命令）。
+
 ## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
 - **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
 - **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
