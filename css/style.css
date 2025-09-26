@@ -3,21 +3,27 @@
     position: relative;
     display: inline-flex;
     align-items: center;
-    min-width: 4.5ch;
-    padding: 0 0.1rem;
-    margin: 0 0.15rem;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: clamp(8ch, 10vw, 16ch);
+    min-height: 2.1rem;
+    padding: 0.25rem 0.55rem 0.35rem;
+    margin: 0 0.4rem;
     border-bottom: 2px solid currentColor;
     font-weight: 700;
     letter-spacing: 0.02em;
+    line-height: 1.2;
+    white-space: nowrap;
     outline: none;
     cursor: text;
-    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .quick-backtest-editable:focus {
     color: var(--primary-foreground);
-    background-color: color-mix(in srgb, var(--primary) 18%, transparent);
+    background-color: color-mix(in srgb, var(--primary) 22%, transparent);
     border-color: currentColor;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 .quick-backtest-editable:empty::before {

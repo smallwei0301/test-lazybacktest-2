@@ -657,3 +657,9 @@
 - **Fix**: 在按鈕內嵌可編輯欄位與閃爍光標，支援即時輸入並透過台股官方清單比對關鍵字，自動更新股票代碼與市場設定；回測進度改以狀態區塊呈現避免破壞可編輯元件，同步新增提示文案。
 - **Diagnostics**: 驗證 `resolveKeywordToStock` 能對照台股清單並回傳市場資訊，`updateHintDisplay` 會顯示最終代碼與名稱；測試清空、中文名稱、台/美股代碼皆能更新 `#stockNo` 並觸發名稱查詢。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-13 — Patch LB-QUICK-KEYIN-20251113A
+- **Issue recap**: 一鍵回測按鈕內的可編輯區域仍偏窄，行動裝置上難以察覺可點擊範圍，亦容易誤觸其他按鈕。
+- **Fix**: 擴大可編輯區最小寬度與高度、補強內距與間距並加入聚焦陰影，確保輸入區塊在桌機與手機皆有明確點擊範圍，同時調整預設標籤間距。
+- **Diagnostics**: 本地檢視首頁 Hero 區塊確認輸入欄位維持底線樣式但寬度顯著放大，聚焦時顯示色塊與陰影提示，光標與提示文案位置穩定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
