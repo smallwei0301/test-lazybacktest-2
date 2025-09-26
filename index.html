@@ -1152,9 +1152,9 @@
                             </div>
                             
                             <!-- Summary Tab -->
-                            <div class="tab-content active" id="summary-tab">
+                            <div class="tab-content active space-y-6" id="summary-tab">
                                 <!-- Chart Area -->
-                                <div class="card shadow-lg summary-card mb-8">
+                                <div class="card shadow-lg summary-card">
                                     <div class="card-header">
                                         <h3 class="card-title">淨值曲線圖</h3>
                                     </div>
@@ -1219,7 +1219,27 @@
                                     </div>
                                 </div>
 
-                                <!-- Summary Results -->
+                                <div class="card shadow-lg summary-card" id="strategy-status-card">
+                                    <div class="card-header pb-4">
+                                        <div class="space-y-2">
+                                            <div class="flex items-center gap-2">
+                                                <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 28%, transparent); color: var(--muted-foreground);">等待開賽</span>
+                                                <span id="strategy-status-diff" class="text-xs font-semibold hidden" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                            <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">策略戰況尚未更新</h3>
+                                            <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                回測完成後會立刻比對策略與買入持有，給您一份幽默但實用的戰況簡報。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-3">
+                                        <div id="strategy-status-detail" class="text-sm leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                            <p>• 等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。</p>
+                                            <p>• 完成回測後，這裡會用條列式寫給散戶看的戰況懶人包。</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div class="card shadow-lg summary-card">
                                     <div class="card-header">
                                         <h3 class="card-title">回測摘要</h3>
@@ -1232,6 +1252,8 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Summary Results -->
                             </div>
 
                             <!-- Staging Optimizer Tab -->
