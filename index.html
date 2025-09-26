@@ -1146,6 +1146,13 @@
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="rolling-test"
+                                            >
+                                                <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -1750,6 +1757,166 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden" id="rolling-test-tab">
+                                <div class="space-y-6">
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">滾動測試設定</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                參考國際量化機構常見的 Walk-Forward 測試（先以固定視窗訓練，再用下一段資料驗證），快速檢查策略在不同市況的穩健度。
+                                                建議先在左側執行一次完整回測，以建立快取資料後再進行滾動測試。
+                                            </p>
+                                        </div>
+                                        <div class="card-content">
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    訓練視窗（月）
+                                                    <input id="rolling-training-months" data-rolling-input type="number" min="6" max="120" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    測試視窗（月）
+                                                    <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="36" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    視窗平移（月）
+                                                    <input id="rolling-step-months" data-rolling-input type="number" min="1" max="24" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    測試至少成交筆數
+                                                    <input id="rolling-min-trades" data-rolling-input type="number" min="1" max="200" step="1" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若小於門檻，將標註樣本不足。</span>
+                                                </label>
+                                                <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
+                                                    <legend class="font-medium">通過門檻（滾動測試）</legend>
+                                                    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+                                                        <label class="flex items-center gap-2">
+                                                            <span class="min-w-[70px]">年化%</span>
+                                                            <input id="rolling-threshold-ann" data-rolling-input type="number" min="0" max="100" step="0.1" value="8" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                        <label class="flex items-center gap-2">
+                                                            <span class="min-w-[70px]">Sharpe</span>
+                                                            <input id="rolling-threshold-sharpe" data-rolling-input type="number" min="0" max="5" step="0.1" value="1" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                        <label class="flex items-center gap-2">
+                                                            <span class="min-w-[70px]">Sortino</span>
+                                                            <input id="rolling-threshold-sortino" data-rolling-input type="number" min="0" max="6" step="0.1" value="1.2" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                        <label class="flex items-center gap-2">
+                                                            <span class="min-w-[70px]">MaxDD%</span>
+                                                            <input id="rolling-threshold-maxdd" data-rolling-input type="number" min="1" max="80" step="0.1" value="25" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                        <label class="flex items-center gap-2">
+                                                            <span class="min-w-[70px]">勝率%</span>
+                                                            <input id="rolling-threshold-win" data-rolling-input type="number" min="0" max="100" step="0.1" value="45" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                    </div>
+                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
+                                                </fieldset>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">視窗規劃預覽</h3>
+                                            <p class="text-xs" id="rolling-plan-range" style="color: var(--muted-foreground);"></p>
+                                        </div>
+                                        <div class="card-content space-y-4">
+                                            <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
+                                                <span id="rolling-plan-summary">尚未建立視窗</span>
+                                                <span id="rolling-plan-warning" class="hidden px-2 py-1 rounded bg-amber-100 text-amber-700">請先執行一次主回測以產生快取資料</span>
+                                            </div>
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                    <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                        <tr>
+                                                            <th class="px-3 py-2 text-left font-semibold">迭代</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">訓練期間</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">測試期間</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">測試交易日</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="rolling-plan-tbody" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-content flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                            <div>
+                                                <h3 class="text-sm font-semibold" style="color: var(--foreground);">執行 Walk-Forward 測試</h3>
+                                                <p class="text-xs mt-1 max-w-xl" style="color: var(--muted-foreground);">系統會依序重播每個滾動視窗，採用現有策略參數計算訓練期與測試期的報酬、風險與交易密度。過程中請勿關閉頁面。</p>
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
+                                                    <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
+                                                    開始滾動測試
+                                                </button>
+                                                <button id="stop-rolling-test" class="btn-outline px-6 py-2.5 rounded-lg font-semibold hidden" style="border-color: var(--destructive); color: var(--destructive);">
+                                                    <i data-lucide="square" class="lucide w-4 h-4"></i>
+                                                    停止
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div id="rolling-progress-panel" class="card-content border-t hidden" style="border-color: var(--border);">
+                                            <div class="flex flex-col gap-3">
+                                                <div class="flex items-center justify-between text-xs" style="color: var(--foreground);">
+                                                    <span id="rolling-progress-text">準備中...</span>
+                                                    <span id="rolling-progress-percent">0%</span>
+                                                </div>
+                                                <div class="w-full h-2 rounded-full bg-muted" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
+                                                    <div id="rolling-progress-bar" class="h-2 rounded-full" style="background-color: var(--primary); width: 0%;"></div>
+                                                </div>
+                                                <div class="flex flex-wrap items-center gap-3 text-[11px]" style="color: var(--muted-foreground);">
+                                                    <span id="rolling-progress-phase">尚未開始</span>
+                                                    <span id="rolling-progress-elapsed" class="hidden"></span>
+                                                    <span id="rolling-progress-eta" class="hidden"></span>
+                                                </div>
+                                                <div id="rolling-progress-alert" class="hidden text-[11px] px-3 py-2 rounded border" style="border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--accent); background-color: color-mix(in srgb, var(--accent) 12%, transparent);"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div id="rolling-test-report" class="card hidden">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">滾動測試報告</h3>
+                                            <p id="rolling-report-intro" class="text-xs" style="color: var(--muted-foreground);"></p>
+                                        </div>
+                                        <div class="card-content space-y-6">
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="rolling-scoreboard"></div>
+                                            <div class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">總結</h4>
+                                                <p id="rolling-score-summary" class="text-xs leading-relaxed" style="color: var(--muted-foreground);"></p>
+                                            </div>
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">逐窗指標</h4>
+                                                <div class="overflow-x-auto">
+                                                    <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                        <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                            <tr>
+                                                                <th class="px-3 py-2 text-left font-semibold">迭代</th>
+                                                                <th class="px-3 py-2 text-left font-semibold">測試期間</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">年化%</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">Sharpe</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">Sortino</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">勝率%</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">交易數</th>
+                                                                <th class="px-3 py-2 text-left font-semibold">評語</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="rolling-window-report" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1819,6 +1986,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
+    <script src="js/rolling-test.js"></script>
     
     <script>
         // Initialize Lucide icons
