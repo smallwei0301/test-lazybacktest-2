@@ -4671,8 +4671,7 @@ function runBacktestInternal() {
             console.log("[Main] Received message from worker:", type, data); // Debug log
 
             if(type==='progress'){
-                updateProgress(progress);
-                if(message)document.getElementById('loadingText').textContent=`⌛ ${message}`;
+                updateProgress(progress, message);
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();

@@ -2953,6 +2953,14 @@ async function fetchStockData(
     }
   }
 
+  if (blobRangeAttempted) {
+    self.postMessage({
+      type: "progress",
+      progress: 10,
+      message: "Netlify Blob 範圍快取未命中，切換遠端資料源...",
+    });
+  }
+
   if (adjusted) {
     self.postMessage({
       type: "progress",

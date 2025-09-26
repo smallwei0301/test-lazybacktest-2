@@ -1604,13 +1604,10 @@ function initDeveloperAreaToggle() {
     });
 }
 
-function showLoading(m="⌛ 處理中...") {
+function showLoading(m = "⌛ 處理中...") {
     const el = document.getElementById("loading");
-    const loadingText = document.getElementById('loadingText');
-
-    if (loadingText) loadingText.textContent = m;
     if (el) el.classList.remove("hidden");
-    progressAnimator.reset();
+    progressAnimator.reset(m);
     progressAnimator.start();
 
     const spinner = el?.querySelector('.fa-spinner');
@@ -1621,58 +1618,12 @@ function hideLoading() {
     progressAnimator.stop();
     if (el) el.classList.add("hidden");
 }
-function updateProgress(p) {
-    progressAnimator.update(p);
+function updateProgress(p, message) {
+    progressAnimator.update(p, message);
 }
 
 function createProgressAnimator() {
-    const AUTO_INTERVAL = 200;
-    const AUTO_STEP = 1.8;
-    const MAX_AUTO_PROGRESS = 99;
-    const MIN_DURATION = 320;
-    const MAX_DURATION = 2400;
-    const MS_PER_PERCENT = 45;
-    const SHORT_TASK_THRESHOLD = 4000;
-    const SHORT_FIRST_SEGMENT_PROGRESS = 50;
-    const SHORT_SECOND_SEGMENT_PROGRESS = 50;
-    const SHORT_FIRST_SEGMENT_SPEEDUP = 3;
-    const SHORT_SECOND_SEGMENT_SLOWDOWN = 2;
-    const SHORT_SECOND_SEGMENT_MULTIPLIER = 1 / SHORT_SECOND_SEGMENT_SLOWDOWN;
-    const SHORT_TIME_WEIGHT =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        + (SHORT_SECOND_SEGMENT_PROGRESS / SHORT_SECOND_SEGMENT_MULTIPLIER);
-    const SHORT_FIRST_SEGMENT_TIME_RATIO =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        / SHORT_TIME_WEIGHT;
-    const SHORT_FINAL_MIN_DURATION = 1700;
-    const SHORT_FINAL_MAX_DURATION = 2600;
-
-    const raf =
-        (typeof window !== 'undefined' && window.requestAnimationFrame)
-            ? window.requestAnimationFrame.bind(window)
-            : (cb) => setTimeout(() => cb(Date.now()), 16);
-    const caf =
-        (typeof window !== 'undefined' && window.cancelAnimationFrame)
-            ? window.cancelAnimationFrame.bind(window)
-            : clearTimeout;
-
-    let currentValue = 0;
-    let targetValue = 0;
-    let animationFrom = 0;
-    let animationStart = 0;
-    let animationEnd = 0;
-    let rafId = null;
-    let autoTimer = null;
-    let reportedValue = 0;
-    let autoCeiling = 0;
-    let startTimestamp = 0;
-
-    function now() {
-        if (typeof performance !== 'undefined' && performance.now) {
-            return performance.now();
-        }
-        return Date.now();
-    }
+    const DEFAULT_MESSAGE = '執行中...';
 
     function clamp(value) {
         const num = Number(value);
@@ -1680,188 +1631,76 @@ function createProgressAnimator() {
         return Math.max(0, Math.min(100, num));
     }
 
-    function apply(value) {
+    function normalizeMessage(text) {
+        if (typeof text !== 'string') return DEFAULT_MESSAGE;
+        return text
+            .replace(/^⌛\s*/, '')
+            .replace(/（\s*\d+%\s*）$/, '')
+            .replace(/\(\s*\d+%\s*\)$/, '')
+            .trim() || DEFAULT_MESSAGE;
+    }
+
+    function applyProgress(value) {
         const bar = document.getElementById('progressBar');
         if (bar) {
             bar.style.width = `${value}%`;
-        }
-    }
-
-    function stopAnimation() {
-        if (rafId) {
-            caf(rafId);
-            rafId = null;
-        }
-    }
-
-    function stopAutoTimer() {
-        if (autoTimer) {
-            clearInterval(autoTimer);
-            autoTimer = null;
-        }
-    }
-
-    function syncCurrent() {
-        if (!rafId) return;
-        const currentTime = now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
-            currentValue = targetValue;
-            stopAnimation();
-            return;
-        }
-        const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
-    }
-
-    function scheduleAnimation() {
-        stopAnimation();
-        if (targetValue <= currentValue + 0.01) {
-            currentValue = targetValue;
-            apply(currentValue);
-            return;
-        }
-        animationFrom = currentValue;
-        animationStart = now();
-        const distance = targetValue - animationFrom;
-        if (distance <= 0) {
-            currentValue = targetValue;
-            apply(currentValue);
-            return;
-        }
-        let duration = distance * MS_PER_PERCENT;
-        duration = Math.max(MIN_DURATION, Math.min(MAX_DURATION, duration));
-        if (targetValue >= 100) {
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                duration = Math.max(duration, SHORT_FINAL_MIN_DURATION);
-                duration = Math.min(duration, SHORT_FINAL_MAX_DURATION);
-            } else {
-                duration = Math.min(duration, 900);
+            bar.setAttribute('aria-valuenow', `${Math.round(value)}`);
+            if (!bar.hasAttribute('role')) {
+                bar.setAttribute('role', 'progressbar');
+                bar.setAttribute('aria-valuemin', '0');
+                bar.setAttribute('aria-valuemax', '100');
             }
         }
-        animationEnd = animationStart + duration;
-        apply(currentValue);
-        rafId = raf(step);
     }
 
-    function step(timestamp) {
-        if (!rafId) return;
-        const currentTime = typeof timestamp === 'number' ? timestamp : now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
-            currentValue = targetValue;
-            apply(currentValue);
-            stopAnimation();
-            return;
-        }
-        const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
-        apply(currentValue);
-        rafId = raf(step);
+    function updateMessage(currentValue, message) {
+        const textEl = document.getElementById('loadingText');
+        if (!textEl) return;
+        const percentLabel = `${Math.round(currentValue)}%`;
+        textEl.textContent = `⌛ ${message}（${percentLabel}）`;
     }
 
-    function ensureAutoTimer() {
-        if (autoTimer) return;
-        autoTimer = setInterval(() => {
-            if (reportedValue >= 100) {
-                autoCeiling = 100;
-                setTarget(100);
-                stopAutoTimer();
-                return;
-            }
-            let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
-                if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
-                    const fastRatio = normalizedTime / SHORT_FIRST_SEGMENT_TIME_RATIO;
-                    const fastProgress = fastRatio * SHORT_FIRST_SEGMENT_PROGRESS;
-                    nextCeiling = Math.max(nextCeiling, fastProgress);
-                } else {
-                    const remainingTimeRatio = (normalizedTime - SHORT_FIRST_SEGMENT_TIME_RATIO)
-                        / (1 - SHORT_FIRST_SEGMENT_TIME_RATIO);
-                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS
-                        + (remainingTimeRatio * SHORT_SECOND_SEGMENT_PROGRESS);
-                    nextCeiling = Math.max(nextCeiling, slowProgress);
-                }
-            }
-            autoCeiling = Math.min(MAX_AUTO_PROGRESS, nextCeiling);
-            if (autoCeiling > targetValue + 0.05) {
-                setTarget(autoCeiling);
-            }
-        }, AUTO_INTERVAL);
-    }
-
-    function setTarget(value) {
-        const clamped = clamp(value);
-        if (clamped <= currentValue + 0.01 && clamped <= targetValue + 0.01) {
-            targetValue = clamped;
-            if (!rafId) {
-                currentValue = clamped;
-                apply(currentValue);
-            }
-            return;
-        }
-        syncCurrent();
-        if (clamped <= currentValue) {
-            targetValue = clamped;
-            currentValue = clamped;
-            apply(currentValue);
-            if (clamped >= 100) {
-                stopAnimation();
-                stopAutoTimer();
-            }
-            return;
-        }
-        if (Math.abs(clamped - targetValue) < 0.05) {
-            targetValue = clamped;
-            return;
-        }
-        targetValue = clamped;
-        scheduleAnimation();
-        if (clamped >= 100) {
-            stopAutoTimer();
-        }
-    }
+    let currentValue = 0;
+    let currentMessage = DEFAULT_MESSAGE;
+    let running = false;
 
     return {
-        start() {
-            startTimestamp = now();
-            ensureAutoTimer();
+        start(initialMessage) {
+            running = true;
+            if (initialMessage) {
+                currentMessage = normalizeMessage(initialMessage);
+            }
+            applyProgress(currentValue);
+            updateMessage(currentValue, currentMessage);
         },
         stop() {
-            stopAutoTimer();
-            stopAnimation();
+            running = false;
         },
-        reset() {
-            stopAutoTimer();
-            stopAnimation();
+        reset(initialMessage) {
+            running = false;
             currentValue = 0;
-            targetValue = 0;
-            animationFrom = 0;
-            animationStart = 0;
-            animationEnd = 0;
-            reportedValue = 0;
-            autoCeiling = 0;
-            startTimestamp = 0;
-            apply(0);
+            currentMessage = normalizeMessage(initialMessage || DEFAULT_MESSAGE);
+            applyProgress(currentValue);
+            updateMessage(currentValue, currentMessage);
         },
-        update(nextProgress) {
-            const clamped = clamp(nextProgress);
-            if (clamped >= 100) {
-                reportedValue = 100;
-                setTarget(100);
-                return;
+        update(nextProgress, nextMessage) {
+            const numericProgress = Number(nextProgress);
+            if (Number.isFinite(numericProgress)) {
+                const clamped = clamp(numericProgress);
+                if (clamped >= currentValue) {
+                    currentValue = clamped;
+                    applyProgress(currentValue);
+                }
             }
-            if (clamped > reportedValue) {
-                reportedValue = clamped;
+            if (typeof nextMessage === 'string' && nextMessage.trim()) {
+                currentMessage = normalizeMessage(nextMessage);
             }
-            if (clamped > autoCeiling) {
-                autoCeiling = clamped;
+            updateMessage(currentValue, currentMessage);
+            if (currentValue >= 100) {
+                running = false;
+            } else if (!running) {
+                running = true;
             }
-            setTarget(Math.max(targetValue, clamped));
-            ensureAutoTimer();
         },
     };
 }
