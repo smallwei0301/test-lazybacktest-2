@@ -1,3 +1,9 @@
+## 2025-11-11 — Patch LB-PERFORMANCE-ANALYSIS-20251111A
+- **Issue recap**: 績效分析分頁在回測後仍顯示空白提示，表格缺乏真實的期間績效數據，使用者無法比較策略與買入持有。
+- **Fix**: 新增 `renderPerformanceTable` 依據 Worker 回傳的 `subPeriodResults` 動態生成「期間績效分析」表格，移除舊版整體摘要卡片占位並以實際回測資料填入報酬率、夏普值、索提諾比率與最大回撤。
+- **UX**: 表格轉換為「近 N 個月／近 N 年」語系與正負號視覺，無資料時提供重新調整參數的提示訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new (require('vm')).Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。

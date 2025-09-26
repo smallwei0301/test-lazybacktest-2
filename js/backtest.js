@@ -5044,7 +5044,12 @@ function clearPreviousResults() {
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    const performanceContainer = document.getElementById("performance-table-container");
+    if (performanceContainer) {
+        performanceContainer.classList.add('flex', 'items-center', 'justify-center');
+        performanceContainer.classList.remove('block');
+        performanceContainer.innerHTML = `<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    }
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -6207,6 +6212,154 @@ function handleBacktestResult(result, stockName, dataSource) {
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
+function formatPerformancePeriodLabel(periodKey) {
+    if (!periodKey || typeof periodKey !== 'string') return '期間';
+    const upperKey = periodKey.toUpperCase();
+    if (upperKey === '1M') return '近1個月';
+    if (upperKey === '3M') return '近3個月';
+    if (upperKey === '6M') return '近6個月';
+    const yearMatch = upperKey.match(/^(\d+)Y$/);
+    if (yearMatch) {
+        const yearCount = parseInt(yearMatch[1], 10);
+        if (Number.isFinite(yearCount) && yearCount > 0) {
+            return `近${yearCount}年`;
+        }
+    }
+    return periodKey;
+}
+
+function formatPerformanceValue(value, options = {}) {
+    const { digits = 2, suffix = '%', keepSign = true } = options;
+    if (!Number.isFinite(value)) {
+        return 'N/A';
+    }
+    const formatted = value.toFixed(digits);
+    if (suffix) {
+        return `${keepSign && value > 0 ? '+' : ''}${formatted}${suffix}`;
+    }
+    return `${keepSign && value > 0 ? '+' : ''}${formatted}`;
+}
+
+function renderPerformanceTable(subPeriodResults) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) {
+        console.warn('[Main] performance-table-container not found when rendering performance table.');
+        return;
+    }
+
+    if (!lastOverallResult) {
+        container.classList.add('flex', 'items-center', 'justify-center');
+        container.classList.remove('block');
+        container.innerHTML = `<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+        return;
+    }
+
+    const periodOrder = {
+        '1M': 1,
+        '3M': 2,
+        '6M': 3,
+        '1Y': 4,
+    };
+    const resolvedResults = subPeriodResults && typeof subPeriodResults === 'object'
+        ? subPeriodResults
+        : lastSubPeriodResults || {};
+    const periodEntries = Object.entries(resolvedResults || {});
+    periodEntries.sort((a, b) => {
+        const [keyA] = a;
+        const [keyB] = b;
+        const orderA = periodOrder[keyA] || (keyA.endsWith('Y') ? parseInt(keyA, 10) * 12 + 4 : 999);
+        const orderB = periodOrder[keyB] || (keyB.endsWith('Y') ? parseInt(keyB, 10) * 12 + 4 : 999);
+        if (orderA !== orderB) return orderA - orderB;
+        return keyA.localeCompare(keyB);
+    });
+
+    const allNull = periodEntries.length === 0 || periodEntries.every(([, value]) => !value);
+    if (allNull) {
+        container.classList.add('flex', 'items-center', 'justify-center');
+        container.classList.remove('block');
+        container.innerHTML = `<p class="text-gray-500">近期區間缺乏有效數據，請調整回測期間或策略參數後再試一次。</p>`;
+        return;
+    }
+
+    container.classList.remove('flex', 'items-center', 'justify-center');
+    container.classList.add('block');
+
+    const buildReturnClass = (value) => (Number.isFinite(value) && value < 0 ? 'text-red-600' : 'text-green-600');
+
+    const rowsHtml = periodEntries.map(([periodKey, stats]) => {
+        if (!stats) {
+            return `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">${formatPerformancePeriodLabel(periodKey)}</td>
+                    <td class="px-4 py-2 text-gray-400 italic" colspan="5">數據不足或該區間無有效交易</td>
+                </tr>
+            `;
+        }
+        const totalReturn = Number.isFinite(stats.totalReturn) ? stats.totalReturn : null;
+        const totalBhReturn = Number.isFinite(stats.totalBuyHoldReturn) ? stats.totalBuyHoldReturn : null;
+        const sharpe = Number.isFinite(stats.sharpeRatio) ? stats.sharpeRatio.toFixed(2) : 'N/A';
+        const sortino = Number.isFinite(stats.sortinoRatio)
+            ? (isFinite(stats.sortinoRatio) ? stats.sortinoRatio.toFixed(2) : '∞')
+            : 'N/A';
+        const maxDD = Number.isFinite(stats.maxDrawdown) ? stats.maxDrawdown : null;
+        return `
+            <tr class="border-b hover:bg-gray-50">
+                <td class="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">${formatPerformancePeriodLabel(periodKey)}</td>
+                <td class="px-4 py-2 ${buildReturnClass(totalReturn)}">${totalReturn === null ? 'N/A' : formatPerformanceValue(totalReturn)}</td>
+                <td class="px-4 py-2 ${buildReturnClass(totalBhReturn)}">${totalBhReturn === null ? 'N/A' : formatPerformanceValue(totalBhReturn)}</td>
+                <td class="px-4 py-2">${sharpe}</td>
+                <td class="px-4 py-2">${sortino}</td>
+                <td class="px-4 py-2">${maxDD === null ? 'N/A' : formatPerformanceValue(maxDD, { suffix: '%', keepSign: false })}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const overallReturn = Number.isFinite(lastOverallResult?.returnRate) ? lastOverallResult.returnRate : null;
+    const overallBHReturnRaw = Array.isArray(lastOverallResult?.buyHoldReturns)
+        ? lastOverallResult.buyHoldReturns[lastOverallResult.buyHoldReturns.length - 1]
+        : null;
+    const overallBHReturn = Number.isFinite(parseFloat(overallBHReturnRaw)) ? parseFloat(overallBHReturnRaw) : null;
+    const overallSharpe = Number.isFinite(lastOverallResult?.sharpeRatio)
+        ? lastOverallResult.sharpeRatio.toFixed(2)
+        : 'N/A';
+    const overallSortino = Number.isFinite(lastOverallResult?.sortinoRatio)
+        ? (isFinite(lastOverallResult.sortinoRatio) ? lastOverallResult.sortinoRatio.toFixed(2) : '∞')
+        : 'N/A';
+    const overallMaxDD = Number.isFinite(lastOverallResult?.maxDrawdown) ? lastOverallResult.maxDrawdown : null;
+
+    const overallRow = `
+        <tr class="border-b bg-gray-100 font-semibold hover:bg-gray-200">
+            <td class="px-4 py-2 text-gray-900 whitespace-nowrap">整段回測 (總計)</td>
+            <td class="px-4 py-2 ${buildReturnClass(overallReturn)}">${overallReturn === null ? 'N/A' : formatPerformanceValue(overallReturn)}</td>
+            <td class="px-4 py-2 ${buildReturnClass(overallBHReturn)}">${overallBHReturn === null ? 'N/A' : formatPerformanceValue(overallBHReturn)}</td>
+            <td class="px-4 py-2">${overallSharpe}</td>
+            <td class="px-4 py-2">${overallSortino}</td>
+            <td class="px-4 py-2">${overallMaxDD === null ? 'N/A' : formatPerformanceValue(overallMaxDD, { suffix: '%', keepSign: false })}</td>
+        </tr>
+    `;
+
+    container.innerHTML = `
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left text-gray-600">
+                <thead class="text-xs uppercase tracking-wide bg-gray-50 text-gray-700">
+                    <tr>
+                        <th scope="col" class="px-4 py-3">期間</th>
+                        <th scope="col" class="px-4 py-3">策略累積報酬 (%)</th>
+                        <th scope="col" class="px-4 py-3">買入持有累積報酬 (%)</th>
+                        <th scope="col" class="px-4 py-3">夏普值</th>
+                        <th scope="col" class="px-4 py-3">索提諾比率</th>
+                        <th scope="col" class="px-4 py-3">最大回撤 (%)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                    ${overallRow}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 function displayBacktestResult(result) {
     console.log("[Main] displayBacktestResult called.");
     const el = document.getElementById("backtest-result");
@@ -6963,6 +7116,7 @@ function displayBacktestResult(result) {
             </div>
         `;
 
+        renderPerformanceTable(result?.subPeriodResults || lastSubPeriodResults);
         initSensitivityCollapse(el);
 
         console.log("[Main] displayBacktestResult finished.");
