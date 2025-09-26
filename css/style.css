@@ -553,6 +553,10 @@ html, body { overflow-x: hidden; }
     border-radius: calc(var(--radius) + 4px);
 }
 
+#trend-analysis-card[data-collapsed="true"] .card-header {
+    padding-bottom: 1.5rem;
+}
+
 .today-suggestion-controls {
     display: flex;
     justify-content: flex-start;

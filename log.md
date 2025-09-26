@@ -1,3 +1,11 @@
+## 2025-11-07 — Patch LB-UI-SUMMARY-TREND-20251107A
+- **Scope**: 基本設定介面、今日建議訊息與趨勢／敏感度資訊層同步優化。
+- **Basic Settings**: 重新配置股票代碼與市場下拉寬度，更新文案為「台灣/美國股票代碼 (目前無提供指數)」，避免窄螢幕時的選單重疊。
+- **Today Suggestion**: 資料落後天數改附註於日期後方，取消備註區的重複提醒，並調整續抱文案為「請持續來本站追蹤」。
+- **Trend Overlay**: 趨勢底色與圖例僅在趨勢區間評估展開時顯示，新增水平捲動支援與摺疊對稱間距。
+- **Sensitivity Analysis**: 將「如何解讀敏感度結果」移入摺疊內容，調整偏移方向說明文字並維持表格預設收合。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-06 — Patch LB-UI-TODAY-TREND-20251106A
 - **Scope**: 今日建議資訊層與趨勢圖例互動調整，優化行動訊息展示與小螢幕可讀性。
 - **Today Suggestion**:

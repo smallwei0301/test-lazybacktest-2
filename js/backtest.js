@@ -720,7 +720,13 @@ const todaySuggestionUI = (() => {
             ? dedupedNotes[0]
             : (payload.message || '—');
         setText(labelEl, payload.label || '—');
-        setText(dateEl, payload.latestDate || '—');
+        const lagDays = Number.isFinite(payload.dataLagDays) ? payload.dataLagDays : null;
+        let dateText = payload.latestDate || '';
+        if (lagDays !== null && lagDays > 0) {
+            const dayLabel = lagDays === 1 ? '距今日 1 日' : `距今日 ${lagDays} 日`;
+            dateText = dateText ? `${dateText}（${dayLabel}）` : dayLabel;
+        }
+        setText(dateEl, dateText || '—');
         setText(messageEl, highlightText || '—');
         payload.highlightMessage = highlightText;
         setText(longEl, describePosition(payload.longPosition));
@@ -1540,7 +1546,7 @@ const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
 const BLOB_LEDGER_MAX_EVENTS = 36;
 
-const TREND_ANALYSIS_VERSION = 'LB-TREND-CARD-20251028A';
+const TREND_ANALYSIS_VERSION = 'LB-TREND-CARD-20251107A';
 const TREND_BACKGROUND_PLUGIN_ID = 'trendBackgroundOverlay';
 const TREND_SENSITIVITY_MIN = 0;
 const TREND_SENSITIVITY_MAX = 10;
@@ -3088,13 +3094,27 @@ function computeTrendAnalysisFromResult(result, thresholds) {
     };
 }
 
+function isTrendAnalysisCardExpanded() {
+    if (typeof document === 'undefined') return true;
+    const card = document.getElementById('trend-analysis-card');
+    if (!card) return true;
+    return (card.dataset.collapsed || 'true') !== 'true';
+}
+
+function resolveTrendOverlaySegments() {
+    if (!isTrendAnalysisCardExpanded()) {
+        return [];
+    }
+    return Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [];
+}
+
 function updateChartTrendOverlay() {
     if (!stockChart) return;
     if (!stockChart.options) stockChart.options = {};
     if (!stockChart.options.plugins) stockChart.options.plugins = {};
     stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] = {
         ...(stockChart.options.plugins[TREND_BACKGROUND_PLUGIN_ID] || {}),
-        segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+        segments: resolveTrendOverlaySegments(),
     };
     stockChart.update('none');
 }
@@ -5611,6 +5631,7 @@ function initTrendAnalysisToggle() {
             legend.classList.toggle('hidden', !expanded);
             legend.setAttribute('aria-hidden', expanded ? 'false' : 'true');
         }
+        updateChartTrendOverlay();
     };
 
     applyState(false);
@@ -6677,7 +6698,7 @@ function displayBacktestResult(result) {
                         <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
                         <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
                     </div>
-                    <p class="text-xs" style="color: var(--muted-foreground);">指標 = 多點擾動後的報酬差異平均值；絕對值 ≤ 10pp 為常見穩健區間。</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。</p>
                     <p class="text-xs mt-1" style="color: var(--muted-foreground);">${directionAdvice}</p>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
@@ -6711,7 +6732,6 @@ function displayBacktestResult(result) {
         <div class="mb-8">
             ${headerHtml}
             ${summaryCards}
-            ${interpretationHint}
             <div class="sensitivity-collapse-controls flex justify-end mt-4">
                 <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
                     <span class="toggle-indicator">＋</span>
@@ -6719,6 +6739,7 @@ function displayBacktestResult(result) {
                 </button>
             </div>
             <div class="space-y-4 sensitivity-collapse-body hidden" data-sensitivity-body aria-hidden="true">
+                ${interpretationHint}
                 ${groupSection}
             </div>
         </div>`;
@@ -7163,7 +7184,7 @@ function renderChart(result) {
             },
             plugins: {
                 [TREND_BACKGROUND_PLUGIN_ID]: {
-                    segments: Array.isArray(trendAnalysisState.segments) ? trendAnalysisState.segments : [],
+                    segments: resolveTrendOverlaySegments(),
                 },
                 legend: {
                     position: 'top',
