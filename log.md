@@ -1,3 +1,10 @@
+## 2025-11-11 — Patch LB-QUICK-SEARCH-20251111A
+- **Scope**: 首頁英雄區一鍵回測按鈕、台股官方清單搜尋工具。
+- **Quick Backtest UX**: 將按鈕文字改為可編輯的底線區塊並加入閃爍游標，提示使用者可直接輸入關鍵字或代碼；新增狀態列即時呈現搜尋、回測進度與錯誤訊息。
+- **Symbol Resolver**: 導出 `lazybacktestSymbolResolver`，提供台股清單依名稱搜尋與代碼解析 API，供前端快速定位股票代號並同步保留市場資訊。
+- **Automation**: 按鈕在搜尋完畢後自動帶入代碼、調整市場、回填最近一年日期並啟動回測流程，同時保留原有的進度條動畫與完成提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。

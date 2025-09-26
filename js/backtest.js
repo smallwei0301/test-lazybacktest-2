@@ -9544,6 +9544,93 @@ function getTaiwanDirectoryEntry(stockCode) {
     return taiwanDirectoryState.entries.get(normalized) || null;
 }
 
+// Patch Tag: LB-QUICK-SEARCH-20251111A
+function normalizeTaiwanNameForSearch(value) {
+    return (value || '')
+        .toString()
+        .trim()
+        .replace(/[\s\u3000\-‧・·•．\.／/]/g, '')
+        .toUpperCase();
+}
+
+function searchTaiwanDirectoryByNameInternal(keyword, options = {}) {
+    if (!(taiwanDirectoryState.entries instanceof Map) || taiwanDirectoryState.entries.size === 0) {
+        return [];
+    }
+    const normalizedKeyword = normalizeTaiwanNameForSearch(keyword);
+    if (!normalizedKeyword) return [];
+
+    const limit = Number.isFinite(options.limit) ? options.limit : 10;
+    const results = [];
+
+    taiwanDirectoryState.entries.forEach((entry) => {
+        if (!entry || !entry.name) return;
+        const normalizedName = normalizeTaiwanNameForSearch(entry.name);
+        if (!normalizedName) return;
+
+        let score = 0;
+
+        if (entry.stockId === normalizedKeyword) {
+            score += 1000;
+        }
+        if (normalizedName === normalizedKeyword) {
+            score += 900;
+        }
+        if (entry.stockId.startsWith(normalizedKeyword)) {
+            score += 500;
+        }
+        if (normalizedName.startsWith(normalizedKeyword)) {
+            score += 450;
+        }
+        if (entry.stockId.includes(normalizedKeyword)) {
+            score += 400;
+        }
+        if (normalizedName.includes(normalizedKeyword)) {
+            score += 350 - normalizedName.indexOf(normalizedKeyword);
+        }
+
+        if (score <= 0) return;
+
+        results.push({
+            stockId: entry.stockId,
+            name: entry.name,
+            market: entry.market || null,
+            board: entry.board || null,
+            instrumentType: entry.instrumentType || null,
+            isETF: entry.isETF || false,
+            score,
+        });
+    });
+
+    results.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (a.stockId !== b.stockId) return a.stockId.localeCompare(b.stockId);
+        return (a.name || '').localeCompare(b.name || '');
+    });
+
+    return results.slice(0, limit);
+}
+
+async function searchTaiwanDirectoryByName(keyword, options = {}) {
+    if (!keyword) return [];
+    await ensureTaiwanDirectoryReady({ forceRefresh: options?.forceRefresh === true });
+    return searchTaiwanDirectoryByNameInternal(keyword, options);
+}
+
+async function resolveTaiwanDirectoryEntryAsync(stockCode, options = {}) {
+    if (!stockCode) return null;
+    await ensureTaiwanDirectoryReady({ forceRefresh: options?.forceRefresh === true });
+    return getTaiwanDirectoryEntry(stockCode);
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestSymbolResolver = Object.assign({}, window.lazybacktestSymbolResolver, {
+        version: 'LB-QUICK-SEARCH-20251111A',
+        searchTaiwanByName,
+        resolveTaiwanEntry: resolveTaiwanDirectoryEntryAsync,
+    });
+}
+
 function resolveCachedStockNameInfo(stockCode, preferredMarket) {
     const normalized = (stockCode || '').trim().toUpperCase();
     if (!normalized) return null;

@@ -382,14 +382,37 @@
 
                             <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
                                 <!-- 一鍵回測按鈕 -->
-                                <button
-                                    id="quickBacktestBtn"
-                                    class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
-                                    style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
-                                >
-                                    <i data-lucide="zap" class="lucide mr-3"></i>
-                                    一鍵回測台積電
-                                </button>
+                                <div class="flex flex-col items-center gap-2">
+                                    <button
+                                        id="quickBacktestBtn"
+                                        class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
+                                        style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                                        data-patch="LB-QUICK-SEARCH-20251111A"
+                                    >
+                                        <i data-lucide="zap" class="lucide mr-3"></i>
+                                        <span class="quick-backtest-button-text">一鍵回測</span>
+                                        <span id="quickBacktestInputWrapper" class="quick-backtest-input-wrapper" data-editing="false">
+                                            <span
+                                                id="quickBacktestEditable"
+                                                class="quick-backtest-editable"
+                                                contenteditable="true"
+                                                role="textbox"
+                                                aria-label="請輸入股票代碼或關鍵字"
+                                                spellcheck="false"
+                                                data-placeholder="台積電"
+                                            >台積電</span>
+                                            <span class="quick-backtest-caret" aria-hidden="true"></span>
+                                        </span>
+                                    </button>
+                                    <p
+                                        id="quickBacktestStatus"
+                                        class="quick-backtest-status"
+                                        role="status"
+                                        aria-live="polite"
+                                    >
+                                        將以 2330 台積電 開始回測
+                                    </p>
+                                </div>
 
                                 <button
                                     id="developerAreaToggle"
@@ -2088,48 +2111,346 @@
             
             // 一鍵回測台積電功能
             const quickBacktestBtn = document.getElementById('quickBacktestBtn');
-            if (quickBacktestBtn) {
-                let originalButtonContent = quickBacktestBtn.innerHTML;
+            const quickBacktestStatus = document.getElementById('quickBacktestStatus');
+            const quickBacktestWrapper = document.getElementById('quickBacktestInputWrapper');
+
+            if (quickBacktestBtn && quickBacktestStatus) {
+                const QUICK_BACKTEST_VERSION = 'LB-QUICK-SEARCH-20251111A';
+                const quickBacktestTemplate = quickBacktestBtn.innerHTML;
+                const quickBacktestDefault = {
+                    query: '台積電',
+                    stockNo: '2330',
+                    displayName: '台積電',
+                    market: 'TWSE',
+                    source: 'default',
+                };
+                const quickBacktestPalette = {
+                    default: 'var(--muted-foreground)',
+                    info: 'var(--blue-600, #2563eb)',
+                    error: 'var(--rose-600, #dc2626)',
+                };
+
+                const quickBacktestState = {
+                    query: quickBacktestDefault.query,
+                    resolved: { ...quickBacktestDefault },
+                    status: 'resolved',
+                    message: '',
+                };
+
+                let quickEditableController = null;
+                let quickBacktestEditableEl = null;
+                let quickInputTimer = null;
+                let quickResolveToken = 0;
+                let quickResolvePromise = Promise.resolve();
                 let progressInterval;
                 let currentProgress = 0;
-                
-                quickBacktestBtn.addEventListener('click', function() {
-                    // 禁用按鈕並改變樣式
-                    quickBacktestBtn.disabled = true;
-                    quickBacktestBtn.style.opacity = '0.7';
-                    currentProgress = 0;
-                    
-                    // 更新按鈕內容為回測中狀態
-                    const updateProgress = () => {
-                        currentProgress += Math.random() * 15 + 5; // 隨機增加 5-20%
-                        if (currentProgress > 95) currentProgress = 95; // 最多到 95%
-                        
-                        quickBacktestBtn.innerHTML = `
-                            <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
-                            回測中...${Math.round(currentProgress)}%
-                        `;
-                        
-                        // 重新初始化圖標
-                        if (typeof lucide !== 'undefined') {
-                            lucide.createIcons();
-                        }
-                    };
-                    
-                    // 立即顯示進度並開始定期更新
-                    updateProgress();
-                    progressInterval = setInterval(updateProgress, 800);
-                    
-                    // 設定台積電的默認參數
-                    const stockInput = document.getElementById('stockInput');
-                    if (stockInput) {
-                        stockInput.value = '2330';
+
+                function sanitizeQuickQuery(text) {
+                    const trimmed = (text || '').replace(/\s+/g, ' ').trim();
+                    if (trimmed.length > 24) {
+                        return trimmed.slice(0, 24);
                     }
-                    
-                    // 設定默認日期範圍（最近一年）
+                    return trimmed;
+                }
+
+                function placeCursorAtEnd(element) {
+                    if (!element) return;
+                    const selection = window.getSelection();
+                    if (!selection) return;
+                    const range = document.createRange();
+                    range.selectNodeContents(element);
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+
+                function setWrapperEditing(flag) {
+                    if (quickBacktestWrapper) {
+                        quickBacktestWrapper.dataset.editing = flag ? 'true' : 'false';
+                    }
+                }
+
+                function updateQuickBacktestStatus() {
+                    const state = quickBacktestState.status;
+                    let text = '';
+                    let color = quickBacktestPalette.default;
+
+                    if (state === 'editing') {
+                        text = '輸入股票代碼或關鍵字後將自動搜尋。';
+                        color = quickBacktestPalette.info;
+                    } else if (state === 'resolving') {
+                        text = `正在尋找「${quickBacktestState.query || quickBacktestDefault.query}」對應代碼...`;
+                        color = quickBacktestPalette.info;
+                    } else if (state === 'running') {
+                        const resolved = quickBacktestState.resolved || quickBacktestDefault;
+                        text = `已套用 ${resolved.stockNo} ${resolved.displayName}，回測執行中...`;
+                        color = quickBacktestPalette.info;
+                    } else if (state === 'error') {
+                        text = quickBacktestState.message || `查無「${quickBacktestState.query}」對應代碼，請重新輸入。`;
+                        color = quickBacktestPalette.error;
+                    } else {
+                        const resolved = quickBacktestState.resolved || quickBacktestDefault;
+                        text = `將以 ${resolved.stockNo} ${resolved.displayName} 開始回測`;
+                    }
+
+                    quickBacktestStatus.textContent = text;
+                    quickBacktestStatus.style.color = color;
+                    quickBacktestStatus.dataset.state = state;
+                    setWrapperEditing(state === 'editing');
+                }
+
+                function destroyQuickEditable() {
+                    if (quickEditableController) {
+                        quickEditableController.abort();
+                        quickEditableController = null;
+                    }
+                    quickBacktestEditableEl = null;
+                }
+
+                function initQuickEditable() {
+                    destroyQuickEditable();
+                    quickBacktestEditableEl = document.getElementById('quickBacktestEditable');
+                    if (!quickBacktestEditableEl) return;
+
+                    quickEditableController = new AbortController();
+                    const { signal } = quickEditableController;
+                    quickBacktestEditableEl.textContent = quickBacktestState.query;
+
+                    quickBacktestEditableEl.addEventListener('focus', () => {
+                        quickBacktestState.status = 'editing';
+                        quickBacktestState.message = '';
+                        updateQuickBacktestStatus();
+                        setTimeout(() => placeCursorAtEnd(quickBacktestEditableEl), 0);
+                    }, { signal });
+
+                    quickBacktestEditableEl.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            quickBacktestEditableEl.blur();
+                        }
+                    }, { signal });
+
+                    quickBacktestEditableEl.addEventListener('input', (event) => {
+                        const sanitized = sanitizeQuickQuery(event.target.textContent || '');
+                        if (sanitized !== event.target.textContent) {
+                            event.target.textContent = sanitized;
+                            placeCursorAtEnd(event.target);
+                        }
+                        quickBacktestState.query = sanitized;
+                        quickBacktestState.status = 'editing';
+                        quickBacktestState.message = '';
+                        updateQuickBacktestStatus();
+                        clearTimeout(quickInputTimer);
+                        quickInputTimer = setTimeout(() => {
+                            applyQuickResolution();
+                        }, 450);
+                    }, { signal });
+
+                    quickBacktestEditableEl.addEventListener('blur', () => {
+                        setWrapperEditing(false);
+                        applyQuickResolution();
+                    }, { signal });
+
+                    ['mousedown', 'click'].forEach((type) => {
+                        quickBacktestEditableEl.addEventListener(type, (event) => {
+                            event.stopPropagation();
+                        }, { signal });
+                    });
+                }
+
+                async function resolveQuickBacktestQuery(query) {
+                    const trimmed = query.trim();
+                    if (!trimmed) {
+                        return { ...quickBacktestDefault };
+                    }
+
+                    const compact = trimmed.replace(/\s+/g, '');
+                    const normalized = compact.toUpperCase();
+                    const taiwanPattern = /^\d{4,6}[A-Z0-9]?$/;
+                    const usPattern = /^[A-Z0-9]{1,6}(?:[.-][A-Z0-9]{1,4})?$/;
+
+                    const codeMatch = trimmed.match(/\d{4,6}[A-Z0-9]?/);
+                    if (codeMatch) {
+                        const candidate = codeMatch[0].toUpperCase();
+                        if (taiwanPattern.test(candidate)) {
+                            let entry = null;
+                            if (window.lazybacktestSymbolResolver?.resolveTaiwanEntry) {
+                                try {
+                                    entry = await window.lazybacktestSymbolResolver.resolveTaiwanEntry(candidate);
+                                } catch (error) {
+                                    console.warn('[Quick Backtest] Taiwan entry lookup failed:', error);
+                                }
+                            }
+                            return {
+                                query: trimmed,
+                                stockNo: candidate,
+                                market: entry?.market || (entry?.board === '上櫃' ? 'TPEX' : 'TWSE'),
+                                displayName: entry?.name || trimmed,
+                                source: entry ? 'taiwan-directory-code' : 'code',
+                            };
+                        }
+                    }
+
+                    if (taiwanPattern.test(normalized)) {
+                        let entry = null;
+                        if (window.lazybacktestSymbolResolver?.resolveTaiwanEntry) {
+                            try {
+                                entry = await window.lazybacktestSymbolResolver.resolveTaiwanEntry(normalized);
+                            } catch (error) {
+                                console.warn('[Quick Backtest] Taiwan entry lookup failed:', error);
+                            }
+                        }
+                        return {
+                            query: trimmed,
+                            stockNo: normalized,
+                            market: entry?.market || (entry?.board === '上櫃' ? 'TPEX' : 'TWSE'),
+                            displayName: entry?.name || trimmed,
+                            source: entry ? 'taiwan-directory-code' : 'code',
+                        };
+                    }
+
+                    if (usPattern.test(normalized) && /[A-Z]/.test(normalized)) {
+                        return {
+                            query: trimmed,
+                            stockNo: normalized,
+                            market: 'US',
+                            displayName: trimmed,
+                            source: 'code',
+                        };
+                    }
+
+                    if (window.lazybacktestSymbolResolver?.searchTaiwanByName) {
+                        try {
+                            const matches = await window.lazybacktestSymbolResolver.searchTaiwanByName(trimmed, { limit: 5 });
+                            if (Array.isArray(matches) && matches.length > 0) {
+                                const best = matches[0];
+                                return {
+                                    query: trimmed,
+                                    stockNo: best.stockId,
+                                    market: best.market || (best.board === '上櫃' ? 'TPEX' : 'TWSE'),
+                                    displayName: best.name || trimmed,
+                                    source: 'taiwan-directory-name',
+                                };
+                            }
+                        } catch (error) {
+                            console.warn('[Quick Backtest] Taiwan name search failed:', error);
+                        }
+                    }
+
+                    return {
+                        error: true,
+                        message: `查無「${trimmed}」對應的上市櫃代碼，請輸入股票代碼或完整名稱。`,
+                        query: trimmed,
+                    };
+                }
+
+                async function applyQuickResolution() {
+                    clearTimeout(quickInputTimer);
+                    const query = sanitizeQuickQuery(quickBacktestState.query || '');
+                    quickBacktestState.query = query || quickBacktestDefault.query;
+                    const effectiveQuery = quickBacktestState.query;
+                    quickResolveToken += 1;
+                    const token = quickResolveToken;
+                    quickBacktestState.status = 'resolving';
+                    quickBacktestState.message = '';
+                    updateQuickBacktestStatus();
+
+                    const promise = resolveQuickBacktestQuery(effectiveQuery)
+                        .then((result) => {
+                            if (token !== quickResolveToken) return null;
+                            if (!result || result.error) {
+                                quickBacktestState.status = 'error';
+                                quickBacktestState.message = result?.message || `查無「${effectiveQuery}」對應代碼，請重新輸入。`;
+                                updateQuickBacktestStatus();
+                                return null;
+                            }
+                            quickBacktestState.resolved = {
+                                stockNo: result.stockNo,
+                                market: result.market || quickBacktestDefault.market,
+                                displayName: result.displayName || effectiveQuery,
+                                source: result.source || 'resolved',
+                            };
+                            quickBacktestState.query = result.query || effectiveQuery;
+                            quickBacktestState.status = 'resolved';
+                            quickBacktestState.message = '';
+                            if (quickBacktestEditableEl && quickBacktestEditableEl.textContent !== quickBacktestState.query) {
+                                quickBacktestEditableEl.textContent = quickBacktestState.query;
+                            }
+                            updateQuickBacktestStatus();
+                            return quickBacktestState.resolved;
+                        })
+                        .catch((error) => {
+                            if (token !== quickResolveToken) return null;
+                            console.error('[Quick Backtest] resolve error:', error);
+                            quickBacktestState.status = 'error';
+                            quickBacktestState.message = '搜尋股票代碼時發生錯誤，請稍後再試。';
+                            updateQuickBacktestStatus();
+                            return null;
+                        });
+
+                    quickResolvePromise = promise;
+                    return promise;
+                }
+
+                async function ensureQuickResolution() {
+                    if (quickBacktestState.status === 'editing') {
+                        await applyQuickResolution();
+                    } else if (quickBacktestState.status === 'resolving') {
+                        await quickResolvePromise;
+                    } else if (!quickBacktestState.resolved) {
+                        await applyQuickResolution();
+                    }
+                    return quickBacktestState.status === 'resolved' ? quickBacktestState.resolved : null;
+                }
+
+                function restoreQuickBacktestButton() {
+                    quickBacktestBtn.innerHTML = quickBacktestTemplate;
+                    if (typeof lucide !== 'undefined') {
+                        lucide.createIcons();
+                    }
+                    initQuickEditable();
+                    updateQuickBacktestStatus();
+                }
+
+                initQuickEditable();
+                updateQuickBacktestStatus();
+
+                quickBacktestBtn.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    if (quickBacktestBtn.disabled) return;
+
+                    const resolved = await ensureQuickResolution();
+                    if (!resolved) {
+                        if (quickBacktestState.status === 'error' && quickBacktestEditableEl) {
+                            quickBacktestEditableEl.focus();
+                            placeCursorAtEnd(quickBacktestEditableEl);
+                        }
+                        return;
+                    }
+
+                    destroyQuickEditable();
+
+                    const stockInput = document.getElementById('stockNo');
+                    if (stockInput) {
+                        stockInput.value = resolved.stockNo;
+                        stockInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+
+                    if (resolved.market) {
+                        const marketSelect = document.getElementById('marketSelect');
+                        if (marketSelect && marketSelect.value !== resolved.market) {
+                            marketSelect.value = resolved.market;
+                            marketSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        if (typeof window.applyMarketPreset === 'function') {
+                            window.applyMarketPreset(resolved.market);
+                        }
+                    }
+
                     const endDate = new Date();
                     const startDate = new Date();
                     startDate.setFullYear(endDate.getFullYear() - 1);
-                    
+
                     const startDateInput = document.getElementById('startDate');
                     const endDateInput = document.getElementById('endDate');
                     if (startDateInput) {
@@ -2138,61 +2459,78 @@
                     if (endDateInput) {
                         endDateInput.value = endDate.toISOString().split('T')[0];
                     }
-                    
-                    // 監聽回測完成事件
+
+                    quickBacktestState.status = 'running';
+                    updateQuickBacktestStatus();
+
+                    quickBacktestBtn.disabled = true;
+                    quickBacktestBtn.style.opacity = '0.7';
+                    currentProgress = 0;
+
+                    const updateProgress = () => {
+                        currentProgress += Math.random() * 15 + 5;
+                        if (currentProgress > 95) currentProgress = 95;
+
+                        quickBacktestBtn.innerHTML = `
+                            <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
+                            回測中...${Math.round(currentProgress)}%
+                        `;
+
+                        if (typeof lucide !== 'undefined') {
+                            lucide.createIcons();
+                        }
+                    };
+
+                    updateProgress();
+                    progressInterval = setInterval(updateProgress, 800);
+
                     const checkBacktestComplete = () => {
                         const resultElement = document.getElementById('backtest-result');
-                        const tradeResultsElement = document.getElementById('trade-results');
-                        
-                        // 檢查是否有結果顯示（簡單檢查文本內容是否改變）
                         if (resultElement && resultElement.textContent.trim() !== '執行回測後將顯示詳細結果') {
-                            // 回測完成
                             clearInterval(progressInterval);
-                            
-                            // 顯示完成狀態
+
                             quickBacktestBtn.innerHTML = `
                                 <i data-lucide="check-circle" class="lucide mr-3"></i>
                                 完成！請看下面績效表現
                             `;
-                            
-                            // 重新初始化圖標
+
                             if (typeof lucide !== 'undefined') {
                                 lucide.createIcons();
                             }
-                            
-                            // 3秒後恢復原始狀態
+
+                            quickBacktestState.status = 'resolved';
+                            updateQuickBacktestStatus();
+
                             setTimeout(() => {
-                                quickBacktestBtn.innerHTML = originalButtonContent;
                                 quickBacktestBtn.disabled = false;
                                 quickBacktestBtn.style.opacity = '1';
-                                if (typeof lucide !== 'undefined') {
-                                    lucide.createIcons();
-                                }
+                                restoreQuickBacktestButton();
                             }, 3000);
-                            
                         } else {
-                            // 繼續檢查
                             setTimeout(checkBacktestComplete, 500);
                         }
                     };
-                    
-                    // 觸發回測
+
                     const backtestBtn = document.getElementById('backtestBtn');
                     if (backtestBtn) {
-                        // 滾動到左邊畫面的開始回測按鈕
-                        backtestBtn.scrollIntoView({ 
-                            behavior: 'smooth', 
+                        backtestBtn.scrollIntoView({
+                            behavior: 'smooth',
                             block: 'center',
                             inline: 'nearest'
                         });
-                        
-                        // 稍微延遲後觸發回測，確保滾動完成
+
                         setTimeout(() => {
                             backtestBtn.click();
                         }, 800);
-                        
-                        // 開始檢查回測狀態
+
                         setTimeout(checkBacktestComplete, 1800);
+                    } else {
+                        clearInterval(progressInterval);
+                        quickBacktestBtn.disabled = false;
+                        quickBacktestBtn.style.opacity = '1';
+                        quickBacktestState.status = 'error';
+                        quickBacktestState.message = '找不到回測按鈕，請重新整理頁面後再試。';
+                        restoreQuickBacktestButton();
                     }
                 });
             }
