@@ -8875,6 +8875,14 @@ function formatAbsoluteLabel(value) {
   return Number(value.toFixed(2)).toString();
 }
 
+function postMessageWithRequestId(requestId, payload) {
+  if (requestId === undefined || requestId === null) {
+    self.postMessage(payload);
+  } else {
+    self.postMessage({ ...payload, requestId });
+  }
+}
+
 // --- 參數優化邏輯 ---
 async function runOptimization(
   baseParams,
@@ -8883,6 +8891,7 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
+  requestId = null,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -8893,7 +8902,7 @@ async function runOptimization(
   };
   const targetLbl =
     targetLblMap[optimizeTargetStrategy] || optimizeTargetStrategy;
-  self.postMessage({
+  postMessageWithRequestId(requestId, {
     type: "progress",
     progress: 0,
     message: `開始優化 ${targetLbl}策略 ${optParamName}...`,
@@ -8952,7 +8961,7 @@ async function runOptimization(
       dataFetched = true;
       if (!Array.isArray(stockData) || stockData.length === 0)
         throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
+      postMessageWithRequestId(requestId, {
         type: "progress",
         progress: 50,
         message: "數據獲取完成，開始優化...",
@@ -8975,7 +8984,7 @@ async function runOptimization(
     if (curVal > range.to && Math.abs(curVal - range.to) > 1e-9) break;
     curStep++;
     const prog = 50 + Math.floor((curStep / totalSteps) * 50);
-    self.postMessage({
+    postMessageWithRequestId(requestId, {
       type: "progress",
       progress: Math.min(100, prog),
       message: `測試 ${optParamName}=${curVal}`,
@@ -9063,7 +9072,11 @@ async function runOptimization(
     const sB = isFinite(b?.sortinoRatio) ? b.sortinoRatio : -Infinity;
     return sB - sA;
   });
-  self.postMessage({ type: "progress", progress: 100, message: "優化完成" });
+  postMessageWithRequestId(requestId, {
+    type: "progress",
+    progress: 100,
+    message: "優化完成",
+  });
   return { results: results, rawDataUsed: dataFetched ? stockData : null };
 }
 
@@ -9079,6 +9092,7 @@ self.onmessage = async function (e) {
     optimizeParamName,
     optimizeRange,
   } = e.data;
+  const requestId = e.data?.requestId ?? null;
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
@@ -9300,7 +9314,7 @@ self.onmessage = async function (e) {
         // 回傳友善的 no_data 訊息給主執行緒，讓 UI 顯示查無資料而不是把 Worker 異常化
         const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 交易數據`;
         console.warn(`[Worker] ${msg}`);
-        self.postMessage({
+        postMessageWithRequestId(requestId, {
           type: "no_data",
           data: {
             stockNo: params.stockNo,
@@ -9327,7 +9341,7 @@ self.onmessage = async function (e) {
       if (visibleStrategyData.length === 0) {
         const msg = `指定範圍 (${params.startDate} ~ ${params.endDate}) 無 ${params.stockNo} 有效交易數據`;
         console.warn(`[Worker] ${msg}（暖身資料僅供指標計算）`);
-        self.postMessage({
+        postMessageWithRequestId(requestId, {
           type: "no_data",
           data: {
             stockNo: params.stockNo,
@@ -9458,7 +9472,7 @@ self.onmessage = async function (e) {
             ? params.marketType || params.market || "未知"
             : "快取",
         };
-      self.postMessage({
+      postMessageWithRequestId(requestId, {
         type: "result",
         data: backtestResult,
         stockName: metaInfo?.stockName || "",
@@ -9489,8 +9503,9 @@ self.onmessage = async function (e) {
         optimizeRange,
         useCachedData,
         cachedData || workerLastDataset,
+        requestId,
       );
-      self.postMessage({ type: "result", data: optOutcome });
+      postMessageWithRequestId(requestId, { type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
       console.log("[Worker] Received getSuggestion request.");
       const todayISO = e.data?.todayISO || getTodayISODate();
@@ -10056,12 +10071,12 @@ self.onmessage = async function (e) {
   } catch (error) {
     console.error(`Worker 執行 ${type} 期間錯誤:`, error);
     if (type === "getSuggestion") {
-      self.postMessage({
+      postMessageWithRequestId(requestId, {
         type: "suggestionError",
         data: { message: `計算建議時發生錯誤: ${error.message || "未知錯誤"}` },
       });
     } else {
-      self.postMessage({
+      postMessageWithRequestId(requestId, {
         type: "error",
         data: {
           message: `Worker ${type} 錯誤: ${error.message || "未知錯誤"}`,

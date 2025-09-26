@@ -49,6 +49,11 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+// 針對參數優化共用同一個 Worker，避免重複啟動
+const OPTIMIZATION_WORKER_TIMEOUT = 60000;
+let optimizationWorkerRequestId = 0;
+const optimizationWorkerPending = new Map();
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -107,6 +112,139 @@ function enrichParamsWithLookback(params) {
         dataStartDate,
         lookbackDays,
     };
+}
+
+function ensureOptimizationWorker() {
+    if (!workerUrl) {
+        console.error('[Batch Optimization] workerUrl 未定義，無法啟動共享 Worker');
+        return null;
+    }
+
+    if (!batchOptimizationWorker) {
+        batchOptimizationWorker = new Worker(workerUrl);
+
+        batchOptimizationWorker.onmessage = function(e) {
+            const message = e.data || {};
+            const requestId = message.requestId;
+
+            if (!requestId || !optimizationWorkerPending.has(requestId)) {
+                // 非共享任務或未知請求，保留給原有流程處理
+                return;
+            }
+
+            const pending = optimizationWorkerPending.get(requestId);
+            if (!pending) return;
+
+            const { resolve, reject, onProgress } = pending;
+
+            if (pending.timeoutId) {
+                clearTimeout(pending.timeoutId);
+            }
+
+            if (message.type === 'progress') {
+                // 進度更新僅回調，不結束請求
+                if (typeof onProgress === 'function') {
+                    try {
+                        onProgress(message);
+                    } catch (err) {
+                        console.warn('[Batch Optimization] onProgress callback error:', err);
+                    }
+                }
+                // 重設超時計時器，避免長時間優化被誤判逾時
+                if (pending.timeoutMs && pending.timeoutMs > 0) {
+                    pending.timeoutId = scheduleWorkerTimeout(requestId, pending.timeoutMs, pending.label);
+                }
+                return;
+            }
+
+            optimizationWorkerPending.delete(requestId);
+
+            if (message.type === 'result') {
+                resolve(message);
+            } else if (message.type === 'error') {
+                reject(message);
+            } else if (message.type === 'no_data') {
+                resolve(message);
+            } else {
+                resolve(message);
+            }
+        };
+
+        batchOptimizationWorker.onerror = function(error) {
+            console.error('[Batch Optimization] Shared worker error:', error);
+            optimizationWorkerPending.forEach((pending) => {
+                if (pending.timeoutId) clearTimeout(pending.timeoutId);
+                const reject = pending.reject;
+                reject(error);
+            });
+            optimizationWorkerPending.clear();
+            batchOptimizationWorker.terminate();
+            batchOptimizationWorker = null;
+        };
+    }
+
+    return batchOptimizationWorker;
+}
+
+function scheduleWorkerTimeout(requestId, timeoutMs, label) {
+    if (!timeoutMs || timeoutMs <= 0) return null;
+    return setTimeout(() => {
+        const pending = optimizationWorkerPending.get(requestId);
+        if (!pending) return;
+
+        optimizationWorkerPending.delete(requestId);
+        pending.reject(new Error(`${label || 'Worker task'} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+}
+
+function runOptimizationWorkerTask(message, options = {}) {
+    const worker = ensureOptimizationWorker();
+    if (!worker) {
+        return Promise.reject(new Error('Worker not available for batch optimization'));
+    }
+
+    const requestId = ++optimizationWorkerRequestId;
+    const timeoutMs = options.timeoutMs ?? OPTIMIZATION_WORKER_TIMEOUT;
+    const onProgress = options.onProgress;
+    const label = options.label || 'Batch optimization task';
+
+    return new Promise((resolve, reject) => {
+        const timeoutId = scheduleWorkerTimeout(requestId, timeoutMs, label);
+        optimizationWorkerPending.set(requestId, {
+            resolve,
+            reject,
+            timeoutId,
+            onProgress,
+            timeoutMs,
+            label
+        });
+
+        try {
+            worker.postMessage({
+                ...message,
+                requestId
+            });
+        } catch (error) {
+            if (timeoutId) clearTimeout(timeoutId);
+            optimizationWorkerPending.delete(requestId);
+            reject(error);
+        }
+    });
+}
+
+function terminateOptimizationWorker(reason) {
+    if (optimizationWorkerPending.size > 0) {
+        optimizationWorkerPending.forEach((pending) => {
+            if (pending.timeoutId) clearTimeout(pending.timeoutId);
+            pending.reject(new Error(reason || 'Shared worker terminated'));
+        });
+        optimizationWorkerPending.clear();
+    }
+
+    if (batchOptimizationWorker) {
+        batchOptimizationWorker.terminate();
+        batchOptimizationWorker = null;
+    }
 }
 
 function resetBatchWorkerStatus() {
@@ -1492,92 +1630,26 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
     }
 }
 
-// 優化單一策略參數
+// 優化單一策略參數（透過共享 Worker 避免重複啟動）
 async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials) {
-    return new Promise((resolve) => {
-        if (!workerUrl) {
-            console.error('[Batch Optimization] Worker not available');
-            resolve({ value: undefined, metric: -Infinity });
-            return;
-        }
-        
-        const optimizeWorker = new Worker(workerUrl);
-        
-        optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
-            if (type === 'result') {
-                optimizeWorker.terminate();
+    if (!workerUrl) {
+        console.error('[Batch Optimization] Worker not available');
+        return { value: undefined, metric: -Infinity };
+    }
 
-                console.debug('[Batch Optimization] optimizeSingleStrategyParameter worker returned data:', data);
-
-                if (!data || !Array.isArray(data.results) || data.results.length === 0) {
-                    console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
-                    resolve({ value: undefined, metric: -Infinity });
-                    return;
-                }
-
-                // Normalize and sort using getMetricFromResult to be tolerant to missing/NaN metrics
-                const results = data.results.map(r => ({
-                    __orig: r,
-                    paramValue: (r.paramValue !== undefined) ? r.paramValue : (r.value !== undefined ? r.value : (r.param !== undefined ? r.param : undefined)),
-                    metricVal: getMetricFromResult(r, targetMetric)
-                }));
-
-                // Filter out entries without a paramValue
-                const validResults = results.filter(r => r.paramValue !== undefined && !isNaN(r.metricVal));
-                if (validResults.length === 0) {
-                    console.warn(`[Batch Optimization] Optimization returned results but none had usable paramValue/metric for ${optimizeTarget.name}`);
-                    // fallback: try to pick first result that has paramValue even if metric NaN
-                    const fallback = results.find(r => r.paramValue !== undefined);
-                    if (fallback) {
-                        resolve({ value: fallback.paramValue, metric: fallback.metricVal });
-                    } else {
-                        resolve({ value: undefined, metric: -Infinity });
-                    }
-                    return;
-                }
-
-                // Sort: for maxDrawdown smaller is better
-                validResults.sort((a, b) => {
-                    if (targetMetric === 'maxDrawdown') {
-                        return Math.abs(a.metricVal) - Math.abs(b.metricVal);
-                    }
-                    return b.metricVal - a.metricVal;
-                });
-
-                const best = validResults[0];
-                console.debug('[Batch Optimization] Selected best optimization result:', best);
-                resolve({ value: best.paramValue, metric: best.metricVal });
-            } else if (type === 'error') {
-                console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
-                optimizeWorker.terminate();
-                resolve({ value: undefined, metric: -Infinity });
-            }
-        };
-        
-        optimizeWorker.onerror = function(error) {
-            console.error(`[Batch Optimization] ${optimizeTarget.name} optimization worker error:`, error);
-            optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
-        };
-        
+    try {
         // 使用策略配置中的原始步長，不進行動態調整
-        // 修復：批量優化應該使用與單次優化相同的參數範圍和步長，
-        // 以確保搜索空間的一致性，避免跳過最優參數值
         const range = optimizeTarget.range;
         const optimizedRange = {
             from: range.from,
             to: range.to,
-            step: range.step || 1  // 使用原始步長，確保與單次優化一致
+            step: range.step || 1
         };
-        
-        console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
-        
-        const preparedParams = enrichParamsWithLookback(params);
 
-        // 發送優化任務
-        optimizeWorker.postMessage({
+        console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
+
+        const preparedParams = enrichParamsWithLookback(params);
+        const response = await runOptimizationWorkerTask({
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: strategyType,
@@ -1585,14 +1657,49 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeRange: optimizedRange,
             useCachedData: true,
             cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
+        }, {
+            timeoutMs: OPTIMIZATION_WORKER_TIMEOUT,
+            label: `Optimize ${optimizeTarget.name}`
         });
-        
-        // 設定超時
-        setTimeout(() => {
-            optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
-        }, 60000); // 60秒超時
-    });
+
+        const data = response?.data;
+        console.debug('[Batch Optimization] optimizeSingleStrategyParameter shared worker response:', data);
+
+        if (!data || !Array.isArray(data.results) || data.results.length === 0) {
+            console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
+            return { value: undefined, metric: -Infinity };
+        }
+
+        const results = data.results.map(r => ({
+            __orig: r,
+            paramValue: (r.paramValue !== undefined) ? r.paramValue : (r.value !== undefined ? r.value : (r.param !== undefined ? r.param : undefined)),
+            metricVal: getMetricFromResult(r, targetMetric)
+        }));
+
+        const validResults = results.filter(r => r.paramValue !== undefined && !isNaN(r.metricVal));
+        if (validResults.length === 0) {
+            console.warn(`[Batch Optimization] Optimization returned results but none had usable paramValue/metric for ${optimizeTarget.name}`);
+            const fallback = results.find(r => r.paramValue !== undefined);
+            if (fallback) {
+                return { value: fallback.paramValue, metric: fallback.metricVal };
+            }
+            return { value: undefined, metric: -Infinity };
+        }
+
+        validResults.sort((a, b) => {
+            if (targetMetric === 'maxDrawdown') {
+                return Math.abs(a.metricVal) - Math.abs(b.metricVal);
+            }
+            return b.metricVal - a.metricVal;
+        });
+
+        const best = validResults[0];
+        console.debug('[Batch Optimization] Selected best optimization result:', best);
+        return { value: best.paramValue, metric: best.metricVal };
+    } catch (error) {
+        console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, error);
+        return { value: undefined, metric: -Infinity };
+    }
 }
 
 // 優化風險管理參數（停損和停利）
@@ -1638,64 +1745,14 @@ async function optimizeRiskManagementParameters(baseParams, optimizeTargets, tar
 
 // 優化單一風險管理參數
 async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric, trials) {
-    return new Promise((resolve) => {
-        if (!workerUrl) {
-            console.error('[Batch Optimization] Worker not available');
-            resolve({ value: undefined, metric: -Infinity });
-            return;
-        }
-        
-        const optimizeWorker = new Worker(workerUrl);
-        
-        optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
-            if (type === 'result') {
-                optimizeWorker.terminate();
-                
-                if (data && data.results && data.results.length > 0) {
-                    // 根據目標指標排序結果
-                    const sortedResults = data.results.sort((a, b) => {
-                        const aValue = a[targetMetric] || -Infinity;
-                        const bValue = b[targetMetric] || -Infinity;
-                        
-                        if (targetMetric === 'maxDrawdown') {
-                            // 最大回撤越小越好
-                            return Math.abs(aValue) - Math.abs(bValue);
-                        } else {
-                            // 其他指標越大越好
-                            return bValue - aValue;
-                        }
-                    });
-                    
-                    const bestResult = sortedResults[0];
-                    console.log(`[Batch Optimization] Best ${optimizeTarget.name}: ${bestResult.paramValue}, ${targetMetric}: ${bestResult[targetMetric]}`);
-                    
-                    resolve({
-                        value: bestResult.paramValue,
-                        metric: bestResult[targetMetric]
-                    });
-                } else {
-                    console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
-                    resolve({ value: undefined, metric: -Infinity });
-                }
-            } else if (type === 'error') {
-                console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
-                optimizeWorker.terminate();
-                resolve({ value: undefined, metric: -Infinity });
-            }
-        };
-        
-        optimizeWorker.onerror = function(error) {
-            console.error(`[Batch Optimization] ${optimizeTarget.name} optimization worker error:`, error);
-            optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
-        };
-        
-        const preparedParams = enrichParamsWithLookback(params);
+    if (!workerUrl) {
+        console.error('[Batch Optimization] Worker not available');
+        return { value: undefined, metric: -Infinity };
+    }
 
-        // 發送優化任務
-        optimizeWorker.postMessage({
+    try {
+        const preparedParams = enrichParamsWithLookback(params);
+        const response = await runOptimizationWorkerTask({
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: 'risk',
@@ -1703,8 +1760,38 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeRange: optimizeTarget.range,
             useCachedData: true,
             cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
+        }, {
+            timeoutMs: OPTIMIZATION_WORKER_TIMEOUT,
+            label: `Optimize ${optimizeTarget.name}`
         });
-    });
+
+        const data = response?.data;
+        if (data && Array.isArray(data.results) && data.results.length > 0) {
+            const sortedResults = data.results.sort((a, b) => {
+                const aValue = a[targetMetric] ?? -Infinity;
+                const bValue = b[targetMetric] ?? -Infinity;
+
+                if (targetMetric === 'maxDrawdown') {
+                    return Math.abs(aValue) - Math.abs(bValue);
+                }
+                return bValue - aValue;
+            });
+
+            const bestResult = sortedResults[0];
+            console.log(`[Batch Optimization] Best ${optimizeTarget.name}: ${bestResult.paramValue}, ${targetMetric}: ${bestResult[targetMetric]}`);
+
+            return {
+                value: bestResult.paramValue,
+                metric: bestResult[targetMetric]
+            };
+        }
+
+        console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
+        return { value: undefined, metric: -Infinity };
+    } catch (error) {
+        console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, error);
+        return { value: undefined, metric: -Infinity };
+    }
 }
 
 // 顯示批量優化結果
@@ -2578,10 +2665,12 @@ function performSingleBacktest(params) {
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
             const preparedParams = enrichParamsWithLookback(params);
+            const canUseCache = Array.isArray(cachedStockData) && cachedStockData.length > 0;
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: false
+                useCachedData: canUseCache,
+                cachedData: canUseCache ? cachedStockData : null
             });
             
         } catch (error) {
@@ -3405,11 +3494,8 @@ function stopBatchOptimization() {
     // 設置停止標誌
     isBatchOptimizationStopped = true;
     
-    // 終止 worker
-    if (batchOptimizationWorker) {
-        batchOptimizationWorker.terminate();
-        batchOptimizationWorker = null;
-    }
+    // 終止共享 worker，避免殘留請求
+    terminateOptimizationWorker('Batch optimization stopped by user');
     
     // 清空進度條並重置進度
     resetBatchProgress();

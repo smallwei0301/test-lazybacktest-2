@@ -651,3 +651,8 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2025-11-12 — Patch LB-BATCH-OPT-SHARED-20251112A
+- **Issue recap**: 批量參數優化會為每個參數與組合重複啟動新 Worker，並在特定流程重新抓取歷史資料，導致執行時間過長且耗費瀏覽器資源。
+- **Fix**: 建立共享的批量優化 Worker 佇列與 requestId 流程，統一在主執行緒排程任務、重設逾時並沿用回測快取資料；同時調整交叉優化單次回測改以快取資料執行，避免重複向 Proxy 抓取行情。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
