@@ -669,3 +669,9 @@
 - **Fix**: 改以可編輯欄位的偽元素呈現插入符號，讓光標緊貼關鍵字結尾並隨聚焦狀態自動隱藏，維持底線整體性且避免額外節點。
 - **Diagnostics**: 在桌機與行動版檢視英雄區，確認未聚焦時插入符號緊貼最後一字且共享底線，聚焦後交還原生輸入游標、失焦時恢復動畫。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-15 — Patch LB-QUICK-KEYIN-20251115A
+- **Issue recap**: 快捷回測預設範例「台積電」與使用者輸入在底線區塊內偏向左側，未能直觀呈現可編輯範圍的中心位置。
+- **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
+- **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
