@@ -1,4 +1,10 @@
 
+## 2025-09-10 — Patch LB-ROLLING-TEST-20250910A
+- **Issue recap**: 用戶需要和國際量化平台一致的 Walk-Forward 滾動測試視圖，快速評估策略在多個市況中的穩健度與合格標準。
+- **Fix**: 在批量優化旁新增「滾動測試」分頁，提供視窗配置、進度監控、Walk-Forward 評分與逐窗指標報告；採用常見 Sharpe、Sortino、年化報酬、最大回撤與勝率門檻，並計算合格率與整體評分。
+- **Diagnostics**: 測試計畫表即時反映可用資料範圍、視窗數量與交易日；報告列出每個視窗的年度績效與缺失原因，便於判讀是否達到國際 Walk-Forward 合格標準。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/batch-optimization.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-03 — Patch LB-TREND-REGRESSION-20250903A
 - **Issue recap**: 先前趨勢偵測僅透過斜率與波動度比值判定，對盤整或不穩定區段常出現誤判，滑桿雖能調整倍率但無法穩定反映趨勢強度。
 - **Fix**: 導入 20 日對數淨值線性回歸，加入 R²、斜率÷殘差與斜率÷波動度等訊噪指標，並依滑桿重新插值嚴格與寬鬆門檻，提升起漲／跌落判定準確度。
