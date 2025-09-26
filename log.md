@@ -656,3 +656,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-15 — Patch LB-OPTIMIZATION-REUSE-20250914A
+- **Issue recap**: 參數優化在每次啟動時仍會重新驗證資料有效性並觸發資料重抓，導致與最新回測結果脫鉤且增加頻寬負擔。
+- **Fix**: 儲存最近一次回測的輸入條件與抓取設定，僅在完全符合時允許啟動優化並強制沿用該次回測的快取資料與診斷，缺少快取時提示使用者先重跑回測。
+- **Diagnostics**: 檢視 `runOptimizationInternal` 的工作訊息確認始終帶入 `useCachedData: true`、`cachedData` 與 `cachedMeta`，並透過 `doesLastFetchMatchInput` 確認市場、日期與價格模式一致。
+- **Testing**: 本地靜態檢查 `js/backtest.js` 執行流程（環境無法連線實際回測 API，僅透過程式碼審閱驗證）。
