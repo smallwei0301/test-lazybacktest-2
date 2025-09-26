@@ -663,3 +663,9 @@
 - **Fix**: 擴大可編輯區最小寬度與高度、補強內距與間距並加入聚焦陰影，確保輸入區塊在桌機與手機皆有明確點擊範圍，同時調整預設標籤間距。
 - **Diagnostics**: 本地檢視首頁 Hero 區塊確認輸入欄位維持底線樣式但寬度顯著放大，聚焦時顯示色塊與陰影提示，光標與提示文案位置穩定。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-14 — Patch LB-QUICK-KEYIN-20251114A
+- **Issue recap**: 快捷回測輸入欄的閃爍指示仍位於底線之外，使用者無法直覺理解「台積電」三字可自訂，亦與底線分離造成視覺跳動。
+- **Fix**: 改以可編輯欄位的偽元素呈現插入符號，讓光標緊貼關鍵字結尾並隨聚焦狀態自動隱藏，維持底線整體性且避免額外節點。
+- **Diagnostics**: 在桌機與行動版檢視英雄區，確認未聚焦時插入符號緊貼最後一字且共享底線，聚焦後交還原生輸入游標、失焦時恢復動畫。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

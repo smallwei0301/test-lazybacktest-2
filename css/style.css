@@ -38,18 +38,19 @@
     border-color: var(--destructive);
 }
 
-.quick-backtest-caret {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-left: 0.2rem;
+.quick-backtest-editable::after {
+    content: '▏';
+    display: inline-block;
     font-weight: 800;
     font-size: 0.95em;
     color: currentColor;
+    margin-left: -0.02em;
+    pointer-events: none;
+    user-select: none;
     animation: quickCaretBlink 1.15s steps(2, jump-none) infinite;
 }
 
-.quick-backtest-caret.is-hidden {
+.quick-backtest-editable[data-caret-hidden="true"]::after {
     opacity: 0;
     animation: none;
 }
