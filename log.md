@@ -1,4 +1,10 @@
 
+## 2025-09-12 — Patch LB-ROLLING-TEST-20250912A
+- **Issue recap**: 已完成主回測仍被提示「請先執行一次主回測以產生快取資料」，導致滾動測試無法啟動並阻礙 Walk-Forward 分析。
+- **Fix**: Walk-Forward 模組改為使用最近一次回測的快取條目自動回灌 `cachedStockData`，並允許以 coverage 範圍推算資料可用區間，避免已完成主回測仍被判定為缺少快取。
+- **Diagnostics**: 滾動測試計畫表與啟動檢查會同步顯示最後一次回測資料的範圍，若 Map 快取異常會輸出警告並維持提示訊息，利於排查快取鍵或瀏覽器儲存行為。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/batch-optimization.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-10 — Patch LB-ROLLING-TEST-20250910A
 - **Issue recap**: 用戶需要和國際量化平台一致的 Walk-Forward 滾動測試視圖，快速評估策略在多個市況中的穩健度與合格標準。
 - **Fix**: 在批量優化旁新增「滾動測試」分頁，提供視窗配置、進度監控、Walk-Forward 評分與逐窗指標報告；採用常見 Sharpe、Sortino、年化報酬、最大回撤與勝率門檻，並計算合格率與整體評分。

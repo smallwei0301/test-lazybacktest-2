@@ -1,6 +1,6 @@
-// --- 滾動測試模組 - v1.0 ---
-// Patch Tag: LB-ROLLING-TEST-20250910A
-/* global getBacktestParams, cachedStockData, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
+// --- 滾動測試模組 - v1.1 ---
+// Patch Tag: LB-ROLLING-TEST-20250912A
+/* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
     const state = {
@@ -17,7 +17,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250910A',
+        version: 'LB-ROLLING-TEST-20250912A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -62,10 +62,11 @@
         if (state.running) return;
 
         const config = getRollingConfig();
-        const availability = getCachedAvailability();
+        const cachedRows = ensureRollingCacheHydrated();
+        const availability = getCachedAvailability(cachedRows);
         const windows = computeRollingWindows(config, availability);
 
-        if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        if (!Array.isArray(cachedRows) || cachedRows.length === 0) {
             setPlanWarning(true);
             setAlert('請先在主畫面執行一次完整回測，以建立快取資料後再啟動滾動測試。', 'error');
             showError?.('滾動測試需要可用的回測快取資料，請先執行一次回測');
@@ -859,8 +860,9 @@
     }
 
     function updateRollingPlanPreview() {
+        const cachedRows = ensureRollingCacheHydrated();
+        const availability = getCachedAvailability(cachedRows);
         const config = getRollingConfig();
-        const availability = getCachedAvailability();
         const windows = computeRollingWindows(config, availability);
 
         const summaryEl = document.getElementById('rolling-plan-summary');
@@ -877,7 +879,7 @@
 
         if (tbody) tbody.innerHTML = '';
 
-        if (!availability || !Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        if (!availability || !Array.isArray(cachedRows) || cachedRows.length === 0) {
             setPlanWarning(true);
             if (summaryEl) summaryEl.textContent = '尚未取得快取資料，請先執行一次主回測。';
             return;
@@ -896,7 +898,7 @@
         if (tbody) {
             windows.forEach((win, index) => {
                 const tr = document.createElement('tr');
-                const tradingDays = countTradingDays(win.testingStart, win.testingEnd);
+                const tradingDays = countTradingDays(win.testingStart, win.testingEnd, cachedRows);
                 tr.innerHTML = [
                     `<td class="px-3 py-2">${index + 1}</td>`,
                     `<td class="px-3 py-2">${win.trainingStart} ~ ${win.trainingEnd}</td>`,
@@ -915,22 +917,99 @@
         else warningEl.classList.add('hidden');
     }
 
-    function countTradingDays(startIso, endIso) {
-        if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) return 0;
-        return cachedStockData.reduce((count, row) => {
+    function countTradingDays(startIso, endIso, rowsOverride) {
+        const rows = Array.isArray(rowsOverride) ? rowsOverride : ensureRollingCacheHydrated();
+        if (!Array.isArray(rows) || rows.length === 0) return 0;
+        return rows.reduce((count, row) => {
             if (!row || !row.date) return count;
             if (row.date >= startIso && row.date <= endIso) return count + 1;
             return count;
         }, 0);
     }
 
-    function getCachedAvailability() {
-        if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) return null;
-        const sorted = cachedStockData;
-        const first = sorted[0]?.date;
-        const last = sorted[sorted.length - 1]?.date;
-        if (!first || !last) return null;
-        return { start: first, end: last };
+    function getCachedAvailability(rowsOverride) {
+        const rows = Array.isArray(rowsOverride) ? rowsOverride : ensureRollingCacheHydrated();
+        if (Array.isArray(rows) && rows.length > 0) {
+            const first = rows[0]?.date;
+            const last = rows[rows.length - 1]?.date;
+            if (first && last) {
+                return { start: first, end: last };
+            }
+        }
+
+        const entry = getLastCacheEntry();
+        if (entry && Array.isArray(entry.coverage) && entry.coverage.length > 0) {
+            const firstSeg = entry.coverage[0];
+            const lastSeg = entry.coverage[entry.coverage.length - 1];
+            if (firstSeg && lastSeg && (firstSeg.start || firstSeg.end) && (lastSeg.start || lastSeg.end)) {
+                return {
+                    start: firstSeg.start || firstSeg.end,
+                    end: lastSeg.end || lastSeg.start,
+                };
+            }
+        }
+
+        const diagnosticsCoverage = lastDatasetDiagnostics?.coverage;
+        if (Array.isArray(diagnosticsCoverage) && diagnosticsCoverage.length > 0) {
+            const firstSeg = diagnosticsCoverage[0];
+            const lastSeg = diagnosticsCoverage[diagnosticsCoverage.length - 1];
+            if (firstSeg && lastSeg && (firstSeg.start || firstSeg.end) && (lastSeg.start || lastSeg.end)) {
+                return {
+                    start: firstSeg.start || firstSeg.end,
+                    end: lastSeg.end || lastSeg.start,
+                };
+            }
+        }
+
+        return null;
+    }
+
+    function ensureRollingCacheHydrated() {
+        if (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+            return cachedStockData;
+        }
+
+        const entry = getLastCacheEntry();
+        if (!entry) return null;
+
+        const candidateArrays = [
+            entry.data,
+            entry.rows,
+            entry.dataset,
+            entry.rawData,
+            entry.rawDataUsed,
+            entry.payload?.data,
+            entry.payload?.rows,
+        ];
+
+        for (let i = 0; i < candidateArrays.length; i += 1) {
+            const candidate = candidateArrays[i];
+            if (Array.isArray(candidate) && candidate.length > 0) {
+                cachedStockData = candidate;
+                return cachedStockData;
+            }
+        }
+
+        return null;
+    }
+
+    function getLastCacheEntry() {
+        try {
+            const store = resolveCacheStore();
+            if (!store || !lastFetchSettings || typeof buildCacheKey !== 'function') return null;
+            const key = buildCacheKey(lastFetchSettings);
+            if (!key) return null;
+            return store.get(key) || null;
+        } catch (error) {
+            console.warn('[Rolling Test] 無法解析快取條目：', error);
+            return null;
+        }
+    }
+
+    function resolveCacheStore() {
+        if (typeof cachedDataStore !== 'undefined' && cachedDataStore instanceof Map) return cachedDataStore;
+        if (typeof window !== 'undefined' && window.cachedDataStore instanceof Map) return window.cachedDataStore;
+        return null;
     }
 
     function formatISODate(date) {
