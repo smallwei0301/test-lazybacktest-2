@@ -5,6 +5,11 @@
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
+// Patch Tag: LB-TODAY-SUGGESTION-20250904A
+// Patch Tag: LB-TODAY-SUGGESTION-DEVLOG-20250905A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250908A
+// Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
@@ -45,6 +50,463 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+function normaliseTextKey(value) {
+    if (value === null || value === undefined) return '';
+    const text = typeof value === 'string' ? value : String(value);
+    return text
+        .trim()
+        .replace(/[\s\u3000]+/g, '')
+        .replace(/[。，．,.、；;！!？?（）()【】\[\]{}<>「」『』“”"'`~]/g, '')
+        .toLowerCase();
+}
+
+function dedupeTextList(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const result = [];
+    list.forEach((item) => {
+        if (!item && item !== 0) return;
+        const text = typeof item === 'string' ? item.trim() : String(item).trim();
+        if (!text) return;
+        const key = normaliseTextKey(text);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        result.push(text);
+    });
+    return result;
+}
+
+const todaySuggestionDeveloperLog = (() => {
+    const MAX_ENTRIES = 30;
+    const entries = [];
+    let container = null;
+    let clearBtn = null;
+    let initialised = false;
+
+    const severityClassMap = {
+        success: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+        info: 'bg-sky-100 text-sky-700 border-sky-200',
+        warning: 'bg-amber-100 text-amber-700 border-amber-200',
+        error: 'bg-rose-100 text-rose-700 border-rose-200',
+        neutral: 'bg-slate-100 text-slate-700 border-slate-200',
+    };
+
+    const severityLabelMap = {
+        success: '成功',
+        info: '資訊',
+        warning: '提醒',
+        error: '錯誤',
+        neutral: '紀錄',
+    };
+
+    const priceModeLabelMap = {
+        RAW: '原始收盤價',
+        ADJ: '調整後價格',
+    };
+
+    const issueCodeDescriptions = {
+        final_evaluation_missing: '回測未產生最終評估結果，需檢查暖身或策略是否產生倉位',
+        latest_date_missing: '回傳資料缺少最新日期，請確認抓取範圍與資料筆數',
+        final_evaluation_degraded_missing_price: '最新資料缺少有效收盤價，已回退至前一有效交易日',
+    };
+
+    function resolveIssueLabel(issueCode) {
+        if (!issueCode) return null;
+        const code = issueCode.toString();
+        const description = issueCodeDescriptions[code];
+        if (description) {
+            return `${description}（${code}）`;
+        }
+        return `Issue Code：${code}`;
+    }
+
+    function ensureElements() {
+        if (initialised) return;
+        container = document.getElementById('today-suggestion-log-body');
+        clearBtn = document.getElementById('todaySuggestionLogClear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                entries.length = 0;
+                renderEntries();
+            });
+        }
+        initialised = true;
+    }
+
+    function cloneValue(value) {
+        if (value === null || typeof value !== 'object') return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                console.warn('[TodaySuggestionLog] structuredClone failed, fallback to JSON clone.', error);
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            if (Array.isArray(value)) {
+                return value.slice();
+            }
+            return { ...value };
+        }
+    }
+
+    function formatTimestamp(timestamp) {
+        const date = new Date(Number(timestamp));
+        if (Number.isNaN(date.getTime())) return '—';
+        if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+            try {
+                return new Intl.DateTimeFormat('zh-TW', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).format(date);
+            } catch (error) {
+                console.warn('[TodaySuggestionLog] Failed to format timestamp with Intl.', error);
+            }
+        }
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function resolveSeverity(entry) {
+        const statusKey = (entry?.payload?.status || '').toString().toLowerCase();
+        if (entry?.kind === 'error' || statusKey === 'error') {
+            return 'error';
+        }
+        if (statusKey === 'ok') {
+            return 'success';
+        }
+        if (statusKey === 'future_start') {
+            return 'info';
+        }
+        if (statusKey === 'no_data') {
+            return 'warning';
+        }
+        if (entry?.kind === 'warning') {
+            return 'warning';
+        }
+        if (entry?.payload?.tone === 'error') {
+            return 'error';
+        }
+        return 'neutral';
+    }
+
+    function resolvePriceModeLabel(modeKey) {
+        if (!modeKey) return null;
+        const key = typeof modeKey === 'string' ? modeKey.toUpperCase() : String(modeKey);
+        return priceModeLabelMap[key] || null;
+    }
+
+    function buildSummaryParts(entry) {
+        const parts = [];
+        const latestDate = entry?.payload?.latestDate;
+        if (latestDate) {
+            parts.push(`最新 ${latestDate}`);
+        }
+        if (entry?.meta?.priceText) {
+            parts.push(entry.meta.priceText);
+        }
+        const datasetRange = entry?.meta?.datasetRange;
+        if (datasetRange) {
+            const rowCount = Number.isFinite(entry?.meta?.rowsWithinRange)
+                ? entry.meta.rowsWithinRange
+                : Number.isFinite(entry?.meta?.datasetRows)
+                    ? entry.meta.datasetRows
+                    : null;
+            const modeLabel = resolvePriceModeLabel(entry?.meta?.priceMode || entry?.payload?.priceMode);
+            const coverageText = Number.isFinite(entry?.meta?.coverageSegments) && entry.meta.coverageSegments > 0
+                ? `覆蓋 ${entry.meta.coverageSegments} 段`
+                : null;
+            const segmentParts = [`區間 ${datasetRange}`];
+            if (rowCount !== null) {
+                segmentParts.push(`${rowCount} 筆${modeLabel ? `（${modeLabel}）` : ''}`);
+            } else if (modeLabel) {
+                segmentParts.push(modeLabel);
+            }
+            if (coverageText) segmentParts.push(coverageText);
+            parts.push(segmentParts.join(' ・ '));
+        }
+        if (entry?.meta?.positionSummary && entry.meta.positionSummary !== '—') {
+            parts.push(`部位 ${entry.meta.positionSummary}`);
+        }
+        if (entry?.meta?.longText && entry.meta.longText !== '—') {
+            parts.push(`多單 ${entry.meta.longText}`);
+        }
+        if (entry?.meta?.shortText && entry.meta.shortText !== '—') {
+            parts.push(`空單 ${entry.meta.shortText}`);
+        }
+        if (Number.isFinite(entry?.meta?.dataLagDays) && entry.meta.dataLagDays > 0) {
+            parts.push(`資料延遲 ${entry.meta.dataLagDays} 日`);
+        }
+        if (entry?.meta?.finalStateLabel && entry.meta.finalStateDate) {
+            parts.push(`模擬最終狀態 ${entry.meta.finalStateLabel}（${entry.meta.finalStateDate}）`);
+        } else if (entry?.meta?.finalStateLabel) {
+            parts.push(`模擬最終狀態 ${entry.meta.finalStateLabel}`);
+        }
+        if (entry?.meta?.pendingTradeLabel) {
+            parts.push(`待執行交易 ${entry.meta.pendingTradeLabel}`);
+        }
+        if (entry?.meta?.finalEvaluationCaptured === false) {
+            parts.push('finalEvaluation 未捕捉');
+        }
+        if (entry?.meta?.finalStateReason) {
+            parts.push(entry.meta.finalStateReason);
+        }
+        const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
+        if (issueLabel) {
+            parts.push(issueLabel);
+        }
+        return dedupeTextList(parts);
+    }
+
+    function buildDetailSections(entry) {
+        const userFacing = [];
+        if (entry?.payload?.message) {
+            userFacing.push(entry.payload.message);
+        }
+        if (Array.isArray(entry?.payload?.notes)) {
+            userFacing.push(...entry.payload.notes);
+        }
+        const developerNotes = [];
+        if (Array.isArray(entry?.payload?.developerNotes)) {
+            developerNotes.push(...entry.payload.developerNotes);
+        }
+        const issueLabel = resolveIssueLabel(entry?.payload?.issueCode || entry?.meta?.issueCode);
+        if (issueLabel) {
+            developerNotes.unshift(issueLabel);
+        }
+        if (entry?.meta?.finalStateLabel && entry.meta.finalStateDate) {
+            developerNotes.push(`模擬最終狀態：${entry.meta.finalStateLabel}（${entry.meta.finalStateDate}）`);
+        } else if (entry?.meta?.finalStateLabel) {
+            developerNotes.push(`模擬最終狀態：${entry.meta.finalStateLabel}`);
+        }
+        if (entry?.meta?.pendingTradeLabel) {
+            developerNotes.push(`待執行交易：${entry.meta.pendingTradeLabel}`);
+        }
+        if (entry?.meta?.finalEvaluationCaptured === false) {
+            developerNotes.push('runStrategy 未產生 finalEvaluation');
+        }
+        if (entry?.meta?.finalStateReason) {
+            developerNotes.push(`finalState 診斷：${entry.meta.finalStateReason}`);
+        }
+        if (entry?.meta?.datasetLastDate && entry?.meta?.finalEvaluationDate && entry.meta.datasetLastDate !== entry.meta.finalEvaluationDate) {
+            developerNotes.push(`資料最後日期 ${entry.meta.datasetLastDate} 缺少有效收盤價，已回退至 ${entry.meta.finalEvaluationDate} 推導建議。`);
+        }
+        if (Number.isFinite(entry?.meta?.finalEvaluationFallbackLagDays)) {
+            developerNotes.push(`最新有效建議日期落後資料最後日期 ${entry.meta.finalEvaluationFallbackLagDays} 日。`);
+        }
+        if (Number.isFinite(entry?.meta?.finalEvaluationFallbackLagBars)) {
+            developerNotes.push(`資料索引落後 ${entry.meta.finalEvaluationFallbackLagBars} 筆。`);
+        }
+        if (entry?.meta?.finalEvaluationFallbackFromDate && entry?.meta?.finalEvaluationRequestedLastDate) {
+            developerNotes.push(`finalEvaluation fallback ${entry.meta.finalEvaluationFallbackFromDate} ← ${entry.meta.finalEvaluationRequestedLastDate}`);
+        }
+        if (entry?.meta?.finalStateSnapshotDate && entry.meta.finalStateSnapshotDate !== entry.meta.finalStateDate) {
+            developerNotes.push(`finalState 快照原始日期：${entry.meta.finalStateSnapshotDate}`);
+        }
+        if (entry?.meta?.finalStateLatestValidDate && entry.meta.finalStateLatestValidDate !== entry.meta.finalStateDate) {
+            developerNotes.push(`最新有效倉位日期：${entry.meta.finalStateLatestValidDate}`);
+        }
+        if (entry?.meta?.missingFinalClose) {
+            developerNotes.push('最新資料列缺少有效收盤價');
+        }
+
+        const diagnostics = [];
+        const modeLabel = resolvePriceModeLabel(entry?.meta?.priceMode || entry?.payload?.priceMode);
+        if (modeLabel) {
+            diagnostics.push(`價格模式：${modeLabel}`);
+        }
+        if (entry?.meta?.datasetRange) {
+            diagnostics.push(`資料區間：${entry.meta.datasetRange}`);
+        }
+        if (Number.isFinite(entry?.meta?.datasetRows)) {
+            diagnostics.push(`總筆數：${entry.meta.datasetRows}`);
+        }
+        if (Number.isFinite(entry?.meta?.rowsWithinRange)) {
+            diagnostics.push(`使用者區間筆數：${entry.meta.rowsWithinRange}`);
+        }
+        if (Number.isFinite(entry?.meta?.warmupRows)) {
+            diagnostics.push(`暖身筆數：${entry.meta.warmupRows}`);
+        }
+        if (Number.isFinite(entry?.meta?.rowCount)) {
+            diagnostics.push(`回傳資料筆數：${entry.meta.rowCount}`);
+        }
+        if (Number.isFinite(entry?.meta?.lookbackDaysUsed)) {
+            diagnostics.push(`計算暖身天數：${entry.meta.lookbackDaysUsed}`);
+        }
+        if (Number.isFinite(entry?.meta?.lookbackResolved)) {
+            diagnostics.push(`暖身推算結果：${entry.meta.lookbackResolved}`);
+        }
+        if (entry?.meta?.startDateUsed) {
+            diagnostics.push(`策略起算日：${entry.meta.startDateUsed}`);
+        }
+        if (entry?.meta?.dataStartDateUsed) {
+            diagnostics.push(`暖身起點：${entry.meta.dataStartDateUsed}`);
+        }
+        if (entry?.meta?.todayISO) {
+            diagnostics.push(`請求日期：${entry.meta.todayISO}`);
+        }
+        if (Number.isFinite(entry?.meta?.firstValidGap)) {
+            const firstValidDate = entry?.meta?.firstValidDate
+                ? `（${entry.meta.firstValidDate}）`
+                : '';
+            diagnostics.push(`暖身後首筆有效收盤落後 ${entry.meta.firstValidGap} 日${firstValidDate}`);
+        } else if (entry?.meta?.firstValidDate) {
+            diagnostics.push(`暖身後首筆有效收盤：${entry.meta.firstValidDate}`);
+        }
+        if (entry?.meta?.fetchRange) {
+            const start = entry.meta.fetchRange?.start || '未知';
+            const end = entry.meta.fetchRange?.end || '未知';
+            diagnostics.push(`抓取範圍：${start} ~ ${end}`);
+        }
+        if (entry?.meta?.dataSource) {
+            diagnostics.push(`資料來源：${entry.meta.dataSource}`);
+        }
+        if (entry?.meta?.priceSource) {
+            diagnostics.push(`價格來源：${entry.meta.priceSource}`);
+        }
+        if (entry?.meta?.coverageFingerprint) {
+            diagnostics.push(`Coverage Fingerprint：${entry.meta.coverageFingerprint}`);
+        }
+        if (Number.isFinite(entry?.meta?.coverageSegments)) {
+            diagnostics.push(`覆蓋區段 ${entry.meta.coverageSegments} 段`);
+        }
+        if (entry?.meta?.finalStateDate) {
+            diagnostics.push(`模擬最終日期：${entry.meta.finalStateDate}`);
+        }
+        if (entry?.meta?.finalPortfolioValue) {
+            diagnostics.push(`模擬最終市值：${entry.meta.finalPortfolioValue}`);
+        }
+        if (entry?.meta?.finalStrategyReturn) {
+            diagnostics.push(`模擬報酬率：${entry.meta.finalStrategyReturn}`);
+        }
+        if (entry?.meta?.finalLongShares) {
+            diagnostics.push(`多單股數：${entry.meta.finalLongShares}`);
+        }
+        if (entry?.meta?.finalShortShares) {
+            diagnostics.push(`空單股數：${entry.meta.finalShortShares}`);
+        }
+
+        const sections = [];
+        const dedupedUserFacing = dedupeTextList(userFacing);
+        if (dedupedUserFacing.length > 0) {
+            sections.push({ title: '使用者提示', items: dedupedUserFacing });
+        }
+        const dedupedDeveloper = dedupeTextList(developerNotes);
+        if (dedupedDeveloper.length > 0) {
+            sections.push({ title: '開發者備註', items: dedupedDeveloper });
+        }
+        const dedupedDiagnostics = dedupeTextList(diagnostics);
+        if (dedupedDiagnostics.length > 0) {
+            sections.push({ title: '資料診斷', items: dedupedDiagnostics });
+        }
+
+        return sections;
+    }
+
+    function renderEntries() {
+        ensureElements();
+        if (!container) return;
+        if (entries.length === 0) {
+            container.innerHTML = `<div class="rounded-md border border-dashed px-3 py-2" style="border-color: var(--border); color: var(--muted-foreground);">執行回測後，會在此列出今日建議的狀態與錯誤訊息。</div>`;
+            return;
+        }
+
+        const html = entries
+            .map((entry) => {
+                const severity = resolveSeverity(entry);
+                const badgeClass = severityClassMap[severity] || severityClassMap.neutral;
+                const severityLabel = severityLabelMap[severity] || severityLabelMap.neutral;
+                const statusLabel = (entry?.payload?.status || entry?.meta?.status || severity).toString();
+                const label = entry?.payload?.label || (entry?.kind === 'error' ? '計算失敗' : '—');
+                const summaryParts = buildSummaryParts(entry)
+                    .map((part) => `<span>${escapeHtml(part)}</span>`)
+                    .join('');
+                const summaryHtml = summaryParts
+                    ? `<div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style="color: var(--muted-foreground);">${summaryParts}</div>`
+                    : '';
+                const detailSections = buildDetailSections(entry)
+                    .map((section) => {
+                        const itemsHtml = section.items
+                            .map((note) => `<li>${escapeHtml(note)}</li>`)
+                            .join('');
+                        return `
+                            <div class="space-y-0.5">
+                                <div class="font-medium" style="color: var(--foreground);">${escapeHtml(section.title)}</div>
+                                <ul class="list-disc list-inside space-y-0.5">${itemsHtml}</ul>
+                            </div>
+                        `;
+                    })
+                    .join('');
+                const detailsHtml = detailSections
+                    ? `<div class="space-y-1.5">${detailSections}</div>`
+                    : '';
+
+                return `
+                    <div class="border rounded-md px-3 py-2 space-y-1 text-[11px]" style="border-color: var(--border);">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="font-medium" style="color: var(--foreground);">${escapeHtml(label)}</span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${badgeClass}">
+                                    <span>${escapeHtml(severityLabel)}</span>
+                                    <span style="color: var(--muted-foreground);">${escapeHtml(statusLabel)}</span>
+                                </span>
+                            </div>
+                            <span class="text-[10px]" style="color: var(--muted-foreground);">${escapeHtml(formatTimestamp(entry.timestamp))}</span>
+                        </div>
+                        ${summaryHtml}
+                        ${detailsHtml}
+                    </div>
+                `;
+            })
+            .join('');
+        container.innerHTML = html;
+    }
+
+    return {
+        record(kind, payload = {}, meta = {}) {
+            ensureElements();
+            const entry = {
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                timestamp: Date.now(),
+                kind: kind || 'info',
+                payload: cloneValue(payload),
+                meta: cloneValue(meta),
+            };
+            entries.unshift(entry);
+            if (entries.length > MAX_ENTRIES) {
+                entries.length = MAX_ENTRIES;
+            }
+            renderEntries();
+        },
+        clear() {
+            entries.length = 0;
+            renderEntries();
+        },
+        render() {
+            renderEntries();
+        },
+        getEntries() {
+            return entries.slice();
+        },
+    };
+})();
+
+window.lazybacktestTodaySuggestionLog = todaySuggestionDeveloperLog;
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        todaySuggestionDeveloperLog.render();
+    } catch (error) {
+        console.warn('[TodaySuggestionLog] Failed to render on DOMContentLoaded.', error);
+    }
+});
+
 const todaySuggestionUI = (() => {
     const area = document.getElementById('today-suggestion-area');
     const body = document.getElementById('today-suggestion-body');
@@ -58,6 +520,7 @@ const todaySuggestionUI = (() => {
     const positionEl = document.getElementById('today-suggestion-position');
     const portfolioEl = document.getElementById('today-suggestion-portfolio');
     const notesEl = document.getElementById('today-suggestion-notes');
+    const notesContainer = document.getElementById('today-suggestion-notes-container');
     const toneClasses = ['is-bullish', 'is-bearish', 'is-exit', 'is-neutral', 'is-info', 'is-warning', 'is-error'];
     const numberFormatter = typeof Intl !== 'undefined'
         ? new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 })
@@ -111,9 +574,9 @@ const todaySuggestionUI = (() => {
     function formatPriceValue(value, type) {
         if (!Number.isFinite(value)) return null;
         const formatted = numberFormatter.format(value);
-        if (!type) return formatted;
+        if (!type) return `${formatted} 元`;
         const label = priceTypeLabel[type] || '價格';
-        return `${label} ${formatted}`;
+        return `${label} ${formatted} 元`;
     }
 
     function formatShares(shares) {
@@ -147,12 +610,15 @@ const todaySuggestionUI = (() => {
     function setNotes(notes) {
         if (!notesEl) return;
         notesEl.innerHTML = '';
-        if (!Array.isArray(notes) || notes.length === 0) {
+        const dedupedNotes = dedupeTextList(Array.isArray(notes) ? notes : []);
+        if (dedupedNotes.length === 0) {
             notesEl.style.display = 'none';
+            if (notesContainer) notesContainer.classList.add('hidden');
             return;
         }
         notesEl.style.display = 'block';
-        notes.forEach((note) => {
+        if (notesContainer) notesContainer.classList.remove('hidden');
+        dedupedNotes.forEach((note) => {
             if (!note) return;
             const li = document.createElement('li');
             li.textContent = note;
@@ -212,32 +678,254 @@ const todaySuggestionUI = (() => {
             ensureAreaVisible();
             showBodyContent();
             const status = payload.status || 'ok';
+            const fallbackNotes = [];
+            let displayPayload = payload;
+            let tone = payload.tone || 'neutral';
             if (status !== 'ok') {
-                const fallbackNotes = [];
                 if (payload.message) fallbackNotes.push(payload.message);
                 if (Array.isArray(payload.notes)) fallbackNotes.push(...payload.notes);
-                setTone(status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral');
-                applyResultPayload({
+                const dedupedNotes = dedupeTextList(fallbackNotes);
+                tone = status === 'no_data' ? 'warning' : status === 'future_start' ? 'info' : 'neutral';
+                displayPayload = {
+                    ...payload,
+                    status,
+                    tone,
                     label: payload.label || (status === 'future_start' ? '策略尚未開始' : '無法取得建議'),
                     latestDate: payload.latestDate || '—',
                     price: { text: payload.price?.text || payload.message || '—' },
                     longPosition: { state: '空手' },
                     shortPosition: { state: '空手' },
                     positionSummary: '—',
-                    notes: fallbackNotes,
-                    evaluation: {},
-                });
-                return;
+                    notes: dedupedNotes,
+                    evaluation: payload.evaluation || {},
+                };
             }
-            setTone(payload.tone || 'neutral');
-            applyResultPayload(payload);
+            setTone(tone);
+            applyResultPayload(displayPayload);
+            if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
+                const priceText = displayPayload.price?.text
+                    || formatPriceValue(displayPayload.price?.value, displayPayload.price?.type)
+                    || displayPayload.message
+                    || '—';
+                const meta = {
+                    status,
+                    priceText,
+                    longText: describePosition(displayPayload.longPosition),
+                    shortText: describePosition(displayPayload.shortPosition),
+                    positionSummary: displayPayload.positionSummary || '—',
+                };
+                if (Number.isFinite(displayPayload.dataLagDays)) {
+                    meta.dataLagDays = displayPayload.dataLagDays;
+                }
+                if (Number.isFinite(displayPayload.lookbackDaysUsed)) {
+                    meta.lookbackDaysUsed = displayPayload.lookbackDaysUsed;
+                }
+                if (Number.isFinite(displayPayload.rowCount)) {
+                    meta.rowCount = displayPayload.rowCount;
+                }
+                if (displayPayload.priceMode) {
+                    meta.priceMode = displayPayload.priceMode;
+                }
+                if (displayPayload.dataSource) {
+                    meta.dataSource = displayPayload.dataSource;
+                }
+                if (displayPayload.priceSource) {
+                    meta.priceSource = displayPayload.priceSource;
+                }
+                if (displayPayload.issueCode) {
+                    meta.issueCode = displayPayload.issueCode;
+                }
+                if (displayPayload.startDateUsed) {
+                    meta.startDateUsed = displayPayload.startDateUsed;
+                }
+                if (displayPayload.dataStartDateUsed) {
+                    meta.dataStartDateUsed = displayPayload.dataStartDateUsed;
+                }
+                if (displayPayload.todayISO) {
+                    meta.todayISO = displayPayload.todayISO;
+                }
+                if (displayPayload.fetchRange && typeof displayPayload.fetchRange === 'object') {
+                    meta.fetchRange = displayPayload.fetchRange;
+                }
+                if (displayPayload.coverageFingerprint) {
+                    meta.coverageFingerprint = displayPayload.coverageFingerprint;
+                }
+                if (Array.isArray(displayPayload.coverage)) {
+                    meta.coverageSegments = displayPayload.coverage.length;
+                }
+                if (displayPayload.datasetLastDate) {
+                    meta.datasetLastDate = displayPayload.datasetLastDate;
+                }
+                if (displayPayload.evaluationDate) {
+                    meta.finalEvaluationDate = displayPayload.evaluationDate;
+                }
+                if (Number.isFinite(displayPayload.evaluationLagFromDatasetDays)) {
+                    meta.finalEvaluationFallbackLagDays = displayPayload.evaluationLagFromDatasetDays;
+                }
+                if (displayPayload.dataset && typeof displayPayload.dataset === 'object') {
+                    const ds = displayPayload.dataset;
+                    const rangeStart = ds.firstDate
+                        || ds.firstRowOnOrAfterEffectiveStart?.date
+                        || null;
+                    const rangeEnd = ds.lastDate || null;
+                    if (rangeStart || rangeEnd) {
+                        meta.datasetRange = rangeStart && rangeEnd && rangeStart !== rangeEnd
+                            ? `${rangeStart} ~ ${rangeEnd}`
+                            : rangeStart || rangeEnd;
+                    }
+                    if (Number.isFinite(ds.totalRows)) {
+                        meta.datasetRows = ds.totalRows;
+                    }
+                    if (Number.isFinite(ds.rowsWithinRange)) {
+                        meta.rowsWithinRange = ds.rowsWithinRange;
+                    }
+                    if (Number.isFinite(ds.warmupRows)) {
+                        meta.warmupRows = ds.warmupRows;
+                    }
+                    if (Number.isFinite(ds.firstValidCloseGapFromEffective)) {
+                        meta.firstValidGap = ds.firstValidCloseGapFromEffective;
+                    }
+                    if (ds.firstValidCloseOnOrAfterEffectiveStart?.date) {
+                        meta.firstValidDate = ds.firstValidCloseOnOrAfterEffectiveStart.date;
+                    }
+                }
+                if (displayPayload.warmup && typeof displayPayload.warmup === 'object') {
+                    const warmup = displayPayload.warmup;
+                    if (Number.isFinite(warmup.lookbackDays)) {
+                        meta.lookbackResolved = warmup.lookbackDays;
+                    }
+                }
+                if (displayPayload.strategyDiagnostics && typeof displayPayload.strategyDiagnostics === 'object') {
+                    const finalState = displayPayload.strategyDiagnostics.finalState;
+                    if (finalState && typeof finalState === 'object') {
+                        const evaluationDate = displayPayload.evaluation?.date || null;
+                        if (finalState.snapshot && typeof finalState.snapshot === 'object') {
+                            const snapshot = finalState.snapshot;
+                            const snapshotDate = snapshot.date || null;
+                            const resolvedFinalDate = evaluationDate || snapshotDate;
+                            if (resolvedFinalDate) {
+                                meta.finalStateDate = resolvedFinalDate;
+                            } else if (snapshotDate) {
+                                meta.finalStateDate = snapshotDate;
+                            }
+                            if (snapshotDate && evaluationDate && snapshotDate !== evaluationDate) {
+                                meta.finalStateSnapshotDate = snapshotDate;
+                            }
+                            if (snapshot.latestValidDate) {
+                                meta.finalStateLatestValidDate = snapshot.latestValidDate;
+                            }
+                            if (Number.isFinite(snapshot.fallbackLagDays)) {
+                                meta.finalEvaluationFallbackLagDays = snapshot.fallbackLagDays;
+                            }
+                            if (Number.isFinite(snapshot.fallbackLagBars)) {
+                                meta.finalEvaluationFallbackLagBars = snapshot.fallbackLagBars;
+                            }
+                            if (typeof snapshot.missingFinalClose === 'boolean') {
+                                meta.missingFinalClose = snapshot.missingFinalClose;
+                            }
+                            const stateParts = [];
+                            if (snapshot.longState) {
+                                stateParts.push(`多單 ${snapshot.longState}`);
+                            }
+                            if (snapshot.shortState) {
+                                stateParts.push(`空單 ${snapshot.shortState}`);
+                            }
+                            if (stateParts.length > 0) {
+                                meta.finalStateLabel = stateParts.join('，');
+                            }
+                            if (Number.isFinite(snapshot.portfolioValue)) {
+                                meta.finalPortfolioValue = `${numberFormatter.format(snapshot.portfolioValue)} 元`;
+                            }
+                            if (Number.isFinite(snapshot.strategyReturn)) {
+                                meta.finalStrategyReturn = `${numberFormatter.format(snapshot.strategyReturn)}%`;
+                            }
+                            if (Number.isFinite(snapshot.longShares)) {
+                                meta.finalLongShares = `${integerFormatter.format(snapshot.longShares)} 股`;
+                            }
+                            if (Number.isFinite(snapshot.shortShares)) {
+                                meta.finalShortShares = `${integerFormatter.format(snapshot.shortShares)} 股`;
+                            }
+                        }
+                        if (displayPayload.evaluation && typeof displayPayload.evaluation.meta === 'object') {
+                            const evalMeta = displayPayload.evaluation.meta;
+                            if (evalMeta.fallbackReason && !meta.finalStateReason) {
+                                meta.finalStateReason = evalMeta.fallbackReason;
+                            }
+                            if (evalMeta.fallbackFromDate) {
+                                meta.finalEvaluationFallbackFromDate = evalMeta.fallbackFromDate;
+                            }
+                            if (evalMeta.requestedLastDate) {
+                                meta.finalEvaluationRequestedLastDate = evalMeta.requestedLastDate;
+                            }
+                            if (Number.isFinite(evalMeta.fallbackLagDays)) {
+                                meta.finalEvaluationFallbackLagDays = evalMeta.fallbackLagDays;
+                            }
+                            if (Number.isFinite(evalMeta.fallbackLagBars)) {
+                                meta.finalEvaluationFallbackLagBars = evalMeta.fallbackLagBars;
+                            }
+                            if (typeof evalMeta.missingFinalClose === 'boolean') {
+                                meta.missingFinalClose = evalMeta.missingFinalClose;
+                            }
+                        }
+                        if (finalState.pendingNextDayTrade && typeof finalState.pendingNextDayTrade === 'object') {
+                            const pending = finalState.pendingNextDayTrade;
+                            const pendingParts = [];
+                            if (pending.type || pending.action) {
+                                pendingParts.push(pending.type || pending.action);
+                            }
+                            if (pending.strategy) {
+                                pendingParts.push(pending.strategy);
+                            }
+                            if (pending.reason) {
+                                pendingParts.push(pending.reason);
+                            }
+                            if (pending.triggeredAt) {
+                                pendingParts.push(`觸發於 ${pending.triggeredAt}`);
+                            }
+                            if (pending.plannedDate) {
+                                pendingParts.push(`預計日期 ${pending.plannedDate}`);
+                            }
+                            if (pendingParts.length > 0) {
+                                meta.pendingTradeLabel = pendingParts.join('｜');
+                            }
+                        }
+                        if (typeof finalState.captured === 'boolean') {
+                            meta.finalEvaluationCaptured = finalState.captured;
+                        }
+                        if (finalState.reason) {
+                            meta.finalStateReason = finalState.reason;
+                        }
+                        if (finalState.fallback && typeof finalState.fallback === 'object') {
+                            meta.finalStateFallback = finalState.fallback;
+                            if (!meta.finalStateReason && finalState.fallback.fallbackReason) {
+                                meta.finalStateReason = finalState.fallback.fallbackReason;
+                            }
+                        }
+                        if (Number.isFinite(finalState.evaluationIndex)) {
+                            meta.finalEvaluationIndex = finalState.evaluationIndex;
+                        }
+                        if (finalState.datasetLastDate) {
+                            meta.datasetLastDate = finalState.datasetLastDate;
+                        }
+                        if (finalState.lastValidEvaluationDate && !meta.finalEvaluationDate) {
+                            meta.finalEvaluationDate = finalState.lastValidEvaluationDate;
+                        }
+                    }
+                }
+                window.lazybacktestTodaySuggestionLog.record(
+                    status === 'ok' ? 'result' : 'warning',
+                    displayPayload,
+                    meta,
+                );
+            }
         },
         showError(message) {
             if (!area) return;
             ensureAreaVisible();
             showBodyContent();
             setTone('error');
-            applyResultPayload({
+            const displayPayload = {
+                status: 'error',
                 label: '計算失敗',
                 latestDate: '—',
                 price: { text: message || '計算建議時發生錯誤' },
@@ -246,12 +934,23 @@ const todaySuggestionUI = (() => {
                 positionSummary: '—',
                 notes: message ? [message] : [],
                 evaluation: {},
-            });
+            };
+            applyResultPayload(displayPayload);
+            if (window.lazybacktestTodaySuggestionLog && typeof window.lazybacktestTodaySuggestionLog.record === 'function') {
+                window.lazybacktestTodaySuggestionLog.record('error', displayPayload, {
+                    status: 'error',
+                    priceText: displayPayload.price?.text || '—',
+                    longText: describePosition(displayPayload.longPosition),
+                    shortText: describePosition(displayPayload.shortPosition),
+                    positionSummary: displayPayload.positionSummary || '—',
+                });
+            }
         },
         showPlaceholder() {
             if (!area) return;
             ensureAreaVisible();
             showPlaceholderContent();
+            setNotes([]);
         },
     };
 })();

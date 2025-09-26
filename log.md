@@ -1,3 +1,51 @@
+## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
+- **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
+- **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
+- **Diagnostics**: 重新以 2330 與 2412 等案例執行今日建議，檢視開發者紀錄確認 `strategyDiagnostics.finalState.captured` 為 true、`issueCode` 不再落入 `final_evaluation_missing`，notes 顯示正確建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-11 — Patch LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+- **Issue recap**: 今日建議在 `final_evaluation_missing` 案例仍會落入 `no_data`，即使 `strategyDiagnostics.finalState` 已回傳持有倉位、市值與快照日期，前端仍無法輸出操作建議。
+- **Fix**: Worker 於 `getSuggestion` 偵測 `finalState` 快照時自動重建 `finalEvaluation`，補齊多空部位、價格與 fallback meta，並在建議 notes 與開發者紀錄標註快照來源與落後天數；同時新增 issue code `final_evaluation_recovered_from_snapshot`。
+- **Diagnostics**: 以 2330、2412 等案例移除最後交易日收盤價，確認今日建議改為顯示「已套用前一有效快照」提示，長短倉摘要與 lag 診斷同步呈現，開發者區域列出重建路徑與 fallback 日期。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-10 — Patch LB-TODAY-SUGGESTION-FINALEVAL-20250910A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳 `final_evaluation_missing`，原因為最新交易日缺少有效收盤價導致 `runStrategy` 未建立 `finalEvaluation`，前端雖有快照卻無法給出操作建議。
+- **Fix**: `runStrategy` 改為持續追蹤最後一筆有效評估並在最終收盤缺漏時回退，回傳 fallback 原因與 lag 診斷；Worker 將 fallback meta、issue code、開發者備註帶回主執行緒，前端 log 則優先採用實際評估日期並記錄缺價原因。
+- **Diagnostics**: 模擬 2330 等案例刻意移除最後一日收盤，確認今日建議仍能顯示前一有效交易日的操作、notes 加註缺價提示，開發者紀錄也標示 fallback 日與落後天數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+
+## 2025-09-09 — Patch LB-TODAY-SUGGESTION-DIAG-20250909A
+- **Issue recap**: 即使資料筆數充足，今日建議仍可能回傳 `final_evaluation_missing`，但開發者紀錄僅顯示一般暖身資訊，無法判斷回測最終狀態或是否存在待執行交易。
+- **Fix**: `runStrategy` 新增最終狀態快照與隔日交易診斷，Worker 在 `no_data` 時同步回傳並於開發者備註標示模擬部位、市值與待執行交易，前端 log 會彙整為「模擬最終狀態／待執行交易／finalEvaluation 捕捉狀態」等欄位。
+- **Diagnostics**: 於 `final_evaluation_missing` 案例確認開發者紀錄摘要包含模擬最終日期、倉位狀態、市值與待執行交易描述，並檢視 payload 內新增的 `strategyDiagnostics.finalState` 內容。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-08 — Patch LB-TODAY-SUGGESTION-DIAG-20250908A
+- **Issue recap**: 今日建議顯示 `no_data` 時，卡片與開發者紀錄會重複出現同樣訊息，缺乏 Issue Code 說明與分類，難以快速判讀暖身或資料診斷重點。
+- **Fix**: 導入文字去重工具並重構開發者紀錄為「使用者提示／開發者備註／資料診斷」三段式區塊，於摘要加入 Issue Code 解釋；今日建議卡片與 fallback 訊息也同步去重避免重複提醒。
+- **Diagnostics**: 於 `no_data` 情境檢視卡片備註僅保留唯一訊息，開發者區域會顯示 Issue Code 與資料區間等整理後的診斷段落；console 確認記錄仍包含 coverage 與 fetchRange 等欄位。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-07 — Patch LB-TODAY-SUGGESTION-DIAG-20250907A
+- **Issue recap**: 今日建議返回 `no_data` 時僅提示「回測資料不足」，開發者無法從 UI 看出實際資料區間、覆蓋段數或暖身缺口，難以判斷是哪個環節未產生最終倉位。
+- **Fix**: Worker 在建議結果中回傳 dataset/warmup/coverage 診斷、資料筆數、暖身天數與 issue code，並新增開發者專用備註；前端 developer log 會顯示區間範圍、價格模式、資料來源與暖身缺口，協助對照為何無法產出建議。
+- **Diagnostics**: 於開發者區域驗證 `no_data` 狀態會列出「資料區間」「總筆數」「暖身後首筆有效收盤」等資訊，並在 console 檢查 meta 內帶有 coverage fingerprint 與 fetch range，確保後續能追蹤快取與資料來源。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-05 — Patch LB-TODAY-SUGGESTION-DEVLOG-20250905A
+- **Issue recap**: 今日建議在資料充足時仍可能回傳「無法判斷今日操作」，但開發者區域缺乏對應 log，難以追蹤是哪個步驟產生 fallback 訊息。
+- **Fix**: 建立今日建議開發者紀錄面板，集中列出最新狀態、價格、部位摘要與訊息，並在 `showResult`、`showError` 中寫入 log 以保留錯誤脈絡。
+- **Diagnostics**: 透過 UI 驗證今日建議在成功、無資料與錯誤狀態下皆會將訊息同步至開發者紀錄區，清除按鈕可重置觀察環境。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-04 — Patch LB-TODAY-SUGGESTION-20250904A
+- **Issue recap**: 今日建議卡片仍沿用早期版面，缺乏行動標籤與部位摘要，備註訊息也未集中管理，導致使用者無法一眼辨識最新操作與潛在風險。
+- **Fix**: 重構首頁今日建議卡為行動亮點＋多空統計＋備註清單的三段式結構，新增 `todaySuggestionUI` 控制器以統一處理載入、結果與錯誤狀態，並將主執行緒請求帶入 coverage/cachedMeta 供 Worker 直接推導 `runStrategy.finalEvaluation` 的建議內容。
+- **Diagnostics**: 於瀏覽器確認卡片在載入、成功與錯誤時皆能切換顯示狀態，備註列表會依實際訊息展開；同時查看 console 確認 getSuggestion 訊息包含 coverage fingerprint 與資料診斷摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2025-10-28 — Patch LB-TREND-CARD-20251028A
 - **Issue recap**: 趨勢卡仍顯示版本章與「HMM 信心」字樣，使用者無法直接看到平均狀態信心；同時牛/盤整/熊卡片也未標示最新交易日，使得判讀即時 regime 辨識時缺乏焦點。
