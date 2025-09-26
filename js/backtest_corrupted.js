@@ -1,3 +1,4 @@
+// Patch Tag: LB-ICON-A11Y-20241003A
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -145,11 +146,8 @@ function clearPreviousResults() {
         stockChart=null; 
         const chartContainer = document.getElementById('chart-container');
         if (chartContainer) {
-            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
-            // Re-initialize Lucide icons
-            if (typeof lucide !== 'undefined' && lucide.createIcons) {
-                lucide.createIcons();
-            }
+            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide lucide-lg mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
+            renderLucideIcons(chartContainer);
         }
     }
     const resEl=document.getElementById("result");
@@ -675,11 +673,8 @@ function renderChart(result) {
     }
     
     if (!result || !result.dates || result.dates.length === 0) {
-        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
-        // Re-initialize Lucide icons
-        if (typeof lucide !== 'undefined' && lucide.createIcons) {
-            lucide.createIcons();
-        }
+        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide lucide-lg mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
+        renderLucideIcons(chartContainer);
         return;
     }
     

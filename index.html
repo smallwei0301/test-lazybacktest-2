@@ -24,6 +24,7 @@
       href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
     />
     <link rel="stylesheet" href="css/style.css">
+    <!-- Patch Tag: LB-ICON-A11Y-20241003A -->
     <style>
       :root {
         --background: #ffffff;
@@ -46,6 +47,9 @@
         --input: #ffffff;
         --ring: rgba(8, 145, 178, 0.5);
         --radius: 0.5rem;
+        --icon-size-sm: 1rem;
+        --icon-size-md: 1.25rem;
+        --icon-size-lg: 3rem;
       }
       
       .card {
@@ -317,14 +321,27 @@
       .border-accent { border-color: var(--accent); }
       
       .lucide {
-        width: 1.25rem;
-        height: 1.25rem;
+        width: var(--icon-size-md);
+        height: var(--icon-size-md);
         stroke-width: 2;
+        color: #000000 !important;
+        stroke: currentColor !important;
+        fill: none;
       }
-      
+
       .lucide-sm {
-        width: 1rem;
-        height: 1rem;
+        width: var(--icon-size-sm);
+        height: var(--icon-size-sm);
+      }
+
+      .lucide-md {
+        width: var(--icon-size-md);
+        height: var(--icon-size-md);
+      }
+
+      .lucide-lg {
+        width: var(--icon-size-lg);
+        height: var(--icon-size-lg);
       }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -387,7 +404,7 @@
                                     class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
                                     style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
                                 >
-                                    <i data-lucide="zap" class="lucide mr-3"></i>
+                                    <i data-lucide="zap" class="lucide lucide-md mr-3"></i>
                                     一鍵回測台積電
                                 </button>
 
@@ -399,7 +416,7 @@
                                     aria-expanded="false"
                                     aria-controls="developerAreaWrapper"
                                 >
-                                    <i data-lucide="wrench" class="lucide mr-2"></i>
+                                    <i data-lucide="wrench" class="lucide lucide-md mr-2"></i>
                                     開發者區域
                                 </button>
                             </div>
@@ -412,7 +429,7 @@
                                 <div class="card hero-developer-card" id="developerAreaCard">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="wrench" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <i data-lucide="wrench" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                             開發者區域
                                         </h3>
                                         <p class="card-description">診斷資料流程、測試來源與 Blob 用量</p>
@@ -425,7 +442,7 @@
                                                 class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
                                                 style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
                                             >
-                                                <i data-lucide="radar" class="lucide w-4 h-4"></i>
+                                                <i data-lucide="radar" class="lucide lucide-sm"></i>
                                                 測試資料來源
                                             </button>
                                             <div id="dataSourceTester" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
@@ -447,7 +464,7 @@
                                                 class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
                                                 style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
                                             >
-                                                <i data-lucide="bug" class="lucide w-4 h-4"></i>
+                                                <i data-lucide="bug" class="lucide lucide-sm"></i>
                                                 診斷資料暖身
                                             </button>
                                             <div id="dataDiagnosticsPanel" class="hidden border rounded-md bg-white/70 shadow-sm" style="border-color: var(--border);">
@@ -496,7 +513,7 @@
                                         <div class="space-y-2" id="dataSourceSummaryContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
-                                                    <i data-lucide="layers" class="lucide w-4 h-4"></i>
+                                                    <i data-lucide="layers" class="lucide lucide-sm"></i>
                                                     數據來源摘要
                                                 </div>
                                                 <span id="dataSourceSummaryTag" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></span>
@@ -508,7 +525,7 @@
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
-                                                    <i data-lucide="message-square-warning" class="lucide w-4 h-4"></i>
+                                                    <i data-lucide="message-square-warning" class="lucide lucide-sm"></i>
                                                     今日建議記錄
                                                 </div>
                                                 <div class="flex items-center gap-2">
@@ -549,7 +566,7 @@
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
-                                                    <i data-lucide="database" class="lucide w-4 h-4"></i>
+                                                    <i data-lucide="database" class="lucide lucide-sm"></i>
                                                     Blob 使用監控
                                                 </div>
                                                 <div id="blobUsageUpdatedAt" class="text-[11px]" style="color: var(--muted-foreground);"></div>
@@ -576,7 +593,7 @@
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <i data-lucide="settings" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                             <span class="tooltip">
                                                 基本設定
                                                 <span class="tooltiptext">更改代碼或日期範圍會觸發重新獲取數據。</span>
@@ -688,7 +705,7 @@
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="trending-up" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            <i data-lucide="trending-up" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                             交易設定
                                         </h3>
                                         <p class="card-description">設定交易時機和手續費</p>
@@ -736,7 +753,7 @@
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="shield" class="lucide text-destructive" style="color: var(--destructive);"></i>
+                                            <i data-lucide="shield" class="lucide lucide-md text-destructive" style="color: var(--destructive);"></i>
                                             風險管理
                                         </h3>
                                         <p class="card-description">設定部位大小和停損停利 (多空共用)</p>
@@ -872,7 +889,7 @@
                                 <div class="card">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="target" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <i data-lucide="target" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                             策略設定
                                         </h3>
                                         <p class="card-description">設定進場和出場條件</p>
@@ -994,7 +1011,7 @@
                             <div class="card">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2">
-                                        <i data-lucide="file-text" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        <i data-lucide="file-text" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                         <span class="tooltip">
                                             策略管理
                                             <span class="tooltiptext">儲存、載入、刪除您的回測策略設定 (包含風險管理)。指標會儲存最後回測結果。</span>
@@ -1026,7 +1043,7 @@
                             <div class="card">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2">
-                                        <i data-lucide="zap" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        <i data-lucide="zap" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                         快速結果
                                     </h3>
                                 </div>
@@ -1045,7 +1062,7 @@
                             <div class="card hidden" id="today-suggestion-area" aria-live="polite">
                                 <div class="card-header pb-2">
                                     <h3 class="card-title flex items-center gap-2">
-                                        <i data-lucide="lightbulb" class="lucide text-accent" style="color: var(--accent);"></i>
+                                        <i data-lucide="lightbulb" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                         今日建議
                                     </h3>
                                 </div>
@@ -1126,7 +1143,7 @@
                             <div class="card shadow-lg border-2 border-primary/20" style="border-color: color-mix(in srgb, var(--primary) 20%, transparent);">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2 text-primary" style="color: var(--primary);">
-                                        <i data-lucide="play" class="lucide"></i>
+                                        <i data-lucide="play" class="lucide lucide-md"></i>
                                         執行回測
                                     </h3>
                                 </div>
@@ -1135,7 +1152,7 @@
                                         id="backtestBtn"
                                         class="w-full btn-primary text-lg py-6 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center justify-center"
                                     >
-                                        <i data-lucide="play" class="lucide mr-2"></i>
+                                        <i data-lucide="play" class="lucide lucide-md mr-2"></i>
                                         開始回測
                                     </button>
 
@@ -1247,7 +1264,7 @@
                                         <div id="chart-container" class="h-96 bg-muted/20 rounded-lg flex items-center justify-center border-2 border-dashed relative" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); border-color: var(--card);">
                                             <canvas id="chart" class="w-full h-full absolute inset-0"></canvas>
                                             <div class="text-muted text-center" style="color: var(--muted-foreground);">
-                                                <i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                                                <i data-lucide="bar-chart-3" class="lucide lucide-lg mx-auto mb-2 opacity-50"></i>
                                                 <p>執行回測後將顯示淨值曲線</p>
                                             </div>
                                         </div>
@@ -1359,7 +1376,7 @@
                                 <div class="card shadow-lg mb-6">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="sparkles" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            <i data-lucide="sparkles" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                             分段優化助手
                                         </h3>
                                         <p class="card-description">自動評估多組進場與出場分段，尋找較佳的資金配置方式</p>
@@ -1474,7 +1491,7 @@
                                 <div class="card shadow-lg">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="zap" class="lucide text-accent" style="color: var(--accent);"></i>
+                                            <i data-lucide="zap" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                             參數優化
                                         </h3>
                                         <p class="card-description">自動尋找最佳參數組合</p>
@@ -1484,7 +1501,7 @@
                                         <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                             <div class="card-header">
                                                 <h4 class="card-title flex items-center gap-2">
-                                                    <i data-lucide="sliders-horizontal" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                    <i data-lucide="sliders-horizontal" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                                     優化控制
                                                 </h4>
                                             </div>
@@ -1569,7 +1586,7 @@
                                         <div id="optimization-progress-section" class="card bg-primary/5 border-2 border-primary/20 hidden" style="background-color: color-mix(in srgb, var(--primary) 5%, transparent); border-color: color-mix(in srgb, var(--primary) 20%, transparent);">
                                             <div class="card-header">
                                                 <h4 class="card-title flex items-center gap-2">
-                                                    <i data-lucide="loader" class="lucide text-primary animate-spin" style="color: var(--primary);"></i>
+                                                    <i data-lucide="loader" class="lucide lucide-md text-primary animate-spin" style="color: var(--primary);"></i>
                                                     優化進行中
                                                 </h4>
                                             </div>
@@ -1594,7 +1611,7 @@
                                         <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                             <div class="card-header">
                                                 <h4 id="optimization-title" class="card-title flex items-center gap-2">
-                                                    <i data-lucide="trending-up" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                    <i data-lucide="trending-up" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                                     優化結果
                                                 </h4>
                                             </div>
@@ -1613,7 +1630,7 @@
                                 <div class="card shadow-lg">
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
-                                            <i data-lucide="users" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            <i data-lucide="users" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                             批量策略優化
                                         </h3>
                                         <p class="card-description">同時測試多種策略組合</p>
@@ -1625,7 +1642,7 @@
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
                                                         <h4 class="card-title flex items-center gap-2">
-                                                            <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                            <i data-lucide="settings" class="lucide lucide-md text-primary" style="color: var(--primary);"></i>
                                                             策略組合選擇
                                                         </h4>
                                                     </div>
@@ -1656,7 +1673,7 @@
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
                                                         <h4 class="card-title flex items-center gap-2">
-                                                            <i data-lucide="sliders-horizontal" class="lucide text-accent" style="color: var(--accent);"></i>
+                                                            <i data-lucide="sliders-horizontal" class="lucide lucide-md text-accent" style="color: var(--accent);"></i>
                                                             優化設定
                                                         </h4>
                                                     </div>
@@ -1706,11 +1723,11 @@
                                             <!-- 執行按鈕 -->
                                             <div class="flex justify-center gap-4 mb-6 mt-6">
                                                 <button id="start-batch-optimization" class="btn-primary px-8 py-3 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center" style="background: linear-gradient(135deg, var(--primary), var(--accent));">
-                                                    <i data-lucide="rocket" class="lucide mr-2"></i>
+                                                    <i data-lucide="rocket" class="lucide lucide-md mr-2"></i>
                                                     開始批量優化
                                                 </button>
                                                 <button id="stop-batch-optimization" class="btn-outline px-8 py-3 rounded-lg font-semibold transition duration-150 ease-in-out flex items-center hidden" style="border-color: var(--destructive); color: var(--destructive);">
-                                                    <i data-lucide="square" class="lucide mr-2"></i>
+                                                    <i data-lucide="square" class="lucide lucide-md mr-2"></i>
                                                     停止優化
                                                 </button>
                                             </div>
@@ -1721,7 +1738,7 @@
                                                     <div class="card-header pb-3">
                                                         <div class="flex items-center justify-between">
                                                             <h5 class="card-title text-sm font-medium flex items-center">
-                                                                <i id="batch-progress-hourglass" data-lucide="hourglass" class="lucide mr-2 animate-spin text-primary" style="color: var(--primary);"></i>
+                                                                <i id="batch-progress-hourglass" data-lucide="hourglass" class="lucide lucide-md mr-2 animate-spin text-primary" style="color: var(--primary);"></i>
                                                                 優化進度
                                                             </h5>
                                                             <span id="batch-progress-text" class="text-sm text-primary" style="color: var(--primary);">0%</span>
@@ -1736,7 +1753,7 @@
                                                             <div id="batch-progress-combination" class="font-medium text-primary" style="color: var(--primary);"></div>
                                                             <div id="batch-time-estimate" class="font-medium text-foreground" style="color: var(--foreground);"></div>
                                                             <div id="batch-long-wait-notice" class="hidden p-2 bg-accent/10 border border-accent/20 rounded text-accent" style="background-color: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent);">
-                                                                <i data-lucide="clock" class="lucide mr-1"></i>
+                                                                <i data-lucide="clock" class="lucide lucide-md mr-1"></i>
                                                                 由於測試次數與選擇策略較多，預估需要較長等待時間，請耐心等候...
                                                             </div>
                                                         </div>
@@ -1782,7 +1799,7 @@
                                                     <div class="card-header pb-3">
                                                         <div class="flex items-center justify-between">
                                                             <h5 class="card-title text-sm font-medium flex items-center">
-                                                                <i id="cross-progress-icon" data-lucide="arrow-right-left" class="lucide mr-2 animate-pulse text-accent" style="color: var(--accent);"></i>
+                                                                <i id="cross-progress-icon" data-lucide="arrow-right-left" class="lucide lucide-md mr-2 animate-pulse text-accent" style="color: var(--accent);"></i>
                                                                 交叉優化進度
                                                             </h5>
                                                             <span id="cross-progress-text" class="text-sm text-accent" style="color: var(--accent);">0%</span>
@@ -1816,7 +1833,7 @@
                                                                     <option value="tradeCount">交易次數</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
-                                                                    <i data-lucide="arrow-down" class="lucide"></i>
+                                                                    <i data-lucide="arrow-down" class="lucide lucide-md"></i>
                                                                 </button>
                                                             </div>
                                                         </div>
@@ -1942,11 +1959,11 @@
                                             </div>
                                             <div class="flex items-center gap-3">
                                                 <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
-                                                    <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
+                                                    <i data-lucide="shuffle" class="lucide lucide-sm"></i>
                                                     開始滾動測試
                                                 </button>
                                                 <button id="stop-rolling-test" class="btn-outline px-6 py-2.5 rounded-lg font-semibold hidden" style="border-color: var(--destructive); color: var(--destructive);">
-                                                    <i data-lucide="square" class="lucide w-4 h-4"></i>
+                                                    <i data-lucide="square" class="lucide lucide-sm"></i>
                                                     停止
                                                 </button>
                                             </div>
@@ -2082,9 +2099,7 @@
     <script>
         // Initialize Lucide icons
         document.addEventListener('DOMContentLoaded', function() {
-            if (typeof lucide !== 'undefined') {
-                lucide.createIcons();
-            }
+            renderLucideIcons();
             
             // 一鍵回測台積電功能
             const quickBacktestBtn = document.getElementById('quickBacktestBtn');
@@ -2105,14 +2120,11 @@
                         if (currentProgress > 95) currentProgress = 95; // 最多到 95%
                         
                         quickBacktestBtn.innerHTML = `
-                            <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
+                            <i data-lucide="loader-2" class="lucide lucide-md mr-3 animate-spin"></i>
                             回測中...${Math.round(currentProgress)}%
                         `;
-                        
-                        // 重新初始化圖標
-                        if (typeof lucide !== 'undefined') {
-                            lucide.createIcons();
-                        }
+
+                        renderLucideIcons(quickBacktestBtn);
                     };
                     
                     // 立即顯示進度並開始定期更新
@@ -2151,23 +2163,18 @@
                             
                             // 顯示完成狀態
                             quickBacktestBtn.innerHTML = `
-                                <i data-lucide="check-circle" class="lucide mr-3"></i>
+                                <i data-lucide="check-circle" class="lucide lucide-md mr-3"></i>
                                 完成！請看下面績效表現
                             `;
-                            
-                            // 重新初始化圖標
-                            if (typeof lucide !== 'undefined') {
-                                lucide.createIcons();
-                            }
+
+                            renderLucideIcons(quickBacktestBtn);
                             
                             // 3秒後恢復原始狀態
                             setTimeout(() => {
                                 quickBacktestBtn.innerHTML = originalButtonContent;
                                 quickBacktestBtn.disabled = false;
                                 quickBacktestBtn.style.opacity = '1';
-                                if (typeof lucide !== 'undefined') {
-                                    lucide.createIcons();
-                                }
+                                renderLucideIcons(quickBacktestBtn);
                             }, 3000);
                             
                         } else {

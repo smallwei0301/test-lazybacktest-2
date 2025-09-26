@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-ICON-A11Y-20241003A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -5050,10 +5051,8 @@ function clearPreviousResults() {
         stockChart=null; 
         const chartContainer = document.getElementById('chart-container');
         if (chartContainer) {
-            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
-            if (typeof lucide !== 'undefined' && lucide.createIcons) {
-                lucide.createIcons();
-            }
+            chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide lucide-lg mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
+            renderLucideIcons(chartContainer);
         }
     }
     const resEl=document.getElementById("result");
@@ -7169,11 +7168,8 @@ function renderChart(result) {
     }
     
     if (!result || !result.dates || result.dates.length === 0) {
-        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
-        // Re-initialize Lucide icons
-        if (typeof lucide !== 'undefined' && lucide.createIcons) {
-            lucide.createIcons();
-        }
+        chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide lucide-lg mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
+        renderLucideIcons(chartContainer);
         return;
     }
     
@@ -8227,9 +8223,7 @@ function renderStagingOptimizationResults(results) {
     }
 
     updateStagingOptimizationStatus('分段優化完成！可於下方查看推薦清單。', false);
-    if (typeof lucide !== 'undefined' && lucide.createIcons) {
-        lucide.createIcons();
-    }
+    renderLucideIcons();
 }
 
 async function runStagingOptimization() {
@@ -8271,9 +8265,7 @@ async function runStagingOptimization() {
     if (runButton) {
         runButton.disabled = true;
         runButton.innerHTML = '<i data-lucide="loader-2" class="lucide-sm animate-spin"></i> 分段優化中...';
-        if (typeof lucide !== 'undefined' && lucide.createIcons) {
-            lucide.createIcons();
-        }
+        renderLucideIcons(runButton);
     }
 
     try {
@@ -8285,9 +8277,7 @@ async function runStagingOptimization() {
             if (runButton) {
                 runButton.disabled = false;
                 runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
-                if (typeof lucide !== 'undefined' && lucide.createIcons) {
-                    lucide.createIcons();
-                }
+                renderLucideIcons(runButton);
             }
             return;
         }
@@ -8418,9 +8408,7 @@ async function runStagingOptimization() {
         if (runButton) {
             runButton.disabled = false;
             runButton.innerHTML = '<i data-lucide="play-circle" class="lucide-sm"></i> 一鍵優化分段策略';
-            if (typeof lucide !== 'undefined' && lucide.createIcons) {
-                lucide.createIcons();
-            }
+            renderLucideIcons(runButton);
         }
     }
 }
