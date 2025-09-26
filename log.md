@@ -651,3 +651,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-12 — Patch LB-QUICK-KEYIN-20251112A
+- **Issue recap**: 首頁「一鍵回測台積電」按鈕文字固定且無輸入提示，使用者難以察覺可替換標的；就算輸入其他名稱也無法同步至代碼欄，回測仍鎖在 2330。
+- **Fix**: 在按鈕內嵌可編輯欄位與閃爍光標，支援即時輸入並透過台股官方清單比對關鍵字，自動更新股票代碼與市場設定；回測進度改以狀態區塊呈現避免破壞可編輯元件，同步新增提示文案。
+- **Diagnostics**: 驗證 `resolveKeywordToStock` 能對照台股清單並回傳市場資訊，`updateHintDisplay` 會顯示最終代碼與名稱；測試清空、中文名稱、台/美股代碼皆能更新 `#stockNo` 並觸發名稱查詢。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
