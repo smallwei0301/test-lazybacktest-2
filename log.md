@@ -680,3 +680,9 @@
 - **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
 - **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-PROGRESS-TIMELINE-20251116A
+- **Issue recap**: 回測進度條尚未完成背景工作就提前跑到 100%，且在 Netlify Blob 首次未命中時會長時間停留在「檢查 Netlify Blob 範圍快取...」。
+- **Fix**: 重寫進度動畫移除自動補滿並新增階段清單；Worker 在 Blob 未命中時即刻播報 fallback 訊息，逐月抓取階段啟動與完成時同步更新提示與百分比。
+- **Diagnostics**: 本地回測觀察進度條僅隨 Worker 回報推進，階段清單依序高亮，Blob 失敗時立即顯示「改由上市/上櫃代理抓取資料」訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

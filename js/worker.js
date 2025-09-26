@@ -2951,6 +2951,12 @@ async function fetchStockData(
     if (blobRangeResult) {
       return blobRangeResult;
     }
+    const fallbackLabel = marketKey === "TPEX" ? "上櫃代理" : "上市代理";
+    self.postMessage({
+      type: "progress",
+      progress: 9,
+      message: `Netlify Blob 範圍快取未命中，改由${fallbackLabel}抓取資料...`,
+    });
   }
 
   if (adjusted) {
@@ -3172,8 +3178,28 @@ async function fetchStockData(
   }));
   const totalMonths = months.length;
   let completedMonths = 0;
+  let reportedFetchProgress = 10;
 
   async function processMonth(monthInfo) {
+    const monthLabel = monthInfo?.label || monthInfo?.monthKey || "指定區間";
+    const phaseLabelStart =
+      monthInfo?.phase === "warmup" ? "暖身範圍" : "回測區間";
+    const previewRatio = Math.min(
+      1,
+      (completedMonths + 0.25) / Math.max(1, totalMonths),
+    );
+    const previewProgress = Math.min(
+      45,
+      10 + Math.round(previewRatio * 35),
+    );
+    if (previewProgress > reportedFetchProgress) {
+      reportedFetchProgress = previewProgress;
+    }
+    self.postMessage({
+      type: "progress",
+      progress: reportedFetchProgress,
+      message: `抓取 ${phaseLabelStart} ${monthLabel} 資料中...`,
+    });
     try {
       let monthEntry = getMonthlyCacheEntry(
         marketKey,
@@ -3474,13 +3500,18 @@ async function fetchStockData(
       };
     } finally {
       completedMonths += 1;
-      const progress = 10 + Math.round((completedMonths / totalMonths) * 35);
+      const ratio = Math.min(
+        1,
+        completedMonths / Math.max(1, totalMonths),
+      );
+      const progress = Math.min(45, 10 + Math.round(ratio * 35));
+      reportedFetchProgress = Math.max(reportedFetchProgress, progress);
       const phaseLabel =
-        monthInfo?.phase === "warmup" ? "暖身佇列" : "回測區間";
+        monthInfo?.phase === "warmup" ? "暖身範圍" : "回測區間";
       self.postMessage({
         type: "progress",
-        progress,
-        message: `處理 ${phaseLabel} ${monthInfo.label} 數據...`,
+        progress: reportedFetchProgress,
+        message: `完成 ${phaseLabel} ${monthLabel} 資料整理...`,
       });
     }
   }
