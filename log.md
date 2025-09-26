@@ -1,3 +1,8 @@
+## 2025-11-13 — Patch LB-DATA-VOLUME-20251113A
+- **Issue recap**: 多位使用者回報 00631L 等低成交量標的在 console 出現「買入持有首筆有效收盤價落後暖身起點」與「區間內偵測到 N 筆無效資料」的刷屏訊息，追蹤發現 FinMind 返回的小於千股成交量經 `Math.round(volume / 1000)` 進位後落為 0，導致整段資料被標示為無效並觸發成千上萬筆警示。
+- **Fix**: 新增 `normalizeVolumeUnits` 將原始成交量換算成千股為主、低於 1 千股時改採小數精度（0.01 千股）保留有效數值，並於所有代理資料路徑套用，確保小量成交仍被視為有效樣本。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-10 — Patch LB-TREND-STATE-20251110A
 - **Issue recap**: Patch `LB-UI-SUMMARY-FOCUS-20251109A` 將趨勢評估狀態重設為僅保留日期與策略報酬，使 `recomputeTrendAnalysis` 重新整理時喪失 `rawData` 而覆寫基礎資料，導致初次回測後趨勢區間卡片顯示空白。
 - **Fix**: 新增 `captureTrendAnalysisSource` 將回測結果所需欄位（日期、策略報酬與原始價格）完整封裝，並在趨勢分析重算時保留既有基礎資料，避免再度覆寫為空值。
