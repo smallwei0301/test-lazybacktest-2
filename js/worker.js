@@ -7835,51 +7835,103 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
-        const subPortfolioVals = portfolioVal
-          .slice(subStartIdx, subEndIdx + 1)
-          .filter((v) => check(v));
-        const subBHRawPrices = closes
-          .slice(subStartIdx, subEndIdx + 1)
-          .filter((v) => check(v));
+        const portfolioSlice = portfolioVal.slice(subStartIdx, subEndIdx + 1);
+        const bhPriceSlice = closes.slice(subStartIdx, subEndIdx + 1);
         const subDates = dates.slice(subStartIdx, subEndIdx + 1);
+
+        let effectiveStartOffset = -1;
+        let effectiveEndOffset = -1;
+
+        for (let i = 0; i < portfolioSlice.length; i += 1) {
+          if (check(portfolioSlice[i]) && check(bhPriceSlice[i])) {
+            effectiveStartOffset = i;
+            break;
+          }
+        }
+
+        for (let i = portfolioSlice.length - 1; i >= 0; i -= 1) {
+          if (check(portfolioSlice[i]) && check(bhPriceSlice[i])) {
+            effectiveEndOffset = i;
+            break;
+          }
+        }
+
         if (
-          subPortfolioVals.length > 1 &&
-          subDates.length > 1 &&
-          subBHRawPrices.length > 1
+          effectiveStartOffset !== -1 &&
+          effectiveEndOffset !== -1 &&
+          effectiveEndOffset > effectiveStartOffset &&
+          subDates.length > effectiveEndOffset
         ) {
-          const subStartVal = subPortfolioVals[0];
-          const subEndVal = subPortfolioVals[subPortfolioVals.length - 1];
-          const subTotalReturn =
-            subStartVal !== 0
-              ? ((subEndVal - subStartVal) / subStartVal) * 100
-              : 0;
-          const subStartBHPrice = subBHRawPrices[0];
-          const subEndBHPrice = subBHRawPrices[subBHRawPrices.length - 1];
-          const subBHTotalReturn =
+          const subStartVal = portfolioSlice[effectiveStartOffset];
+          const subEndVal = portfolioSlice[effectiveEndOffset];
+          const subStartBHPrice = bhPriceSlice[effectiveStartOffset];
+          const subEndBHPrice = bhPriceSlice[effectiveEndOffset];
+
+          if (
+            check(subStartVal) &&
+            check(subEndVal) &&
+            check(subStartBHPrice) &&
+            check(subEndBHPrice) &&
+            subStartVal !== 0 &&
             subStartBHPrice !== 0
-              ? ((subEndBHPrice - subStartBHPrice) / subStartBHPrice) * 100
-              : 0;
-          const subDailyReturns = calculateDailyReturns(
-            subPortfolioVals,
-            subDates,
-          );
-          const subAnnualizedReturn = 0;
-          const subSharpe = calculateSharpeRatio(
-            subDailyReturns,
-            subAnnualizedReturn,
-          );
-          const subSortino = calculateSortinoRatio(
-            subDailyReturns,
-            subAnnualizedReturn,
-          );
-          const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
-          subPeriodResults[label] = {
-            totalReturn: subTotalReturn,
-            totalBuyHoldReturn: subBHTotalReturn,
-            sharpeRatio: subSharpe,
-            sortinoRatio: subSortino,
-            maxDrawdown: subMaxDD,
-          };
+          ) {
+            const portfolioWindow = [];
+            for (
+              let i = effectiveStartOffset;
+              i <= effectiveEndOffset;
+              i += 1
+            ) {
+              if (check(portfolioSlice[i])) {
+                portfolioWindow.push(portfolioSlice[i]);
+              }
+            }
+
+            if (portfolioWindow.length > 1) {
+              const subTotalReturn =
+                ((subEndVal - subStartVal) / subStartVal) * 100;
+              const subBHTotalReturn =
+                ((subEndBHPrice - subStartBHPrice) / subStartBHPrice) * 100;
+              const subDailyReturns = calculateDailyReturns(portfolioWindow);
+
+              const startDate = new Date(subDates[effectiveStartOffset]);
+              const endDate = new Date(subDates[effectiveEndOffset]);
+              const durationMs = endDate - startDate;
+              const durationDays = durationMs / (1000 * 60 * 60 * 24);
+              let subAnnualizedReturn = 0;
+              if (Number.isFinite(durationDays) && durationDays > 0) {
+                const totalReturnDecimal = subEndVal / subStartVal - 1;
+                const annualFactor = 365.25 / durationDays;
+                if (Number.isFinite(annualFactor) && annualFactor > 0) {
+                  const compounded = Math.pow(
+                    Math.max(0, 1 + totalReturnDecimal),
+                    annualFactor,
+                  );
+                  subAnnualizedReturn = (compounded - 1) * 100;
+                }
+              }
+
+              const subSharpe = calculateSharpeRatio(
+                subDailyReturns,
+                subAnnualizedReturn,
+              );
+              const subSortino = calculateSortinoRatio(
+                subDailyReturns,
+                subAnnualizedReturn,
+              );
+              const subMaxDD = calculateMaxDrawdown(portfolioWindow);
+              subPeriodResults[label] = {
+                totalReturn: subTotalReturn,
+                totalBuyHoldReturn: subBHTotalReturn,
+                sharpeRatio: subSharpe,
+                sortinoRatio: subSortino,
+                maxDrawdown: subMaxDD,
+              };
+            } else {
+              subPeriodResults[label] = null;
+            }
+          } else {
+            subPeriodResults[label] = null;
+          }
         } else {
           subPeriodResults[label] = null;
         }

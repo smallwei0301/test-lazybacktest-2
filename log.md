@@ -1,4 +1,46 @@
 
+## 2025-09-10 — Patch LB-PERFORMANCE-DIAGNOSTIC-20250713A
+- **Issue recap**: 「績效分析」分頁在回測完成後仍顯示預設提示，無法呈現各期間績效與總結指標，導致使用者誤以為回測失敗。
+
+## 2025-07-20 — Patch LB-PERFORMANCE-ANALYTICS-20250720A
+- **Fix**: 移除績效分析分頁的整體摘要卡，僅保留期間績效比較表並以最新版本標籤呈現；同步將 Worker 的期間統計改為依實際近 1 個月、6 個月、N 年資料切片計算報酬、夏普、索提諾與最大回撤。
+- **Diagnostics**: 回測完成後，「期間績效分析」表格會列出真實回測期間的策略與買入持有指標，若資料不足則顯示提示；清除結果或回測失敗會恢復預設訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>new vm.Script(fs.readFileSync(file,'utf8'),{filename:file}));console.log('scripts compile');NODE`
+
+- **Fix**: 新增績效診斷模組記錄容器初始狀態並動態渲染摘要卡、期間比較表與版本資訊；回測成功時即時注入資料，發生錯誤或重新清除時恢復預設訊息。
+- **Diagnostics**: 回測後切換至「績效分析」分頁，可看到整體績效摘要、各期間策略 vs. 買入持有比較與版本標籤；重新執行或回測失敗時容器恢復居中提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>new vm.Script(fs.readFileSync(file,'utf8'),{filename:file}));console.log('scripts compile');NODE`
+
+## 2025-09-20 — Patch LB-STRATEGY-STATUS-20250920A
+- **Issue recap**: 策略狀態卡雖已改為推文語氣，但最新需求希望改成電玩宅式的戰報敘事，既有文案缺乏遊戲化比喻與補師/技能等語境。
+- **Fix**: 將版本更新為 `LB-STRATEGY-STATUS-20250920A`，重寫戰況卡各狀態標語、戰況比較句、體檢結論與敏感度建議，採用副本、Buff、滅團等電玩宅用語呈現策略優劣勢。
+- **Diagnostics**: 以模擬資料檢查領先、平手、落後、資料缺席與錯誤情境，確認卡片顯示新徽章與條列，落後時強調句會提示開技能補血，敏感度與體檢文案全面換成電玩宅語調。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-15 — Patch LB-STRATEGY-STATUS-20250915A
+- **Issue recap**: 策略狀態卡文案仍偏向一般說明口吻，與最新要求的 PTT 爆文語氣不符；落後時的強調句與敏感度建議也缺乏推文式調侃提醒。
+- **Fix**: 將狀態卡版本更新為 `LB-STRATEGY-STATUS-20250915A`，重寫預設、載入、領先、平手、落後等狀態標語與子標題為 PTT 口吻，並改寫戰況條列、體檢結論與敏感度建議的文案讓散戶能用爆文語氣快速吸收重點。
+- **Diagnostics**: 以模擬資料檢查落後、平手與領先情境，確認卡片顯示新的推文式標語、落後強調句與條列內容都採用 PTT 風格；敏感度資訊在各門檻下會輸出對應的新用語。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-10 — Patch LB-STRATEGY-STATUS-20250910A
+- **Issue recap**: 策略狀態卡落後時缺乏敏感度分數的提醒，無法向使用者交代參數穩定度；差距欄位仍以破折號佔位，與最新不顯示要求不符，落後狀態也未加粗標語引導注意力。
+- **Fix**: 新增 `buildSensitivityScoreAdvice` 將穩定度分數、平均漂移與方向偏移轉為戰況條列建議，更新狀態套用器隱藏差距欄破折號並於落後時插入「快呼叫策略優化…」強調句，版本碼調整為 `LB-STRATEGY-STATUS-20250910A`。
+- **Diagnostics**: 以模擬結果檢查策略領先、平手、落後情境，確認戰況條列會出現敏感度判讀句並依門檻切換建議；落後時展開摺疊後可看到加粗激勵句與完整條列，差距欄位保持隱藏。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-07 — Patch LB-STRATEGY-STATUS-20250907A
+- **Issue recap**: 策略狀態卡落後情境仍會顯示「快呼叫策略優化與風險管理小隊調整參數，下一波逆轉勝。」的大字標語，與最新需求不符；差距徽章同時以 "-14.67pp" 顯示百分點，造成視覺干擾。
+- **Fix**: 移除落後狀態的強調標語，調整狀態套用器僅保留條列重點；差距徽章固定顯示破折號，避免輸出百分點文案。
+- **Diagnostics**: 回測後逐一檢查策略領先、平手、落後等情境，確認卡片只呈現條列戰況與體檢句，不再出現放大標語，差距徽章持續顯示破折號。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-07-10 — Patch LB-STRATEGY-STATUS-20250710B
+- **Issue recap**: 策略狀態卡的版本徽章佔據視覺重心且戰況條列一字排開，與回測摘要、趨勢評估卡緊貼排列，使用者難以掃描，也無法在落後時快速收合細節。
+- **Fix**: 移除版本號展示並以 `data-lb-strategy-status-version` 註記版本，將趨勢評估卡搬到策略狀態卡上方並為摘要區塊加入 `space-y-6` 間距；戰況條列改為 `<details>` 摺疊呈現，落後時保留放大激勵句，改寫逆風副標維持幽默語氣。
+- **Diagnostics**: 手動確認摘要頁卡片上下間距一致、趨勢卡順序調整成功，策略狀態卡落後時顯示加粗激勵句且條列需點擊展開；預設/載入階段仍以段落提示，無摺疊節點。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-12 — Patch LB-ROLLING-TEST-20250912A
 - **Issue recap**: 已完成主回測仍被提示「請先執行一次主回測以產生快取資料」，導致滾動測試無法啟動並阻礙 Walk-Forward 分析。
 - **Fix**: Walk-Forward 模組改為使用最近一次回測的快取條目自動回灌 `cachedStockData`，並允許以 coverage 範圍推算資料可用區間，避免已完成主回測仍被判定為缺少快取。
@@ -46,6 +88,12 @@
 - **Fix**: 移除舊版模擬函式，改以 `runStrategy` 的 `finalEvaluation` 對今日資料延伸評估，產出多空持倉、最新價格與具體行動；同時補齊主執行緒快取 coverage 後灌入 Worker，確保建議計算命中現有資料並沿用最新 meta。
 - **Diagnostics**: 今日建議回傳載明延伸至今日的資料日期、倉位摘要與 lag 天數，若策略起始日尚未到達亦會顯示提示訊息；Worker 快取保留 coverage fingerprint，後續重播時可比對資料區間。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE`
+
+## 2025-07-03 — Patch LB-STRATEGY-STATUS-20250703A
+- **Issue recap**: 策略狀態速報仍隸屬建議分頁，無法在摘要頁即時查看戰況，也缺乏與買入持有差距與指標體檢的條列敘述，散戶難以秒讀策略健康度。
+- **Fix**: 將卡片移至摘要頁淨值曲線下、回測摘要上方，新增幽默語氣的領先/落後徽章與差距顯示，並以 `buildStrategyHealthSummary`、`splitSummaryIntoBulletLines` 拆解年化報酬、夏普、索提諾、最大回撤、前後段穩定比的雙級診斷，落後時先輸出加粗激勵語再逐條列出注意事項。
+- **Diagnostics**: 手動檢查預設版本碼 `LB-STRATEGY-STATUS-20250703A`、回測啟動時的「戰況計算中」提示、失敗時的 `戰況暫停` 標章，以及策略領先/落後/平手時差距與指標巡檢是否依門檻切換口吻與條列格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2025-07-25 — Patch LB-SUMMARY-COMPACT-20250725A
 ## 2025-07-15 — Patch LB-SENSITIVITY-GRID-20250715A / LB-SENSITIVITY-UX-20250715B
