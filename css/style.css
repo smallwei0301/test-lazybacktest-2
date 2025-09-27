@@ -1,4 +1,23 @@
 /* --- 自訂 CSS --- */
+:root {
+    --progress-mascot-border: #f8d7e3;
+    --progress-mascot-shadow: rgba(248, 215, 227, 0.45);
+}
+
+.loading-mascot-wrapper {
+    background-color: #ffffff;
+    border: 2px solid var(--progress-mascot-border);
+    box-shadow: 0 0 0 1px var(--progress-mascot-shadow);
+}
+
+.loading-mascot-wrapper .tenor-gif-embed,
+.loading-mascot-wrapper iframe.tenor-gif-embed {
+    border-radius: 9999px;
+    width: 100% !important;
+    height: 100% !important;
+    background-color: transparent !important;
+    display: block;
+}
 .quick-backtest-editable {
     position: relative;
     display: inline-flex;

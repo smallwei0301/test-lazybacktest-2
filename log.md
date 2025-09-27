@@ -692,3 +692,9 @@
 - **Fix**: Worker 端對 Netlify Blob 範圍檢索加入 2.5 秒逾時並紀錄狀態，逾時即回傳讓主流程顯示「回應逾時」訊息並提前切換；同時將進度卡沙漏改為指定 Chiikawa GIF，維持品牌調性。
 - **Diagnostics**: 人為調降 Blob 回應速度確認 2.5 秒即逾時並切換訊息，`fetchDiagnostics.rangeFetch.status` 會標記為 `timeout`；前端載入時檢視執行卡顯示 GIF 並隨進度文字更新百分比。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-19 — Patch LB-PROGRESS-VISUAL-20251119A
+- **Issue recap**: 執行中卡片的 Chiikawa GIF 在圓形容器邊緣出現灰色條紋，與吉祥物風格不符且破壞進度敘事的一致性。
+- **Fix**: 建立專用的 `loading-mascot-wrapper` 造型，使用柔和粉色邊框與白色背景包覆 GIF，並強制 Tenor 嵌入內容填滿圓形避免再露出灰邊。
+- **Diagnostics**: 本地載入回測進度卡確認 GIF 圓形邊緣維持粉白配色、無灰階漏出，且 Tenor iframe 仍能自動播放並隨進度文字更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
