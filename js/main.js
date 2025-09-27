@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251227A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1711,13 +1711,26 @@ function initLoadingMascotSanitiser() {
                 continue;
             }
 
+            const handleLoad = () => {
+                img.removeEventListener('error', handleError);
+                img.removeEventListener('load', handleLoad);
+                if (img.naturalWidth <= 1 && img.naturalHeight <= 1) {
+                    if (!useFallbackImage()) {
+                        mountTenorEmbedFallback();
+                    }
+                    return;
+                }
+                container.dataset.lbMascotSource = `fallback:${nextSrc}`;
+            };
             const handleError = () => {
                 img.removeEventListener('error', handleError);
+                img.removeEventListener('load', handleLoad);
                 if (!useFallbackImage()) {
                     mountTenorEmbedFallback();
                 }
             };
             img.addEventListener('error', handleError, { once: true });
+            img.addEventListener('load', handleLoad, { once: true });
             if (img.src !== nextSrc) {
                 img.src = nextSrc;
             } else {
@@ -1730,7 +1743,6 @@ function initLoadingMascotSanitiser() {
                     img.src = nextSrc;
                 });
             }
-            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
             return true;
         }
         return false;
