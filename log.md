@@ -716,3 +716,9 @@
 - **Fix**: 於 Sanitiser 中記錄新版本碼並在每次偵測到變動時先行 `disconnect`，完成清理後透過 `queueMicrotask`（退回 `setTimeout`）再重新註冊 MutationObserver，避免自我觸發的屬性回呼；同步限制監控屬性清單並保留透明化、禁用點擊的處理。
 - **Diagnostics**: 本地重載首頁確認 DOMContentLoaded 後進度卡正常顯示、控制台無卡住記錄，反覆觸發 Tenor 重新注入（透過重新開啟進度卡）亦僅執行單次清理且不再堆疊監聽。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-26 — Patch LB-PROGRESS-MASCOT-20251126A
+- **Issue recap**: 即便採用 MutationObserver 清理 Tenor 內嵌，吉祥物仍殘留灰色邊框與背景，且分享連結 iframe 造成透明度難以維持。
+- **Fix**: 改以 Tenor v2 API 動態抓取指定貼圖的 GIF URL，直接以 `<img>` 呈現並停用外部嵌入腳本，確保透明像素不再被灰底覆蓋，同時加上本地 fallback 指示避免 API 失敗時影響進度敘事。
+- **Diagnostics**: 於本地重新載入執行卡確認容器僅包含 `<img>` 並維持透明背景，網路攔截測試時會顯示 `⌛` fallback 並記錄在 console，確保使用者仍感知進度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

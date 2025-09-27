@@ -5,22 +5,41 @@
     box-shadow: none;
 }
 
-.loading-mascot-wrapper .tenor-gif-embed,
-.loading-mascot-wrapper iframe.tenor-gif-embed {
-    width: 100% !important;
-    height: 100% !important;
-    background-color: transparent !important;
+.loading-mascot-canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 0.25rem;
+    background: transparent;
+    pointer-events: none;
+}
+
+.loading-mascot-wrapper.square .loading-mascot-canvas {
+    border-radius: 0;
+}
+
+.loading-mascot-image {
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
     display: block;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    pointer-events: none;
 }
 
-.loading-mascot-wrapper .tenor-gif-embed,
-.loading-mascot-wrapper .tenor-gif-embed * {
-    background: none !important;
-}
-
-.loading-mascot-wrapper .tenor-gif-embed,
-.loading-mascot-wrapper .tenor-gif-embed * {
-    pointer-events: none !important;
+.loading-mascot-canvas.loading-mascot-fallback {
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--muted-foreground);
 }
 .quick-backtest-editable {
     position: relative;

@@ -1616,95 +1616,100 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-VISUAL-20251125A';
-    const embed = document.getElementById('loadingGif');
-    if (!embed) {
+    const VERSION = 'LB-PROGRESS-MASCOT-20251126A';
+    const container = document.getElementById('loadingGif');
+    if (!container) {
         return;
     }
 
-    const previousVersion = embed.dataset.lbMascotSanitiser;
-    if (previousVersion === VERSION) {
+    if (container.dataset.lbMascotSanitiser === VERSION) {
         return;
     }
 
-    const sanitise = () => {
-        if (!embed || !embed.isConnected) {
-            return;
+    const markInitialised = () => {
+        container.dataset.lbMascotSanitiser = VERSION;
+    };
+
+    const ensureImageElement = () => {
+        let img = container.querySelector('img.loading-mascot-image');
+        if (!img) {
+            img = document.createElement('img');
+            img.className = 'loading-mascot-image';
+            img.alt = 'LazyBacktest 進度吉祥物動畫';
+            img.decoding = 'async';
+            img.loading = 'lazy';
+            img.referrerPolicy = 'no-referrer';
+            img.setAttribute('aria-hidden', 'true');
+            container.textContent = '';
+            container.appendChild(img);
         }
-
-        embed.style.background = 'none';
-        embed.style.backgroundColor = 'transparent';
-        embed.style.pointerEvents = 'none';
-
-        const anchors = embed.querySelectorAll('a');
-        anchors.forEach((anchor) => {
-            anchor.removeAttribute('href');
-            anchor.removeAttribute('target');
-            anchor.setAttribute('tabindex', '-1');
-            anchor.style.pointerEvents = 'none';
-            anchor.style.background = 'transparent';
-        });
-
-        const frames = embed.querySelectorAll('iframe');
-        frames.forEach((frame) => {
-            frame.setAttribute('allowtransparency', 'true');
-            frame.style.background = 'transparent';
-            frame.style.pointerEvents = 'none';
-        });
-
-        const containers = embed.querySelectorAll('div, span');
-        containers.forEach((node) => {
-            if (node && node.style) {
-                node.style.background = 'transparent';
-                node.style.backgroundColor = 'transparent';
-            }
-        });
+        return img;
     };
 
-    const Observer = typeof MutationObserver === 'function' ? MutationObserver : null;
-    let observer = null;
-    const observerConfig = {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style', 'class', 'href', 'target'],
+    const showFallback = () => {
+        container.classList.add('loading-mascot-fallback');
+        container.textContent = '⌛';
+        markInitialised();
     };
 
-    if (Observer) {
-        observer = new Observer(() => {
-            if (!observer) {
-                return;
+    const postId = container.dataset.tenorId;
+    const apiKey = container.dataset.tenorApiKey;
+
+    if (!postId || !apiKey || typeof fetch !== 'function') {
+        showFallback();
+        return;
+    }
+
+    const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
+    requestUrl.searchParams.set('ids', postId);
+    requestUrl.searchParams.set('key', apiKey);
+    requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
+    requestUrl.searchParams.set('ar_range', 'all');
+
+    fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit' })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`Tenor API HTTP ${response.status}`);
             }
-            observer.disconnect();
-            sanitise();
-            const resubscribe = () => {
-                if (!embed || !embed.isConnected || !observer) {
-                    return;
-                }
-                observer.observe(embed, observerConfig);
-            };
-            if (typeof queueMicrotask === 'function') {
-                queueMicrotask(resubscribe);
-            } else {
-                setTimeout(resubscribe, 0);
+            return response.json();
+        })
+        .then((payload) => {
+            const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+            if (!result) {
+                throw new Error('Tenor API 回傳空集合');
             }
+
+            const formats = result.media_formats || {};
+            const mediaList = Array.isArray(result.media) ? result.media : [];
+            const gifCandidate =
+                formats.gif?.url ||
+                formats.mediumgif?.url ||
+                formats.tinygif?.url ||
+                formats.nanogif?.url ||
+                mediaList.reduce((selected, item) => {
+                    if (selected) return selected;
+                    if (item?.gif?.url) return item.gif.url;
+                    if (item?.mediumgif?.url) return item.mediumgif.url;
+                    if (item?.tinygif?.url) return item.tinygif.url;
+                    if (item?.nanogif?.url) return item.nanogif.url;
+                    return null;
+                }, null);
+
+            if (!gifCandidate) {
+                throw new Error('Tenor API 缺少 GIF 連結');
+            }
+
+            const img = ensureImageElement();
+            if (img.src !== gifCandidate) {
+                img.src = gifCandidate;
+            }
+            container.classList.remove('loading-mascot-fallback');
+            markInitialised();
+        })
+        .catch((error) => {
+            console.warn('[Mascot] 無法載入 Tenor GIF：', error);
+            showFallback();
         });
-        observer.observe(embed, observerConfig);
-    }
-
-    sanitise();
-
-    embed.dataset.lbMascotSanitiser = VERSION;
-
-    if (observer) {
-        window.addEventListener(
-            'beforeunload',
-            () => {
-                observer.disconnect();
-            },
-            { once: true },
-        );
-    }
 }
 
 function setLoadingBaseMessage(message) {
