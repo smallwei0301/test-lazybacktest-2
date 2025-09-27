@@ -1427,23 +1427,29 @@ function buildSensitivityScoreAdvice(result) {
         ? Math.abs(Number(summary.negativeDriftPercent))
         : null;
     const sampleCount = Number.isFinite(summary.scenarioCount) ? Number(summary.scenarioCount) : null;
+    const horizonYears = Number.isFinite(summary.horizonYears) ? Number(summary.horizonYears) : null;
 
     const segments = [];
 
     if (rawScore === null) {
         segments.push('敏感度總分失聯，像存檔壞軌，請重跑擾動測試確認穩定度');
-    } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，參數調校像滿級裝備`);
-    } else if (rawScore >= 40) {
+    } else if (rawScore >= 75) {
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，長週期也能撐住像穿神話套`);
+    } else if (rawScore >= 50) {
         segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調參時請像打副本一樣小心`);
     } else {
         segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超敏感，碰一下就暴擊先開保護`);
     }
 
+    if (horizonYears && horizonYears >= 1) {
+        const roundedYears = horizonYears >= 10 ? horizonYears.toFixed(0) : horizonYears.toFixed(1);
+        segments.push(`本次樣本涵蓋約 ${roundedYears} 年，依 QuantConnect 與 Portfolio123 建議，五年以上可容忍較高漂移，分數已套用長週期調整`);
+    }
+
     if (averageDrift !== null) {
-        if (averageDrift <= 20) {
-            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
-        } else if (averageDrift <= 40) {
+        if (averageDrift <= 18) {
+            segments.push('平均漂移守在 ±18pp，以機構常用 5～10 年樣本標準來看很穩');
+        } else if (averageDrift <= 35) {
             segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
         } else {
             segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
@@ -1457,12 +1463,12 @@ function buildSensitivityScoreAdvice(result) {
         const dominantMagnitude = dominantDirection === '調高' ? positiveDrift : negativeDrift;
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
-            if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
-            } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
-            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+            if (dominantMagnitude > 18) {
+                segments.push(`${dominantDirection}方向平均偏移超過 18pp，該方向參數等於被掛上 Debuff，快排程調整`);
+            } else if (dominantMagnitude > 12) {
+                segments.push(`${dominantDirection}方向平均偏移落在 12～18pp，建議再做滾動驗證避免下個版本翻車`);
+            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 12 && dominantMagnitude <= 12) {
+                segments.push('調高與調低方向平均偏移皆在 12pp 內，穩到可以邊刷副本邊調參');
             } else {
                 segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
             }
@@ -6671,23 +6677,26 @@ function displayBacktestResult(result) {
         const stabilitySharpePenalty = Number.isFinite(stabilityComponents?.sharpePenalty)
             ? stabilityComponents.sharpePenalty
             : null;
+        const analysisHorizonYears = Number.isFinite(data?.summary?.horizonYears)
+            ? data.summary.horizonYears
+            : null;
         const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            '穩定度分數 = 100 − 漂移扣分 − Sharpe 懲罰；漂移扣分依 15%/30%/50% 分段遞增，長週期樣本會自動放寬門檻。',
             Number.isFinite(stabilityDriftPenalty)
                 ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
                 : null,
             Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
                 ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
                 : Number.isFinite(summarySharpeDrop)
-                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
+                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，0.10 內不扣分，0.25 以上逐步加重`
                     : null,
-            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
+            '分數 ≥ 75 視為穩健；50～74 建議加強滾動驗證；<50 則需謹慎。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
         let directionSafeTooltip = null;
         const directionAdvice = (() => {
-            const safeThreshold = 10;
-            const warnThreshold = 15;
+            const safeThreshold = 12;
+            const warnThreshold = 18;
             const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
             const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
             if (positiveAbs === null && negativeAbs === null) {
@@ -6700,13 +6709,13 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
+                directionSafeTooltip = '兩側平均偏移皆在 ±12pp 內，符合多數量化平臺對長週期參數的穩健門檻。';
                 return '方向偏移穩健，維持現行節奏即可。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
+                return `${dominantDirection}方向平均偏移已超過 18pp，建議對該方向進行批量優化或調整風控。`;
             }
-            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
+            return `${dominantDirection}方向平均偏移介於 12～18pp，建議針對該方向再延伸樣本驗證。`;
         })();
         const summarySentence = (() => {
             const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
@@ -6739,6 +6748,11 @@ function displayBacktestResult(result) {
                         </div>
                         <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
                         <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
+                        ${analysisHorizonYears && analysisHorizonYears >= 1
+                            ? `<p class="text-[11px]" style="color: var(--muted-foreground);">樣本涵蓋約 ${analysisHorizonYears >= 10
+                                ? analysisHorizonYears.toFixed(0)
+                                : analysisHorizonYears.toFixed(1)} 年（長週期校正已啟用）</p>`
+                            : ''}
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
@@ -6747,7 +6761,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                             <span class="tooltip">
                                 <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 18%</strong>：對齊 QuantConnect、Portfolio123 對 5～10 年樣本的穩健門檻。<br><strong>18%～35%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 35%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
