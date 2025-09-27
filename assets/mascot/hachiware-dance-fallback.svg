@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Hachiware fallback mascot">
+  <defs>
+    <linearGradient id="bodyGradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f4f5ff" />
+      <stop offset="100%" stop-color="#dce4ff" />
+    </linearGradient>
+    <clipPath id="faceClip">
+      <circle cx="80" cy="58" r="34" />
+    </clipPath>
+    <style>
+      @keyframes hop {
+        0%, 100% { transform: translateY(4px) scale(0.98, 1.02); }
+        50% { transform: translateY(-4px) scale(1.02, 0.98); }
+      }
+      @keyframes arm-swing {
+        0%, 100% { transform: rotate(-12deg); }
+        50% { transform: rotate(12deg); }
+      }
+      @keyframes arm-swing-right {
+        0%, 100% { transform: rotate(15deg); }
+        50% { transform: rotate(-15deg); }
+      }
+      @keyframes blink {
+        0%, 92%, 100% { transform: scaleY(1); }
+        94%, 98% { transform: scaleY(0.1); }
+      }
+      .mascot {
+        transform-origin: 80px 110px;
+        animation: hop 1.9s ease-in-out infinite;
+      }
+      .arm-left, .arm-right {
+        transform-origin: 40px 98px;
+      }
+      .arm-left {
+        animation: arm-swing 1.9s ease-in-out infinite;
+      }
+      .arm-right {
+        transform-origin: 120px 98px;
+        animation: arm-swing-right 1.9s ease-in-out infinite;
+      }
+      .eye {
+        transform-origin: center;
+        animation: blink 3.2s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .mascot, .arm-left, .arm-right, .eye {
+          animation-duration: 0s;
+          animation-iteration-count: 1;
+        }
+      }
+    </style>
+  </defs>
+  <g class="mascot">
+    <ellipse cx="80" cy="132" rx="34" ry="10" fill="#d6d8ef" opacity="0.5" />
+    <g class="arm-left">
+      <path d="M44 104c-8-2-14 4-12 10 2 6 10 8 16 2 6-6 6-12-4-12z" fill="#cdd7ff" />
+    </g>
+    <g class="arm-right">
+      <path d="M116 104c10 0 12 6 10 12-2 6-10 8-16 2-6-6-4-14 6-14z" fill="#cdd7ff" />
+    </g>
+    <path d="M80 44c-20 0-34 14-34 34 0 20 14 42 34 42s34-22 34-42c0-20-14-34-34-34z" fill="url(#bodyGradient)" stroke="#657bba" stroke-width="4" stroke-linejoin="round" />
+    <path d="M60 28l-16 16c-4 4-4 10 0 14s10 4 14 0l14-14c4-4 4-10 0-14s-10-4-12-2z" fill="#657bba" />
+    <path d="M100 28l16 16c4 4 4 10 0 14s-10 4-14 0l-14-14c-4-4-4-10 0-14s10-4 12-2z" fill="#657bba" />
+    <g clip-path="url(#faceClip)">
+      <rect x="46" y="24" width="68" height="68" fill="#ffffff" />
+      <rect x="46" y="24" width="34" height="68" fill="#5aa9ff" opacity="0.28" />
+      <path d="M80 24c18 0 28 10 32 20-8 12-20 18-32 18s-24-6-32-18c4-10 14-20 32-20z" fill="#fdfdfd" />
+      <circle cx="62" cy="58" r="12" fill="#ffffff" />
+      <circle cx="98" cy="58" r="12" fill="#ffffff" />
+      <g class="eye" transform="translate(62 58)">
+        <ellipse rx="4.4" ry="5.6" fill="#32323a" />
+      </g>
+      <g class="eye" transform="translate(98 58)">
+        <ellipse rx="4.4" ry="5.6" fill="#32323a" />
+      </g>
+      <path d="M72 74c4 6 12 6 16 0" fill="none" stroke="#32323a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M66 66c-4 4-10 4-14 0" fill="none" stroke="#657bba" stroke-width="4" stroke-linecap="round" />
+      <path d="M108 66c-4 4-10 4-14 0" fill="none" stroke="#657bba" stroke-width="4" stroke-linecap="round" />
+    </g>
+    <path d="M58 92c-4 18 4 38 22 38s26-20 22-38" fill="url(#bodyGradient)" stroke="#657bba" stroke-width="4" stroke-linejoin="round" />
+    <path d="M64 116c0 8 6 14 16 14s16-6 16-14" fill="#ffffff" stroke="#657bba" stroke-width="4" stroke-linecap="round" />
+    <circle cx="64" cy="106" r="4" fill="#657bba" />
+    <circle cx="96" cy="106" r="4" fill="#657bba" />
+    <path d="M70 126c4 6 16 6 20 0" fill="none" stroke="#657bba" stroke-width="4" stroke-linecap="round" />
+  </g>
+</svg>

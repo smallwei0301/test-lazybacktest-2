@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251201A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251205A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1730,6 +1730,7 @@ function initLoadingMascotSanitiser() {
                     img.src = nextSrc;
                 });
             }
+            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
             return true;
         }
         return false;
@@ -1770,6 +1771,8 @@ function initLoadingMascotSanitiser() {
         embed.dataset.aspectRatio = '1';
         container.appendChild(embed);
 
+        container.dataset.lbMascotSource = 'tenor-embed';
+
         scheduleEmbedSanitise();
         embedObserver = new MutationObserver(scheduleEmbedSanitise);
         embedObserver.observe(container, { childList: true, subtree: true });
@@ -1791,6 +1794,7 @@ function initLoadingMascotSanitiser() {
     const showHourglassFallback = () => {
         container.classList.add('loading-mascot-fallback');
         container.textContent = '⌛';
+        container.dataset.lbMascotSource = 'hourglass';
     };
 
     const showFallback = () => {
@@ -1816,6 +1820,7 @@ function initLoadingMascotSanitiser() {
         if (img.src !== url) {
             img.src = url;
         }
+        container.dataset.lbMascotSource = `tenor:${url}`;
         markInitialised();
     };
 
@@ -1857,7 +1862,9 @@ function initLoadingMascotSanitiser() {
         fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error(`Tenor Legacy API HTTP ${response.status}`);
+                    const httpError = new Error(`Tenor Legacy API HTTP ${response.status}`);
+                    httpError.status = response.status;
+                    throw httpError;
                 }
                 return response.json();
             })
@@ -1882,6 +1889,10 @@ function initLoadingMascotSanitiser() {
             })
             .catch((error) => {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
+                if (error?.status === 403) {
+                    showFallback();
+                    return;
+                }
                 if (attempt < MAX_LEGACY_ATTEMPTS) {
                     setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
                 } else {
@@ -1901,7 +1912,9 @@ function initLoadingMascotSanitiser() {
         fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error(`Tenor API HTTP ${response.status}`);
+                    const httpError = new Error(`Tenor API HTTP ${response.status}`);
+                    httpError.status = response.status;
+                    throw httpError;
                 }
                 return response.json();
             })
@@ -1909,6 +1922,10 @@ function initLoadingMascotSanitiser() {
             .then((gifUrl) => applyGifSource(gifUrl))
             .catch((error) => {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
+                if (error?.status === 403) {
+                    showFallback();
+                    return;
+                }
                 if (attempt < MAX_PRIMARY_ATTEMPTS) {
                     setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
                 } else {

@@ -740,3 +740,9 @@
 - **Fix**: 將進度吉祥物預設 `<img>` 改為 `loading="eager"`，並在 Sanitiser 內優先收集現有 `<img>` 與 data fallback、重新整理失敗時會強制刷新同一路徑，另外把 Tenor Post ID 更新為 Chiikawa 動畫並維持舊 Hachiware 作為最後一層備援。
 - **Diagnostics**: 在本地重現前次灰框情境（阻擋 Tenor API 與 CDN）後，確認仍能維持 Chiikawa／Hachiware 靜態 fallback，待網路恢復則由 v2 API 覆寫為最新 GIF；多次切換回測流程也不再出現空白狀態。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-05 — Patch LB-PROGRESS-MASCOT-20251205A
+- **Issue recap**: 在多數企業網路（含代理）環境中 Tenor 伺服器回傳 HTTP 403，導致進度吉祥物區域長時間維持空白或沙漏 fallback，無法確認回測狀態。
+- **Fix**: 新增 `assets/mascot/hachiware-dance-fallback.svg` 作為本地可離線的 Chiikawa/Hachiware 動畫，並將 Sanitiser 更新為版本碼 `LB-PROGRESS-MASCOT-20251205A`：先載入本地 SVG，若 Tenor API 403 即停止重試並回退；同時標記 `data-lb-mascot-source` 以利診斷。
+- **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
