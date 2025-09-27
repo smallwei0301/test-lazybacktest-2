@@ -710,3 +710,9 @@
 - **Fix**: 於樣式層全面移除 Tenor 內層背景並禁用指標事件，同步導入 MutationObserver 清理嵌入產生的連結與 iframe，使背景維持透明且無法被點擊。
 - **Diagnostics**: 本地重載回測進度卡確認吉祥物保持透明邊緣、無分享彈層，並檢視 console 確認 `data-lb-mascot-sanitiser` 標記套用版本碼。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-25 — Patch LB-PROGRESS-VISUAL-20251125A
+- **Issue recap**: `initLoadingMascotSanitiser` 與 MutationObserver 同步調整時未斷開監聽，Tenor 內嵌節點在清理過程反覆觸發屬性變更，導致主執行緒陷入無窮回圈、頁面載入即卡住。
+- **Fix**: 於 Sanitiser 中記錄新版本碼並在每次偵測到變動時先行 `disconnect`，完成清理後透過 `queueMicrotask`（退回 `setTimeout`）再重新註冊 MutationObserver，避免自我觸發的屬性回呼；同步限制監控屬性清單並保留透明化、禁用點擊的處理。
+- **Diagnostics**: 本地重載首頁確認 DOMContentLoaded 後進度卡正常顯示、控制台無卡住記錄，反覆觸發 Tenor 重新注入（透過重新開啟進度卡）亦僅執行單次清理且不再堆疊監聽。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

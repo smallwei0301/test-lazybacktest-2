@@ -1616,9 +1616,14 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-VISUAL-20251120A';
+    const VERSION = 'LB-PROGRESS-VISUAL-20251125A';
     const embed = document.getElementById('loadingGif');
-    if (!embed || embed.dataset.lbMascotSanitiser === VERSION) {
+    if (!embed) {
+        return;
+    }
+
+    const previousVersion = embed.dataset.lbMascotSanitiser;
+    if (previousVersion === VERSION) {
         return;
     }
 
@@ -1658,9 +1663,33 @@ function initLoadingMascotSanitiser() {
 
     const Observer = typeof MutationObserver === 'function' ? MutationObserver : null;
     let observer = null;
+    const observerConfig = {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'href', 'target'],
+    };
+
     if (Observer) {
-        observer = new Observer(() => sanitise());
-        observer.observe(embed, { childList: true, subtree: true, attributes: true });
+        observer = new Observer(() => {
+            if (!observer) {
+                return;
+            }
+            observer.disconnect();
+            sanitise();
+            const resubscribe = () => {
+                if (!embed || !embed.isConnected || !observer) {
+                    return;
+                }
+                observer.observe(embed, observerConfig);
+            };
+            if (typeof queueMicrotask === 'function') {
+                queueMicrotask(resubscribe);
+            } else {
+                setTimeout(resubscribe, 0);
+            }
+        });
+        observer.observe(embed, observerConfig);
     }
 
     sanitise();
