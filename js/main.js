@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251205C';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1663,6 +1663,10 @@ function initLoadingMascotSanitiser() {
             fallbackSources.push(src);
         }
     }
+    const localFallback = '/assets/mascot/hachiware-dance-fallback.svg';
+    if (!fallbackSources.includes(localFallback)) {
+        fallbackSources.push(localFallback);
+    }
     let fallbackIndex = 0;
 
     let embedObserver = null;
@@ -1692,10 +1696,14 @@ function initLoadingMascotSanitiser() {
             img.loading = 'eager';
             img.referrerPolicy = 'no-referrer';
             img.setAttribute('aria-hidden', 'true');
+            img.style.backgroundColor = 'transparent';
+            img.style.setProperty('background-color', 'transparent', 'important');
             container.appendChild(img);
         } else {
             const embeds = container.querySelectorAll('.tenor-gif-embed');
             embeds.forEach((node) => node.remove());
+            img.style.removeProperty('background');
+            img.style.setProperty('background-color', 'transparent', 'important');
         }
         return img;
     };
@@ -1832,19 +1840,40 @@ function initLoadingMascotSanitiser() {
 
         const formats = result.media_formats || {};
         const mediaList = Array.isArray(result.media) ? result.media : [];
-        const gifCandidate =
-            formats.gif?.url ||
-            formats.mediumgif?.url ||
-            formats.tinygif?.url ||
-            formats.nanogif?.url ||
+        const preferredFormatKeys = [
+            'gif_transparent',
+            'mediumgif_transparent',
+            'tinygif_transparent',
+            'nanogif_transparent',
+            'gif',
+            'mediumgif',
+            'tinygif',
+            'nanogif'
+        ];
+
+        const resolveFromFormats = () => {
+            for (const key of preferredFormatKeys) {
+                const candidate = formats?.[key]?.url;
+                if (typeof candidate === 'string' && candidate.trim()) {
+                    return candidate.trim();
+                }
+            }
+            return null;
+        };
+
+        const resolveFromLegacyMedia = () =>
             mediaList.reduce((selected, item) => {
                 if (selected) return selected;
-                if (item?.gif?.url) return item.gif.url;
-                if (item?.mediumgif?.url) return item.mediumgif.url;
-                if (item?.tinygif?.url) return item.tinygif.url;
-                if (item?.nanogif?.url) return item.nanogif.url;
+                for (const key of preferredFormatKeys) {
+                    const candidate = item?.[key]?.url;
+                    if (typeof candidate === 'string' && candidate.trim()) {
+                        return candidate.trim();
+                    }
+                }
                 return null;
             }, null);
+
+        const gifCandidate = resolveFromFormats() || resolveFromLegacyMedia();
 
         if (!gifCandidate) {
             throw new Error('Tenor API 缺少 GIF 連結');
