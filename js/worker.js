@@ -602,6 +602,15 @@ function diffIsoDays(startISO, endISO) {
   return Math.round((endTs - startTs) / DAY_MS);
 }
 
+// Patch Tag: LB-DATA-VOLUME-20251112A
+function normalizeVolumeToLots(rawVolume) {
+  if (!Number.isFinite(rawVolume) || rawVolume <= 0) return 0;
+  const scaled = rawVolume / 1000;
+  if (!Number.isFinite(scaled) || scaled <= 0) return 1;
+  const rounded = Math.round(scaled);
+  return rounded > 0 ? rounded : 1;
+}
+
 function formatReasonCountMap(reasonCounts) {
   if (!reasonCounts || typeof reasonCounts !== "object") return "無";
   const entries = Object.entries(reasonCounts)
@@ -1726,7 +1735,7 @@ async function fetchAdjustedPriceRange(
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: normalizeVolumeToLots(volumeRaw),
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -1869,7 +1878,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume: normalizeVolumeToLots(volNumber),
     };
   } catch (error) {
     return null;
