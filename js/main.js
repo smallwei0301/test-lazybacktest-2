@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251130A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251201A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1633,10 +1633,37 @@ function initLoadingMascotSanitiser() {
     const postId = container.dataset.tenorId?.trim();
     const apiKey = container.dataset.tenorApiKey?.trim();
     const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
-    const fallbackQueue = (container.dataset.tenorFallbackSrc || '')
+    const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
         .split(',')
         .map((src) => src.trim())
         .filter(Boolean);
+
+    const existingImage = container.querySelector('img.loading-mascot-image');
+    const inlineSrc = existingImage?.getAttribute('src')?.trim();
+    if (existingImage) {
+        existingImage.loading = 'eager';
+        existingImage.decoding = 'async';
+        existingImage.referrerPolicy = 'no-referrer';
+        existingImage.setAttribute('aria-hidden', 'true');
+        if (typeof existingImage.decode === 'function') {
+            existingImage
+                .decode()
+                .catch(() => {
+                    /* ignore decode failures – the fallback loader will retry */
+                });
+        }
+    }
+
+    const fallbackSources = [];
+    if (inlineSrc) {
+        fallbackSources.push(inlineSrc);
+    }
+    for (const src of declaredFallbacks) {
+        if (!fallbackSources.includes(src)) {
+            fallbackSources.push(src);
+        }
+    }
+    let fallbackIndex = 0;
 
     let embedObserver = null;
     let embedSanitiseScheduled = false;
@@ -1662,7 +1689,7 @@ function initLoadingMascotSanitiser() {
             img.className = 'loading-mascot-image';
             img.alt = 'LazyBacktest 進度吉祥物動畫';
             img.decoding = 'async';
-            img.loading = 'lazy';
+            img.loading = 'eager';
             img.referrerPolicy = 'no-referrer';
             img.setAttribute('aria-hidden', 'true');
             container.appendChild(img);
@@ -1674,24 +1701,38 @@ function initLoadingMascotSanitiser() {
     };
 
     const useFallbackImage = () => {
-        if (!fallbackQueue.length) {
+        if (fallbackIndex >= fallbackSources.length) {
             return false;
         }
         const img = ensureImageElement();
-        const nextSrc = fallbackQueue.shift();
-        if (!nextSrc) {
-            return useFallbackImage();
-        }
-
-        const handleError = () => {
-            img.removeEventListener('error', handleError);
-            if (!useFallbackImage()) {
-                mountTenorEmbedFallback();
+        while (fallbackIndex < fallbackSources.length) {
+            const nextSrc = fallbackSources[fallbackIndex++];
+            if (!nextSrc) {
+                continue;
             }
-        };
-        img.addEventListener('error', handleError, { once: true });
-        img.src = nextSrc;
-        return true;
+
+            const handleError = () => {
+                img.removeEventListener('error', handleError);
+                if (!useFallbackImage()) {
+                    mountTenorEmbedFallback();
+                }
+            };
+            img.addEventListener('error', handleError, { once: true });
+            if (img.src !== nextSrc) {
+                img.src = nextSrc;
+            } else {
+                // If the same src is reused, force a repaint so browsers retry the request.
+                img.removeAttribute('src');
+                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+                    ? window.requestAnimationFrame.bind(window)
+                    : (cb) => setTimeout(() => cb(), 16);
+                rerender(() => {
+                    img.src = nextSrc;
+                });
+            }
+            return true;
+        }
+        return false;
     };
 
     const scheduleEmbedSanitise = () => {

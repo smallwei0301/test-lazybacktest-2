@@ -734,3 +734,9 @@
 - **Fix**: 在進度卡容器預先放置指定 Hachiware GIF 的 `<img>` 作為靜態後盾，並強化 `loading-mascot` 樣式強制透明背景、移除額外留白；同步更新 Sanitiser 版本碼，沿用 Tenor API 自動換源時也會覆寫同一個 `<img>`。
 - **Diagnostics**: 本地重新整理後未觸發 JavaScript 仍能直接呈現 GIF，開啟網路面板確認載入同一張透明素材且容器背景維持透明方形。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-01 — Patch LB-PROGRESS-MASCOT-20251201A
+- **Issue recap**: 回測進度條仍偶發只剩灰底或空白，追查為 GIF fallback 採 `loading="lazy"`、Tenor API 更新至 Chiikawa ID 後未同步回寫 inline 與 fallback 清單，導致腳本執行前無預設影像，腳本執行時又消耗完備援佇列。
+- **Fix**: 將進度吉祥物預設 `<img>` 改為 `loading="eager"`，並在 Sanitiser 內優先收集現有 `<img>` 與 data fallback、重新整理失敗時會強制刷新同一路徑，另外把 Tenor Post ID 更新為 Chiikawa 動畫並維持舊 Hachiware 作為最後一層備援。
+- **Diagnostics**: 在本地重現前次灰框情境（阻擋 Tenor API 與 CDN）後，確認仍能維持 Chiikawa／Hachiware 靜態 fallback，待網路恢復則由 v2 API 覆寫為最新 GIF；多次切換回測流程也不再出現空白狀態。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
