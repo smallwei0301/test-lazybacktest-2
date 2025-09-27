@@ -7426,10 +7426,91 @@ function hideOptimizationProgress() {
     }
 }
 
-function runOptimizationInternal(optimizeType) { 
-    if (!workerUrl) { 
-        showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); 
-        return; 
+function canReuseOptimizationDataset(params) {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
+        return {
+            ok: false,
+            reason: '請先執行回測以建立參數優化所需的資料。',
+        };
+    }
+    if (!lastFetchSettings) {
+        return {
+            ok: false,
+            reason: '找不到最近一次回測的資料設定，請重新執行回測後再試。',
+        };
+    }
+
+    const mismatches = [];
+    const normalizedMarket = (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase();
+    const lastMarket = (lastFetchSettings.market || lastFetchSettings.marketType || currentMarket || 'TWSE').toUpperCase();
+    if ((params.stockNo || '').toString() !== (lastFetchSettings.stockNo || '').toString()) {
+        mismatches.push('標的代碼');
+    }
+    const desiredStart = params.startDate || params.effectiveStartDate || '';
+    const cachedEffectiveStart = lastFetchSettings.effectiveStartDate || lastFetchSettings.startDate || '';
+    if (desiredStart !== cachedEffectiveStart) {
+        mismatches.push('起始日');
+    }
+    if ((params.endDate || '') !== (lastFetchSettings.endDate || '')) {
+        mismatches.push('結束日');
+    }
+    if (normalizedMarket !== lastMarket) {
+        mismatches.push('市場');
+    }
+    if (Boolean(params.adjustedPrice) !== Boolean(lastFetchSettings.adjustedPrice)) {
+        mismatches.push('調整股價設定');
+    }
+    if (Boolean(params.splitAdjustment) !== Boolean(lastFetchSettings.splitAdjustment)) {
+        mismatches.push('拆分還原設定');
+    }
+
+    if (mismatches.length > 0) {
+        return {
+            ok: false,
+            reason: `請先以最新設定執行回測，再進行參數優化。差異項目：${mismatches.join('、')}。`,
+        };
+    }
+
+    return { ok: true };
+}
+
+function applyLastBacktestWindowToParams(params) {
+    if (!params || !lastFetchSettings) return;
+    const effectiveStart = lastFetchSettings.effectiveStartDate || params.startDate;
+    const dataStart = lastFetchSettings.dataStartDate || lastFetchSettings.startDate || effectiveStart;
+    if (effectiveStart) {
+        params.effectiveStartDate = effectiveStart;
+    }
+    if (dataStart) {
+        params.dataStartDate = dataStart;
+    }
+    if (Number.isFinite(lastFetchSettings.lookbackDays)) {
+        params.lookbackDays = lastFetchSettings.lookbackDays;
+    }
+    if (lastFetchSettings.market || lastFetchSettings.marketType) {
+        params.marketType = lastFetchSettings.market || lastFetchSettings.marketType;
+    }
+    if (typeof lastFetchSettings.adjustedPrice !== 'undefined') {
+        params.adjustedPrice = lastFetchSettings.adjustedPrice;
+    }
+    if (typeof lastFetchSettings.splitAdjustment !== 'undefined') {
+        params.splitAdjustment = lastFetchSettings.splitAdjustment;
+    }
+}
+
+function buildOptimizationCachedMeta() {
+    if (!lastFetchSettings || typeof buildCacheKey !== 'function') return null;
+    const key = buildCacheKey(lastFetchSettings);
+    if (!key) return null;
+    const entry = cachedDataStore.get(key);
+    if (!entry) return null;
+    return buildCachedMetaFromEntry(entry, lastFetchSettings.effectiveStartDate, lastFetchSettings.lookbackDays);
+}
+
+function runOptimizationInternal(optimizeType) {
+    if (!workerUrl) {
+        showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。");
+        return;
     } 
     
     console.log(`[Main] runOptimizationInternal called for ${optimizeType}`); 
@@ -7457,24 +7538,34 @@ function runOptimizationInternal(optimizeType) {
     // 顯示初始準備狀態
     showOptimizationProgress('⌛ 正在驗證參數...');
     
-    const params=getBacktestParams(); 
-    let targetStratKey, paramSelectId, selectedParamName, optLabel, optRange, msgAction, configKey, config; 
-    const isShortOpt = optimizeType === 'shortEntry' || optimizeType === 'shortExit'; 
-    const isRiskOpt = optimizeType === 'risk'; 
-    
-    if (isShortOpt && !params.enableShorting) { 
+    const params=getBacktestParams();
+    let targetStratKey, paramSelectId, selectedParamName, optLabel, optRange, msgAction, configKey, config;
+    const isShortOpt = optimizeType === 'shortEntry' || optimizeType === 'shortExit';
+    const isRiskOpt = optimizeType === 'risk';
+
+    if (isShortOpt && !params.enableShorting) {
         hideOptimizationProgress();
-        showError("請先啟用做空策略才能進行做空相關優化。"); 
-        return; 
-    } 
-    
+        showError("請先啟用做空策略才能進行做空相關優化。");
+        return;
+    }
+
     if (!validateBacktestParams(params)) {
         hideOptimizationProgress();
         return;
     }
-    
-    const msgActionMap = {'entry': '多單進場', 'exit': '多單出場', 'shortEntry': '做空進場', 'shortExit': '回補出場', 'risk': '風險控制'}; 
-    msgAction = msgActionMap[optimizeType] || '未知'; 
+
+    const datasetReadiness = canReuseOptimizationDataset(params);
+    if (!datasetReadiness.ok) {
+        hideOptimizationProgress();
+        console.warn(`[Main][${OPTIMIZATION_REUSE_VERSION}] Optimization aborted: ${datasetReadiness.reason}`);
+        showError(datasetReadiness.reason);
+        return;
+    }
+
+    applyLastBacktestWindowToParams(params);
+
+    const msgActionMap = {'entry': '多單進場', 'exit': '多單出場', 'shortEntry': '做空進場', 'shortExit': '回補出場', 'risk': '風險控制'};
+    msgAction = msgActionMap[optimizeType] || '未知';
     
     if (isRiskOpt) { 
         paramSelectId = 'optimizeRiskParamSelect'; 
@@ -7533,16 +7624,22 @@ function runOptimizationInternal(optimizeType) {
     optRange = config.range; 
     console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
     
+    const effectiveStartForMessage = params.effectiveStartDate || params.startDate;
+    const lastMarketKey = (lastFetchSettings?.market || lastFetchSettings?.marketType || params.market || params.marketType || currentMarket || 'TWSE').toUpperCase();
     const curSettings={
         stockNo: params.stockNo,
-        startDate: params.startDate,
+        startDate: params.dataStartDate || params.startDate,
+        dataStartDate: params.dataStartDate || params.startDate,
         endDate: params.endDate,
-        market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
+        effectiveStartDate: effectiveStartForMessage,
+        market: lastMarketKey,
         adjustedPrice: Boolean(params.adjustedPrice),
+        splitAdjustment: Boolean(params.splitAdjustment),
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+        lookbackDays: params.lookbackDays,
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
+    const useCache=true;
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel})（沿用最近一次回測資料）...`;
     
     // 先清除之前的結果，但不隱藏優化進度
     clearPreviousResults(); 
@@ -7564,38 +7661,27 @@ function runOptimizationInternal(optimizeType) {
     
     try { 
         optimizationWorker=new Worker(workerUrl); 
-        const workerMsg={ 
-            type:'runOptimization', 
-            params, 
-            optimizeTargetStrategy: optimizeType, 
-            optimizeParamName:selectedParamName, 
-            optimizeRange:optRange, 
-            useCachedData:useCache 
-        }; 
-        
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData=cachedStockData;
-            const cacheEntry = ensureDatasetCacheEntryFresh(
-                buildCacheKey(curSettings),
-                cachedDataStore.get(buildCacheKey(curSettings)),
-                curSettings.market,
-            );
-                if (cacheEntry) {
-                    workerMsg.cachedMeta = {
-                        summary: cacheEntry.summary || null,
-                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                        priceSource: cacheEntry.priceSource || null,
-                        dataSource: cacheEntry.dataSource || null,
-                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
-                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
-                        finmindStatus: cacheEntry.finmindStatus || null,
-                    };
-                }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
-        
-        optimizationWorker.postMessage(workerMsg); 
+        const workerMsg={
+            type:'runOptimization',
+            params,
+            optimizeTargetStrategy: optimizeType,
+            optimizeParamName:selectedParamName,
+            optimizeRange:optRange,
+            useCachedData:useCache,
+            cachedData: cachedStockData,
+            datasetVersion: OPTIMIZATION_REUSE_VERSION,
+        };
+
+        const cachedMeta = buildOptimizationCachedMeta();
+        if (cachedMeta) {
+            workerMsg.cachedMeta = cachedMeta;
+        }
+
+        if (Array.isArray(cachedStockData)) {
+            console.log(`[Main][${OPTIMIZATION_REUSE_VERSION}] Reusing ${cachedStockData.length} 筆資料進行 ${optimizeType} 優化。`);
+        }
+
+        optimizationWorker.postMessage(workerMsg);
         
         optimizationWorker.onmessage=e=>{ 
             const{type,data,progress,message}=e.data; 

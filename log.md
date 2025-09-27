@@ -154,6 +154,12 @@
 - **Diagnostics**: 手動確認摘要頁卡片上下間距一致、趨勢卡順序調整成功，策略狀態卡落後時顯示加粗激勵句且條列需點擊展開；預設/載入階段仍以段落提示，無摺疊節點。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-07-09 — Patch LB-PARAM-OPT-20250709A
+- **Scope**: 參數優化頁面、主執行緒與 Worker 溝通層。
+- **Behavior**: 參數優化改為強制沿用最近一次回測快取資料，若使用者調整標的或日期與快取設定不符將提示先重跑回測；同時送往 Worker 的 payload 會附帶最後回測的 `dataStartDate`、`effectiveStartDate` 與 `lookbackDays`，避免 Worker 重算暖身或再次驗證 coverage。
+- **Worker Update**: `runOptimization` 僅接受主執行緒提供的資料集與 meta，移除遠端抓取與資料有效性檢查流程，若缺少快取會直接拋出錯誤；新增版本碼日誌便於追蹤沿用資料策略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-12 — Patch LB-ROLLING-TEST-20250912A
 - **Issue recap**: 已完成主回測仍被提示「請先執行一次主回測以產生快取資料」，導致滾動測試無法啟動並阻礙 Walk-Forward 分析。
 - **Fix**: Walk-Forward 模組改為使用最近一次回測的快取條目自動回灌 `cachedStockData`，並允許以 coverage 範圍推算資料可用區間，避免已完成主回測仍被判定為缺少快取。
