@@ -1127,17 +1127,24 @@
                                     <h3 class="card-title">執行中...</h3>
                                 </div>
                                 <div class="card-content">
-                                    <div class="space-y-2">
+                                    <div class="space-y-3">
+                                        <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
+                                            <span id="loadingText" class="font-medium">準備中...</span>
+                                            <span id="loadingPercent" class="tabular-nums">0%</span>
+                                        </div>
                                         <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
                                             <div
                                                 id="progressBar"
                                                 class="bg-primary h-2 rounded-full transition-all duration-300"
+                                                role="progressbar"
+                                                aria-label="回測進度"
+                                                aria-valuemin="0"
+                                                aria-valuemax="100"
+                                                aria-valuenow="0"
                                                 style="width: 0%; background-color: var(--primary);"
                                             ></div>
                                         </div>
-                                        <p id="loadingText" class="text-sm text-muted" style="color: var(--muted-foreground);">
-                                            準備中...
-                                        </p>
+                                        <div id="loadingStageList" class="space-y-1 text-xs" style="color: var(--muted-foreground);" aria-live="polite"></div>
                                     </div>
                                 </div>
                             </div>

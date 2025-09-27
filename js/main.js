@@ -15,7 +15,12 @@ let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
-const progressAnimator = createProgressAnimator();
+const progressTracker = createBacktestProgressTracker();
+const progressAnimator = createProgressAnimator({
+    onUpdate(value) {
+        progressTracker.update(value);
+    },
+});
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -1610,6 +1615,7 @@ function showLoading(m="⌛ 處理中...") {
 
     if (loadingText) loadingText.textContent = m;
     if (el) el.classList.remove("hidden");
+    progressTracker.reset();
     progressAnimator.reset();
     progressAnimator.start();
 
@@ -1625,28 +1631,10 @@ function updateProgress(p) {
     progressAnimator.update(p);
 }
 
-function createProgressAnimator() {
-    const AUTO_INTERVAL = 200;
-    const AUTO_STEP = 1.8;
-    const MAX_AUTO_PROGRESS = 99;
-    const MIN_DURATION = 320;
-    const MAX_DURATION = 2400;
-    const MS_PER_PERCENT = 45;
-    const SHORT_TASK_THRESHOLD = 4000;
-    const SHORT_FIRST_SEGMENT_PROGRESS = 50;
-    const SHORT_SECOND_SEGMENT_PROGRESS = 50;
-    const SHORT_FIRST_SEGMENT_SPEEDUP = 3;
-    const SHORT_SECOND_SEGMENT_SLOWDOWN = 2;
-    const SHORT_SECOND_SEGMENT_MULTIPLIER = 1 / SHORT_SECOND_SEGMENT_SLOWDOWN;
-    const SHORT_TIME_WEIGHT =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        + (SHORT_SECOND_SEGMENT_PROGRESS / SHORT_SECOND_SEGMENT_MULTIPLIER);
-    const SHORT_FIRST_SEGMENT_TIME_RATIO =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        / SHORT_TIME_WEIGHT;
-    const SHORT_FINAL_MIN_DURATION = 1700;
-    const SHORT_FINAL_MAX_DURATION = 2600;
-
+function createProgressAnimator(options = {}) {
+    const MIN_DURATION = 220;
+    const MAX_DURATION = 900;
+    const MS_PER_PERCENT = 18;
     const raf =
         (typeof window !== 'undefined' && window.requestAnimationFrame)
             ? window.requestAnimationFrame.bind(window)
@@ -1655,36 +1643,38 @@ function createProgressAnimator() {
         (typeof window !== 'undefined' && window.cancelAnimationFrame)
             ? window.cancelAnimationFrame.bind(window)
             : clearTimeout;
+    const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
 
+    let progressBarEl = null;
+    let percentLabelEl = null;
     let currentValue = 0;
     let targetValue = 0;
-    let animationFrom = 0;
-    let animationStart = 0;
-    let animationEnd = 0;
+    let startValue = 0;
+    let startTime = 0;
+    let duration = 0;
     let rafId = null;
-    let autoTimer = null;
-    let reportedValue = 0;
-    let autoCeiling = 0;
-    let startTimestamp = 0;
 
-    function now() {
-        if (typeof performance !== 'undefined' && performance.now) {
-            return performance.now();
-        }
-        return Date.now();
+    function ensureElements() {
+        if (!progressBarEl) progressBarEl = document.getElementById('progressBar');
+        if (!percentLabelEl) percentLabelEl = document.getElementById('loadingPercent');
     }
 
     function clamp(value) {
-        const num = Number(value);
-        if (!Number.isFinite(num)) return 0;
-        return Math.max(0, Math.min(100, num));
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        return Math.max(0, Math.min(100, numeric));
     }
 
     function apply(value) {
-        const bar = document.getElementById('progressBar');
-        if (bar) {
-            bar.style.width = `${value}%`;
+        ensureElements();
+        if (progressBarEl) {
+            progressBarEl.style.width = `${value}%`;
+            progressBarEl.setAttribute('aria-valuenow', value.toFixed(1));
         }
+        if (percentLabelEl) {
+            percentLabelEl.textContent = `${Math.round(value)}%`;
+        }
+        if (onUpdate) onUpdate(value);
     }
 
     function stopAnimation() {
@@ -1694,174 +1684,193 @@ function createProgressAnimator() {
         }
     }
 
-    function stopAutoTimer() {
-        if (autoTimer) {
-            clearInterval(autoTimer);
-            autoTimer = null;
-        }
-    }
-
-    function syncCurrent() {
-        if (!rafId) return;
-        const currentTime = now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
-            currentValue = targetValue;
-            stopAnimation();
-            return;
-        }
-        const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
-    }
-
-    function scheduleAnimation() {
-        stopAnimation();
-        if (targetValue <= currentValue + 0.01) {
-            currentValue = targetValue;
-            apply(currentValue);
-            return;
-        }
-        animationFrom = currentValue;
-        animationStart = now();
-        const distance = targetValue - animationFrom;
-        if (distance <= 0) {
-            currentValue = targetValue;
-            apply(currentValue);
-            return;
-        }
-        let duration = distance * MS_PER_PERCENT;
-        duration = Math.max(MIN_DURATION, Math.min(MAX_DURATION, duration));
-        if (targetValue >= 100) {
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                duration = Math.max(duration, SHORT_FINAL_MIN_DURATION);
-                duration = Math.min(duration, SHORT_FINAL_MAX_DURATION);
-            } else {
-                duration = Math.min(duration, 900);
-            }
-        }
-        animationEnd = animationStart + duration;
-        apply(currentValue);
-        rafId = raf(step);
+    function easeOut(t) {
+        return 1 - Math.pow(1 - t, 3);
     }
 
     function step(timestamp) {
         if (!rafId) return;
-        const currentTime = typeof timestamp === 'number' ? timestamp : now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
+        const now = typeof timestamp === 'number' ? timestamp : Date.now();
+        if (duration <= 0 || now - startTime >= duration) {
             currentValue = targetValue;
             apply(currentValue);
             stopAnimation();
             return;
         }
-        const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
+        const ratio = Math.min(1, Math.max(0, (now - startTime) / duration));
+        const eased = easeOut(ratio);
+        currentValue = startValue + (targetValue - startValue) * eased;
         apply(currentValue);
         rafId = raf(step);
     }
 
-    function ensureAutoTimer() {
-        if (autoTimer) return;
-        autoTimer = setInterval(() => {
-            if (reportedValue >= 100) {
-                autoCeiling = 100;
-                setTarget(100);
-                stopAutoTimer();
-                return;
-            }
-            let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
-                if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
-                    const fastRatio = normalizedTime / SHORT_FIRST_SEGMENT_TIME_RATIO;
-                    const fastProgress = fastRatio * SHORT_FIRST_SEGMENT_PROGRESS;
-                    nextCeiling = Math.max(nextCeiling, fastProgress);
-                } else {
-                    const remainingTimeRatio = (normalizedTime - SHORT_FIRST_SEGMENT_TIME_RATIO)
-                        / (1 - SHORT_FIRST_SEGMENT_TIME_RATIO);
-                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS
-                        + (remainingTimeRatio * SHORT_SECOND_SEGMENT_PROGRESS);
-                    nextCeiling = Math.max(nextCeiling, slowProgress);
-                }
-            }
-            autoCeiling = Math.min(MAX_AUTO_PROGRESS, nextCeiling);
-            if (autoCeiling > targetValue + 0.05) {
-                setTarget(autoCeiling);
-            }
-        }, AUTO_INTERVAL);
-    }
-
-    function setTarget(value) {
+    function setTarget(value, { immediate = false } = {}) {
         const clamped = clamp(value);
-        if (clamped <= currentValue + 0.01 && clamped <= targetValue + 0.01) {
-            targetValue = clamped;
-            if (!rafId) {
-                currentValue = clamped;
-                apply(currentValue);
-            }
+        if (clamped < currentValue - 0.1) {
             return;
         }
-        syncCurrent();
-        if (clamped <= currentValue) {
-            targetValue = clamped;
+        if (immediate || clamped <= currentValue + 0.1) {
+            stopAnimation();
             currentValue = clamped;
+            targetValue = clamped;
             apply(currentValue);
-            if (clamped >= 100) {
-                stopAnimation();
-                stopAutoTimer();
-            }
             return;
         }
-        if (Math.abs(clamped - targetValue) < 0.05) {
+        if (clamped <= targetValue + 0.1) {
             targetValue = clamped;
             return;
         }
+        stopAnimation();
+        startValue = currentValue;
         targetValue = clamped;
-        scheduleAnimation();
-        if (clamped >= 100) {
-            stopAutoTimer();
-        }
+        startTime = typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now();
+        duration = Math.min(
+            MAX_DURATION,
+            Math.max(MIN_DURATION, (targetValue - startValue) * MS_PER_PERCENT),
+        );
+        apply(currentValue);
+        rafId = raf(step);
     }
 
     return {
         start() {
-            startTimestamp = now();
-            ensureAutoTimer();
+            // 保留舊介面的呼叫介面，實際邏輯由 update 控制
         },
         stop() {
-            stopAutoTimer();
             stopAnimation();
         },
         reset() {
-            stopAutoTimer();
             stopAnimation();
             currentValue = 0;
             targetValue = 0;
-            animationFrom = 0;
-            animationStart = 0;
-            animationEnd = 0;
-            reportedValue = 0;
-            autoCeiling = 0;
-            startTimestamp = 0;
+            startValue = 0;
+            startTime = 0;
+            duration = 0;
             apply(0);
         },
         update(nextProgress) {
-            const clamped = clamp(nextProgress);
-            if (clamped >= 100) {
-                reportedValue = 100;
-                setTarget(100);
-                return;
-            }
-            if (clamped > reportedValue) {
-                reportedValue = clamped;
-            }
-            if (clamped > autoCeiling) {
-                autoCeiling = clamped;
-            }
-            setTarget(Math.max(targetValue, clamped));
-            ensureAutoTimer();
+            if (!Number.isFinite(nextProgress)) return;
+            setTarget(nextProgress);
+        },
+    };
+}
+
+function createBacktestProgressTracker() {
+    const STAGES = [
+        { id: 'init', label: '初始化環境', from: 0, to: 4 },
+        { id: 'cache', label: '檢查快取與暖身', from: 4, to: 15 },
+        { id: 'fetch', label: '抓取歷史資料', from: 15, to: 45 },
+        { id: 'prepare', label: '整理資料與指標', from: 45, to: 70 },
+        { id: 'simulate', label: '執行回測模擬', from: 70, to: 95 },
+        { id: 'finalize', label: '彙整最終結果', from: 95, to: 100 },
+    ];
+
+    let containerEl = null;
+    const entries = [];
+
+    function ensureContainer() {
+        if (!containerEl) {
+            containerEl = document.getElementById('loadingStageList');
+            if (!containerEl) return false;
+        }
+        if (entries.length === 0) {
+            containerEl.innerHTML = '';
+            containerEl.classList.add('space-y-1');
+            containerEl.setAttribute('role', 'list');
+            STAGES.forEach((stage) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-2 text-xs leading-5';
+                row.setAttribute('role', 'listitem');
+                row.dataset.stageId = stage.id;
+
+                const dot = document.createElement('span');
+                dot.className = 'inline-flex w-2 h-2 rounded-full transition-all duration-200';
+                dot.style.backgroundColor = 'var(--muted-foreground)';
+                dot.style.opacity = '0.35';
+
+                const label = document.createElement('span');
+                label.className = 'flex-1 truncate';
+                label.textContent = stage.label;
+                label.style.color = 'var(--muted-foreground)';
+
+                const state = document.createElement('span');
+                state.className = 'text-[10px] tracking-wide uppercase';
+                state.textContent = '待處理';
+                state.style.color = 'var(--muted-foreground)';
+                state.style.opacity = '0.6';
+
+                row.appendChild(dot);
+                row.appendChild(label);
+                row.appendChild(state);
+                containerEl.appendChild(row);
+
+                entries.push({ stage, row, dot, label, state, lastState: null });
+            });
+        }
+        return true;
+    }
+
+    function applyState(entry, state) {
+        if (entry.lastState === state) return;
+        entry.lastState = state;
+        if (state === 'done') {
+            entry.dot.style.backgroundColor = 'var(--primary)';
+            entry.dot.style.opacity = '1';
+            entry.label.style.color = 'var(--primary)';
+            entry.label.style.fontWeight = '600';
+            entry.state.textContent = '完成';
+            entry.state.style.color = 'var(--primary)';
+            entry.state.style.opacity = '0.85';
+        } else if (state === 'active') {
+            entry.dot.style.backgroundColor = 'var(--primary)';
+            entry.dot.style.opacity = '0.85';
+            entry.label.style.color = 'var(--primary)';
+            entry.label.style.fontWeight = '600';
+            entry.state.textContent = '進行中';
+            entry.state.style.color = 'var(--primary)';
+            entry.state.style.opacity = '0.85';
+        } else {
+            entry.dot.style.backgroundColor = 'var(--muted-foreground)';
+            entry.dot.style.opacity = '0.35';
+            entry.label.style.color = 'var(--muted-foreground)';
+            entry.label.style.fontWeight = '400';
+            entry.state.textContent = '待處理';
+            entry.state.style.color = 'var(--muted-foreground)';
+            entry.state.style.opacity = '0.6';
+        }
+    }
+
+    function normalizeProgress(progress) {
+        if (!Number.isFinite(progress)) return 0;
+        return Math.max(0, Math.min(100, progress));
+    }
+
+    return {
+        reset() {
+            if (!ensureContainer()) return;
+            entries.forEach((entry) => {
+                entry.lastState = null;
+                applyState(entry, 'pending');
+            });
+        },
+        update(progress) {
+            if (!ensureContainer()) return;
+            const value = normalizeProgress(progress);
+            entries.forEach((entry) => {
+                const { from, to } = entry.stage;
+                let state = 'pending';
+                if (value >= to - 0.1) state = 'done';
+                else if (value >= from - 0.1) state = 'active';
+                applyState(entry, state);
+            });
+        },
+        complete() {
+            if (!ensureContainer()) return;
+            entries.forEach((entry) => {
+                applyState(entry, 'done');
+            });
         },
     };
 }
