@@ -685,3 +685,69 @@
 - **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
 - **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-PROGRESS-PIPELINE-20251116A
+- **Issue recap**: 回測進度條會自動衝到 100% 但後端流程仍在跑，且遇到 Netlify Blob 首次未命中時進度訊息卡在「檢查 Netlify Blob 範圍快取...」。
+- **Fix**: 以階段化動畫取代舊自動補數邏輯，進度僅依實際回報推進並同步於狀態文字顯示百分比；同時在 Blob 快取落空後立即發布轉換訊息，縮短停留時間。
+- **Diagnostics**: 本地多次啟動回測觀察進度列不再提前到頂，Blob 首次 miss 亦會立刻切換為「改用 Proxy 逐月補抓...」等下一步提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-PROGRESS-PIPELINE-20251116B
+- **Issue recap**: Blob 範圍快取檢查遇到慢速回應時仍停留在「檢查快取」訊息，未能及時落回逐月補抓；進度條沙漏符號也與全新敘事不符。
+- **Fix**: Worker 端對 Netlify Blob 範圍檢索加入 2.5 秒逾時並紀錄狀態，逾時即回傳讓主流程顯示「回應逾時」訊息並提前切換；同時將進度卡沙漏改為指定 Chiikawa GIF，維持品牌調性。
+- **Diagnostics**: 人為調降 Blob 回應速度確認 2.5 秒即逾時並切換訊息，`fetchDiagnostics.rangeFetch.status` 會標記為 `timeout`；前端載入時檢視執行卡顯示 GIF 並隨進度文字更新百分比。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-19 — Patch LB-PROGRESS-VISUAL-20251119A
+- **Issue recap**: 執行中卡片的 Chiikawa GIF 在圓形容器邊緣出現灰色條紋，與吉祥物風格不符且破壞進度敘事的一致性。
+- **Fix**: 建立專用的 `loading-mascot-wrapper` 造型，使用柔和粉色邊框與白色背景包覆 GIF，並強制 Tenor 嵌入內容填滿圓形避免再露出灰邊。
+- **Diagnostics**: 本地載入回測進度卡確認 GIF 圓形邊緣維持粉白配色、無灰階漏出，且 Tenor iframe 仍能自動播放並隨進度文字更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-19 — Patch LB-PROGRESS-MASCOT-20251119B
+- **Issue recap**: 進度卡仍使用粉色圓框與舊版 Chiikawa GIF，與最新 UI 指引要求的方形、無邊框 Hachiware 造型不符。
+- **Fix**: 移除進度吉祥物容器的粉色邊線與陰影，改為方形透明背景，同步將 Tenor 嵌入更新為 Hachiware GIF。
+- **Diagnostics**: 本地檢視執行卡確認 GIF 方形填滿容器、周圍不再出現粉色外框，進度敘事文字與百分比持續正確更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-20 — Patch LB-PROGRESS-VISUAL-20251120A
+- **Issue recap**: 進度吉祥物的 Tenor 嵌入在載入時仍可能覆蓋灰底，且點擊後會跳出 Facebook 等分享連結，破壞透明背景與專注式體驗。
+- **Fix**: 於樣式層全面移除 Tenor 內層背景並禁用指標事件，同步導入 MutationObserver 清理嵌入產生的連結與 iframe，使背景維持透明且無法被點擊。
+- **Diagnostics**: 本地重載回測進度卡確認吉祥物保持透明邊緣、無分享彈層，並檢視 console 確認 `data-lb-mascot-sanitiser` 標記套用版本碼。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-25 — Patch LB-PROGRESS-VISUAL-20251125A
+- **Issue recap**: `initLoadingMascotSanitiser` 與 MutationObserver 同步調整時未斷開監聽，Tenor 內嵌節點在清理過程反覆觸發屬性變更，導致主執行緒陷入無窮回圈、頁面載入即卡住。
+- **Fix**: 於 Sanitiser 中記錄新版本碼並在每次偵測到變動時先行 `disconnect`，完成清理後透過 `queueMicrotask`（退回 `setTimeout`）再重新註冊 MutationObserver，避免自我觸發的屬性回呼；同步限制監控屬性清單並保留透明化、禁用點擊的處理。
+- **Diagnostics**: 本地重載首頁確認 DOMContentLoaded 後進度卡正常顯示、控制台無卡住記錄，反覆觸發 Tenor 重新注入（透過重新開啟進度卡）亦僅執行單次清理且不再堆疊監聽。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-26 — Patch LB-PROGRESS-MASCOT-20251126A
+- **Issue recap**: 即便採用 MutationObserver 清理 Tenor 內嵌，吉祥物仍殘留灰色邊框與背景，且分享連結 iframe 造成透明度難以維持。
+- **Fix**: 改以 Tenor v2 API 動態抓取指定貼圖的 GIF URL，直接以 `<img>` 呈現並停用外部嵌入腳本，確保透明像素不再被灰底覆蓋，同時加上本地 fallback 指示避免 API 失敗時影響進度敘事。
+- **Diagnostics**: 於本地重新載入執行卡確認容器僅包含 `<img>` 並維持透明背景，網路攔截測試時會顯示 `⌛` fallback 並記錄在 console，確保使用者仍感知進度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-27 — Patch LB-PROGRESS-MASCOT-20251127A
+- **Issue recap**: Tenor v2 API 偶發失敗時進度吉祥物立即落入沙漏 fallback，無法持續顯示 Hachiware 動畫且缺乏自動重試與備援來源。
+- **Fix**: 擴增 `initLoadingMascotSanitiser`，先以 Tenor v2 重試三次、再回退至舊版 API，並預載多組 GIF 直接連結或必要時重新掛載官方嵌入，同時保持透明背景與禁用分享連結。
+- **Diagnostics**: 本地封鎖 `tenor.googleapis.com` 後觀察到自動切換至 fallback GIF／官方嵌入仍維持透明與不可點，恢復網路則會回填最新動畫且僅注入單一 `<img>`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-30 — Patch LB-PROGRESS-MASCOT-20251130A
+- **Issue recap**: 實際頁面載入時進度吉祥物區域未顯示任何圖像，推測 DOM 初始化前若腳本未執行便失去預設 `<img>`，同時仍需確保 Hachiware GIF 無灰色外框與透明背景維持一致。
+- **Fix**: 在進度卡容器預先放置指定 Hachiware GIF 的 `<img>` 作為靜態後盾，並強化 `loading-mascot` 樣式強制透明背景、移除額外留白；同步更新 Sanitiser 版本碼，沿用 Tenor API 自動換源時也會覆寫同一個 `<img>`。
+- **Diagnostics**: 本地重新整理後未觸發 JavaScript 仍能直接呈現 GIF，開啟網路面板確認載入同一張透明素材且容器背景維持透明方形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-01 — Patch LB-PROGRESS-MASCOT-20251201A
+- **Issue recap**: 回測進度條仍偶發只剩灰底或空白，追查為 GIF fallback 採 `loading="lazy"`、Tenor API 更新至 Chiikawa ID 後未同步回寫 inline 與 fallback 清單，導致腳本執行前無預設影像，腳本執行時又消耗完備援佇列。
+- **Fix**: 將進度吉祥物預設 `<img>` 改為 `loading="eager"`，並在 Sanitiser 內優先收集現有 `<img>` 與 data fallback、重新整理失敗時會強制刷新同一路徑，另外把 Tenor Post ID 更新為 Chiikawa 動畫並維持舊 Hachiware 作為最後一層備援。
+- **Diagnostics**: 在本地重現前次灰框情境（阻擋 Tenor API 與 CDN）後，確認仍能維持 Chiikawa／Hachiware 靜態 fallback，待網路恢復則由 v2 API 覆寫為最新 GIF；多次切換回測流程也不再出現空白狀態。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-05 — Patch LB-PROGRESS-MASCOT-20251205A
+- **Issue recap**: 在多數企業網路（含代理）環境中 Tenor 伺服器回傳 HTTP 403，導致進度吉祥物區域長時間維持空白或沙漏 fallback，無法確認回測狀態。
+- **Fix**: 新增 `assets/mascot/hachiware-dance-fallback.svg` 作為本地可離線的 Chiikawa/Hachiware 動畫，並將 Sanitiser 更新為版本碼 `LB-PROGRESS-MASCOT-20251205A`：先載入本地 SVG，若 Tenor API 403 即停止重試並回退；同時標記 `data-lb-mascot-source` 以利診斷。
+- **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
