@@ -1,3 +1,8 @@
+## 2025-12-05 — Patch LB-PROGRESS-MASCOT-20251205C
+- **Issue recap**: 進度條吉祥物使用 Tenor 動圖時背景會轉為白色，推測為 API 僅返回標準 GIF 版本而未使用透明貼圖格式，導致放置於灰底卡片時違反 UI 預期。
+- **Fix**: `initLoadingMascotSanitiser` 重新定義媒體格式優先序，優先選用 `*_transparent` 系列並在缺少透明版本時才回退至一般 GIF，同步強制移除圖片節點的背景色並加入本地 SVG 備援，避免 Tenor 回傳空值時出現白底。版本碼更新為 `LB-PROGRESS-MASCOT-20251205C`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
