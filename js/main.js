@@ -8,6 +8,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // 全局變量
 let stockChart = null;
@@ -1627,13 +1628,13 @@ function renderLoadingMessage(percent) {
     const base = el.dataset.rawMessage || '處理中...';
     if (Number.isFinite(percent)) {
         const safe = Math.max(0, Math.min(100, Math.round(percent)));
-        el.textContent = `⌛ ${base}（${safe}%）`;
+        el.textContent = `${base}（${safe}%）`;
     } else {
-        el.textContent = `⌛ ${base}`;
+        el.textContent = base;
     }
 }
 
-function showLoading(m = "⌛ 處理中...") {
+function showLoading(m = "處理中...") {
     const el = document.getElementById("loading");
     if (el) el.classList.remove("hidden");
 

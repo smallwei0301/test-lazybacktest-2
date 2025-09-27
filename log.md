@@ -686,3 +686,9 @@
 - **Fix**: 以階段化動畫取代舊自動補數邏輯，進度僅依實際回報推進並同步於狀態文字顯示百分比；同時在 Blob 快取落空後立即發布轉換訊息，縮短停留時間。
 - **Diagnostics**: 本地多次啟動回測觀察進度列不再提前到頂，Blob 首次 miss 亦會立刻切換為「改用 Proxy 逐月補抓...」等下一步提示。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-PROGRESS-PIPELINE-20251116B
+- **Issue recap**: Blob 範圍快取檢查遇到慢速回應時仍停留在「檢查快取」訊息，未能及時落回逐月補抓；進度條沙漏符號也與全新敘事不符。
+- **Fix**: Worker 端對 Netlify Blob 範圍檢索加入 2.5 秒逾時並紀錄狀態，逾時即回傳讓主流程顯示「回應逾時」訊息並提前切換；同時將進度卡沙漏改為指定 Chiikawa GIF，維持品牌調性。
+- **Diagnostics**: 人為調降 Blob 回應速度確認 2.5 秒即逾時並切換訊息，`fetchDiagnostics.rangeFetch.status` 會標記為 `timeout`；前端載入時檢視執行卡顯示 GIF 並隨進度文字更新百分比。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
