@@ -722,3 +722,9 @@
 - **Fix**: 改以 Tenor v2 API 動態抓取指定貼圖的 GIF URL，直接以 `<img>` 呈現並停用外部嵌入腳本，確保透明像素不再被灰底覆蓋，同時加上本地 fallback 指示避免 API 失敗時影響進度敘事。
 - **Diagnostics**: 於本地重新載入執行卡確認容器僅包含 `<img>` 並維持透明背景，網路攔截測試時會顯示 `⌛` fallback 並記錄在 console，確保使用者仍感知進度。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-27 — Patch LB-PROGRESS-MASCOT-20251127A
+- **Issue recap**: Tenor v2 API 偶發失敗時進度吉祥物立即落入沙漏 fallback，無法持續顯示 Hachiware 動畫且缺乏自動重試與備援來源。
+- **Fix**: 擴增 `initLoadingMascotSanitiser`，先以 Tenor v2 重試三次、再回退至舊版 API，並預載多組 GIF 直接連結或必要時重新掛載官方嵌入，同時保持透明背景與禁用分享連結。
+- **Diagnostics**: 本地封鎖 `tenor.googleapis.com` 後觀察到自動切換至 fallback GIF／官方嵌入仍維持透明與不可點，恢復網路則會回填最新動畫且僅注入單一 `<img>`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

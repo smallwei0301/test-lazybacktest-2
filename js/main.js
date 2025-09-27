@@ -1616,7 +1616,11 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251126A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251127A';
+    const MAX_PRIMARY_ATTEMPTS = 3;
+    const MAX_LEGACY_ATTEMPTS = 2;
+    const RETRY_DELAY_MS = 1200;
+
     const container = document.getElementById('loadingGif');
     if (!container) {
         return;
@@ -1626,13 +1630,34 @@ function initLoadingMascotSanitiser() {
         return;
     }
 
+    const postId = container.dataset.tenorId?.trim();
+    const apiKey = container.dataset.tenorApiKey?.trim();
+    const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
+    const fallbackQueue = (container.dataset.tenorFallbackSrc || '')
+        .split(',')
+        .map((src) => src.trim())
+        .filter(Boolean);
+
+    let embedObserver = null;
+    let embedSanitiseScheduled = false;
+
     const markInitialised = () => {
         container.dataset.lbMascotSanitiser = VERSION;
     };
 
+    const resetContainer = () => {
+        container.classList.remove('loading-mascot-fallback');
+        if (embedObserver) {
+            embedObserver.disconnect();
+            embedObserver = null;
+        }
+    };
+
     const ensureImageElement = () => {
+        resetContainer();
         let img = container.querySelector('img.loading-mascot-image');
         if (!img) {
+            container.innerHTML = '';
             img = document.createElement('img');
             img.className = 'loading-mascot-image';
             img.alt = 'LazyBacktest 進度吉祥物動畫';
@@ -1640,76 +1665,219 @@ function initLoadingMascotSanitiser() {
             img.loading = 'lazy';
             img.referrerPolicy = 'no-referrer';
             img.setAttribute('aria-hidden', 'true');
-            container.textContent = '';
             container.appendChild(img);
+        } else {
+            const embeds = container.querySelectorAll('.tenor-gif-embed');
+            embeds.forEach((node) => node.remove());
         }
         return img;
     };
 
-    const showFallback = () => {
-        container.classList.add('loading-mascot-fallback');
-        container.textContent = '⌛';
-        markInitialised();
+    const useFallbackImage = () => {
+        if (!fallbackQueue.length) {
+            return false;
+        }
+        const img = ensureImageElement();
+        const nextSrc = fallbackQueue.shift();
+        if (!nextSrc) {
+            return useFallbackImage();
+        }
+
+        const handleError = () => {
+            img.removeEventListener('error', handleError);
+            if (!useFallbackImage()) {
+                mountTenorEmbedFallback();
+            }
+        };
+        img.addEventListener('error', handleError, { once: true });
+        img.src = nextSrc;
+        return true;
     };
 
-    const postId = container.dataset.tenorId;
-    const apiKey = container.dataset.tenorApiKey;
+    const scheduleEmbedSanitise = () => {
+        if (embedSanitiseScheduled) {
+            return;
+        }
+        embedSanitiseScheduled = true;
+        queueMicrotask(() => {
+            embedSanitiseScheduled = false;
+            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
+            anchors.forEach((anchor) => anchor.remove());
+
+            const iframe = container.querySelector('.tenor-gif-embed iframe');
+            if (iframe) {
+                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
+                iframe.setAttribute('aria-hidden', 'true');
+                iframe.setAttribute('tabindex', '-1');
+                iframe.style.pointerEvents = 'none';
+                iframe.style.background = 'transparent';
+            }
+        });
+    };
+
+    function mountTenorEmbedFallback() {
+        if (!postId) {
+            return false;
+        }
+
+        container.innerHTML = '';
+        const embed = document.createElement('div');
+        embed.className = 'tenor-gif-embed';
+        embed.dataset.postid = postId;
+        embed.dataset.shareMethod = 'basic';
+        embed.dataset.width = '100%';
+        embed.dataset.aspectRatio = '1';
+        container.appendChild(embed);
+
+        scheduleEmbedSanitise();
+        embedObserver = new MutationObserver(scheduleEmbedSanitise);
+        embedObserver.observe(container, { childList: true, subtree: true });
+
+        if (!document.querySelector('script[data-tenor-embed]')) {
+            const script = document.createElement('script');
+            script.src = 'https://tenor.com/embed.js';
+            script.async = true;
+            script.dataset.tenorEmbed = 'true';
+            script.referrerPolicy = 'no-referrer';
+            document.body.appendChild(script);
+        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
+            window.Tenor.refresh();
+        }
+
+        return true;
+    }
+
+    const showHourglassFallback = () => {
+        container.classList.add('loading-mascot-fallback');
+        container.textContent = '⌛';
+    };
+
+    const showFallback = () => {
+        if (useFallbackImage()) {
+            markInitialised();
+            return;
+        }
+        if (mountTenorEmbedFallback()) {
+            markInitialised();
+            return;
+        }
+        showHourglassFallback();
+        markInitialised();
+    };
 
     if (!postId || !apiKey || typeof fetch !== 'function') {
         showFallback();
         return;
     }
 
-    const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
-    requestUrl.searchParams.set('ids', postId);
-    requestUrl.searchParams.set('key', apiKey);
-    requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
-    requestUrl.searchParams.set('ar_range', 'all');
+    const applyGifSource = (url) => {
+        const img = ensureImageElement();
+        if (img.src !== url) {
+            img.src = url;
+        }
+        markInitialised();
+    };
 
-    fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit' })
-        .then((response) => {
-            if (!response.ok) {
-                throw new Error(`Tenor API HTTP ${response.status}`);
-            }
-            return response.json();
-        })
-        .then((payload) => {
-            const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-            if (!result) {
-                throw new Error('Tenor API 回傳空集合');
-            }
+    const resolveGifUrl = (payload) => {
+        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+        if (!result) {
+            throw new Error('Tenor API 回傳空集合');
+        }
 
-            const formats = result.media_formats || {};
-            const mediaList = Array.isArray(result.media) ? result.media : [];
-            const gifCandidate =
-                formats.gif?.url ||
-                formats.mediumgif?.url ||
-                formats.tinygif?.url ||
-                formats.nanogif?.url ||
-                mediaList.reduce((selected, item) => {
-                    if (selected) return selected;
-                    if (item?.gif?.url) return item.gif.url;
-                    if (item?.mediumgif?.url) return item.mediumgif.url;
-                    if (item?.tinygif?.url) return item.tinygif.url;
-                    if (item?.nanogif?.url) return item.nanogif.url;
-                    return null;
-                }, null);
+        const formats = result.media_formats || {};
+        const mediaList = Array.isArray(result.media) ? result.media : [];
+        const gifCandidate =
+            formats.gif?.url ||
+            formats.mediumgif?.url ||
+            formats.tinygif?.url ||
+            formats.nanogif?.url ||
+            mediaList.reduce((selected, item) => {
+                if (selected) return selected;
+                if (item?.gif?.url) return item.gif.url;
+                if (item?.mediumgif?.url) return item.mediumgif.url;
+                if (item?.tinygif?.url) return item.tinygif.url;
+                if (item?.nanogif?.url) return item.nanogif.url;
+                return null;
+            }, null);
 
-            if (!gifCandidate) {
-                throw new Error('Tenor API 缺少 GIF 連結');
-            }
+        if (!gifCandidate) {
+            throw new Error('Tenor API 缺少 GIF 連結');
+        }
 
-            const img = ensureImageElement();
-            if (img.src !== gifCandidate) {
-                img.src = gifCandidate;
-            }
-            container.classList.remove('loading-mascot-fallback');
-            markInitialised();
-        })
-        .catch((error) => {
-            console.warn('[Mascot] 無法載入 Tenor GIF：', error);
-            showFallback();
-        });
+        return gifCandidate;
+    };
+
+    const requestLegacy = (attempt = 1) => {
+        const legacyUrl = new URL('https://g.tenor.com/v1/gifs');
+        legacyUrl.searchParams.set('ids', postId);
+        legacyUrl.searchParams.set('key', apiKey);
+        legacyUrl.searchParams.set('client_key', clientKey);
+
+        fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Tenor Legacy API HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then((payload) => {
+                const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+                if (!result) {
+                    throw new Error('Tenor Legacy API 回傳空集合');
+                }
+
+                const media = result.media || {};
+                const gifCandidate =
+                    media.gif?.url ||
+                    media.mediumgif?.url ||
+                    media.tinygif?.url ||
+                    media.nanogif?.url;
+
+                if (!gifCandidate) {
+                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
+                }
+
+                applyGifSource(gifCandidate);
+            })
+            .catch((error) => {
+                console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
+                if (attempt < MAX_LEGACY_ATTEMPTS) {
+                    setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
+                } else {
+                    showFallback();
+                }
+            });
+    };
+
+    const requestPrimary = (attempt = 1) => {
+        const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
+        requestUrl.searchParams.set('ids', postId);
+        requestUrl.searchParams.set('key', apiKey);
+        requestUrl.searchParams.set('client_key', clientKey);
+        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
+        requestUrl.searchParams.set('ar_range', 'all');
+
+        fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Tenor API HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then((payload) => resolveGifUrl(payload))
+            .then((gifUrl) => applyGifSource(gifUrl))
+            .catch((error) => {
+                console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
+                if (attempt < MAX_PRIMARY_ATTEMPTS) {
+                    setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
+                } else {
+                    requestLegacy();
+                }
+            });
+    };
+
+    useFallbackImage();
+    requestPrimary();
 }
 
 function setLoadingBaseMessage(message) {
