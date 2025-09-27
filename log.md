@@ -698,3 +698,9 @@
 - **Fix**: 建立專用的 `loading-mascot-wrapper` 造型，使用柔和粉色邊框與白色背景包覆 GIF，並強制 Tenor 嵌入內容填滿圓形避免再露出灰邊。
 - **Diagnostics**: 本地載入回測進度卡確認 GIF 圓形邊緣維持粉白配色、無灰階漏出，且 Tenor iframe 仍能自動播放並隨進度文字更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-19 — Patch LB-PROGRESS-MASCOT-20251119B
+- **Issue recap**: 進度卡仍使用粉色圓框與舊版 Chiikawa GIF，與最新 UI 指引要求的方形、無邊框 Hachiware 造型不符。
+- **Fix**: 移除進度吉祥物容器的粉色邊線與陰影，改為方形透明背景，同步將 Tenor 嵌入更新為 Hachiware GIF。
+- **Diagnostics**: 本地檢視執行卡確認 GIF 方形填滿容器、周圍不再出現粉色外框，進度敘事文字與百分比持續正確更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
