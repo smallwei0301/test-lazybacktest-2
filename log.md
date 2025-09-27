@@ -728,3 +728,9 @@
 - **Fix**: 擴增 `initLoadingMascotSanitiser`，先以 Tenor v2 重試三次、再回退至舊版 API，並預載多組 GIF 直接連結或必要時重新掛載官方嵌入，同時保持透明背景與禁用分享連結。
 - **Diagnostics**: 本地封鎖 `tenor.googleapis.com` 後觀察到自動切換至 fallback GIF／官方嵌入仍維持透明與不可點，恢復網路則會回填最新動畫且僅注入單一 `<img>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-30 — Patch LB-PROGRESS-MASCOT-20251130A
+- **Issue recap**: 實際頁面載入時進度吉祥物區域未顯示任何圖像，推測 DOM 初始化前若腳本未執行便失去預設 `<img>`，同時仍需確保 Hachiware GIF 無灰色外框與透明背景維持一致。
+- **Fix**: 在進度卡容器預先放置指定 Hachiware GIF 的 `<img>` 作為靜態後盾，並強化 `loading-mascot` 樣式強制透明背景、移除額外留白；同步更新 Sanitiser 版本碼，沿用 Tenor API 自動換源時也會覆寫同一個 `<img>`。
+- **Diagnostics**: 本地重新整理後未觸發 JavaScript 仍能直接呈現 GIF，開啟網路面板確認載入同一張透明素材且容器背景維持透明方形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
