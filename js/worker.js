@@ -35,7 +35,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20251009A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -8145,27 +8145,111 @@ function runStrategy(data, params, options = {}) {
   }
 }
 
-function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
+function deriveSensitivityObservationStats(data) {
+  const stats = {
+    startDate: null,
+    endDate: null,
+    horizonDays: null,
+    horizonYears: 1,
+  };
+  if (!Array.isArray(data) || data.length === 0) {
+    return stats;
+  }
+  const parseDate = (value) => {
+    if (typeof value !== "string") return null;
+    const ts = Date.parse(value);
+    return Number.isFinite(ts) ? ts : null;
+  };
+  let firstISO = null;
+  let lastISO = null;
+  for (let i = 0; i < data.length; i += 1) {
+    const row = data[i];
+    if (!row || typeof row.date !== "string") {
+      continue;
+    }
+    if (!firstISO) {
+      firstISO = row.date;
+    }
+    lastISO = row.date;
+  }
+  const firstTS = parseDate(firstISO);
+  const lastTS = parseDate(lastISO);
+  if (firstTS !== null && lastTS !== null && lastTS >= firstTS) {
+    const horizonDays = Math.max(
+      1,
+      Math.round((lastTS - firstTS) / 86400000) + 1,
+    );
+    const horizonYears = Math.max(horizonDays / 365.25, 1 / 12);
+    stats.startDate = firstISO;
+    stats.endDate = lastISO;
+    stats.horizonDays = horizonDays;
+    stats.horizonYears = horizonYears;
+  } else {
+    const approxDays = Array.isArray(data) ? Math.max(1, data.length) : 1;
+    stats.horizonDays = approxDays;
+    stats.horizonYears = Math.max(approxDays / 252, 1 / 12);
+  }
+  return stats;
+}
+
+function evaluateSensitivityStability(
+  averageDrift,
+  averageSharpeDrop,
+  options = {},
+) {
+  const horizonYearsRaw = Number.isFinite(options?.horizonYears)
+    ? options.horizonYears
+    : null;
+  const scenarioCount = Number.isFinite(options?.scenarioCount)
+    ? options.scenarioCount
+    : null;
+  const horizonYears =
+    horizonYearsRaw && horizonYearsRaw > 0
+      ? Math.min(25, Math.max(horizonYearsRaw, 1 / 12))
+      : 1;
   if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
     return {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      horizonYears,
+      scenarioPenalty: 0,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
-  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
-    ? Math.max(0, averageSharpeDrop) * 100
-    : 0;
-  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
-  const baseScore = 100 - driftPenalty - sharpePenalty;
+
+  const driftExponent = horizonYears >= 5 ? 0.65 : 0.75;
+  const driftDivisor = Math.pow(horizonYears, driftExponent) || 1;
+  let driftPenalty = 0;
+  if (Number.isFinite(averageDrift)) {
+    const normalizedDrift = Math.max(0, averageDrift);
+    driftPenalty = normalizedDrift / driftDivisor;
+    if (horizonYears >= 5) {
+      driftPenalty *= 0.9;
+    }
+    driftPenalty = Math.min(70, driftPenalty);
+  }
+
+  let sharpePenalty = 0;
+  if (Number.isFinite(averageSharpeDrop)) {
+    const normalizedSharpeDrop = Math.max(0, averageSharpeDrop);
+    const sharpeScale = horizonYears >= 5 ? 85 : 95;
+    sharpePenalty = Math.min(35, normalizedSharpeDrop * sharpeScale);
+  }
+
+  let scenarioPenalty = 0;
+  if (scenarioCount !== null && scenarioCount > 0 && scenarioCount < 6) {
+    scenarioPenalty = (6 - scenarioCount) * 2.5;
+  }
+
+  const baseScore = 100 - driftPenalty - sharpePenalty - scenarioPenalty;
   const score = Math.max(0, Math.min(100, baseScore));
+
   return {
     score,
     driftPenalty,
     sharpePenalty,
+    horizonYears,
+    scenarioPenalty: scenarioPenalty > 0 ? scenarioPenalty : 0,
   };
 }
 
@@ -8185,6 +8269,9 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     ? baselineMetrics.sharpeRatio
     : null;
 
+  const observationStats = deriveSensitivityObservationStats(data);
+  const horizonYearsForScoring = observationStats.horizonYears;
+
   const summaryAccumulator = {
     driftValues: [],
     positive: [],
@@ -8203,6 +8290,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         baselineReturn,
         baselineSharpe,
         summaryAccumulator,
+        horizonYears: horizonYearsForScoring,
       }),
     )
     .filter(Boolean);
@@ -8244,6 +8332,10 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   const stabilityComponents = evaluateSensitivityStability(
     summaryAverage,
     summarySharpeDrop,
+    {
+      horizonYears: horizonYearsForScoring,
+      scenarioCount: summaryAccumulator.scenarioCount,
+    },
   );
   const stabilityScore = stabilityComponents.score;
 
@@ -8263,12 +8355,20 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         version: SENSITIVITY_SCORE_VERSION,
         driftPenalty: stabilityComponents.driftPenalty,
         sharpePenalty: stabilityComponents.sharpePenalty,
+        horizonYears: stabilityComponents.horizonYears,
+        scenarioPenalty: stabilityComponents.scenarioPenalty,
       },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
       averageSharpeDrop: summarySharpeDrop,
       averageSharpeGain: summarySharpeGain,
       scenarioCount: summaryAccumulator.scenarioCount,
+      observationHorizon: {
+        years: horizonYearsForScoring,
+        days: observationStats.horizonDays,
+        startDate: observationStats.startDate,
+        endDate: observationStats.endDate,
+      },
     },
     baseline: {
       returnRate: baselineReturn,
@@ -8288,6 +8388,7 @@ function buildSensitivityGroup({
   baselineReturn,
   baselineSharpe,
   summaryAccumulator,
+  horizonYears,
 }) {
   const paramEntries = Object.entries(context.params || {})
     .filter(([_, value]) => Number.isFinite(value))
@@ -8307,6 +8408,7 @@ function buildSensitivityGroup({
         baselineReturn,
         baselineSharpe,
         summaryAccumulator,
+        horizonYears,
       }),
     )
     .filter(Boolean);
@@ -8367,6 +8469,13 @@ function buildSensitivityGroup({
   const groupStabilityComponents = evaluateSensitivityStability(
     groupAverage,
     groupSharpeDrop,
+    {
+      horizonYears,
+      scenarioCount: parameters.reduce(
+        (sum, param) => sum + (param.scenarioCount || 0),
+        0,
+      ),
+    },
   );
   const groupScore = groupStabilityComponents.score;
 
@@ -8389,6 +8498,8 @@ function buildSensitivityGroup({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: groupStabilityComponents.driftPenalty,
       sharpePenalty: groupStabilityComponents.sharpePenalty,
+      horizonYears: groupStabilityComponents.horizonYears,
+      scenarioPenalty: groupStabilityComponents.scenarioPenalty,
     },
     parameters,
   };
@@ -8403,6 +8514,7 @@ function evaluateSensitivityParameter({
   baselineReturn,
   baselineSharpe,
   summaryAccumulator,
+  horizonYears,
 }) {
   if (!Number.isFinite(baseValue)) {
     return null;
@@ -8551,6 +8663,10 @@ function evaluateSensitivityParameter({
   const stabilityComponents = evaluateSensitivityStability(
     avgDrift,
     avgSharpeDrop,
+    {
+      horizonYears,
+      scenarioCount: scenarios.filter((s) => s && s.run).length,
+    },
   );
   const stabilityScore = stabilityComponents.score;
 
@@ -8571,6 +8687,8 @@ function evaluateSensitivityParameter({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: stabilityComponents.driftPenalty,
       sharpePenalty: stabilityComponents.sharpePenalty,
+      horizonYears: stabilityComponents.horizonYears,
+      scenarioPenalty: stabilityComponents.scenarioPenalty,
     },
   };
 }

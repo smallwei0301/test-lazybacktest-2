@@ -680,3 +680,9 @@
 - **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
 - **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-SENSITIVITY-METRIC-20251009A / LB-SENSITIVITY-UX-20251116A
+- **Issue recap**: 五至十年樣本的敏感度分數因直接套用累積漂移扣分，常出現 0 分，與 QuantConnect、Portfolio123 等平臺的年化穩健門檻不符。
+- **Fix**: Worker 新增 `deriveSensitivityObservationStats` 以年化漂移並依專業回測平臺指引重算穩定度，加入樣本不足懲罰與診斷欄位；前端同步更新 tooltip 與摘要文案，說明年化評分與建議樣本數。
+- **Diagnostics**: 以長週期回測檢視 `parameterSensitivity.summary.stabilityComponents` 新欄位（`horizonYears`、`scenarioPenalty`）與 `observationHorizon`，確認穩定度不再歸零且 tooltip 顯示年化標準與樣本提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

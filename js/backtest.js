@@ -6350,7 +6350,7 @@ function displayBacktestResult(result) {
                 ? sensitivityData
                 : null;
         const tooltipContent =
-            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的報酬漂移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
+            '參考 QuantConnect、Portfolio123 與 TradeStation 等專業回測平臺的 Robustness 報告：<br>1. 穩定度分數 ≥ 70：年化漂移 ≤ 6pp、Sharpe 下滑 < 0.25，長期樣本仍屬穩健。<br>2. 45 ～ 69：年化漂移 6～12pp 或 Sharpe 下滑 0.25～0.4，建議延長樣本或批量優化。<br>3. < 45：年化漂移 > 12pp 或 Sharpe 下滑 > 0.4，代表策略對參數高度敏感。<br><br>分數採年化漂移＋Sharpe 懲罰＋樣本不足扣分計算；PP（百分點）為調整後報酬與基準的絕對差值。';
         const headerHtml = `
         <div class="flex items-center mb-6">
             <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
@@ -6671,17 +6671,41 @@ function displayBacktestResult(result) {
         const stabilitySharpePenalty = Number.isFinite(stabilityComponents?.sharpePenalty)
             ? stabilityComponents.sharpePenalty
             : null;
+        const stabilityScenarioPenalty = Number.isFinite(stabilityComponents?.scenarioPenalty)
+            ? stabilityComponents.scenarioPenalty
+            : null;
+        const observationHorizon = data?.summary?.observationHorizon || null;
+        const observationLabel = (() => {
+            const years = Number.isFinite(observationHorizon?.years) ? observationHorizon.years : null;
+            const days = Number.isFinite(observationHorizon?.days) ? observationHorizon.days : null;
+            if (years && years >= 1) {
+                return `${years >= 5 ? years.toFixed(1) : years.toFixed(2)} 年`;
+            }
+            if (years && years > 0) {
+                return `${Math.round(years * 12)} 個月`;
+            }
+            if (days) {
+                return `${Math.round(days)} 天`;
+            }
+            return null;
+        })();
         const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            '穩定度分數 = 100 − 年化漂移扣分 − Sharpe 下滑懲罰 − 樣本不足扣分（參考 QuantConnect／Portfolio123 Robustness 指南）。',
             Number.isFinite(stabilityDriftPenalty)
                 ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
                 : null,
             Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
                 ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
                 : Number.isFinite(summarySharpeDrop)
-                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
+                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 0.9～1 分`
                     : null,
-            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
+            Number.isFinite(stabilityScenarioPenalty) && stabilityScenarioPenalty > 0
+                ? `擾動樣本不足另外扣 ${stabilityScenarioPenalty.toFixed(1)} 分（建議至少 6 組）。`
+                : Number.isFinite(overallSamples)
+                    ? `擾動樣本 ${overallSamples} 組，已達建議下限。`
+                    : null,
+            observationLabel ? `本次敏感度涵蓋約 ${observationLabel}，已換算為年化漂移。` : null,
+            '分數 ≥ 70 視為穩健；45～69 建議延長樣本，<45 則需謹慎。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
         let directionSafeTooltip = null;
@@ -6708,20 +6732,21 @@ function displayBacktestResult(result) {
             }
             return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
         })();
+        const horizonHintSuffix = observationLabel ? `（涵蓋約 ${observationLabel}，已換算年化漂移）` : '';
         const summarySentence = (() => {
             const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
             const driftAbs = Number.isFinite(overallDrift) ? Math.abs(overallDrift) : null;
             const maxAbs = Number.isFinite(overallMaxDrift) ? Math.abs(overallMaxDrift) : null;
             if (stabilityScore === null && driftAbs === null && maxAbs === null) {
-                return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
+                return `目前樣本不足，請先補齊回測資料再檢視敏感度。${horizonHintSuffix}`.trim();
             }
             if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
-                return '整體擾動反應平穩，可照現有參數持續觀察。';
+                return `整體擾動反應平穩，可照現有參數持續觀察。${horizonHintSuffix}`.trim();
             }
             if (stabilityScore !== null && stabilityScore >= 55) {
-                return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
+                return `敏感度略偏波動，建議搭配分段風控或延長樣本觀察。${horizonHintSuffix}`.trim();
             }
-            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
+            return `敏感度偏向敏感，建議縮小部位並重新檢視參數設定。${horizonHintSuffix}`.trim();
         })();
         const directionTooltipHtml = directionSafeTooltip
             ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
