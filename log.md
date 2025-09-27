@@ -1,3 +1,8 @@
+## 2025-11-12 — Patch LB-SENSITIVITY-SCORE-20251112A
+- **Issue recap**: 長週期（5～10 年）回測的敏感度總分經常被漂移扣分壓至 0，與 QuantConnect、Portfolio123 等量化平臺採用的長樣本容忍度不符，造成前端摘要與建議過度悲觀。
+- **Fix**: Worker 重新定義 `evaluateSensitivityStability`，導入 15%/30%/50% 分段漂移扣分、Sharpe 緩衝與長週期調整係數，新增樣本年數推算並隨回傳帶回；前端更新文案與 tooltip，說明專業機構的評分基準並同步顯示涵蓋年數。
+- **Testing**: 受限於容器無法啟動資料來源，待能連線代理後以 2330、0050、2412 回測確認敏感度分數與文案符合新門檻。
+
 ## 2025-11-11 — Patch LB-PRICE-INSPECTOR-20251111A
 - **Issue recap**: 區間價格檢視按鈕搬移到淨值卡片後，打開彈窗時未初始化 `sourceLabel`，在填入價格來源欄位時觸發 `ReferenceError`，導致彈窗仍維持隱藏狀態、使用者看不到表格。
 - **Fix**: 於 `openPriceInspectorModal` 重新導入 `resolvePriceInspectorSourceLabel()` 的結果，確保渲染價格來源欄位時具備預設值，避免錯誤中斷。
