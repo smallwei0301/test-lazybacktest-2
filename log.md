@@ -685,3 +685,9 @@
 - **Fix**: 將可編輯區設定為置中對齊並同步調整空狀態的提示對齊方式，確保範例字與使用者輸入皆落在底線中央。
 - **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-16 — Patch LB-PROGRESS-PIPELINE-20251116A / LB-PROGRESS-UX-20251116A / LB-PROGRESS-BLOB-20251116A
+- **Issue recap**: 回測進度條會在核心計算完成前先跑滿 100%，Blob 範圍快取未命中時持續顯示「檢查 Netlify Blob 範圍快取...」，且等待時間偏長導致使用者誤判卡住。
+- **Fix**: 建立前端進度控制器維持階段百分比、延後 100% 顯示至建議計算結束並同步訊息；回測主流程與建議流程失敗時主動收斂進度；Worker 新增 Blob 請求逾時計時與改抓訊息，以便快速轉入逐月補抓。
+- **Diagnostics**: 待實機回測確認進度訊息依序切換（Blob 逾時→逐月補抓→整理數據→整理建議）且建議成功後才顯示 100%。
+- **Testing**: 未執行（需待可用 Proxy 與回測資料時於瀏覽器實測）。

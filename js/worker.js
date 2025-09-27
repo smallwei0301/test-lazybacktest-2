@@ -17,6 +17,7 @@ importScripts('config.js');
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+// Patch Tag: LB-PROGRESS-BLOB-20251116A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -2396,18 +2397,39 @@ async function tryFetchRangeFromBlob({
   const requestUrl = `/.netlify/functions/stock-range?${params.toString()}`;
   const startedAt = Date.now();
   let response;
+  const abortController =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  let timeoutId = null;
+  if (abortController) {
+    timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, 2500);
+  }
   try {
-    response = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+    response = await fetch(requestUrl, {
+      headers: { Accept: "application/json" },
+      signal: abortController ? abortController.signal : undefined,
+    });
   } catch (error) {
-    rangeFetchInfo.status = "network-error";
-    rangeFetchInfo.error = error?.message || String(error);
+    if (timeoutId) clearTimeout(timeoutId);
+    if (error?.name === "AbortError") {
+      rangeFetchInfo.status = "timeout";
+      rangeFetchInfo.error = "timeout";
+      console.warn(
+        `[Worker] Netlify Blob 範圍請求逾時 (${stockNo})，改用 Proxy 逐月補抓。`,
+      );
+    } else {
+      rangeFetchInfo.status = "network-error";
+      rangeFetchInfo.error = error?.message || String(error);
+      console.warn(
+        `[Worker] Netlify Blob 範圍請求失敗 (${stockNo})：`,
+        error,
+      );
+    }
     rangeFetchInfo.durationMs = Date.now() - startedAt;
-    console.warn(
-      `[Worker] Netlify Blob 範圍請求失敗 (${stockNo})：`,
-      error,
-    );
     return null;
   }
+  if (timeoutId) clearTimeout(timeoutId);
 
   rangeFetchInfo.httpStatus = response.status;
   if (!response.ok) {
@@ -2951,6 +2973,11 @@ async function fetchStockData(
     if (blobRangeResult) {
       return blobRangeResult;
     }
+    self.postMessage({
+      type: "progress",
+      progress: 10,
+      message: "未命中範圍快取，改用 Proxy 逐月補抓...",
+    });
   }
 
   if (adjusted) {

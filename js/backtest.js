@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -4671,8 +4672,7 @@ function runBacktestInternal() {
             console.log("[Main] Received message from worker:", type, data); // Debug log
 
             if(type==='progress'){
-                updateProgress(progress);
-                if(message)document.getElementById('loadingText').textContent=`⌛ ${message}`;
+                updateProgress(progress, message);
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
@@ -4965,6 +4965,7 @@ function runBacktestInternal() {
                 if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showResult === 'function') {
                     window.lazybacktestTodaySuggestion.showResult(data || {});
                 }
+                finalizeProgress('回測與策略建議完成');
                 hideLoading();
                 showSuccess("回測完成！");
                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
@@ -4973,6 +4974,7 @@ function runBacktestInternal() {
                 if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
                     window.lazybacktestTodaySuggestion.showError(message);
                 }
+                finalizeProgress('核心回測完成');
                 hideLoading();
                 showError("回測完成，但計算建議時發生錯誤。");
                 if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;

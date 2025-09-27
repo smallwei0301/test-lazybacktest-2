@@ -7,6 +7,7 @@
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
+// Patch Tag: LB-PROGRESS-UX-20251116A
 
 // 全局變量
 let stockChart = null;
@@ -16,6 +17,25 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
+const progressState = {
+    lastValue: 0,
+    pendingFinal: false,
+    lastMessage: '',
+};
+
+function resetProgressTracking() {
+    progressState.lastValue = 0;
+    progressState.pendingFinal = false;
+    progressState.lastMessage = '';
+}
+
+function setLoadingStatusText(text) {
+    const loadingText = document.getElementById('loadingText');
+    if (!loadingText || typeof text !== 'string') return;
+    if (progressState.lastMessage === text) return;
+    loadingText.textContent = text;
+    progressState.lastMessage = text;
+}
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -1606,9 +1626,8 @@ function initDeveloperAreaToggle() {
 
 function showLoading(m="⌛ 處理中...") {
     const el = document.getElementById("loading");
-    const loadingText = document.getElementById('loadingText');
-
-    if (loadingText) loadingText.textContent = m;
+    resetProgressTracking();
+    setLoadingStatusText(m);
     if (el) el.classList.remove("hidden");
     progressAnimator.reset();
     progressAnimator.start();
@@ -1619,10 +1638,52 @@ function showLoading(m="⌛ 處理中...") {
 function hideLoading() {
     const el = document.getElementById("loading");
     progressAnimator.stop();
+    resetProgressTracking();
     if (el) el.classList.add("hidden");
 }
-function updateProgress(p) {
-    progressAnimator.update(p);
+function updateProgress(p, message) {
+    if (typeof message === 'string' && message.trim() !== '') {
+        setLoadingStatusText(`⌛ ${message.trim()}`);
+    }
+
+    const value = Number(p);
+    if (!Number.isFinite(value)) return;
+
+    const safeValue = Math.max(0, Math.min(100, value));
+    if (safeValue >= 100) {
+        progressState.pendingFinal = true;
+        const holdTarget = Math.min(99.2, Math.max(progressState.lastValue, 96));
+        if (holdTarget > progressState.lastValue) {
+            progressAnimator.update(holdTarget);
+            progressState.lastValue = holdTarget;
+        }
+        if (!message || !message.trim()) {
+            setLoadingStatusText('⌛ 核心計算完成，整理建議中...');
+        }
+        return;
+    }
+
+    if (safeValue < progressState.lastValue) {
+        return;
+    }
+
+    const cappedValue = progressState.pendingFinal ? Math.min(safeValue, 99) : safeValue;
+    if (cappedValue > progressState.lastValue) {
+        progressAnimator.update(cappedValue);
+        progressState.lastValue = cappedValue;
+    }
+}
+
+function finalizeProgress(message) {
+    const trimmed = typeof message === 'string' ? message.trim() : '';
+    if (trimmed) {
+        const finalText = trimmed.startsWith('⌛') ? trimmed : `⌛ ${trimmed}`;
+        setLoadingStatusText(finalText);
+    }
+    progressState.pendingFinal = false;
+    progressState.lastValue = 100;
+    progressAnimator.update(100);
+    progressAnimator.stop();
 }
 
 function createProgressAnimator() {
@@ -2230,21 +2291,28 @@ function getSuggestion() {
     const suggestionUI = window.lazybacktestTodaySuggestion;
     if (!suggestionUI || typeof suggestionUI.showLoading !== 'function') {
         console.warn('[Main] Suggestion UI controller not available.');
+        finalizeProgress('回測完成');
+        hideLoading();
         return;
     }
 
     if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) {
         suggestionUI.showError('請先執行回測以建立建議所需的資料。');
+        finalizeProgress('回測完成');
+        hideLoading();
         return;
     }
 
     if (!workerUrl || !backtestWorker) {
         console.warn('[Suggestion] Worker not ready or busy.');
         suggestionUI.showError('引擎未就緒或忙碌中');
+        finalizeProgress('回測完成');
+        hideLoading();
         return;
     }
 
     suggestionUI.showLoading();
+    updateProgress(98, '整理策略建議...');
 
     try {
         const params = getBacktestParams();
@@ -2331,6 +2399,8 @@ function getSuggestion() {
         console.error('[Main] Error getting suggestion:', error);
         suggestionUI.showError(error?.message || '計算建議時出錯');
         if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
+        finalizeProgress('回測完成');
+        hideLoading();
     }
 }
 
