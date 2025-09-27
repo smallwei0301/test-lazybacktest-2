@@ -704,3 +704,9 @@
 - **Fix**: 移除進度吉祥物容器的粉色邊線與陰影，改為方形透明背景，同步將 Tenor 嵌入更新為 Hachiware GIF。
 - **Diagnostics**: 本地檢視執行卡確認 GIF 方形填滿容器、周圍不再出現粉色外框，進度敘事文字與百分比持續正確更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-20 — Patch LB-PROGRESS-VISUAL-20251120A
+- **Issue recap**: 進度吉祥物的 Tenor 嵌入在載入時仍可能覆蓋灰底，且點擊後會跳出 Facebook 等分享連結，破壞透明背景與專注式體驗。
+- **Fix**: 於樣式層全面移除 Tenor 內層背景並禁用指標事件，同步導入 MutationObserver 清理嵌入產生的連結與 iframe，使背景維持透明且無法被點擊。
+- **Diagnostics**: 本地重載回測進度卡確認吉祥物保持透明邊緣、無分享彈層，並檢視 console 確認 `data-lb-mascot-sanitiser` 標記套用版本碼。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

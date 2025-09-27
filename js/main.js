@@ -1615,6 +1615,69 @@ function normaliseLoadingMessage(message) {
     return message.replace(/^⌛\s*/, '').trim() || '處理中...';
 }
 
+function initLoadingMascotSanitiser() {
+    const VERSION = 'LB-PROGRESS-VISUAL-20251120A';
+    const embed = document.getElementById('loadingGif');
+    if (!embed || embed.dataset.lbMascotSanitiser === VERSION) {
+        return;
+    }
+
+    const sanitise = () => {
+        if (!embed || !embed.isConnected) {
+            return;
+        }
+
+        embed.style.background = 'none';
+        embed.style.backgroundColor = 'transparent';
+        embed.style.pointerEvents = 'none';
+
+        const anchors = embed.querySelectorAll('a');
+        anchors.forEach((anchor) => {
+            anchor.removeAttribute('href');
+            anchor.removeAttribute('target');
+            anchor.setAttribute('tabindex', '-1');
+            anchor.style.pointerEvents = 'none';
+            anchor.style.background = 'transparent';
+        });
+
+        const frames = embed.querySelectorAll('iframe');
+        frames.forEach((frame) => {
+            frame.setAttribute('allowtransparency', 'true');
+            frame.style.background = 'transparent';
+            frame.style.pointerEvents = 'none';
+        });
+
+        const containers = embed.querySelectorAll('div, span');
+        containers.forEach((node) => {
+            if (node && node.style) {
+                node.style.background = 'transparent';
+                node.style.backgroundColor = 'transparent';
+            }
+        });
+    };
+
+    const Observer = typeof MutationObserver === 'function' ? MutationObserver : null;
+    let observer = null;
+    if (Observer) {
+        observer = new Observer(() => sanitise());
+        observer.observe(embed, { childList: true, subtree: true, attributes: true });
+    }
+
+    sanitise();
+
+    embed.dataset.lbMascotSanitiser = VERSION;
+
+    if (observer) {
+        window.addEventListener(
+            'beforeunload',
+            () => {
+                observer.disconnect();
+            },
+            { once: true },
+        );
+    }
+}
+
 function setLoadingBaseMessage(message) {
     const el = getLoadingTextElement();
     if (!el) return;
@@ -2366,6 +2429,8 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
+
+        initLoadingMascotSanitiser();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();

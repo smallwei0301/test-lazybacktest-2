@@ -1,6 +1,6 @@
 /* --- 自訂 CSS --- */
 .loading-mascot-wrapper {
-    background-color: transparent;
+    background: none;
     border: none;
     box-shadow: none;
 }
@@ -11,6 +11,16 @@
     height: 100% !important;
     background-color: transparent !important;
     display: block;
+}
+
+.loading-mascot-wrapper .tenor-gif-embed,
+.loading-mascot-wrapper .tenor-gif-embed * {
+    background: none !important;
+}
+
+.loading-mascot-wrapper .tenor-gif-embed,
+.loading-mascot-wrapper .tenor-gif-embed * {
+    pointer-events: none !important;
 }
 .quick-backtest-editable {
     position: relative;
