@@ -5826,22 +5826,36 @@ function runStrategy(data, params, options = {}) {
     const buildAggregatedLongEntry = () => {
       if (currentLongEntryBreakdown.length === 0) return null;
       const totalShares = currentLongEntryBreakdown.reduce(
-        (sum, info) => sum + (info.shares || 0),
+        (sum, info) => sum + (info.originalShares || info.shares || 0),
         0,
       );
       const totalPercent = currentLongEntryBreakdown.reduce(
         (sum, info) => sum + (info.allocationPercent || 0),
         0,
       );
+      const totalCostWithFee = currentLongEntryBreakdown.reduce(
+        (sum, info) =>
+          sum + (info.originalCost ?? info.cost ?? info.remainingCost ?? 0),
+        0,
+      );
+      const totalCostWithoutFee = currentLongEntryBreakdown.reduce(
+        (sum, info) =>
+          sum +
+          (info.originalCostWithoutFee ??
+            info.costWithoutFee ??
+            info.remainingCostWithoutFee ??
+            0),
+        0,
+      );
       const averageEntryPrice =
-        totalShares > 0 ? longPositionCostWithoutFee / totalShares : 0;
+        totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
       return {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
         shares: totalShares,
-        cost: longPositionCostWithFee,
-        costWithoutFee: longPositionCostWithoutFee,
+        cost: totalCostWithFee,
+        costWithoutFee: totalCostWithoutFee,
         averageEntryPrice,
         stageCount: currentLongEntryBreakdown.length,
         cumulativeStagePercent: totalPercent,
