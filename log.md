@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-PROGRESS-MASCOT-20251209A
+- **Issue recap**: 用戶要求進度吉祥物僅能以指定的 Hachiware GIF 程式碼呈現，現行 Sanitiser 仍會觸發 Tenor API 與多層 fallback，造成額外的外部依賴與除錯負擔。
+- **Fix**: 將 `#loadingGif` 調整為固定引用使用者提供的 GIF URL，Sanitiser 改為僅驗證並維持這個靜態來源，若載入失敗才回退沙漏提示，同步移除 Tenor 相關屬性與樣式並更新版本碼為 `LB-PROGRESS-MASCOT-20251209A`。
+- **Diagnostics**: 本地重新載入進度卡確認 DOM 僅保留單一 `<img>`，阻擋遠端 GIF 後會顯示沙漏 fallback 並記錄 `[Mascot]` 警告訊息，解除阻擋後刷新仍能回到指定動畫。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
