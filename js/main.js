@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251222A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1744,7 +1744,11 @@ function initLoadingMascotSanitiser() {
         queueMicrotask(() => {
             embedSanitiseScheduled = false;
             const anchors = container.querySelectorAll('.tenor-gif-embed > a');
-            anchors.forEach((anchor) => anchor.remove());
+            anchors.forEach((anchor) => {
+                anchor.setAttribute('tabindex', '-1');
+                anchor.setAttribute('aria-hidden', 'true');
+                anchor.style.pointerEvents = 'none';
+            });
 
             const iframe = container.querySelector('.tenor-gif-embed iframe');
             if (iframe) {
@@ -1757,7 +1761,7 @@ function initLoadingMascotSanitiser() {
         });
     };
 
-    function mountTenorEmbedFallback() {
+    function mountTenorEmbedFallback(options = {}) {
         if (!postId) {
             return false;
         }
@@ -1766,10 +1770,31 @@ function initLoadingMascotSanitiser() {
         const embed = document.createElement('div');
         embed.className = 'tenor-gif-embed';
         embed.dataset.postid = postId;
-        embed.dataset.shareMethod = 'basic';
-        embed.dataset.width = '100%';
-        embed.dataset.aspectRatio = '1';
+        embed.dataset.shareMethod = options.shareMethod || 'host';
+        embed.dataset.width = options.width || '100%';
+        embed.dataset.aspectRatio = options.aspectRatio || '1';
         container.appendChild(embed);
+
+        if (options.includeAttribution !== false) {
+            const attributionWrapper = document.createElement('span');
+            attributionWrapper.style.display = 'none';
+            const primaryLink = document.createElement('a');
+            primaryLink.href = 'https://tenor.com/view/hachiware-gif-1718069610368761676';
+            primaryLink.textContent = 'Hachiware Sticker';
+            primaryLink.target = '_blank';
+            primaryLink.rel = 'noopener noreferrer';
+            const fromText = document.createElement('span');
+            fromText.textContent = ' from ';
+            const secondaryLink = document.createElement('a');
+            secondaryLink.href = 'https://tenor.com/search/hachiware-stickers';
+            secondaryLink.textContent = 'Hachiware Stickers';
+            secondaryLink.target = '_blank';
+            secondaryLink.rel = 'noopener noreferrer';
+            attributionWrapper.appendChild(primaryLink);
+            attributionWrapper.appendChild(fromText);
+            attributionWrapper.appendChild(secondaryLink);
+            embed.appendChild(attributionWrapper);
+        }
 
         container.dataset.lbMascotSource = 'tenor-embed';
 
@@ -1782,6 +1807,7 @@ function initLoadingMascotSanitiser() {
             script.src = 'https://tenor.com/embed.js';
             script.async = true;
             script.dataset.tenorEmbed = 'true';
+            script.type = 'text/javascript';
             script.referrerPolicy = 'no-referrer';
             document.body.appendChild(script);
         } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
@@ -1792,9 +1818,15 @@ function initLoadingMascotSanitiser() {
     }
 
     const showHourglassFallback = () => {
+        if (mountTenorEmbedFallback({ shareMethod: 'host', width: '100%', aspectRatio: '1', includeAttribution: true })) {
+            container.dataset.lbMascotSource = 'tenor-embed-snippet';
+            markInitialised();
+            return;
+        }
         container.classList.add('loading-mascot-fallback');
         container.textContent = '⌛';
         container.dataset.lbMascotSource = 'hourglass';
+        markInitialised();
     };
 
     const showFallback = () => {
@@ -1802,12 +1834,12 @@ function initLoadingMascotSanitiser() {
             markInitialised();
             return;
         }
-        if (mountTenorEmbedFallback()) {
+        if (mountTenorEmbedFallback({ shareMethod: 'host', width: '100%', aspectRatio: '1', includeAttribution: true })) {
+            container.dataset.lbMascotSource = 'tenor-embed-host';
             markInitialised();
             return;
         }
         showHourglassFallback();
-        markInitialised();
     };
 
     if (!postId || !apiKey || typeof fetch !== 'function') {
