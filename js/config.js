@@ -67,3 +67,70 @@ const globalOptimizeTargets = {
     stopLoss: { label: '停損 (%)', range: { from: 1, to: 30, step: 0.5 } },
     takeProfit: { label: '停利 (%)', range: { from: 5, to: 100, step: 1 } }
 };
+
+const fuzzyOptimizationConfig = {
+    version: 'LB-GA-FUZZY-20251208A',
+    indicators: {
+        k: {
+            domain: { min: 0, max: 100 },
+            memberships: [
+                { name: 'low', type: 'triangular', default: [0, 15, 40], margin: 5 },
+                { name: 'medium', type: 'triangular', default: [30, 50, 70], margin: 5 },
+                { name: 'high', type: 'triangular', default: [60, 80, 100], margin: 5 }
+            ]
+        },
+        d: {
+            domain: { min: 0, max: 100 },
+            memberships: [
+                { name: 'low', type: 'triangular', default: [0, 20, 45], margin: 5 },
+                { name: 'medium', type: 'triangular', default: [35, 55, 75], margin: 5 },
+                { name: 'high', type: 'triangular', default: [65, 85, 100], margin: 5 }
+            ]
+        },
+        rsi: {
+            domain: { min: 0, max: 100 },
+            memberships: [
+                { name: 'low', type: 'triangular', default: [0, 20, 40], margin: 5 },
+                { name: 'medium', type: 'triangular', default: [35, 50, 65], margin: 5 },
+                { name: 'high', type: 'triangular', default: [60, 80, 100], margin: 5 }
+            ]
+        }
+    },
+    strategyMappings: {
+        k_d_cross: [
+            { param: 'thresholdX', indicator: 'd', membership: 'low', strategyType: 'entry' }
+        ],
+        k_d_cross_exit: [
+            { param: 'thresholdY', indicator: 'd', membership: 'high', strategyType: 'exit' }
+        ],
+        short_k_d_cross: [
+            { param: 'thresholdY', indicator: 'd', membership: 'high', strategyType: 'entry', enableShort: true }
+        ],
+        cover_k_d_cross: [
+            { param: 'thresholdX', indicator: 'd', membership: 'low', strategyType: 'exit' }
+        ],
+        rsi_oversold: [
+            { param: 'threshold', indicator: 'rsi', membership: 'low', strategyType: 'entry' }
+        ],
+        rsi_overbought: [
+            { param: 'threshold', indicator: 'rsi', membership: 'high', strategyType: 'exit' }
+        ],
+        short_rsi_overbought: [
+            { param: 'threshold', indicator: 'rsi', membership: 'high', strategyType: 'entry', enableShort: true }
+        ],
+        cover_rsi_oversold: [
+            { param: 'threshold', indicator: 'rsi', membership: 'low', strategyType: 'exit' }
+        ]
+    },
+    population: {
+        min: 6,
+        max: 24,
+        defaultSize: 12
+    },
+    mutationRate: 0.18,
+    crossoverRate: 0.85
+};
+
+if (typeof window !== 'undefined') {
+    window.fuzzyOptimizationConfig = fuzzyOptimizationConfig;
+}

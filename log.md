@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-GA-FUZZY-20251208A
+- **Issue recap**: 批量優化仍依賴固定網格取樣，KD/RSI 等震盪指標的閾值需要大量窮舉才能得到可用結果，導致 6k DAU 高峰時批量優化等待時間過長。
+- **Fix**: 新增「基因演算法 + 模糊系統」優化引擎，建立 KD、D、RSI 隸屬函數的演化流程，將 GA 最佳解輸入既有迭代優化流程並記錄診斷資訊，維持 `LB-GA-FUZZY-20251208A` 版本碼。
+- **Diagnostics**: 本地切換 GA 引擎後確認 `fuzzyOptimization` 診斷包含演化代數、最佳指標、三角隸屬函數，並在 console 觀察到迭代優化直接沿用 GA 結果。
+- **Testing**: `node --version`（容器未提供 Node，預計於 Netlify build pipeline 執行 `scripts compile` 進行語法檢查）
