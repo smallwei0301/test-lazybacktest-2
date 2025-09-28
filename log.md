@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-FORECAST-LSTM-GA-20250714A
+- **Issue recap**: 使用者缺乏以歷史回測資料為基礎的隔日收盤價預測工具，無法評估策略與實際價格趨勢的差異，也缺少對預測命中率與漲跌幅的定量指標。
+- **Fix**: 新增「預測」分頁與 `js/forecast.js` 模組，利用 LSTM 建模並以 GA 誤差校正僅以訓練期資料調整係數，走訪驗證期採步進式預測，輸出實際／預測曲線、方向命中率及平均漲跌幅，避免回看未來資料。
+- **Diagnostics**: 本地載入預測分頁確認狀態提示、圖表 placeholder 與 GA 診斷資訊，檢查指標在無資料、資料不足與成功預測三種狀態下的提示文案與顏色。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/forecast.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
