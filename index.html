@@ -330,6 +330,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.14.0/dist/tf.min.js"></script>
     <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -1219,6 +1220,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="forecast"
+                                            >
+                                                <i data-lucide="line-chart" class="lucide-sm inline mr-1"></i>預測
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1409,81 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Forecast Tab -->
+                            <div class="tab-content hidden space-y-6" id="forecast-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-3 space-y-2">
+                                        <div class="flex items-center justify-between flex-wrap gap-3">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="line-chart" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                LSTM+GA 預測模擬
+                                            </h3>
+                                            <span id="forecastVersion" class="text-[11px] font-medium px-2 py-1 rounded-full border"
+                                                style="border-color: var(--border); color: var(--muted-foreground);">版本載入中...</span>
+                                        </div>
+                                        <p class="card-description text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            依照回測區間的收盤價建立 LSTM 時序模型，並以遺傳演算法調校殘差，產出隔日收盤價的方向命中率與報酬分布。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-5">
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <button
+                                                id="runForecastBtn"
+                                                class="btn-primary px-5 py-2.5 rounded-lg font-semibold flex items-center gap-2"
+                                                style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 40%, var(--accent)));"
+                                            >
+                                                <i data-lucide="play" class="lucide-sm"></i>
+                                                產生預測
+                                            </button>
+                                            <span id="forecastSamples" class="text-xs font-medium" style="color: var(--muted-foreground);">尚未建立樣本</span>
+                                            <span id="forecastStatus" class="text-xs" style="color: var(--muted-foreground);">請先完成回測，再啟動預測模擬。</span>
+                                        </div>
+                                        <div class="grid gap-4 md:grid-cols-3" id="forecastMetrics">
+                                            <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: var(--primary);">隔日漲跌命中率</p>
+                                                <p id="forecastHitRate" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">以隔日收盤價與前一日相比，評估方向命中比例。</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, #10b981 8%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: #047857;">平均漲幅</p>
+                                                <p id="forecastAvgGain" class="text-2xl font-bold" style="color: #047857;">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">測試期間內，實際上漲日的平均百分比變動。</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, #ef4444 8%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: #b91c1c;">平均跌幅</p>
+                                                <p id="forecastAvgLoss" class="text-2xl font-bold" style="color: #b91c1c;">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">測試期間內，實際下跌日的平均百分比變動。</p>
+                                            </div>
+                                        </div>
+                                        <div class="grid gap-4 md:grid-cols-2" id="forecastErrorMetrics">
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">RMSE（收盤價）</p>
+                                                <p id="forecastRmse" class="text-xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">LSTM+GA 修正後與實際收盤價的均方根誤差。</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">MAE（收盤價）</p>
+                                                <p id="forecastMae" class="text-xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">LSTM+GA 修正後的絕對誤差平均值。</p>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2">
+                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">預測曲線</h4>
+                                            <div class="h-96 bg-muted/10 rounded-lg border" style="border-color: var(--border);">
+                                                <canvas id="forecastChart"></canvas>
+                                            </div>
+                                        </div>
+                                        <div class="p-4 rounded-lg border bg-background" style="border-color: var(--border);">
+                                            <h5 class="text-xs font-semibold mb-2" style="color: var(--foreground);">GA 誤差校正權重</h5>
+                                            <p id="forecastWeights" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">尚未建立校正權重。</p>
+                                        </div>
+                                        <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                            注意：本功能僅為歷史資料模擬，實際投資仍需自行判斷。模型採用訓練區間的統計值進行標準化，預測時僅使用當下可取得的歷史資料，不會回頭修正既有資料。
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->
@@ -2124,6 +2207,7 @@
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
+    <script src="js/forecast.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
