@@ -775,3 +775,9 @@
 - **Fix**: 將進度卡預設吉祥物直接指向使用者提供的 `media.tenor.com` GIF，Sanitiser 同步調整預設來源與 ALT 文案，維持嵌入碼需求並沿用沙漏備援。
 - **Style**: 精簡 `loading-mascot` 相關樣式，僅保留對齊與尺寸設定，移除會造成全面透明的覆寫，確保 GIF 與 fallback 皆可正常顯示。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-12 — Patch LB-PROGRESS-MASCOT-20251212A
+- **Issue recap**: 使用者仍反映執行中卡片沒有顯示 Hachiware GIF 或沙漏符號，推測樣式透明度或載入流程仍有殘留設定造成整體被隱藏。
+- **Fix**: 強化 `loading-mascot` 樣式設定，明確保留透明背景並鎖定 `opacity`/`visibility` 為顯示狀態，同時停用指標事件避免外層 CSS 覆蓋。
+- **Fix**: Sanitiser 初始化時先顯示沙漏備援並同步重設容器/圖片的顯示屬性，GIF 成功載入後再覆寫為使用者提供的動畫，若失敗則維持沙漏提示。
+- **Diagnostics**: 透過本地模擬 403（阻擋 Tenor CDN）確認 `#loadingGif` 立即顯示沙漏，解除封鎖後刷新可看到 GIF 播放且 `data-lb-mascot-source` 記錄為 `tenor-media`。

@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251211A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251212A';
     const HOURGLASS_FALLBACK = '⌛';
     const DEFAULT_SHARE_SRC = 'https://tenor.com/zh-TW/view/hachiware-gif-1718069610368761676';
     const DEFAULT_MEDIA_SRC = 'https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif';
@@ -1718,6 +1718,8 @@ function initLoadingMascotSanitiser() {
 
     const showHourglassFallback = () => {
         container.textContent = HOURGLASS_FALLBACK;
+        container.style.opacity = '1';
+        container.style.visibility = 'visible';
         container.classList.add('loading-mascot-fallback');
         markSource('hourglass', '');
     };
@@ -1734,10 +1736,14 @@ function initLoadingMascotSanitiser() {
         }
 
         container.classList.remove('loading-mascot-fallback');
+        container.style.opacity = '1';
+        container.style.visibility = 'visible';
         img.decoding = 'async';
         img.loading = 'eager';
         img.referrerPolicy = 'no-referrer';
         img.alt = '吉伊卡哇進度';
+        img.style.opacity = '1';
+        img.style.visibility = 'visible';
         return img;
     };
 
@@ -1780,6 +1786,7 @@ function initLoadingMascotSanitiser() {
     };
 
     try {
+        showHourglassFallback();
         applyStaticMascot();
     } catch (error) {
         console.warn('[Mascot] 無法套用靜態吉祥物：', error);
