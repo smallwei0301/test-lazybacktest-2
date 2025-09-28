@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251208A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1674,6 +1674,7 @@ function initLoadingMascotSanitiser() {
 
     const resetContainer = () => {
         container.classList.remove('loading-mascot-fallback');
+        delete container.dataset.lbMascotVariant;
         if (embedObserver) {
             embedObserver.disconnect();
             embedObserver = null;
@@ -1731,6 +1732,7 @@ function initLoadingMascotSanitiser() {
                 });
             }
             container.dataset.lbMascotSource = `fallback:${nextSrc}`;
+            container.dataset.lbMascotVariant = 'fallback-inline';
             return true;
         }
         return false;
@@ -1772,6 +1774,7 @@ function initLoadingMascotSanitiser() {
         container.appendChild(embed);
 
         container.dataset.lbMascotSource = 'tenor-embed';
+        container.dataset.lbMascotVariant = 'tenor-embed';
 
         scheduleEmbedSanitise();
         embedObserver = new MutationObserver(scheduleEmbedSanitise);
@@ -1795,6 +1798,7 @@ function initLoadingMascotSanitiser() {
         container.classList.add('loading-mascot-fallback');
         container.textContent = '⌛';
         container.dataset.lbMascotSource = 'hourglass';
+        container.dataset.lbMascotVariant = 'hourglass';
     };
 
     const showFallback = () => {
@@ -1815,12 +1819,23 @@ function initLoadingMascotSanitiser() {
         return;
     }
 
-    const applyGifSource = (url) => {
-        const img = ensureImageElement();
-        if (img.src !== url) {
-            img.src = url;
+    const applyGifSource = (source) => {
+        const resolved = typeof source === 'string' ? { url: source } : source || {};
+        if (!resolved.url) {
+            throw new Error('Mascot source 缺少 URL');
         }
-        container.dataset.lbMascotSource = `tenor:${url}`;
+        const img = ensureImageElement();
+        if (img.src !== resolved.url) {
+            img.src = resolved.url;
+        }
+        img.style.backgroundColor = 'transparent';
+        img.style.setProperty('background-color', 'transparent', 'important');
+        if (resolved.variant) {
+            container.dataset.lbMascotVariant = resolved.variant;
+        } else {
+            delete container.dataset.lbMascotVariant;
+        }
+        container.dataset.lbMascotSource = `tenor:${resolved.url}`;
         markInitialised();
     };
 
@@ -1832,25 +1847,76 @@ function initLoadingMascotSanitiser() {
 
         const formats = result.media_formats || {};
         const mediaList = Array.isArray(result.media) ? result.media : [];
-        const gifCandidate =
-            formats.gif?.url ||
-            formats.mediumgif?.url ||
-            formats.tinygif?.url ||
-            formats.nanogif?.url ||
-            mediaList.reduce((selected, item) => {
-                if (selected) return selected;
-                if (item?.gif?.url) return item.gif.url;
-                if (item?.mediumgif?.url) return item.mediumgif.url;
-                if (item?.tinygif?.url) return item.tinygif.url;
-                if (item?.nanogif?.url) return item.nanogif.url;
-                return null;
-            }, null);
+        const preferredKeys = [
+            'gif_transparent',
+            'mediumgif_transparent',
+            'tinygif_transparent',
+            'nanogif_transparent',
+            'gif',
+            'mediumgif',
+            'tinygif',
+            'nanogif',
+        ];
 
-        if (!gifCandidate) {
-            throw new Error('Tenor API 缺少 GIF 連結');
+        const selectFromFormats = (candidateFormats) => {
+            for (const key of preferredKeys) {
+                const candidate = candidateFormats?.[key];
+                if (candidate?.url) {
+                    return { url: candidate.url, variant: key };
+                }
+            }
+            return null;
+        };
+
+        const byFormat = selectFromFormats(formats);
+        if (byFormat) {
+            return byFormat;
         }
 
-        return gifCandidate;
+        for (const item of mediaList) {
+            const selection = selectFromFormats(item);
+            if (selection) {
+                return selection;
+            }
+        }
+
+        throw new Error('Tenor API 缺少 GIF 連結');
+    };
+
+    const buildMediaFilterParam = () => {
+        return [
+            'gif',
+            'gif_transparent',
+            'mediumgif',
+            'mediumgif_transparent',
+            'tinygif',
+            'tinygif_transparent',
+            'nanogif',
+            'nanogif_transparent',
+        ].join(',');
+    };
+
+    const resolveLegacyGifUrl = (result) => {
+        const media = result?.media || {};
+        const selectionOrder = [
+            'gif_transparent',
+            'mediumgif_transparent',
+            'tinygif_transparent',
+            'nanogif_transparent',
+            'gif',
+            'mediumgif',
+            'tinygif',
+            'nanogif',
+        ];
+
+        for (const key of selectionOrder) {
+            const candidate = media?.[key];
+            if (candidate?.url) {
+                return { url: candidate.url, variant: key };
+            }
+        }
+
+        throw new Error('Tenor Legacy API 缺少 GIF 連結');
     };
 
     const requestLegacy = (attempt = 1) => {
@@ -1874,18 +1940,9 @@ function initLoadingMascotSanitiser() {
                     throw new Error('Tenor Legacy API 回傳空集合');
                 }
 
-                const media = result.media || {};
-                const gifCandidate =
-                    media.gif?.url ||
-                    media.mediumgif?.url ||
-                    media.tinygif?.url ||
-                    media.nanogif?.url;
+                const media = resolveLegacyGifUrl(result);
 
-                if (!gifCandidate) {
-                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
-                }
-
-                applyGifSource(gifCandidate);
+                applyGifSource(media);
             })
             .catch((error) => {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
@@ -1906,7 +1963,7 @@ function initLoadingMascotSanitiser() {
         requestUrl.searchParams.set('ids', postId);
         requestUrl.searchParams.set('key', apiKey);
         requestUrl.searchParams.set('client_key', clientKey);
-        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
+        requestUrl.searchParams.set('media_filter', buildMediaFilterParam());
         requestUrl.searchParams.set('ar_range', 'all');
 
         fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
@@ -1919,7 +1976,7 @@ function initLoadingMascotSanitiser() {
                 return response.json();
             })
             .then((payload) => resolveGifUrl(payload))
-            .then((gifUrl) => applyGifSource(gifUrl))
+            .then((gifSource) => applyGifSource(gifSource))
             .catch((error) => {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
                 if (error?.status === 403) {

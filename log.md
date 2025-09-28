@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-PROGRESS-MASCOT-20251208A
+- **Issue recap**: 實際執行進度卡時，Tenor 回傳的 GIF 仍採用不透明版本，透明像素被白底覆蓋，導致顯示在進度條旁邊時看起來像是白色方塊。
+- **Fix**: 更新 `initLoadingMascotSanitiser` 版本碼為 `LB-PROGRESS-MASCOT-20251208A`，優先從 Tenor v2／Legacy API 擷取 `gif_transparent` 系列資源並記錄使用的變體，同步將 `<img>` 背景強制為透明，維持既有 fallback 邏輯。
+- **Diagnostics**: 本地啟動靜態頁面後顯示執行中卡片，檢視 `#loadingGif.dataset` 確認 `lbMascotVariant` 會標示實際載入格式、容器與影像的計算背景色皆為 `rgba(0, 0, 0, 0)`，避免再被白底覆蓋。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
