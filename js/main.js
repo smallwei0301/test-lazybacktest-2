@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251210A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1665,19 +1665,12 @@ function initLoadingMascotSanitiser() {
     }
     let fallbackIndex = 0;
 
-    let embedObserver = null;
-    let embedSanitiseScheduled = false;
-
     const markInitialised = () => {
         container.dataset.lbMascotSanitiser = VERSION;
     };
 
     const resetContainer = () => {
         container.classList.remove('loading-mascot-fallback');
-        if (embedObserver) {
-            embedObserver.disconnect();
-            embedObserver = null;
-        }
     };
 
     const ensureImageElement = () => {
@@ -1687,7 +1680,7 @@ function initLoadingMascotSanitiser() {
             container.innerHTML = '';
             img = document.createElement('img');
             img.className = 'loading-mascot-image';
-            img.alt = 'LazyBacktest 進度吉祥物動畫';
+            img.alt = 'LazyBacktest 進度吉祥物動畫（吉伊卡哇進度）';
             img.decoding = 'async';
             img.loading = 'eager';
             img.referrerPolicy = 'no-referrer';
@@ -1700,10 +1693,28 @@ function initLoadingMascotSanitiser() {
         return img;
     };
 
-    const useFallbackImage = () => {
-        if (fallbackIndex >= fallbackSources.length) {
-            return false;
+    const reloadImage = (img, nextSrc) => {
+        if (img.src !== nextSrc) {
+            img.src = nextSrc;
+            return;
         }
+
+        img.removeAttribute('src');
+        const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+            ? window.requestAnimationFrame.bind(window)
+            : (cb) => setTimeout(() => cb(), 16);
+        rerender(() => {
+            img.src = nextSrc;
+        });
+    };
+
+    const showHourglassFallback = () => {
+        container.classList.add('loading-mascot-fallback');
+        container.textContent = '⌛';
+        container.dataset.lbMascotSource = 'hourglass';
+    };
+
+    const useFallbackImage = () => {
         const img = ensureImageElement();
         while (fallbackIndex < fallbackSources.length) {
             const nextSrc = fallbackSources[fallbackIndex++];
@@ -1714,112 +1725,40 @@ function initLoadingMascotSanitiser() {
             const handleError = () => {
                 img.removeEventListener('error', handleError);
                 if (!useFallbackImage()) {
-                    mountTenorEmbedFallback();
+                    showHourglassFallback();
+                    markInitialised();
                 }
             };
             img.addEventListener('error', handleError, { once: true });
-            if (img.src !== nextSrc) {
-                img.src = nextSrc;
-            } else {
-                // If the same src is reused, force a repaint so browsers retry the request.
-                img.removeAttribute('src');
-                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-                    ? window.requestAnimationFrame.bind(window)
-                    : (cb) => setTimeout(() => cb(), 16);
-                rerender(() => {
-                    img.src = nextSrc;
-                });
-            }
+
+            reloadImage(img, nextSrc);
             container.dataset.lbMascotSource = `fallback:${nextSrc}`;
             return true;
         }
         return false;
     };
 
-    const scheduleEmbedSanitise = () => {
-        if (embedSanitiseScheduled) {
-            return;
-        }
-        embedSanitiseScheduled = true;
-        queueMicrotask(() => {
-            embedSanitiseScheduled = false;
-            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
-            anchors.forEach((anchor) => anchor.remove());
-
-            const iframe = container.querySelector('.tenor-gif-embed iframe');
-            if (iframe) {
-                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
-                iframe.setAttribute('aria-hidden', 'true');
-                iframe.setAttribute('tabindex', '-1');
-                iframe.style.pointerEvents = 'none';
-                iframe.style.background = 'transparent';
-            }
-        });
-    };
-
-    function mountTenorEmbedFallback() {
-        if (!postId) {
-            return false;
-        }
-
-        container.innerHTML = '';
-        const embed = document.createElement('div');
-        embed.className = 'tenor-gif-embed';
-        embed.dataset.postid = postId;
-        embed.dataset.shareMethod = 'basic';
-        embed.dataset.width = '100%';
-        embed.dataset.aspectRatio = '1';
-        container.appendChild(embed);
-
-        container.dataset.lbMascotSource = 'tenor-embed';
-
-        scheduleEmbedSanitise();
-        embedObserver = new MutationObserver(scheduleEmbedSanitise);
-        embedObserver.observe(container, { childList: true, subtree: true });
-
-        if (!document.querySelector('script[data-tenor-embed]')) {
-            const script = document.createElement('script');
-            script.src = 'https://tenor.com/embed.js';
-            script.async = true;
-            script.dataset.tenorEmbed = 'true';
-            script.referrerPolicy = 'no-referrer';
-            document.body.appendChild(script);
-        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
-            window.Tenor.refresh();
-        }
-
-        return true;
-    }
-
-    const showHourglassFallback = () => {
-        container.classList.add('loading-mascot-fallback');
-        container.textContent = '⌛';
-        container.dataset.lbMascotSource = 'hourglass';
-    };
-
     const showFallback = () => {
         if (useFallbackImage()) {
-            markInitialised();
-            return;
-        }
-        if (mountTenorEmbedFallback()) {
-            markInitialised();
-            return;
+            return true;
         }
         showHourglassFallback();
-        markInitialised();
+        return false;
     };
+
+    if (fallbackSources.length > 0) {
+        useFallbackImage();
+    }
 
     if (!postId || !apiKey || typeof fetch !== 'function') {
         showFallback();
+        markInitialised();
         return;
     }
 
     const applyGifSource = (url) => {
         const img = ensureImageElement();
-        if (img.src !== url) {
-            img.src = url;
-        }
+        reloadImage(img, url);
         container.dataset.lbMascotSource = `tenor:${url}`;
         markInitialised();
     };
@@ -1891,12 +1830,14 @@ function initLoadingMascotSanitiser() {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
                 if (error?.status === 403) {
                     showFallback();
+                    markInitialised();
                     return;
                 }
                 if (attempt < MAX_LEGACY_ATTEMPTS) {
                     setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
                 } else {
                     showFallback();
+                    markInitialised();
                 }
             });
     };
@@ -1924,6 +1865,7 @@ function initLoadingMascotSanitiser() {
                 console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
                 if (error?.status === 403) {
                     showFallback();
+                    markInitialised();
                     return;
                 }
                 if (attempt < MAX_PRIMARY_ATTEMPTS) {
@@ -1934,7 +1876,6 @@ function initLoadingMascotSanitiser() {
             });
     };
 
-    useFallbackImage();
     requestPrimary();
 }
 
