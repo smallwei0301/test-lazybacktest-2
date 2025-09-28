@@ -1616,10 +1616,10 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
-    const MAX_PRIMARY_ATTEMPTS = 3;
-    const MAX_LEGACY_ATTEMPTS = 2;
-    const RETRY_DELAY_MS = 1200;
+    const VERSION = 'LB-PROGRESS-MASCOT-20251212A';
+    const HOURGLASS_FALLBACK = '⌛';
+    const DEFAULT_SHARE_SRC = 'https://tenor.com/zh-TW/view/hachiware-gif-1718069610368761676';
+    const DEFAULT_MEDIA_SRC = 'https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif';
 
     const container = document.getElementById('loadingGif');
     if (!container) {
@@ -1630,312 +1630,178 @@ function initLoadingMascotSanitiser() {
         return;
     }
 
-    const postId = container.dataset.tenorId?.trim();
-    const apiKey = container.dataset.tenorApiKey?.trim();
-    const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
-    const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
-        .split(',')
-        .map((src) => src.trim())
-        .filter(Boolean);
-
-    const existingImage = container.querySelector('img.loading-mascot-image');
-    const inlineSrc = existingImage?.getAttribute('src')?.trim();
-    if (existingImage) {
-        existingImage.loading = 'eager';
-        existingImage.decoding = 'async';
-        existingImage.referrerPolicy = 'no-referrer';
-        existingImage.setAttribute('aria-hidden', 'true');
-        if (typeof existingImage.decode === 'function') {
-            existingImage
-                .decode()
-                .catch(() => {
-                    /* ignore decode failures – the fallback loader will retry */
-                });
+    const normaliseTenorPath = (path) => {
+        if (!path) {
+            return '/tenor.gif';
         }
-    }
-
-    const fallbackSources = [];
-    if (inlineSrc) {
-        fallbackSources.push(inlineSrc);
-    }
-    for (const src of declaredFallbacks) {
-        if (!fallbackSources.includes(src)) {
-            fallbackSources.push(src);
+        if (path.endsWith('/tenor.gif')) {
+            return path;
         }
-    }
-    let fallbackIndex = 0;
-
-    let embedObserver = null;
-    let embedSanitiseScheduled = false;
-
-    const markInitialised = () => {
-        container.dataset.lbMascotSanitiser = VERSION;
+        const trimmed = path.endsWith('/') ? path.slice(0, -1) : path;
+        return `${trimmed}/tenor.gif`;
     };
 
-    const resetContainer = () => {
-        container.classList.remove('loading-mascot-fallback');
-        if (embedObserver) {
-            embedObserver.disconnect();
-            embedObserver = null;
+    const safeParseURL = (value) => {
+        if (typeof value !== 'string' || !value.trim()) {
+            return null;
+        }
+        try {
+            return new URL(value.trim());
+        } catch (error) {
+            try {
+                const origin = (typeof window !== 'undefined' && window.location?.origin)
+                    ? window.location.origin
+                    : 'https://lazybacktest.local';
+                return new URL(value.trim(), origin);
+            } catch (innerError) {
+                return null;
+            }
         }
     };
 
-    const ensureImageElement = () => {
-        resetContainer();
+    const resolveMascotSource = (candidate) => {
+        const fallback = {
+            raw: DEFAULT_SHARE_SRC,
+            resolved: DEFAULT_MEDIA_SRC,
+            label: 'default-tenor-media',
+        };
+
+        const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+        if (!trimmed) {
+            return fallback;
+        }
+
+        const parsed = safeParseURL(trimmed);
+        if (!parsed) {
+            return { raw: trimmed, resolved: trimmed, label: 'custom-static-raw' };
+        }
+
+        const host = parsed.hostname.toLowerCase();
+
+        if (host === 'media.tenor.com') {
+            const resolvedPath = parsed.pathname.endsWith('/tenor.gif')
+                ? parsed.pathname
+                : normaliseTenorPath(parsed.pathname);
+            const resolved = `https://media.tenor.com${resolvedPath}${parsed.search}${parsed.hash}`;
+            return { raw: trimmed, resolved, label: 'tenor-media' };
+        }
+
+        if (host.endsWith('tenor.com')) {
+            const resolved = `https://media.tenor.com${normaliseTenorPath(parsed.pathname)}${parsed.search}${parsed.hash}`;
+            return { raw: trimmed, resolved, label: 'tenor-share' };
+        }
+
+        return { raw: trimmed, resolved: parsed.href, label: 'custom-static-url' };
+    };
+
+    const { raw: rawMascotSrc, resolved: staticSrc, label: staticSourceLabel } = resolveMascotSource(container.dataset.mascotSrc);
+
+    if (rawMascotSrc) {
+        container.dataset.lbMascotRawSrc = rawMascotSrc;
+    } else {
+        delete container.dataset.lbMascotRawSrc;
+    }
+    container.dataset.lbMascotResolvedSrc = staticSrc;
+    container.dataset.lbMascotSanitiser = VERSION;
+
+    const ensureStructure = () => {
+        let fallbackEl = container.querySelector('.loading-mascot-fallback-icon');
+        if (!fallbackEl) {
+            fallbackEl = document.createElement('span');
+            fallbackEl.className = 'loading-mascot-fallback-icon';
+            fallbackEl.textContent = HOURGLASS_FALLBACK;
+            fallbackEl.setAttribute('aria-hidden', 'true');
+            container.appendChild(fallbackEl);
+        } else if (!fallbackEl.textContent?.trim()) {
+            fallbackEl.textContent = HOURGLASS_FALLBACK;
+        }
+
         let img = container.querySelector('img.loading-mascot-image');
         if (!img) {
-            container.innerHTML = '';
             img = document.createElement('img');
             img.className = 'loading-mascot-image';
-            img.alt = 'LazyBacktest 進度吉祥物動畫';
-            img.decoding = 'async';
-            img.loading = 'eager';
-            img.referrerPolicy = 'no-referrer';
-            img.setAttribute('aria-hidden', 'true');
             container.appendChild(img);
+        }
+
+        img.decoding = 'async';
+        img.loading = 'eager';
+        img.referrerPolicy = 'no-referrer';
+        img.alt = '吉伊卡哇進度';
+
+        return { img, fallbackEl };
+    };
+
+    const markSource = (source, resolvedValue) => {
+        container.dataset.lbMascotSanitiser = VERSION;
+        if (source) {
+            container.dataset.lbMascotSource = source;
         } else {
-            const embeds = container.querySelectorAll('.tenor-gif-embed');
-            embeds.forEach((node) => node.remove());
+            delete container.dataset.lbMascotSource;
         }
-        return img;
+        if (typeof resolvedValue === 'string') {
+            container.dataset.lbMascotResolvedSrc = resolvedValue;
+        }
     };
 
-    const useFallbackImage = () => {
-        if (fallbackIndex >= fallbackSources.length) {
-            return false;
-        }
-        const img = ensureImageElement();
-        while (fallbackIndex < fallbackSources.length) {
-            const nextSrc = fallbackSources[fallbackIndex++];
-            if (!nextSrc) {
-                continue;
-            }
+    const setState = (state) => {
+        container.dataset.mascotState = state;
+    };
 
-            const handleError = () => {
-                img.removeEventListener('error', handleError);
-                if (!useFallbackImage()) {
-                    mountTenorEmbedFallback();
-                }
-            };
-            img.addEventListener('error', handleError, { once: true });
-            if (img.src !== nextSrc) {
-                img.src = nextSrc;
+    const showHourglassFallback = (label = 'hourglass') => {
+        const { img } = ensureStructure();
+        if (img) {
+            img.removeAttribute('src');
+        }
+        setState('error');
+        markSource(label, '');
+    };
+
+    const applyStaticMascot = () => {
+        if (!staticSrc) {
+            throw new Error('缺少吉祥物來源 URL');
+        }
+
+        const { img } = ensureStructure();
+
+        setState('loading');
+
+        const handleLoad = () => {
+            setState('ready');
+            markSource(staticSourceLabel, staticSrc);
+        };
+
+        const handleError = () => {
+            console.warn('[Mascot] 靜態吉祥物載入失敗，顯示沙漏 fallback');
+            showHourglassFallback(staticSourceLabel ? `${staticSourceLabel}-error` : 'hourglass');
+        };
+
+        img.addEventListener('load', handleLoad, { once: true });
+        img.addEventListener('error', handleError, { once: true });
+
+        if (img.src !== staticSrc) {
+            img.src = staticSrc;
+        } else if (img.complete) {
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                handleLoad();
             } else {
-                // If the same src is reused, force a repaint so browsers retry the request.
-                img.removeAttribute('src');
-                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-                    ? window.requestAnimationFrame.bind(window)
-                    : (cb) => setTimeout(() => cb(), 16);
-                rerender(() => {
-                    img.src = nextSrc;
-                });
+                handleError();
             }
-            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
-            return true;
-        }
-        return false;
-    };
-
-    const scheduleEmbedSanitise = () => {
-        if (embedSanitiseScheduled) {
             return;
         }
-        embedSanitiseScheduled = true;
-        queueMicrotask(() => {
-            embedSanitiseScheduled = false;
-            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
-            anchors.forEach((anchor) => anchor.remove());
 
-            const iframe = container.querySelector('.tenor-gif-embed iframe');
-            if (iframe) {
-                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
-                iframe.setAttribute('aria-hidden', 'true');
-                iframe.setAttribute('tabindex', '-1');
-                iframe.style.pointerEvents = 'none';
-                iframe.style.background = 'transparent';
-            }
-        });
-    };
-
-    function mountTenorEmbedFallback() {
-        if (!postId) {
-            return false;
-        }
-
-        container.innerHTML = '';
-        const embed = document.createElement('div');
-        embed.className = 'tenor-gif-embed';
-        embed.dataset.postid = postId;
-        embed.dataset.shareMethod = 'basic';
-        embed.dataset.width = '100%';
-        embed.dataset.aspectRatio = '1';
-        container.appendChild(embed);
-
-        container.dataset.lbMascotSource = 'tenor-embed';
-
-        scheduleEmbedSanitise();
-        embedObserver = new MutationObserver(scheduleEmbedSanitise);
-        embedObserver.observe(container, { childList: true, subtree: true });
-
-        if (!document.querySelector('script[data-tenor-embed]')) {
-            const script = document.createElement('script');
-            script.src = 'https://tenor.com/embed.js';
-            script.async = true;
-            script.dataset.tenorEmbed = 'true';
-            script.referrerPolicy = 'no-referrer';
-            document.body.appendChild(script);
-        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
-            window.Tenor.refresh();
-        }
-
-        return true;
-    }
-
-    const showHourglassFallback = () => {
-        container.classList.add('loading-mascot-fallback');
-        container.textContent = '⌛';
-        container.dataset.lbMascotSource = 'hourglass';
-    };
-
-    const showFallback = () => {
-        if (useFallbackImage()) {
-            markInitialised();
-            return;
-        }
-        if (mountTenorEmbedFallback()) {
-            markInitialised();
-            return;
-        }
-        showHourglassFallback();
-        markInitialised();
-    };
-
-    if (!postId || !apiKey || typeof fetch !== 'function') {
-        showFallback();
-        return;
-    }
-
-    const applyGifSource = (url) => {
-        const img = ensureImageElement();
-        if (img.src !== url) {
-            img.src = url;
-        }
-        container.dataset.lbMascotSource = `tenor:${url}`;
-        markInitialised();
-    };
-
-    const resolveGifUrl = (payload) => {
-        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-        if (!result) {
-            throw new Error('Tenor API 回傳空集合');
-        }
-
-        const formats = result.media_formats || {};
-        const mediaList = Array.isArray(result.media) ? result.media : [];
-        const gifCandidate =
-            formats.gif?.url ||
-            formats.mediumgif?.url ||
-            formats.tinygif?.url ||
-            formats.nanogif?.url ||
-            mediaList.reduce((selected, item) => {
-                if (selected) return selected;
-                if (item?.gif?.url) return item.gif.url;
-                if (item?.mediumgif?.url) return item.mediumgif.url;
-                if (item?.tinygif?.url) return item.tinygif.url;
-                if (item?.nanogif?.url) return item.nanogif.url;
-                return null;
-            }, null);
-
-        if (!gifCandidate) {
-            throw new Error('Tenor API 缺少 GIF 連結');
-        }
-
-        return gifCandidate;
-    };
-
-    const requestLegacy = (attempt = 1) => {
-        const legacyUrl = new URL('https://g.tenor.com/v1/gifs');
-        legacyUrl.searchParams.set('ids', postId);
-        legacyUrl.searchParams.set('key', apiKey);
-        legacyUrl.searchParams.set('client_key', clientKey);
-
-        fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor Legacy API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => {
-                const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-                if (!result) {
-                    throw new Error('Tenor Legacy API 回傳空集合');
-                }
-
-                const media = result.media || {};
-                const gifCandidate =
-                    media.gif?.url ||
-                    media.mediumgif?.url ||
-                    media.tinygif?.url ||
-                    media.nanogif?.url;
-
-                if (!gifCandidate) {
-                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
-                }
-
-                applyGifSource(gifCandidate);
-            })
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_LEGACY_ATTEMPTS) {
-                    setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    showFallback();
-                }
+        if (typeof img.decode === 'function') {
+            img.decode().catch(() => {
+                // 忽略 decode 錯誤，等待 load/error 事件處理。
             });
+        }
     };
 
-    const requestPrimary = (attempt = 1) => {
-        const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
-        requestUrl.searchParams.set('ids', postId);
-        requestUrl.searchParams.set('key', apiKey);
-        requestUrl.searchParams.set('client_key', clientKey);
-        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
-        requestUrl.searchParams.set('ar_range', 'all');
-
-        fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => resolveGifUrl(payload))
-            .then((gifUrl) => applyGifSource(gifUrl))
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_PRIMARY_ATTEMPTS) {
-                    setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    requestLegacy();
-                }
-            });
-    };
-
-    useFallbackImage();
-    requestPrimary();
+    try {
+        applyStaticMascot();
+    } catch (error) {
+        console.warn('[Mascot] 無法套用靜態吉祥物：', error);
+        showHourglassFallback('sanitiser-error');
+    }
 }
 
 function setLoadingBaseMessage(message) {
