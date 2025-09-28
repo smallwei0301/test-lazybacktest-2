@@ -1616,8 +1616,10 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251209A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251210A';
     const HOURGLASS_FALLBACK = '⌛';
+    const DEFAULT_SHARE_SRC = 'https://tenor.com/zh-TW/view/hachiware-gif-1718069610368761676';
+    const DEFAULT_MEDIA_SRC = 'https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif';
 
     const container = document.getElementById('loadingGif');
     if (!container) {
@@ -1628,20 +1630,96 @@ function initLoadingMascotSanitiser() {
         return;
     }
 
-    const staticSrc = container.dataset.mascotSrc?.trim()
-        || 'https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif';
+    const normaliseTenorPath = (path) => {
+        if (!path) {
+            return '/tenor.gif';
+        }
+        if (path.endsWith('/tenor.gif')) {
+            return path;
+        }
+        const trimmed = path.endsWith('/') ? path.slice(0, -1) : path;
+        return `${trimmed}/tenor.gif`;
+    };
 
-    const markSource = (source) => {
+    const safeParseURL = (value) => {
+        if (typeof value !== 'string' || !value.trim()) {
+            return null;
+        }
+        try {
+            return new URL(value.trim());
+        } catch (error) {
+            try {
+                const origin = (typeof window !== 'undefined' && window.location?.origin)
+                    ? window.location.origin
+                    : 'https://lazybacktest.local';
+                return new URL(value.trim(), origin);
+            } catch (innerError) {
+                return null;
+            }
+        }
+    };
+
+    const resolveMascotSource = (candidate) => {
+        const fallback = {
+            raw: DEFAULT_SHARE_SRC,
+            resolved: DEFAULT_MEDIA_SRC,
+            label: 'default-tenor-media',
+        };
+
+        const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+        if (!trimmed) {
+            return fallback;
+        }
+
+        const parsed = safeParseURL(trimmed);
+        if (!parsed) {
+            return { raw: trimmed, resolved: trimmed, label: 'custom-static-raw' };
+        }
+
+        const host = parsed.hostname.toLowerCase();
+
+        if (host === 'media.tenor.com') {
+            const resolvedPath = parsed.pathname.endsWith('/tenor.gif')
+                ? parsed.pathname
+                : normaliseTenorPath(parsed.pathname);
+            const resolved = `https://media.tenor.com${resolvedPath}${parsed.search}${parsed.hash}`;
+            return { raw: trimmed, resolved, label: 'tenor-media' };
+        }
+
+        if (host.endsWith('tenor.com')) {
+            const resolved = `https://media.tenor.com${normaliseTenorPath(parsed.pathname)}${parsed.search}${parsed.hash}`;
+            return { raw: trimmed, resolved, label: 'tenor-share' };
+        }
+
+        return { raw: trimmed, resolved: parsed.href, label: 'custom-static-url' };
+    };
+
+    const { raw: rawMascotSrc, resolved: staticSrc, label: staticSourceLabel } = resolveMascotSource(container.dataset.mascotSrc);
+
+    if (rawMascotSrc) {
+        container.dataset.lbMascotRawSrc = rawMascotSrc;
+    } else {
+        delete container.dataset.lbMascotRawSrc;
+    }
+    container.dataset.lbMascotResolvedSrc = staticSrc;
+    container.dataset.lbMascotSanitiser = VERSION;
+
+    const markSource = (source, resolvedValue) => {
         container.dataset.lbMascotSanitiser = VERSION;
         if (source) {
             container.dataset.lbMascotSource = source;
+        } else {
+            delete container.dataset.lbMascotSource;
+        }
+        if (typeof resolvedValue === 'string') {
+            container.dataset.lbMascotResolvedSrc = resolvedValue;
         }
     };
 
     const showHourglassFallback = () => {
         container.textContent = HOURGLASS_FALLBACK;
         container.classList.add('loading-mascot-fallback');
-        markSource('hourglass');
+        markSource('hourglass', '');
     };
 
     const ensureImageElement = () => {
@@ -1673,7 +1751,7 @@ function initLoadingMascotSanitiser() {
 
         const handleLoad = () => {
             container.classList.remove('loading-mascot-fallback');
-            markSource('static');
+            markSource(staticSourceLabel, staticSrc);
         };
 
         const handleError = () => {
