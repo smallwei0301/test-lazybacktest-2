@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-PROGRESS-MASCOT-20251207B
+- **Issue recap**: 需求更新為僅能使用指定的 Hachiware GIF 片段，原有的 Tenor API 重試與 fallback 邏輯造成多餘請求與素材切換。
+- **Fix**: 精簡 `initLoadingMascotSanitiser`，移除 Tenor API 互動與所有 fallback 嵌入流程，改為固定載入 `https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif` 並同步更新版本碼 `LB-PROGRESS-MASCOT-20251207B`；同時清理 Tenor embed 專用樣式與 HTML data-* 屬性。
+- **Diagnostics**: 本地重新載入回測頁面，確認進度吉祥物僅呈現指定 GIF、不再出現沙漏或替代素材，並透過元素檢視確認 DOM 結構僅包含單一 `<img>`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
