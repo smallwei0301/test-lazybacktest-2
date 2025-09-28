@@ -1,3 +1,11 @@
+## 2025-11-18 — Patch LB-FORECAST-LSTMGA-20251118A
+- **Scope**: 新增「預測」分頁，以 LSTM + 遺傳演算法誤差校正模擬隔日收盤價。
+- **Features**:
+  - 建立預測儀表卡，顯示隔日漲跌命中率、平均漲跌幅與 GA 校正參數。
+  - 以歷史走勢訓練 TensorFlow.js LSTM 模型，採走勢遞推避免未來資訊外洩，並用 GA 校正預測偏誤。
+  - 提供實際 vs. 預測曲線、最新隔日預測卡與明細表，方便檢視預測品質。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

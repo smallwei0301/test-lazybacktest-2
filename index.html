@@ -330,6 +330,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js" defer></script>
     <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -1219,6 +1220,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="forecast"
+                                            >
+                                                <i data-lucide="bot" class="lucide-sm inline mr-1"></i>預測
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1409,137 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Forecast Tab -->
+                            <div class="tab-content hidden space-y-6" id="forecast-tab">
+                                <div class="card shadow-lg" data-forecast-card="controller">
+                                    <div class="card-header space-y-2">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="bot" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            LSTM × GA 預測實驗室
+                                        </h3>
+                                        <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            透過遞迴式 LSTM 模型結合遺傳演算法誤差校正，以走勢資料的歷史視窗逐日推進，模擬隔日收盤價。系統只使用當下可見的資料，避免向後校正造成未來資訊外洩。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                            <div>
+                                                <p class="text-sm font-medium" style="color: var(--foreground);">最新回測資料</p>
+                                                <p id="forecast-sample-summary" class="text-xs" style="color: var(--muted-foreground);">尚未取得回測資料，請先執行一次主回測。</p>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <button id="runForecastBtn" class="btn-primary px-4 py-2 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
+                                                    <i data-lucide="refresh-cw" class="lucide w-4 h-4"></i>
+                                                    重新產生預測
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div id="forecast-status" class="text-xs px-3 py-2 rounded-md hidden" style="background-color: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted-foreground);"></div>
+                                        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" id="forecast-metrics">
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent);">
+                                                <p class="text-xs font-medium" style="color: var(--primary);">隔日漲跌命中率</p>
+                                                <p id="forecast-hit-rate" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p id="forecast-hit-sample" class="text-[11px]" style="color: var(--muted-foreground);"></p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--accent) 8%, transparent);">
+                                                <p class="text-xs font-medium" style="color: var(--accent);">平均漲幅（實際）</p>
+                                                <p id="forecast-avg-up" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px]" style="color: var(--muted-foreground);">僅計算實際收漲交易日</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
+                                                <p class="text-xs font-medium" style="color: var(--muted-foreground);">平均跌幅（實際）</p>
+                                                <p id="forecast-avg-down" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px]" style="color: var(--muted-foreground);">僅計算實際收跌交易日</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 5%, transparent);">
+                                                <p class="text-xs font-medium" style="color: var(--muted-foreground);">GA 校正參數</p>
+                                                <p id="forecast-ga-params" class="text-sm font-semibold" style="color: var(--foreground);">尚未校正</p>
+                                                <p id="forecast-ga-mae" class="text-[11px]" style="color: var(--muted-foreground);"></p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg" data-forecast-card="next">
+                                    <div class="card-header flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                                        <div>
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="trending-up" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                最新隔日預測
+                                            </h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">使用最後可見交易日的資料推估下一個交易日，僅供模擬參考。</p>
+                                        </div>
+                                        <span id="forecast-next-date" class="text-xs font-medium" style="color: var(--muted-foreground);"></span>
+                                    </div>
+                                    <div class="card-content grid gap-4 sm:grid-cols-2 lg:grid-cols-4" id="forecast-next-metrics">
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 12%, transparent);">
+                                            <p class="text-xs font-medium" style="color: var(--primary);">最新收盤價</p>
+                                            <p id="forecast-last-close" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--accent) 10%, transparent);">
+                                            <p class="text-xs font-medium" style="color: var(--accent);">LSTM 預測收盤</p>
+                                            <p id="forecast-next-raw" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                            <p id="forecast-next-raw-change" class="text-[11px]" style="color: var(--muted-foreground);"></p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 12%, transparent);">
+                                            <p class="text-xs font-medium" style="color: var(--muted-foreground);">GA 校正後收盤</p>
+                                            <p id="forecast-next-corrected" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                            <p id="forecast-next-corrected-change" class="text-[11px]" style="color: var(--muted-foreground);"></p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                            <p class="text-xs font-medium" style="color: var(--muted-foreground);">預測方向</p>
+                                            <p id="forecast-next-direction" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg" data-forecast-card="chart">
+                                    <div class="card-header flex items-center justify-between">
+                                    <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="line-chart" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            實際 vs. 預測收盤
+                                        </h3>
+                                        <span id="forecast-chart-range" class="text-xs" style="color: var(--muted-foreground);"></span>
+                                    </div>
+                                    <div class="card-content">
+                                        <div id="forecast-chart-container" class="relative h-80 bg-muted/20 rounded-lg border border-dashed flex items-center justify-center" style="background-color: color-mix(in srgb, var(--muted) 18%, transparent); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                                            <p class="text-xs text-center" style="color: var(--muted-foreground);">等待回測資料完成預測</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg" data-forecast-card="table">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="table" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            近期預測命中明細
+                                        </h3>
+                                        <p class="text-xs" style="color: var(--muted-foreground);">僅顯示最近 12 筆隔日預測，命中以方向是否一致判定。</p>
+                                    </div>
+                                    <div class="card-content">
+                                        <div class="overflow-x-auto">
+                                            <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--foreground);">
+                                                    <tr>
+                                                        <th class="px-3 py-2 text-left font-semibold">日期</th>
+                                                        <th class="px-3 py-2 text-right font-semibold">實際收盤</th>
+                                                        <th class="px-3 py-2 text-right font-semibold">校正後預測</th>
+                                                        <th class="px-3 py-2 text-right font-semibold">預測漲跌%</th>
+                                                        <th class="px-3 py-2 text-right font-semibold">實際漲跌%</th>
+                                                        <th class="px-3 py-2 text-center font-semibold">命中</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="forecast-breakdown-body" class="divide-y divide-border" style="border-color: var(--border);">
+                                                    <tr>
+                                                        <td colspan="6" class="px-3 py-4 text-center" style="color: var(--muted-foreground);">尚無預測資料</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->

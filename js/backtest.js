@@ -34,6 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDataSourceDisplay(null, null);
 });
 
+document.addEventListener('DOMContentLoaded', () => {
+    resetForecastView('idle');
+    const btn = document.getElementById('runForecastBtn');
+    if (btn) {
+        btn.addEventListener('click', () => {
+            forecastState.pendingAutoRun = false;
+            runForecastAnalysis({ auto: false });
+        });
+    }
+});
+
 let lastPriceDebug = {
     steps: [],
     summary: null,
@@ -51,6 +62,713 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251118A';
+const FORECAST_MIN_SAMPLES = 120;
+const FORECAST_MIN_EVAL_POINTS = 8;
+const FORECAST_DEFAULT_WINDOW = 30;
+const forecastState = {
+    version: FORECAST_VERSION_CODE,
+    tfReady: false,
+    processing: false,
+    lastSeries: [],
+    lastResult: null,
+    pendingAutoRun: false,
+};
+
+function setForecastButtonState(isProcessing) {
+    const btn = document.getElementById('runForecastBtn');
+    if (!btn) return;
+    if (!btn.dataset.defaultHtml) {
+        btn.dataset.defaultHtml = btn.innerHTML;
+    }
+    if (isProcessing) {
+        btn.disabled = true;
+        btn.classList.add('opacity-70', 'cursor-not-allowed');
+        btn.innerHTML = '<i data-lucide="loader-2" class="lucide w-4 h-4 animate-spin"></i>模型計算中';
+    } else {
+        btn.disabled = false;
+        btn.classList.remove('opacity-70', 'cursor-not-allowed');
+        if (btn.dataset.defaultHtml) {
+            btn.innerHTML = btn.dataset.defaultHtml;
+        }
+    }
+    if (typeof refreshLucideIcons === 'function') {
+        refreshLucideIcons();
+    } else if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
+
+function updateForecastStatus(message, options = {}) {
+    const el = document.getElementById('forecast-status');
+    if (!el) return;
+    if (!message) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    const tone = options.type || 'info';
+    const palette = {
+        info: { bg: 'color-mix(in srgb, var(--muted) 18%, transparent)', color: 'var(--muted-foreground)' },
+        progress: { bg: 'color-mix(in srgb, var(--primary) 15%, transparent)', color: 'var(--primary)' },
+        success: { bg: 'color-mix(in srgb, #10b981 20%, transparent)', color: '#047857' },
+        error: { bg: 'color-mix(in srgb, #f87171 22%, transparent)', color: '#b91c1c' },
+        warning: { bg: 'color-mix(in srgb, #fbbf24 25%, transparent)', color: '#b45309' },
+    };
+    const style = palette[tone] || palette.info;
+    el.style.backgroundColor = style.bg;
+    el.style.color = style.color;
+    el.textContent = message;
+    el.classList.remove('hidden');
+}
+
+function describeForecastSample(series, context = {}) {
+    if (!Array.isArray(series) || series.length === 0) {
+        return '尚未取得回測資料，請先執行一次主回測。';
+    }
+    const firstDate = series[0]?.date || '';
+    const lastDate = series[series.length - 1]?.date || '';
+    const suffixParts = [];
+    if (Number.isFinite(context.training)) {
+        suffixParts.push(`訓練 ${context.training} 筆`);
+    }
+    if (Number.isFinite(context.evaluation)) {
+        suffixParts.push(`驗證 ${context.evaluation} 筆`);
+    }
+    const suffix = suffixParts.length > 0 ? `（${suffixParts.join('，')}）` : '';
+    return `${firstDate} ~ ${lastDate} 共 ${series.length} 筆收盤價${suffix}`;
+}
+
+function resetForecastView(reason = 'idle') {
+    forecastState.lastResult = null;
+    const summaryEl = document.getElementById('forecast-sample-summary');
+    if (summaryEl) {
+        summaryEl.textContent = reason === 'no-data'
+            ? '尚未取得回測資料，請先執行一次主回測。'
+            : '等待預測資料更新。';
+    }
+    updateForecastStatus(null);
+    const hitRateEl = document.getElementById('forecast-hit-rate');
+    if (hitRateEl) hitRateEl.textContent = '--';
+    const hitSampleEl = document.getElementById('forecast-hit-sample');
+    if (hitSampleEl) hitSampleEl.textContent = '';
+    const avgUpEl = document.getElementById('forecast-avg-up');
+    if (avgUpEl) avgUpEl.textContent = '--';
+    const avgDownEl = document.getElementById('forecast-avg-down');
+    if (avgDownEl) avgDownEl.textContent = '--';
+    const gaParamsEl = document.getElementById('forecast-ga-params');
+    if (gaParamsEl) gaParamsEl.textContent = '尚未校正';
+    const gaMaeEl = document.getElementById('forecast-ga-mae');
+    if (gaMaeEl) gaMaeEl.textContent = '';
+    const nextDateEl = document.getElementById('forecast-next-date');
+    if (nextDateEl) nextDateEl.textContent = '';
+    const nextRawEl = document.getElementById('forecast-next-raw');
+    if (nextRawEl) nextRawEl.textContent = '--';
+    const nextRawChangeEl = document.getElementById('forecast-next-raw-change');
+    if (nextRawChangeEl) nextRawChangeEl.textContent = '';
+    const nextCorrectedEl = document.getElementById('forecast-next-corrected');
+    if (nextCorrectedEl) nextCorrectedEl.textContent = '--';
+    const nextCorrectedChangeEl = document.getElementById('forecast-next-corrected-change');
+    if (nextCorrectedChangeEl) nextCorrectedChangeEl.textContent = '';
+    const nextDirectionEl = document.getElementById('forecast-next-direction');
+    if (nextDirectionEl) nextDirectionEl.textContent = '--';
+    const lastCloseEl = document.getElementById('forecast-last-close');
+    if (lastCloseEl) lastCloseEl.textContent = '--';
+    const chartRangeEl = document.getElementById('forecast-chart-range');
+    if (chartRangeEl) chartRangeEl.textContent = '';
+    if (forecastChart) {
+        forecastChart.destroy();
+        forecastChart = null;
+    }
+    const chartContainer = document.getElementById('forecast-chart-container');
+    if (chartContainer) {
+        chartContainer.innerHTML = '<p class="text-xs text-center" style="color: var(--muted-foreground);">等待回測資料完成預測</p>';
+    }
+    const tbody = document.getElementById('forecast-breakdown-body');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center" style="color: var(--muted-foreground);">尚無預測資料</td></tr>';
+    }
+}
+
+function extractForecastSeriesFromResult(result) {
+    if (!result) return [];
+    const rows = Array.isArray(result.rawDataUsed) ? result.rawDataUsed : [];
+    const mapped = rows
+        .map((row) => {
+            if (!row) return null;
+            const date = row.date || row.Date || null;
+            const close = Number(row.close ?? row.Close ?? NaN);
+            if (!date || !Number.isFinite(close)) return null;
+            return { date, close };
+        })
+        .filter((item) => item !== null);
+    mapped.sort((a, b) => {
+        if (a.date === b.date) return 0;
+        return a.date > b.date ? 1 : -1;
+    });
+    return mapped;
+}
+
+async function ensureTensorflowReadyForForecast() {
+    if (forecastState.tfReady) return true;
+    if (typeof tf === 'undefined') {
+        console.error('[Forecast] TensorFlow.js 尚未載入');
+        return false;
+    }
+    try {
+        if (typeof tf.ready === 'function') {
+            await tf.ready();
+        }
+        forecastState.tfReady = true;
+        return true;
+    } catch (error) {
+        console.error('[Forecast] TensorFlow.js 初始化失敗', error);
+        return false;
+    }
+}
+
+function computeNextTradingDate(lastDate) {
+    if (!lastDate) return '';
+    const base = new Date(lastDate);
+    if (Number.isNaN(base.getTime())) return '';
+    const next = new Date(base.getTime());
+    next.setDate(next.getDate() + 1);
+    return next.toISOString().split('T')[0];
+}
+
+function formatForecastPrice(value) {
+    if (!Number.isFinite(value)) return '--';
+    return formatNumber(value, value >= 1000 ? 2 : 2);
+}
+
+function formatPercent(value) {
+    if (!Number.isFinite(value)) return '--';
+    const percent = value * 100;
+    const sign = percent > 0 ? '+' : '';
+    return `${sign}${percent.toFixed(2)}%`;
+}
+
+function renderForecastChart(records) {
+    const container = document.getElementById('forecast-chart-container');
+    if (!container) return;
+    if (forecastChart) {
+        forecastChart.destroy();
+        forecastChart = null;
+    }
+    if (!Array.isArray(records) || records.length === 0) {
+        container.innerHTML = '<p class="text-xs text-center" style="color: var(--muted-foreground);">等待回測資料完成預測</p>';
+        return;
+    }
+    container.innerHTML = '<canvas id="forecast-chart" class="w-full h-full"></canvas>';
+    const canvas = document.getElementById('forecast-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const labels = records.map((row) => row.date);
+    const actual = records.map((row) => (Number.isFinite(row.actualClose) ? row.actualClose : null));
+    const corrected = records.map((row) => (Number.isFinite(row.correctedPrice) ? row.correctedPrice : null));
+    const raw = records.map((row) => (Number.isFinite(row.predictedPrice) ? row.predictedPrice : null));
+    forecastChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: '實際收盤',
+                    data: actual,
+                    borderColor: '#1f2937',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.18,
+                    pointRadius: 0,
+                    spanGaps: true,
+                },
+                {
+                    label: '校正後預測',
+                    data: corrected,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0,
+                    spanGaps: true,
+                },
+                {
+                    label: 'LSTM 原始預測',
+                    data: raw,
+                    borderColor: '#f97316',
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    backgroundColor: 'transparent',
+                    tension: 0.18,
+                    pointRadius: 0,
+                    spanGaps: true,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { maxTicksLimit: 14 },
+                },
+                y: {
+                    grid: { color: '#e5e7eb' },
+                    ticks: {
+                        callback: (value) => formatNumber(value, 2),
+                    },
+                },
+            },
+            plugins: {
+                legend: { position: 'top', labels: { usePointStyle: true } },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: (context) => {
+                            const label = context.dataset.label || '';
+                            const value = Number.isFinite(context.parsed.y)
+                                ? formatNumber(context.parsed.y, 2)
+                                : '--';
+                            return `${label}: ${value}`;
+                        },
+                    },
+                },
+            },
+        },
+    });
+}
+
+function renderForecastTable(records) {
+    const tbody = document.getElementById('forecast-breakdown-body');
+    if (!tbody) return;
+    if (!Array.isArray(records) || records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center" style="color: var(--muted-foreground);">尚無預測資料</td></tr>';
+        return;
+    }
+    const latest = records.slice(-12).reverse();
+    const rowsHtml = latest
+        .map((row) => {
+            const predictedDir = row.correctedChange > 0 ? 1 : row.correctedChange < 0 ? -1 : 0;
+            const actualDir = row.actualChange > 0 ? 1 : row.actualChange < 0 ? -1 : 0;
+            const hit = predictedDir === actualDir;
+            const badge = hit
+                ? '<span class="inline-flex items-center gap-1 text-emerald-600 font-semibold"><i data-lucide="check" class="lucide w-3 h-3"></i>命中</span>'
+                : '<span class="inline-flex items-center gap-1 text-rose-500 font-semibold"><i data-lucide="x" class="lucide w-3 h-3"></i>未中</span>';
+            return `
+                <tr>
+                    <td class="px-3 py-2" style="color: var(--foreground);">${row.date}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatForecastPrice(row.actualClose)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatForecastPrice(row.correctedPrice)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${formatPercent(row.correctedChange)}</td>
+                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${formatPercent(row.actualChange)}</td>
+                    <td class="px-3 py-2 text-center">${badge}</td>
+                </tr>`;
+        })
+        .join('');
+    tbody.innerHTML = rowsHtml;
+    if (typeof refreshLucideIcons === 'function') {
+        refreshLucideIcons();
+    } else if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
+
+function renderForecastMetrics(summary) {
+    const { metrics, calibration, nextForecast } = summary;
+    const hitRateEl = document.getElementById('forecast-hit-rate');
+    if (hitRateEl) {
+        hitRateEl.textContent = Number.isFinite(metrics.hitRate)
+            ? `${(metrics.hitRate * 100).toFixed(1)}%`
+            : '--';
+    }
+    const hitSampleEl = document.getElementById('forecast-hit-sample');
+    if (hitSampleEl) {
+        hitSampleEl.textContent = metrics.totalCount ? `共 ${metrics.totalCount} 筆預測` : '';
+    }
+    const avgUpEl = document.getElementById('forecast-avg-up');
+    if (avgUpEl) {
+        avgUpEl.textContent = Number.isFinite(metrics.avgUp)
+            ? formatPercent(metrics.avgUp)
+            : '--';
+    }
+    const avgDownEl = document.getElementById('forecast-avg-down');
+    if (avgDownEl) {
+        avgDownEl.textContent = Number.isFinite(metrics.avgDown)
+            ? formatPercent(metrics.avgDown)
+            : '--';
+    }
+    const gaParamsEl = document.getElementById('forecast-ga-params');
+    if (gaParamsEl) {
+        if (calibration && calibration.used) {
+            gaParamsEl.textContent = `scale ${calibration.params.scale.toFixed(3)}, offset ${(calibration.params.offset * 100).toFixed(2)}%`;
+        } else {
+            gaParamsEl.textContent = '未啟用校正（採用原始預測）';
+        }
+    }
+    const gaMaeEl = document.getElementById('forecast-ga-mae');
+    if (gaMaeEl) {
+        gaMaeEl.textContent = calibration && calibration.used && Number.isFinite(calibration.mae)
+            ? `校正樣本 ${calibration.sampleSize} 筆，MAE ${formatPercent(calibration.mae)}`
+            : '';
+    }
+    const lastCloseEl = document.getElementById('forecast-last-close');
+    if (lastCloseEl) {
+        lastCloseEl.textContent = formatForecastPrice(nextForecast.prevClose);
+    }
+    const nextDateEl = document.getElementById('forecast-next-date');
+    if (nextDateEl) {
+        nextDateEl.textContent = nextForecast.date ? `預估日期：${nextForecast.date}` : '';
+    }
+    const nextRawEl = document.getElementById('forecast-next-raw');
+    if (nextRawEl) {
+        nextRawEl.textContent = formatForecastPrice(nextForecast.rawPrice);
+    }
+    const nextRawChangeEl = document.getElementById('forecast-next-raw-change');
+    if (nextRawChangeEl) {
+        nextRawChangeEl.textContent = `未校正變動 ${formatPercent(nextForecast.rawChange)}`;
+    }
+    const nextCorrectedEl = document.getElementById('forecast-next-corrected');
+    if (nextCorrectedEl) {
+        nextCorrectedEl.textContent = formatForecastPrice(nextForecast.correctedPrice);
+    }
+    const nextCorrectedChangeEl = document.getElementById('forecast-next-corrected-change');
+    if (nextCorrectedChangeEl) {
+        nextCorrectedChangeEl.textContent = `校正後變動 ${formatPercent(nextForecast.correctedChange)}`;
+    }
+    const nextDirectionEl = document.getElementById('forecast-next-direction');
+    if (nextDirectionEl) {
+        const direction = nextForecast.correctedChange > 0
+            ? '看多'
+            : nextForecast.correctedChange < 0
+                ? '看空'
+                : '持平';
+        nextDirectionEl.textContent = direction;
+        nextDirectionEl.style.color = nextForecast.correctedChange > 0
+            ? '#047857'
+            : nextForecast.correctedChange < 0
+                ? '#b91c1c'
+                : 'var(--muted-foreground)';
+    }
+}
+
+function applyForecastResult(summary) {
+    forecastState.lastResult = summary;
+    renderForecastMetrics(summary);
+    renderForecastChart(summary.records);
+    renderForecastTable(summary.records);
+    updateForecastAvailability(forecastState.lastSeries, {
+        training: summary.trainingSize,
+        evaluation: summary.evaluationSize,
+    });
+    const chartRangeEl = document.getElementById('forecast-chart-range');
+    if (chartRangeEl) {
+        if (Array.isArray(summary.records) && summary.records.length > 0) {
+            const start = summary.records[0].date;
+            const end = summary.records[summary.records.length - 1].date;
+            chartRangeEl.textContent = `${start} ~ ${end}（${summary.records.length} 筆）`;
+        } else {
+            chartRangeEl.textContent = '';
+        }
+    }
+    updateForecastStatus('預測完成，已結合 GA 校正隔日模擬走勢。', { type: 'success' });
+}
+
+function updateForecastAvailability(series, context = {}) {
+    const summaryEl = document.getElementById('forecast-sample-summary');
+    if (!summaryEl) return;
+    summaryEl.textContent = describeForecastSample(series, context);
+}
+
+function runForecastGeneticCalibration(calibrationDataset, options = {}) {
+    if (!Array.isArray(calibrationDataset) || calibrationDataset.length < 4) {
+        return null;
+    }
+    const populationSize = options.populationSize || 32;
+    const generations = options.generations || 40;
+    const scaleRange = options.scaleRange || { min: 0.6, max: 1.4 };
+    const offsetRange = options.offsetRange || { min: -0.02, max: 0.02 };
+    const clamp = (value, range) => Math.max(range.min, Math.min(range.max, value));
+    const evaluate = (genes) => {
+        const [scale, offset] = genes;
+        const total = calibrationDataset.reduce((sum, row) => {
+            const corrected = scale * row.predictedChange + offset;
+            return sum + Math.abs(corrected - row.actualChange);
+        }, 0);
+        return total / calibrationDataset.length;
+    };
+    const randomBetween = (range) => range.min + Math.random() * (range.max - range.min);
+    const createIndividual = () => {
+        const genes = [randomBetween(scaleRange), randomBetween(offsetRange)];
+        return { genes, score: evaluate(genes) };
+    };
+    const tournamentSelect = (population, size = 3) => {
+        let best = null;
+        for (let i = 0; i < size; i += 1) {
+            const candidate = population[Math.floor(Math.random() * population.length)];
+            if (!best || candidate.score < best.score) {
+                best = candidate;
+            }
+        }
+        return best;
+    };
+    let population = Array.from({ length: populationSize }, createIndividual);
+    for (let gen = 0; gen < generations; gen += 1) {
+        population.sort((a, b) => a.score - b.score);
+        const elites = population.slice(0, Math.max(1, Math.floor(populationSize * 0.2)));
+        const next = elites.slice();
+        while (next.length < populationSize) {
+            const parentA = tournamentSelect(population);
+            const parentB = tournamentSelect(population);
+            const mix = Math.random();
+            const genes = parentA.genes.map((gene, idx) => {
+                const other = parentB.genes[idx];
+                const base = gene * mix + other * (1 - mix);
+                const mutationRange = idx === 0 ? 0.08 : 0.004;
+                const mutated = Math.random() < 0.25
+                    ? base + (Math.random() - 0.5) * mutationRange
+                    : base;
+                return clamp(mutated, idx === 0 ? scaleRange : offsetRange);
+            });
+            next.push({ genes, score: evaluate(genes) });
+        }
+        population = next;
+    }
+    population.sort((a, b) => a.score - b.score);
+    const best = population[0];
+    return {
+        scale: best.genes[0],
+        offset: best.genes[1],
+        mae: best.score,
+        sampleSize: calibrationDataset.length,
+        used: true,
+    };
+}
+
+async function computeForecastWithLstmGa(series) {
+    const closes = series.map((row) => row.close);
+    const dates = series.map((row) => row.date);
+    const total = closes.length;
+    const windowSize = Math.max(20, Math.min(FORECAST_DEFAULT_WINDOW, total - 20));
+    let trainingEnd = Math.max(windowSize + 10, Math.floor(total * 0.7));
+    trainingEnd = Math.min(total - 1, trainingEnd);
+    if (trainingEnd <= windowSize) {
+        throw new Error('可用資料不足，無法建立預測模型。');
+    }
+    const trainingCloses = closes.slice(0, trainingEnd);
+    const minClose = Math.min(...trainingCloses);
+    const maxClose = Math.max(...trainingCloses);
+    const range = Math.max(1e-6, maxClose - minClose);
+    const normalise = (value) => (value - minClose) / range;
+    const denormalise = (value) => (value * range) + minClose;
+    const xs = [];
+    const ys = [];
+    for (let i = windowSize; i < trainingCloses.length; i += 1) {
+        const window = trainingCloses.slice(i - windowSize, i).map(normalise);
+        const target = normalise(trainingCloses[i]);
+        xs.push(window);
+        ys.push(target);
+    }
+    if (xs.length < 10) {
+        throw new Error('有效訓練樣本不足，請拉長回測期間。');
+    }
+    const xTensor = tf.tensor(xs).reshape([xs.length, windowSize, 1]);
+    const yTensor = tf.tensor(ys).reshape([ys.length, 1]);
+    const model = tf.sequential();
+    model.add(tf.layers.lstm({ units: 48, inputShape: [windowSize, 1], returnSequences: false }));
+    model.add(tf.layers.dropout({ rate: 0.15 }));
+    model.add(tf.layers.dense({ units: 24, activation: 'relu' }));
+    model.add(tf.layers.dense({ units: 1 }));
+    model.compile({ optimizer: tf.train.adam(0.005), loss: 'meanSquaredError' });
+    await model.fit(xTensor, yTensor, {
+        epochs: 55,
+        batchSize: 16,
+        validationSplit: 0.15,
+        verbose: 0,
+        callbacks: {
+            onEpochEnd: async (epoch) => {
+                if (epoch % 5 === 0) {
+                    await tf.nextFrame();
+                }
+            },
+        },
+    });
+    xTensor.dispose();
+    yTensor.dispose();
+    const evaluationRecords = [];
+    let windowData = closes.slice(trainingEnd - windowSize, trainingEnd);
+    for (let i = trainingEnd; i < total; i += 1) {
+        const inputTensor = tf.tensor(windowData.map(normalise), [1, windowSize, 1]);
+        const predictionTensor = model.predict(inputTensor);
+        const predictedNormalised = (await predictionTensor.data())[0];
+        predictionTensor.dispose();
+        inputTensor.dispose();
+        const predictedClose = denormalise(predictedNormalised);
+        const actualClose = closes[i];
+        const prevClose = i > 0 ? closes[i - 1] : actualClose;
+        const predictedChange = prevClose ? (predictedClose - prevClose) / prevClose : 0;
+        const actualChange = prevClose ? (actualClose - prevClose) / prevClose : 0;
+        evaluationRecords.push({
+            date: dates[i],
+            predictedPrice: predictedClose,
+            actualClose,
+            prevClose,
+            predictedChange,
+            actualChange,
+        });
+        windowData.push(actualClose);
+        windowData.shift();
+        if (i % 12 === 0) {
+            await tf.nextFrame();
+        }
+    }
+    const calibrationSize = Math.max(4, Math.floor(evaluationRecords.length * 0.5));
+    let calibration = null;
+    if (evaluationRecords.length >= calibrationSize && calibrationSize >= 4) {
+        calibration = runForecastGeneticCalibration(evaluationRecords.slice(0, calibrationSize));
+    }
+    if (!calibration) {
+        calibration = { scale: 1, offset: 0, mae: null, sampleSize: 0, used: false };
+    }
+    const correctedRecords = evaluationRecords.map((row) => {
+        const correctedChange = row.predictedChange * calibration.scale + calibration.offset;
+        const correctedPrice = row.prevClose * (1 + correctedChange);
+        return {
+            ...row,
+            correctedChange,
+            correctedPrice,
+        };
+    });
+    const validRecords = correctedRecords.filter((row) => Number.isFinite(row.actualChange));
+    const hitCount = validRecords.filter((row) => {
+        const predictedDir = row.correctedChange > 0 ? 1 : row.correctedChange < 0 ? -1 : 0;
+        const actualDir = row.actualChange > 0 ? 1 : row.actualChange < 0 ? -1 : 0;
+        return predictedDir === actualDir;
+    }).length;
+    const avgUpRecords = validRecords.filter((row) => row.actualChange > 0);
+    const avgDownRecords = validRecords.filter((row) => row.actualChange < 0);
+    const avgUp = avgUpRecords.length
+        ? avgUpRecords.reduce((sum, row) => sum + row.actualChange, 0) / avgUpRecords.length
+        : null;
+    const avgDown = avgDownRecords.length
+        ? avgDownRecords.reduce((sum, row) => sum + row.actualChange, 0) / avgDownRecords.length
+        : null;
+    const lastClose = closes[closes.length - 1];
+    const lastWindow = closes.slice(-windowSize);
+    const nextInput = tf.tensor(lastWindow.map(normalise), [1, windowSize, 1]);
+    const nextTensor = model.predict(nextInput);
+    const nextNorm = (await nextTensor.data())[0];
+    nextTensor.dispose();
+    nextInput.dispose();
+    const rawNextPrice = denormalise(nextNorm);
+    const rawNextChange = lastClose ? (rawNextPrice - lastClose) / lastClose : 0;
+    const correctedNextChange = rawNextChange * calibration.scale + calibration.offset;
+    const correctedNextPrice = lastClose * (1 + correctedNextChange);
+    model.dispose();
+    await tf.nextFrame();
+    return {
+        windowSize,
+        trainingSize: trainingCloses.length,
+        evaluationSize: correctedRecords.length,
+        records: correctedRecords,
+        metrics: {
+            totalCount: correctedRecords.length,
+            hitRate: validRecords.length ? hitCount / validRecords.length : null,
+            avgUp,
+            avgDown,
+            hitCount,
+        },
+        calibration: {
+            used: Boolean(calibration.used),
+            sampleSize: calibration.sampleSize || 0,
+            mae: calibration.mae,
+            params: {
+                scale: calibration.scale,
+                offset: calibration.offset,
+            },
+        },
+        nextForecast: {
+            prevClose: lastClose,
+            rawPrice: rawNextPrice,
+            correctedPrice: correctedNextPrice,
+            rawChange: rawNextChange,
+            correctedChange: correctedNextChange,
+            date: computeNextTradingDate(dates[dates.length - 1]),
+        },
+    };
+}
+
+async function runForecastAnalysis(options = {}) {
+    const auto = Boolean(options.auto);
+    const series = Array.isArray(options.series) ? options.series : forecastState.lastSeries;
+    if (!Array.isArray(series) || series.length === 0) {
+        resetForecastView('no-data');
+        updateForecastStatus('尚未取得回測資料，請先執行主回測。', { type: 'info' });
+        return;
+    }
+    updateForecastAvailability(series);
+    if (series.length < FORECAST_MIN_SAMPLES) {
+        resetForecastView('insufficient');
+        updateForecastStatus(`資料筆數僅 ${series.length} 筆，低於預測所需的 ${FORECAST_MIN_SAMPLES} 筆。`, { type: 'warning' });
+        return;
+    }
+    if (forecastState.processing) {
+        return;
+    }
+    forecastState.processing = true;
+    setForecastButtonState(true);
+    updateForecastStatus(auto ? '偵測到新的回測結果，正在建立預測模型…' : '正在以 LSTM + GA 模型進行預測，請稍候…', { type: 'progress' });
+    try {
+        const ready = await ensureTensorflowReadyForForecast();
+        if (!ready) {
+            throw new Error('TensorFlow.js 載入失敗，請稍後重試。');
+        }
+        await tf.nextFrame();
+        const summary = await computeForecastWithLstmGa(series);
+        if (!summary || !Array.isArray(summary.records)) {
+            throw new Error('預測結果無效，請重新嘗試。');
+        }
+        if (summary.records.length < FORECAST_MIN_EVAL_POINTS) {
+            resetForecastView('insufficient');
+            updateForecastAvailability(series, {
+                training: summary.trainingSize,
+                evaluation: summary.evaluationSize,
+            });
+            updateForecastStatus(`預測樣本僅 ${summary.records.length} 筆，未達分析門檻。`, { type: 'warning' });
+            return;
+        }
+        applyForecastResult(summary);
+    } catch (error) {
+        console.error('[Forecast] 預測失敗:', error);
+        updateForecastStatus(`預測失敗：${error.message}`, { type: 'error' });
+    } finally {
+        forecastState.processing = false;
+        forecastState.pendingAutoRun = false;
+        setForecastButtonState(false);
+    }
+}
+
+function prepareForecastFromResult(result) {
+    const series = extractForecastSeriesFromResult(result);
+    forecastState.lastSeries = series;
+    if (!Array.isArray(series) || series.length === 0) {
+        resetForecastView('no-data');
+        updateForecastStatus('預測模組尚未取得有效股價序列。', { type: 'info' });
+        return;
+    }
+    updateForecastAvailability(series);
+    if (!forecastState.processing) {
+        forecastState.pendingAutoRun = true;
+        setTimeout(() => {
+            if (forecastState.pendingAutoRun) {
+                runForecastAnalysis({ auto: true });
+            }
+        }, 120);
+    }
+}
 
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
@@ -5049,8 +5767,8 @@ function clearPreviousResults() {
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
     document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
     if(stockChart){
-        stockChart.destroy(); 
-        stockChart=null; 
+        stockChart.destroy();
+        stockChart=null;
         const chartContainer = document.getElementById('chart-container');
         if (chartContainer) {
             chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
@@ -5077,6 +5795,9 @@ function clearPreviousResults() {
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
+    forecastState.lastSeries = [];
+    forecastState.pendingAutoRun = false;
+    resetForecastView('no-data');
 }
 
 const adjustmentReasonLabels = {
@@ -6158,6 +6879,9 @@ function handleBacktestResult(result, stockName, dataSource) {
         trendAnalysisState.thresholds = null;
         renderTrendSummary();
         updateChartTrendOverlay();
+        forecastState.lastSeries = [];
+        forecastState.pendingAutoRun = false;
+        resetForecastView('no-data');
         if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
         return;
@@ -6188,6 +6912,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayTradeResults(result);
         renderChart(result);
         updateChartTrendOverlay();
+        prepareForecastFromResult(result);
         activateTab('summary');
 
         setTimeout(() => {
