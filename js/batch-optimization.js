@@ -619,14 +619,16 @@ function resetBatchProgress() {
     const progressDetail = document.getElementById('batch-progress-detail');
     const timeEstimate = document.getElementById('batch-time-estimate');
     const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
-    
+    const mascotWrapper = document.getElementById('batch-progress-mascot-wrapper');
+    const mascotCanvas = document.getElementById('batchProgressMascot');
+
     if (progressText) progressText.textContent = '0%';
     if (progressBar) progressBar.style.width = '0%';
     if (progressDetail) progressDetail.textContent = '已停止';
     if (timeEstimate) timeEstimate.textContent = '';
     if (longWaitNotice) longWaitNotice.classList.add('hidden');
-    if (hourglass) hourglass.classList.remove('animate-spin');
+    if (mascotWrapper) mascotWrapper.classList.add('hidden');
+    if (mascotCanvas) mascotCanvas.dataset.lbMascotState = 'idle';
 }
 
 // 更新進度顯示
@@ -637,7 +639,8 @@ function updateBatchProgress(currentCombination = null) {
     const progressCombination = document.getElementById('batch-progress-combination');
     const timeEstimate = document.getElementById('batch-time-estimate');
     const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
+    const mascotWrapper = document.getElementById('batch-progress-mascot-wrapper');
+    const mascotCanvas = document.getElementById('batchProgressMascot');
     
     if (progressText && progressBar && progressDetail) {
         // 計算精確的百分比（每1%更新）
@@ -702,13 +705,21 @@ function updateBatchProgress(currentCombination = null) {
             }
         }
         
-        // 更新沙漏動畫
-        if (hourglass) {
-            if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
-                hourglass.classList.add('animate-spin');
+        const activePhases = ['optimizing', 'preparing', 'running', 'processing', 'waiting'];
+        const isActiveMascot = activePhases.includes(currentBatchProgress.phase);
+
+        if (mascotWrapper) {
+            if (isActiveMascot) {
+                mascotWrapper.classList.remove('hidden');
             } else {
-                hourglass.classList.remove('animate-spin');
+                mascotWrapper.classList.add('hidden');
             }
+        }
+        if (mascotCanvas) {
+            const mascotState = typeof currentBatchProgress.phase === 'string'
+                ? currentBatchProgress.phase
+                : 'idle';
+            mascotCanvas.dataset.lbMascotState = mascotState;
         }
         
         let detailText = '';

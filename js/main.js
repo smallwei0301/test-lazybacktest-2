@@ -1615,13 +1615,12 @@ function normaliseLoadingMessage(message) {
     return message.replace(/^⌛\s*/, '').trim() || '處理中...';
 }
 
-function initLoadingMascotSanitiser() {
+function initMascotSanitiserFor(container) {
     const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
 
-    const container = document.getElementById('loadingGif');
     if (!container) {
         return;
     }
@@ -1936,6 +1935,19 @@ function initLoadingMascotSanitiser() {
 
     useFallbackImage();
     requestPrimary();
+}
+
+function initLoadingMascotSanitiser() {
+    const targets = [
+        document.getElementById('loadingGif'),
+        document.getElementById('batchProgressMascot')
+    ];
+
+    targets.forEach((node) => {
+        if (node) {
+            initMascotSanitiserFor(node);
+        }
+    });
 }
 
 function setLoadingBaseMessage(message) {

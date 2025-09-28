@@ -7,6 +7,12 @@
     padding: 0;
 }
 
+#batch-progress-mascot-wrapper {
+    width: 2.25rem;
+    height: 2.25rem;
+    flex-shrink: 0;
+}
+
 .loading-mascot-canvas {
     position: relative;
     width: 100%;
