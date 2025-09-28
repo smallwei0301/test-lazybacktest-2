@@ -1,74 +1,80 @@
 /* --- 自訂 CSS --- */
 .loading-mascot-wrapper {
-    background: none;
-    background-color: transparent !important;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border: none;
     box-shadow: none;
-    padding: 0;
+    background-color: transparent;
 }
 
 .loading-mascot-canvas {
     position: relative;
-    width: 100%;
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    width: 100%;
+    height: 100%;
     border-radius: 0.25rem;
-    background: transparent;
-    background-color: transparent !important;
-    pointer-events: none;
+    overflow: hidden;
+    background-color: transparent;
+    color: var(--muted-foreground);
 }
 
 .loading-mascot-wrapper.square .loading-mascot-canvas {
     border-radius: 0;
 }
 
-.loading-mascot-canvas .tenor-gif-embed,
-.loading-mascot-canvas .tenor-gif-embed iframe {
-    width: 100% !important;
-    height: 100% !important;
-}
-
-.loading-mascot-canvas .tenor-gif-embed {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none !important;
-    border: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.loading-mascot-canvas .tenor-gif-embed iframe {
-    pointer-events: none !important;
-    border: none !important;
-    background: transparent !important;
-}
-
-.loading-mascot-canvas .tenor-gif-embed > a {
-    display: none !important;
-}
-
 .loading-mascot-image {
-    max-width: 100%;
-    max-height: 100%;
+    position: relative;
+    z-index: 2;
+    display: block;
     width: 100%;
     height: 100%;
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
-    display: block;
-    background: transparent;
     border: none;
-    border-radius: 0;
     box-shadow: none;
+    opacity: 0;
+    transition: opacity 120ms ease-out;
     pointer-events: none;
 }
 
-.loading-mascot-canvas.loading-mascot-fallback {
-    font-size: 1.5rem;
+.loading-mascot-fallback-icon {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.625rem;
     line-height: 1;
     color: var(--muted-foreground);
+    background-color: transparent;
+    transition: opacity 120ms ease-out;
+}
+
+.loading-mascot-canvas[data-mascot-state="ready"] .loading-mascot-image {
+    opacity: 1;
+}
+
+.loading-mascot-canvas[data-mascot-state="ready"] .loading-mascot-fallback-icon {
+    opacity: 0;
+}
+
+.loading-mascot-canvas[data-mascot-state="error"] .loading-mascot-image {
+    opacity: 0;
+}
+
+.loading-mascot-canvas[data-mascot-state="error"] .loading-mascot-fallback-icon {
+    opacity: 1;
+}
+
+.loading-mascot-canvas[data-mascot-state="loading"] .loading-mascot-fallback-icon {
+    opacity: 1;
 }
 .quick-backtest-editable {
     position: relative;
