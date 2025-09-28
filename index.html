@@ -1219,6 +1219,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="prediction"
+                                            >
+                                                <i data-lucide="activity" class="lucide-sm inline mr-1"></i>預測
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1408,121 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Prediction Tab -->
+                            <div class="tab-content hidden space-y-6" id="prediction-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                        <div class="space-y-2">
+                                            <h3 class="card-title flex items-center gap-2" style="color: var(--foreground);">
+                                                <i data-lucide="activity" class="lucide-sm" aria-hidden="true"></i>
+                                                LSTM + GA 隔日預測
+                                            </h3>
+                                            <p
+                                                id="prediction-status"
+                                                class="text-xs leading-relaxed"
+                                                style="color: var(--muted-foreground);"
+                                                aria-live="polite"
+                                            >
+                                                請先執行回測以載入股價資料。
+                                            </p>
+                                        </div>
+                                        <span
+                                            id="prediction-version"
+                                            class="inline-flex items-center px-2 py-1 rounded-md border text-[10px] font-mono uppercase tracking-widest"
+                                            style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--background) 96%, transparent);"
+                                        >
+                                            LB-PREDICTION-LSTM-GA-20251117A
+                                        </span>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+                                            <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <div
+                                                    class="rounded-lg border p-4 shadow-sm"
+                                                    style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, var(--background));"
+                                                >
+                                                    <p class="text-[11px] uppercase font-medium tracking-[0.08em]" style="color: var(--primary);">
+                                                        漲跌命中率
+                                                    </p>
+                                                    <p id="prediction-hit-rate" class="text-2xl font-bold mt-2" style="color: var(--foreground);">—</p>
+                                                </div>
+                                                <div
+                                                    class="rounded-lg border p-4 shadow-sm"
+                                                    style="border-color: var(--border); background-color: color-mix(in srgb, #10b981 6%, var(--background));"
+                                                >
+                                                    <p class="text-[11px] uppercase font-medium tracking-[0.08em]" style="color: #047857;">
+                                                        平均漲幅
+                                                    </p>
+                                                    <p id="prediction-average-rise" class="text-2xl font-bold mt-2" style="color: var(--foreground);">—</p>
+                                                </div>
+                                                <div
+                                                    class="rounded-lg border p-4 shadow-sm"
+                                                    style="border-color: var(--border); background-color: color-mix(in srgb, #f87171 6%, var(--background));"
+                                                >
+                                                    <p class="text-[11px] uppercase font-medium tracking-[0.08em]" style="color: #dc2626;">
+                                                        平均跌幅
+                                                    </p>
+                                                    <p id="prediction-average-drop" class="text-2xl font-bold mt-2" style="color: var(--foreground);">—</p>
+                                                </div>
+                                            </div>
+                                            <div class="lg:w-64 flex flex-col gap-3">
+                                                <button
+                                                    id="predictionRunBtn"
+                                                    type="button"
+                                                    class="btn-primary w-full justify-center text-sm font-semibold px-4 py-2 rounded-md flex items-center gap-2 transition-colors"
+                                                >
+                                                    <i data-lucide="play" class="lucide-sm" aria-hidden="true"></i>
+                                                    <span data-prediction-run-label>執行預測</span>
+                                                </button>
+                                                <div
+                                                    id="prediction-meta"
+                                                    class="text-xs leading-relaxed rounded-md border px-3 py-2 space-y-1"
+                                                    style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--muted) 10%, transparent);"
+                                                >
+                                                    <p>訓練樣本：—</p>
+                                                    <p>測試樣本：—</p>
+                                                    <p>視窗長度：—</p>
+                                                    <p>測試區間：—</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div
+                                            class="relative h-96 rounded-xl border overflow-hidden"
+                                            style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 12%, transparent);"
+                                        >
+                                            <canvas id="predictionChart" class="absolute inset-0 w-full h-full"></canvas>
+                                            <div
+                                                id="predictionChartPlaceholder"
+                                                class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm"
+                                                style="color: var(--muted-foreground);"
+                                            >
+                                                <i data-lucide="line-chart" class="lucide w-10 h-10 opacity-40" aria-hidden="true"></i>
+                                                <p class="text-center leading-relaxed">
+                                                    完成回測後，系統會以 LSTM + 遺傳演算法校正模型推估隔日收盤價。
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div
+                                            id="prediction-error"
+                                            class="text-xs font-medium hidden rounded-md border px-3 py-2"
+                                            style="border-color: color-mix(in srgb, var(--destructive) 30%, transparent); background-color: color-mix(in srgb, var(--destructive) 8%, transparent); color: var(--destructive);"
+                                            role="alert"
+                                        ></div>
+                                        <div
+                                            class="rounded-lg border px-4 py-3 text-xs leading-relaxed space-y-2"
+                                            style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--background) 96%, transparent);"
+                                        >
+                                            <p class="font-medium" style="color: var(--foreground);">模型說明</p>
+                                            <ul class="list-disc list-inside space-y-1">
+                                                <li>以最近一次回測載入的收盤價建立時間序列，維持時間順序避免看到未來資訊。</li>
+                                                <li>採用 LSTM 模型預測隔日價格，再透過遺傳演算法校正殘差，僅使用歷史資料訓練。</li>
+                                                <li>命中率統計針對測試集隔日漲跌方向，平均漲跌幅為實際隔日報酬平均值。</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->
@@ -2120,9 +2242,11 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/prediction.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
