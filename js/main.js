@@ -12,6 +12,7 @@
 
 // 全局變量
 let stockChart = null;
+let forecastChart = null;
 let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
