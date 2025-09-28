@@ -619,14 +619,14 @@ function resetBatchProgress() {
     const progressDetail = document.getElementById('batch-progress-detail');
     const timeEstimate = document.getElementById('batch-time-estimate');
     const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
+    const mascot = document.getElementById('batch-progress-mascot-container');
     
     if (progressText) progressText.textContent = '0%';
     if (progressBar) progressBar.style.width = '0%';
     if (progressDetail) progressDetail.textContent = '已停止';
     if (timeEstimate) timeEstimate.textContent = '';
     if (longWaitNotice) longWaitNotice.classList.add('hidden');
-    if (hourglass) hourglass.classList.remove('animate-spin');
+    if (mascot) mascot.classList.add('inactive');
 }
 
 // 更新進度顯示
@@ -637,7 +637,7 @@ function updateBatchProgress(currentCombination = null) {
     const progressCombination = document.getElementById('batch-progress-combination');
     const timeEstimate = document.getElementById('batch-time-estimate');
     const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
+    const mascot = document.getElementById('batch-progress-mascot-container');
     
     if (progressText && progressBar && progressDetail) {
         // 計算精確的百分比（每1%更新）
@@ -703,11 +703,11 @@ function updateBatchProgress(currentCombination = null) {
         }
         
         // 更新沙漏動畫
-        if (hourglass) {
+        if (mascot) {
             if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
-                hourglass.classList.add('animate-spin');
+                mascot.classList.remove('inactive');
             } else {
-                hourglass.classList.remove('animate-spin');
+                mascot.classList.add('inactive');
             }
         }
         

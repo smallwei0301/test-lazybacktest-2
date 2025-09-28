@@ -1,3 +1,8 @@
+## 2025-12-08 — Patch LB-PROGRESS-MASCOT-20251208A
+- **Issue recap**: 批量優化進度卡仍使用旋轉沙漏圖示，與最新需求指定的 Hachiware 吉祥物 GIF 不符，且缺乏明確的停用狀態視覺提示。
+- **Fix**: 以 Tenor 官方嵌入取代沙漏 `<i>`，新增 `batch-progress-mascot` 容器樣式讓 GIF 自適應並在待命時套用灰階透明效果，同步調整批量優化腳本以切換吉祥物的啟用／待命狀態並載入 Tenor 嵌入腳本。
+- **Testing**: 受限於容器僅提供靜態檔案，暫未能啟動實際回測流程；部署至 Netlify 預覽站後將以批量優化實測確認進度視覺與 console 無錯誤。
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
