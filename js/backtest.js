@@ -6188,6 +6188,16 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayTradeResults(result);
         renderChart(result);
         updateChartTrendOverlay();
+        if (window.lazybacktestPrediction && typeof window.lazybacktestPrediction.onBacktestResult === 'function') {
+            const predictionContext = {
+                stockNo: result.stockNo || result.symbol || result.stock_id || result.stockId || result.ticker || null,
+                market: result.marketType || result.market || result.marketCode || currentMarket || null,
+            };
+            window.lazybacktestPrediction.onBacktestResult({
+                priceSeries: Array.isArray(visibleStockData) ? visibleStockData : [],
+                context: predictionContext,
+            });
+        }
         activateTab('summary');
 
         setTimeout(() => {
@@ -8722,32 +8732,34 @@ function resetSettings() {
     showSuccess("設定已重置");
 }
 
-function initTabs() { 
-    // Initialize with summary tab active
-    activateTab('summary'); 
+function initTabs() {
+    const tabs = document.querySelectorAll('[data-tab]');
+    tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.getAttribute('data-tab');
+            if (targetTab) {
+                activateTab(targetTab);
+            }
+        });
+    });
+    activateTab('summary');
 }
-function activateTab(tabId) { 
-    const tabs = document.querySelectorAll('[data-tab]'); 
-    const contents = document.querySelectorAll('.tab-content'); 
-    
-    // Update button states
-    tabs.forEach(tab => { 
-        const currentTabId = tab.getAttribute('data-tab'); 
-        const isActive = currentTabId === tabId; 
-        
-        if (isActive) {
-            tab.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap';
-            tab.style.color = 'var(--primary)';
-            tab.style.borderColor = 'var(--primary)';
-        } else {
-            tab.className = 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap';
-            tab.style.color = 'var(--muted-foreground)';
-            tab.style.borderColor = 'transparent';
-        }
-    }); 
-    
-    // Show corresponding content
-    contents.forEach(content => { 
+function activateTab(tabId) {
+    const tabs = document.querySelectorAll('[data-tab]');
+    const contents = document.querySelectorAll('.tab-content');
+
+    tabs.forEach((tab) => {
+        const currentTabId = tab.getAttribute('data-tab');
+        const isActive = currentTabId === tabId;
+        tab.className = isActive
+            ? 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap'
+            : 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap';
+        tab.style.color = isActive ? 'var(--primary)' : 'var(--muted-foreground)';
+        tab.style.borderColor = isActive ? 'var(--primary)' : 'transparent';
+        tab.setAttribute('aria-current', isActive ? 'page' : 'false');
+    });
+
+    contents.forEach((content) => {
         const isTargetTab = content.id === `${tabId}-tab`;
         if (isTargetTab) {
             content.classList.remove('hidden');
@@ -8756,7 +8768,11 @@ function activateTab(tabId) {
             content.classList.add('hidden');
             content.classList.remove('active');
         }
-    }); 
+    });
+
+    if (tabId === 'prediction' && window.lazybacktestPrediction && typeof window.lazybacktestPrediction.handleTabActivated === 'function') {
+        window.lazybacktestPrediction.handleTabActivated();
+    }
 }
 function setDefaultFees(stockNo) {
     const buyFeeInput = document.getElementById('buyFee');
