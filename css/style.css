@@ -1,24 +1,24 @@
 /* --- 自訂 CSS --- */
 .loading-mascot-wrapper {
-    background: none;
-    background-color: transparent !important;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border: none;
     box-shadow: none;
-    padding: 0;
+    background-color: inherit;
 }
 
 .loading-mascot-canvas {
     position: relative;
-    width: 100%;
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    width: 100%;
+    height: 100%;
     border-radius: 0.25rem;
-    background: transparent;
-    background-color: transparent !important;
-    pointer-events: none;
+    overflow: hidden;
 }
 
 .loading-mascot-wrapper.square .loading-mascot-canvas {
@@ -26,17 +26,15 @@
 }
 
 .loading-mascot-image {
+    display: block;
     max-width: 100%;
     max-height: 100%;
     width: 100%;
     height: 100%;
     object-fit: contain;
-    display: block;
-    background: transparent;
+    background-color: transparent;
     border: none;
-    border-radius: 0;
     box-shadow: none;
-    pointer-events: none;
 }
 
 .loading-mascot-canvas.loading-mascot-fallback {

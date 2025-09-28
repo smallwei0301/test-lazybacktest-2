@@ -769,3 +769,9 @@
 - **Fix**: Sanitiser 新增 Tenor 分享網址轉換邏輯，自動補上 `/tenor.gif` 並以 `media.tenor.com` 取得實體 GIF，同步記錄原始與轉換後網址並在載入成功時標記來源，失敗則回退沙漏；預設來源亦改為分享網址並提升版本碼 `LB-PROGRESS-MASCOT-20251210A`。
 - **Diagnostics**: 本地模擬僅提供分享網址時，觀察 `dataset.lbMascotResolvedSrc` 會填入轉換後的 GIF URL，成功載入後 `dataset.lbMascotSource` 會顯示 `tenor-share`，封鎖網路時則改回沙漏並標記 `hourglass`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-11 — Patch LB-PROGRESS-MASCOT-20251211A
+- **Issue recap**: 分享網址轉換後雖能取得實體 GIF，但 CSS 重設過度導致整個吉祥物區塊透明，頁面上看不到動畫或沙漏 fallback。
+- **Fix**: 將進度卡預設吉祥物直接指向使用者提供的 `media.tenor.com` GIF，Sanitiser 同步調整預設來源與 ALT 文案，維持嵌入碼需求並沿用沙漏備援。
+- **Style**: 精簡 `loading-mascot` 相關樣式，僅保留對齊與尺寸設定，移除會造成全面透明的覆寫，確保 GIF 與 fallback 皆可正常顯示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

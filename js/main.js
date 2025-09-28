@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251210A';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251211A';
     const HOURGLASS_FALLBACK = '⌛';
     const DEFAULT_SHARE_SRC = 'https://tenor.com/zh-TW/view/hachiware-gif-1718069610368761676';
     const DEFAULT_MEDIA_SRC = 'https://media.tenor.com/zh-TW/view/hachiware-gif-1718069610368761676/tenor.gif';
@@ -1728,7 +1728,6 @@ function initLoadingMascotSanitiser() {
             container.innerHTML = '';
             img = document.createElement('img');
             img.className = 'loading-mascot-image';
-            img.setAttribute('aria-hidden', 'true');
             container.appendChild(img);
         } else {
             container.textContent = '';
@@ -1738,7 +1737,7 @@ function initLoadingMascotSanitiser() {
         img.decoding = 'async';
         img.loading = 'eager';
         img.referrerPolicy = 'no-referrer';
-        img.alt = 'LazyBacktest 進度吉祥物動畫';
+        img.alt = '吉伊卡哇進度';
         return img;
     };
 
