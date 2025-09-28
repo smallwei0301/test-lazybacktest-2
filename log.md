@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-PROGRESS-MASCOT-20251210A
+- **Issue recap**: 進度吉祥物在 Tenor API 失敗時仍會動態掛載官方嵌入或落回其他 ID 的備援圖，與「僅使用指定 Hachiware 貼圖」的新規不符，且嵌入腳本在部分企業網路仍遭封鎖。
+- **Fix**: 移除 Tenor 嵌入 fallback，改為純 `<img>` 鏈結與相同貼圖 ID 的多節點備援，更新 Sanitiser 流程為 `LB-PROGRESS-MASCOT-20251210A`，並將 HTML fallback 清單統一為使用者提供的 1718069610368761676 GIF 來源。
+- **Diagnostics**: 手動檢查 `#loadingGif` dataset 於初始化即標記 `fallback:...1718069610368761676`，阻斷 Tenor script 觀察 fallback 依序換源，並在失敗時改為沙漏且 dataset 記錄 `hourglass`，確認未再注入 iframe。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
