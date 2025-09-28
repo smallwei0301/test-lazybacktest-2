@@ -330,6 +330,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
     <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -1219,6 +1220,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="forecast"
+                                            >
+                                                <i data-lucide="activity" class="lucide-sm inline mr-1"></i>預測
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1409,95 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Forecast Tab -->
+                            <div class="tab-content hidden space-y-6" id="forecast-tab">
+                                <div class="card shadow-lg summary-card">
+                                    <div class="card-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                        <div>
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="activity" class="lucide-sm"></i>
+                                                隔日收盤價預測
+                                            </h3>
+                                            <p class="text-xs mt-2 leading-relaxed" style="color: var(--muted-foreground);">
+                                                使用 LSTM 與遺傳演算法誤差校正，依據回測後的歷史股價推估隔日收盤價走勢。
+                                            </p>
+                                        </div>
+                                        <span class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">
+                                            LB-FORECAST-LSTM-GA-20250714A
+                                        </span>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <button
+                                            id="runForecastBtn"
+                                            class="btn-primary w-full sm:w-auto px-4 py-3 text-sm font-semibold rounded-md flex items-center justify-center gap-2 transition duration-150 ease-in-out"
+                                        >
+                                            <i data-lucide="sparkles" class="lucide-sm"></i>
+                                            生成預測結果
+                                        </button>
+                                        <p id="forecastStatus" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            請先完成一次回測以建立可用的歷史股價資料。
+                                        </p>
+                                        <div
+                                            class="border border-dashed rounded-md p-3 text-[11px]"
+                                            style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--muted) 12%, transparent);"
+                                        >
+                                            <p>流程說明：</p>
+                                            <ul class="list-disc list-inside space-y-1 mt-1">
+                                                <li>以回測後的歷史收盤價建立 LSTM 訓練集，保留最近 20% 資料做為步進式驗證。</li>
+                                                <li>僅使用歷史資料訓練遺傳演算法的誤差校正參數，避免回看未來資料。</li>
+                                                <li>輸出隔日收盤價方向命中率、平均漲跌幅與實際／預測曲線。</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">股價預測曲線</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div
+                                            id="forecastChartContainer"
+                                            class="h-96 bg-muted/20 rounded-lg flex items-center justify-center border-2 border-dashed relative"
+                                            style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); border-color: var(--card);"
+                                        >
+                                            <canvas id="forecastChart" class="w-full h-full absolute inset-0"></canvas>
+                                            <div
+                                                id="forecastChartPlaceholder"
+                                                class="text-muted text-center"
+                                                style="color: var(--muted-foreground);"
+                                            >
+                                                <i data-lucide="line-chart" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                                                <p>生成預測後會顯示實際股價與預測曲線</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">預測統計</h3>
+                                    </div>
+                                    <div class="card-content space-y-3">
+                                        <div
+                                            id="forecastMetrics"
+                                            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm"
+                                            style="color: var(--muted-foreground);"
+                                        >
+                                            <div
+                                                class="col-span-full text-center text-xs py-3 rounded-md border border-dashed"
+                                                style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);"
+                                            >
+                                                尚未產生預測結果。
+                                            </div>
+                                        </div>
+                                        <div
+                                            id="forecastDiagnostics"
+                                            class="text-xs leading-relaxed space-y-1"
+                                            style="color: var(--muted-foreground);"
+                                        ></div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->
@@ -2124,6 +2221,7 @@
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
+    <script src="js/forecast.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
