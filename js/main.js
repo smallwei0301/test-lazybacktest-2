@@ -1616,7 +1616,7 @@ function normaliseLoadingMessage(message) {
 }
 
 function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const VERSION = 'LB-PROGRESS-MASCOT-20251210A';
     const MAX_PRIMARY_ATTEMPTS = 3;
     const MAX_LEGACY_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1200;
@@ -1633,6 +1633,7 @@ function initLoadingMascotSanitiser() {
     const postId = container.dataset.tenorId?.trim();
     const apiKey = container.dataset.tenorApiKey?.trim();
     const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
+    const localFallback = container.dataset.mascotLocalSrc?.trim();
     const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
         .split(',')
         .map((src) => src.trim())
@@ -1655,7 +1656,10 @@ function initLoadingMascotSanitiser() {
     }
 
     const fallbackSources = [];
-    if (inlineSrc) {
+    if (localFallback) {
+        fallbackSources.push(localFallback);
+    }
+    if (inlineSrc && !fallbackSources.includes(inlineSrc)) {
         fallbackSources.push(inlineSrc);
     }
     for (const src of declaredFallbacks) {

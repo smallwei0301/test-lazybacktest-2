@@ -1,10 +1,11 @@
 /* --- 自訂 CSS --- */
 .loading-mascot-wrapper {
     background: none;
-    background-color: transparent !important;
+    background-color: inherit;
     border: none;
     box-shadow: none;
     padding: 0;
+    isolation: isolate;
 }
 
 .loading-mascot-canvas {
@@ -16,8 +17,8 @@
     justify-content: center;
     overflow: hidden;
     border-radius: 0.25rem;
-    background: transparent;
-    background-color: transparent !important;
+    background: none;
+    background-color: inherit;
     pointer-events: none;
 }
 
@@ -58,7 +59,8 @@
     height: 100%;
     object-fit: contain;
     display: block;
-    background: transparent;
+    background: none;
+    background-color: transparent !important;
     border: none;
     border-radius: 0;
     box-shadow: none;

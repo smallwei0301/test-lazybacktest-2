@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-PROGRESS-MASCOT-20251210A
+- **Issue recap**: 企業網路阻擋 Tenor 時會落回官方嵌入或遠端 fallback，iframe 內建的白底覆蓋了透明像素，進度吉祥物在進度條旁變成白色方塊。
+- **Fix**: 重新導入本地 `assets/mascot/hachiware-dance-fallback.svg` 作為首選來源，於 Sanitiser 中優先載入並標記來源，同步讓容器繼承卡片底色、更新版本碼 `LB-PROGRESS-MASCOT-20251210A` 確保快取刷新。
+- **Diagnostics**: 阻擋 Tenor API 後確認 `#loadingGif` 即顯示本地 SVG 並標記 `fallback:assets/...`，恢復連線時覆寫為 Tenor GIF 仍維持透明背景；檢視元素樣式確保 wrapper 無額外白底。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
