@@ -180,7 +180,8 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            optimizationEngine: 'ga_fuzzy'
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -329,7 +330,22 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const optimizationEngineRadios = document.querySelectorAll('input[name="batch-optimization-engine"]');
+        if (optimizationEngineRadios && optimizationEngineRadios.length > 0) {
+            optimizationEngineRadios.forEach(radio => {
+                if (radio.checked) {
+                    batchOptimizationConfig.optimizationEngine = radio.value;
+                }
+                radio.addEventListener('change', (event) => {
+                    if (event.target.checked) {
+                        batchOptimizationConfig.optimizationEngine = event.target.value;
+                        console.log('[Batch Optimization] Optimization engine changed:', batchOptimizationConfig.optimizationEngine);
+                    }
+                });
+            });
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -392,10 +408,15 @@ function startBatchOptimization() {
         
         // 重置結果
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
-    resetBatchWorkerStatus();
-    const panel = document.getElementById('batch-worker-status-panel');
-    if (panel) panel.classList.remove('hidden');
+        batchOptimizationConfig = {
+            ...batchOptimizationConfig,
+            ...config
+        };
+
+        // 初始化 worker 狀態面板
+        resetBatchWorkerStatus();
+        const panel = document.getElementById('batch-worker-status-panel');
+        if (panel) panel.classList.remove('hidden');
         
         // 顯示進度
         showBatchProgress();
@@ -516,7 +537,16 @@ function getBatchOptimizationConfig() {
         if (iterationLimitElement && iterationLimitElement.value) {
             config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
         }
-        
+
+        const engineRadios = document.querySelectorAll('input[name="batch-optimization-engine"]:checked');
+        if (engineRadios && engineRadios.length > 0) {
+            config.optimizationEngine = engineRadios[0].value;
+        } else if (batchOptimizationConfig.optimizationEngine) {
+            config.optimizationEngine = batchOptimizationConfig.optimizationEngine;
+        } else {
+            config.optimizationEngine = 'ga_fuzzy';
+        }
+
         // 安全檢查優化目標
         const annualReturnElement = document.getElementById('optimize-annual-return');
         if (annualReturnElement && annualReturnElement.checked) {
@@ -802,6 +832,443 @@ function getMetricFromResult(result, metric) {
     return val;
 }
 
+function shouldUseGeneticFuzzyEngine(combination, config) {
+    try {
+        if (!combination || !config) return false;
+        if (!config.optimizationEngine || config.optimizationEngine !== 'ga_fuzzy') {
+            return false;
+        }
+        const fuzzyConfig = (typeof fuzzyOptimizationConfig !== 'undefined') ? fuzzyOptimizationConfig : null;
+        if (!fuzzyConfig || !fuzzyConfig.strategyMappings) {
+            return false;
+        }
+        const hasEntryMapping = fuzzyConfig.strategyMappings[combination.buyStrategy];
+        const hasExitMapping = fuzzyConfig.strategyMappings[combination.sellStrategy];
+        return Boolean(hasEntryMapping || hasExitMapping);
+    } catch (error) {
+        console.error('[Batch Optimization] Fuzzy engine guard failed:', error);
+        return false;
+    }
+}
+
+async function runGeneticFuzzyOptimization(baseCombination, config) {
+    const fuzzyConfig = (typeof fuzzyOptimizationConfig !== 'undefined') ? fuzzyOptimizationConfig : null;
+    if (!fuzzyConfig) {
+        return baseCombination;
+    }
+
+    const mappingList = [];
+    if (fuzzyConfig.strategyMappings[baseCombination.buyStrategy]) {
+        mappingList.push(...fuzzyConfig.strategyMappings[baseCombination.buyStrategy]);
+    }
+    if (fuzzyConfig.strategyMappings[baseCombination.sellStrategy]) {
+        mappingList.push(...fuzzyConfig.strategyMappings[baseCombination.sellStrategy]);
+    }
+
+    if (mappingList.length === 0) {
+        return baseCombination;
+    }
+
+    const definitions = collectFuzzyMembershipDefinitions(fuzzyConfig, mappingList);
+    if (!definitions || definitions.length === 0) {
+        return baseCombination;
+    }
+
+    const evaluationBudget = Math.max(10, parseInt(config.parameterTrials, 10) || 100);
+    const populationSettings = fuzzyConfig.population || {};
+    const basePopulation = populationSettings.defaultSize || 12;
+    const populationSize = clampNumber(
+        basePopulation,
+        populationSettings.min || 6,
+        Math.min(populationSettings.max || 24, Math.max(4, evaluationBudget))
+    );
+    const maxGenerations = Math.max(1, Math.floor(evaluationBudget / populationSize));
+    const mutationRate = typeof fuzzyConfig.mutationRate === 'number' ? fuzzyConfig.mutationRate : 0.15;
+    const crossoverRate = typeof fuzzyConfig.crossoverRate === 'number' ? fuzzyConfig.crossoverRate : 0.8;
+
+    let population = createInitialFuzzyPopulation(definitions, populationSize);
+    let bestIndividual = null;
+    let bestFitness = -Infinity;
+    let bestResult = null;
+    let bestCombination = null;
+    let evaluations = 0;
+    let completedGenerations = 0;
+
+    for (let generation = 0; generation < maxGenerations; generation++) {
+        for (let i = 0; i < population.length && evaluations < evaluationBudget; i++) {
+            const individual = population[i];
+            if (typeof individual.fitness !== 'number') {
+                const evaluated = await evaluateFuzzyIndividual(
+                    individual,
+                    baseCombination,
+                    mappingList,
+                    config,
+                    definitions
+                );
+                evaluations++;
+                if (evaluated && typeof evaluated.fitness === 'number' && evaluated.fitness > bestFitness) {
+                    bestFitness = evaluated.fitness;
+                    bestIndividual = cloneFuzzyIndividual(evaluated);
+                    bestResult = evaluated.result || null;
+                    bestCombination = evaluated.combination ? evaluated.combination : null;
+                }
+            }
+        }
+
+        completedGenerations++;
+
+        if (evaluations >= evaluationBudget) {
+            break;
+        }
+
+        if (generation === maxGenerations - 1) {
+            break;
+        }
+
+        const sorted = [...population].sort((a, b) => {
+            const fitnessA = typeof a.fitness === 'number' ? a.fitness : -Infinity;
+            const fitnessB = typeof b.fitness === 'number' ? b.fitness : -Infinity;
+            return fitnessB - fitnessA;
+        });
+
+        const eliteCount = Math.min(2, sorted.length);
+        const newPopulation = [];
+        for (let i = 0; i < eliteCount; i++) {
+            newPopulation.push(cloneFuzzyIndividual(sorted[i]));
+        }
+
+        while (newPopulation.length < populationSize) {
+            const parentA = tournamentSelectFuzzy(population);
+            const parentB = tournamentSelectFuzzy(population);
+            let child;
+            if (Math.random() < crossoverRate) {
+                child = crossoverFuzzyIndividuals(parentA, parentB, definitions);
+            } else {
+                child = cloneFuzzyIndividual(parentA);
+            }
+            mutateFuzzyIndividual(child, definitions, mutationRate);
+            newPopulation.push(child);
+        }
+
+        population = newPopulation;
+    }
+
+    if (!bestIndividual || typeof bestFitness !== 'number' || !isFinite(bestFitness)) {
+        const fallbackCombo = cloneCombinationForFuzzy(baseCombination);
+        fallbackCombo.fuzzyOptimization = {
+            engine: 'ga_fuzzy',
+            version: fuzzyConfig.version,
+            evaluations,
+            generations: completedGenerations,
+            targetMetric: config.targetMetric,
+            status: 'no_valid_fitness'
+        };
+        return fallbackCombo;
+    }
+
+    const appliedCombination = bestCombination || buildCombinationFromGenes(baseCombination, bestIndividual.genes, mappingList);
+    const membershipSummary = summarizeFuzzyGenes(bestIndividual.genes);
+
+    appliedCombination.fuzzyOptimization = {
+        engine: 'ga_fuzzy',
+        version: fuzzyConfig.version,
+        evaluations,
+        generations: completedGenerations,
+        targetMetric: config.targetMetric,
+        bestMetric: bestFitness,
+        resultSummary: extractResultMetrics(bestResult, config.targetMetric),
+        memberships: membershipSummary
+    };
+
+    return appliedCombination;
+}
+
+function collectFuzzyMembershipDefinitions(fuzzyConfig, mappingList) {
+    const definitions = [];
+    const seenIndicators = new Set();
+    mappingList.forEach(mapping => {
+        if (mapping && mapping.indicator) {
+            seenIndicators.add(mapping.indicator);
+        }
+    });
+
+    seenIndicators.forEach(indicator => {
+        const indicatorConfig = fuzzyConfig.indicators ? fuzzyConfig.indicators[indicator] : null;
+        if (!indicatorConfig || !indicatorConfig.memberships) {
+            return;
+        }
+        indicatorConfig.memberships.forEach(membership => {
+            const key = `${indicator}.${membership.name}`;
+            if (!membership || definitions.find(def => def.key === key)) {
+                return;
+            }
+            const domain = indicatorConfig.domain || { min: 0, max: 100 };
+            const defaults = Array.isArray(membership.default)
+                ? membership.default.slice()
+                : [domain.min, (domain.min + domain.max) / 2, domain.max];
+            definitions.push({
+                key,
+                indicator,
+                membership: membership.name,
+                domain,
+                margin: Number.isFinite(membership.margin) ? membership.margin : 5,
+                defaultValues: enforceTriangularOrder(defaults, domain)
+            });
+        });
+    });
+
+    return definitions;
+}
+
+function createInitialFuzzyPopulation(definitions, populationSize) {
+    const population = [];
+    if (!definitions || definitions.length === 0 || populationSize <= 0) {
+        return population;
+    }
+    population.push({
+        genes: createGenesFromDefaults(definitions),
+        fitness: undefined
+    });
+    while (population.length < populationSize) {
+        population.push({
+            genes: createRandomGenes(definitions),
+            fitness: undefined
+        });
+    }
+    return population;
+}
+
+function createGenesFromDefaults(definitions) {
+    const genes = {};
+    definitions.forEach(def => {
+        genes[def.key] = def.defaultValues.slice();
+    });
+    return genes;
+}
+
+function createRandomGenes(definitions) {
+    const genes = {};
+    definitions.forEach(def => {
+        const jitter = def.margin || 5;
+        const domain = def.domain || { min: 0, max: 100 };
+        const baseValues = def.defaultValues.slice();
+        const perturbed = baseValues.map(val => {
+            const delta = (Math.random() * 2 - 1) * jitter;
+            return clampNumber(val + delta, domain.min, domain.max);
+        });
+        genes[def.key] = enforceTriangularOrder(perturbed, domain);
+    });
+    return genes;
+}
+
+async function evaluateFuzzyIndividual(individual, baseCombination, mappingList, config, definitions) {
+    if (!individual) return null;
+    if (typeof individual.fitness === 'number') {
+        return individual;
+    }
+
+    const testCombination = buildCombinationFromGenes(baseCombination, individual.genes, mappingList);
+    const result = await executeBacktestForCombination(testCombination);
+    const metric = getMetricFromResult(result, config.targetMetric);
+    let fitness = Number.isFinite(metric) ? metric : -Infinity;
+    if (config.targetMetric === 'maxDrawdown' && Number.isFinite(metric)) {
+        fitness = -Math.abs(metric);
+    }
+
+    individual.fitness = fitness;
+    individual.result = result;
+    individual.combination = testCombination;
+    return individual;
+}
+
+function crossoverFuzzyIndividuals(parentA, parentB, definitions) {
+    const childGenes = {};
+    definitions.forEach(def => {
+        const geneA = parentA?.genes?.[def.key] || def.defaultValues;
+        const geneB = parentB?.genes?.[def.key] || def.defaultValues;
+        const alpha = Math.random();
+        const blended = geneA.map((val, idx) => {
+            const other = geneB[idx] !== undefined ? geneB[idx] : def.defaultValues[idx];
+            return val * alpha + other * (1 - alpha);
+        });
+        childGenes[def.key] = enforceTriangularOrder(blended, def.domain);
+    });
+    return { genes: childGenes, fitness: undefined };
+}
+
+function mutateFuzzyIndividual(individual, definitions, mutationRate) {
+    if (!individual || !definitions) return;
+    definitions.forEach(def => {
+        if (Math.random() < mutationRate) {
+            const gene = individual.genes[def.key].slice();
+            const domain = def.domain || { min: 0, max: 100 };
+            const jitter = def.margin || 5;
+            const index = Math.floor(Math.random() * gene.length);
+            const delta = (Math.random() * 2 - 1) * jitter;
+            gene[index] = clampNumber(gene[index] + delta, domain.min, domain.max);
+            individual.genes[def.key] = enforceTriangularOrder(gene, domain);
+            individual.fitness = undefined;
+        }
+    });
+}
+
+function tournamentSelectFuzzy(population) {
+    if (!population || population.length === 0) {
+        return null;
+    }
+    const tournamentSize = Math.min(3, population.length);
+    let best = null;
+    for (let i = 0; i < tournamentSize; i++) {
+        const candidate = population[Math.floor(Math.random() * population.length)];
+        if (!best || (candidate && (candidate.fitness || -Infinity) > (best.fitness || -Infinity))) {
+            best = candidate;
+        }
+    }
+    return best ? cloneFuzzyIndividual(best) : population[0];
+}
+
+function cloneFuzzyIndividual(individual) {
+    if (!individual) return null;
+    const genes = {};
+    Object.keys(individual.genes || {}).forEach(key => {
+        genes[key] = individual.genes[key].slice();
+    });
+    return {
+        genes,
+        fitness: typeof individual.fitness === 'number' ? individual.fitness : undefined,
+        result: individual.result ? { ...individual.result } : undefined,
+        combination: individual.combination ? cloneCombinationForFuzzy(individual.combination) : undefined
+    };
+}
+
+function buildCombinationFromGenes(baseCombination, genes, mappingList) {
+    const cloned = cloneCombinationForFuzzy(baseCombination);
+    const buyStrategy = cloned.buyStrategy;
+    const sellStrategy = cloned.sellStrategy;
+    const buyDefaults = getDefaultParamsForStrategy(buyStrategy);
+    const sellDefaults = getDefaultParamsForStrategy(sellStrategy);
+    const buyParams = { ...buyDefaults, ...(cloned.buyParams || {}) };
+    const sellParams = { ...sellDefaults, ...(cloned.sellParams || {}) };
+
+    mappingList.forEach(mapping => {
+        if (!mapping || !mapping.param || !mapping.indicator) {
+            return;
+        }
+        const key = `${mapping.indicator}.${mapping.membership}`;
+        const gene = genes[key];
+        if (!gene || gene.length < 3) {
+            return;
+        }
+        const center = gene[1];
+        const targetStrategy = mapping.strategyType === 'exit' ? sellStrategy : buyStrategy;
+        const targetParams = mapping.strategyType === 'exit' ? sellParams : buyParams;
+        const range = resolveStrategyParamRange(targetStrategy, mapping.param);
+        targetParams[mapping.param] = clampToRange(center, range);
+        if (mapping.enableShort) {
+            cloned.enableShorting = true;
+        }
+    });
+
+    cloned.buyParams = buyParams;
+    cloned.sellParams = sellParams;
+    return cloned;
+}
+
+function cloneCombinationForFuzzy(combination) {
+    if (!combination) {
+        return {};
+    }
+    return {
+        ...combination,
+        buyParams: deepCloneObject(combination.buyParams),
+        sellParams: deepCloneObject(combination.sellParams),
+        riskManagement: deepCloneObject(combination.riskManagement)
+    };
+}
+
+function deepCloneObject(value) {
+    if (value === null || value === undefined) return value;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        return value;
+    }
+}
+
+function getDefaultParamsForStrategy(strategy) {
+    const info = strategyDescriptions[strategy];
+    if (!info || !info.defaultParams) {
+        return {};
+    }
+    return deepCloneObject(info.defaultParams) || {};
+}
+
+function resolveStrategyParamRange(strategy, paramName) {
+    const info = strategyDescriptions[strategy];
+    if (!info || !Array.isArray(info.optimizeTargets)) {
+        return null;
+    }
+    const target = info.optimizeTargets.find(t => t.name === paramName);
+    return target && target.range ? target.range : null;
+}
+
+function clampToRange(value, range) {
+    if (!range) return value;
+    const min = Math.min(range.from, range.to);
+    const max = Math.max(range.from, range.to);
+    if (!Number.isFinite(value)) return min;
+    return Math.min(max, Math.max(min, value));
+}
+
+function clampNumber(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    if (Number.isFinite(min) && value < min) return min;
+    if (Number.isFinite(max) && value > max) return max;
+    return value;
+}
+
+function enforceTriangularOrder(values, domain) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    const min = Number.isFinite(domain?.min) ? domain.min : 0;
+    const max = Number.isFinite(domain?.max) ? domain.max : 100;
+    const epsilon = 0.0001;
+    let [a, b, c] = sorted;
+    a = clampNumber(a, min, max);
+    b = clampNumber(Math.max(a + epsilon, b), min, max);
+    c = clampNumber(Math.max(b + epsilon, c), min, max);
+    if (c > max) {
+        c = max;
+        b = Math.min(b, c - epsilon);
+        a = Math.min(a, b - epsilon);
+        if (a < min) a = min;
+    }
+    return [a, b, c];
+}
+
+function summarizeFuzzyGenes(genes) {
+    const summary = {};
+    Object.keys(genes || {}).forEach(key => {
+        summary[key] = genes[key].map(val => Number.parseFloat(val.toFixed(3)));
+    });
+    return summary;
+}
+
+function extractResultMetrics(result, targetMetric) {
+    if (!result) return null;
+    const metrics = {
+        annualizedReturn: result.annualizedReturn,
+        returnRate: result.returnRate,
+        sharpeRatio: result.sharpeRatio,
+        sortinoRatio: result.sortinoRatio,
+        maxDrawdown: result.maxDrawdown,
+        tradesCount: result.tradesCount
+    };
+    if (targetMetric && metrics[targetMetric] !== undefined) {
+        metrics.focusMetric = metrics[targetMetric];
+    }
+    return metrics;
+}
+
 // 用來深度比較參數物件是否相等（簡單 JSON 比較）
 function paramsEqual(a, b) {
     try {
@@ -830,10 +1297,23 @@ async function optimizeCombinationIterative(combination, config) {
         console.log(`[Batch Optimization] Initial combination:`, {
             buyStrategy: currentCombo.buyStrategy,
             buyParams: currentCombo.buyParams,
-            sellStrategy: currentCombo.sellStrategy, 
+            sellStrategy: currentCombo.sellStrategy,
             sellParams: currentCombo.sellParams,
             riskManagement: currentCombo.riskManagement
         });
+
+        if (shouldUseGeneticFuzzyEngine(currentCombo, config)) {
+            try {
+                console.log('[Batch Optimization] Running GA + fuzzy warm-up...');
+                const fuzzyOptimized = await runGeneticFuzzyOptimization(currentCombo, config);
+                if (fuzzyOptimized) {
+                    currentCombo = fuzzyOptimized;
+                    console.log('[Batch Optimization] Fuzzy optimization applied:', currentCombo.fuzzyOptimization);
+                }
+            } catch (error) {
+                console.error('[Batch Optimization] Genetic fuzzy optimization error:', error);
+            }
+        }
 
         // 修復：實現策略間的交替迭代優化直到收斂
         // 這模擬了用戶手動操作的完整過程
