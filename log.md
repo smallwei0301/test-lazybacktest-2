@@ -1,3 +1,11 @@
+## 2025-11-18 — Patch LB-OVERFITTING-SCORE-20251118A
+- **Scope**: 摘要區與全新「過擬合」分頁。
+- **Highlights**:
+  - 依回測穩健度模型新增 P₁/P₂/P₃ 懲罰計算，整合夏普折損、PBO 估計與參數彈性分析，產出 0–100 分 R<sub>score</sub>。
+  - 於主頁新增「過擬合」分頁卡片，顯示總分、風險分級、三項指標細節與計算說明，並處理資料不足時的中性補註。
+  - Worker 擴充敏感度場景回傳的半場 Sharpe 值，供 PBO 與彈性計算使用。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
