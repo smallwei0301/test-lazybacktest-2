@@ -1,4 +1,4 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251113A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251115A';
 let forecastChartInstance = null;
 
 function updateForecastStatus(message, type = 'info') {
@@ -49,16 +49,15 @@ function formatNumber(value, digits = 2) {
     return value.toFixed(digits);
 }
 
-function describeWeights(weights) {
-    if (!Array.isArray(weights) || weights.length === 0) {
-        return '尚未建立校正權重。';
+function describeCorrection(delta, finalCarry) {
+    if (!Number.isFinite(delta)) {
+        return '尚未建立校正閥值。';
     }
-    const [offset, ...rest] = weights;
-    const parts = [`偏移 ${formatNumber(offset, 4)}`];
-    rest.forEach((w, idx) => {
-        parts.push(`殘差(-${idx + 1}) × ${formatNumber(w, 4)}`);
-    });
-    return parts.join(' ｜ ');
+    const deltaText = `最佳校正閥值 δ = ${(delta * 100).toFixed(3)}%`;
+    const carryText = Number.isFinite(finalCarry)
+        ? `最新累積誤差 C_last = ${formatNumber(finalCarry, 4)}`
+        : '最新累積誤差 C_last = --';
+    return `${deltaText} ｜ ${carryText}`;
 }
 
 function resolveCloseValue(row) {
@@ -110,6 +109,21 @@ function normalizeValue(value, stats) {
 
 function denormalizeValue(value, stats) {
     return value * (stats.std || 1) + stats.mean;
+}
+
+function computeMse(predicted, actuals) {
+    if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length !== actuals.length || predicted.length === 0) {
+        return NaN;
+    }
+    const sumSq = predicted.reduce((sum, pred, idx) => {
+        const actual = actuals[idx];
+        if (!Number.isFinite(pred) || !Number.isFinite(actual)) {
+            return sum;
+        }
+        const diff = pred - actual;
+        return sum + diff * diff;
+    }, 0);
+    return sumSq / predicted.length;
 }
 
 function createLstmModel(sequenceLength) {
@@ -186,134 +200,92 @@ async function predictSequential(model, normalizedSeries, closes, startIndex, se
     return { predicted, actuals, dates };
 }
 
-function computeRmse(predicted, actuals) {
-    if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length !== actuals.length || predicted.length === 0) {
-        return NaN;
-    }
-    const sumSq = predicted.reduce((sum, pred, idx) => {
-        const diff = pred - actuals[idx];
-        return sum + diff * diff;
-    }, 0);
-    return Math.sqrt(sumSq / predicted.length);
-}
-
-function computeMae(predicted, actuals) {
-    if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length !== actuals.length || predicted.length === 0) {
-        return NaN;
-    }
-    const sumAbs = predicted.reduce((sum, pred, idx) => sum + Math.abs(pred - actuals[idx]), 0);
-    return sumAbs / predicted.length;
-}
-
-function applyCorrectionSequential(rawPreds, actuals, seedResiduals, weights) {
-    const window = Math.max(0, weights.length - 1);
-    const history = Array.isArray(seedResiduals)
-        ? seedResiduals.slice(-window).filter((v) => Number.isFinite(v))
-        : [];
+function applyDeltaCorrection(rawPreds, actuals, initialCarry, delta) {
     const corrected = [];
+    const residuals = [];
+    let carry = Number.isFinite(initialCarry) ? initialCarry : 0;
     for (let idx = 0; idx < rawPreds.length; idx += 1) {
-        let correction = weights[0] || 0;
-        for (let j = 0; j < window; j += 1) {
-            const historyIndex = history.length - 1 - j;
-            const residualValue = historyIndex >= 0 ? history[historyIndex] : 0;
-            correction += (weights[j + 1] || 0) * residualValue;
-        }
-        const correctedValue = rawPreds[idx] + correction;
-        corrected.push(correctedValue);
-        if (Array.isArray(actuals) && Number.isFinite(actuals[idx])) {
-            const residual = actuals[idx] - correctedValue;
-            history.push(residual);
-            if (history.length > window) {
-                history.shift();
+        const baseline = rawPreds[idx];
+        const predicted = Number.isFinite(baseline) ? baseline + carry : NaN;
+        corrected.push(predicted);
+        const actual = actuals[idx];
+        if (Number.isFinite(actual) && Number.isFinite(predicted)) {
+            const residual = actual - predicted;
+            residuals.push(residual);
+            const threshold = Math.abs(actual) * (Number.isFinite(delta) ? Math.max(delta, 0) : 0);
+            if (Math.abs(residual) > threshold) {
+                carry += residual;
             }
+        } else {
+            residuals.push(NaN);
         }
     }
-    return { corrected, residualHistory: history.slice(-window) };
+    return { corrected, residuals, finalCarry: carry };
 }
 
-function runGeneticOptimization({ rawPreds, actuals, window }) {
-    const populationSize = 30;
-    const generations = 40;
-    const mutationRate = 0.2;
-    const mutationScale = 0.1;
-    const limit = 0.8;
-
+function runGeneticDeltaSearch({ rawPreds, actuals }) {
     if (!Array.isArray(rawPreds) || rawPreds.length === 0 || !Array.isArray(actuals) || actuals.length !== rawPreds.length) {
-        return [0];
+        return { delta: 0, mse: computeMse(rawPreds, actuals) };
     }
-    const weightLength = Math.max(1, window + 1);
 
-    const randomGene = (scale = 0.3) => (Math.random() * 2 - 1) * scale;
+    const populationSize = 24;
+    const generations = 40;
+    const mutationRate = 0.3;
+    const crossoverRate = 0.7;
+    const deltaMin = 0.0005;
+    const deltaMax = 0.15;
 
-    const createChromosome = () => {
-        const genes = [];
-        for (let i = 0; i < weightLength; i += 1) {
-            genes.push(randomGene(i === 0 ? 0.1 : 0.3));
-        }
-        return genes;
+    const randomDelta = () => deltaMin + Math.random() * (deltaMax - deltaMin);
+
+    const evaluate = (delta) => {
+        const { corrected } = applyDeltaCorrection(rawPreds, actuals, 0, delta);
+        return computeMse(corrected, actuals);
     };
 
-    const clampGene = (value) => {
-        if (!Number.isFinite(value)) return 0;
-        if (value > limit) return limit;
-        if (value < -limit) return -limit;
-        return value;
-    };
-
-    const evaluate = (chromosome) => {
-        const { corrected } = applyCorrectionSequential(rawPreds, actuals, [], chromosome);
-        return computeRmse(corrected, actuals);
-    };
-
-    const population = Array.from({ length: populationSize }, createChromosome);
-    let bestChromosome = population[0];
-    let bestScore = evaluate(bestChromosome);
-
-    const selectParent = (scores) => {
-        const tournamentSize = 3;
-        let best = null;
-        let bestValue = Infinity;
-        for (let i = 0; i < tournamentSize; i += 1) {
-            const candidateIndex = Math.floor(Math.random() * population.length);
-            const candidateScore = scores[candidateIndex];
-            if (candidateScore < bestValue) {
-                bestValue = candidateScore;
-                best = population[candidateIndex];
-            }
-        }
-        return best ? best.slice() : createChromosome();
-    };
+    let population = Array.from({ length: populationSize }, randomDelta);
+    let bestDelta = population[0];
+    let bestScore = evaluate(bestDelta);
 
     for (let generation = 0; generation < generations; generation += 1) {
         const scores = population.map(evaluate);
         scores.forEach((score, idx) => {
             if (score < bestScore) {
                 bestScore = score;
-                bestChromosome = population[idx].slice();
+                bestDelta = population[idx];
             }
         });
 
-        const nextPopulation = [];
-        while (nextPopulation.length < populationSize) {
-            const parentA = selectParent(scores);
-            const parentB = selectParent(scores);
-            const child = parentA.map((gene, idx) => {
-                const inherit = Math.random() < 0.5 ? gene : parentB[idx] || 0;
-                return inherit;
-            });
-            if (Math.random() < mutationRate) {
-                for (let i = 0; i < child.length; i += 1) {
-                    if (Math.random() < 0.5) {
-                        child[i] = clampGene(child[i] + randomGene(mutationScale));
-                    }
-                }
-            }
-            nextPopulation.push(child.map(clampGene));
+        const matingPool = [];
+        while (matingPool.length < populationSize) {
+            const idxA = Math.floor(Math.random() * population.length);
+            const idxB = Math.floor(Math.random() * population.length);
+            const selected = scores[idxA] < scores[idxB] ? population[idxA] : population[idxB];
+            matingPool.push(selected);
         }
-        population.splice(0, population.length, ...nextPopulation);
+
+        const nextPopulation = [];
+        for (let i = 0; i < populationSize; i += 1) {
+            let offspring = matingPool[i];
+            if (Math.random() < crossoverRate) {
+                const mate = matingPool[Math.floor(Math.random() * matingPool.length)];
+                offspring = (offspring + mate) / 2;
+            }
+            if (Math.random() < mutationRate) {
+                const perturbation = (Math.random() - 0.5) * 0.05;
+                offspring += perturbation;
+            }
+            if (!Number.isFinite(offspring)) {
+                offspring = randomDelta();
+            }
+            if (offspring < deltaMin) offspring = deltaMin;
+            if (offspring > deltaMax) offspring = deltaMax;
+            nextPopulation.push(offspring);
+        }
+
+        population = nextPopulation;
     }
 
-    return bestChromosome.map((gene) => clampGene(gene));
+    return { delta: bestDelta, mse: bestScore };
 }
 
 function computeDirectionMetrics(predicted, actuals, closes, startIndex) {
@@ -428,21 +400,27 @@ function updateForecastMetrics(result) {
     const hitRateEl = document.getElementById('forecastHitRate');
     const gainEl = document.getElementById('forecastAvgGain');
     const lossEl = document.getElementById('forecastAvgLoss');
-    const rmseEl = document.getElementById('forecastRmse');
-    const maeEl = document.getElementById('forecastMae');
-    const weightsEl = document.getElementById('forecastWeights');
+    const mseEl = document.getElementById('forecastMse');
+    const correctionEl = document.getElementById('forecastCorrection');
+    const correctionDetailsEl = document.getElementById('forecastCorrectionDetails');
 
     if (hitRateEl) hitRateEl.textContent = formatRatio(metrics.hitRate);
     if (gainEl) gainEl.textContent = formatChange(metrics.avgGain);
     if (lossEl) lossEl.textContent = formatChange(metrics.avgLoss);
-    if (rmseEl) rmseEl.textContent = `${formatNumber(metrics.rmse, 2)} （基準 ${formatNumber(metrics.baselineRmse, 2)}）`;
-    if (maeEl) maeEl.textContent = `${formatNumber(metrics.mae, 2)} （基準 ${formatNumber(metrics.baselineMae, 2)}）`;
-    if (weightsEl) weightsEl.textContent = describeWeights(result.weights);
+    if (mseEl) mseEl.textContent = `${formatNumber(metrics.mse, 2)} （基準 ${formatNumber(metrics.baselineMse, 2)}）`;
+    const deltaValue = Number.isFinite(result.correction?.delta) ? result.correction.delta : NaN;
+    if (correctionEl) {
+        const finalCarry = result.correction?.finalCarry;
+        correctionEl.textContent = describeCorrection(deltaValue, finalCarry);
+    }
+    if (correctionDetailsEl) {
+        correctionDetailsEl.textContent = `訓練期 MSE ${formatNumber(metrics.baselineTrainingMse, 2)} → ${formatNumber(metrics.trainingMse, 2)}，δ ${(Number.isFinite(deltaValue) ? (deltaValue * 100).toFixed(3) : '—')}%。`;
+    }
 }
 
 function summariseForecastCompletion(result) {
     const durationSeconds = Number.isFinite(result.durationMs) ? result.durationMs / 1000 : 0;
-    const summary = `完成預測：命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，RMSE ${formatNumber(result.metrics.baselineRmse, 2)} → ${formatNumber(result.metrics.rmse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
+    const summary = `完成預測：命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，MSE ${formatNumber(result.metrics.baselineMse, 2)} → ${formatNumber(result.metrics.mse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
     updateForecastStatus(summary, 'success');
 }
 
@@ -488,26 +466,25 @@ async function runForecastWorkflow() {
     const trainPredActuals = trainPredNormArray.map((value) => denormalizeValue(value, stats));
     const trainActuals = closes.slice(sequenceLength, trainCount);
 
-    const window = Math.min(3, Math.max(1, Math.floor(trainPredActuals.length / 10)));
-    const weights = trainPredActuals.length >= 5
-        ? runGeneticOptimization({ rawPreds: trainPredActuals, actuals: trainActuals, window })
-        : [0];
+    const deltaSearch = trainPredActuals.length >= 5
+        ? runGeneticDeltaSearch({ rawPreds: trainPredActuals, actuals: trainActuals })
+        : { delta: 0, mse: computeMse(trainPredActuals, trainActuals) };
 
-    const trainingCorrection = applyCorrectionSequential(trainPredActuals, trainActuals, [], weights);
+    const baselineTrainingMse = computeMse(trainPredActuals, trainActuals);
+    const trainingCorrection = applyDeltaCorrection(trainPredActuals, trainActuals, 0, deltaSearch.delta);
+    const trainingMse = computeMse(trainingCorrection.corrected, trainActuals);
 
     const testResult = await predictSequential(model, normalizedSeries, closes, trainCount, sequenceLength, stats, rows);
-    const baselineRmse = computeRmse(testResult.predicted, testResult.actuals);
-    const baselineMae = computeMae(testResult.predicted, testResult.actuals);
+    const baselineMse = computeMse(testResult.predicted, testResult.actuals);
 
-    const correctedResult = applyCorrectionSequential(
+    const correctedResult = applyDeltaCorrection(
         testResult.predicted,
         testResult.actuals,
-        trainingCorrection.residualHistory,
-        weights,
+        trainingCorrection.finalCarry,
+        deltaSearch.delta,
     );
 
-    const rmse = computeRmse(correctedResult.corrected, testResult.actuals);
-    const mae = computeMae(correctedResult.corrected, testResult.actuals);
+    const mse = computeMse(correctedResult.corrected, testResult.actuals);
 
     const directionMetrics = computeDirectionMetrics(
         correctedResult.corrected,
@@ -535,16 +512,19 @@ async function runForecastWorkflow() {
         sequenceLength,
         trainSamples: sampleCount,
         testSamples: testResult.actuals.length,
-        weights,
+        correction: {
+            delta: deltaSearch.delta,
+            finalCarry: correctedResult.finalCarry,
+        },
         durationMs: 0,
         metrics: {
             hitRate: directionMetrics.hitRate,
             avgGain: directionMetrics.avgGain,
             avgLoss: directionMetrics.avgLoss,
-            rmse,
-            mae,
-            baselineRmse,
-            baselineMae,
+            mse,
+            baselineMse,
+            trainingMse,
+            baselineTrainingMse,
             baselineHitRate: baselineDirection.hitRate,
         },
         chart: chartPayload,

@@ -763,3 +763,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-FORECAST-LSTMGA-20251115A
+- **Issue recap**: 原預測模組以線性殘差權重修正並採 RMSE/MAE 指標，未符合研究要求的均方誤差評估與閥值型誤差校正流程，且無法清楚揭露累積誤差。
+- **Fix**: 將 GA 目標改為尋找最佳校正閥值 δ，依「|C_t| > R_t × δ」規則累計誤差並套用於次日預測；更新介面改以 MSE 作為主要指標，同步顯示 δ 與累積誤差、訓練期對照結果。
+- **Diagnostics**: 本地以可見股價序列執行預測，確認訓練／測試 MSE 均能輸出、δ 與 C_last 會隨按鈕更新，圖表不會提前使用未來資料。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

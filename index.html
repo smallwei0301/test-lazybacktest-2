@@ -1423,8 +1423,8 @@
                                             <span id="forecastVersion" class="text-[11px] font-medium px-2 py-1 rounded-full border"
                                                 style="border-color: var(--border); color: var(--muted-foreground);">版本載入中...</span>
                                         </div>
-                                        <p class="card-description text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                            依照回測區間的收盤價建立 LSTM 時序模型，並以遺傳演算法調校殘差，產出隔日收盤價的方向命中率與報酬分布。
+                                            <p class="card-description text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            依照回測區間的收盤價建立 LSTM 時序模型，透過遺傳演算法搜尋最佳誤差校正閥值，避免回溯修正並輸出隔日方向命中率與報酬分布。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-5">
@@ -1459,14 +1459,14 @@
                                         </div>
                                         <div class="grid gap-4 md:grid-cols-2" id="forecastErrorMetrics">
                                             <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
-                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">RMSE（收盤價）</p>
-                                                <p id="forecastRmse" class="text-xl font-bold" style="color: var(--foreground);">--</p>
-                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">LSTM+GA 修正後與實際收盤價的均方根誤差。</p>
+                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">MSE（收盤價）</p>
+                                                <p id="forecastMse" class="text-xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">以均方誤差衡量 LSTM 與校正結果的準確度，並與未校正基準比較。</p>
                                             </div>
                                             <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
-                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">MAE（收盤價）</p>
-                                                <p id="forecastMae" class="text-xl font-bold" style="color: var(--foreground);">--</p>
-                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">LSTM+GA 修正後的絕對誤差平均值。</p>
+                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">誤差校正參數</p>
+                                                <p id="forecastCorrection" class="text-xs leading-relaxed" style="color: var(--foreground);">尚未建立校正閥值。</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">以當日誤差超過 δ × 當日收盤價時才累加至下一期，避免未來資料洩漏。</p>
                                             </div>
                                         </div>
                                         <div class="space-y-2">
@@ -1476,8 +1476,10 @@
                                             </div>
                                         </div>
                                         <div class="p-4 rounded-lg border bg-background" style="border-color: var(--border);">
-                                            <h5 class="text-xs font-semibold mb-2" style="color: var(--foreground);">GA 誤差校正權重</h5>
-                                            <p id="forecastWeights" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">尚未建立校正權重。</p>
+                                            <h5 class="text-xs font-semibold mb-2" style="color: var(--foreground);">GA 校正摘要</h5>
+                                            <p id="forecastCorrectionDetails" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                校正閥值將於完成預測後顯示，可配合 MSE 評估模型穩定度。
+                                            </p>
                                         </div>
                                         <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                             注意：本功能僅為歷史資料模擬，實際投資仍需自行判斷。模型採用訓練區間的統計值進行標準化，預測時僅使用當下可取得的歷史資料，不會回頭修正既有資料。
