@@ -52,6 +52,21 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+function publishVisibleStockData(nextData) {
+    visibleStockData = Array.isArray(nextData) ? nextData : [];
+    if (typeof window !== 'undefined') {
+        window.visibleStockData = visibleStockData;
+    }
+    if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+        document.dispatchEvent(new CustomEvent('lb:visible-stock-data-updated', {
+            detail: { length: visibleStockData.length },
+        }));
+    }
+    return visibleStockData;
+}
+
+publishVisibleStockData(visibleStockData);
+
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
     const text = typeof value === 'string' ? value : String(value);
@@ -4647,7 +4662,7 @@ function runBacktestInternal() {
             );
             cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
-            visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
+            publishVisibleStockData(extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate));
             cachedStockData = cachedEntry.data;
             lastFetchSettings = { ...curSettings };
             refreshPriceInspectorControls();
@@ -4800,7 +4815,7 @@ function runBacktestInternal() {
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                      }, cacheEntry.data);
-                     visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
+                     publishVisibleStockData(extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate));
                      cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
@@ -4890,7 +4905,7 @@ function runBacktestInternal() {
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                     }, updatedEntry.data);
-                    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+                    publishVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
                     cachedStockData = updatedEntry.data;
                     lastFetchSettings = { ...curSettings };
                     refreshPriceInspectorControls();
@@ -5073,7 +5088,7 @@ function clearPreviousResults() {
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
     }
-    visibleStockData = [];
+    publishVisibleStockData([]);
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
@@ -7607,7 +7622,7 @@ function runOptimizationInternal(optimizeType) {
                 if(!useCache&&data?.rawDataUsed){
                     cachedStockData=data.rawDataUsed;
                     if (Array.isArray(data.rawDataUsed)) {
-                        visibleStockData = data.rawDataUsed;
+                        publishVisibleStockData(data.rawDataUsed);
                     }
                     lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
@@ -8118,7 +8133,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         acknowledgeExcessGap: false,
     });
     cachedDataStore.set(cacheKey, updatedEntry);
-    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+    publishVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
     cachedStockData = updatedEntry.data;
     lastFetchSettings = { ...curSettings };
     refreshPriceInspectorControls();
