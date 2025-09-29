@@ -566,6 +566,85 @@
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }
+
+/* Patch Tag: LB-OVERFITTING-SCORE-20250914A */
+.overfitting-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.25rem;
+}
+
+.overfitting-score-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.overfitting-score-chip--excellent {
+    background: color-mix(in srgb, var(--emerald-500, #10b981) 18%, transparent);
+    color: color-mix(in srgb, var(--emerald-500, #10b981) 85%, white);
+    border: 1px solid color-mix(in srgb, var(--emerald-500, #10b981) 60%, transparent);
+}
+
+.overfitting-score-chip--good {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    color: color-mix(in srgb, var(--primary) 80%, white);
+    border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.overfitting-score-chip--moderate {
+    background: color-mix(in srgb, #f97316 15%, transparent);
+    color: color-mix(in srgb, #f97316 78%, white);
+    border: 1px solid color-mix(in srgb, #f97316 55%, transparent);
+}
+
+.overfitting-score-chip--high {
+    background: color-mix(in srgb, #f43f5e 18%, transparent);
+    color: color-mix(in srgb, #f43f5e 82%, white);
+    border: 1px solid color-mix(in srgb, #f43f5e 60%, transparent);
+}
+
+.overfitting-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+}
+
+.overfitting-detail-table thead {
+    background: color-mix(in srgb, var(--muted) 30%, transparent);
+}
+
+.overfitting-detail-table th,
+.overfitting-detail-table td {
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.overfitting-detail-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.overfitting-detail-table th {
+    font-weight: 600;
+    color: var(--muted-foreground);
+}
+
+.overfitting-detail-table td {
+    color: var(--foreground);
+}
+
+.overfitting-note {
+    font-size: 0.7rem;
+    line-height: 1.6;
+    color: var(--muted-foreground);
+}
 #backtest-result { position: relative; overflow: visible; }
 .developer-area-wrapper { width: 100%; }
 .developer-area-wrapper:not(.hidden) .hero-developer-card { animation: fadeIn 0.3s ease-in-out; }

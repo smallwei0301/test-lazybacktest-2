@@ -1216,6 +1216,14 @@
                                             >
                                                 <i data-lucide="clipboard-list" class="lucide-sm inline mr-1"></i>摘要
                                             </button>
+                                            <!-- Patch Tag: LB-OVERFITTING-SCORE-20250914A -->
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="overfitting"
+                                            >
+                                                <i data-lucide="shield-alert" class="lucide-sm inline mr-1"></i>過擬合
+                                            </button>
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
@@ -1262,7 +1270,39 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
+                            <!-- Overfitting Tab -->
+                            <div class="tab-content hidden" id="overfitting-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-4">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="brain-circuit" class="lucide" style="color: var(--accent);"></i>
+                                            回測過擬合評估
+                                        </h3>
+                                        <p class="card-description" style="color: var(--muted-foreground);">
+                                            依據效能折損、回測過擬合機率與參數敏感度三項指標計算 0–100 分的回測穩健度分數。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-5">
+                                        <div
+                                            id="overfitting-placeholder"
+                                            class="rounded-lg border border-dashed p-4 text-sm leading-relaxed"
+                                            style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: var(--muted-foreground);"
+                                        >
+                                            執行回測後，這裡會即時計算回測穩健度分數（<em>Backtest Robustness Score</em>）並說明每一項扣分來源，協助判斷是否已陷入過擬合。
+                                        </div>
+                                        <div id="overfitting-score-container" class="space-y-5 hidden"></div>
+                                        <p
+                                            id="overfitting-version"
+                                            class="text-[11px] tracking-wide uppercase"
+                                            style="color: var(--muted-foreground);"
+                                        >
+                                            版本代碼：LB-OVERFITTING-SCORE-20250914A
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Summary Tab -->
                             <div class="tab-content active space-y-6" id="summary-tab">
                                 <!-- Strategy Status Card -->

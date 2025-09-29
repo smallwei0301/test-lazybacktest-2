@@ -13,6 +13,9 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-OVERFITTING-SCORE-20250914A
+
+const OVERFITTING_SCORE_VERSION = 'LB-OVERFITTING-SCORE-20250914A';
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -5077,6 +5080,7 @@ function clearPreviousResults() {
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
+    renderOverfittingAssessment(null);
 }
 
 const adjustmentReasonLabels = {
@@ -6159,7 +6163,8 @@ function handleBacktestResult(result, stockName, dataSource) {
         renderTrendSummary();
         updateChartTrendOverlay();
         if (suggestionArea) suggestionArea.classList.add('hidden');
-         hideLoading();
+        hideLoading();
+        renderOverfittingAssessment(null);
         return;
     }
     try {
@@ -6222,6 +6227,7 @@ function displayBacktestResult(result) {
     if (!result) {
         resetStrategyStatusCard('missing');
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
+        renderOverfittingAssessment(null);
         return;
     }
     updateStrategyStatusCard(result);
@@ -6968,10 +6974,502 @@ function displayBacktestResult(result) {
         `;
 
         initSensitivityCollapse(el);
+        renderOverfittingAssessment(result);
 
         console.log("[Main] displayBacktestResult finished.");
     }
-const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
+
+function renderOverfittingAssessment(result) {
+    const container = document.getElementById('overfitting-score-container');
+    const placeholder = document.getElementById('overfitting-placeholder');
+    const versionLabel = document.getElementById('overfitting-version');
+    if (versionLabel) {
+        versionLabel.textContent = `版本代碼：${OVERFITTING_SCORE_VERSION}`;
+    }
+    if (!container) return;
+
+    if (!result) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        if (placeholder) placeholder.classList.remove('hidden');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+        return;
+    }
+
+    const evaluation = computeOverfittingScoreComponents(result);
+    if (!evaluation) {
+        container.innerHTML = `
+            <div class="rounded-lg border border-dashed p-4 text-sm leading-relaxed" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: var(--muted-foreground);">
+                目前缺乏半段績效或參數敏感度場景，暫時無法評估過擬合風險。建議至少執行一次完整回測與敏感度分析，再回來檢視分數。
+            </div>
+        `;
+        container.classList.remove('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+        return;
+    }
+
+    const { totalScore, classification, components, missingComponents, parameterSummaries } = evaluation;
+    const scoreText = Number.isFinite(totalScore) ? totalScore.toFixed(1) : '—';
+    const badgeClass = `overfitting-score-chip overfitting-score-chip--${classification.level}`;
+    const missingNote = missingComponents.length > 0
+        ? `<div class="overfitting-note mt-3">部分指標尚未取得資料：${missingComponents.map((item) => escapeHtml(item)).join('、')}。建議補齊相關測試後再觀察分數。</div>`
+        : '';
+
+    const performance = components.performance;
+    const pbo = components.pbo;
+    const sensitivity = components.sensitivity;
+
+    const performanceDetails = Number.isFinite(performance.score)
+        ? `<ul class="space-y-1 text-xs" style="color: var(--muted-foreground);">
+                <li>IS 夏普比：${formatOverfittingNumber(performance.sharpeInSample, 2)} ｜ OOS 推估夏普比：${formatOverfittingNumber(performance.sharpeOutSample, 2)}</li>
+                <li>折損率 (Haircut)：${formatOverfittingRatio(performance.haircut, 1)}</li>
+            </ul>`
+        : `<p class="text-sm" style="color: var(--muted-foreground);">缺少 Sharpe Ratio 對半分資料，暫無法估計效能折損懲罰。</p>`;
+
+    let pboDetails = `<p class="text-sm" style="color: var(--muted-foreground);">敏感度場景不足，暫無法估計 PBO。</p>`;
+    if (Number.isFinite(pbo.score)) {
+        const improvementLine = pbo.improvementCount > 0
+            ? `提升報酬的場景 ${pbo.improvementCount} 筆，其中 ${pbo.degradeCount} 筆樣本外風險調整績效低於基準。`
+            : `共有 ${pbo.comparableCount} 筆敏感度場景可比較，暫未偵測到顯著的過擬合跡象。`;
+        pboDetails = `<ul class="space-y-1 text-xs" style="color: var(--muted-foreground);">
+                <li>PBO 估計值：${formatOverfittingRatio(pbo.probability, 1)}</li>
+                <li>${escapeHtml(improvementLine)}</li>
+            </ul>`;
+    }
+
+    const sensitivityDetails = Number.isFinite(sensitivity.score)
+        ? `<ul class="space-y-1 text-xs" style="color: var(--muted-foreground);">
+                <li>平均絕對彈性：${formatOverfittingNumber(sensitivity.elasticityAverage, 2)}</li>
+                <li>涵蓋參數：${sensitivity.parameterCount} 組 ｜ 場景筆數：${sensitivity.scenarioCount}</li>
+            </ul>`
+        : `<p class="text-sm" style="color: var(--muted-foreground);">敏感度分析尚未啟用或缺少有效基準，無法計算平均絕對彈性。</p>`;
+
+    let parameterTable = '';
+    if (Array.isArray(parameterSummaries) && parameterSummaries.length > 0) {
+        const rowsHtml = parameterSummaries
+            .slice()
+            .sort((a, b) => (Number.isFinite(b.averageElasticity) ? b.averageElasticity : -Infinity) - (Number.isFinite(a.averageElasticity) ? a.averageElasticity : -Infinity))
+            .slice(0, 6)
+            .map((item) => {
+                const contextText = escapeHtml(item.contextLabel || '策略參數');
+                const nameText = escapeHtml(item.parameterName || '參數');
+                const elasticityText = formatOverfittingNumber(item.averageElasticity, 2);
+                const driftText = Number.isFinite(item.averageDriftPercent)
+                    ? `${formatOverfittingNumber(item.averageDriftPercent, 2)}%`
+                    : '—';
+                const stabilityText = Number.isFinite(item.stabilityScore)
+                    ? formatOverfittingNumber(item.stabilityScore, 1)
+                    : '—';
+                const baseValueText = Number.isFinite(item.baseValue)
+                    ? formatOverfittingNumber(item.baseValue, Math.abs(item.baseValue) >= 10 ? 0 : 2)
+                    : '—';
+                return `
+                    <tr>
+                        <td>${contextText}</td>
+                        <td>${nameText}</td>
+                        <td>${baseValueText}</td>
+                        <td>${elasticityText}</td>
+                        <td>${driftText}</td>
+                        <td>${stabilityText}</td>
+                    </tr>
+                `;
+            })
+            .join('');
+
+        if (rowsHtml) {
+            parameterTable = `
+                <div class="space-y-2">
+                    <h4 class="text-sm font-semibold" style="color: var(--foreground);">彈性最高的參數觀察</h4>
+                    <div class="overflow-x-auto">
+                        <table class="overfitting-detail-table">
+                            <thead>
+                                <tr>
+                                    <th>模組</th>
+                                    <th>參數</th>
+                                    <th>基準值</th>
+                                    <th>平均彈性</th>
+                                    <th>平均漂移</th>
+                                    <th>穩定度分數</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rowsHtml}</tbody>
+                        </table>
+                    </div>
+                    <p class="overfitting-note">表格列出彈性最高的參數，數值越大表示微幅調整即可能帶來顯著績效變化，建議優先加入 Walk-Forward 驗證。</p>
+                </div>
+            `;
+        }
+    }
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--accent) 8%, var(--background)); border-color: color-mix(in srgb, var(--accent) 35%, transparent);">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">回測穩健度分數</p>
+                        <h4 class="text-3xl font-bold" style="color: var(--foreground);">${scoreText}</h4>
+                    </div>
+                    <span class="${badgeClass}">
+                        <i data-lucide="shield-check" class="lucide-sm"></i>
+                        ${escapeHtml(classification.label)}
+                    </span>
+                </div>
+                <p class="text-sm mt-3" style="color: var(--muted-foreground);">${escapeHtml(classification.description)}</p>
+                ${missingNote}
+            </div>
+
+            <div class="overfitting-breakdown-grid">
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--primary) 6%, var(--background)); border-color: color-mix(in srgb, var(--primary) 35%, transparent);">
+                    <p class="text-xs font-semibold uppercase tracking-wide" style="color: var(--primary);">效能折損懲罰（30 分）</p>
+                    <p class="text-2xl font-bold mt-2" style="color: var(--foreground);">${formatOverfittingScoreValue(performance.score, performance.max)}</p>
+                    ${performanceDetails}
+                </div>
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, #f97316 8%, var(--background)); border-color: color-mix(in srgb, #f97316 38%, transparent);">
+                    <p class="text-xs font-semibold uppercase tracking-wide" style="color: #f97316;">回測過擬合機率懲罰（40 分）</p>
+                    <p class="text-2xl font-bold mt-2" style="color: var(--foreground);">${formatOverfittingScoreValue(pbo.score, pbo.max)}</p>
+                    ${pboDetails}
+                </div>
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, #10b981 8%, var(--background)); border-color: color-mix(in srgb, #10b981 35%, transparent);">
+                    <p class="text-xs font-semibold uppercase tracking-wide" style="color: #059669;">參數敏感度懲罰（30 分）</p>
+                    <p class="text-2xl font-bold mt-2" style="color: var(--foreground);">${formatOverfittingScoreValue(sensitivity.score, sensitivity.max)}</p>
+                    ${sensitivityDetails}
+                </div>
+            </div>
+
+            ${parameterTable}
+
+            <div class="rounded-lg border border-dashed p-4" style="border-color: color-mix(in srgb, var(--border) 65%, transparent); background: color-mix(in srgb, var(--muted) 6%, transparent);">
+                <p class="overfitting-note">PBO 估計採用敏感度模擬結果中「提升報酬但拉低夏普比」的比例近似 CSCV 框架，作為樣本外排名惡化的風險指標。建議後續搭配 Walk-Forward 或 CSCV 實測，確認穩健度是否維持。</p>
+            </div>
+        </div>
+    `;
+
+    container.classList.remove('hidden');
+    if (placeholder) placeholder.classList.add('hidden');
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
+
+function computeOverfittingScoreComponents(result) {
+    if (!result || typeof result !== 'object') return null;
+
+    const baseline = {
+        returnRate: Number.isFinite(result.returnRate) ? result.returnRate : null,
+        sharpe: Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null,
+    };
+
+    const srIn = Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null;
+    const srHalf2 = Number.isFinite(result.sharpeHalf2) ? result.sharpeHalf2 : null;
+    const srHalf1 = Number.isFinite(result.sharpeHalf1) ? result.sharpeHalf1 : null;
+    const srOut = srHalf2 !== null ? srHalf2 : srHalf1 !== null ? srHalf1 : null;
+
+    let hairCut = null;
+    if (srIn !== null && srOut !== null && Math.abs(srIn) > 1e-6) {
+        hairCut = 1 - srOut / srIn;
+        if (!Number.isFinite(hairCut)) hairCut = null;
+    }
+    const performanceScore = Number.isFinite(hairCut)
+        ? 30 * (1 - Math.min(Math.max(hairCut, 0), 1))
+        : null;
+
+    const sensitivityData = result.parameterSensitivity ?? result.sensitivityAnalysis ?? null;
+    const sensitivityStats = computeParameterElasticityStats(sensitivityData, baseline);
+    const sensitivityScore = Number.isFinite(sensitivityStats.elasticityAverage)
+        ? 30 * (1 - Math.min(Math.max(sensitivityStats.elasticityAverage, 0), 3) / 3)
+        : null;
+
+    const pboMetrics = estimateProbabilityOfOverfitting(sensitivityStats.scenarios, baseline.sharpe);
+    const pboScore = Number.isFinite(pboMetrics.probability)
+        ? 40 * (1 - Math.min(Math.max(pboMetrics.probability, 0), 1))
+        : null;
+
+    if (!Number.isFinite(performanceScore) && !Number.isFinite(pboScore) && !Number.isFinite(sensitivityScore)) {
+        return null;
+    }
+
+    const totalScore = (performanceScore ?? 0) + (pboScore ?? 0) + (sensitivityScore ?? 0);
+    const classification = classifyRobustnessLevel(totalScore);
+    const missingComponents = [];
+    if (!Number.isFinite(performanceScore)) missingComponents.push('效能折損懲罰');
+    if (!Number.isFinite(pboScore)) missingComponents.push('回測過擬合機率懲罰');
+    if (!Number.isFinite(sensitivityScore)) missingComponents.push('參數敏感度懲罰');
+
+    return {
+        totalScore,
+        classification,
+        missingComponents,
+        components: {
+            performance: {
+                score: performanceScore,
+                max: 30,
+                sharpeInSample: srIn,
+                sharpeOutSample: srOut,
+                haircut: hairCut,
+            },
+            pbo: {
+                score: pboScore,
+                max: 40,
+                probability: pboMetrics.probability,
+                improvementCount: pboMetrics.improvementCount,
+                degradeCount: pboMetrics.degradeCount,
+                comparableCount: pboMetrics.comparableCount,
+            },
+            sensitivity: {
+                score: sensitivityScore,
+                max: 30,
+                elasticityAverage: sensitivityStats.elasticityAverage,
+                parameterCount: sensitivityStats.parameterCount,
+                scenarioCount: sensitivityStats.scenarioCount,
+            },
+        },
+        parameterSummaries: sensitivityStats.parameterSummaries,
+    };
+}
+
+function computeParameterElasticityStats(sensitivityData, baseline) {
+    const scenarios = extractSensitivityScenarios(sensitivityData);
+    if (scenarios.length === 0) {
+        return {
+            elasticityAverage: null,
+            parameterSummaries: [],
+            parameterCount: 0,
+            scenarioCount: 0,
+            elasticityScenarioCount: 0,
+            scenarios: [],
+        };
+    }
+
+    const grouped = new Map();
+    let totalScenarioCount = 0;
+    scenarios.forEach((scenario, index) => {
+        if (scenario.run) totalScenarioCount += 1;
+        const contextKey = scenario.contextKey || scenario.contextLabel || 'context';
+        const paramKey = scenario.parameterKey || scenario.parameterName || `param-${index}`;
+        const uniqueKey = `${contextKey}::${paramKey}`;
+        if (!grouped.has(uniqueKey)) {
+            grouped.set(uniqueKey, {
+                contextLabel: scenario.contextLabel || '策略參數',
+                parameterName: scenario.parameterName || paramKey,
+                baseValue: Number.isFinite(scenario.baseValue) ? scenario.baseValue : null,
+                averageDriftPercent: Number.isFinite(scenario.parameterAverageDrift) ? scenario.parameterAverageDrift : null,
+                stabilityScore: Number.isFinite(scenario.parameterStabilityScore) ? scenario.parameterStabilityScore : null,
+                entries: [],
+            });
+        }
+        grouped.get(uniqueKey).entries.push(scenario);
+    });
+
+    let parameterCount = 0;
+    let elasticitySum = 0;
+    let elasticityScenarioCount = 0;
+    const parameterSummaries = [];
+
+    grouped.forEach((group) => {
+        const baseValue = Number.isFinite(group.baseValue) ? group.baseValue : null;
+        if (baseValue === null) {
+            return;
+        }
+        const elasticities = [];
+        const metricUsage = { sharpe: 0, return: 0 };
+        group.entries.forEach((entry) => {
+            if (!entry.run) return;
+            if (!Number.isFinite(entry.scenarioValue)) return;
+            const deltaParam = entry.scenarioValue - baseValue;
+            if (!Number.isFinite(deltaParam) || Math.abs(deltaParam) < 1e-9) return;
+            const metricSelection = selectElasticityMetric(baseline, entry.run);
+            if (!metricSelection) return;
+            const basePerformance = metricSelection.basePerformance;
+            const scenarioPerformance = metricSelection.scenarioPerformance;
+            if (!Number.isFinite(basePerformance) || Math.abs(basePerformance) < 1e-9) return;
+            const elasticity = ((scenarioPerformance - basePerformance) / basePerformance) * (baseValue / deltaParam);
+            if (Number.isFinite(elasticity)) {
+                elasticities.push(Math.abs(elasticity));
+                elasticityScenarioCount += 1;
+                metricUsage[metricSelection.metric] = (metricUsage[metricSelection.metric] || 0) + 1;
+            }
+        });
+        if (elasticities.length > 0) {
+            const avgElasticity = elasticities.reduce((sum, val) => sum + val, 0) / elasticities.length;
+            elasticitySum += avgElasticity;
+            parameterCount += 1;
+            const primaryMetric = metricUsage.sharpe >= metricUsage.return ? 'Sharpe' : '報酬率';
+            parameterSummaries.push({
+                contextLabel: group.contextLabel,
+                parameterName: group.parameterName,
+                baseValue,
+                averageElasticity: avgElasticity,
+                scenarioCount: elasticities.length,
+                averageDriftPercent: group.averageDriftPercent,
+                stabilityScore: group.stabilityScore,
+                primaryMetric,
+            });
+        }
+    });
+
+    const elasticityAverage = parameterCount > 0 ? elasticitySum / parameterCount : null;
+
+    return {
+        elasticityAverage,
+        parameterSummaries,
+        parameterCount,
+        scenarioCount: totalScenarioCount,
+        elasticityScenarioCount,
+        scenarios,
+    };
+}
+
+function extractSensitivityScenarios(sensitivityData) {
+    if (!sensitivityData || typeof sensitivityData !== 'object') return [];
+    const groups = Array.isArray(sensitivityData.groups) ? sensitivityData.groups : [];
+    const scenarios = [];
+    groups.forEach((group) => {
+        const parameters = Array.isArray(group.parameters) ? group.parameters : [];
+        parameters.forEach((param) => {
+            const baseValue = Number.isFinite(param.baseValue) ? param.baseValue : null;
+            const entries = Array.isArray(param.scenarios) ? param.scenarios : [];
+            entries.forEach((scenario) => {
+                if (!scenario || typeof scenario !== 'object') return;
+                const run = scenario.run && typeof scenario.run === 'object'
+                    ? {
+                          returnRate: Number.isFinite(scenario.run.returnRate) ? scenario.run.returnRate : null,
+                          sharpeRatio: Number.isFinite(scenario.run.sharpeRatio) ? scenario.run.sharpeRatio : null,
+                          annualizedReturn: Number.isFinite(scenario.run.annualizedReturn) ? scenario.run.annualizedReturn : null,
+                      }
+                    : null;
+                scenarios.push({
+                    contextKey: group.key || null,
+                    contextLabel: group.label || group.key || '策略參數',
+                    parameterKey: param.key || param.name || null,
+                    parameterName: param.name || param.key || '參數',
+                    baseValue,
+                    parameterAverageDrift: Number.isFinite(param.averageDriftPercent) ? param.averageDriftPercent : null,
+                    parameterStabilityScore: Number.isFinite(param.stabilityScore) ? param.stabilityScore : null,
+                    scenarioValue: Number.isFinite(scenario.value) ? scenario.value : null,
+                    deltaReturn: Number.isFinite(scenario.deltaReturn) ? scenario.deltaReturn : null,
+                    deltaSharpe: Number.isFinite(scenario.deltaSharpe) ? scenario.deltaSharpe : null,
+                    run,
+                });
+            });
+        });
+    });
+    return scenarios;
+}
+
+function selectElasticityMetric(baseline, scenarioRun) {
+    const baselineSharpe = Number.isFinite(baseline.sharpe) ? baseline.sharpe : null;
+    const scenarioSharpe = Number.isFinite(scenarioRun?.sharpeRatio) ? scenarioRun.sharpeRatio : null;
+    if (baselineSharpe !== null && scenarioSharpe !== null && Math.abs(baselineSharpe) >= 1e-6) {
+        return { basePerformance: baselineSharpe, scenarioPerformance: scenarioSharpe, metric: 'sharpe' };
+    }
+    const baselineReturn = Number.isFinite(baseline.returnRate) ? baseline.returnRate : null;
+    const scenarioReturn = Number.isFinite(scenarioRun?.returnRate) ? scenarioRun.returnRate : null;
+    if (baselineReturn !== null && scenarioReturn !== null && Math.abs(baselineReturn) >= 1e-6) {
+        return { basePerformance: baselineReturn, scenarioPerformance: scenarioReturn, metric: 'return' };
+    }
+    return null;
+}
+
+function estimateProbabilityOfOverfitting(scenarios, baselineSharpe) {
+    if (!Array.isArray(scenarios) || scenarios.length === 0) {
+        return { probability: null, improvementCount: 0, degradeCount: 0, comparableCount: 0 };
+    }
+    const comparable = scenarios.filter((scenario) => {
+        const hasReturn = Number.isFinite(scenario.deltaReturn);
+        const hasSharpeDelta = Number.isFinite(scenario.deltaSharpe);
+        const hasScenarioSharpe = Number.isFinite(scenario.run?.sharpeRatio);
+        return hasReturn || hasSharpeDelta || hasScenarioSharpe;
+    });
+    if (comparable.length === 0) {
+        return { probability: null, improvementCount: 0, degradeCount: 0, comparableCount: 0 };
+    }
+    const improvement = comparable.filter((scenario) => Number.isFinite(scenario.deltaReturn) && scenario.deltaReturn > 0);
+    const degradeCount = improvement.filter((scenario) => {
+        const sharpeDrop = Number.isFinite(scenario.deltaSharpe) && scenario.deltaSharpe < 0;
+        const absoluteDrop = Number.isFinite(baselineSharpe) && Number.isFinite(scenario.run?.sharpeRatio)
+            ? scenario.run.sharpeRatio < baselineSharpe
+            : false;
+        return sharpeDrop || absoluteDrop;
+    }).length;
+
+    let probability = null;
+    if (improvement.length > 0) {
+        probability = degradeCount / improvement.length;
+    } else {
+        const negativeSharpe = comparable.filter((scenario) => Number.isFinite(scenario.deltaSharpe) && scenario.deltaSharpe < 0).length;
+        probability = comparable.length > 0 ? negativeSharpe / comparable.length : null;
+    }
+
+    if (probability !== null) {
+        probability = Math.max(0, Math.min(1, probability));
+    }
+
+    return {
+        probability,
+        improvementCount: improvement.length,
+        degradeCount,
+        comparableCount: comparable.length,
+    };
+}
+
+function classifyRobustnessLevel(score) {
+    if (!Number.isFinite(score)) {
+        return {
+            label: '資料不足',
+            level: 'moderate',
+            description: '尚無足夠資料評估過擬合風險，建議先完成一次完整回測。',
+        };
+    }
+    if (score >= 80) {
+        return {
+            label: '極低過擬合風險',
+            level: 'excellent',
+            description: '效能折損、PBO 與參數彈性皆維持健康水準，策略在未見資料上仍具高度穩健性。',
+        };
+    }
+    if (score >= 60) {
+        return {
+            label: '低過擬合風險',
+            level: 'good',
+            description: '整體分數仍在安全範圍，僅部分指標略有折損，建議持續監控樣本外績效。',
+        };
+    }
+    if (score >= 40) {
+        return {
+            label: '中度過擬合風險',
+            level: 'moderate',
+            description: '指標已顯示明顯的效能折損或敏感度偏高，建議檢查參數自由度並加入額外驗證。',
+        };
+    }
+    return {
+        label: '高過擬合風險',
+        level: 'high',
+        description: '過擬合指標偏高，回測結果可能失真，建議重新規畫資料分割或降低模型複雜度。',
+    };
+}
+
+function formatOverfittingScoreValue(score, max) {
+    if (!Number.isFinite(score)) {
+        return `— / ${max}`;
+    }
+    return `${score.toFixed(1)} / ${max}`;
+}
+
+function formatOverfittingRatio(value, decimals = 1) {
+    if (!Number.isFinite(value)) return '—';
+    return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function formatOverfittingNumber(value, decimals = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return Number(value).toFixed(decimals);
+}
+const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v);
 
 const formatIndicatorValues = (indicatorValues) => { 
     try { 

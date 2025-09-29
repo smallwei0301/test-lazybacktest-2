@@ -1,3 +1,9 @@
+## 2025-11-13 — Patch LB-OVERFITTING-SCORE-20250914A
+- **Scope**: 回測摘要分頁與主結果腳本 `backtest.js`、`index.html`、`style.css`。
+- **Feature**: 新增「過擬合」分頁，依效能折損、PBO 與參數敏感度計算 0–100 分回測穩健度分數，並以條列與表格揭露扣分來源與彈性最高的參數。
+- **UI**: 製作三項懲罰指標卡片與風險徽章、補充 heuristics 提示與版本標籤，確保在資料不足時回傳友善訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
