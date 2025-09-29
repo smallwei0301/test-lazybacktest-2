@@ -1219,6 +1219,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="overfitting"
+                                            >
+                                                <i data-lucide="shield-alert" class="lucide-sm inline mr-1"></i>過擬合
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1262,7 +1269,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- Summary Tab -->
                             <div class="tab-content active space-y-6" id="summary-tab">
                                 <!-- Strategy Status Card -->
@@ -1401,6 +1408,28 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Overfitting Tab -->
+                            <div class="tab-content hidden" id="overfitting-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-4">
+                                        <div class="space-y-1">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="shield-alert" class="lucide-sm" style="color: var(--secondary);"></i>
+                                                過擬合診斷
+                                            </h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                根據效能折損、CSCV 回測過擬合機率與參數彈性計算回測穩健度分數，協助評估策略是否已過度貼合歷史資料。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-4" id="overfitting-content">
+                                        <div class="text-sm" style="color: var(--muted-foreground);">
+                                            執行回測後將顯示回測穩健度分數、三項懲罰細節與敏感度警示，請先於「摘要」分頁啟動回測。
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->
