@@ -1,3 +1,15 @@
+## 2025-11-21 — Patch LB-OVERFITTING-SCORE-20251120B
+- **Scope**: 擴充過擬合分頁說明層，納入 IS/OOS 起訖年份、計分公式與來源文獻，並為各項分數加入工具提示。
+- **UI**: 過擬合儀表板每個分項與統計欄位新增 tooltip 說明，另建立「過擬合評估說明」卡片，揭露資料切分、P1/P2/P3 計算流程與引用論文。
+- **Logic**: Worker 回傳有效資料前後半段區間，主執行緒記錄 Sharpe 估計方法與區間年限，協助在 UI 明確呈現 IS/OOS 範圍與折損來源。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-20 — Patch LB-OVERFITTING-SCORE-20251120A
+- **Scope**: 新增回測過擬合評估分頁與後端計算模組，整合夏普折損、敏感度樣本與參數彈性評分。
+- **UI**: 右側分頁導覽加入「過擬合」分頁，提供回測穩健度總分、三大扣分項目、指標表格與備註提醒，未執行回測時顯示提示。
+- **Logic**: 主執行緒計算 `Backtest Robustness Score`，整合半期夏普、敏感度結果與彈性樣本估算 P1/P2/P3，並支援錯誤時自動重置分頁。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

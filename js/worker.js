@@ -7807,13 +7807,16 @@ function runStrategy(data, params, options = {}) {
         }
       }
     }
-    const validPortfolioSlice = portfolioVal
-      .slice(startIdx)
-      .filter((v) => check(v));
-    const dailyR = calculateDailyReturns(
-      validPortfolioSlice,
-      dates.slice(startIdx),
-    );
+    const runTimeline = [];
+    for (let i = startIdx; i < n; i += 1) {
+      const value = portfolioVal[i];
+      const dateISO = dates[i];
+      if (!check(value) || !dateISO) continue;
+      runTimeline.push({ value, date: dateISO });
+    }
+    const validPortfolioSlice = runTimeline.map((item) => item.value);
+    const validDateSlice = runTimeline.map((item) => item.date);
+    const dailyR = calculateDailyReturns(validPortfolioSlice, validDateSlice);
     const sharpeR = calculateSharpeRatio(dailyR, annualR);
     const sortinoR = calculateSortinoRatio(dailyR, annualR);
 
@@ -7822,15 +7825,31 @@ function runStrategy(data, params, options = {}) {
       annReturnHalf2 = null,
       sharpeHalf2 = null;
     const validDataLength = validPortfolioSlice.length;
+    const segmentRanges = { inSample: null, outOfSample: null, fullSample: null };
+    const buildRange = (arr) => {
+      if (!Array.isArray(arr) || arr.length === 0) return null;
+      const start = arr[0];
+      const end = arr[arr.length - 1];
+      if (!start || !end) return null;
+      return { start, end };
+    };
+    segmentRanges.fullSample = buildRange(validDateSlice);
+
+    let midPoint = 0;
+    let firstHalfPortfolio = [];
+    let secondHalfPortfolio = [];
+    let firstHalfDates = [];
+    let secondHalfDates = [];
+    if (validDataLength > 0) {
+      midPoint = Math.floor(validDataLength / 2);
+      firstHalfPortfolio = validPortfolioSlice.slice(0, Math.max(midPoint, 1));
+      secondHalfPortfolio = validPortfolioSlice.slice(midPoint);
+      firstHalfDates = validDateSlice.slice(0, Math.max(midPoint, 1));
+      secondHalfDates = validDateSlice.slice(midPoint);
+      segmentRanges.inSample = buildRange(firstHalfDates);
+      segmentRanges.outOfSample = buildRange(secondHalfDates);
+    }
     if (validDataLength >= 4) {
-      const midPoint = Math.floor(validDataLength / 2);
-      const firstHalfPortfolio = validPortfolioSlice.slice(0, midPoint);
-      const secondHalfPortfolio = validPortfolioSlice.slice(midPoint);
-      const firstHalfDates = dates.slice(startIdx, startIdx + midPoint);
-      const secondHalfDates = dates.slice(
-        startIdx + midPoint,
-        startIdx + validDataLength,
-      );
       if (firstHalfPortfolio.length > 1) {
         const firstHalfDailyReturns = calculateDailyReturns(
           firstHalfPortfolio,
@@ -8193,6 +8212,7 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      overfittingSegments: segmentRanges,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
