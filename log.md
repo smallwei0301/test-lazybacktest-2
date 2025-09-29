@@ -769,3 +769,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-FORECAST-LSTMGA-20251115A
+- **Issue recap**: 預測分頁在完成回測後仍提示「請先執行一次回測」，`runForecastWorkflow` 無法取得可視股價資料導致預測流程被阻斷。
+- **Fix**: 建立 `syncVisibleStockData` 同步機制，於回測更新時將資料寫回 `window.visibleStockData`，並在預測腳本新增 `getSharedVisibleStockData` 共用讀取邏輯，同步調整版本碼。
+- **Diagnostics**: 本地流程先執行回測，再啟動預測模擬確認不再出現提示，並能成功進入 LSTM+GA 訓練與圖表渲染。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

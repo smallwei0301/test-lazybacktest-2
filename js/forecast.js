@@ -1,5 +1,16 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251114A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251115A';
 let forecastChartInstance = null;
+
+function getSharedVisibleStockData() {
+    const globalWindow = typeof window !== 'undefined' ? window : undefined;
+    if (globalWindow && Array.isArray(globalWindow.visibleStockData)) {
+        return globalWindow.visibleStockData;
+    }
+    if (typeof visibleStockData !== 'undefined' && Array.isArray(visibleStockData)) {
+        return visibleStockData;
+    }
+    return [];
+}
 
 function updateForecastStatus(message, type = 'info') {
     const statusEl = document.getElementById('forecastStatus');
@@ -72,11 +83,12 @@ function resolveCloseValue(row) {
 }
 
 function extractForecastRows() {
-    if (!Array.isArray(window.visibleStockData) || window.visibleStockData.length === 0) {
+    const source = getSharedVisibleStockData();
+    if (!Array.isArray(source) || source.length === 0) {
         return [];
     }
     const dedup = new Map();
-    window.visibleStockData.forEach((row) => {
+    source.forEach((row) => {
         const dateText = row?.date ? String(row.date).trim() : '';
         if (!dateText) return;
         const closeValue = resolveCloseValue(row);
@@ -554,7 +566,8 @@ async function runForecastWorkflow() {
 }
 
 async function handleForecastRequest(button) {
-    if (!Array.isArray(window.visibleStockData) || window.visibleStockData.length === 0) {
+    const source = getSharedVisibleStockData();
+    if (!Array.isArray(source) || source.length === 0) {
         updateForecastStatus('請先執行一次回測以取得股價資料。', 'warning');
         return;
     }
@@ -584,7 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (runBtn) {
         runBtn.addEventListener('click', () => handleForecastRequest(runBtn));
     }
-    if (!Array.isArray(window.visibleStockData) || window.visibleStockData.length === 0) {
+    if (getSharedVisibleStockData().length === 0) {
         updateForecastStatus('請先完成回測，再啟動預測模擬。', 'info');
     }
 });
