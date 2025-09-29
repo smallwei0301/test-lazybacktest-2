@@ -757,3 +757,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-OVERFIT-SCORE-20251208A
+- **Issue recap**: 摘要頁缺少集中檢視回測過擬合風險的工具，無法根據夏普折損、CSCV 與參數彈性快速判斷策略穩健度。
+- **Fix**: Worker 新增回測穩健度分數計算，整合效能折損、CSCV PBO 與參數彈性三項懲罰並輸出版本碼，前端建立「過擬合」分頁展示分數、組成細節與警示清單。
+- **Diagnostics**: 本地檢查 `renderOverfittingTab` 確認分數卡、懲罰卡與彈性排名皆會隨回傳資料更新，無資料時保留指引文案。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

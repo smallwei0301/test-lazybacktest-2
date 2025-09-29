@@ -38,6 +38,7 @@ const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
 const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const OVERFITTING_SCORE_VERSION = "LB-OVERFIT-SCORE-20251208A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -4155,6 +4156,643 @@ function calculateSortinoRatio(dailyReturns, annualReturnPct) {
   return annualDownsideDev !== 0 ? annualExcess / annualDownsideDev : Infinity;
 }
 
+function computePearsonCorrelation(seriesA, seriesB) {
+  if (!Array.isArray(seriesA) || !Array.isArray(seriesB)) {
+    return null;
+  }
+  const length = Math.min(seriesA.length, seriesB.length);
+  if (length === 0) {
+    return null;
+  }
+  let count = 0;
+  let sumA = 0;
+  let sumB = 0;
+  for (let i = 0; i < length; i += 1) {
+    const a = seriesA[i];
+    const b = seriesB[i];
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      sumA += a;
+      sumB += b;
+      count += 1;
+    }
+  }
+  if (count < 2) {
+    return null;
+  }
+  const meanA = sumA / count;
+  const meanB = sumB / count;
+  let cov = 0;
+  let varA = 0;
+  let varB = 0;
+  for (let i = 0; i < length; i += 1) {
+    const a = seriesA[i];
+    const b = seriesB[i];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const diffA = a - meanA;
+    const diffB = b - meanB;
+    cov += diffA * diffB;
+    varA += diffA * diffA;
+    varB += diffB * diffB;
+  }
+  if (varA <= 0 || varB <= 0) {
+    return null;
+  }
+  return cov / Math.sqrt(varA * varB);
+}
+
+function computeMedian(values) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return null;
+  }
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return null;
+  }
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function computeQuantile(values, quantile) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return null;
+  }
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return null;
+  }
+  if (quantile <= 0) {
+    return sorted[0];
+  }
+  if (quantile >= 1) {
+    return sorted[sorted.length - 1];
+  }
+  const position = (sorted.length - 1) * quantile;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  if (lowerIndex === upperIndex) {
+    return sorted[lowerIndex];
+  }
+  const lowerValue = sorted[lowerIndex];
+  const upperValue = sorted[upperIndex];
+  return lowerValue + (upperValue - lowerValue) * (position - lowerIndex);
+}
+
+function computeQuantiles(values) {
+  return {
+    p25: computeQuantile(values, 0.25),
+    p50: computeQuantile(values, 0.5),
+    p75: computeQuantile(values, 0.75),
+  };
+}
+
+function computeAnnualizedReturnFromDaily(dailyReturns) {
+  if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) {
+    return 0;
+  }
+  let product = 1;
+  let count = 0;
+  for (const r of dailyReturns) {
+    if (!Number.isFinite(r)) continue;
+    product *= 1 + r;
+    count += 1;
+  }
+  if (count === 0) {
+    return 0;
+  }
+  const averageFactor = Math.pow(product, 1 / count);
+  return Math.pow(averageFactor, 252) - 1;
+}
+
+function computeSharpeFromDaily(dailyReturns) {
+  if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) {
+    return null;
+  }
+  const annualReturn = computeAnnualizedReturnFromDaily(dailyReturns) * 100;
+  return calculateSharpeRatio(dailyReturns, annualReturn);
+}
+
+function partitionIntoBlocks(length, blockCount) {
+  if (!Number.isFinite(length) || length <= 0 || blockCount <= 0) {
+    return [];
+  }
+  const blocks = [];
+  const baseSize = Math.floor(length / blockCount);
+  let remainder = length % blockCount;
+  let cursor = 0;
+  for (let i = 0; i < blockCount; i += 1) {
+    let size = baseSize;
+    if (remainder > 0) {
+      size += 1;
+      remainder -= 1;
+    }
+    const start = cursor;
+    const end = Math.min(length, cursor + size);
+    blocks.push({ start, end });
+    cursor = end;
+  }
+  return blocks;
+}
+
+function generateBlockCombinations(totalBlocks, chooseCount) {
+  const results = [];
+  if (chooseCount <= 0 || chooseCount > totalBlocks) {
+    return results;
+  }
+  const combination = [];
+  function backtrack(start) {
+    if (combination.length === chooseCount) {
+      results.push(combination.slice());
+      return;
+    }
+    for (let i = start; i < totalBlocks; i += 1) {
+      combination.push(i);
+      backtrack(i + 1);
+      combination.pop();
+    }
+  }
+  backtrack(0);
+  return results;
+}
+
+function estimateCscvProbability(dailyReturns) {
+  if (!Array.isArray(dailyReturns)) {
+    return {
+      probability: null,
+      blockCount: 0,
+      combosEvaluated: 0,
+      oosSharpeMedian: null,
+      oosSharpeQuantiles: null,
+      oosSharpeSamples: 0,
+      notes: "缺少報酬序列",
+    };
+  }
+  const clean = dailyReturns.filter((value) => Number.isFinite(value));
+  if (clean.length < 16) {
+    return {
+      probability: null,
+      blockCount: 0,
+      combosEvaluated: 0,
+      oosSharpeMedian: null,
+      oosSharpeQuantiles: null,
+      oosSharpeSamples: 0,
+      notes: "樣本數不足以進行 CSCV (至少需要 16 筆有效日報酬)",
+    };
+  }
+  let blockCount = Math.min(12, Math.floor(clean.length / 10));
+  blockCount = Math.max(blockCount, 4);
+  if (blockCount % 2 === 1) {
+    blockCount -= 1;
+  }
+  while (blockCount >= 4 && Math.floor(clean.length / blockCount) < 5) {
+    blockCount -= 2;
+  }
+  if (blockCount < 4) {
+    return {
+      probability: null,
+      blockCount: 0,
+      combosEvaluated: 0,
+      oosSharpeMedian: null,
+      oosSharpeQuantiles: null,
+      oosSharpeSamples: 0,
+      notes: "資料長度不足以拆分為至少四個區塊",
+    };
+  }
+  const blocks = partitionIntoBlocks(clean.length, blockCount);
+  const chooseCount = blockCount / 2;
+  const combinations = generateBlockCombinations(blockCount, chooseCount);
+  if (combinations.length === 0) {
+    return {
+      probability: null,
+      blockCount,
+      combosEvaluated: 0,
+      oosSharpeMedian: null,
+      oosSharpeQuantiles: null,
+      oosSharpeSamples: 0,
+      notes: "無法生成 CSCV 區塊組合",
+    };
+  }
+  const oosSharpeValues = [];
+  const isSharpeValues = [];
+  combinations.forEach((combo) => {
+    const comboSet = new Set(combo);
+    const isReturns = [];
+    const oosReturns = [];
+    blocks.forEach((block, index) => {
+      const target = comboSet.has(index) ? isReturns : oosReturns;
+      for (let i = block.start; i < block.end; i += 1) {
+        const value = clean[i];
+        if (Number.isFinite(value)) {
+          target.push(value);
+        }
+      }
+    });
+    if (isReturns.length < 5 || oosReturns.length < 5) {
+      return;
+    }
+    const sharpeIS = computeSharpeFromDaily(isReturns);
+    const sharpeOOS = computeSharpeFromDaily(oosReturns);
+    if (Number.isFinite(sharpeIS)) {
+      isSharpeValues.push(sharpeIS);
+    }
+    if (Number.isFinite(sharpeOOS)) {
+      oosSharpeValues.push(sharpeOOS);
+    }
+  });
+  if (oosSharpeValues.length === 0) {
+    return {
+      probability: null,
+      blockCount,
+      combosEvaluated: 0,
+      oosSharpeMedian: null,
+      oosSharpeQuantiles: null,
+      oosSharpeSamples: 0,
+      notes: "CSCV 組合皆未產生有效的 OOS Sharpe",
+    };
+  }
+  const median = computeMedian(oosSharpeValues);
+  const belowMedianCount = oosSharpeValues.filter((value) => value < median)
+    .length;
+  const probability = oosSharpeValues.length
+    ? belowMedianCount / oosSharpeValues.length
+    : null;
+  return {
+    probability,
+    blockCount,
+    combosEvaluated: oosSharpeValues.length,
+    oosSharpeMedian: median,
+    oosSharpeQuantiles: computeQuantiles(oosSharpeValues),
+    oosSharpeSamples: oosSharpeValues.length,
+    notes: null,
+  };
+}
+
+function countNumericParameters(params) {
+  if (!params || typeof params !== "object") {
+    return 0;
+  }
+  const visited = new Set();
+  let count = 0;
+  const traverse = (value) => {
+    if (value === null) return;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      count += 1;
+      return;
+    }
+    if (typeof value !== "object") return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => traverse(item));
+    } else {
+      Object.values(value).forEach((item) => traverse(item));
+    }
+  };
+  traverse(params.entryParams);
+  traverse(params.exitParams);
+  traverse(params.shortEntryParams);
+  traverse(params.shortExitParams);
+  traverse(params.riskParams);
+  const numericKeys = [
+    "stopLoss",
+    "takeProfit",
+    "buyFee",
+    "sellFee",
+    "positionSize",
+    "positionRatio",
+    "maxPositions",
+    "riskReward",
+    "trailingStop",
+    "atrPeriod",
+    "atrMultiplier",
+    "positionBasis",
+  ];
+  numericKeys.forEach((key) => {
+    if (Number.isFinite(params[key])) {
+      count += 1;
+    }
+  });
+  if (Array.isArray(params.entryStages)) {
+    params.entryStages.forEach((value) => {
+      if (Number.isFinite(value)) {
+        count += 1;
+      }
+    });
+  }
+  if (Array.isArray(params.exitStages)) {
+    params.exitStages.forEach((value) => {
+      if (Number.isFinite(value)) {
+        count += 1;
+      }
+    });
+  }
+  return count;
+}
+
+function computeElasticitySummary(sensitivityAnalysis, baselineSharpe) {
+  const result = {
+    averageElasticity: null,
+    maxElasticity: null,
+    sampleCount: 0,
+    topParameters: [],
+  };
+  if (
+    !sensitivityAnalysis ||
+    !Array.isArray(sensitivityAnalysis.groups) ||
+    !Number.isFinite(baselineSharpe)
+  ) {
+    return result;
+  }
+  const safeBaselineSharpe = Math.max(Math.abs(baselineSharpe), 1e-6);
+  const scenarioElasticities = [];
+  const paramAggregate = new Map();
+  sensitivityAnalysis.groups.forEach((group) => {
+    if (!group || !Array.isArray(group.parameters)) return;
+    group.parameters.forEach((param) => {
+      if (!param || !Array.isArray(param.scenarios)) return;
+      const baseValue = Number.isFinite(param.baseValue)
+        ? param.baseValue
+        : null;
+      if (baseValue === null) return;
+      param.scenarios.forEach((scenario) => {
+        const scenarioSharpe = scenario?.run?.sharpeRatio;
+        const scenarioValue = scenario?.value;
+        if (
+          !Number.isFinite(scenarioSharpe) ||
+          !Number.isFinite(scenarioValue)
+        ) {
+          return;
+        }
+        const deltaTheta = scenarioValue - baseValue;
+        if (!Number.isFinite(deltaTheta) || Math.abs(deltaTheta) < 1e-6) {
+          return;
+        }
+        const deltaSharpe = scenarioSharpe - baselineSharpe;
+        if (!Number.isFinite(deltaSharpe)) {
+          return;
+        }
+        const paramScale = Math.abs(baseValue) > 1e-6
+          ? baseValue
+          : Math.abs(scenarioValue) > 1e-6
+            ? scenarioValue
+            : 1;
+        const elasticity =
+          (deltaSharpe / safeBaselineSharpe) * (paramScale / deltaTheta);
+        if (!Number.isFinite(elasticity)) {
+          return;
+        }
+        const absoluteElasticity = Math.abs(elasticity);
+        scenarioElasticities.push(absoluteElasticity);
+        const aggregateKey = `${group.key || ""}::${param.key || ""}`;
+        const existing = paramAggregate.get(aggregateKey) || {
+          key: param.key || aggregateKey,
+          name: param.name || param.key || aggregateKey,
+          group: group.label || group.key || "",
+          baseValue,
+          sum: 0,
+          count: 0,
+          max: 0,
+        };
+        existing.sum += absoluteElasticity;
+        existing.count += 1;
+        existing.max = Math.max(existing.max, absoluteElasticity);
+        paramAggregate.set(aggregateKey, existing);
+      });
+    });
+  });
+  if (scenarioElasticities.length === 0) {
+    return result;
+  }
+  const total = scenarioElasticities.reduce((sum, value) => sum + value, 0);
+  result.averageElasticity = total / scenarioElasticities.length;
+  result.maxElasticity = Math.max(...scenarioElasticities);
+  result.sampleCount = scenarioElasticities.length;
+  result.topParameters = Array.from(paramAggregate.values())
+    .filter((entry) => entry.count > 0)
+    .map((entry) => ({
+      key: entry.key,
+      name: entry.name,
+      group: entry.group,
+      baseValue: entry.baseValue,
+      averageElasticity: entry.sum / entry.count,
+      maxElasticity: entry.max,
+    }))
+    .filter((entry) => Number.isFinite(entry.averageElasticity))
+    .sort((a, b) => b.averageElasticity - a.averageElasticity)
+    .slice(0, 3);
+  return result;
+}
+
+function buildOverfittingRating(score) {
+  if (!Number.isFinite(score)) {
+    return {
+      label: "資料不足",
+      description: "需先完成回測並產出完整診斷才能評估過擬合風險。",
+      riskLevel: "unknown",
+    };
+  }
+  if (score >= 80) {
+    return {
+      label: "極低過擬合風險",
+      description:
+        "策略在樣本內外的績效差異極小，CSCV 顯示幾乎不會落到中位數以下，參數彈性也相當平穩。",
+      riskLevel: "excellent",
+    };
+  }
+  if (score >= 60) {
+    return {
+      label: "低過擬合風險",
+      description:
+        "策略在未來仍具穩健性，但建議持續追蹤 PBO 與參數彈性，避免在極端行情下漂移。",
+      riskLevel: "good",
+    };
+  }
+  if (score >= 40) {
+    return {
+      label: "中度過擬合風險",
+      description:
+        "樣本外表現已有明顯折損，請檢查是否需降低策略複雜度或加強正則化與資料量。",
+      riskLevel: "moderate",
+    };
+  }
+  return {
+    label: "高過擬合風險",
+    description:
+      "策略對參數極為敏感或 OOS 表現長期低於中位數，建議重新設計核心邏輯或導入更嚴格的穩健化機制。",
+    riskLevel: "high",
+  };
+}
+
+function computeBacktestOverfittingDiagnostics({
+  dailyReturns,
+  buyHoldDailyReturns,
+  baselineSharpe,
+  baselineAnnualReturn,
+  params,
+  sensitivityAnalysis,
+}) {
+  const cleanStrategyReturns = Array.isArray(dailyReturns)
+    ? dailyReturns.filter((value) => Number.isFinite(value))
+    : [];
+  const cleanBenchmarkReturns = Array.isArray(buyHoldDailyReturns)
+    ? buyHoldDailyReturns.filter((value) => Number.isFinite(value))
+    : [];
+  const sampleSize = cleanStrategyReturns.length;
+  const numericParamCount = countNumericParameters(params || {});
+  const traceM = Math.max(1, numericParamCount || 1);
+  const correlation = computePearsonCorrelation(
+    cleanStrategyReturns,
+    cleanBenchmarkReturns,
+  );
+  const rho = Number.isFinite(correlation)
+    ? Math.max(-0.999, Math.min(0.999, correlation))
+    : 0;
+  let expectedSharpeOut = Number.isFinite(baselineSharpe)
+    ? baselineSharpe
+    : null;
+  let haircut = null;
+  if (Number.isFinite(baselineSharpe) && baselineSharpe > 0 && sampleSize > 0) {
+    const penaltyFactor = (2 * traceM) / sampleSize;
+    const denominator = Math.pow(rho * rho + 1, 1.5);
+    const adjustedSharpe = baselineSharpe - penaltyFactor / (denominator || 1);
+    expectedSharpeOut = Math.max(0, adjustedSharpe);
+    haircut = Math.max(
+      0,
+      Math.min(1, 1 - Math.min(expectedSharpeOut, baselineSharpe) / baselineSharpe),
+    );
+  } else {
+    expectedSharpeOut = Number.isFinite(expectedSharpeOut)
+      ? Math.max(0, expectedSharpeOut)
+      : 0;
+    haircut = 1;
+  }
+  const performanceScore = Math.max(
+    0,
+    Math.min(30, 30 * (1 - Math.min(haircut, 1))),
+  );
+  const cscv = estimateCscvProbability(cleanStrategyReturns);
+  const pboProbability = Number.isFinite(cscv.probability)
+    ? Math.max(0, Math.min(1, cscv.probability))
+    : null;
+  const pboScore = Number.isFinite(pboProbability)
+    ? Math.max(0, Math.min(40, 40 * (1 - pboProbability)))
+    : 0;
+  const elasticitySummary = computeElasticitySummary(
+    sensitivityAnalysis,
+    baselineSharpe,
+  );
+  const averageElasticity = Number.isFinite(elasticitySummary.averageElasticity)
+    ? elasticitySummary.averageElasticity
+    : null;
+  const elasticityThreshold = 3;
+  const elasticityScore =
+    averageElasticity !== null
+      ? Math.max(
+          0,
+          Math.min(
+            30,
+            30 * (1 - Math.min(averageElasticity, elasticityThreshold) / elasticityThreshold),
+          ),
+        )
+      : 0;
+  const totalScore = Math.max(
+    0,
+    Math.min(100, performanceScore + pboScore + elasticityScore),
+  );
+  const rating = buildOverfittingRating(totalScore);
+  const warnings = [];
+  if (!Number.isFinite(baselineSharpe) || baselineSharpe <= 0) {
+    warnings.push("策略夏普值不足，已以最大扣分計算效能折損懲罰。");
+  }
+  if (!Number.isFinite(pboProbability)) {
+    warnings.push(
+      cscv.notes || "資料不足，無法估計 CSCV 過擬合機率，PBO 懲罰視為 0 分。",
+    );
+  }
+  if (averageElasticity === null) {
+    warnings.push(
+      "尚未產出參數敏感度網格，已將參數敏感度懲罰視為 0 分，請確認 Worker 是否啟用了敏感度分析。",
+    );
+  }
+  return {
+    version: OVERFITTING_SCORE_VERSION,
+    score: Number(totalScore.toFixed(1)),
+    rating,
+    warnings,
+    components: {
+      performance: {
+        score: Number(performanceScore.toFixed(1)),
+        haircut: Number.isFinite(haircut)
+          ? Number((haircut * 100).toFixed(1))
+          : null,
+        sharpeIn: Number.isFinite(baselineSharpe)
+          ? Number(baselineSharpe.toFixed(3))
+          : null,
+        expectedSharpeOut: Number.isFinite(expectedSharpeOut)
+          ? Number(expectedSharpeOut.toFixed(3))
+          : null,
+        sampleSize,
+        traceM,
+        rho: Number.isFinite(rho) ? Number(rho.toFixed(3)) : null,
+      },
+      pbo: {
+        score: Number(pboScore.toFixed(1)),
+        probability: Number.isFinite(pboProbability)
+          ? Number(pboProbability.toFixed(3))
+          : null,
+        blockCount: cscv.blockCount || 0,
+        combosEvaluated: cscv.combosEvaluated || 0,
+        medianSharpe: Number.isFinite(cscv.oosSharpeMedian)
+          ? Number(cscv.oosSharpeMedian.toFixed(3))
+          : null,
+        quantiles: cscv.oosSharpeQuantiles,
+        samples: cscv.oosSharpeSamples || 0,
+        notes: cscv.notes,
+      },
+      sensitivity: {
+        score: Number(elasticityScore.toFixed(1)),
+        averageElasticity:
+          averageElasticity !== null
+            ? Number(averageElasticity.toFixed(2))
+            : null,
+        maxElasticity: Number.isFinite(elasticitySummary.maxElasticity)
+          ? Number(elasticitySummary.maxElasticity.toFixed(2))
+          : null,
+        sampleCount: elasticitySummary.sampleCount || 0,
+        penaltyThreshold: elasticityThreshold,
+        topParameters: (elasticitySummary.topParameters || []).map((item) => ({
+          key: item.key,
+          name: item.name,
+          group: item.group,
+          baseValue: item.baseValue,
+          averageElasticity: Number.isFinite(item.averageElasticity)
+            ? Number(item.averageElasticity.toFixed(2))
+            : null,
+          maxElasticity: Number.isFinite(item.maxElasticity)
+            ? Number(item.maxElasticity.toFixed(2))
+            : null,
+        })),
+      },
+    },
+    metadata: {
+      sampleSize,
+      numericParamCount,
+      baselineAnnualReturn: Number.isFinite(baselineAnnualReturn)
+        ? Number(baselineAnnualReturn.toFixed(2))
+        : null,
+      correlationWithBenchmark: Number.isFinite(rho)
+        ? Number(rho.toFixed(3))
+        : null,
+    },
+  };
+}
+
 function calculateMaxDrawdown(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
   let peak = -Infinity;
@@ -8136,6 +8774,38 @@ function runStrategy(data, params, options = {}) {
         );
       }
     }
+    let overfittingDiagnostics = null;
+    try {
+      const buyHoldDaily = [];
+      for (let i = startIdx + 1; i < n; i += 1) {
+        const today = closes[i];
+        const yesterday = closes[i - 1];
+        if (
+          Number.isFinite(today) &&
+          Number.isFinite(yesterday) &&
+          yesterday !== 0
+        ) {
+          buyHoldDaily.push(today / yesterday - 1);
+        }
+      }
+      overfittingDiagnostics = computeBacktestOverfittingDiagnostics({
+        dailyReturns: dailyR,
+        buyHoldDailyReturns: buyHoldDaily,
+        baselineSharpe: sharpeR,
+        baselineAnnualReturn: annualR,
+        params: {
+          ...params,
+          entryStages: entryStagePercents.slice(),
+          exitStages: exitStagePercents.slice(),
+        },
+        sensitivityAnalysis,
+      });
+    } catch (overfitError) {
+      console.warn(
+        "[Worker] Failed to compute overfitting diagnostics:",
+        overfitError,
+      );
+    }
     const result = {
 
       stockNo: params.stockNo,
@@ -8193,6 +8863,7 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      overfitting: overfittingDiagnostics,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;

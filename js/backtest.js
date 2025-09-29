@@ -6207,6 +6207,7 @@ function handleBacktestResult(result, stockName, dataSource) {
          showError(`處理回測結果時發生錯誤: ${error.message}`);
          resetStrategyStatusCard('error');
          if (suggestionArea) suggestionArea.classList.add('hidden');
+         renderOverfittingTab(null);
          hideLoading();
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
@@ -6222,6 +6223,7 @@ function displayBacktestResult(result) {
     if (!result) {
         resetStrategyStatusCard('missing');
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
+        renderOverfittingTab(null);
         return;
     }
     updateStrategyStatusCard(result);
@@ -6968,9 +6970,234 @@ function displayBacktestResult(result) {
         `;
 
         initSensitivityCollapse(el);
+        renderOverfittingTab(result);
 
         console.log("[Main] displayBacktestResult finished.");
     }
+
+function renderOverfittingTab(result) {
+    const container = document.getElementById('overfitting-content');
+    if (!container) {
+        return;
+    }
+    const overfit = result && typeof result === 'object' ? result.overfitting : null;
+    if (!overfit) {
+        container.innerHTML = `
+            <div class="text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                尚未取得過擬合診斷。請完成一次回測，系統會根據夏普值折損、CSCV 過擬合機率與參數彈性計算穩健度分數。
+            </div>
+        `;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+        return;
+    }
+
+    const {
+        score,
+        rating,
+        warnings,
+        components,
+        version,
+        metadata,
+    } = overfit;
+
+    const themes = {
+        excellent: {
+            bg: 'color-mix(in srgb, var(--primary) 14%, transparent)',
+            border: 'color-mix(in srgb, var(--primary) 38%, transparent)',
+            text: 'var(--primary)',
+        },
+        good: {
+            bg: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+            border: 'color-mix(in srgb, var(--accent) 36%, transparent)',
+            text: 'var(--accent)',
+        },
+        moderate: {
+            bg: 'color-mix(in srgb, var(--secondary) 10%, transparent)',
+            border: 'color-mix(in srgb, var(--secondary) 32%, transparent)',
+            text: 'var(--secondary)',
+        },
+        high: {
+            bg: 'color-mix(in srgb, var(--destructive) 12%, transparent)',
+            border: 'color-mix(in srgb, var(--destructive) 40%, transparent)',
+            text: 'var(--destructive)',
+        },
+        unknown: {
+            bg: 'color-mix(in srgb, var(--muted) 12%, transparent)',
+            border: 'color-mix(in srgb, var(--muted) 40%, transparent)',
+            text: 'var(--muted-foreground)',
+        },
+    };
+    const theme = themes[rating?.riskLevel] || themes.unknown;
+
+    const formatNumber = (value, digits = 2) =>
+        Number.isFinite(value) ? value.toFixed(digits) : '—';
+    const formatPercent = (value, digits = 1) =>
+        Number.isFinite(value) ? `${value.toFixed(digits)}%` : '—';
+
+    const performance = components?.performance || {};
+    const pbo = components?.pbo || {};
+    const sensitivity = components?.sensitivity || {};
+
+    const quantiles = pbo?.quantiles || {};
+    const topParameters = Array.isArray(sensitivity.topParameters)
+        ? sensitivity.topParameters
+        : [];
+
+    const summaryHtml = `
+        <div class="p-6 rounded-xl border transition-all duration-200" style="background: ${theme.bg}; border-color: ${theme.border};">
+            <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <p class="text-xs font-medium uppercase tracking-wider" style="color: var(--muted-foreground);">回測穩健度分數</p>
+                    <p class="text-3xl font-bold" style="color: var(--foreground);">${formatNumber(score ?? null, 1)}</p>
+                </div>
+                <div class="text-left md:text-right space-y-1">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold" style="background: ${theme.border}; color: ${theme.text};">
+                        ${escapeHtml(rating?.label || '資料不足')}
+                    </span>
+                    <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">${escapeHtml(rating?.description || '完成回測即可產生過擬合診斷。')}</p>
+                </div>
+            </div>
+            <div class="mt-4 grid gap-3 text-xs" style="color: var(--muted-foreground);">
+                <div class="flex items-center justify-between">
+                    <span>有效樣本數 (N)</span>
+                    <span style="color: var(--foreground);">${formatNumber(metadata?.sampleSize ?? null, 0)}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span>模型自由度 Tr(M)</span>
+                    <span style="color: var(--foreground);">${formatNumber(metadata?.numericParamCount ?? null, 0)}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span>年化報酬 (IS)</span>
+                    <span style="color: var(--foreground);">${formatPercent(metadata?.baselineAnnualReturn ?? null, 2)}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span>與買入持有相關係數</span>
+                    <span style="color: var(--foreground);">${formatNumber(performance?.rho ?? metadata?.correlationWithBenchmark ?? null, 3)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const componentCards = [
+        {
+            title: '效能折損懲罰 (P1)',
+            score: performance?.score,
+            body: `
+                <div class="space-y-2 text-xs" style="color: var(--muted-foreground);">
+                    <div class="flex items-center justify-between"><span>SR Haircut</span><span style="color: var(--foreground);">${formatPercent(performance?.haircut ?? null, 1)}</span></div>
+                    <div class="flex items-center justify-between"><span>樣本內 Sharpe</span><span style="color: var(--foreground);">${formatNumber(performance?.sharpeIn ?? null, 3)}</span></div>
+                    <div class="flex items-center justify-between"><span>預期 OOS Sharpe</span><span style="color: var(--foreground);">${formatNumber(performance?.expectedSharpeOut ?? null, 3)}</span></div>
+                    <div class="flex items-center justify-between"><span>模型自由度</span><span style="color: var(--foreground);">${formatNumber(performance?.traceM ?? null, 0)}</span></div>
+                </div>
+            `,
+        },
+        {
+            title: 'PBO 懲罰 (P2)',
+            score: pbo?.score,
+            body: `
+                <div class="space-y-2 text-xs" style="color: var(--muted-foreground);">
+                    <div class="flex items-center justify-between"><span>PBO 機率</span><span style="color: var(--foreground);">${formatPercent((pbo?.probability ?? null) !== null ? pbo.probability * 100 : null, 1)}</span></div>
+                    <div class="flex items-center justify-between"><span>CSCV 區塊數</span><span style="color: var(--foreground);">${formatNumber(pbo?.blockCount ?? null, 0)}</span></div>
+                    <div class="flex items-center justify-between"><span>有效組合</span><span style="color: var(--foreground);">${formatNumber(pbo?.combosEvaluated ?? null, 0)}</span></div>
+                    <div class="flex items-center justify-between"><span>OOS Sharpe 中位數</span><span style="color: var(--foreground);">${formatNumber(pbo?.medianSharpe ?? null, 3)}</span></div>
+                    <div class="flex items-center justify-between"><span>四分位範圍</span><span style="color: var(--foreground);">${Number.isFinite(quantiles?.p25) && Number.isFinite(quantiles?.p75) ? `${formatNumber(quantiles.p25, 3)} → ${formatNumber(quantiles.p75, 3)}` : '—'}</span></div>
+                </div>
+            `,
+        },
+        {
+            title: '參數敏感度懲罰 (P3)',
+            score: sensitivity?.score,
+            body: `
+                <div class="space-y-2 text-xs" style="color: var(--muted-foreground);">
+                    <div class="flex items-center justify-between"><span>平均彈性</span><span style="color: var(--foreground);">${formatNumber(sensitivity?.averageElasticity ?? null, 2)}</span></div>
+                    <div class="flex items-center justify-between"><span>最高彈性</span><span style="color: var(--foreground);">${formatNumber(sensitivity?.maxElasticity ?? null, 2)}</span></div>
+                    <div class="flex items-center justify-between"><span>彈性樣本數</span><span style="color: var(--foreground);">${formatNumber(sensitivity?.sampleCount ?? null, 0)}</span></div>
+                    <div class="flex items-center justify-between"><span>懲罰閾值</span><span style="color: var(--foreground);">${formatNumber(sensitivity?.penaltyThreshold ?? null, 2)}</span></div>
+                </div>
+            `,
+        },
+    ]
+        .map((card) => {
+            const scoreText = Number.isFinite(card.score)
+                ? card.score.toFixed(1)
+                : '—';
+            return `
+                <div class="p-5 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background-color: color-mix(in srgb, var(--card) 90%, transparent); border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(card.title)}</h4>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold" style="background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary);">${scoreText}</span>
+                    </div>
+                    ${card.body}
+                </div>
+            `;
+        })
+        .join('');
+
+    const warningHtml = Array.isArray(warnings) && warnings.length > 0
+        ? `
+            <div class="p-4 rounded-lg border" style="background: color-mix(in srgb, var(--destructive) 8%, transparent); border-color: color-mix(in srgb, var(--destructive) 35%, transparent);">
+                <div class="flex items-start gap-2">
+                    <i data-lucide="alert-triangle" class="lucide-sm mt-0.5" style="color: var(--destructive);"></i>
+                    <div class="space-y-1">
+                        <p class="text-sm font-semibold" style="color: var(--destructive);">計算警示</p>
+                        <ul class="list-disc list-inside text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                            ${warnings
+                                .map((warning) => `<li>${escapeHtml(warning)}</li>`)
+                                .join('')}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        `
+        : '';
+
+    const topParamHtml = topParameters.length > 0
+        ? `
+            <div class="p-5 rounded-xl border" style="background-color: color-mix(in srgb, var(--muted) 8%, transparent); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <p class="text-sm font-semibold mb-3" style="color: var(--foreground);">彈性最高的參數組合</p>
+                <div class="space-y-2 text-xs" style="color: var(--muted-foreground);">
+                    ${topParameters
+                        .map((param) => {
+                            const labelParts = [
+                                param.group ? escapeHtml(param.group) : '',
+                                param.name ? escapeHtml(param.name) : '',
+                            ].filter(Boolean);
+                            const label = labelParts.join('｜');
+                            return `
+                                <div class="flex items-center justify-between">
+                                    <span>${label || escapeHtml(param.key || '參數')}</span>
+                                    <span style="color: var(--foreground);">${formatNumber(param.averageElasticity ?? null, 2)}</span>
+                                </div>
+                            `;
+                        })
+                        .join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    const versionHtml = version
+        ? `<p class="text-[11px] text-right" style="color: var(--muted-foreground);">版本代碼：${escapeHtml(version)}</p>`
+        : '';
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            ${summaryHtml}
+            <div class="grid gap-4 md:grid-cols-3">
+                ${componentCards}
+            </div>
+            ${topParamHtml}
+            ${warningHtml}
+            ${versionHtml}
+        </div>
+    `;
+
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
+}
 const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
 
 const formatIndicatorValues = (indicatorValues) => { 
