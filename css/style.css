@@ -152,6 +152,10 @@
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
 }
+.tooltiptext--overfitting {
+    max-width: min(360px, calc(100vw - 56px));
+    white-space: normal;
+}
 .sensitivity-card {
     position: relative;
     overflow: visible;

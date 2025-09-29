@@ -5091,6 +5091,7 @@ function resetOverfittingTab(state = 'idle', message = '') {
     const scorecard = document.getElementById('overfitting-scorecard');
     const components = document.getElementById('overfitting-components');
     const metrics = document.getElementById('overfitting-metrics');
+    const methodology = document.getElementById('overfitting-methodology');
     const notes = document.getElementById('overfitting-notes');
     if (!scorecard) {
         return;
@@ -5113,6 +5114,10 @@ function resetOverfittingTab(state = 'idle', message = '') {
     if (metrics) {
         metrics.classList.add('hidden');
         metrics.innerHTML = '';
+    }
+    if (methodology) {
+        methodology.classList.add('hidden');
+        methodology.innerHTML = '';
     }
     if (notes) {
         notes.classList.add('hidden');
@@ -5140,6 +5145,14 @@ function computeOverfittingAnalysis(result) {
         ? Math.abs(sensitivitySummary.averageSharpeDrop)
         : null;
 
+    const diagnostics = result.diagnostics || {};
+    const warmupDiag = diagnostics.warmup || diagnostics.runtime?.warmup || null;
+    const effectiveStartIdx = Number.isFinite(warmupDiag?.effectiveStartIndex) ? warmupDiag.effectiveStartIndex : 0;
+    const computedStartIdx = Number.isFinite(warmupDiag?.computedStartIndex)
+        ? warmupDiag.computedStartIndex
+        : effectiveStartIdx;
+    const trimmedDates = Array.isArray(result.dates) ? result.dates.slice() : [];
+
     const srOutCandidates = [];
     if (Number.isFinite(srHalf2)) {
         srOutCandidates.push(srHalf2);
@@ -5161,6 +5174,59 @@ function computeOverfittingAnalysis(result) {
         const mid = Math.floor(sorted.length / 2);
         srOutEstimate = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
     }
+
+    const startOffset = Math.min(Math.max(computedStartIdx - effectiveStartIdx, 0), trimmedDates.length);
+    const validLength = Math.max(trimmedDates.length - startOffset, 0);
+    const halfSplit = validLength > 0 ? Math.floor(validLength / 2) : 0;
+
+    const safeDate = (iso) => {
+        if (!iso || typeof iso !== 'string') return null;
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return null;
+        return date;
+    };
+
+    const computeRange = (startIndex, endIndex) => {
+        if (startIndex === null || endIndex === null) return null;
+        if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return null;
+        const startIdx = Math.max(0, Math.min(Math.floor(startIndex), trimmedDates.length - 1));
+        const endIdx = Math.max(0, Math.min(Math.floor(endIndex), trimmedDates.length - 1));
+        if (trimmedDates.length === 0 || startIdx > endIdx) return null;
+        const startISO = trimmedDates[startIdx] || null;
+        const endISO = trimmedDates[endIdx] || null;
+        const startDate = safeDate(startISO);
+        const endDate = safeDate(endISO);
+        let years = null;
+        if (startDate && endDate) {
+            const diffMs = endDate.getTime() - startDate.getTime();
+            if (Number.isFinite(diffMs) && diffMs >= 0) {
+                years = diffMs / (1000 * 60 * 60 * 24 * 365.25);
+            }
+        }
+        return {
+            start: startISO,
+            end: endISO,
+            years,
+            startIndex: startIdx,
+            endIndex: endIdx,
+        };
+    };
+
+    const fullRange = trimmedDates.length > 0 ? computeRange(0, trimmedDates.length - 1) : null;
+    const isRange = halfSplit > 0 ? computeRange(startOffset, startOffset + Math.max(halfSplit - 1, 0)) : null;
+    const oosRange = halfSplit > 0 ? computeRange(startOffset + halfSplit, startOffset + validLength - 1) : null;
+    const periods = {
+        effectiveStartIdx,
+        computedStartIdx,
+        startOffset,
+        validLength,
+        halfSplit,
+        totalSamples: trimmedDates.length,
+        effectiveStartDate: trimmedDates.length > 0 ? trimmedDates[0] : null,
+        fullRange,
+        isRange,
+        oosRange,
+    };
 
     let hairCutRatio = null;
     if (srIn !== null && srIn > 0 && srOutEstimate !== null) {
@@ -5305,6 +5371,19 @@ function computeOverfittingAnalysis(result) {
     const baselineRankDisplay = baselineRank !== null && Number.isFinite(candidateCount) && candidateCount > 0
         ? `${baselineRank + 1} / ${candidateCount}`
         : '—';
+    const formatPeriodText = (range) => {
+        if (!range) return '—';
+        const { start, end, years } = range;
+        const yearText = Number.isFinite(years) ? `（約 ${years.toFixed(2)} 年）` : '';
+        return `${start || '—'} → ${end || '—'}${yearText}`;
+    };
+    const describeRange = (label, range) => {
+        if (!range) return `${label} 範圍資料不足`;
+        const startText = range.start ? range.start.slice(0, 10) : '—';
+        const endText = range.end ? range.end.slice(0, 10) : '—';
+        const yearText = Number.isFinite(range.years) ? `，約 ${range.years.toFixed(2)} 年樣本` : '';
+        return `${label}：${startText} 至 ${endText}${yearText}`;
+    };
 
     let p1Summary = '缺少可用的夏普比率，無法估算折損率。';
     if (srIn === null || srIn <= 0) {
@@ -5344,6 +5423,15 @@ function computeOverfittingAnalysis(result) {
         p3Summary = '參數敏感度樣本存在，但缺少 Sharpe 或報酬資料以計算彈性。';
     }
 
+    const componentTooltips = {
+        performance:
+            'P1 = 30 × (1 - min(H, 1))，其中 H = 1 - E[SR_out]/SR_in。E[SR_out] 取回測後段夏普、敏感度平均折損調整值與半期夏普比值的中位數，對應 Bailey、Borwein、Lopez de Prado 與 Zhu (2017) 所提出的 Sharpe Ratio Haircut 概念。',
+        pbo:
+            'P2 = 40 × (1 - PBO)。PBO 依 Bailey、Borwein、Lopez de Prado 與 Zhu (2014) 提出的 Combinatorially-Symmetric Cross-Validation，計算基準策略在所有參數擾動樣本中的相對排名，估計樣本外跌落至中位數以下的機率。',
+        sensitivity:
+            'P3 = 30 × max(0, 1 - min(|E|, 3) / 3)。|E| 代表參數彈性，依 Lopez de Prado (2018) 與 Harvey & Liu (2015) 建議，使用基準績效的相對變化除以參數比例變化來衡量策略對參數的敏感度。',
+    };
+
     const components = [
         {
             key: 'performance',
@@ -5352,11 +5440,28 @@ function computeOverfittingAnalysis(result) {
             weight: 30,
             score: p1Score,
             summary: p1Summary,
+            tooltip: componentTooltips.performance,
             detailItems: [
-                { label: 'IS 夏普', value: formatNumber(srIn, 2) },
-                { label: 'OOS 夏普估', value: formatNumber(srOutEstimate, 2) },
-                { label: '折損率 H', value: hairCutPercentDisplay },
-                { label: '半期夏普 (前/後)', value: halfSharpeDisplay },
+                {
+                    label: 'IS 夏普',
+                    value: formatNumber(srIn, 2),
+                    tooltip: 'Worker 以 252 日年化與 1% 無風險利率計算夏普比率，對應整段有效樣本。',
+                },
+                {
+                    label: 'OOS 夏普估',
+                    value: formatNumber(srOutEstimate, 2),
+                    tooltip: 'E[SR_out] 為 {後段夏普、SR_in - 平均 Sharpe 折損、SR_in × (後段/前段夏普比)} 的中位數。',
+                },
+                {
+                    label: '折損率 H',
+                    value: hairCutPercentDisplay,
+                    tooltip: 'H = 1 - E[SR_out] / SR_in；若 SR_in ≤ 0 則視為需完全折損。',
+                },
+                {
+                    label: '半期夏普 (前/後)',
+                    value: halfSharpeDisplay,
+                    tooltip: `${describeRange('前段(IS)', isRange)}；${describeRange('後段(OOS)', oosRange)}。`,
+                },
             ],
         },
         {
@@ -5366,11 +5471,28 @@ function computeOverfittingAnalysis(result) {
             weight: 40,
             score: p2Score,
             summary: p2Summary,
+            tooltip: componentTooltips.pbo,
             detailItems: [
-                { label: 'PBO', value: pboPercent !== null ? `${pboPercent.toFixed(1)}%` : '—' },
-                { label: '敏感度樣本', value: scenarioSamples > 0 ? String(scenarioSamples) : '—' },
-                { label: 'Sharpe 中位數', value: formatNumber(scenarioSharpeMedian, 2) },
-                { label: 'Baseline 名次', value: baselineRankDisplay },
+                {
+                    label: 'PBO',
+                    value: pboPercent !== null ? `${pboPercent.toFixed(1)}%` : '—',
+                    tooltip: '將基準策略與所有參數擾動樣本的夏普比率排序，取其落在樣本外中位數以下的分位值。',
+                },
+                {
+                    label: '敏感度樣本',
+                    value: scenarioSamples > 0 ? String(scenarioSamples) : '—',
+                    tooltip: '參數敏感度模組回傳的有效情境數量，作為 CSCV 的候選策略數。',
+                },
+                {
+                    label: 'Sharpe 中位數',
+                    value: formatNumber(scenarioSharpeMedian, 2),
+                    tooltip: '所有參數擾動樣本的夏普比率中位數，對應 CSCV 的 OOS 中位數基準。',
+                },
+                {
+                    label: 'Baseline 名次',
+                    value: baselineRankDisplay,
+                    tooltip: '基準策略在擾動樣本中的排序（1 表示最差），名次越高代表越可能過擬合。',
+                },
             ],
         },
         {
@@ -5380,14 +5502,114 @@ function computeOverfittingAnalysis(result) {
             weight: 30,
             score: p3Score,
             summary: p3Summary,
+            tooltip: componentTooltips.sensitivity,
             detailItems: [
-                { label: '平均彈性 |E|', value: Number.isFinite(elasticityAvg) ? elasticityAvg.toFixed(2) : '—' },
-                { label: '最大彈性', value: Number.isFinite(elasticityMax) ? elasticityMax.toFixed(2) : '—' },
-                { label: '樣本數', value: elasticitySamples > 0 ? String(elasticitySamples) : '—' },
-                { label: '懲罰門檻', value: 'E_penalty = 3' },
+                {
+                    label: '平均彈性 |E|',
+                    value: Number.isFinite(elasticityAvg) ? elasticityAvg.toFixed(2) : '—',
+                    tooltip: 'Elasticity = (績效變化 / 基準績效) × (原始參數 / 參數變化)，以 Sharpe 為優先，否則退回總報酬率。',
+                },
+                {
+                    label: '最大彈性',
+                    value: Number.isFinite(elasticityMax) ? elasticityMax.toFixed(2) : '—',
+                    tooltip: '觀察到的絕對彈性最大值，可快速辨識單一參數是否高度敏感。',
+                },
+                {
+                    label: '樣本數',
+                    value: elasticitySamples > 0 ? String(elasticitySamples) : '—',
+                    tooltip: '參數擾動情境中能計算彈性的有效樣本數，需 >0 才能評分。',
+                },
+                {
+                    label: '懲罰門檻',
+                    value: 'E_penalty = 3',
+                    tooltip: '平均彈性 ≥ 3 視為高度敏感並給予最大扣分，與常見多參數策略的穩健門檻一致。',
+                },
             ],
         },
     ];
+
+    const metricSections = [
+        {
+            title: '夏普與折損基準',
+            items: [
+                {
+                    label: 'IS 夏普',
+                    value: formatNumber(srIn, 2),
+                    tooltip: '整段有效樣本的基準夏普，由 Worker 日化報酬轉換而來。',
+                },
+                {
+                    label: 'OOS 夏普估',
+                    value: formatNumber(srOutEstimate, 2),
+                    tooltip: '以中位數整合半期夏普、敏感度折損與比例調整三種估計。',
+                },
+                {
+                    label: '折損率 H',
+                    value: hairCutPercentDisplay,
+                    tooltip: 'H = 1 - E[SR_out] / SR_in，最大裁切為 100%。',
+                },
+                {
+                    label: '半期夏普 (前/後)',
+                    value: halfSharpeDisplay,
+                    tooltip: `${describeRange('前段(IS)', isRange)}；${describeRange('後段(OOS)', oosRange)}。`,
+                },
+            ],
+        },
+        {
+            title: '敏感度統計',
+            items: [
+                {
+                    label: '敏感度樣本',
+                    value: scenarioSamples > 0 ? String(scenarioSamples) : '—',
+                    tooltip: '參數敏感度分析產生的有效情境數量。',
+                },
+                {
+                    label: 'Sharpe 中位數',
+                    value: formatNumber(scenarioSharpeMedian, 2),
+                    tooltip: '所有情境夏普的中位數，對應 CSCV 的中位基準。',
+                },
+                {
+                    label: 'Baseline 名次',
+                    value: baselineRankDisplay,
+                    tooltip: '基準策略在情境集合中的排序。',
+                },
+                {
+                    label: '平均彈性 |E|',
+                    value: Number.isFinite(elasticityAvg) ? elasticityAvg.toFixed(2) : '—',
+                    tooltip: '所有有效情境的彈性絕對值平均。',
+                },
+            ],
+        },
+    ];
+
+    if (periods.fullRange) {
+        metricSections.push({
+            title: '樣本區間定義',
+            items: [
+                {
+                    label: '有效樣本',
+                    value: formatPeriodText(periods.fullRange),
+                    tooltip: '指自有效起始日（排除暖身）起算的完整回測期間。',
+                },
+                {
+                    label: 'IS 範圍',
+                    value: formatPeriodText(periods.isRange),
+                    tooltip: describeRange('IS', periods.isRange),
+                },
+                {
+                    label: 'OOS 範圍',
+                    value: formatPeriodText(periods.oosRange),
+                    tooltip: describeRange('OOS', periods.oosRange),
+                },
+                {
+                    label: '有效筆數',
+                    value: periods.validLength > 0
+                        ? `${periods.validLength} 筆（總樣本 ${periods.totalSamples}）`
+                        : '—',
+                    tooltip: '有效筆數 = 總樣本 - 暖身位移（computedStartIndex - effectiveStartIndex）。',
+                },
+            ],
+        });
+    }
 
     const availableCount = components.filter((comp) => Number.isFinite(comp.score)).length;
     const rawScore = components.reduce((sum, comp) => sum + (Number.isFinite(comp.score) ? comp.score : 0), 0);
@@ -5445,6 +5667,74 @@ function computeOverfittingAnalysis(result) {
         };
     })();
 
+    const scoreTooltip = [
+        'R_score = P1 + P2 + P3（最高 100 分）。',
+        'P1：依 Sharpe Ratio Haircut 修正 IS 夏普以估計 OOS 效能（Bailey et al., 2017）。',
+        'P2：採用 Combinatorially-Symmetric Cross-Validation 估計 PBO（Bailey et al., 2014）。',
+        'P3：以參數彈性評估策略對超參數的穩健性（Lopez de Prado, 2018；Harvey & Liu, 2015）。',
+    ].join('\n');
+
+    const references = [
+        {
+            label:
+                'Bailey, D. H., Borwein, J. M., Lopez de Prado, M., & Zhu, Q. J. (2014). The Probability of Backtest Overfitting. Journal of Portfolio Management, 40(5), 144–157.',
+            url: 'https://doi.org/10.3905/jpm.2014.40.5.144',
+        },
+        {
+            label:
+                'Bailey, D. H., Borwein, J. M., Lopez de Prado, M., & Zhu, Q. J. (2017). The Sharpe Ratio Efficient Frontier. Journal of Risk, 20(2), 1–33.',
+            url: 'https://doi.org/10.21314/JOR.2017.399',
+        },
+        {
+            label: 'Lopez de Prado, M. (2018). Advances in Financial Machine Learning. Wiley.',
+            url: 'https://www.wiley.com/en-us/Advances+in+Financial+Machine+Learning-p-9781119482086',
+        },
+        {
+            label:
+                'Harvey, C. R., & Liu, Y. (2015). Backtesting. Journal of Portfolio Management, 42(1), 13–28.',
+            url: 'https://doi.org/10.3905/jpm.2015.42.1.013',
+        },
+    ];
+
+    const methodology = {
+        intro: '本頁依 Backtest Robustness Score（R_score）綜合衡量夏普折損、CSCV PBO 與參數彈性，權重分別為 30/40/30。',
+        steps: [
+            periods.fullRange
+                ? `IS/OOS 切割：使用暖身後的有效樣本 ${formatPeriodText(periods.fullRange)}，前半段（${formatPeriodText(periods.isRange)}）視為 IS，後半段（${formatPeriodText(periods.oosRange)}）視為 OOS。`
+                : 'IS/OOS 切割：資料不足，無法推導有效樣本範圍。',
+            'P1（效能折損）：計算後段夏普、敏感度平均折損調整值與半期夏普比的組合，取中位數作為 E[SR_out]，再依 Sharpe Ratio Haircut 框架換算折損率 H。',
+            'P2（PBO）：彙整敏感度分析的所有情境夏普，使用 CSCV 量化基準策略落在 OOS 中位數以下的機率。',
+            'P3（參數彈性）：針對每個參數樣本計算 Elasticity，平均後與門檻 E_penalty = 3 對比，彈性越大扣分越多。',
+        ],
+        definitions: [
+            {
+                term: 'IS (In-Sample)',
+                description: periods.isRange
+                    ? `${formatPeriodText(periods.isRange)}，為有效樣本的前半段，用於訓練與門檻評估。`
+                    : '資料不足以切出 IS 區間。',
+            },
+            {
+                term: 'OOS (Out-of-Sample)',
+                description: periods.oosRange
+                    ? `${formatPeriodText(periods.oosRange)}，為有效樣本的後半段，用於驗證策略泛化能力。`
+                    : '資料不足以切出 OOS 區間。',
+            },
+            {
+                term: 'Sharpe Ratio Haircut',
+                description: '依 Bailey et al. (2017) 建議，以多種 OOS 夏普估計的中位數折減 IS 夏普，避免高估未來績效。',
+            },
+            {
+                term: 'PBO (Probability of Backtest Overfitting)',
+                description: 'Bailey et al. (2014) 定義的機率，衡量最佳樣本內策略在樣本外跌落至所有策略中位數以下的風險。',
+            },
+            {
+                term: '參數彈性 (Elasticity)',
+                description: '參數微調造成的績效相對變化，以 |E| > 3 為高度敏感門檻，參考 Lopez de Prado (2018) 與 Harvey & Liu (2015)。',
+            },
+        ],
+        references,
+    };
+
     const notes = [];
     if (srIn === null || srIn <= 0) {
         notes.push('缺少正值的 IS 夏普比率，P1 以保守折損處理。');
@@ -5471,6 +5761,9 @@ function computeOverfittingAnalysis(result) {
         availableCount,
         classification,
         components,
+        periods,
+        metricSections,
+        scoreTooltip,
         srIn,
         srOutEstimate,
         srHalf1,
@@ -5486,6 +5779,7 @@ function computeOverfittingAnalysis(result) {
         elasticityAvg,
         elasticityMax,
         elasticitySamples,
+        methodology,
         notes,
     };
 }
@@ -5494,9 +5788,10 @@ function renderOverfittingTab(result) {
     const scorecard = document.getElementById('overfitting-scorecard');
     const componentsContainer = document.getElementById('overfitting-components');
     const metricsContainer = document.getElementById('overfitting-metrics');
+    const methodologyContainer = document.getElementById('overfitting-methodology');
     const notesContainer = document.getElementById('overfitting-notes');
 
-    if (!scorecard || !componentsContainer || !metricsContainer || !notesContainer) {
+    if (!scorecard || !componentsContainer || !metricsContainer || !notesContainer || !methodologyContainer) {
         return;
     }
 
@@ -5529,10 +5824,21 @@ function renderOverfittingTab(result) {
     scorecard.className = 'rounded-xl border shadow-sm p-6 space-y-4';
     scorecard.style.borderColor = 'color-mix(in srgb, var(--border) 60%, transparent)';
     scorecard.style.color = 'var(--foreground)';
+    const renderTooltip = (text, sizeClass = 'w-4 h-4 text-[10px]') => {
+        if (!text) return '';
+        const safeText = escapeHtml(text).replace(/\n/g, '<br>');
+        return `
+            <span class="tooltip inline-flex items-center justify-center ml-1 align-middle">
+                <span class="info-icon inline-flex items-center justify-center ${sizeClass} rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                <span class="tooltiptext tooltiptext--overfitting">${safeText}</span>
+            </span>
+        `;
+    };
+
     scorecard.innerHTML = `
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div class="space-y-2">
-                <p class="text-[11px] font-semibold tracking-wider uppercase" style="color: var(--muted-foreground);">Backtest Robustness Score</p>
+                <p class="text-[11px] font-semibold tracking-wider uppercase flex items-center" style="color: var(--muted-foreground);">Backtest Robustness Score${renderTooltip(analysis.scoreTooltip)}</p>
                 <div class="flex items-baseline gap-3">
                     <span class="text-4xl font-extrabold ${analysis.classification.colorClass}">${scoreText}</span>
                     <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${analysis.classification.badgeClass}">${escapeHtml(analysis.classification.label)}</span>
@@ -5552,17 +5858,20 @@ function renderOverfittingTab(result) {
             const progress = hasScore ? Math.max(0, Math.min(100, (comp.score / comp.weight) * 100)) : 0;
             const progressClass = progress >= 70 ? 'bg-emerald-500' : progress >= 40 ? 'bg-amber-500' : 'bg-rose-500';
             const detailRows = (Array.isArray(comp.detailItems) ? comp.detailItems : [])
-                .map((item) => `
+                .map((item) => {
+                    const labelHtml = `<span class="flex items-center gap-1" style="color: var(--muted-foreground);">${escapeHtml(item.label)}${renderTooltip(item.tooltip)}</span>`;
+                    return `
                         <div class="flex items-center justify-between text-xs">
-                            <span style="color: var(--muted-foreground);">${escapeHtml(item.label)}</span>
+                            ${labelHtml}
                             <span class="font-semibold" style="color: var(--foreground);">${escapeHtml(item.value)}</span>
                         </div>
-                    `)
+                    `;
+                })
                 .join('');
             return `
                 <div class="p-4 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent); background-color: color-mix(in srgb, var(--background) 98%, var(--muted) 6%);">
                     <div class="flex items-center justify-between mb-3">
-                        <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(comp.label)}</p>
+                        <p class="text-sm font-semibold flex items-center gap-2" style="color: var(--foreground);">${escapeHtml(comp.label)}${renderTooltip(comp.tooltip, 'w-5 h-5 text-xs')}</p>
                         <span class="text-sm font-semibold" style="color: var(--foreground);">${scoreDisplay} / ${comp.weight}</span>
                     </div>
                     <div class="w-full h-2 rounded-full" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
@@ -5578,62 +5887,88 @@ function renderOverfittingTab(result) {
     componentsContainer.innerHTML = `<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">${componentCards}</div>`;
     componentsContainer.classList.remove('hidden');
 
-    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
-    const hairCutDisplay = analysis.hairCutRatio === null
-        ? '—'
-        : analysis.hairCutRatio >= 1
-            ? '≥1.00'
-            : analysis.hairCutRatio <= -1
-                ? `≤-${Math.abs(analysis.hairCutRatio).toFixed(2)}`
-                : analysis.hairCutRatio.toFixed(2);
-    const halfSharpeText = Number.isFinite(analysis.srHalf1) && Number.isFinite(analysis.srHalf2)
-        ? `${analysis.srHalf1.toFixed(2)} / ${analysis.srHalf2.toFixed(2)}`
-        : '—';
-    const baselineRankText = analysis.baselineRank !== null && Number.isFinite(analysis.candidateCount) && analysis.candidateCount > 0
-        ? `${analysis.baselineRank + 1} / ${analysis.candidateCount}`
-        : '—';
-
-    const metricSections = [
-        {
-            title: '夏普與折損基準',
-            items: [
-                { label: 'IS 夏普', value: formatNumber(analysis.srIn, 2) },
-                { label: 'OOS 夏普估', value: formatNumber(analysis.srOutEstimate, 2) },
-                { label: '折損率 H', value: hairCutDisplay },
-                { label: '半期夏普 (前/後)', value: halfSharpeText },
-            ],
-        },
-        {
-            title: '敏感度統計',
-            items: [
-                { label: '敏感度樣本', value: analysis.scenarioSamples > 0 ? String(analysis.scenarioSamples) : '—' },
-                { label: 'Sharpe 中位數', value: formatNumber(analysis.scenarioSharpeMedian, 2) },
-                { label: 'Baseline 名次', value: baselineRankText },
-                { label: '平均彈性 |E|', value: Number.isFinite(analysis.elasticityAvg) ? analysis.elasticityAvg.toFixed(2) : '—' },
-            ],
-        },
-    ];
-
+    const metricSections = Array.isArray(analysis.metricSections) ? analysis.metricSections : [];
     const metricHtml = metricSections
         .map((section) => `
                 <div class="p-4 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <p class="text-sm font-semibold mb-3" style="color: var(--foreground);">${escapeHtml(section.title)}</p>
                     <div class="space-y-1 text-xs">
                         ${section.items
-                            .map((item) => `
+                            .map((item) => {
+                                const labelHtml = `<span class="flex items-center gap-1" style="color: var(--muted-foreground);">${escapeHtml(item.label)}${renderTooltip(item.tooltip)}</span>`;
+                                return `
                                     <div class="flex items-center justify-between">
-                                        <span style="color: var(--muted-foreground);">${escapeHtml(item.label)}</span>
+                                        ${labelHtml}
                                         <span class="font-semibold" style="color: var(--foreground);">${escapeHtml(item.value)}</span>
                                     </div>
-                                `)
+                                `;
+                            })
                             .join('')}
                     </div>
                 </div>
             `)
         .join('');
 
-    metricsContainer.innerHTML = `<div class="grid gap-4 md:grid-cols-2">${metricHtml}</div>`;
-    metricsContainer.classList.remove('hidden');
+    if (metricSections.length > 0) {
+        metricsContainer.innerHTML = `<div class="grid gap-4 md:grid-cols-2">${metricHtml}</div>`;
+        metricsContainer.classList.remove('hidden');
+    } else {
+        metricsContainer.innerHTML = '';
+        metricsContainer.classList.add('hidden');
+    }
+
+    const methodologyData = analysis.methodology || null;
+    if (methodologyData) {
+        const introHtml = methodologyData.intro ? `<p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">${escapeHtml(methodologyData.intro)}</p>` : '';
+        const steps = Array.isArray(methodologyData.steps) ? methodologyData.steps : [];
+        const definitions = Array.isArray(methodologyData.definitions) ? methodologyData.definitions : [];
+        const references = Array.isArray(methodologyData.references) ? methodologyData.references : [];
+        const stepsHtml = steps.length
+            ? `<ol class="list-decimal pl-5 space-y-1 text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${steps
+                  .map((step) => `<li>${escapeHtml(step)}</li>`)
+                  .join('')}</ol>`
+            : '';
+        const definitionsHtml = definitions.length
+            ? `<ul class="space-y-2 text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${definitions
+                  .map((item) => `<li><span class="font-semibold" style="color: var(--foreground);">${escapeHtml(item.term)}：</span>${escapeHtml(item.description)}</li>`)
+                  .join('')}</ul>`
+            : '';
+        const referencesHtml = references.length
+            ? `<ul class="list-disc pl-5 space-y-1 text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${references
+                  .map((ref) => {
+                      const label = escapeHtml(ref.label || '');
+                      return ref.url
+                          ? `<li><a href="${escapeHtml(ref.url)}" target="_blank" rel="noopener" style="color: var(--primary);">${label}</a></li>`
+                          : `<li>${label}</li>`;
+                  })
+                  .join('')}</ul>`
+            : '';
+
+        methodologyContainer.innerHTML = `
+            <div class="p-5 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                <h4 class="text-sm font-semibold mb-3" style="color: var(--foreground);">過擬合說明</h4>
+                ${introHtml}
+                <div class="grid gap-4 mt-4 md:grid-cols-2">
+                    <div>
+                        <p class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">計算流程</p>
+                        ${stepsHtml || '<p class="text-xs" style="color: var(--muted-foreground);">暫無流程說明。</p>'}
+                    </div>
+                    <div>
+                        <p class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">名詞定義</p>
+                        ${definitionsHtml || '<p class="text-xs" style="color: var(--muted-foreground);">暫無名詞定義。</p>'}
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <p class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">參考文獻</p>
+                    ${referencesHtml || '<p class="text-xs" style="color: var(--muted-foreground);">尚未提供參考文獻。</p>'}
+                </div>
+            </div>
+        `;
+        methodologyContainer.classList.remove('hidden');
+    } else {
+        methodologyContainer.classList.add('hidden');
+        methodologyContainer.innerHTML = '';
+    }
 
     if (Array.isArray(analysis.notes) && analysis.notes.length > 0) {
         const noteItems = analysis.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('');
