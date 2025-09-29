@@ -1,3 +1,9 @@
+## 2025-11-20 — Patch LB-OVERFITTING-SCORE-20251120A
+- **Scope**: 新增回測過擬合評估分頁與後端計算模組，整合夏普折損、敏感度樣本與參數彈性評分。
+- **UI**: 右側分頁導覽加入「過擬合」分頁，提供回測穩健度總分、三大扣分項目、指標表格與備註提醒，未執行回測時顯示提示。
+- **Logic**: 主執行緒計算 `Backtest Robustness Score`，整合半期夏普、敏感度結果與彈性樣本估算 P1/P2/P3，並支援錯誤時自動重置分頁。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
@@ -757,3 +763,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-OVERFITTING-SCORE-20251208A
+- **Issue recap**: 過擬合分頁缺乏計算說明與依據，無法追蹤 IS/OOS 期間與各項分數來源，使用者也無從得知指標與文獻脈絡。
+- **Fix**: 為 P1/P2/P3 與詳細指標新增工具提示，補充 Haircut Sharpe Ratio、CSCV PBO 與參數彈性公式；同步揭露 IS/OOS/整體期間與有效交易日數，並加入依 Bailey 等人 (2014)、López de Prado (2018) 的過擬合說明卡與動態計算摘要。
+- **Diagnostics**: 以本地回測檢視過擬合分頁，確認 tooltip 解釋、期間年份、計算摘要與參考文獻皆正確顯示且能隨回測結果更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
