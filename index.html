@@ -1219,6 +1219,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="overfitting"
+                                            >
+                                                <i data-lucide="shield-alert" class="lucide-sm inline mr-1"></i>過擬合
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1408,117 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Overfitting Tab -->
+                            <div class="tab-content hidden space-y-6" id="overfitting-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="shield" class="lucide-sm" aria-hidden="true"></i>
+                                            過擬合評估儀表板
+                                        </h3>
+                                        <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            依照回測穩健度分數（Backtest Robustness Score）評估效能折損、過擬合機率與參數敏感度，協助判斷策略是否已經過擬合。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div
+                                            id="overfitting-scorecard"
+                                            class="rounded-xl border border-dashed p-6 text-sm text-center"
+                                            style="border-color: color-mix(in srgb, var(--border) 65%, transparent); color: var(--muted-foreground);"
+                                        >
+                                            執行回測後將顯示過擬合評估結果與綜合分數。
+                                        </div>
+                                        <div id="overfitting-components" class="space-y-4 hidden"></div>
+                                        <div id="overfitting-metrics" class="space-y-4 hidden"></div>
+                                        <div id="overfitting-notes" class="hidden"></div>
+                                    </div>
+                                </div>
+
+                                <div class="card border border-dashed" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                                    <div class="card-header pb-3">
+                                        <h4 class="card-title text-sm font-semibold">判讀對照表</h4>
+                                    </div>
+                                    <div class="card-content text-xs leading-relaxed space-y-3" style="color: var(--muted-foreground);">
+                                        <p>
+                                            回測穩健度分數介於 0–100 分，分數越高代表過擬合風險越低。若分數未滿 100 分，優先檢查效能折損（P1）、過擬合機率（P2）與參數敏感度（P3）的扣分原因。
+                                        </p>
+                                        <div class="overflow-x-auto">
+                                            <table class="min-w-full divide-y divide-border" style="border-color: var(--border);">
+                                                <thead style="background-color: color-mix(in srgb, var(--muted) 12%, transparent);">
+                                                    <tr>
+                                                        <th class="px-3 py-2 text-left font-semibold" style="color: var(--foreground);">分數範圍</th>
+                                                        <th class="px-3 py-2 text-left font-semibold" style="color: var(--foreground);">風險等級</th>
+                                                        <th class="px-3 py-2 text-left font-semibold" style="color: var(--foreground);">解讀重點</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody style="background-color: var(--background); color: var(--muted-foreground);" class="divide-y divide-border">
+                                                    <tr>
+                                                        <td class="px-3 py-2">80 – 100</td>
+                                                        <td class="px-3 py-2 font-semibold text-emerald-600">極低過擬合風險</td>
+                                                        <td class="px-3 py-2">OOS 夏普與 IS 接近、PBO 極低，參數彈性穩定。</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="px-3 py-2">60 – 79</td>
+                                                        <td class="px-3 py-2 font-semibold text-emerald-500">低過擬合風險</td>
+                                                        <td class="px-3 py-2">折損率可接受、PBO 偏低，建議持續監控敏感度。</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="px-3 py-2">40 – 59</td>
+                                                        <td class="px-3 py-2 font-semibold text-amber-500">中度過擬合風險</td>
+                                                        <td class="px-3 py-2">折損或 PBO 接近門檻，建議延伸樣本或調整參數。</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td class="px-3 py-2">0 – 39</td>
+                                                        <td class="px-3 py-2 font-semibold text-rose-600">高過擬合風險</td>
+                                                        <td class="px-3 py-2">OOS 表現快速崩落或參數極敏感，需重新檢視策略設計。</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card border border-dashed" style="border-color: color-mix(in srgb, var(--border) 65%, transparent);">
+                                    <div class="card-header pb-3">
+                                        <h4 class="card-title text-sm font-semibold">過擬合說明</h4>
+                                    </div>
+                                    <div class="card-content text-xs leading-relaxed space-y-3" style="color: var(--muted-foreground);">
+                                        <p>
+                                            本頁的回測穩健度分數 <code>R_score</code> 由 <code>P1 + P2 + P3</code> 組成。
+                                            Worker 會將有效資產曲線對半切分，前半段視為樣本內（In-Sample, IS），後半段視為樣本外（Out-of-Sample, OOS），並回傳兩段的起訖日期給前端顯示。
+                                        </p>
+                                        <div class="space-y-2">
+                                            <div>
+                                                <p class="font-semibold text-foreground">P1 — 效能折損懲罰（30 分）</p>
+                                                <p>
+                                                    參考 Bailey, Borwein, López de Prado, Zhu (2017, <em>The Sharpe Ratio Efficient Frontier</em>) 的 Sharpe Ratio Haircut 概念，計算
+                                                    <code>H = 1 - E[SR_out]/SR_in</code>。
+                                                    <code>E[SR_out]</code> 為第二段夏普值、夏普跌幅調整值與半期比率推估值的中位數，確保 OOS 估計落在保守區間。
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p class="font-semibold text-foreground">P2 — 回測過擬合機率懲罰（40 分）</p>
+                                                <p>
+                                                    依照 Bailey 等人 (2014, <em>The Probability of Backtest Overfitting</em>) 提出的 Combinatorially Symmetric Cross-Validation（CSCV）精神，
+                                                    以敏感度網格中的 Sharpe 排名估算 PBO：若樣本內最佳策略在 OOS 排名落入下半部，即視為過擬合。PBO 越高，扣分越多。
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p class="font-semibold text-foreground">P3 — 參數敏感度懲罰（30 分）</p>
+                                                <p>
+                                                    參考 López de Prado (2018, <em>Advances in Financial Machine Learning</em>) 對參數彈性的討論，
+                                                    以敏感度分析中的有限差分估算平均絕對彈性 <code>E_avg</code>，只要 <code>E_avg</code> 接近 3 即視為高度敏感並扣除全部 30 分。
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <p>
+                                            本站不自行硬編任何 OOS 數據，所有樣本內外範圍直接來自 Worker 計算後的資產序列。
+                                            若要重現學術文獻中的完整 CSCV 或 Deflated Sharpe Ratio，可依照相同參數匯出敏感度結果後自行延伸。
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->

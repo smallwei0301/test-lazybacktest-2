@@ -1,3 +1,9 @@
+## 2025-11-20 — Patch LB-OVERFITTING-SCORE-20251120A
+- **Scope**: 新增回測過擬合評估分頁與後端計算模組，整合夏普折損、敏感度樣本與參數彈性評分。
+- **UI**: 右側分頁導覽加入「過擬合」分頁，提供回測穩健度總分、三大扣分項目、指標表格與備註提醒，未執行回測時顯示提示。
+- **Logic**: 主執行緒計算 `Backtest Robustness Score`，整合半期夏普、敏感度結果與彈性樣本估算 P1/P2/P3，並支援錯誤時自動重置分頁。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
@@ -756,4 +762,10 @@
 - **Issue recap**: 實際回測時吉祥物仍顯示成 SVG 或沙漏，追查為 Tenor 貼圖 ID 與 fallback 清單未對應到使用者指定的 Hachiware 動畫，導致 Sanitiser 成功後仍回填錯誤素材。
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-OVERFITTING-EXPLAIN-20251208A
+- **Issue recap**: 過擬合分頁缺乏工具提示與引用來源，無法清楚展示 IS/OOS 切分年份與評分公式來源，使用者難以了解分數如何計算。
+- **Fix**: 於過擬合儀表板新增版本化 Tooltip，說明 P1/P2/P3 所採用的 Bailey et al. (2014, 2017) 與 López de Prado (2018) 方法；透過 Worker 回傳的半期資訊顯示 IS/OOS 起訖年份與長度，並加入完整的「過擬合說明」卡片。
+- **Diagnostics**: 本地回傳模擬資料檢查 Backtest Robustness Score、三項分數與 IS/OOS 期間皆正確顯示並帶有 tooltip，說明卡片文字與引用年份同步校對。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

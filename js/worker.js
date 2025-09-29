@@ -7821,6 +7821,8 @@ function runStrategy(data, params, options = {}) {
       sharpeHalf1 = null,
       annReturnHalf2 = null,
       sharpeHalf2 = null;
+    let half1Range = null,
+      half2Range = null;
     const validDataLength = validPortfolioSlice.length;
     if (validDataLength >= 4) {
       const midPoint = Math.floor(validDataLength / 2);
@@ -7858,6 +7860,13 @@ function runStrategy(data, params, options = {}) {
           firstHalfDailyReturns.length > 0 ? avgDailyReturn1 * 252 * 100 : 0;
         const annExcessReturn1 = approxAnnReturn1 / 100 - 0.01;
         sharpeHalf1 = annStdDev1 !== 0 ? annExcessReturn1 / annStdDev1 : 0;
+        if (firstHalfDates.length > 0) {
+          half1Range = {
+            start: firstHalfDates[0] || null,
+            end: firstHalfDates[firstHalfDates.length - 1] || null,
+            bars: firstHalfDates.length,
+          };
+        }
       }
       if (secondHalfPortfolio.length > 1) {
         const secondHalfDailyReturns = calculateDailyReturns(
@@ -7886,6 +7895,13 @@ function runStrategy(data, params, options = {}) {
           secondHalfDailyReturns.length > 0 ? avgDailyReturn2 * 252 * 100 : 0;
         const annExcessReturn2 = approxAnnReturn2 / 100 - 0.01;
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
+        if (secondHalfDates.length > 0) {
+          half2Range = {
+            start: secondHalfDates[0] || null,
+            end: secondHalfDates[secondHalfDates.length - 1] || null,
+            bars: secondHalfDates.length,
+          };
+        }
       }
     }
     const subPeriodResults = {};
@@ -8193,6 +8209,10 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      halfRanges: {
+        is: half1Range,
+        oos: half2Range,
+      },
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
