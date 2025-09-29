@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-OVERFITTING-SCORE-20251120A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -34,6 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDataSourceDisplay(null, null);
 });
 
+document.addEventListener('DOMContentLoaded', () => {
+    resetOverfittingTab('idle');
+});
+
 let lastPriceDebug = {
     steps: [],
     summary: null,
@@ -51,6 +56,8 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+const OVERFITTING_SCORE_VERSION = 'LB-OVERFITTING-SCORE-20251208A';
+let lastOverfittingAnalysis = null;
 
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
@@ -5077,6 +5084,812 @@ function clearPreviousResults() {
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
+    resetOverfittingTab('idle');
+}
+
+function resetOverfittingTab(state = 'idle', message = '') {
+    const scorecard = document.getElementById('overfitting-scorecard');
+    const components = document.getElementById('overfitting-components');
+    const metrics = document.getElementById('overfitting-metrics');
+    const notes = document.getElementById('overfitting-notes');
+    const methodology = document.getElementById('overfitting-methodology-runtime');
+    if (!scorecard) {
+        return;
+    }
+
+    const baseText =
+        state === 'error'
+            ? `過擬合評估暫時無法顯示：${escapeHtml(message || '請稍後再試')}`
+            : '執行回測後將顯示過擬合評估結果與綜合分數。';
+
+    scorecard.className = 'rounded-xl border border-dashed p-6 text-sm text-center';
+    scorecard.style.borderColor = 'color-mix(in srgb, var(--border) 65%, transparent)';
+    scorecard.style.color = 'var(--muted-foreground)';
+    scorecard.innerHTML = `<span>${baseText}</span>`;
+
+    if (components) {
+        components.classList.add('hidden');
+        components.innerHTML = '';
+    }
+    if (metrics) {
+        metrics.classList.add('hidden');
+        metrics.innerHTML = '';
+    }
+    if (notes) {
+        notes.classList.add('hidden');
+        notes.innerHTML = '';
+    }
+    if (methodology) {
+        methodology.classList.add('hidden');
+        methodology.innerHTML = '';
+    }
+
+    lastOverfittingAnalysis = null;
+    if (typeof window !== 'undefined') {
+        window.lazybacktestOverfittingAnalysis = null;
+    }
+}
+
+function computeOverfittingAnalysis(result) {
+    if (!result || typeof result !== 'object') {
+        return null;
+    }
+
+    const rawDates = Array.isArray(result.dates) ? result.dates : [];
+    const dateSeries = rawDates.filter((value) => typeof value === 'string' && value);
+    const extractYear = (isoDate) => {
+        if (typeof isoDate !== 'string' || isoDate.length < 4) return null;
+        const parsed = Number.parseInt(isoDate.slice(0, 4), 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+    const buildRange = (dates) => {
+        const filtered = dates.filter((d) => typeof d === 'string' && d);
+        if (filtered.length === 0) return null;
+        const start = filtered[0];
+        const end = filtered[filtered.length - 1];
+        return {
+            start,
+            end,
+            startYear: extractYear(start),
+            endYear: extractYear(end),
+        };
+    };
+    const overallRange = buildRange(dateSeries);
+    let isRange = null;
+    let oosRange = null;
+    if (dateSeries.length >= 2) {
+        const midIndex = Math.floor(dateSeries.length / 2);
+        const safeMid = Math.max(1, Math.min(midIndex, dateSeries.length - 1));
+        const isDates = dateSeries.slice(0, safeMid);
+        const oosDates = dateSeries.slice(safeMid);
+        isRange = buildRange(isDates);
+        oosRange = buildRange(oosDates);
+    }
+
+    const srIn = Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null;
+    const srHalf1 = Number.isFinite(result.sharpeHalf1) ? result.sharpeHalf1 : null;
+    const srHalf2 = Number.isFinite(result.sharpeHalf2) ? result.sharpeHalf2 : null;
+    const baselineReturn = Number.isFinite(result.returnRate) ? result.returnRate : null;
+    const sensitivity = result.sensitivityAnalysis || result.parameterSensitivity || null;
+    const sensitivitySummary = sensitivity?.summary || null;
+    const averageSharpeDrop = Number.isFinite(sensitivitySummary?.averageSharpeDrop)
+        ? Math.abs(sensitivitySummary.averageSharpeDrop)
+        : null;
+
+    const srOutCandidates = [];
+    if (Number.isFinite(srHalf2)) {
+        srOutCandidates.push(srHalf2);
+    }
+    if (Number.isFinite(srIn) && Number.isFinite(averageSharpeDrop)) {
+        srOutCandidates.push(srIn - averageSharpeDrop);
+    }
+    if (Number.isFinite(srIn) && Number.isFinite(srHalf1) && Number.isFinite(srHalf2) && Math.abs(srHalf1) > 1e-6) {
+        const ratio = srHalf2 / srHalf1;
+        if (Number.isFinite(ratio)) {
+            srOutCandidates.push(srIn * ratio);
+        }
+    }
+
+    const srOutList = srOutCandidates.filter((value) => Number.isFinite(value));
+    let srOutEstimate = null;
+    if (srOutList.length > 0) {
+        const sorted = srOutList.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        srOutEstimate = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    }
+
+    let hairCutRatio = null;
+    if (srIn !== null && srIn > 0 && srOutEstimate !== null) {
+        hairCutRatio = 1 - srOutEstimate / srIn;
+        if (!Number.isFinite(hairCutRatio)) {
+            hairCutRatio = null;
+        }
+    }
+
+    const boundedHaircut = hairCutRatio !== null ? Math.min(Math.max(hairCutRatio, 0), 1) : null;
+    const rawP1Score = boundedHaircut !== null ? 30 * (1 - boundedHaircut) : null;
+
+    const clampScore = (score, max) => {
+        if (!Number.isFinite(score)) return null;
+        if (score < 0) return 0;
+        if (score > max) return max;
+        return score;
+    };
+
+    const p1Score = clampScore(rawP1Score, 30);
+
+    const sensitivityGroups = Array.isArray(sensitivity?.groups) ? sensitivity.groups : [];
+    const scenarioSharpes = [];
+    let scenarioSamples = 0;
+
+    sensitivityGroups.forEach((group) => {
+        if (!Array.isArray(group.parameters)) return;
+        group.parameters.forEach((param) => {
+            if (!Array.isArray(param.scenarios)) return;
+            param.scenarios.forEach((scenario) => {
+                if (scenario && scenario.run) {
+                    if (Number.isFinite(scenario.run.sharpeRatio)) {
+                        scenarioSharpes.push(scenario.run.sharpeRatio);
+                    }
+                    scenarioSamples += 1;
+                }
+            });
+        });
+    });
+
+    let scenarioSharpeMedian = null;
+    if (scenarioSharpes.length > 0) {
+        const sorted = scenarioSharpes.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        scenarioSharpeMedian = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    }
+
+    const baselineSharpeForRanking = Number.isFinite(srOutEstimate) ? srOutEstimate : srIn;
+    let baselineRank = null;
+    let pbo = null;
+    let candidateCount = scenarioSharpes.length;
+    if (Number.isFinite(baselineSharpeForRanking)) {
+        candidateCount += 1;
+    }
+    if (Number.isFinite(baselineSharpeForRanking) && scenarioSharpes.length > 0) {
+        const combined = scenarioSharpes.concat([baselineSharpeForRanking]);
+        const sorted = combined.slice().sort((a, b) => a - b);
+        baselineRank = sorted.findIndex((value) => Math.abs(value - baselineSharpeForRanking) < 1e-6);
+        if (baselineRank === -1) {
+            baselineRank = sorted.indexOf(baselineSharpeForRanking);
+        }
+        if (baselineRank === -1) {
+            let closestIndex = 0;
+            let smallestDiff = Infinity;
+            sorted.forEach((value, index) => {
+                const diff = Math.abs(value - baselineSharpeForRanking);
+                if (diff < smallestDiff) {
+                    smallestDiff = diff;
+                    closestIndex = index;
+                }
+            });
+            baselineRank = closestIndex;
+        }
+        const total = sorted.length - 1;
+        if (total > 0) {
+            const quantile = baselineRank / total;
+            pbo = Math.min(Math.max(quantile, 0), 1);
+        }
+    }
+
+    const p2Score = clampScore(pbo !== null ? 40 * (1 - pbo) : null, 40);
+
+    const elasticityValues = [];
+    let elasticitySamples = 0;
+
+    sensitivityGroups.forEach((group) => {
+        if (!Array.isArray(group.parameters)) return;
+        group.parameters.forEach((param) => {
+            const baseValue = Number.isFinite(param?.baseValue) ? param.baseValue : null;
+            if (baseValue === null || Math.abs(baseValue) < 1e-6) return;
+            if (!Array.isArray(param.scenarios)) return;
+            param.scenarios.forEach((scenario) => {
+                if (!scenario || !scenario.run) return;
+                const scenarioValue = Number.isFinite(scenario.value) ? scenario.value : null;
+                if (scenarioValue === null) return;
+                const deltaTheta = scenarioValue - baseValue;
+                if (!Number.isFinite(deltaTheta) || Math.abs(deltaTheta) < 1e-6) return;
+                const scenarioSharpe = Number.isFinite(scenario.run.sharpeRatio) ? scenario.run.sharpeRatio : null;
+                const scenarioReturn = Number.isFinite(scenario.run.returnRate) ? scenario.run.returnRate : null;
+                let baselinePerf = null;
+                let scenarioPerf = null;
+                if (Number.isFinite(srIn) && Number.isFinite(scenarioSharpe)) {
+                    baselinePerf = srIn;
+                    scenarioPerf = scenarioSharpe;
+                } else if (Number.isFinite(baselineReturn) && Number.isFinite(scenarioReturn)) {
+                    baselinePerf = baselineReturn;
+                    scenarioPerf = scenarioReturn;
+                }
+                if (baselinePerf === null || scenarioPerf === null) return;
+                if (Math.abs(baselinePerf) < 1e-6) return;
+                const elasticity = ((scenarioPerf - baselinePerf) / baselinePerf) * (baseValue / deltaTheta);
+                if (Number.isFinite(elasticity)) {
+                    elasticityValues.push(Math.abs(elasticity));
+                    elasticitySamples += 1;
+                }
+            });
+        });
+    });
+
+    const elasticityAvg = elasticityValues.length > 0
+        ? elasticityValues.reduce((sum, value) => sum + value, 0) / elasticityValues.length
+        : null;
+    const elasticityMax = elasticityValues.length > 0 ? Math.max(...elasticityValues) : null;
+    const E_PENALTY = 3;
+    const normalizedElasticity = elasticityAvg !== null ? Math.min(Math.max(elasticityAvg, 0), E_PENALTY) : null;
+    const p3Score = clampScore(
+        normalizedElasticity !== null ? 30 * Math.max(0, 1 - normalizedElasticity / E_PENALTY) : null,
+        30,
+    );
+
+    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
+    const hairCutPercentDisplay = (() => {
+        if (hairCutRatio === null) return '—';
+        if (hairCutRatio >= 1) return '≥100%';
+        if (hairCutRatio <= -1) return `≤-${Math.abs(hairCutRatio * 100).toFixed(1)}%`;
+        return `${(hairCutRatio * 100).toFixed(1)}%`;
+    })();
+    const halfSharpeDisplay = Number.isFinite(srHalf1) && Number.isFinite(srHalf2)
+        ? `${srHalf1.toFixed(2)} / ${srHalf2.toFixed(2)}`
+        : '—';
+    const pboPercent = Number.isFinite(pbo) ? pbo * 100 : null;
+    const baselineRankDisplay = baselineRank !== null && Number.isFinite(candidateCount) && candidateCount > 0
+        ? `${baselineRank + 1} / ${candidateCount}`
+        : '—';
+
+    let p1Summary = '缺少可用的夏普比率，無法估算折損率。';
+    if (srIn === null || srIn <= 0) {
+        p1Summary = '基準夏普比率非正值，採用保守折損假設。';
+    } else if (srOutEstimate === null) {
+        p1Summary = '尚未取得 OOS 夏普估計，建議延伸樣本或確認敏感度運算。';
+    } else if (hairCutRatio !== null && hairCutRatio <= 0) {
+        p1Summary = `OOS 夏普估 ${srOutEstimate.toFixed(2)}，較 IS 提升 ${Math.abs(hairCutRatio * 100).toFixed(1)}%。`;
+    } else if (hairCutRatio !== null && hairCutRatio >= 1) {
+        p1Summary = `OOS 夏普估 ${srOutEstimate.toFixed(2)}，折損超過 100%，請檢查資料來源或策略穩健性。`;
+    } else if (hairCutRatio !== null) {
+        p1Summary = `OOS 夏普估 ${srOutEstimate.toFixed(2)}，需折損 ${(hairCutRatio * 100).toFixed(1)}%。`;
+    }
+
+    let p2Summary = '敏感度樣本不足，無法估計過擬合機率。';
+    if (pboPercent !== null) {
+        const riskHint = pbo <= 0.2
+            ? 'PBO 偏低，策略選擇較穩健。'
+            : pbo <= 0.5
+                ? 'PBO 居中，建議持續進行延伸驗證。'
+                : 'PBO 偏高，需注意策略可能過度擬合。';
+        p2Summary = `PBO 約 ${pboPercent.toFixed(1)}%，敏感度 Sharpe 名次 ${baselineRankDisplay}。${riskHint}`;
+    } else if (scenarioSamples === 0) {
+        p2Summary = '尚未取得參數敏感度樣本，建議先完成一次含敏感度的回測。';
+    }
+
+    let p3Summary = '缺少有效的彈性樣本或基準績效為 0，無法評估參數敏感度。';
+    if (elasticityAvg !== null) {
+        const driftHint = elasticityAvg <= 1
+            ? '平均彈性低於 1，參數穩健。'
+            : elasticityAvg <= 2
+                ? '平均彈性介於 1–2，建議持續觀察。'
+                : '平均彈性高於 2，策略對參數高度敏感。';
+        const maxText = elasticityMax !== null ? `最大彈性 ${elasticityMax.toFixed(2)}。` : '';
+        p3Summary = `平均彈性 ${elasticityAvg.toFixed(2)}，樣本 ${elasticitySamples} 組。${maxText}${driftHint}`;
+    } else if (elasticitySamples === 0 && scenarioSamples > 0) {
+        p3Summary = '參數敏感度樣本存在，但缺少 Sharpe 或報酬資料以計算彈性。';
+    }
+
+    const components = [
+        {
+            key: 'performance',
+            label: '效能折損懲罰 (P1)',
+            shortLabel: 'P1',
+            weight: 30,
+            score: p1Score,
+            tooltip:
+                '依 Bailey 等人 (2014)《The Sharpe Ratio Efficient Frontier》提出的 Haircut Sharpe Ratio，Lazybacktest 以 Worker 輸出的整體夏普、半期夏普與敏感度下修值估計 E[SR_out]，再計算 H = 1 - E[SR_out] / SR_in 並換算成 0-30 分的折損懲罰。',
+            summary: p1Summary,
+            detailItems: [
+                {
+                    label: 'IS 夏普',
+                    value: formatNumber(srIn, 2),
+                    tooltip: 'Worker 以 252 個交易日調整的夏普比率 (SharpeRatio) 作為 IS 基準，無風險利率假設 1%。',
+                },
+                {
+                    label: 'OOS 夏普估',
+                    value: formatNumber(srOutEstimate, 2),
+                    tooltip: 'OOS 夏普估 = 中位數(半期夏普、敏感度 Sharpe 下修值、IS 夏普 × 後半期/前半期比例)，對應 Haircut Sharpe Ratio 的保守估計。',
+                },
+                {
+                    label: '折損率 H',
+                    value: hairCutPercentDisplay,
+                    tooltip: 'H = 1 - E[SR_out] / SR_in，若 H ≥ 1 代表 OOS 估計歸零或為負，將被扣滿 30 分。',
+                },
+                {
+                    label: '半期夏普 (前/後)',
+                    value: halfSharpeDisplay,
+                    tooltip: '以有效資產曲線對半切分，前半段為 IS，後半段為 OOS。夏普比率由實際日報酬推算，對應折損參考。',
+                },
+            ],
+        },
+        {
+            key: 'pbo',
+            label: '回測過擬合機率懲罰 (P2)',
+            shortLabel: 'P2',
+            weight: 40,
+            score: p2Score,
+            tooltip:
+                'P2 參考 Bailey 等人 (2014)《The Probability of Backtest Overfitting》，以敏感度樣本 Sharpe 名次模擬 Combinatorially-Symmetric Cross-Validation，計算 PBO 並換算成 0-40 分。',
+            summary: p2Summary,
+            detailItems: [
+                {
+                    label: 'PBO',
+                    value: pboPercent !== null ? `${pboPercent.toFixed(1)}%` : '—',
+                    tooltip: 'PBO = Baseline Sharpe 在敏感度 Sharpe 排名的分位數，對應 CSCV 下策略在 OOS 落於中位數以下的機率。',
+                },
+                {
+                    label: '敏感度樣本',
+                    value: scenarioSamples > 0 ? String(scenarioSamples) : '—',
+                    tooltip: '敏感度分析遍歷的參數擾動組數，每組含策略回測結果。組數越多，PBO 估計越穩定。',
+                },
+                {
+                    label: 'Sharpe 中位數',
+                    value: formatNumber(scenarioSharpeMedian, 2),
+                    tooltip: '將所有參數擾動樣本的 Sharpe 值排序後取中位數，視為 CSCV 場景的基準 Sharpe。',
+                },
+                {
+                    label: 'Baseline 名次',
+                    value: baselineRankDisplay,
+                    tooltip: 'Baseline 名次 = 將基準 Sharpe 與所有敏感度 Sharpe 合併排序後的相對名次，作為 PBO 的分位數。',
+                },
+            ],
+        },
+        {
+            key: 'sensitivity',
+            label: '參數敏感度懲罰 (P3)',
+            shortLabel: 'P3',
+            weight: 30,
+            score: p3Score,
+            tooltip:
+                'P3 參考 López de Prado (2018)《Advances in Financial Machine Learning》提出的彈性概念，衡量參數微調對 Sharpe/報酬的影響，平均彈性愈大代表策略越不穩健。',
+            summary: p3Summary,
+            detailItems: [
+                {
+                    label: '平均彈性 |E|',
+                    value: Number.isFinite(elasticityAvg) ? elasticityAvg.toFixed(2) : '—',
+                    tooltip: '平均彈性 = 平均(|(績效擾動 / 基準績效) × (參數基準 / 參數差異)|)，衡量小幅調參對績效的比例影響。',
+                },
+                {
+                    label: '最大彈性',
+                    value: Number.isFinite(elasticityMax) ? elasticityMax.toFixed(2) : '—',
+                    tooltip: '記錄所有擾動樣本中的最大絕對彈性，便於辨識極端敏感的參數組合。',
+                },
+                {
+                    label: '樣本數',
+                    value: elasticitySamples > 0 ? String(elasticitySamples) : '—',
+                    tooltip: '成功計算彈性的擾動組數，需同時具備 Sharpe 或報酬與有效參數變動。',
+                },
+                {
+                    label: '懲罰門檻',
+                    value: 'E_penalty = 3',
+                    tooltip: '若平均彈性 ≥ 3，代表參數對績效的敏感度極高，依照內部標準扣至 0 分。',
+                },
+            ],
+        },
+    ];
+
+    const availableCount = components.filter((comp) => Number.isFinite(comp.score)).length;
+    const rawScore = components.reduce((sum, comp) => sum + (Number.isFinite(comp.score) ? comp.score : 0), 0);
+    const availableMax = components.reduce((sum, comp) => sum + (Number.isFinite(comp.score) ? comp.weight : 0), 0);
+
+    let finalScore = null;
+    let scaled = false;
+    if (availableMax > 0) {
+        finalScore = rawScore;
+        if (availableMax !== 100) {
+            finalScore = (rawScore / availableMax) * 100;
+            scaled = true;
+        }
+        finalScore = Math.max(0, Math.min(100, finalScore));
+    }
+
+    const classification = (() => {
+        if (finalScore === null) {
+            return {
+                label: '資料不足',
+                colorClass: 'text-muted-foreground',
+                badgeClass: 'bg-slate-100 text-slate-700 border border-slate-200',
+                description: '缺少必要指標，暫時無法判定過擬合風險。',
+            };
+        }
+        if (finalScore >= 80) {
+            return {
+                label: '極低過擬合風險',
+                colorClass: 'text-emerald-600',
+                badgeClass: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+                description: 'OOS 表現與 IS 接近，參數穩健且過擬合機率極低。',
+            };
+        }
+        if (finalScore >= 60) {
+            return {
+                label: '低過擬合風險',
+                colorClass: 'text-emerald-500',
+                badgeClass: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
+                description: '整體風險偏低，建議持續監控敏感度與效能折損。',
+            };
+        }
+        if (finalScore >= 40) {
+            return {
+                label: '中度過擬合風險',
+                colorClass: 'text-amber-500',
+                badgeClass: 'bg-amber-100 text-amber-700 border border-amber-200',
+                description: '折損或 PBO 已接近門檻，建議延伸樣本與調整參數。',
+            };
+        }
+        return {
+            label: '高過擬合風險',
+            colorClass: 'text-rose-600',
+            badgeClass: 'bg-rose-100 text-rose-700 border border-rose-200',
+            description: 'OOS 表現大幅下滑或參數極敏感，需重新檢視策略設計。',
+        };
+    })();
+
+    const notes = [];
+    if (srIn === null || srIn <= 0) {
+        notes.push('缺少正值的 IS 夏普比率，P1 以保守折損處理。');
+    }
+    if (srOutEstimate === null) {
+        notes.push('尚未取得 OOS 夏普估計，建議延伸回測或確認敏感度運算。');
+    }
+    if (pbo === null) {
+        notes.push('敏感度樣本或 Sharpe 資料不足，暫無法估算 PBO。');
+    }
+    if (elasticityAvg === null) {
+        notes.push('缺少有效的參數擾動樣本，平均彈性無法計算。');
+    }
+    if (scaled && finalScore !== null) {
+        notes.push('總分依可用項目重新正規化為 100 分制，建議補齊缺漏指標後再評估。');
+    }
+
+    return {
+        version: OVERFITTING_SCORE_VERSION,
+        finalScore,
+        scaled,
+        rawScore,
+        availableMax,
+        availableCount,
+        classification,
+        components,
+        srIn,
+        srOutEstimate,
+        srHalf1,
+        srHalf2,
+        hairCutRatio,
+        srOutSamples: srOutList.length,
+        pbo,
+        baselineRank,
+        candidateCount,
+        scenarioSamples,
+        scenarioSharpeMedian,
+        baselineSharpeUsed: baselineSharpeForRanking,
+        elasticityAvg,
+        elasticityMax,
+        elasticitySamples,
+        dateCount: dateSeries.length,
+        overallRange,
+        isRange,
+        oosRange,
+        notes,
+    };
+}
+
+function renderOverfittingTab(result) {
+    const scorecard = document.getElementById('overfitting-scorecard');
+    const componentsContainer = document.getElementById('overfitting-components');
+    const metricsContainer = document.getElementById('overfitting-metrics');
+    const notesContainer = document.getElementById('overfitting-notes');
+    const methodologyContainer = document.getElementById('overfitting-methodology-runtime');
+
+    if (!scorecard || !componentsContainer || !metricsContainer || !notesContainer) {
+        return;
+    }
+
+    if (!result) {
+        resetOverfittingTab('idle');
+        return;
+    }
+
+    const analysis = computeOverfittingAnalysis(result);
+    if (!analysis) {
+        resetOverfittingTab('error', '缺少過擬合評估所需的資料');
+        return;
+    }
+
+    lastOverfittingAnalysis = analysis;
+    if (typeof window !== 'undefined') {
+        window.lazybacktestOverfittingAnalysis = analysis;
+    }
+
+    const renderTooltipIcon = (content, iconSize = 'w-4 h-4 text-[10px]') => {
+        if (!content) return '';
+        return `
+            <span class="tooltip inline-flex items-center justify-center ${iconSize} rounded-full cursor-help info-icon" style="background-color: var(--primary); color: var(--primary-foreground);">
+                ?
+                <span class="tooltiptext tooltiptext--overfitting">${escapeHtml(content)}</span>
+            </span>
+        `.trim();
+    };
+
+    const renderLabelWithTooltip = (label, tooltip, options = {}) => {
+        const { color = 'var(--muted-foreground)', textClass = '', iconSize = 'w-4 h-4 text-[10px]' } = options;
+        const icon = renderTooltipIcon(tooltip, iconSize);
+        return `<span class="flex items-center gap-1 ${textClass}" style="color: ${color};">${escapeHtml(label)}${icon}</span>`;
+    };
+
+    const formatRange = (range) => {
+        if (!range) return '—';
+        const start = range.start || '—';
+        const end = range.end || '—';
+        const hasYears = Number.isFinite(range.startYear) && Number.isFinite(range.endYear);
+        const yearText = hasYears ? `（年份 ${range.startYear}–${range.endYear}）` : '';
+        return `${start} ～ ${end}${yearText}`;
+    };
+
+    const metaLines = [
+        `版本：${escapeHtml(analysis.version)}`,
+        `可用項目：${analysis.availableCount}/3`,
+    ];
+    if (analysis.scaled) {
+        metaLines.push('分數已正規化為 100 分制');
+    }
+
+    const scoreText = analysis.finalScore !== null ? analysis.finalScore.toFixed(1) : '—';
+
+    scorecard.className = 'rounded-xl border shadow-sm p-6 space-y-4';
+    scorecard.style.borderColor = 'color-mix(in srgb, var(--border) 60%, transparent)';
+    scorecard.style.color = 'var(--foreground)';
+    scorecard.innerHTML = `
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="space-y-2">
+                <p class="text-[11px] font-semibold tracking-wider uppercase" style="color: var(--muted-foreground);">Backtest Robustness Score</p>
+                <div class="flex items-baseline gap-3">
+                    <span class="text-4xl font-extrabold ${analysis.classification.colorClass}">${scoreText}</span>
+                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${analysis.classification.badgeClass}">${escapeHtml(analysis.classification.label)}</span>
+                </div>
+                <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">${escapeHtml(analysis.classification.description)}</p>
+            </div>
+            <div class="text-right space-y-1 text-xs" style="color: var(--muted-foreground);">
+                ${metaLines.map((line) => `<p>${line}</p>`).join('')}
+            </div>
+        </div>
+    `;
+
+    const componentCards = analysis.components
+        .map((comp) => {
+            const hasScore = Number.isFinite(comp.score);
+            const scoreDisplay = hasScore ? comp.score.toFixed(1) : '—';
+            const progress = hasScore ? Math.max(0, Math.min(100, (comp.score / comp.weight) * 100)) : 0;
+            const progressClass = progress >= 70 ? 'bg-emerald-500' : progress >= 40 ? 'bg-amber-500' : 'bg-rose-500';
+            const detailRows = (Array.isArray(comp.detailItems) ? comp.detailItems : [])
+                .map((item) => `
+                        <div class="flex items-center justify-between text-xs">
+                            ${renderLabelWithTooltip(item.label, item.tooltip)}
+                            <span class="font-semibold" style="color: var(--foreground);">${escapeHtml(item.value)}</span>
+                        </div>
+                    `)
+                .join('');
+            const headerLabel = renderLabelWithTooltip(comp.label, comp.tooltip, {
+                color: 'var(--foreground)',
+                textClass: 'text-sm font-semibold',
+                iconSize: 'w-4 h-4 text-[10px]',
+            });
+            return `
+                <div class="p-4 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent); background-color: color-mix(in srgb, var(--background) 98%, var(--muted) 6%);">
+                    <div class="flex items-center justify-between mb-3">
+                        ${headerLabel}
+                        <span class="text-sm font-semibold" style="color: var(--foreground);">${scoreDisplay} / ${comp.weight}</span>
+                    </div>
+                    <div class="w-full h-2 rounded-full" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
+                        <div class="h-2 rounded-full ${progressClass}" style="width: ${hasScore ? progress.toFixed(0) : 0}%;"></div>
+                    </div>
+                    <p class="text-xs mt-3" style="color: var(--muted-foreground); line-height: 1.6;">${escapeHtml(comp.summary)}</p>
+                    <div class="mt-3 space-y-1">${detailRows}</div>
+                </div>
+            `;
+        })
+        .join('');
+
+    componentsContainer.innerHTML = `<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">${componentCards}</div>`;
+    componentsContainer.classList.remove('hidden');
+
+    const componentLookup = {};
+    analysis.components.forEach((comp) => {
+        if (comp && comp.key) {
+            componentLookup[comp.key] = comp;
+        }
+    });
+
+    const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
+    const hairCutRatioDisplay = analysis.hairCutRatio === null
+        ? '—'
+        : analysis.hairCutRatio >= 1
+            ? '≥1.00'
+            : analysis.hairCutRatio <= -1
+                ? `≤-${Math.abs(analysis.hairCutRatio).toFixed(2)}`
+                : analysis.hairCutRatio.toFixed(2);
+    const hairCutPercentText = analysis.hairCutRatio === null
+        ? '—'
+        : analysis.hairCutRatio >= 1
+            ? '≥100%'
+            : analysis.hairCutRatio <= -1
+                ? `≤-${Math.abs(analysis.hairCutRatio * 100).toFixed(1)}%`
+                : `${(analysis.hairCutRatio * 100).toFixed(1)}%`;
+    const halfSharpeText = Number.isFinite(analysis.srHalf1) && Number.isFinite(analysis.srHalf2)
+        ? `${analysis.srHalf1.toFixed(2)} / ${analysis.srHalf2.toFixed(2)}`
+        : '—';
+    const baselineRankText = analysis.baselineRank !== null && Number.isFinite(analysis.candidateCount) && analysis.candidateCount > 0
+        ? `${analysis.baselineRank + 1} / ${analysis.candidateCount}`
+        : '—';
+
+    const metricSections = [
+        {
+            title: '樣本區間',
+            tooltip: 'Lazybacktest 以有效交易日對半切分資料，前半段視為 IS，後半段視為 OOS，並同步列出整體範圍與樣本數。',
+            items: [
+                {
+                    label: 'IS 期間',
+                    value: formatRange(analysis.isRange),
+                    tooltip: 'IS (In-Sample) 為有效交易日的前半段，用於估計基準夏普與折損。',
+                },
+                {
+                    label: 'OOS 期間',
+                    value: formatRange(analysis.oosRange),
+                    tooltip: 'OOS (Out-of-Sample) 為有效交易日的後半段，用於檢驗策略泛化能力。',
+                },
+                {
+                    label: '整體範圍',
+                    value: formatRange(analysis.overallRange),
+                    tooltip: '顯示此回測可用的完整日期區間，含暖身後的所有交易日。',
+                },
+                {
+                    label: '有效交易日數',
+                    value: Number.isFinite(analysis.dateCount) ? String(analysis.dateCount) : '—',
+                    tooltip: '回測輸出中可計算的有效日期筆數，亦是切分 IS/OOS 的基礎。',
+                },
+            ],
+        },
+        {
+            title: '夏普與折損基準',
+            items: [
+                {
+                    label: 'IS 夏普',
+                    value: formatNumber(analysis.srIn, 2),
+                    tooltip: '整段回測的基準夏普比率，對應 P1 的 SR_in。',
+                },
+                {
+                    label: 'OOS 夏普估',
+                    value: formatNumber(analysis.srOutEstimate, 2),
+                    tooltip: '綜合半期夏普與敏感度資訊的 OOS 夏普估計，對應 E[SR_out]。',
+                },
+                {
+                    label: '折損率 H',
+                    value: hairCutPercentText,
+                    tooltip: 'H = 1 - E[SR_out] / SR_in，顯示為百分比（Haircut Sharpe Ratio 概念）。',
+                },
+                {
+                    label: '半期夏普 (前/後)',
+                    value: halfSharpeText,
+                    tooltip: '以有效交易日對半拆分後的夏普比率 (IS/OOS)。',
+                },
+            ],
+        },
+        {
+            title: '敏感度統計',
+            items: [
+                {
+                    label: '敏感度樣本',
+                    value: analysis.scenarioSamples > 0 ? String(analysis.scenarioSamples) : '—',
+                    tooltip: '敏感度分析生成的擾動組數，亦是 CSCV 場景數。',
+                },
+                {
+                    label: 'Sharpe 中位數',
+                    value: formatNumber(analysis.scenarioSharpeMedian, 2),
+                    tooltip: '所有敏感度樣本 Sharpe 的中位數，對應 CSCV 的基準 Sharpe。',
+                },
+                {
+                    label: 'Baseline 名次',
+                    value: baselineRankText,
+                    tooltip: '基準 Sharpe 與敏感度樣本合併排序後的排名，用於計算 PBO。',
+                },
+                {
+                    label: '平均彈性 |E|',
+                    value: Number.isFinite(analysis.elasticityAvg) ? analysis.elasticityAvg.toFixed(2) : '—',
+                    tooltip: '所有參數擾動的平均絕對彈性，越高代表策略越敏感。',
+                },
+            ],
+        },
+    ];
+
+    const metricHtml = metricSections
+        .map((section) => {
+            const titleLabel = renderLabelWithTooltip(section.title, section.tooltip, {
+                color: 'var(--foreground)',
+                textClass: 'text-sm font-semibold',
+            });
+            const itemRows = (Array.isArray(section.items) ? section.items : [])
+                .map((item) => `
+                        <div class="flex items-center justify-between">
+                            ${renderLabelWithTooltip(item.label, item.tooltip)}
+                            <span class="font-semibold" style="color: var(--foreground);">${escapeHtml(item.value)}</span>
+                        </div>
+                    `)
+                .join('');
+            return `
+                <div class="p-4 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                    <div class="mb-3">${titleLabel}</div>
+                    <div class="space-y-1 text-xs">
+                        ${itemRows}
+                    </div>
+                </div>
+            `;
+        })
+        .join('');
+
+    metricsContainer.innerHTML = `<div class="grid gap-4 md:grid-cols-2">${metricHtml}</div>`;
+    metricsContainer.classList.remove('hidden');
+
+    if (methodologyContainer) {
+        const performanceComp = componentLookup.performance || {};
+        const pboComp = componentLookup.pbo || {};
+        const sensitivityComp = componentLookup.sensitivity || {};
+        const srInText = Number.isFinite(analysis.srIn) ? analysis.srIn.toFixed(2) : '—';
+        const srOutText = Number.isFinite(analysis.srOutEstimate) ? analysis.srOutEstimate.toFixed(2) : '—';
+        const elasticityAvgText = Number.isFinite(analysis.elasticityAvg) ? analysis.elasticityAvg.toFixed(2) : '—';
+        const elasticityMaxText = Number.isFinite(analysis.elasticityMax) ? analysis.elasticityMax.toFixed(2) : '—';
+        const samplesText = analysis.scenarioSamples > 0 ? String(analysis.scenarioSamples) : '—';
+        const pboText = pboPercent !== null ? `${pboPercent.toFixed(1)}%` : '—';
+        const dateCountText = Number.isFinite(analysis.dateCount) ? `${analysis.dateCount} 筆` : '—';
+        const performanceScoreText = Number.isFinite(performanceComp.score)
+            ? `${performanceComp.score.toFixed(1)} / ${performanceComp.weight || 30}`
+            : '—';
+        const pboScoreText = Number.isFinite(pboComp.score)
+            ? `${pboComp.score.toFixed(1)} / ${pboComp.weight || 40}`
+            : '—';
+        const sensitivityScoreText = Number.isFinite(sensitivityComp.score)
+            ? `${sensitivityComp.score.toFixed(1)} / ${sensitivityComp.weight || 30}`
+            : '—';
+        const methodologyItems = [
+            `IS 期間 ${formatRange(analysis.isRange)}，OOS 期間 ${formatRange(analysis.oosRange)}，共 ${dateCountText} 有效交易日，依序取前半段作為 IS、後半段作為 OOS。`,
+            `P1：H = 1 - E[SR_out] / SR_in = ${hairCutRatioDisplay}（約 ${hairCutPercentText}），SR_in = ${srInText}，E[SR_out] = ${srOutText}，得分 ${performanceScoreText}。`,
+            `P2：敏感度樣本 ${samplesText}，Baseline 名次 ${baselineRankText}，PBO = ${pboText}，得分 ${pboScoreText}。`,
+            `P3：平均彈性 ${elasticityAvgText}、最大 ${elasticityMaxText}，依 E_penalty = 3 計算得分 ${sensitivityScoreText}。`,
+        ];
+        methodologyContainer.innerHTML = `
+            <ul class="list-disc pl-5 space-y-2 text-xs leading-relaxed">
+                ${methodologyItems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            </ul>
+        `;
+        methodologyContainer.classList.remove('hidden');
+    }
+
+    if (Array.isArray(analysis.notes) && analysis.notes.length > 0) {
+        const noteItems = analysis.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('');
+        notesContainer.innerHTML = `
+            <div class="p-4 rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 55%, transparent); background-color: color-mix(in srgb, var(--muted) 8%, transparent);">
+                <p class="text-xs font-semibold mb-2" style="color: var(--foreground);">備註</p>
+                <ul class="list-disc pl-5 space-y-1 text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${noteItems}</ul>
+            </div>
+        `;
+        notesContainer.classList.remove('hidden');
+    } else {
+        notesContainer.classList.add('hidden');
+        notesContainer.innerHTML = '';
+    }
+
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        lucide.createIcons();
+    }
 }
 
 const adjustmentReasonLabels = {
@@ -6221,10 +7034,12 @@ function displayBacktestResult(result) {
 
     if (!result) {
         resetStrategyStatusCard('missing');
+        resetOverfittingTab('error', '回測結果無效或缺少輸出');
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
         return;
     }
     updateStrategyStatusCard(result);
+    renderOverfittingTab(result);
     const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
