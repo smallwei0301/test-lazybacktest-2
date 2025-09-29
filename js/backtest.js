@@ -14,6 +14,8 @@
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 
+const OVERFITTING_SCORE_VERSION = 'LB-OVERFITTING-SCORE-20251118A';
+
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -5048,6 +5050,7 @@ function clearPreviousResults() {
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
     document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    resetOverfittingTab('過擬合評估準備中，請完成回測。');
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -6211,6 +6214,388 @@ function handleBacktestResult(result, stockName, dataSource) {
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
 }
+function resetOverfittingTab(message = '請先執行回測，我們會自動計算回測穩健度分數與三項懲罰指標。') {
+    const container = document.getElementById('overfitting-result');
+    if (!container) return;
+    container.innerHTML = `<p class="text-sm" style="color: var(--muted-foreground);">${escapeHtml(message)}</p>`;
+}
+
+function collectOverfittingCandidates(result) {
+    const candidates = [];
+    const seen = new Set();
+    const addCandidate = (id, label, isSharpe, oosSharpe) => {
+        if (!Number.isFinite(isSharpe) || !Number.isFinite(oosSharpe)) return;
+        const key = String(id || label || candidates.length);
+        if (seen.has(key)) return;
+        seen.add(key);
+        candidates.push({ id: key, label, isSharpe, oosSharpe });
+    };
+
+    const baselineIs = Number(result?.sharpeHalf1);
+    const baselineOos = Number(result?.sharpeHalf2);
+    if (Number.isFinite(baselineIs) && Number.isFinite(baselineOos)) {
+        addCandidate('baseline', '主策略 (半場 Sharpe)', baselineIs, baselineOos);
+    }
+
+    const sensitivity = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+    if (sensitivity && Array.isArray(sensitivity.groups)) {
+        sensitivity.groups.forEach((group, groupIdx) => {
+            const groupLabel = group?.label || `Group ${groupIdx + 1}`;
+            (group?.parameters || []).forEach((param, paramIdx) => {
+                const baseName = param?.name || param?.key || `Param ${paramIdx + 1}`;
+                (param?.scenarios || []).forEach((scenario, scenarioIdx) => {
+                    if (!scenario || scenario.error) return;
+                    const run = scenario.run || {};
+                    const isSharpe = Number(run.sharpeHalf1);
+                    const oosSharpe = Number(run.sharpeHalf2);
+                    const scenarioLabel = scenario?.label || `調整 ${scenarioIdx + 1}`;
+                    const label = `${groupLabel}｜${baseName} ${scenarioLabel}`;
+                    const id = `${group?.key || groupLabel}|${param?.key || baseName}|${scenarioLabel}`;
+                    addCandidate(id, label.trim(), isSharpe, oosSharpe);
+                });
+            });
+        });
+    }
+
+    return { candidates };
+}
+
+function estimatePboFromCandidates(candidateData) {
+    const candidates = Array.isArray(candidateData?.candidates) ? candidateData.candidates : [];
+    if (candidates.length < 2) {
+        return {
+            pbo: 0.5,
+            fallback: true,
+            validCount: candidates.length,
+            bestCandidate: candidates[0] || null,
+            percentile: null,
+        };
+    }
+    const bestIsCandidate = [...candidates].sort((a, b) => b.isSharpe - a.isSharpe)[0];
+    const sortedByOos = [...candidates].sort((a, b) => a.oosSharpe - b.oosSharpe);
+    const bestIndex = sortedByOos.findIndex((item) => item.id === bestIsCandidate.id);
+    if (bestIndex === -1) {
+        return {
+            pbo: 0.5,
+            fallback: true,
+            validCount: candidates.length,
+            bestCandidate: bestIsCandidate,
+            percentile: null,
+        };
+    }
+    const percentile = (bestIndex + 1) / sortedByOos.length;
+    let pbo = 0;
+    if (percentile > 0.5) {
+        pbo = Math.min(1, (percentile - 0.5) / 0.5);
+    }
+    return {
+        pbo,
+        fallback: false,
+        validCount: sortedByOos.length,
+        bestCandidate: bestIsCandidate,
+        percentile,
+    };
+}
+
+function computeParameterElasticityAverage(result) {
+    const sensitivity = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+    const groups = Array.isArray(sensitivity?.groups) ? sensitivity.groups : [];
+    const baselineSharpe = Number.isFinite(sensitivity?.baseline?.sharpeRatio)
+        ? sensitivity.baseline.sharpeRatio
+        : Number.isFinite(result?.sharpeRatio)
+            ? result.sharpeRatio
+            : null;
+    if (!Number.isFinite(baselineSharpe) || Math.abs(baselineSharpe) < 1e-6 || groups.length === 0) {
+        return { value: null, count: 0, fallback: true };
+    }
+
+    const elasticities = [];
+    groups.forEach((group) => {
+        (group?.parameters || []).forEach((param) => {
+            const baseValue = Number(param?.baseValue);
+            if (!Number.isFinite(baseValue) || Math.abs(baseValue) < 1e-8) return;
+            (param?.scenarios || []).forEach((scenario) => {
+                if (!scenario || scenario.error) return;
+                const scenarioSharpe = Number.isFinite(scenario?.run?.sharpeRatio)
+                    ? Number(scenario.run.sharpeRatio)
+                    : null;
+                if (!Number.isFinite(scenarioSharpe)) return;
+                const deltaTheta = Number(scenario.value) - baseValue;
+                if (!Number.isFinite(deltaTheta) || Math.abs(deltaTheta) < 1e-8) return;
+                const elasticity = ((scenarioSharpe - baselineSharpe) / baselineSharpe) * (baseValue / deltaTheta);
+                if (Number.isFinite(elasticity)) {
+                    elasticities.push(Math.abs(elasticity));
+                }
+            });
+        });
+    });
+
+    if (elasticities.length === 0) {
+        return { value: null, count: 0, fallback: true };
+    }
+    const average = elasticities.reduce((sum, val) => sum + val, 0) / elasticities.length;
+    return { value: average, count: elasticities.length, fallback: false };
+}
+
+function classifyOverfittingScore(score) {
+    if (!Number.isFinite(score)) {
+        return {
+            tier: 'unknown',
+            label: '資料不足',
+            description: '缺少完整的績效或敏感度資料，暫無法評估過擬合風險。',
+            badgeBackground: 'color-mix(in srgb, var(--muted) 20%, transparent)',
+            badgeColor: 'var(--muted-foreground)',
+        };
+    }
+    if (score >= 80) {
+        return {
+            tier: 'excellent',
+            label: '極低過擬合風險',
+            description: '預期樣本外績效與樣本內差距極小，參數調整也相對穩定。',
+            badgeBackground: 'color-mix(in srgb, #10b981 25%, transparent)',
+            badgeColor: '#047857',
+        };
+    }
+    if (score >= 60) {
+        return {
+            tier: 'good',
+            label: '低過擬合風險',
+            description: '策略在多數情境下維持穩健，偶爾出現的折損仍在可接受範圍。',
+            badgeBackground: 'color-mix(in srgb, #0ea5e9 22%, transparent)',
+            badgeColor: '#0369a1',
+        };
+    }
+    if (score >= 40) {
+        return {
+            tier: 'moderate',
+            label: '中度過擬合風險',
+            description: '夏普折損或敏感度偏高，建議延長樣本與滾動驗證。',
+            badgeBackground: 'color-mix(in srgb, #f97316 25%, transparent)',
+            badgeColor: '#9a3412',
+        };
+    }
+    return {
+        tier: 'high',
+        label: '高過擬合風險',
+        description: 'PBO 或參數敏感度顯示嚴重不穩定，建議重新設計或加入更強的正規化。',
+        badgeBackground: 'color-mix(in srgb, #ef4444 28%, transparent)',
+        badgeColor: '#991b1b',
+    };
+}
+
+function computeOverfittingDiagnostics(result) {
+    if (!result || typeof result !== 'object') return null;
+    const sensitivity = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+    const baselineSharpe = Number.isFinite(result?.sharpeRatio) ? Number(result.sharpeRatio) : null;
+    const averageSharpeDrop = Number.isFinite(sensitivity?.summary?.averageSharpeDrop)
+        ? Number(sensitivity.summary.averageSharpeDrop)
+        : null;
+
+    let expectedOutSharpe = null;
+    if (Number.isFinite(baselineSharpe)) {
+        const drop = Number.isFinite(averageSharpeDrop) ? averageSharpeDrop : 0;
+        expectedOutSharpe = Math.max(0, baselineSharpe - drop);
+    }
+
+    let hairCut = null;
+    if (
+        Number.isFinite(baselineSharpe) &&
+        Math.abs(baselineSharpe) > 1e-6 &&
+        Number.isFinite(expectedOutSharpe)
+    ) {
+        hairCut = 1 - expectedOutSharpe / baselineSharpe;
+        hairCut = Math.min(1, Math.max(0, hairCut));
+    }
+
+    let p1Score;
+    let p1Fallback = false;
+    if (hairCut !== null) {
+        p1Score = Math.max(0, 30 * (1 - hairCut));
+    } else {
+        p1Score = 15;
+        p1Fallback = true;
+    }
+
+    const candidateMetrics = collectOverfittingCandidates(result);
+    const pboInfo = estimatePboFromCandidates(candidateMetrics);
+    let p2Score = Math.max(0, Math.min(40, 40 * (1 - (Number.isFinite(pboInfo.pbo) ? pboInfo.pbo : 0))));
+    let p2Fallback = Boolean(pboInfo.fallback);
+    if (pboInfo.fallback) {
+        p2Score = 20;
+    }
+
+    const elasticityInfo = computeParameterElasticityAverage(result);
+    let p3Score;
+    let p3Fallback = Boolean(elasticityInfo.fallback);
+    if (!elasticityInfo.fallback && Number.isFinite(elasticityInfo.value)) {
+        p3Score = 30 * Math.max(0, 1 - Math.min(elasticityInfo.value, 3) / 3);
+    } else {
+        p3Score = 15;
+        p3Fallback = true;
+    }
+
+    const totalScore = Math.max(0, Math.min(100, (p1Score || 0) + (p2Score || 0) + (p3Score || 0)));
+    const classification = classifyOverfittingScore(totalScore);
+
+    return {
+        version: OVERFITTING_SCORE_VERSION,
+        score: totalScore,
+        classification,
+        components: {
+            performance: {
+                score: p1Score,
+                haircut,
+                inSampleSharpe: Number.isFinite(baselineSharpe) ? baselineSharpe : null,
+                expectedOutSharpe: Number.isFinite(expectedOutSharpe) ? expectedOutSharpe : null,
+                averageSharpeDrop,
+                fallback: p1Fallback,
+            },
+            pbo: {
+                score: p2Score,
+                pbo: Number.isFinite(pboInfo.pbo) ? pboInfo.pbo : null,
+                percentile: Number.isFinite(pboInfo.percentile) ? pboInfo.percentile : null,
+                validCount: pboInfo.validCount,
+                bestCandidate: pboInfo.bestCandidate || null,
+                fallback: p2Fallback,
+            },
+            sensitivity: {
+                score: p3Score,
+                averageElasticity: Number.isFinite(elasticityInfo.value) ? elasticityInfo.value : null,
+                scenarioCount: elasticityInfo.count,
+                fallback: p3Fallback,
+            },
+        },
+        candidateMetrics,
+        elasticityInfo,
+        pboInfo,
+    };
+}
+
+function renderOverfittingDiagnostics(result) {
+    const container = document.getElementById('overfitting-result');
+    if (!container) return;
+    const diagnostics = computeOverfittingDiagnostics(result);
+    if (!diagnostics) {
+        resetOverfittingTab('暫無足夠資料計算過擬合指標，請確認夏普值與敏感度分析均已產出。');
+        return;
+    }
+
+    const overallScoreText = Number.isFinite(diagnostics.score) ? diagnostics.score.toFixed(1) : '—';
+    const performance = diagnostics.components.performance;
+    const pbo = diagnostics.components.pbo;
+    const sensitivity = diagnostics.components.sensitivity;
+    const classification = diagnostics.classification;
+
+    const haircutText = Number.isFinite(performance.haircut)
+        ? `${(performance.haircut * 100).toFixed(1)}%`
+        : '—';
+    const inSampleSharpeText = Number.isFinite(performance.inSampleSharpe)
+        ? performance.inSampleSharpe.toFixed(2)
+        : '—';
+    const expectedSharpeText = Number.isFinite(performance.expectedOutSharpe)
+        ? performance.expectedOutSharpe.toFixed(2)
+        : '—';
+    const averageDropText = Number.isFinite(performance.averageSharpeDrop)
+        ? performance.averageSharpeDrop.toFixed(2)
+        : '—';
+
+    const pboPercentText = Number.isFinite(pbo.pbo)
+        ? `${(pbo.pbo * 100).toFixed(1)}%`
+        : '—';
+    const percentileText = Number.isFinite(pbo.percentile)
+        ? `${(pbo.percentile * 100).toFixed(1)}%`
+        : '—';
+    const candidateLabel = pbo.bestCandidate?.label
+        ? escapeHtml(pbo.bestCandidate.label)
+        : '主策略';
+
+    const elasticityText = Number.isFinite(sensitivity.averageElasticity)
+        ? sensitivity.averageElasticity.toFixed(2)
+        : '—';
+
+    const fallbackNotes = [];
+    if (performance.fallback) {
+        fallbackNotes.push('效能折損缺少夏普或擾動結果，已以中性 15 分列入。');
+    }
+    if (pbo.fallback) {
+        fallbackNotes.push('PBO 樣本不足（需至少兩組半場 Sharpe），以 20 分作為保守估計。');
+    }
+    if (sensitivity.fallback) {
+        fallbackNotes.push('參數敏感度缺少有效的彈性樣本，已以中性 15 分納入。');
+    }
+
+    const fallbackHtml = fallbackNotes.length > 0
+        ? `<div class="p-4 rounded-lg border" style="background: color-mix(in srgb, var(--accent) 8%, var(--background)); border-color: color-mix(in srgb, var(--accent) 35%, transparent);">
+                <p class="text-xs font-semibold mb-2" style="color: var(--accent);">評分補註</p>
+                <ul class="space-y-1 text-xs" style="color: var(--muted-foreground);">
+                    ${fallbackNotes.map((note) => `<li>• ${escapeHtml(note)}</li>`).join('')}
+                </ul>
+           </div>`
+        : '';
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p class="text-sm font-semibold" style="color: var(--muted-foreground);">回測穩健度分數 (R<sub>score</sub>)</p>
+                        <p class="text-3xl font-bold" style="color: var(--foreground);">${overallScoreText}</p>
+                        <p class="text-xs mt-1" style="color: var(--muted-foreground);">${escapeHtml(classification.description)}</p>
+                    </div>
+                    <span class="inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full" style="background-color: ${classification.badgeBackground}; color: ${classification.badgeColor};">
+                        ${escapeHtml(classification.label)}
+                    </span>
+                </div>
+                <p class="text-[11px] mt-4 leading-5" style="color: var(--muted-foreground);">
+                    R<sub>score</sub> = P₁ + P₂ + P₃；P₁ 著重夏普折損、P₂ 評估回測過擬合機率 (PBO)、P₃ 衡量參數彈性。分數越高表示樣本外穩健度越好。
+                </p>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3">
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, #0ea5e9 10%, var(--background)); border-color: color-mix(in srgb, #0ea5e9 35%, transparent);">
+                    <p class="text-sm font-semibold mb-2" style="color: #0369a1;">P₁ 效能折損懲罰</p>
+                    <p class="text-2xl font-bold mb-2" style="color: var(--foreground);">${performance.score.toFixed(1)} / 30</p>
+                    <ul class="text-xs space-y-1" style="color: var(--muted-foreground);">
+                        <li>• IS 夏普：${inSampleSharpeText}</li>
+                        <li>• E[SR<sub>out</sub>]：${expectedSharpeText}</li>
+                        <li>• 折損率 H：${haircutText}</li>
+                        <li>• 平均夏普折損：${averageDropText}</li>
+                    </ul>
+                </div>
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, #f59e0b 10%, var(--background)); border-color: color-mix(in srgb, #f59e0b 40%, transparent);">
+                    <p class="text-sm font-semibold mb-2" style="color: #b45309;">P₂ PBO 懲罰</p>
+                    <p class="text-2xl font-bold mb-2" style="color: var(--foreground);">${pbo.score.toFixed(1)} / 40</p>
+                    <ul class="text-xs space-y-1" style="color: var(--muted-foreground);">
+                        <li>• PBO：${pboPercentText}</li>
+                        <li>• IS 冠軍：${candidateLabel}</li>
+                        <li>• OOS 分位：${percentileText}</li>
+                        <li>• 參與策略：${pbo.validCount}</li>
+                    </ul>
+                </div>
+                <div class="p-5 rounded-xl border shadow-sm" style="background: color-mix(in srgb, #34d399 10%, var(--background)); border-color: color-mix(in srgb, #34d399 35%, transparent);">
+                    <p class="text-sm font-semibold mb-2" style="color: #047857;">P₃ 參數敏感度懲罰</p>
+                    <p class="text-2xl font-bold mb-2" style="color: var(--foreground);">${sensitivity.score.toFixed(1)} / 30</p>
+                    <ul class="text-xs space-y-1" style="color: var(--muted-foreground);">
+                        <li>• 平均彈性 |E|：${elasticityText}</li>
+                        <li>• 評估樣本：${sensitivity.scenarioCount}</li>
+                        <li>• 門檻 E<sub>penalty</sub>：3.00</li>
+                    </ul>
+                </div>
+            </div>
+            ${fallbackHtml}
+            <div class="p-4 rounded-xl border" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <p class="text-xs font-semibold mb-2" style="color: var(--foreground);">計算說明</p>
+                <ul class="text-[11px] space-y-1" style="color: var(--muted-foreground);">
+                    <li>• P₁ = 30 × (1 - min(H, 1))，H = 1 - E[SR<sub>out</sub>] / SR<sub>in</sub>。</li>
+                    <li>• P₂ = 40 × (1 - PBO)，PBO 估計 IS 冠軍在 OOS 排名跌破中位數的風險。</li>
+                    <li>• P₃ = 30 × max(0, 1 - min(E<sub>avg</sub>, 3) / 3)，E<sub>avg</sub> 來自參數彈性平均值。</li>
+                </ul>
+                <p class="text-[11px] mt-2" style="color: var(--muted-foreground);">建議搭配滾動驗證、減少策略自由度或強化正規化機制（如 Dropout / L2）以持續抑制過擬合。</p>
+            </div>
+            <p class="text-[11px] text-right" style="color: var(--muted-foreground);">版本：${escapeHtml(diagnostics.version)}</p>
+        </div>
+    `;
+}
+
 function displayBacktestResult(result) {
     console.log("[Main] displayBacktestResult called.");
     const el = document.getElementById("backtest-result");
@@ -6222,6 +6607,7 @@ function displayBacktestResult(result) {
     if (!result) {
         resetStrategyStatusCard('missing');
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
+        resetOverfittingTab('回測結果缺失，請重新執行以產生過擬合診斷。');
         return;
     }
     updateStrategyStatusCard(result);
@@ -6968,6 +7354,7 @@ function displayBacktestResult(result) {
         `;
 
         initSensitivityCollapse(el);
+        renderOverfittingDiagnostics(result);
 
         console.log("[Main] displayBacktestResult finished.");
     }

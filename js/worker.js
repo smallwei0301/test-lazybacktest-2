@@ -8561,6 +8561,12 @@ function evaluateSensitivityParameter({
             ? scenarioResult.annualizedReturn
             : null,
           sharpeRatio: scenarioSharpe,
+          sharpeHalf1: Number.isFinite(scenarioResult.sharpeHalf1)
+            ? scenarioResult.sharpeHalf1
+            : null,
+          sharpeHalf2: Number.isFinite(scenarioResult.sharpeHalf2)
+            ? scenarioResult.sharpeHalf2
+            : null,
         },
       });
     } else {

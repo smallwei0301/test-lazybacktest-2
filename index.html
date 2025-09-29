@@ -1219,6 +1219,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="overfitting"
+                                            >
+                                                <i data-lucide="activity" class="lucide-sm inline mr-1"></i>過擬合
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
@@ -1401,6 +1408,24 @@
                                 </div>
 
                                 <!-- Summary Results -->
+                            </div>
+
+                            <!-- Overfitting Tab -->
+                            <div class="tab-content hidden" id="overfitting-tab" data-lb-overfitting-version="LB-OVERFITTING-SCORE-20251118A">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-4">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="activity" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            過擬合診斷
+                                        </h3>
+                                        <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            透過回測穩健度分數（R<sub>score</sub>）檢視策略是否過度貼合歷史資料。分數越高代表過擬合風險越低，請完成回測後檢視各項懲罰指標。
+                                        </p>
+                                    </div>
+                                    <div class="card-content" id="overfitting-result">
+                                        <p class="text-sm" style="color: var(--muted-foreground);">請先執行回測，我們會自動計算回測穩健度分數與三項懲罰指標。</p>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Staging Optimizer Tab -->
