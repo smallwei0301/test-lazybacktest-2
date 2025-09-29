@@ -1,3 +1,15 @@
+## 2025-11-14 — Patch LB-FORECAST-LSTMGA-20251114A
+- **Scope**: 調整 LSTM + GA 預測流程，改以均方誤差作為遺傳演算法適應函數，並採累積誤差校正法。
+- **Error Correction**: 依據文獻流程建立累積誤差與閾值 δ 的修正邏輯，禁止回看未來資料，同步於訓練與測試階段套用。
+- **Metrics UI**: 預測面板新增 MSE 指標、更新 RMSE/MAE 文案與 GA 參數摘要，清楚揭露最佳化結果與閾值。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-13 — Patch LB-FORECAST-LSTMGA-20251113A
+- **Scope**: 新增預測分頁，提供 LSTM 與遺傳演算法誤差校正的隔日收盤價模擬。
+- **Forecast Tab**: 建立「預測」分頁、指標卡、GA 權重摘要與折線圖，導入版本章 `FORECAST_VERSION_CODE` 便於追蹤。
+- **ML Pipeline**: 以回測區間的可視價格序列訓練 TensorFlow.js LSTM 模型，並以 GA 最佳化殘差權重，計算命中率、RMSE/MAE 與平均漲跌幅指標。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
