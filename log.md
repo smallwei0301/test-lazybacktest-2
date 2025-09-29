@@ -1,3 +1,9 @@
+## 2025-11-13 — Patch LB-FORECAST-LSTMGA-20251113A
+- **Scope**: 新增預測分頁，提供 LSTM 與遺傳演算法誤差校正的隔日收盤價模擬。
+- **Forecast Tab**: 建立「預測」分頁、指標卡、GA 權重摘要與折線圖，導入版本章 `FORECAST_VERSION_CODE` 便於追蹤。
+- **ML Pipeline**: 以回測區間的可視價格序列訓練 TensorFlow.js LSTM 模型，並以 GA 最佳化殘差權重，計算命中率、RMSE/MAE 與平均漲跌幅指標。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
@@ -757,3 +763,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-12 — Patch LB-FORECAST-LSTMGA-20251212A
+- **Issue recap**: 原始 LSTM+GA 流程僅以 RMSE 評估並直接調整殘差權重，未落實文獻所述的累積誤差閾值校正法，且無法針對均方誤差 (MSE) 尋找最佳閾值。
+- **Fix**: 導入以 MSE 為適應函數的遺傳演算法，演化單一閾值 δ，依據實際股價乘上 δ 的門檻累加誤差，並保留訓練尾端累積值於測試階段接續使用，避免回溯修正既有預測。
+- **Diagnostics**: 以本地可見股價資料實測，確認 GA 會輸出 δ 與觸發次數、曲線改以 MSE 衡量，預測摘要與版面提示皆更新為「無未來資料回寫」。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
