@@ -1,3 +1,9 @@
+## 2025-11-22 — Patch LB-OVERFITTING-SCORE-20251120C
+- **Scope**: 過擬合評估卡片新增 tooltip 自動定位與 PBO 說明，避免泡泡被卡片邊緣遮擋並揭露計算差異。
+- **UI**: Tooltip 依據視窗位置自動判斷左右／上下對齊，卡片四周不再裁切說明文字，並調整提示泡泡尺寸與陰影強度。
+- **Logic**: 過擬合說明卡補上 PBO 逐步計算流程，並明確比對 Lazybacktest 與 López de Prado、Bailey (2014) CSCV 方法的差異與近似假設。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-21 — Patch LB-OVERFITTING-SCORE-20251120B
 - **Scope**: 擴充過擬合分頁說明層，納入 IS/OOS 起訖年份、計分公式與來源文獻，並為各項分數加入工具提示。
 - **UI**: 過擬合儀表板每個分項與統計欄位新增 tooltip 說明，另建立「過擬合評估說明」卡片，揭露資料切分、P1/P2/P3 計算流程與引用論文。

@@ -14,6 +14,7 @@
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 // Patch Tag: LB-OVERFITTING-SCORE-20251120A
+// Patch Tag: LB-OVERFITTING-SCORE-20251120C
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -56,8 +57,51 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
-const OVERFITTING_SCORE_VERSION = 'LB-OVERFITTING-SCORE-20251120B';
+const OVERFITTING_SCORE_VERSION = 'LB-OVERFITTING-SCORE-20251120C';
 let lastOverfittingAnalysis = null;
+
+const TOOLTIP_SAFE_MARGIN = 16;
+
+function adjustTooltipPosition(tooltipEl) {
+    if (!tooltipEl || typeof tooltipEl.querySelector !== 'function') return;
+    const bubble = tooltipEl.querySelector(':scope > .tooltiptext');
+    if (!bubble) return;
+    bubble.classList.remove('tooltiptext--align-left', 'tooltiptext--align-right', 'tooltiptext--below');
+
+    const rect = bubble.getBoundingClientRect();
+    if (rect && rect.width > 0) {
+        if (rect.right > window.innerWidth - TOOLTIP_SAFE_MARGIN) {
+            bubble.classList.add('tooltiptext--align-right');
+        } else if (rect.left < TOOLTIP_SAFE_MARGIN) {
+            bubble.classList.add('tooltiptext--align-left');
+        }
+
+        const updatedRect = bubble.getBoundingClientRect();
+        if (updatedRect.top < TOOLTIP_SAFE_MARGIN) {
+            bubble.classList.add('tooltiptext--below');
+        }
+    }
+}
+
+function initTooltipAutoPositioning() {
+    const handleAdjust = (event) => {
+        const target = event.target;
+        if (!target || typeof target.closest !== 'function') return;
+        const tooltip = target.closest('.tooltip');
+        if (!tooltip) return;
+        window.requestAnimationFrame(() => adjustTooltipPosition(tooltip));
+    };
+
+    document.addEventListener('mouseenter', handleAdjust, true);
+    document.addEventListener('focusin', handleAdjust, true);
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('.tooltip:hover, .tooltip:focus-within').forEach((tooltip) => {
+            adjustTooltipPosition(tooltip);
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initTooltipAutoPositioning);
 
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
@@ -5813,7 +5857,19 @@ function renderOverfittingTab(result) {
                     <p><strong>P1 效能折損：</strong> 依 Bailey、Borwein、López de Prado、Zhu (2014) 提出的 Sharpe Ratio Haircut，使用 H = 1 - E[SR_out]/SR_in，並以 30 分配重換算分數。本系統的 OOS Sharpe 估計採以下來源的中位數：</p>
                     ${srOutMethodsHtml}
                 </div>
-                <p><strong>P2 過擬合機率：</strong> 參考 López de Prado 與 Bailey (2014) 的 CSCV 觀念，以敏感度分析所有情境與基準策略的 Sharpe 排名近似 PBO，並計算 P2 = 40 × (1 - PBO)。</p>
+                <div>
+                    <p><strong>P2 過擬合機率：</strong> 參考 López de Prado 與 Bailey (2014) 的 CSCV 觀念，利用敏感度分析取得的 Sharpe 排名近似 PBO，並將結果換算為 P2 = 40 × (1 - PBO)。實際步驟如下：</p>
+                    <ol class="list-decimal pl-5 space-y-1 mt-2">
+                        <li>蒐集基準策略的 Sharpe（優先採用 OOS 估計）以及所有參數擾動情境的 Sharpe。</li>
+                        <li>將上述 Sharpe 值合併後由小到大排序，定位基準策略在所有候選中的相對名次。</li>
+                        <li>以名次除以候選總數近似 PBO（基準策略優於越多情境時 PBO 越高），再換算成 P2 分數。</li>
+                    </ol>
+                    <p class="mt-2">與論文中的 CSCV 差異在於：</p>
+                    <ul class="list-disc pl-5 space-y-1">
+                        <li>原始 CSCV 會先把完整樣本切成 <em>S</em> 個區塊並排列所有 IS/OOS 組合；Lazybacktest 直接重用敏感度分析的參數擾動結果作為候選集合，因此不進行額外的資料重切。</li>
+                        <li>論文以樣本外績效的對數勝率（logit）低於 0 的比例定義 PBO；我們以基準 Sharpe 在候選排序中的分位數作為近似，適合快速評估敏感度網格中「僅有少數參數可維持高 Sharpe」的風險。</li>
+                    </ul>
+                </div>
                 <p><strong>P3 參數敏感度：</strong> 依 López de Prado (2018)《Advances in Financial Machine Learning》第 7 章的參數擾動檢驗，以有限差分估計彈性，平均絕對值超過 3 視為高敏感並給予懲罰。</p>
                 <div>
                     <p><strong>參考文獻：</strong></p>
