@@ -202,6 +202,30 @@
     gap: 0.5rem;
 }
 
+/* --- ML Forecast Tab --- */
+.ml-trade-log {
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background-color: var(--background);
+    max-height: 18rem;
+    overflow-y: auto;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--foreground);
+}
+
+.ml-trade-log-entry {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.ml-trade-log-entry:last-child {
+    border-bottom: none;
+}
+
 .sensitivity-mobile-param {
     font-size: 0.95rem;
     font-weight: 600;

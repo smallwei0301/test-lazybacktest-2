@@ -1,3 +1,11 @@
+## 2025-12-10 — Patch LB-ML-FORECAST-20251210A
+- **Scope**: 新增「預測機制」分頁，整合文獻摘要與瀏覽器端隔日預測 + 凱利資金控管實驗室。
+- **Highlights**:
+  - 右側分頁導覽加入「預測機制」，提供 2024–2025 深度學習、凱利資金控管相關論文連結，方便對照實作脈絡。
+  - 以 Logistic Regression (SGD) 建立輕量隔日方向分類，支援日期分段、標準化、訓練門檻掃描、g/l 推估與半凱利 + 單筆上限模擬，並繪製權益曲線與機率分佈。
+  - 新增交易紀錄清單樣式，逐筆呈現預測機率、凱利下注比例、當日報酬與損益百分比，強化使用者風控判讀。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
