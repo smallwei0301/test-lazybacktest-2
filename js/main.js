@@ -2537,8 +2537,8 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
-// --- ML Forecast (LB-ML-LSTM-20251208A) ---
-const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
+// --- ML Forecast (LB-ML-LSTM-20251212A) ---
+const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
 
 (function initMlForecastTab() {
     if (typeof document === 'undefined') return;
@@ -2550,6 +2550,62 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         const m = mean(arr);
         return Math.sqrt(mean(arr.map((v) => (v - m) * (v - m))));
     };
+
+    const MIN_TRAIN_SAMPLES = 60;
+    const MIN_TEST_SAMPLES = 30;
+    const mlForecastState = { totalSamples: null };
+
+    const renderSplitLabels = (train, test, total) => {
+        const trainEl = document.getElementById('ml-train-days');
+        const testEl = document.getElementById('ml-test-days');
+        const totalEl = document.getElementById('ml-total-days');
+        const formatValue = (value) => (Number.isFinite(value) ? Math.round(value) : '—');
+        if (trainEl) trainEl.textContent = formatValue(train);
+        if (testEl) testEl.textContent = formatValue(test);
+        if (totalEl) totalEl.textContent = formatValue(total);
+    };
+
+    renderSplitLabels(null, null, null);
+
+    const resolveTrainTestSamples = (totalSamples, { coerceSliderValue = true } = {}) => {
+        const slider = document.getElementById('ml-train-slider');
+        if (!slider || !Number.isFinite(totalSamples)) return null;
+        if (totalSamples < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) return null;
+
+        const maxTrain = Math.max(MIN_TRAIN_SAMPLES, totalSamples - MIN_TEST_SAMPLES);
+        slider.min = String(MIN_TRAIN_SAMPLES);
+        slider.max = String(maxTrain);
+        slider.step = '1';
+
+        let sliderValue = Number(slider.value);
+        if (!Number.isFinite(sliderValue)) {
+            sliderValue = Math.floor(totalSamples * 0.7);
+        }
+        sliderValue = clamp(Math.floor(sliderValue), MIN_TRAIN_SAMPLES, maxTrain);
+        let train = sliderValue;
+        let test = totalSamples - train;
+        if (test < MIN_TEST_SAMPLES) {
+            train = totalSamples - MIN_TEST_SAMPLES;
+            test = MIN_TEST_SAMPLES;
+            sliderValue = train;
+        }
+
+        if (coerceSliderValue) {
+            slider.value = String(train);
+        }
+
+        renderSplitLabels(train, test, totalSamples);
+        return { train, test };
+    };
+
+    const trainSlider = document.getElementById('ml-train-slider');
+    if (trainSlider) {
+        trainSlider.addEventListener('input', () => {
+            if (Number.isFinite(mlForecastState.totalSamples)) {
+                resolveTrainTestSamples(mlForecastState.totalSamples, { coerceSliderValue: true });
+            }
+        });
+    }
 
     const computeRsi = (closes, period = 14) => {
         const out = Array(closes.length).fill(null);
@@ -2600,6 +2656,8 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         const nextReturns = [];
         const signalDates = [];
         const tradeDates = [];
+        const entryPrices = [];
+        const exitPrices = [];
         for (let i = 21; i < rows.length - 1; i += 1) {
             const f1 = retLag(1, i);
             const f3 = retLag(3, i);
@@ -2607,14 +2665,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             if ([f1, f3, f5, vol20[i], rsi14[i], sma20[i]].some((v) => v === null || Number.isNaN(v))) continue;
             const gap = sma20[i] === 0 ? 0 : (closePrices[i] - sma20[i]) / sma20[i];
             const feat = [f1, f3, f5, vol20[i], rsi14[i] / 100, gap];
-            const nextRet = (closePrices[i + 1] - closePrices[i]) / closePrices[i];
+            const nextOpen = Number(rows[i + 1].open);
+            const nextClose = Number(rows[i + 1].close);
+            if (!Number.isFinite(nextOpen) || !Number.isFinite(nextClose) || nextOpen <= 0) continue;
+            const nextRet = (nextClose - nextOpen) / nextOpen;
             features.push(feat);
             labels.push(nextRet > 0 ? 1 : 0);
             nextReturns.push(nextRet);
             signalDates.push(rows[i].date);
             tradeDates.push(rows[i + 1].date);
+            entryPrices.push(nextOpen);
+            exitPrices.push(nextClose);
         }
-        return { features, labels, nextReturns, signalDates, tradeDates };
+        return { features, labels, nextReturns, signalDates, tradeDates, entryPrices, exitPrices };
     };
 
     const standardize = (matrix) => {
@@ -2850,12 +2913,14 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         };
     };
 
-    const extractSequences = (featuresAll, labelsAll, returnsAll, signalAll, tradeAll, startIdx, endIdx, seqLen) => {
+    const extractSequences = (featuresAll, labelsAll, returnsAll, signalAll, tradeAll, entryAll, exitAll, startIdx, endIdx, seqLen) => {
         const sequences = [];
         const labels = [];
         const returns = [];
         const signalDates = [];
         const tradeDates = [];
+        const entryPrices = [];
+        const exitPrices = [];
         for (let idx = startIdx; idx < endIdx; idx += 1) {
             const seqStart = idx - seqLen + 1;
             if (seqStart < 0) continue;
@@ -2868,27 +2933,38 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             returns.push(returnsAll[idx]);
             signalDates.push(signalAll[idx]);
             tradeDates.push(tradeAll[idx]);
+            entryPrices.push(entryAll[idx]);
+            exitPrices.push(exitAll[idx]);
         }
-        return { sequences, labels, returns, signalDates, tradeDates };
+        return { sequences, labels, returns, signalDates, tradeDates, entryPrices, exitPrices };
+    };
+
+    const evaluateThreshold = (probs, labels, returns, threshold) => {
+        const metrics = { threshold: Number.isFinite(threshold) ? Number(threshold.toFixed(2)) : threshold, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0 };
+        if (!Number.isFinite(threshold)) return metrics;
+        const selected = [];
+        for (let i = 0; i < probs.length; i += 1) {
+            if (probs[i] >= threshold) {
+                selected.push({ hit: labels[i] === 1, ret: returns[i] });
+            }
+        }
+        metrics.sampleSize = selected.length;
+        if (metrics.sampleSize === 0) return metrics;
+        metrics.accuracy = mean(selected.map((item) => (item.hit ? 1 : 0)));
+        const upMoves = selected.filter((item) => item.ret > 0).map((item) => item.ret);
+        const downMoves = selected.filter((item) => item.ret <= 0).map((item) => item.ret);
+        metrics.avgUp = upMoves.length ? mean(upMoves) : 0;
+        metrics.avgDown = downMoves.length ? mean(downMoves) : 0;
+        return metrics;
     };
 
     const fitThresholdAndEdge = (probs, labels, returns) => {
         let best = { threshold: 0.5, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0 };
         for (let thr = 0.35; thr <= 0.65; thr += 0.01) {
-            const selected = [];
-            for (let i = 0; i < probs.length; i += 1) {
-                if (probs[i] >= thr) {
-                    selected.push({ hit: labels[i] === 1, ret: returns[i] });
-                }
-            }
-            if (selected.length < 20) continue;
-            const accuracy = mean(selected.map((item) => (item.hit ? 1 : 0)));
-            const upMoves = selected.filter((item) => item.ret > 0).map((item) => item.ret);
-            const downMoves = selected.filter((item) => item.ret <= 0).map((item) => item.ret);
-            const avgUp = upMoves.length ? mean(upMoves) : 0;
-            const avgDown = downMoves.length ? mean(downMoves) : 0;
-            if (accuracy > best.accuracy) {
-                best = { threshold: Number(thr.toFixed(2)), accuracy, avgUp, avgDown, sampleSize: selected.length };
+            const metrics = evaluateThreshold(probs, labels, returns, Number(thr.toFixed(2)));
+            if (metrics.sampleSize < 20) continue;
+            if (metrics.accuracy > best.accuracy) {
+                best = metrics;
             }
         }
         return best;
@@ -2902,7 +2978,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         return clamp(raw * multiplier, 0, cap);
     };
 
-    const simulate = (probs, returns, tradeDates, avgUp, avgDown, threshold, multiplier, cap, signalDates = tradeDates) => {
+    const simulate = (
+        probs,
+        returns,
+        tradeDates,
+        avgUp,
+        avgDown,
+        threshold,
+        multiplier,
+        cap,
+        signalDates = tradeDates,
+        entryPrices = [],
+        exitPrices = []
+    ) => {
         let equityModel = 1;
         let equityBh = 1;
         const equitySeriesModel = [];
@@ -2914,15 +3002,31 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             const ret = returns[i];
             const tradeDate = tradeDates[i];
             const signalDate = signalDates?.[i] || tradeDate;
+            const entryPrice = Number.isFinite(entryPrices[i]) ? entryPrices[i] : null;
+            const exitPrice = Number.isFinite(exitPrices[i]) ? exitPrices[i] : null;
 
             const bhGrowth = 1 + ret;
             equityBh *= Math.max(1e-6, bhGrowth);
 
             if (prob >= threshold) {
                 const fraction = kellyFraction(prob, avgUp, avgDown, multiplier, cap);
-                const growth = 1 + fraction * ret;
-                equityModel *= Math.max(1e-6, growth);
-                trades.push({ signalDate, tradeDate, prob, fraction, ret, pnl: fraction * ret });
+                const capitalBefore = equityModel;
+                const pnlPct = fraction * ret;
+                const capitalAfter = Math.max(1e-6, capitalBefore * (1 + pnlPct));
+                equityModel = capitalAfter;
+                trades.push({
+                    signalDate,
+                    tradeDate,
+                    prob,
+                    fraction,
+                    ret,
+                    pnlPct,
+                    pnlAmount: capitalAfter - capitalBefore,
+                    capitalBefore,
+                    capitalAfter,
+                    entryPrice,
+                    exitPrice,
+                });
             }
 
             equitySeriesModel.push({ date: tradeDate, equity: equityModel });
@@ -2939,28 +3043,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
     };
 
     const runMlForecast = () => {
-        if (!Array.isArray(cachedStockData) || cachedStockData.length < 60) {
+        if (!Array.isArray(cachedStockData) || cachedStockData.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES + 10) {
             showError('請先執行一次回測以建立快取股價資料。');
             return;
         }
 
         const getInput = (id) => document.getElementById(id);
-        const trainPeriodInput = Number(getInput('ml-train-period')?.value || 0);
-        const testPeriodInput = Number(getInput('ml-test-period')?.value || 0);
-        const lr = Number(getInput('ml-lr')?.value || 0.01);
-        const epochs = Number(getInput('ml-epochs')?.value || 80);
+        const lrRaw = Number(getInput('ml-lr')?.value || 0.01);
+        const epochsRaw = Number(getInput('ml-epochs')?.value || 80);
         const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
         const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
-        const minTrainSamples = 60;
-        const minTestSamples = 30;
-        const trainSamplesRequested = Number.isFinite(trainPeriodInput) ? Math.floor(trainPeriodInput) : 0;
-        const testSamplesRequested = Number.isFinite(testPeriodInput) ? Math.floor(testPeriodInput) : 0;
-        const learningRate = Number.isFinite(lr) && lr > 0 ? lr : 0.01;
-        const epochCount = Number.isFinite(epochs) && epochs > 0 ? Math.floor(epochs) : 80;
-        if (trainSamplesRequested < minTrainSamples || testSamplesRequested < minTestSamples) {
-            showError(`請至少提供 ${minTrainSamples} 日訓練與 ${minTestSamples} 日測試期間。`);
-            return;
-        }
+        const learningRate = Number.isFinite(lrRaw) && lrRaw > 0 ? lrRaw : 0.01;
+        const epochCount = Number.isFinite(epochsRaw) && epochsRaw > 0 ? Math.floor(epochsRaw) : 80;
+
         const rows = cachedStockData
             .map((r) => ({
                 date: r.date,
@@ -2970,17 +3065,40 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
                 low: Number(r.low),
                 volume: Number(r.volume),
             }))
-            .filter((r) => Number.isFinite(r.close));
+            .filter((r) => Number.isFinite(r.close) && Number.isFinite(r.open));
         rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
 
-        const { features, labels, nextReturns, signalDates, tradeDates } = buildFeatures(rows);
+        const { features, labels, nextReturns, signalDates, tradeDates, entryPrices, exitPrices } = buildFeatures(rows);
         if (!features.length || features.length !== labels.length || labels.length !== nextReturns.length) {
             showError('特徵構建失敗，請確認快取資料是否完整。');
             return;
         }
+        if (
+            signalDates.length !== features.length ||
+            tradeDates.length !== features.length ||
+            entryPrices.length !== features.length ||
+            exitPrices.length !== features.length
+        ) {
+            showError('日期或報價對齊失敗，請重新執行回測。');
+            return;
+        }
 
-        if (signalDates.length !== features.length || tradeDates.length !== features.length) {
-            showError('日期對齊失敗，請重新執行回測。');
+        if (features.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+            showError(`快取樣本僅剩 ${features.length} 筆，需至少 ${MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES} 筆才能切分訓練與測試。`);
+            return;
+        }
+
+        mlForecastState.totalSamples = features.length;
+        const split = resolveTrainTestSamples(features.length, { coerceSliderValue: true });
+        if (!split) {
+            showError('滑桿切分失敗，請確認資料量是否足夠。');
+            return;
+        }
+        const trainSamplesRequested = split.train;
+        const testSamplesRequested = split.test;
+
+        if (trainSamplesRequested < MIN_TRAIN_SAMPLES || testSamplesRequested < MIN_TEST_SAMPLES) {
+            showError(`請至少保留訓練 ${MIN_TRAIN_SAMPLES} 日、測試 ${MIN_TEST_SAMPLES} 日。`);
             return;
         }
 
@@ -2999,15 +3117,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         const rTrain = nextReturns.slice(startIndex, trainEndIndex);
         const signalTrain = signalDates.slice(startIndex, trainEndIndex);
         const tradeTrain = tradeDates.slice(startIndex, trainEndIndex);
+        const entryTrain = entryPrices.slice(startIndex, trainEndIndex);
+        const exitTrain = exitPrices.slice(startIndex, trainEndIndex);
 
         const Xtest = features.slice(trainEndIndex, testEndIndex);
         const yTest = labels.slice(trainEndIndex, testEndIndex);
         const rTest = nextReturns.slice(trainEndIndex, testEndIndex);
         const signalTest = signalDates.slice(trainEndIndex, testEndIndex);
         const tradeTest = tradeDates.slice(trainEndIndex, testEndIndex);
+        const entryTest = entryPrices.slice(trainEndIndex, testEndIndex);
+        const exitTest = exitPrices.slice(trainEndIndex, testEndIndex);
 
-        if (Xtrain.length < minTrainSamples || Xtest.length < minTestSamples) {
-            showError('訓練或測試樣本過少，請縮短期間或重新快取資料。');
+        if (Xtrain.length < MIN_TRAIN_SAMPLES || Xtest.length < MIN_TEST_SAMPLES) {
+            showError('訓練或測試樣本過少，請調整滑桿或重新快取資料。');
             return;
         }
 
@@ -3018,6 +3140,8 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         const returnsAll = rTrain.concat(rTest);
         const signalAll = signalTrain.concat(signalTest);
         const tradeAll = tradeTrain.concat(tradeTest);
+        const entryAll = entryTrain.concat(entryTest);
+        const exitAll = exitTrain.concat(exitTest);
 
         let sequenceLength = 16;
         if (trainSamplesRequested < sequenceLength + 10) {
@@ -3035,6 +3159,8 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             returnsAll,
             signalAll,
             tradeAll,
+            entryAll,
+            exitAll,
             0,
             yTrain.length,
             sequenceLength
@@ -3045,6 +3171,8 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             returnsAll,
             signalAll,
             tradeAll,
+            entryAll,
+            exitAll,
             yTrain.length,
             yTrain.length + yTest.length,
             sequenceLength
@@ -3062,11 +3190,42 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
         }
 
         const pTrain = trainSequences.sequences.map((seq) => model.predict(seq));
-        const { threshold, accuracy, avgUp, avgDown, sampleSize } = fitThresholdAndEdge(
-            pTrain,
-            trainSequences.labels,
-            trainSequences.returns
-        );
+        const bestMetrics = fitThresholdAndEdge(pTrain, trainSequences.labels, trainSequences.returns);
+        if (!bestMetrics || bestMetrics.sampleSize < 20) {
+            showError('訓練資料不足以取得穩定門檻，請延長訓練期間。');
+            return;
+        }
+
+        const thresholdInputEl = getInput('ml-threshold');
+        let thresholdSource = 'auto';
+        let thresholdUsed = bestMetrics.threshold;
+        if (thresholdInputEl) {
+            const rawValue = (thresholdInputEl.value || '').trim();
+            if (rawValue) {
+                const parsed = Number(rawValue);
+                if (Number.isFinite(parsed)) {
+                    const coerced = clamp(parsed, 0.05, 0.95);
+                    thresholdUsed = Number(coerced.toFixed(2));
+                    thresholdInputEl.value = thresholdUsed.toFixed(2);
+                    thresholdSource = 'custom';
+                } else {
+                    thresholdInputEl.value = '';
+                }
+            } else {
+                thresholdInputEl.value = '';
+            }
+        }
+
+        let chosenMetrics = thresholdSource === 'auto'
+            ? bestMetrics
+            : evaluateThreshold(pTrain, trainSequences.labels, trainSequences.returns, thresholdUsed);
+
+        if (!chosenMetrics || chosenMetrics.sampleSize < 20) {
+            showError('自訂門檻觸發樣本不足（需至少 20 筆），請調整門檻或增加訓練期間。');
+            return;
+        }
+
+        thresholdUsed = chosenMetrics.threshold;
 
         const pTest = testSequences.sequences.map((seq) => model.predict(seq));
         if (!pTest.length) {
@@ -3078,25 +3237,28 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             pTest,
             testSequences.returns,
             testSequences.tradeDates,
-            avgUp,
-            avgDown,
-            threshold,
+            chosenMetrics.avgUp,
+            chosenMetrics.avgDown,
+            thresholdUsed,
             kellyMultiplier,
             maxFraction,
-            testSequences.signalDates
+            testSequences.signalDates,
+            testSequences.entryPrices,
+            testSequences.exitPrices
         );
 
         const hitRateTest = mean(
-            pTest.map((prob, idx) => ((prob >= threshold) === (testSequences.labels[idx] === 1) ? 1 : 0))
+            pTest.map((prob, idx) => ((prob >= thresholdUsed) === (testSequences.labels[idx] === 1) ? 1 : 0))
         );
-        const avgProbability = mean(pTrain);
+
         const indicativeKelly = kellyFraction(
-            clamp(avgProbability || threshold, 0, 1),
-            avgUp,
-            avgDown,
+            chosenMetrics.accuracy,
+            chosenMetrics.avgUp,
+            chosenMetrics.avgDown,
             kellyMultiplier,
             maxFraction
         );
+
         const trainRangeText = trainSequences.signalDates.length
             ? `${trainSequences.signalDates[0]} → ${trainSequences.signalDates[trainSequences.signalDates.length - 1]}`
             : '—';
@@ -3107,34 +3269,42 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             ? `${testSequences.tradeDates[0]} → ${testSequences.tradeDates[testSequences.tradeDates.length - 1]}`
             : '—';
 
+        const bestThresholdDisplay = Number.isFinite(bestMetrics.threshold) ? bestMetrics.threshold.toFixed(2) : '—';
+        const bestSampleDisplay = Number.isFinite(bestMetrics.sampleSize) && bestMetrics.sampleSize > 0 ? bestMetrics.sampleSize : '—';
+        const chosenSampleDisplay = Number.isFinite(chosenMetrics.sampleSize) && chosenMetrics.sampleSize > 0 ? chosenMetrics.sampleSize : '—';
+        const formatPercent = (value, digits = 2) => (Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '—');
+        const formatReturn = (value) => (Number.isFinite(value) ? `${((value - 1) * 100).toFixed(2)}%` : '—');
+        const thresholdUsedDisplay = Number.isFinite(thresholdUsed) ? thresholdUsed.toFixed(2) : '—';
+
         const cards = document.getElementById('ml-cards');
         if (cards) {
             cards.innerHTML = `
-                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
-                    <div class="text-[11px] uppercase tracking-wide">資料切分</div>
-                    <div class="text-xs">訓練 ${trainSequences.sequences.length} 筆序列：${trainRangeText}</div>
-                    <div class="text-xs">測試 ${testSequences.sequences.length} 筆序列：訊號 ${testSignalRange}</div>
-                    <div class="text-xs">序列長度：${sequenceLength} 日｜交易落點：${testTradeRange}</div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">資料切分</div>
+                    <div class=\"text-xs\">訓練 ${trainSamplesRequested} 日（序列 ${trainSequences.sequences.length} 筆）：${trainRangeText}</div>
+                    <div class=\"text-xs\">測試 ${testSamplesRequested} 日（序列 ${testSequences.sequences.length} 筆）：訊號 ${testSignalRange}</div>
+                    <div class=\"text-xs\">隔日開盤→收盤：${testTradeRange}</div>
                 </div>
-                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
-                    <div class="text-[11px] uppercase tracking-wide">訓練最佳門檻</div>
-                    <div class="text-lg font-semibold" style="color: var(--foreground);">${threshold.toFixed(2)}（樣本 ${sampleSize}）</div>
-                    <div class="text-xs">訓練命中率：${(accuracy * 100).toFixed(1)}%</div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">門檻設定</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--foreground);\">${thresholdUsedDisplay}（${thresholdSource === 'auto' ? '最佳' : '自訂'}｜樣本 ${chosenSampleDisplay}）</div>
+                    <div class=\"text-xs\">訓練命中率：${formatPercent(chosenMetrics.accuracy, 1)}</div>
+                    <div class=\"text-xs\">最佳門檻參考：${bestThresholdDisplay}｜樣本 ${bestSampleDisplay}</div>
                 </div>
-                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
-                    <div class="text-[11px] uppercase tracking-wide">平均漲幅 / 跌幅</div>
-                    <div class="text-sm font-semibold" style="color: var(--primary);">${(avgUp * 100).toFixed(2)}%</div>
-                    <div class="text-sm font-semibold" style="color: var(--destructive);">${(avgDown * 100).toFixed(2)}%</div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">平均漲幅 / 跌幅</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--primary);\">${formatPercent(chosenMetrics.avgUp)}</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--destructive);\">${formatPercent(chosenMetrics.avgDown)}</div>
                 </div>
-                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
-                    <div class="text-[11px] uppercase tracking-wide">測試命中率</div>
-                    <div class="text-lg font-semibold" style="color: var(--foreground);">${(hitRateTest * 100).toFixed(1)}%</div>
-                    <div class="text-xs">半凱利建議（參考）：${(indicativeKelly * 100).toFixed(1)}%</div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">測試命中率</div>
+                    <div class=\"text-lg font-semibold\" style=\"color: var(--foreground);\">${formatPercent(hitRateTest, 1)}</div>
+                    <div class=\"text-xs\">半凱利建議（參考）：${formatPercent(indicativeKelly, 1)}</div>
                 </div>
-                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
-                    <div class="text-[11px] uppercase tracking-wide">累積報酬（測試）</div>
-                    <div class="text-sm">LSTM + Kelly：<span style="color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalModel - 1) * 100).toFixed(2)}%</span></div>
-                    <div class="text-sm">買入持有：<span style="color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalBh - 1) * 100).toFixed(2)}%</span></div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">累積報酬（測試）</div>
+                    <div class=\"text-sm\">LSTM + Kelly：<span style=\"color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalModel)}</span></div>
+                    <div class=\"text-sm\">買入持有：<span style=\"color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalBh)}</span></div>
                 </div>
             `;
         }
@@ -3236,9 +3406,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
             tradesContainer.innerHTML = simulation.trades.length
                 ? simulation.trades
                     .map((trade) => `
-                        <div class="border-b py-1 flex justify-between" style="border-color: var(--border); color: var(--muted-foreground);">
-                            <span>訊號 ${trade.signalDate} → 交易 ${trade.tradeDate}</span>
-                            <span>P=${trade.prob.toFixed(2)} ｜ f=${(trade.fraction * 100).toFixed(1)}% ｜ 日報酬=${(trade.ret * 100).toFixed(2)}% ｜ PL=${(trade.pnl * 100).toFixed(2)}%</span>
+                        <div class="border-b py-2 space-y-1" style="border-color: var(--border); color: var(--muted-foreground);">
+                            <div class="flex justify-between text-xs">
+                                <span>訊號 ${trade.signalDate}</span>
+                                <span>交易 ${trade.tradeDate}</span>
+                            </div>
+                            <div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                                <span>P=${trade.prob.toFixed(2)}</span>
+                                <span>f=${(trade.fraction * 100).toFixed(1)}%</span>
+                                <span>日內=${(trade.ret * 100).toFixed(2)}%</span>
+                                <span>資金 ${trade.capitalBefore.toFixed(2)}→${trade.capitalAfter.toFixed(2)}</span>
+                                ${Number.isFinite(trade.entryPrice) && Number.isFinite(trade.exitPrice) ? `<span>價=${trade.entryPrice.toFixed(2)}→${trade.exitPrice.toFixed(2)}</span>` : ''}
+                                <span>PL=${(trade.pnlPct * 100).toFixed(2)}%</span>
+                            </div>
                         </div>
                     `)
                     .join('')
@@ -3253,11 +3433,11 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
 
     const preloadDurations = () => {
         try {
-            if (!Array.isArray(cachedStockData) || cachedStockData.length < 60) return;
-            const trainField = document.getElementById('ml-train-period');
-            const testField = document.getElementById('ml-test-period');
-            if (!trainField || !testField) return;
-            if (trainField.value && testField.value) return;
+            const slider = document.getElementById('ml-train-slider');
+            if (!slider || !Array.isArray(cachedStockData) || cachedStockData.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+                renderSplitLabels(null, null, null);
+                return;
+            }
 
             const rows = cachedStockData
                 .map((r) => ({
@@ -3268,21 +3448,22 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
                     low: Number(r.low),
                     volume: Number(r.volume),
                 }))
-                .filter((r) => Number.isFinite(r.close));
+                .filter((r) => Number.isFinite(r.close) && Number.isFinite(r.open));
             rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
             const { features } = buildFeatures(rows);
             const total = features.length;
-            const minTrain = 60;
-            const minTest = 30;
-            if (total < minTrain + minTest) return;
-            let defaultTrain = Math.max(minTrain, Math.floor(total * 0.7));
-            let defaultTest = Math.max(minTest, total - defaultTrain);
-            if (defaultTrain + defaultTest > total) {
-                defaultTrain = Math.max(minTrain, total - minTest);
-                defaultTest = Math.max(minTest, total - defaultTrain);
+            if (total < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+                renderSplitLabels(null, null, null);
+                return;
             }
-            if (!trainField.value) trainField.value = defaultTrain;
-            if (!testField.value) testField.value = defaultTest;
+
+            const maxTrain = Math.max(MIN_TRAIN_SAMPLES, total - MIN_TEST_SAMPLES);
+            let defaultTrain = Math.floor(total * 0.7);
+            defaultTrain = clamp(defaultTrain, MIN_TRAIN_SAMPLES, maxTrain);
+
+            slider.value = String(defaultTrain);
+            mlForecastState.totalSamples = total;
+            resolveTrainTestSamples(total, { coerceSliderValue: true });
         } catch (error) {
             console.warn('[ML Forecast] 預設期間計算失敗', error);
         }

@@ -2127,23 +2127,31 @@
                                             提醒：請先在主回測頁執行一次回測建立 cachedStockData，再切換至此分頁操作。必要時可調整半凱利係數與曝險上限降低波動。
                                         </div>
 
-                                        <div class="grid md:grid-cols-3 gap-3">
-                                            <div>
-                                                <label class="block text-xs mb-1">訓練期間（交易日）</label>
-                                                <input id="ml-train-period" type="number" min="60" step="10" value="504" class="w-full border px-2 py-1 rounded" />
-                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">預設取最近約兩年交易日作為訓練樣本。</p>
+                                        <div class="grid md:grid-cols-2 gap-3">
+                                            <div class="border rounded px-3 py-3 space-y-3" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent); color: var(--muted-foreground);">
+                                                <div class="flex items-center justify-between text-xs">
+                                                    <label for="ml-train-slider" class="font-semibold" style="color: var(--foreground);">訓練／測試切分</label>
+                                                    <span>保持總長度不變</span>
+                                                </div>
+                                                <input id="ml-train-slider" type="range" min="60" max="260" step="1" value="0" class="w-full accent-blue-600" />
+                                                <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                    <span>訓練：<span id="ml-train-days">—</span> 日</span>
+                                                    <span>測試：<span id="ml-test-days">—</span> 日</span>
+                                                    <span>總計：<span id="ml-total-days">—</span> 日</span>
+                                                </div>
+                                                <p class="text-[11px] leading-relaxed">最少需保留 <span class="font-semibold" style="color: var(--foreground);">訓練 60 日、測試 30 日</span>。拖曳滑桿時會自動調整，確保兩端條件成立。</p>
                                             </div>
-                                            <div>
-                                                <label class="block text-xs mb-1">測試期間（交易日）</label>
-                                                <input id="ml-test-period" type="number" min="30" step="10" value="126" class="w-full border px-2 py-1 rounded" />
-                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">系統會使用訓練之後的連續區段作為測試樣本。</p>
-                                            </div>
-                                            <div class="border rounded px-3 py-2 text-xs leading-relaxed" style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--accent) 6%, transparent);">
-                                                期間僅需設定交易日數。系統會從最新資料往回推 <span class="font-semibold" style="color: var(--foreground);">訓練日數 + 測試日數</span>，先切出較舊的樣本訓練，再保留較新的區段驗證。
+                                            <div class="border rounded px-3 py-3 text-xs leading-relaxed" style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--accent) 6%, transparent);">
+                                                系統會依滑桿設定從 <span class="font-semibold" style="color: var(--foreground);">最新資料往回回溯</span>，先切出較舊的交易日作為訓練，再保留較新的交易日驗證。若尚未建立 cachedStockData，請先於回測分頁執行一次回測。
                                             </div>
                                         </div>
 
-                                        <div class="grid md:grid-cols-4 gap-3">
+                                        <div class="grid md:grid-cols-5 gap-3">
+                                            <div>
+                                                <label class="block text-xs mb-1">自訂機率門檻</label>
+                                                <input id="ml-threshold" type="number" step="0.01" min="0.05" max="0.95" placeholder="自動" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">留空沿用訓練樣本最佳門檻。</p>
+                                            </div>
                                             <div>
                                                 <label class="block text-xs mb-1">學習率</label>
                                                 <input id="ml-lr" type="number" step="0.0001" value="0.01" class="w-full border px-2 py-1 rounded" />
@@ -2168,14 +2176,15 @@
                                                 <ul class="list-disc pl-4 space-y-1">
                                                     <li>以 cachedStockData 建立報酬、波動度、RSI、均線落差等特徵，並以訓練期間資料計算平均與標準差完成標準化。</li>
                                                     <li>自動取近期 16 日（不足時會調整）的序列輸入輕量 LSTM，使用隨機梯度下降最小化交叉熵，輸出隔日上漲機率。</li>
-                                                    <li>訓練樣本中掃描機率門檻 0.35–0.65，挑選命中率最高且樣本數 ≥ 20 的門檻，同時估計平均漲幅 <em>g</em> 與跌幅 <em>l</em>。</li>
-                                                    <li>測試階段僅在機率 ≥ 門檻時進場，依凱利公式 <em>f*</em> = <em>p</em> − (1−<em>p</em>)/(<em>g</em>/|<em>l</em>|) 乘以半凱利與曝險上限模擬資金配置。</li>
+                                                    <li>訓練樣本中掃描機率門檻 0.35–0.65，挑選命中率最高且樣本數 ≥ 20 的門檻，同時估計平均漲幅 <em>g</em> 與跌幅 <em>l</em>（可於上方自訂門檻覆蓋）。</li>
+                                                    <li>測試階段僅在機率 ≥ 門檻時於隔日開盤進場、收盤出場，依凱利公式 <em>f*</em> = <em>p</em> − (1−<em>p</em>)/(<em>g</em>/|<em>l</em>|) 乘以半凱利與曝險上限模擬資金配置。</li>
                                                 </ul>
                                             </div>
                                             <div class="border rounded px-3 py-3 space-y-2" style="border-color: var(--border); color: var(--muted-foreground);">
                                                 <h4 class="font-semibold text-sm" style="color: var(--foreground);">參數與計算解釋</h4>
                                                 <ul class="list-disc pl-4 space-y-1">
-                                                    <li><strong>訓練/測試期間</strong>：定義連續交易日數。系統自最新資料往回切分，確保訓練在測試之前。</li>
+                                                    <li><strong>訓練/測試切分</strong>：滑桿維持總樣本不變，同時確保訓練 ≥ 60 日、測試 ≥ 30 日。</li>
+                                                    <li><strong>自訂機率門檻</strong>：預設採訓練樣本最佳值；如需更保守，可輸入 0.55–0.65 等較高門檻。</li>
                                                     <li><strong>學習率</strong>：每次梯度更新的步伐，預設 0.05。過高易震盪，過低收斂變慢。</li>
                                                     <li><strong>迭代次數</strong>：掃描訓練資料的輪數，影響模型是否收斂。</li>
                                                     <li><strong>半凱利係數</strong>：對 <em>f*</em> 乘上係數（預設 0.5），保留安全邊際避免全凱利過度槓桿。</li>
