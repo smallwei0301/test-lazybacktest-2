@@ -764,3 +764,9 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-12 — Patch LB-AI-PREDICT-20250921A
+- **Issue recap**: 缺乏原生 AI 預測分頁協助使用者快速檢視以 LSTM 為核心的隔日漲幅（≥2 元）判斷與凱利公式資金配置，導致想評估深度學習策略的使用者需另行撰寫腳本。
+- **Fix**: 新增「AI 預測」頁籤與 `js/ai-predict.js` 模組，導入 TensorFlow.js LSTM（20 日視窗、2:1 時序切分）即時訓練，計算訓練/測試勝率、凱利投入比例、以今日收盤買進隔日賣出的模擬報酬，並提供 CSV 匯出功能；同步在 UI 顯示版本碼 `LB-AI-PREDICT-20250921A` 與使用說明。
+- **Diagnostics**: 確認未執行回測時會顯示提示、資料不足時提示補抓，並於測試集觸發交易後更新指標卡與交易表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
