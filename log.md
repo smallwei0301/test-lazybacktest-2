@@ -1,3 +1,9 @@
+## 2025-11-13 — Patch LB-BATCH-MASCOT-20251113A
+- **Scope**: 批量優化進度區域。
+- **Issue recap**: 進度表仍使用旋轉沙漏圖示，缺乏與首頁其他流程一致的吉祥物體驗，也無法在 Tenor 無法載入時提供 fallback。
+- **Fix**: 導入吉祥物 GIF 容器並重用 Tenor Sanitiser，於進度階段顯示動畫並在閒置時自動隱藏，同步更新 UI 與狀態管理，讓沙漏邏輯退場。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/batch-optimization.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
