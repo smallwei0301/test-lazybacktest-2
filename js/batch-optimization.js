@@ -49,6 +49,16 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+const OVERFIT_VERSION_CODE = 'LB-OVERFIT-SCORING-20250705A';
+let overfitAnalyticsState = {
+    version: OVERFIT_VERSION_CODE,
+    computedAt: null,
+    blockCount: null,
+    summary: null,
+    isComputing: false,
+    notes: []
+};
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -180,8 +190,14 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            overfitBlockCount: 10
         };
+
+        const overfitInput = document.getElementById('overfit-block-count');
+        if (overfitInput) {
+            overfitInput.value = batchOptimizationConfig.overfitBlockCount;
+        }
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
         try {
@@ -329,7 +345,25 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const overfitBlockInput = document.getElementById('overfit-block-count');
+        if (overfitBlockInput) {
+            overfitBlockInput.addEventListener('change', () => {
+                const parsed = parseInt(overfitBlockInput.value, 10);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    batchOptimizationConfig.overfitBlockCount = parsed;
+                    refreshOverfitAnalytics({ force: true, reason: 'block_count_change' });
+                }
+            });
+        }
+
+        const overfitRecomputeBtn = document.getElementById('overfit-recompute-btn');
+        if (overfitRecomputeBtn) {
+            overfitRecomputeBtn.addEventListener('click', () => {
+                refreshOverfitAnalytics({ force: true, reason: 'manual_recompute' });
+            });
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -392,11 +426,23 @@ function startBatchOptimization() {
         
         // 重置結果
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
-    resetBatchWorkerStatus();
-    const panel = document.getElementById('batch-worker-status-panel');
-    if (panel) panel.classList.remove('hidden');
-        
+        overfitAnalyticsState = {
+            version: OVERFIT_VERSION_CODE,
+            computedAt: null,
+            blockCount: normaliseOverfitBlockCount(batchOptimizationConfig?.overfitBlockCount || 10),
+            summary: null,
+            isComputing: false,
+            notes: ['reset'],
+        };
+        renderOverfitSummary(overfitAnalyticsState);
+        renderOverfitToplist(overfitAnalyticsState);
+        renderOverfitLambdaHints(null);
+
+        // 初始化 worker 狀態面板
+        resetBatchWorkerStatus();
+        const panel = document.getElementById('batch-worker-status-panel');
+        if (panel) panel.classList.remove('hidden');
+
         // 顯示進度
         showBatchProgress();
         
@@ -1726,10 +1772,12 @@ function showBatchResults() {
         
         // 排序結果
         sortBatchResults();
-        
+
         // 渲染結果表格
         renderBatchResultsTable();
-        
+
+        refreshOverfitAnalytics({ force: true, reason: 'show_results' });
+
         // 重置運行狀態
         restoreBatchOptimizationUI();
     } catch (error) {
@@ -1745,9 +1793,23 @@ function sortBatchResults() {
     const sortDirection = config.sortDirection || 'desc';
     
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
+        let aValue;
+        let bValue;
+
+        if (sortKey === 'overfitScore') {
+            aValue = Number.isFinite(a.overfitDiagnostics?.overfitScore) ? a.overfitDiagnostics.overfitScore : null;
+            bValue = Number.isFinite(b.overfitDiagnostics?.overfitScore) ? b.overfitDiagnostics.overfitScore : null;
+        } else {
+            aValue = a[sortKey] || 0;
+            bValue = b[sortKey] || 0;
+        }
+
+        if (sortKey === 'overfitScore') {
+            const isAsc = sortDirection === 'asc';
+            aValue = Number.isFinite(aValue) ? aValue : (isAsc ? Infinity : -Infinity);
+            bValue = Number.isFinite(bValue) ? bValue : (isAsc ? Infinity : -Infinity);
+        }
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1852,7 +1914,9 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
+        const overfitCellHtml = formatOverfitScoreCell(result.overfitDiagnostics);
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -1860,6 +1924,7 @@ function renderBatchResultsTable() {
             </td>
             <td class="px-3 py-2 text-sm text-gray-900">${buyStrategyName}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${sellStrategyName}${riskManagementInfo}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${overfitCellHtml}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
@@ -2604,6 +2669,522 @@ function formatNumber(value) {
     return value.toFixed(2);
 }
 
+function formatRatioAsPercent(ratio, digits = 1) {
+    if (!Number.isFinite(ratio)) return '-';
+    return `${(ratio * 100).toFixed(digits)}%`;
+}
+
+function getOverfitModules() {
+    const root = typeof window !== 'undefined' ? window.lazybacktestOverfit : null;
+    if (!root) {
+        return {};
+    }
+    return {
+        pbo: root.pbo,
+        dsr: root.dsr,
+        islands: root.islands,
+        overfit: root.overfit,
+    };
+}
+
+function normaliseOverfitBlockCount(input) {
+    let blockCount = Number.isFinite(input) ? Math.floor(input) : 10;
+    if (blockCount < 4) blockCount = 4;
+    if (blockCount % 2 !== 0) blockCount -= 1;
+    if (blockCount < 4) blockCount = 4;
+    return blockCount;
+}
+
+function computeDailyReturnsFromResult(result) {
+    if (!result || !Array.isArray(result.strategyReturns) || result.strategyReturns.length < 2) {
+        return [];
+    }
+    const returns = [];
+    for (let i = 1; i < result.strategyReturns.length; i++) {
+        const prev = Number(result.strategyReturns[i - 1]);
+        const curr = Number(result.strategyReturns[i]);
+        if (!Number.isFinite(prev) || !Number.isFinite(curr)) {
+            continue;
+        }
+        const prevNav = 1 + prev / 100;
+        const currNav = 1 + curr / 100;
+        if (prevNav <= 0 || currNav <= 0) {
+            continue;
+        }
+        returns.push(currNav / prevNav - 1);
+    }
+    return returns;
+}
+
+function computeSharpeFromReturns(dailyReturns) {
+    const valid = Array.isArray(dailyReturns)
+        ? dailyReturns.filter((value) => Number.isFinite(value))
+        : [];
+    if (valid.length < 2) return null;
+    const mean = valid.reduce((sum, value) => sum + value, 0) / valid.length;
+    const variance = valid.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / (valid.length - 1);
+    if (!Number.isFinite(variance) || variance <= 0) {
+        return 0;
+    }
+    return (mean / Math.sqrt(variance)) * Math.sqrt(252);
+}
+
+function computeBlockMetrics(dailyReturns, blockCount) {
+    if (!Array.isArray(dailyReturns) || dailyReturns.length < blockCount * 2) {
+        return null;
+    }
+    const metrics = [];
+    const total = dailyReturns.length;
+    const baseSize = Math.floor(total / blockCount);
+    if (baseSize < 2) {
+        return null;
+    }
+    let remainder = total - baseSize * blockCount;
+    let cursor = 0;
+    for (let i = 0; i < blockCount; i++) {
+        const extra = remainder > 0 ? 1 : 0;
+        const blockSize = baseSize + extra;
+        const slice = dailyReturns.slice(cursor, cursor + blockSize);
+        const sharpe = computeSharpeFromReturns(slice);
+        if (sharpe === null) {
+            return null;
+        }
+        metrics.push(sharpe);
+        cursor += blockSize;
+        if (remainder > 0) remainder -= 1;
+    }
+    return metrics;
+}
+
+function determineIslandAxes(entries) {
+    const candidates = new Map();
+    const register = (source, params) => {
+        if (!params || typeof params !== 'object') return;
+        Object.entries(params).forEach(([key, value]) => {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) return;
+            const mapKey = `${source}.${key}`;
+            if (!candidates.has(mapKey)) {
+                candidates.set(mapKey, {
+                    key,
+                    source,
+                    count: 0,
+                    values: new Set(),
+                });
+            }
+            const candidate = candidates.get(mapKey);
+            candidate.count += 1;
+            candidate.values.add(numeric);
+        });
+    };
+
+    entries.forEach((entry) => {
+        register('buy', entry.result?.buyParams);
+        register('sell', entry.result?.sellParams);
+    });
+
+    const candidateArray = Array.from(candidates.values()).map((candidate) => ({
+        key: candidate.key,
+        source: candidate.source,
+        count: candidate.count,
+        values: Array.from(candidate.values).sort((a, b) => a - b),
+    }));
+
+    candidateArray.sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return b.values.length - a.values.length;
+    });
+
+    return candidateArray.slice(0, 2);
+}
+
+function getAxisValue(result, axis) {
+    if (!axis || !result) return null;
+    let params = null;
+    if (axis.source === 'buy') {
+        params = result.buyParams;
+    } else if (axis.source === 'sell') {
+        params = result.sellParams;
+    }
+    if (!params || typeof params !== 'object') return null;
+    const raw = params[axis.key];
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildIslandPoints(entries, axes, configStats) {
+    return entries.map((entry, idx) => {
+        let x = idx;
+        let y = 0;
+        if (axes[0]) {
+            const candidate = getAxisValue(entry.result, axes[0]);
+            if (Number.isFinite(candidate)) {
+                x = candidate;
+            }
+        }
+        if (axes[1]) {
+            const candidate = getAxisValue(entry.result, axes[1]);
+            if (Number.isFinite(candidate)) {
+                y = candidate;
+            }
+        }
+        const configStat = Array.isArray(configStats) ? configStats[idx] : null;
+        const score = Number.isFinite(configStat?.medianOOS)
+            ? configStat.medianOOS
+            : (Number.isFinite(entry.sharpe) ? entry.sharpe : 0);
+        const pbo = Number.isFinite(configStat?.belowMedianRate) ? configStat.belowMedianRate : null;
+        return {
+            id: idx,
+            x,
+            y,
+            score,
+            pbo,
+        };
+    });
+}
+
+function averageNumeric(values) {
+    const valid = values.filter((value) => Number.isFinite(value));
+    if (valid.length === 0) return null;
+    return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function medianNumeric(values) {
+    const valid = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+    if (valid.length === 0) return null;
+    const mid = Math.floor(valid.length / 2);
+    if (valid.length % 2 === 0) {
+        return (valid[mid - 1] + valid[mid]) / 2;
+    }
+    return valid[mid];
+}
+
+function renderOverfitSummary(state) {
+    const summaryEl = document.getElementById('overfit-score-summary');
+    if (!summaryEl) return;
+    const summary = state?.summary;
+    if (!summary) {
+        summaryEl.innerHTML = '<p class="text-xs" style="color: var(--muted-foreground);">尚未計算過擬合評分，請先執行批量優化。</p>';
+        return;
+    }
+    const modules = getOverfitModules();
+    const riskLabel = modules.overfit?.classifyPboRisk(summary.pbo) || '';
+    const pboText = formatRatioAsPercent(summary.pbo ?? 0, 1);
+    const lambdaNeg = formatRatioAsPercent(summary.negativeLambdaRatio ?? 0, 1);
+    const dsrAvg = Number.isFinite(summary.dsrAverage) ? summary.dsrAverage.toFixed(2) : '-';
+    const dsrMedian = Number.isFinite(summary.dsrMedian) ? summary.dsrMedian.toFixed(2) : '-';
+    summaryEl.innerHTML = `
+        <div class="space-y-1">
+            <p>有效策略：<strong>${summary.validResults}</strong> / ${summary.totalResults}，CSCV 區塊數 ${summary.blockCount}。</p>
+            <p>PBO：<strong>${pboText}</strong>（${riskLabel}，λ &lt; 0 出現 ${lambdaNeg}）。</p>
+            <p>Deflated Sharpe Ratio：平均 ${dsrAvg}，中位數 ${dsrMedian}。</p>
+        </div>
+    `;
+}
+
+function renderOverfitToplist(state) {
+    const container = document.getElementById('overfit-toplist');
+    if (!container) return;
+    container.innerHTML = '';
+    const summary = state?.summary;
+    if (!summary || !Array.isArray(summary.topEntries) || summary.topEntries.length === 0) {
+        container.innerHTML = '<p class="text-xs" style="color: var(--muted-foreground);">尚無可顯示的策略，請先完成批量優化。</p>';
+        return;
+    }
+
+    const modules = getOverfitModules();
+
+    summary.topEntries.forEach((result, idx) => {
+        const diagnostics = result.overfitDiagnostics;
+        const scoreText = Number.isFinite(diagnostics?.overfitScore)
+            ? diagnostics.overfitScore.toFixed(1)
+            : '-';
+        const pboText = Number.isFinite(diagnostics?.configPbo)
+            ? formatRatioAsPercent(diagnostics.configPbo, 1)
+            : '-';
+        const dsrText = Number.isFinite(diagnostics?.dsr)
+            ? diagnostics.dsr.toFixed(2)
+            : '-';
+        const islandText = Number.isFinite(diagnostics?.island?.score)
+            ? diagnostics.island.score.toFixed(2)
+            : '-';
+        const riskLabel = modules.overfit?.classifyPboRisk(diagnostics?.configPbo ?? diagnostics?.pbo) || '';
+
+        const card = document.createElement('div');
+        card.className = 'p-3 border rounded-md space-y-2';
+        card.style.borderColor = 'var(--border)';
+        card.innerHTML = `
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold" style="color: var(--muted-foreground);">Top ${idx + 1}</span>
+                <span class="text-xs" style="color: var(--muted-foreground);">${riskLabel}</span>
+            </div>
+            <div class="text-lg font-semibold" style="color: var(--foreground);">${scoreText}</div>
+            <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                <p>PBO ${pboText} ｜ DSR ${dsrText} ｜ Island ${islandText}</p>
+                <p>${getStrategyChineseName(result.buyStrategy)} → ${getStrategyChineseName(result.sellStrategy)}</p>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function renderOverfitLambdaHints(summary) {
+    const hintsEl = document.getElementById('overfit-lambda-hints');
+    if (!hintsEl) return;
+    const samples = Array.isArray(summary?.lambdaSamples) ? summary.lambdaSamples.filter((value) => Number.isFinite(value)) : [];
+    if (samples.length === 0) {
+        hintsEl.textContent = '';
+        return;
+    }
+    samples.sort((a, b) => a - b);
+    const minLambda = samples[0];
+    const maxLambda = samples[samples.length - 1];
+    const medianLambda = samples[Math.floor(samples.length / 2)];
+    hintsEl.innerHTML = `
+        <span>λ 範圍：${formatNumber(minLambda)} ～ ${formatNumber(maxLambda)}，中位數 ${formatNumber(medianLambda)}。</span>
+    `;
+}
+
+function formatOverfitScoreCell(diagnostics) {
+    if (!diagnostics) {
+        return '<span class="text-xs" style="color: var(--muted-foreground);">未計算</span>';
+    }
+    if (!Number.isFinite(diagnostics.overfitScore)) {
+        const reason = diagnostics.reason === 'insufficient_samples'
+            ? '樣本不足'
+            : '未計算';
+        return `<span class="text-xs" style="color: var(--muted-foreground);">${reason}</span>`;
+    }
+    const modules = getOverfitModules();
+    const riskLabel = modules.overfit?.classifyPboRisk(diagnostics.configPbo ?? diagnostics.pbo) || '';
+    const pboText = Number.isFinite(diagnostics.configPbo)
+        ? formatRatioAsPercent(diagnostics.configPbo, 1)
+        : '-';
+    const dsrText = Number.isFinite(diagnostics.dsr) ? diagnostics.dsr.toFixed(2) : '-';
+    const islandText = Number.isFinite(diagnostics.island?.score) ? diagnostics.island.score.toFixed(2) : '-';
+    return `
+        <div class="space-y-1">
+            <div class="text-sm font-semibold" style="color: var(--foreground);">${diagnostics.overfitScore.toFixed(1)}</div>
+            <div class="text-[11px]" style="color: var(--muted-foreground);">
+                <span class="mr-2">PBO ${pboText}</span>
+                <span class="mr-2">DSR ${dsrText}</span>
+                <span class="mr-2">Island ${islandText}</span>
+                <span>${riskLabel}</span>
+            </div>
+        </div>
+    `;
+}
+
+function refreshOverfitAnalytics(options = {}) {
+    try {
+        const totalResults = Array.isArray(batchOptimizationResults) ? batchOptimizationResults.length : 0;
+        const blockCount = normaliseOverfitBlockCount(batchOptimizationConfig?.overfitBlockCount || 10);
+        const modules = getOverfitModules();
+        const summaryEl = document.getElementById('overfit-score-summary');
+        if (!summaryEl) return;
+
+        if (!modules.pbo || !modules.dsr || !modules.overfit) {
+            summaryEl.innerHTML = '<p class="text-xs" style="color: var(--muted-foreground);">過擬合計算模組尚未載入完成。</p>';
+            return;
+        }
+
+        if (!totalResults) {
+            overfitAnalyticsState = {
+                version: OVERFIT_VERSION_CODE,
+                computedAt: Date.now(),
+                blockCount,
+                summary: null,
+                isComputing: false,
+                notes: ['no_results'],
+            };
+            renderOverfitSummary(overfitAnalyticsState);
+            renderOverfitToplist(overfitAnalyticsState);
+            renderOverfitLambdaHints(null);
+            return;
+        }
+
+        if (!options.force && overfitAnalyticsState.summary && overfitAnalyticsState.blockCount === blockCount && overfitAnalyticsState.summary.totalResults === totalResults) {
+            renderOverfitSummary(overfitAnalyticsState);
+            renderOverfitToplist(overfitAnalyticsState);
+            renderOverfitLambdaHints(overfitAnalyticsState.summary);
+            if (options.updateTable !== false) {
+                renderBatchResultsTable();
+            }
+            return;
+        }
+
+        overfitAnalyticsState.isComputing = true;
+
+        const preparedEntries = [];
+        batchOptimizationResults.forEach((result, index) => {
+            const dailyReturns = computeDailyReturnsFromResult(result);
+            const blockMetrics = computeBlockMetrics(dailyReturns, blockCount);
+            const sharpe = computeSharpeFromReturns(dailyReturns);
+            if (!blockMetrics) {
+                result.overfitDiagnostics = {
+                    version: OVERFIT_VERSION_CODE,
+                    available: false,
+                    reason: 'insufficient_samples',
+                    blockCount,
+                };
+                return;
+            }
+            preparedEntries.push({
+                index,
+                result,
+                dailyReturns,
+                blockMetrics,
+                sharpe,
+            });
+        });
+
+        if (preparedEntries.length < 2) {
+            preparedEntries.forEach((entry) => {
+                entry.result.overfitDiagnostics = {
+                    version: OVERFIT_VERSION_CODE,
+                    available: false,
+                    reason: 'insufficient_peer_strategies',
+                    blockCount,
+                };
+            });
+
+            overfitAnalyticsState = {
+                version: OVERFIT_VERSION_CODE,
+                computedAt: Date.now(),
+                blockCount,
+                summary: null,
+                isComputing: false,
+                notes: ['insufficient_valid_entries'],
+            };
+            renderOverfitSummary(overfitAnalyticsState);
+            renderOverfitToplist(overfitAnalyticsState);
+            renderOverfitLambdaHints(null);
+            if (options.updateTable !== false) {
+                renderBatchResultsTable();
+            }
+            return;
+        }
+
+        preparedEntries.forEach((entry) => {
+            const dsrResult = modules.dsr.computeDeflatedSharpeRatio(entry.dailyReturns, {
+                trialCount: preparedEntries.length,
+            });
+            entry.dsr = Number.isFinite(dsrResult?.dsr) ? dsrResult.dsr : null;
+            entry.dsrDetails = dsrResult;
+        });
+
+        const matrix = preparedEntries.map((entry) => entry.blockMetrics);
+        const pboResult = modules.pbo.computeCSCVPBO(matrix, { blockCount });
+
+        const axes = determineIslandAxes(preparedEntries);
+        const points = buildIslandPoints(preparedEntries, axes, pboResult.configStats);
+        const islandResult = modules.islands
+            ? modules.islands.extractIslands(points, { quantile: 0.75 })
+            : { islands: [], assignments: new Map(), threshold: null };
+        const evaluatedIslands = modules.overfit.evaluateIslands(islandResult.islands || [], {});
+
+        const islandAssignments = new Map();
+        if (islandResult.assignments instanceof Map) {
+            points.forEach((point) => {
+                const islandId = islandResult.assignments.get(point.id);
+                const islandInfo = evaluatedIslands.islands.find((island) => island.id === islandId) || null;
+                islandAssignments.set(point.id, islandInfo || null);
+            });
+        }
+
+        preparedEntries.forEach((entry, idx) => {
+            const configStat = Array.isArray(pboResult.configStats) ? pboResult.configStats[idx] : null;
+            const point = points[idx];
+            const islandInfo = islandAssignments.get(point.id) || null;
+            const componentPbo = Number.isFinite(configStat?.belowMedianRate)
+                ? configStat.belowMedianRate
+                : pboResult.pbo;
+            const overfitScoreResult = modules.overfit.computeOverfitScore({
+                pbo: componentPbo,
+                dsr: entry.dsr,
+                islandScore: islandInfo ? islandInfo.score : 0,
+            });
+
+            entry.result.overfitDiagnostics = {
+                version: OVERFIT_VERSION_CODE,
+                blockCount: pboResult.blockCount,
+                pbo: pboResult.pbo,
+                configPbo: componentPbo,
+                splitCount: pboResult.splitCount,
+                lambdaSamples: pboResult.lambdaSamples,
+                overfitScore: overfitScoreResult.score,
+                scoreBreakdown: overfitScoreResult,
+                dsr: entry.dsr,
+                dsrDetails: entry.dsrDetails,
+                oosMedian: configStat?.medianOOS ?? null,
+                island: islandInfo
+                    ? {
+                        id: islandInfo.id,
+                        score: islandInfo.score,
+                        area: islandInfo.area,
+                        normArea: islandInfo.normArea,
+                        dispersion: islandInfo.dispersion,
+                        edgeSharpness: islandInfo.edgeNorm !== undefined ? islandInfo.edgeNorm : islandInfo.edgeSharpness,
+                        avgPbo: islandInfo.avgPbo,
+                    }
+                    : null,
+            };
+        });
+
+        const dsrValues = preparedEntries.map((entry) => entry.dsr).filter((value) => Number.isFinite(value));
+        const dsrAverage = averageNumeric(dsrValues);
+        const dsrMedian = medianNumeric(dsrValues);
+        const negativeLambdaRatio = Array.isArray(pboResult.lambdaSamples) && pboResult.lambdaSamples.length > 0
+            ? pboResult.lambdaSamples.filter((value) => Number.isFinite(value) && value < 0).length / pboResult.lambdaSamples.length
+            : null;
+
+        const sortedByScore = [...preparedEntries].sort((a, b) => {
+            const scoreA = Number.isFinite(a.result.overfitDiagnostics?.overfitScore)
+                ? a.result.overfitDiagnostics.overfitScore
+                : -Infinity;
+            const scoreB = Number.isFinite(b.result.overfitDiagnostics?.overfitScore)
+                ? b.result.overfitDiagnostics.overfitScore
+                : -Infinity;
+            return scoreB - scoreA;
+        });
+
+        const summary = {
+            totalResults,
+            validResults: preparedEntries.length,
+            blockCount: pboResult.blockCount,
+            pbo: pboResult.pbo,
+            negativeLambdaRatio,
+            dsrAverage,
+            dsrMedian,
+            lambdaSamples: pboResult.lambdaSamples || [],
+            islandThreshold: islandResult.threshold,
+            topEntries: sortedByScore.slice(0, 6).map((entry) => entry.result),
+        };
+
+        overfitAnalyticsState = {
+            version: OVERFIT_VERSION_CODE,
+            computedAt: Date.now(),
+            blockCount: summary.blockCount,
+            summary,
+            isComputing: false,
+            notes: [],
+        };
+
+        renderOverfitSummary(overfitAnalyticsState);
+        renderOverfitToplist(overfitAnalyticsState);
+        renderOverfitLambdaHints(summary);
+
+        if (options.updateTable !== false) {
+            renderBatchResultsTable();
+        }
+    } catch (error) {
+        console.error('[Batch Optimization] refreshOverfitAnalytics error:', error);
+        const summaryEl = document.getElementById('overfit-score-summary');
+        if (summaryEl) {
+            summaryEl.innerHTML = `<p class="text-xs" style="color: #dc2626;">過擬合評分計算失敗：${error.message}</p>`;
+        }
+    }
+}
 // 載入批量優化策略
 function loadBatchStrategy(index) {
     const result = batchOptimizationResults[index];
@@ -2865,10 +3446,11 @@ function testLoadStrategyFix() {
     
     // 添加到結果中
     batchOptimizationResults = testResults;
-    
+
     // 顯示結果
     displayBatchOptimizationResults();
-    
+    refreshOverfitAnalytics({ force: true, reason: 'test_results' });
+
     console.log('[Test] Test results created with death cross strategies. Try loading them now.');
     showInfo('已創建包含死亡交叉策略的測試結果，請點擊表格中的"載入"按鈕測試修復效果');
 }
@@ -3536,7 +4118,7 @@ function updateCrossOptimizationProgress(currentTask = null) {
 function addCrossOptimizationResults(newResults) {
     newResults.forEach(newResult => {
         // 查找是否有相同的買入策略、賣出策略和年化報酬率的結果
-        const existingIndex = batchOptimizationResults.findIndex(existing => 
+        const existingIndex = batchOptimizationResults.findIndex(existing =>
             existing.buyStrategy === newResult.buyStrategy &&
             existing.sellStrategy === newResult.sellStrategy &&
             Math.abs(existing.annualizedReturn - newResult.annualizedReturn) < 0.0001 // 允許微小差異
@@ -3568,6 +4150,8 @@ function addCrossOptimizationResults(newResults) {
             console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
         }
     });
+
+    refreshOverfitAnalytics({ force: true, reason: 'cross_optimization' });
 }
 
 // 快速優化單一策略參數（減少步數，用於交叉優化）

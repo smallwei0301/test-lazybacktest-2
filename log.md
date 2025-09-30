@@ -1,3 +1,7 @@
+## 2025-07-05 — Patch LB-OVERFIT-SCORING-20250705A
+- **Scope**: 新增 CSCV PBO、Deflated Sharpe Ratio、礁島穩健度與綜合過擬合評分模組，於批量優化結果表與專用面板揭露分數、PBO 風險等指標，支援動態調整區塊數與策略排名。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/dsr.js','js/islands.js','js/overfit-score.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
