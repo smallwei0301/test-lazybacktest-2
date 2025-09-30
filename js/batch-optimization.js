@@ -52,7 +52,7 @@ let batchOptimizationOFIMetrics = null;
 let batchOptimizationOFISignature = null;
 
 // 版本標記：批量優化 OFI 指標表整合
-const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250924A';
+const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250926B';
 const OFI_METRICS_CSV_PATH = 'assets/ofi-metrics-parameters.csv';
 let ofiMetricsTableCache = null;
 let ofiMetricsFetchPromise = null;
@@ -1759,6 +1759,10 @@ function showBatchResults() {
 // 排序結果
 function sortBatchResults() {
     ensureBatchOfiComputed();
+    if (batchOptimizationOFIMetrics && batchOptimizationOFIMetrics.allowStrategyRanking === false) {
+        console.info('[Batch Optimization][OFI] Flow 未達標，暫停策略排序');
+        return;
+    }
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'ofiScore';
     const sortDirection = config.sortDirection || 'desc';
@@ -1819,15 +1823,24 @@ function renderBatchResultsTable() {
 
     ensureBatchOfiComputed();
 
+    const flowMetrics = batchOptimizationOFIMetrics;
+    renderOfiFlowBanner(flowMetrics);
+    const allowStrategyRanking = !flowMetrics || flowMetrics.allowStrategyRanking !== false;
+    const flowVerdictStatus = flowMetrics ? flowMetrics.flowVerdictStatus : 'unknown';
+
     tbody.innerHTML = '';
 
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
-        row.className = 'hover:bg-gray-50';
-        
+        row.className = allowStrategyRanking ? 'hover:bg-gray-50' : 'bg-gray-50';
+        if (!allowStrategyRanking) {
+            row.style.opacity = '0.65';
+            row.classList.add('text-gray-500');
+        }
+
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
         
         // 判斷優化類型並處理合併的類型標籤
@@ -1873,14 +1886,18 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
         const ofiScoreDisplay = formatOfiScore(result.ofiScore);
         const ofiVerdict = result.ofiVerdict || '資料不足';
         const ofiBadgeClass = getOfiBadgeClass(result.ofiScore);
-        const ofiSummary = formatOfiSummary(result);
+        const ofiSummary = formatOfiSummary(result, flowVerdictStatus);
         const ofiTooltip = buildOfiTooltip(result);
         const ofiTooltipAttr = escapeHtmlAttr(ofiTooltip);
         const ofiSummaryHtml = ofiSummary ? `<span class="text-xs text-gray-500">${escapeHtml(ofiSummary)}</span>` : '';
+        const loadButtonDisabled = allowStrategyRanking ? '' : 'disabled aria-disabled="true"';
+        const loadButtonClass = allowStrategyRanking
+            ? 'px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border'
+            : 'px-2 py-1 bg-gray-100 text-gray-400 text-xs rounded border border-border cursor-not-allowed';
 
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
@@ -1902,13 +1919,13 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
-                        onclick="loadBatchStrategy(${index})">
+                <button class="${loadButtonClass}" ${loadButtonDisabled}
+                        onclick="${allowStrategyRanking ? `loadBatchStrategy(${index})` : 'return false;'}">
                     載入
                 </button>
             </td>
         `;
-        
+
         tbody.appendChild(row);
     });
 }
@@ -1927,6 +1944,7 @@ function ensureBatchOfiComputed(force = false) {
             batchOptimizationOFIMetrics = null;
             batchOptimizationOFISignature = signature;
             renderOfiFlowSummary();
+            renderOfiFlowBanner(null);
             return;
         }
         const evaluation = window.lazybacktestOFI.computeOFIForResults(batchOptimizationResults);
@@ -1934,10 +1952,12 @@ function ensureBatchOfiComputed(force = false) {
             batchOptimizationOFIMetrics = null;
             batchOptimizationOFISignature = null;
             renderOfiFlowSummary();
+            renderOfiFlowBanner(null);
             return;
         }
         batchOptimizationOFIMetrics = evaluation.flow || null;
         renderOfiFlowSummary();
+        renderOfiFlowBanner(batchOptimizationOFIMetrics);
         evaluation.strategies.forEach((entry) => {
             const target = batchOptimizationResults[entry.index];
             if (!target) return;
@@ -1993,6 +2013,47 @@ function formatOfiScore(value) {
     return value.toFixed(1);
 }
 
+function formatScore(value) {
+    if (!Number.isFinite(value)) return '--';
+    return value.toFixed(1);
+}
+
+function formatNormalisedScore(value) {
+    if (!Number.isFinite(value)) return '--';
+    return (value * 100).toFixed(1);
+}
+
+function formatPercentFromScore(value) {
+    if (!Number.isFinite(value)) return '--';
+    return `${(value * 100).toFixed(0)}%`;
+}
+
+function formatPboValue(value) {
+    if (!Number.isFinite(value)) return '--';
+    return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSampleLengthDetail(flow) {
+    if (!flow || !Number.isFinite(flow.sampleLength)) return '--';
+    const base = `${Math.round(flow.sampleLength)} 筆`;
+    const status = flow.sampleLengthStatus ? `｜${flow.sampleLengthStatus}` : '';
+    const block = Number.isFinite(flow.suggestedBlockLength) ? `｜建議 block ≈ ${flow.suggestedBlockLength}` : '';
+    return `${base}${status}${block}`;
+}
+
+function formatStrategyPoolDetail(flow) {
+    if (!flow || !Number.isFinite(flow.strategyPoolSize)) return '--';
+    const label = flow.strategyPoolLabel ? `｜${flow.strategyPoolLabel}` : '';
+    return `${flow.strategyPoolSize} 組${label}`;
+}
+
+function formatFlowVerdictTag(flowVerdict, status) {
+    if (status === 'fail') return 'Flow 未達標';
+    if (status === 'caution') return 'Flow 邊界';
+    if (flowVerdict && flowVerdict.includes('暫停')) return 'Flow 暫停';
+    return '';
+}
+
 function getOfiBadgeClass(score) {
     if (!Number.isFinite(score)) return 'text-gray-500';
     if (score >= 80) return 'text-green-600';
@@ -2001,12 +2062,16 @@ function getOfiBadgeClass(score) {
     return 'text-red-600';
 }
 
-function formatOfiSummary(result) {
+function formatOfiSummary(result, flowVerdictStatus) {
     if (!result || !result.ofiComponents) return '';
-    const flow = formatComponentScore(result.ofiComponents.flow);
-    const strategy = formatComponentScore(result.ofiComponents.strategy);
-    if (flow === '--' && strategy === '--') return '';
-    return `Flow ${flow}｜Strat ${strategy}`;
+    const flowScore = formatScore(result.ofiComponents.flowScoreRaw);
+    const strategyScore = formatNormalisedScore(result.ofiComponents.strategy);
+    const parts = [];
+    if (flowScore !== '--') parts.push(`Flow ${flowScore}`);
+    if (strategyScore !== '--') parts.push(`Strat ${strategyScore}`);
+    const flowTag = formatFlowVerdictTag(result.ofiMeta?.flowVerdict, flowVerdictStatus);
+    if (flowTag) parts.push(flowTag);
+    return parts.join('｜');
 }
 
 function buildOfiTooltip(result) {
@@ -2016,10 +2081,14 @@ function buildOfiTooltip(result) {
     const c = result.ofiComponents;
     const lines = [
         `OFI ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim(),
-        `Flow ${formatComponentScore(c.flow)} ｜ Strategy ${formatComponentScore(c.strategy)}`,
-        `PBO ${formatComponentScore(c.RPBO)} ｜ SPA ${formatComponentScore(c.RSPA)} ｜ MCS ${formatComponentScore(c.RMCS)}`,
+        `FlowScore ${formatScore(c.flowScoreRaw)} ｜ Strategy ${formatNormalisedScore(c.strategy)}`,
+        `R^PBO ${formatComponentScore(c.RPBO)} ｜ R^Len ${formatComponentScore(c.RLen)} ｜ R^Pool ${formatComponentScore(c.RPool)}`,
+        `R^SPA ${formatComponentScore(c.RSPA)} ｜ R^MCS ${formatComponentScore(c.RMCS)}`,
         `OOS ${formatComponentScore(c.ROOS)} ｜ WF ${formatComponentScore(c.RWF)} ｜ DSR/PSR ${formatComponentScore(c.RDSRPSR)} ｜ Island ${formatComponentScore(c.RIsland)}`,
     ];
+    if (result?.ofiMeta?.flowVerdict) {
+        lines.push(`Flow 判定：${result.ofiMeta.flowVerdict}`);
+    }
     return lines.join('\n');
 }
 
@@ -2306,11 +2375,15 @@ function renderOfiFlowSummary() {
     }
 
     const entries = [
-        { label: 'Flow 總分', value: formatComponentScore(flow.RFlow) },
+        { label: 'FlowScore', value: formatScore(flow.flowScore) },
         { label: 'R^{PBO}', value: formatComponentScore(flow.RPBO) },
+        { label: 'R^{Len}', value: formatComponentScore(flow.RLen) },
+        { label: 'R^{Pool}', value: formatComponentScore(flow.RPool) },
         { label: 'R^{SPA}', value: formatComponentScore(flow.RSPA) },
         { label: 'R^{MCS}', value: formatComponentScore(flow.RMCS) },
-        { label: 'PBO', value: Number.isFinite(flow.PBO) ? `${(flow.PBO * 100).toFixed(2)}%` : '--' },
+        { label: 'PBO', value: formatPboValue(flow.PBO) },
+        { label: '樣本長度', value: formatSampleLengthDetail(flow) },
+        { label: '策略池', value: formatStrategyPoolDetail(flow) },
         { label: '有效切分', value: Number.isFinite(flow.validSplits) && Number.isFinite(flow.totalSplits)
             ? `${flow.validSplits}/${flow.totalSplits}`
             : '--' },
@@ -2329,8 +2402,77 @@ function renderOfiFlowSummary() {
         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             ${cards.join('')}
         </div>
-        <p class="mt-2 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">版本 ${escapeHtml(BATCH_OFI_UI_VERSION)}｜Flow 權重 0.6 / 0.2 / 0.2</p>
+        <p class="mt-2 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">版本 ${escapeHtml(BATCH_OFI_UI_VERSION)}｜Flow 權重 0.40 / 0.20 / 0.15 / 0.15 / 0.10</p>
     `;
+}
+
+function renderOfiFlowBanner(flow) {
+    const banner = document.getElementById('batch-ofi-flow-banner');
+    if (!banner) return;
+
+    if (!flow || typeof flow !== 'object') {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+        return;
+    }
+
+    const scoreDisplay = formatScore(flow.flowScore);
+    const verdictLabel = flow.flowVerdict || 'Flow 指標資料不足';
+    const summary = flow.summary || 'Flow 指標資料不足';
+    const status = flow.flowVerdictStatus || 'unknown';
+
+    let containerClass = 'border border-border bg-muted/20';
+    let verdictClass = 'text-gray-600';
+    if (status === 'pass') {
+        containerClass = 'border border-emerald-300 bg-emerald-50';
+        verdictClass = 'text-emerald-700';
+    } else if (status === 'caution') {
+        containerClass = 'border border-amber-300 bg-amber-50';
+        verdictClass = 'text-amber-700';
+    } else if (status === 'fail') {
+        containerClass = 'border border-rose-300 bg-rose-50';
+        verdictClass = 'text-rose-700';
+    }
+
+    const detailEntries = [
+        { label: 'PBO', value: formatPboValue(flow.PBO) },
+        { label: '樣本長度', value: formatSampleLengthDetail(flow) },
+        { label: '策略池', value: formatStrategyPoolDetail(flow) },
+        { label: 'SPA 通過率', value: formatPercentFromScore(flow.RSPA) },
+        { label: 'MCS 存活率', value: formatPercentFromScore(flow.RMCS) },
+    ];
+
+    const detailHtml = detailEntries
+        .filter((entry) => entry.value !== '--')
+        .map((entry) => `
+            <div>
+                <div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(entry.label)}</div>
+                <div class="mt-1 text-sm font-medium" style="color: var(--foreground);">${escapeHtml(entry.value)}</div>
+            </div>
+        `)
+        .join('');
+
+    const recommendations = Array.isArray(flow.recommendations) ? flow.recommendations.filter(Boolean) : [];
+    const recommendationHtml = recommendations.length > 0
+        ? `<ul class="mt-2 list-disc space-y-1 pl-5 text-[11px] text-gray-600">${recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+        : '';
+
+    banner.innerHTML = `
+        <div class="${containerClass} rounded-lg p-4">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">FlowScore</div>
+                    <div class="text-2xl font-semibold" style="color: var(--foreground);">${escapeHtml(scoreDisplay)}</div>
+                </div>
+                <div class="text-sm font-semibold ${verdictClass}">${escapeHtml(verdictLabel)}</div>
+            </div>
+            <p class="mt-2 text-xs leading-relaxed" style="color: var(--foreground);">${escapeHtml(summary)}</p>
+            ${detailHtml ? `<div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">${detailHtml}</div>` : ''}
+            ${recommendationHtml}
+            <p class="mt-2 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">版本 ${escapeHtml(BATCH_OFI_UI_VERSION)}｜Flow 權重 0.40 / 0.20 / 0.15 / 0.15 / 0.10</p>
+        </div>
+    `;
+    banner.classList.remove('hidden');
 }
 
 function setOfiMetricsStatus(message, isError = false) {

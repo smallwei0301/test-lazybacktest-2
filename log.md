@@ -1,3 +1,12 @@
+## 2025-09-26 — Patch LB-OFI-LAYERED-20250926A
+- **Scope**: 重構 OFI Flow 層級，補上樣本長度與策略池診斷，並以 FlowScore 判定是否允許策略比較。
+- **Implementation**:
+  - `js/overfit-score.js` 加入 `R^{Len}`、`R^{Pool}` 與 FlowScore 判定，提供樣本長度、策略池摘要與改善建議，FlowScore < 50 時鎖定策略排序。
+  - `js/batch-optimization.js` 新增 FlowScore 橫幅、Tooltip 與排序鎖定邏輯，OFI 列顯示 Flow/Strategy 分數與 Flow 判定提醒。
+  - 更新 `docs/ofi-metrics-breakdown.md` 與 `assets/ofi-metrics-parameters.csv`，同步記錄新權重與門檻，`index.html` Modal 版本碼一併調整。
+- **Diagnostics**: 實際執行批量優化確認 FlowScore 卡片顯示樣本長度/策略池狀態、Flow 邊界時仍允許排序但附加提醒，Flow 未達標則列出淡灰鎖定列表並顯示改善建議；檢查 tooltip 與 CSV 下載內容對齊文件描述。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-24 — Patch LB-OFI-UI-20250924A
 - **Scope**: 將 OFI 指標公式表整合進批量優化結果頁面，提供即時查詢與下載。
 - **Implementation**:

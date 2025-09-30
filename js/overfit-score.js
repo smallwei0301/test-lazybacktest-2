@@ -1,9 +1,9 @@
 /*
  * Overfit Indicator computation module
- * Version: LB-OFI-METRICS-20250923A
+ * Version: LB-OFI-LAYERED-20250926A
  */
 (function () {
-  const MODULE_VERSION = "LB-OFI-METRICS-20250923A";
+  const MODULE_VERSION = "LB-OFI-LAYERED-20250926A";
 
   const DEFAULT_CONFIG = {
     desiredSegments: 10,
@@ -20,11 +20,15 @@
       minimumWindows: 2,
     },
     weights: {
-      flow: { pbo: 0.6, spa: 0.2, mcs: 0.2 },
+      flow: { pbo: 0.4, len: 0.2, pool: 0.15, spa: 0.15, mcs: 0.1 },
       strategy: { dsrpsr: 0.25, oos: 0.25, wf: 0.25, island: 0.25 },
       ofi: { flow: 0.3, strategy: 0.7 },
     },
     oosAlpha: 0.6,
+    flowVerdictThresholds: {
+      pass: 70,
+      caution: 50,
+    },
   };
 
   const EPSILON = 1e-6;
@@ -78,7 +82,10 @@
   function buildEmptyFlowMetrics() {
     return {
       RFlow: null,
+      flowScore: null,
       RPBO: null,
+      RLen: null,
+      RPool: null,
       RSPA: null,
       RMCS: null,
       PBO: null,
@@ -87,6 +94,17 @@
       totalSplits: 0,
       validSplits: 0,
       segments: null,
+      sampleLength: null,
+      sampleLengthLabel: null,
+      sampleLengthStatus: null,
+      suggestedBlockLength: null,
+      strategyPoolSize: null,
+      strategyPoolLabel: null,
+      flowVerdict: "Flow 指標資料不足",
+      flowVerdictStatus: "unknown",
+      allowStrategyRanking: false,
+      summary: "Flow 指標資料不足",
+      recommendations: [],
       version: MODULE_VERSION,
     };
   }
@@ -98,8 +116,11 @@
       verdict: "資料不足",
       components: {
         flow: null,
+        flowScoreRaw: null,
         strategy: null,
         RPBO: null,
+        RLen: null,
+        RPool: null,
         RSPA: null,
         RMCS: null,
         ROOS: null,
@@ -109,6 +130,7 @@
       },
       meta: {
         version: MODULE_VERSION,
+        flowVerdict: null,
       },
     };
   }
@@ -400,17 +422,45 @@
 
   function computeFlowScore(prepared, cscvOutcome, config) {
     const RPBO = Number.isFinite(cscvOutcome.pbo) ? clamp(1 - cscvOutcome.pbo, 0, 1) : null;
+    const lenInfo = computeSampleLengthScore(prepared);
+    const RLen = lenInfo.score;
+    const poolInfo = computePoolBreadthScore(prepared);
+    const RPool = poolInfo.score;
     const RSPA = computeSPAScore(prepared, config);
     const RMCS = computeMCSScore(prepared, config);
     const components = [
       { value: RPBO, weight: config.weights.flow.pbo },
+      { value: RLen, weight: config.weights.flow.len },
+      { value: RPool, weight: config.weights.flow.pool },
       { value: RSPA, weight: config.weights.flow.spa },
       { value: RMCS, weight: config.weights.flow.mcs },
     ];
     const normalisedFlow = weightedAverage(components);
+    const flowScoreValue = Number.isFinite(normalisedFlow) ? normalisedFlow * 100 : null;
+    const verdict = deriveFlowVerdict(flowScoreValue, config.flowVerdictThresholds);
+    const summary = buildFlowSummary(verdict, flowScoreValue, {
+      RPBO,
+      RLen,
+      RPool,
+      RSPA,
+      RMCS,
+      PBO: cscvOutcome.pbo,
+      spaRate: RSPA,
+      mcsRate: RMCS,
+    }, lenInfo, poolInfo);
+    const recommendations = buildFlowRecommendations(verdict, {
+      RPBO,
+      RLen,
+      RPool,
+      RSPA,
+      RMCS,
+    }, lenInfo, poolInfo);
     const flowScore = {
       RFlow: normalisedFlow,
+      flowScore: flowScoreValue,
       RPBO,
+      RLen,
+      RPool,
       RSPA,
       RMCS,
       PBO: cscvOutcome.pbo,
@@ -418,15 +468,165 @@
       qValues: cscvOutcome.qValues,
       totalSplits: cscvOutcome.totalSplits,
       validSplits: cscvOutcome.validSplits,
+      sampleLength: lenInfo.sampleLength,
+      sampleLengthLabel: lenInfo.label,
+      sampleLengthStatus: lenInfo.statusText,
+      suggestedBlockLength: lenInfo.blockLength,
+      strategyPoolSize: poolInfo.size,
+      strategyPoolLabel: poolInfo.label,
+      flowVerdict: verdict.label,
+      flowVerdictStatus: verdict.status,
+      allowStrategyRanking: verdict.allowStrategyRanking,
+      summary,
+      recommendations,
       version: MODULE_VERSION,
     };
     prepared.forEach((item) => {
       item.flowScore = flowScore.RFlow;
       item.RPBO = RPBO;
+      item.RLen = RLen;
+      item.RPool = RPool;
       item.RSPA = RSPA;
       item.RMCS = RMCS;
+      item.flowVerdictStatus = verdict.status;
     });
     return flowScore;
+  }
+
+  function computeSampleLengthScore(prepared) {
+    const lengths = Array.isArray(prepared)
+      ? prepared
+          .map((item) => (Array.isArray(item.dailyReturns) ? item.dailyReturns.length : null))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      : [];
+    if (lengths.length === 0) {
+      return { score: null, sampleLength: null, label: "資料不足", statusText: "資料不足", blockLength: null };
+    }
+    const medianLength = median(lengths);
+    if (!Number.isFinite(medianLength)) {
+      return { score: null, sampleLength: null, label: "資料不足", statusText: "資料不足", blockLength: null };
+    }
+    let score = null;
+    let label = "資料不足";
+    let statusText = "資料不足";
+    if (medianLength < 250) {
+      score = 0;
+      label = "不足";
+      statusText = "樣本長度不足";
+    } else if (medianLength < 500) {
+      score = 0.5;
+      label = "偏弱";
+      statusText = "樣本長度偏短";
+    } else {
+      score = 1;
+      label = "充足";
+      statusText = "樣本長度充足";
+    }
+    const blockLength = Math.max(1, Math.round(Math.pow(medianLength, 1 / 3)));
+    return { score, sampleLength: medianLength, label, statusText, blockLength };
+  }
+
+  function computePoolBreadthScore(prepared) {
+    const size = Array.isArray(prepared) ? prepared.length : 0;
+    if (!Number.isFinite(size) || size <= 0) {
+      return { score: null, size: size || 0, label: "資料不足", statusText: "資料不足" };
+    }
+    let score = null;
+    let label = "資料不足";
+    let statusText = "資料不足";
+    if (size < 20) {
+      score = 0;
+      label = "不足";
+      statusText = "策略池過小";
+    } else if (size < 100) {
+      score = 0.7;
+      label = "合理";
+      statusText = "策略池合理";
+    } else {
+      score = 1;
+      label = "充足";
+      statusText = "策略池充足";
+    }
+    return { score, size, label, statusText };
+  }
+
+  function deriveFlowVerdict(flowScore, thresholds) {
+    const passThreshold = thresholds?.pass ?? 70;
+    const cautionThreshold = thresholds?.caution ?? 50;
+    if (!Number.isFinite(flowScore)) {
+      return { label: "Flow 指標資料不足", status: "unknown", allowStrategyRanking: false };
+    }
+    if (flowScore >= passThreshold) {
+      return { label: "🟢 本次試驗合格", status: "pass", allowStrategyRanking: true };
+    }
+    if (flowScore >= cautionThreshold) {
+      return { label: "🟡 本次試驗邊界", status: "caution", allowStrategyRanking: true };
+    }
+    return { label: "🔴 本次試驗不合格", status: "fail", allowStrategyRanking: false };
+  }
+
+  function buildFlowSummary(verdict, flowScore, metrics, lenInfo, poolInfo) {
+    const fragments = [];
+    if (Number.isFinite(metrics.PBO)) {
+      fragments.push(`PBO=${(metrics.PBO * 100).toFixed(1)}%`);
+    }
+    if (lenInfo && Number.isFinite(lenInfo.sampleLength)) {
+      fragments.push(`樣本長度${lenInfo.label}`);
+    }
+    if (poolInfo && Number.isFinite(poolInfo.size)) {
+      const poolLabel = poolInfo.label ? `（${poolInfo.label}）` : "";
+      fragments.push(`策略池 ${poolInfo.size} 組${poolLabel}`);
+    }
+    if (Number.isFinite(metrics.RSPA)) {
+      fragments.push(`SPA 通過率 ${(metrics.RSPA * 100).toFixed(0)}%`);
+    }
+    if (Number.isFinite(metrics.RMCS)) {
+      fragments.push(`MCS ${(metrics.RMCS * 100).toFixed(0)}%`);
+    }
+    const base = fragments.join("，");
+    if (!Number.isFinite(flowScore)) {
+      return base || "Flow 指標資料不足";
+    }
+    if (verdict.status === "pass") {
+      return base ? `本次測試合格：${base}。可以進入策略比較。` : "本次測試合格，可以進入策略比較。";
+    }
+    if (verdict.status === "caution") {
+      return base ? `本次測試邊界：${base}。仍可參考策略比較，但請審慎解讀。` : "本次測試邊界，仍可參考策略比較，但請審慎解讀。";
+    }
+    if (verdict.status === "fail") {
+      return base ? `本次測試不合格：${base}。` : "本次測試不合格。";
+    }
+    return base || "Flow 指標資料不足";
+  }
+
+  function buildFlowRecommendations(verdict, metrics, lenInfo, poolInfo) {
+    const suggestions = [];
+    if (verdict.status === "fail" || verdict.status === "caution") {
+      if (lenInfo && Number.isFinite(lenInfo.score)) {
+        if (lenInfo.score === 0) {
+          suggestions.push("延長回測期至 ≥ 2 年（約 500 筆以上）以支援 block bootstrap。");
+        } else if (lenInfo.score === 0.5) {
+          suggestions.push("適度延長回測期，提升樣本長度至 ≥ 500 筆。");
+        }
+      }
+      if (poolInfo && Number.isFinite(poolInfo.score)) {
+        if (poolInfo.score === 0) {
+          suggestions.push("擴充策略池，至少提供 20 組以上參數組合。");
+        } else if (poolInfo.score < 1) {
+          suggestions.push("建議擴充策略池至 100 組以上，提升比較可信度。");
+        }
+      }
+      if (Number.isFinite(metrics.RPBO) && metrics.RPBO < 0.6) {
+        suggestions.push("PBO 偏高，請增加 CSCV 區塊或調整策略以降低過擬合風險。");
+      }
+      if (Number.isFinite(metrics.RSPA) && metrics.RSPA < 0.3) {
+        suggestions.push("Top-N 策略通過 SPA 的比例偏低，建議檢查策略穩健度或延長資料期間。");
+      }
+      if (Number.isFinite(metrics.RMCS) && metrics.RMCS < 0.3) {
+        suggestions.push("MCS 存活比例偏低，可檢查策略組合是否過於集中。");
+      }
+    }
+    return suggestions;
   }
 
   function computeSPAScore(prepared, config) {
@@ -923,6 +1123,10 @@
 
   function buildStrategyEvaluations(preparedAll, preparedValid, flowMetrics, config) {
     const flowScore = flowMetrics.RFlow;
+    const flowScoreRaw = Number.isFinite(flowMetrics.flowScore) ? flowMetrics.flowScore : null;
+    const allowRanking = flowMetrics.allowStrategyRanking !== false;
+    const flowVerdictStatus = flowMetrics.flowVerdictStatus || "unknown";
+    const flowVerdictLabel = flowMetrics.flowVerdict || "Flow 指標資料不足";
     preparedValid.forEach((item) => {
       const components = [
         { value: item.dsrpsrScore, weight: config.weights.strategy.dsrpsr },
@@ -937,11 +1141,15 @@
         { value: strategyScore, weight: config.weights.ofi.strategy },
       ];
       const ofi = weightedAverage(finalComponents);
-      item.finalOFI = Number.isFinite(ofi) ? ofi * 100 : null;
+      const computedOFI = Number.isFinite(ofi) ? ofi * 100 : null;
+      item.finalOFI = allowRanking ? computedOFI : null;
       item.components = {
         flow: flowScore,
+        flowScoreRaw,
         strategy: strategyScore,
         RPBO: item.RPBO,
+        RLen: item.RLen,
+        RPool: item.RPool,
         RSPA: item.RSPA,
         RMCS: item.RMCS,
         ROOS: item.oosScore,
@@ -949,13 +1157,30 @@
         RDSRPSR: item.dsrpsrScore,
         RIsland: item.islandScore,
       };
-      item.verdict = deriveVerdict(item.finalOFI);
+      if (!allowRanking) {
+        item.verdict = "🔒 暫停策略比較";
+      } else {
+        const baseVerdict = deriveVerdict(item.finalOFI);
+        if (flowVerdictStatus === "caution" && baseVerdict !== "資料不足") {
+          item.verdict = `${baseVerdict}｜Flow 邊界`;
+        } else {
+          item.verdict = baseVerdict;
+        }
+      }
+      item.metaFlowVerdict = flowVerdictLabel;
     });
 
     return preparedAll.map((item) => {
       const validItem = preparedValid.find((v) => v.index === item.index);
       if (!validItem) {
-        return buildEmptyStrategyResult(item.index);
+        const empty = buildEmptyStrategyResult(item.index);
+        if (!allowRanking) {
+          empty.verdict = "🔒 暫停策略比較";
+          empty.components.flow = flowScore;
+          empty.components.flowScoreRaw = flowScoreRaw;
+          empty.meta.flowVerdict = flowVerdictLabel;
+        }
+        return empty;
       }
       return {
         index: validItem.index,
@@ -965,6 +1190,7 @@
         meta: {
           version: MODULE_VERSION,
           island: validItem.islandMeta || null,
+          flowVerdict: flowVerdictLabel,
         },
       };
     });

@@ -1,6 +1,6 @@
-# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250924B）
+# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250926A）
 
-> 適用模組：`LB-OFI-METRICS-20250923A`
+> 適用模組：`LB-OFI-LAYERED-20250926A`
 
 本文件將批量優化流程中每一個 OFI 構面、子分數與實作細節完整展開，並與原始規格比對差異與影響，方便前後端工程師與產品夥伴追蹤。
 
@@ -23,21 +23,34 @@
 3. `PBO = Pr(\lambda < 0)`，最終轉成 `R^{PBO} = 1 - PBO`。
 
 **差異 & 影響**
-- 實作額外對 `q` 做邊界夾住（clamp），避免排名落在 0 或 1 時出現無限大的 `\lambda`。【F:js/overfit-score.js†L313-L345】
+- 實作額外對 `q` 做邊界夾住（clamp），避免排名落在 0 或 1 時出現無限大的 `\lambda`。【F:js/overfit-score.js†L308-L352】
 - 若 OOS 聚合值不足則跳過該切分，降低極端樣本污染結果。
 - 與原規格邏輯一致，僅增加數值穩定性。
 
-### 1.2 SPA 與 MCS
+### 1.2 樣本長度充足度 `R^{Len}`
 
-- **SPA**：蒐集 `spaPValue` 等欄位，統計小於 `\alpha`（預設 0.1）的策略占比作為 `R^{SPA}`。【F:js/overfit-score.js†L421-L435】
-- **MCS**：根據 `mcsSurvivor/mcsInclusion/mcsRank` 等旗標，計算存活策略比率作為 `R^{MCS}`。【F:js/overfit-score.js†L437-L463】
+- 取得所有有效策略的日報酬筆數中位數，作為樣本長度 `T`。【F:js/overfit-score.js†L354-L402】
+- 依 `T` 位置給分：`T < 250 → 0`、`250 ≤ T < 500 → 0.5`、`T ≥ 500 → 1`，對應 block bootstrap 是否可行。【F:js/overfit-score.js†L354-L402】
+- 同步輸出建議的 block 長度 `T^{1/3}` 與文字標籤（不足／偏弱／充足），供 UI 提醒樣本是否達標。【F:js/overfit-score.js†L354-L402】
+
+### 1.3 策略池廣度 `R^{Pool}`
+
+- 以有效策略數 `K` 為基準：`K < 20 → 0`、`20 ≤ K < 100 → 0.7`、`K ≥ 100 → 1`，評估策略池是否足夠廣泛。【F:js/overfit-score.js†L404-L426】
+- 標記策略池狀態（過小／合理／充足），讓前端可直接在 Flow 卡片顯示建議。【F:js/overfit-score.js†L404-L426】
+
+### 1.4 SPA 與 MCS
+
+- **SPA**：蒐集 `spaPValue` 等欄位，統計小於 `\alpha`（預設 0.1）的策略占比作為 `R^{SPA}`。【F:js/overfit-score.js†L428-L442】
+- **MCS**：根據 `mcsSurvivor/mcsInclusion/mcsRank` 等旗標，計算存活策略比率作為 `R^{MCS}`。【F:js/overfit-score.js†L444-L470】
 
 **差異 & 影響**
-- 若伺服端尚未回填對應欄位，分數會為 `null`，後續加權時自動重新正規化有效權重，避免因缺資料導致總分崩潰。【F:js/overfit-score.js†L404-L419】
+- 若伺服端尚未回填對應欄位，分數會為 `null`，後續加權時自動重新正規化有效權重，避免因缺資料導致總分崩潰。【F:js/overfit-score.js†L310-L350】【F:js/overfit-score.js†L404-L476】
 
-### 1.3 Flow 綜合分數
+### 1.5 FlowScore（總分與門檻）
 
-- `R^{Flow} = 0.6 R^{PBO} + 0.2 R^{SPA} + 0.2 R^{MCS}`，缺值會重新正規化權重。【F:js/overfit-score.js†L404-L419】【F:js/overfit-score.js†L986-L1019】
+- `R^{Flow} = 0.40 R^{PBO} + 0.20 R^{Len} + 0.15 R^{Pool} + 0.15 R^{SPA} + 0.10 R^{MCS}`。【F:js/overfit-score.js†L308-L352】【F:js/overfit-score.js†L428-L476】
+- `FlowScore = 100 · R^{Flow}`，同時輸出文字判定：`≥70` 合格、`50–69` 邊界、`<50` 不合格。【F:js/overfit-score.js†L308-L352】【F:js/overfit-score.js†L308-L352】
+- FlowScore 不合格時會標記 `allowStrategyRanking = false`，UI 直接鎖定策略排序並顯示改善建議（延長樣本、擴充策略池等）。【F:js/overfit-score.js†L308-L352】【F:js/overfit-score.js†L354-L402】【F:js/overfit-score.js†L404-L476】【F:js/batch-optimization.js†L1685-L1905】
 
 ---
 
@@ -98,7 +111,8 @@
 
 ## 4. UI 與輸出欄位
 
-- `computeOFIForResults` 會回傳 `flow` 物件（含 `PBO/q/λ` 分布）與每個策略的 `components`，UI 以 tooltip 呈現所有子分數。【F:js/batch-optimization.js†L1991-L2011】
+- `computeOFIForResults` 會回傳 `flow` 物件（含 `PBO/q/λ` 分布）與每個策略的 `components`，UI 以 tooltip 呈現所有子分數。【F:js/batch-optimization.js†L1865-L2050】
+- FlowScore 透過 `renderOfiFlowBanner` 呈現於結果卡片上，會顯示樣本長度／策略池狀態與改善建議，並在 FlowScore < 50 時鎖定排序按鈕與結果列。【F:js/batch-optimization.js†L1685-L1905】【F:js/batch-optimization.js†L2298-L2364】
 - IslandScore `meta` 包含原始/正規化數值，可直接渲染至診斷視窗。【F:js/overfit-score.js†L618-L642】
 
 ---
@@ -115,19 +129,22 @@
 | 加權 | 權重會依有效子分數重新正規化 | 避免任何一項缺資料時整體評分消失。【F:js/overfit-score.js†L986-L1019】 |
 
 ---
-## 6. 指標公式總表（LB-OFI-TABLE-20250924A）
+## 6. 指標公式總表（LB-OFI-TABLE-20250926A）
 
 下表彙整 OFI 所有構面、計算公式與權重，可搭配 [下載用 CSV](../assets/ofi-metrics-parameters.csv) 交叉檢查設定；批量優化頁面亦提供「查看 OFI 指標表」按鈕，會直接載入此資料並可一鍵下載。
 
 | 層級 | 構面 / 指標 | 計算公式 | 正規化 / 門檻 | 權重 / 參數 | 備註 |
 | --- | --- | --- | --- | --- | --- |
 | 前置 | CSCV 分段 | 將每日報酬切成 `S` 段，`S=desiredSegments=10`，`|I_t|=|O_t|=S/2` | 每段至少 `minPointsPerSegment=5` 筆樣本，無法均分時前段補一筆 | 聚合子 `agg=median`（可改 `mean`） | 參考 `DEFAULT_CONFIG.desiredSegments` 與 `aggregator` 設定。【F:js/overfit-score.js†L9-L29】【F:js/overfit-score.js†L248-L288】 |
-| Flow | OOS 分位 `q_t` | `q_t = \frac{\operatorname{rank}(A_{k^*}(O_t))}{K+1}` | 夾住於 `[1/(K+1+ε), 1-1/(K+1+ε)]`，`ε=1e-6` | 依有效 OOS 樣本計算排名 | 避免極端值導致 `\lambda` 無限大。【F:js/overfit-score.js†L313-L345】 |
-| Flow | `\lambda_t` | `\lambda_t = \log\frac{q_t}{1-q_t}` | 與 `q_t` 同 | 無額外權重 | 用於判斷 PBO。【F:js/overfit-score.js†L313-L345】 |
-| Flow | `R^{PBO}` | `R^{PBO} = 1 - \frac{1}{T}\sum 1_{\lambda_t < 0}` | 無需再正規化（結果落在 [0,1]） | `T = validSplits` | 失敗切分自動忽略。【F:js/overfit-score.js†L313-L366】 |
-| Flow | `R^{SPA}` | `R^{SPA} = \frac{1}{K}\sum 1_{p^{SPA}_k < \alpha}` | `\alpha = spaAlpha = 0.1` | 權重 `β_2 = 0.2` | 待伺服端回填資料時計算。【F:js/overfit-score.js†L404-L435】 |
-| Flow | `R^{MCS}` | `R^{MCS} = \frac{|\mathcal{S}_{MCS}|}{K}` | 不需額外正規化 | 權重 `β_3 = 0.2` | 需伺服端提供 MCS 結果。【F:js/overfit-score.js†L404-L463】 |
-| Flow | `R^{Flow}` | `R^{Flow} = 0.6 R^{PBO} + 0.2 R^{SPA} + 0.2 R^{MCS}` | 缺值時動態重算有效權重 | `β = (0.6, 0.2, 0.2)` | Flow 分數共用於所有策略。【F:js/overfit-score.js†L404-L419】【F:js/overfit-score.js†L986-L1019】 |
+| Flow | OOS 分位 `q_t` | `q_t = rac{\operatorname{rank}(A_{k^*}(O_t))}{K+1}` | 夾住於 `[1/(K+1+ε), 1-1/(K+1+ε)]``ε=1e-6` | 依有效 OOS 样本計算排名 | 避免極端值導致 `\lambda` 無限大。【F:js/overfit-score.js†L308-L352】 |
+| Flow | `\lambda_t` | `\lambda_t = \lograc{q_t}{1-q_t}` | 與 `q_t` 同 | - | 用於判斷 PBO。【F:js/overfit-score.js†L308-L352】 |
+| Flow | `R^{PBO}` | `R^{PBO} = 1 - rac{1}{T}\sum 1_{\lambda_t < 0}` | 結果落在 [0,1] | `T = validSplits` | 失敗切分自動忽略。【F:js/overfit-score.js†L308-L352】 |
+| Flow | `R^{Len}` | `R^{Len} = 0 (T<250); 0.5 (250≤T<500); 1 (T≥500)` | `T` 為有效策略日報酬筆數中位數 | 權重 `β_2 = 0.20` | UI 會顯示樣本狀態與建議 block 長度。【F:js/overfit-score.js†L354-L402】 |
+| Flow | `R^{Pool}` | `R^{Pool} = 0 (K<20); 0.7 (20≤K<100); 1 (K≥100)` | `K` 為有效策略數量 | 權重 `β_3 = 0.15` | 判斷策略池是否足夠廣泛。【F:js/overfit-score.js†L404-L426】 |
+| Flow | `R^{SPA}` | `R^{SPA} = rac{1}{K}\sum 1_{p^{SPA}_k < lpha}` | `lpha = spaAlpha = 0.1` | 權重 `β_4 = 0.15` | 待伺服端回填資料時計算。【F:js/overfit-score.js†L428-L442】 |
+| Flow | `R^{MCS}` | `R^{MCS} = rac{|\mathcal{S}_{MCS}|}{K}` | 不需額外正規化 | 權重 `β_5 = 0.10` | 需伺服端提供 MCS 結果。【F:js/overfit-score.js†L444-L470】 |
+| Flow | `R^{Flow}` | `0.40 R^{PBO} + 0.20 R^{Len} + 0.15 R^{Pool} + 0.15 R^{SPA} + 0.10 R^{MCS}` | 缺值時動態重算有效權重 | `β = (0.40, 0.20, 0.15, 0.15, 0.10)` | Flow 分數共用於所有策略。【F:js/overfit-score.js†L308-L352】【F:js/overfit-score.js†L428-L476】 |
+| Flow | FlowScore | `100 · R^{Flow}` | - | FlowScore 0–100 | `≥70` 合格、`50–69` 邊界、`<50` 不合格；不合格時暫停策略排序。【F:js/overfit-score.js†L308-L352】【F:js/batch-optimization.js†L1685-L1905】 |
 | Strategy | `\tilde m_k` | OOS 中位數 | P10/P90 分位夾住至 [0,1] | - | 核心穩健度指標。【F:js/overfit-score.js†L465-L517】 |
 | Strategy | `\text{IQR}_k` | OOS IQR | P10/P90 分位夾住至 [0,1] | - | 缺值視為 1，代表最差穩健度。【F:js/overfit-score.js†L505-L521】 |
 | Strategy | `R^{OOS}_k` | `0.6 · \text{mid\_norm}_k + 0.4 · (1 - \text{iqr\_norm}_k)` | `mid\_norm`、`iqr\_norm` 均限制在 [0,1] | `α = oosAlpha = 0.6` | 提醒樣本不足時偏保守。【F:js/overfit-score.js†L505-L523】 |
