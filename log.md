@@ -1,3 +1,11 @@
+## 2025-11-13 — Patch LB-OFI-RATING-20251113A
+- **Scope**: 批量優化結果導入 OFI（Overfit Indicator）診斷。
+- **Implementation**:
+  - 新增 `overfit-score.js` 定義 Flow（PBO/SPA/MCS）、策略穩健性（CSCV、Walk-forward、Island、DSR/PSR）與最終 OFI 加權計算，提供 `lazybacktestOfi.evaluateBatchResult` 介面。
+  - 批量優化表格新增 OFI 欄位與排序選項，並在渲染時套用 OFI 評分與 Verdict 標籤。
+  - 將 OFI 模組註冊於頁面腳本順序中，確保 `batch-optimization.js` 可取得評分函式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/overfit-score.js','js/batch-optimization.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
