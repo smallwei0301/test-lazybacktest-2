@@ -1854,15 +1854,26 @@
                                             <div id="batch-optimization-results" class="hidden">
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
-                                                        <div class="flex items-center justify-between">
-                                                            <h4 class="card-title text-lg font-semibold">優化結果</h4>
-                                                            <div class="flex items-center gap-2">
+                                                        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                                            <div class="flex flex-col">
+                                                                <h4 class="card-title text-lg font-semibold">優化結果</h4>
+                                                                <span id="ofi-version-label" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">OFI 指標載入中…</span>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-2 justify-end">
+                                                                <button id="batch-ofi-sort" class="px-3 py-1 text-xs font-medium rounded border border-border text-foreground hover:bg-accent/20" style="border-color: var(--border); color: var(--foreground);">策略穩健度排序</button>
+                                                                <button id="batch-filter-spa" class="px-3 py-1 text-xs font-medium rounded border border-border text-foreground hover:bg-accent/20" style="border-color: var(--border); color: var(--foreground);">只看通過 SPA/MCS</button>
                                                                 <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
                                                                 <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                                                     <option value="annualizedReturn">年化報酬率</option>
                                                                     <option value="sharpeRatio">夏普比率</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
                                                                     <option value="tradeCount">交易次數</option>
+                                                                    <option value="ofiScore">穩健度 (OFI)</option>
+                                                                    <option value="ofiCPBO">cPBO 逆分數</option>
+                                                                    <option value="ofiMedianOOS">OOS 中位</option>
+                                                                    <option value="ofiIQR">OOS IQR</option>
+                                                                    <option value="ofiIsland">Island Score</option>
+                                                                    <option value="ofiDSR">DSR</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
                                                                     <i data-lucide="arrow-down" class="lucide"></i>
@@ -1879,6 +1890,7 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">買入策略</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">過擬合風險 (OFI)</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
