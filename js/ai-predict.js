@@ -1,7 +1,7 @@
 /* global tf, lastOverallResult, cachedStockData, trendAnalysisState, Chart */
-// --- AI 預測模組 - 版本碼 LB-AI-PREDICT-20250923A ---
+// --- AI 預測模組 - 版本碼 LB-AI-PREDICT-20250927A ---
 (function initAIPredictor() {
-    const VERSION_CODE = 'LB-AI-PREDICT-20250923A';
+    const VERSION_CODE = 'LB-AI-PREDICT-20250927A';
     const WINDOW_SIZE = 20;
     const EPOCHS = 40;
     const BATCH_SIZE = 32;
@@ -37,6 +37,7 @@
         currentMode: CAPITAL_MODES.KELLY,
         trades: [],
         equityChart: null,
+        hasExecuted: false,
         elements: {
             runBtn: null,
             status: null,
@@ -47,6 +48,8 @@
                 trainWinRate: null,
                 testAccuracy: null,
                 testWinRate: null,
+                trainSamples: null,
+                testSamples: null,
                 kellyFraction: null,
                 averageProfit: null,
                 totalReturn: null,
@@ -129,6 +132,7 @@
         state.kellyFraction = 0;
         state.initialCapital = 0;
         state.currentMode = CAPITAL_MODES.KELLY;
+        state.hasExecuted = false;
         if (state.elements.capitalMode) {
             state.elements.capitalMode.value = CAPITAL_MODES.KELLY;
         }
@@ -412,8 +416,12 @@
         };
     }
 
-    function renderTrades(trades) {
+    function renderTrades(trades, options = {}) {
+        const { executed = false } = options;
         if (!state.elements.tradesBody) return;
+        if (!executed) {
+            return;
+        }
         if (!Array.isArray(trades) || trades.length === 0) {
             state.elements.tradesBody.innerHTML = `
                 <tr>
@@ -601,11 +609,17 @@
         state.currentMode = selectedMode;
         const simulation = state.simulations[selectedMode];
         if (!simulation) {
-            renderTrades([]);
-            setMetric('averageProfit', '-');
-            setMetric('totalReturn', '-');
-            setMetric('tradeCount', '0');
-            setMetric('kellyFraction', selectedMode === CAPITAL_MODES.KELLY ? formatPercent(state.kellyFraction) : '不適用');
+            if (state.hasExecuted) {
+                state.trades = [];
+                renderTrades([], { executed: true });
+                setMetric('averageProfit', '-');
+                setMetric('totalReturn', '-');
+                setMetric('tradeCount', '0');
+                setMetric('kellyFraction', selectedMode === CAPITAL_MODES.KELLY ? formatPercent(state.kellyFraction) : '不適用');
+            } else {
+                renderTrades(null, { executed: false });
+            }
+            renderEquityChart(state.equityCurves, selectedMode);
             return;
         }
         setMetric('averageProfit', simulation.results.length > 0 ? formatCurrency(simulation.averageProfit) : '-');
@@ -617,7 +631,7 @@
             setMetric('kellyFraction', '不適用');
         }
         state.trades = simulation.results;
-        renderTrades(simulation.results);
+        renderTrades(simulation.results, { executed: true });
         renderEquityChart(state.equityCurves, selectedMode);
     }
 
@@ -687,6 +701,10 @@
             if (!split) {
                 throw new Error('可用樣本不足以切分訓練／測試集，請放寬回測期間。');
             }
+            const trainSamplesCount = split.train.sequences.length;
+            const testSamplesCount = split.test.sequences.length;
+            setMetric('trainSamples', trainSamplesCount.toString());
+            setMetric('testSamples', testSamplesCount.toString());
             const normalized = normalizeSequences(split.train.sequences, split.test.sequences);
             const xTrain = sequencesToTensor(normalized.train);
             const yTrain = labelsToTensor(split.train.labels);
@@ -756,11 +774,12 @@
                 [CAPITAL_MODES.FIXED]: fixedSimulation,
             };
             state.equityCurves = buildEquityCurves(split.test.meta, initialCapital, state.simulations);
+            state.hasExecuted = true;
 
             setMetric('trainAccuracy', formatPercent(trainAccuracy));
-            setMetric('trainWinRate', formatPercent(trainTrades.winRate));
+            setMetric('trainWinRate', trainTrades.executed > 0 ? formatPercent(trainTrades.winRate) : '-');
             setMetric('testAccuracy', formatPercent(testAccuracy));
-            setMetric('testWinRate', formatPercent(testTrades.winRate));
+            setMetric('testWinRate', testTrades.executed > 0 ? formatPercent(testTrades.winRate) : '-');
 
             const selectedMode = state.elements.capitalMode?.value === CAPITAL_MODES.FIXED
                 ? CAPITAL_MODES.FIXED
@@ -769,9 +788,9 @@
             applySimulationMode(selectedMode);
 
             if (!state.tradeCandidates.length) {
-                setStatus('模型於測試集未找到符合條件且能成交的做多機會。', 'warning');
+                setStatus(`模型於測試集未找到符合條件且能成交的做多機會（訓練樣本 ${trainSamplesCount}，測試樣本 ${testSamplesCount}）。`, 'warning');
             } else {
-                const summary = `AI 預測完成，測試集共成交 ${state.tradeCandidates.length} 筆交易，凱利建議投入 ${formatPercent(state.kellyFraction)}。`;
+                const summary = `AI 預測完成，訓練樣本 ${trainSamplesCount}、測試樣本 ${testSamplesCount}，測試集共成交 ${state.tradeCandidates.length} 筆交易，凱利建議投入 ${formatPercent(state.kellyFraction)}。`;
                 setStatus(summary, 'success');
             }
         } catch (error) {
@@ -792,6 +811,8 @@
         state.elements.metrics.trainWinRate = getElement('aiTrainWinRate');
         state.elements.metrics.testAccuracy = getElement('aiTestAccuracy');
         state.elements.metrics.testWinRate = getElement('aiTestWinRate');
+        state.elements.metrics.trainSamples = getElement('aiTrainSamples');
+        state.elements.metrics.testSamples = getElement('aiTestSamples');
         state.elements.metrics.kellyFraction = getElement('aiKellyFraction');
         state.elements.metrics.averageProfit = getElement('aiAverageProfit');
         state.elements.metrics.totalReturn = getElement('aiTotalReturn');

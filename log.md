@@ -770,6 +770,12 @@
 - **Diagnostics**: 確認未執行回測時會顯示提示、資料不足時提示補抓，並於測試集觸發交易後更新指標卡與交易表。
 - **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
 
+## 2025-12-14 — Patch LB-AI-PREDICT-20250927A
+- **Fix**: `js/ai-predict.js` 升級至版本碼 `LB-AI-PREDICT-20250927A`，新增測試流程旗標避免尚未執行時誤顯示「測試集無交易」訊息，並於測試樣本充足但未成交時輸出明確提醒。
+- **Analytics**: 訓練完成後揭露訓練／測試樣本數、僅以測試資料計算勝率與凱利配置，並將狀態列提示同步帶出樣本統計強化測試集驗證概念。
+- **UI**: `index.html` 新增訓練／測試樣本數指標卡，將交易卡片標題改為「測試集成交筆數」，確保所有績效與訊息皆對應測試資料。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
 ## 2025-12-13 — Patch LB-AI-PREDICT-20250923A
 - **Issue recap**: 先前 LSTM 模組仍以「隔日+2 元」判斷買點，忽略實際漲跌方向，且未檢查隔日高低點導致測試投入金額為 0；同時欠缺凱利／非凱利資金配置切換與買入持有曲線對照。
 - **Fix**: 更新 `js/ai-predict.js` 為版本碼 `LB-AI-PREDICT-20250923A`，改用隔日收盤是否高於今日收盤的二元分類，新增隔日高低點觸價檢查、凱利與全額投入雙模模擬、資金曲線圖與 CSV 欄位調整；`index.html` 新增資金模式選單、策略曲線卡片與操作說明修正。
