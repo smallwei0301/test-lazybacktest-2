@@ -1,3 +1,15 @@
+## 2025-07-09 — Patch LB-OVERFIT-SCORING-20250709A
+- **Scope**: 強化礁島穩健度評分、過擬合摘要與演算法說明，回應島嶼分數長期為 0 與缺乏差異說明的問題。
+- **Adjustments**:
+  - 更新 Island Score 權重與組成，改以面積、穩定度、平滑度與低 PBO 的加權平均計算，並補充 IQR、鄰近中位數等統計資料。
+  - 批量優化摘要新增島嶼統計、參數軸資訊，個別策略診斷也揭露平滑度、低 PBO 分數與 IQR。
+  - 在批量優化分頁加入完整演算法流程與與原論文差異說明的卡片，協助使用者理解本站實作。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/dsr.js','js/islands.js','js/overfit-score.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-07-05 — Patch LB-OVERFIT-SCORING-20250705A
+- **Scope**: 新增 CSCV PBO、Deflated Sharpe Ratio、礁島穩健度與綜合過擬合評分模組，於批量優化結果表與專用面板揭露分數、PBO 風險等指標，支援動態調整區塊數與策略排名。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/dsr.js','js/islands.js','js/overfit-score.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
