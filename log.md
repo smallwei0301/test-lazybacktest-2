@@ -1,3 +1,11 @@
+## 2025-09-15 — Patch LB-AI-LSTM-20250915A
+- **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
+- **Features**:
+  - 建立 `ai-prediction` 分頁，提供 lookback、epochs、批次大小、學習率與凱利公式開關等設定，並顯示訓練／測試勝率、交易摘要與文獻參考。
+  - 引入 TensorFlow.js LSTM 模型，以 2:1 訓練／測試切分計算隔日收盤漲跌方向，並根據可視資料計算日報酬、Kelly 比率與平均盈虧比。
+  - 擴充 `backtest.js` 將 `visibleStockData` 更新事件透過 `lazybacktestAIBridge` 廣播，供 AI 模組取得資料與同步資料摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

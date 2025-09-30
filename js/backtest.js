@@ -52,6 +52,43 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+const ensureAIBridge = () => {
+    if (typeof window === 'undefined') return null;
+    if (!window.lazybacktestAIBridge || typeof window.lazybacktestAIBridge !== 'object') {
+        window.lazybacktestAIBridge = {};
+    }
+    return window.lazybacktestAIBridge;
+};
+
+function setVisibleStockData(data) {
+    visibleStockData = Array.isArray(data) ? data : [];
+    const bridge = ensureAIBridge();
+    if (bridge) {
+        bridge.getVisibleStockData = () => (Array.isArray(visibleStockData) ? [...visibleStockData] : []);
+        if (typeof bridge.handleVisibleDataUpdate === 'function') {
+            try {
+                bridge.handleVisibleDataUpdate(visibleStockData);
+            } catch (error) {
+                console.warn('[AI Bridge] handleVisibleDataUpdate failed:', error);
+            }
+        }
+    }
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+            window.dispatchEvent(
+                new CustomEvent('lazybacktest:visible-data-changed', {
+                    detail: { length: Array.isArray(visibleStockData) ? visibleStockData.length : 0 },
+                })
+            );
+        } catch (error) {
+            console.warn('[AI Bridge] dispatch visible-data-changed failed:', error);
+        }
+    }
+    return visibleStockData;
+}
+
+setVisibleStockData(visibleStockData);
+
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
     const text = typeof value === 'string' ? value : String(value);
@@ -4647,7 +4684,7 @@ function runBacktestInternal() {
             );
             cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
-            visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
+            setVisibleStockData(extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate));
             cachedStockData = cachedEntry.data;
             lastFetchSettings = { ...curSettings };
             refreshPriceInspectorControls();
@@ -4800,8 +4837,8 @@ function runBacktestInternal() {
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                      }, cacheEntry.data);
-                     visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
-                     cachedStockData = mergedData;
+                    setVisibleStockData(extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate));
+                    cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
@@ -4890,7 +4927,7 @@ function runBacktestInternal() {
                         priceMode,
                         splitAdjustment: params.splitAdjustment,
                     }, updatedEntry.data);
-                    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+                    setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
                     cachedStockData = updatedEntry.data;
                     lastFetchSettings = { ...curSettings };
                     refreshPriceInspectorControls();
@@ -5073,7 +5110,7 @@ function clearPreviousResults() {
         const suggestionArea = document.getElementById('today-suggestion-area');
         if (suggestionArea) suggestionArea.classList.add('hidden');
     }
-    visibleStockData = [];
+    setVisibleStockData([]);
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
@@ -7607,7 +7644,7 @@ function runOptimizationInternal(optimizeType) {
                 if(!useCache&&data?.rawDataUsed){
                     cachedStockData=data.rawDataUsed;
                     if (Array.isArray(data.rawDataUsed)) {
-                        visibleStockData = data.rawDataUsed;
+                        setVisibleStockData(data.rawDataUsed);
                     }
                     lastFetchSettings={ ...curSettings };
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
@@ -8118,7 +8155,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         acknowledgeExcessGap: false,
     });
     cachedDataStore.set(cacheKey, updatedEntry);
-    visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
+    setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
     cachedStockData = updatedEntry.data;
     lastFetchSettings = { ...curSettings };
     refreshPriceInspectorControls();
