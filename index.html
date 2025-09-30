@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ai-forecast"
+                                            >
+                                                <i data-lucide="brain-circuit" class="lucide-sm inline mr-1"></i>AI 預測
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2057,6 +2064,97 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden" id="ai-forecast-tab">
+                                <div class="space-y-6">
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">AI 預測與資金配置指南</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                本模組採用長短期記憶（LSTM）網路建模，結合近期學術研究對金融時間序列的建議，
+                                                以預測隔日收盤價是否相對今日上漲至少 2 元並配合凱利公式決定投入部位。
+                                                模型流程參考 Fischer &amp; Krauss (2018)、Nelson 等人 (2017) 對 LSTM 預測流程的實務配置，
+                                                並以 MacLean 等人 (2011) 的凱利資金管理檢核勝率與賠率。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card" id="ai-forecast-config-card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">建模參數</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">
+                                                請先在左側執行一次回測以載入完整價格序列，本工具會沿用相同區間資料。
+                                                訓練集與測試集將以 2:1 切分，並固定僅在模型判斷隔日漲幅達 2 元以上時進場。
+                                            </p>
+                                        </div>
+                                        <div class="card-content space-y-4">
+                                            <div class="grid gap-4 md:grid-cols-3">
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    起始資金（元）
+                                                    <input id="ai-forecast-capital" type="number" min="10000" step="1000" value="100000"
+                                                        class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">Kelly 比例將以此金額為基礎滾動計算倉位。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    LSTM 觀察天數
+                                                    <input id="ai-forecast-lookback" type="number" min="10" max="90" step="1" value="30"
+                                                        class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">使用近 N 日的報酬率序列餵入 LSTM。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    最小漲幅門檻（元）
+                                                    <input id="ai-forecast-threshold" type="number" min="0.5" max="10" step="0.1" value="2"
+                                                        class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">僅預測隔日漲幅達此門檻時才會建議買入。</span>
+                                                </label>
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-3">
+                                                <button id="ai-forecast-run" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2"
+                                                    style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 55%, var(--primary)));">
+                                                    <i data-lucide="cpu" class="lucide w-4 h-4"></i>
+                                                    訓練並回測 AI 策略
+                                                </button>
+                                                <span id="ai-forecast-status" class="text-xs" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card hidden" id="ai-forecast-result-card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">AI 策略成果摘要</h3>
+                                            <p class="text-xs" id="ai-forecast-summary" style="color: var(--muted-foreground);"></p>
+                                        </div>
+                                        <div class="card-content space-y-6">
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="ai-forecast-metrics"></div>
+                                            <div class="border rounded-lg p-4" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                                <h4 class="text-sm font-semibold mb-3" style="color: var(--foreground);">交易模擬（僅在預測上漲時進場）</h4>
+                                                <div class="space-y-3 text-xs" style="color: var(--muted-foreground);">
+                                                    <div class="flex flex-wrap gap-3" id="ai-forecast-trade-summary"></div>
+                                                    <div class="overflow-x-auto">
+                                                        <table class="min-w-full divide-y divide-border text-[11px]" style="border-color: var(--border);">
+                                                            <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                                <tr>
+                                                                    <th class="px-2 py-1 text-left font-semibold">買入日</th>
+                                                                    <th class="px-2 py-1 text-left font-semibold">賣出日</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">買入價</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">賣出價</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">預測勝率</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">單筆報酬率</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody id="ai-forecast-trades" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                <p>模型輸出僅供教育用途，實際下單時仍需考量流動性、手續費與風險承受度。
+                                                    凱利公式建議的資金比例已限制於 0~100%，若分母不足以估計賠率時會採用保守折扣避免過度槓桿。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2120,12 +2218,14 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0/dist/tf.min.js"></script>
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
+    <script src="js/ai-forecast.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>

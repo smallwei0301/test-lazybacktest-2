@@ -764,3 +764,9 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-08 — Patch LB-AI-FORECAST-20250915A
+- **Feature**: 新增「AI 預測」頁籤，導入 TensorFlow.js LSTM 模型依 2:1 訓練/測試比例預測隔日是否上漲至少 2 元，並以凱利公式估算動態持倉比例。
+- **Feature**: 在測試期模擬僅於預測上漲時進場，以今日收盤買入、隔日收盤賣出計算累積報酬，提供勝率、精確率、平均報酬與最終資金摘要。
+- **UX**: 新增相關學術引用說明、參數設定表單與交易明細表，並自動帶入回測初始資金作為凱利評估基準。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('ai-forecast.js ok');NODE`
+
