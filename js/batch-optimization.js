@@ -43,11 +43,18 @@ function getWorkerStrategyName(batchStrategyName) {
 }
 
 // 全局變量
+const BATCH_OVERFIT_VERSION = 'LB-OVERFIT-SCORE-20251120B';
 let batchOptimizationWorker = null;
 let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+
+let lastOverfitEvaluation = {
+    version: null,
+    resultCount: 0,
+    timestamp: 0,
+};
 
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
@@ -180,8 +187,14 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            blockCount: 10,
         };
+
+        const blockInput = document.getElementById('batch-block-count');
+        if (blockInput && !blockInput.value) {
+            blockInput.value = String(batchOptimizationConfig.blockCount);
+        }
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
         try {
@@ -329,7 +342,25 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const blockCountInput = document.getElementById('batch-block-count');
+        if (blockCountInput) {
+            blockCountInput.addEventListener('change', () => {
+                let requested = parseInt(blockCountInput.value, 10);
+                if (!Number.isFinite(requested)) {
+                    requested = batchOptimizationConfig.blockCount || 10;
+                }
+                if (requested < 2) requested = 2;
+                if (requested % 2 !== 0) requested += 1;
+                if (requested > 24) requested = 24;
+                blockCountInput.value = String(requested);
+                batchOptimizationConfig.blockCount = requested;
+                if (batchOptimizationResults.length > 0) {
+                    sortBatchResults();
+                }
+            });
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -389,7 +420,8 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+        batchOptimizationConfig = { ...batchOptimizationConfig, ...config };
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
@@ -485,12 +517,13 @@ function getBatchOptimizationConfig() {
         // 初始化配置，設定預設值
         const config = {
             batchSize: 100,        // 預設批次大小
-            maxCombinations: 10000, // 預設最大組合數  
+            maxCombinations: 10000, // 預設最大組合數
             parameterTrials: 100,   // 預設參數優化次數
             targetMetric: 'annualizedReturn', // 預設優化目標指標
             concurrency: 4,         // 預設併發數
             iterationLimit: 6,      // 預設迭代上限
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'], // 顯示所有指標
+            blockCount: batchOptimizationConfig.blockCount || 10,
         };
         
         // 獲取參數優化次數
@@ -509,6 +542,19 @@ function getBatchOptimizationConfig() {
         const concurrencyElement = document.getElementById('batch-optimize-concurrency');
         if (concurrencyElement && concurrencyElement.value) {
             config.concurrency = parseInt(concurrencyElement.value) || 4;
+        }
+
+        const blockCountElement = document.getElementById('batch-block-count');
+        if (blockCountElement && blockCountElement.value) {
+            let requested = parseInt(blockCountElement.value, 10);
+            if (!Number.isFinite(requested)) {
+                requested = config.blockCount;
+            }
+            if (requested < 2) requested = 2;
+            if (requested % 2 !== 0) requested += 1;
+            if (requested > 24) requested = 24;
+            config.blockCount = requested;
+            blockCountElement.value = String(requested);
         }
         
         // 獲取迭代上限
@@ -1724,11 +1770,9 @@ function showBatchResults() {
             resultsDiv.classList.remove('hidden');
         }
         
-        // 排序結果
+        // 計算過擬合診斷並排序結果
+        applyOverfitDiagnostics(batchOptimizationResults, { blockCount: batchOptimizationConfig.blockCount });
         sortBatchResults();
-        
-        // 渲染結果表格
-        renderBatchResultsTable();
         
         // 重置運行狀態
         restoreBatchOptimizationUI();
@@ -1740,6 +1784,12 @@ function showBatchResults() {
 
 // 排序結果
 function sortBatchResults() {
+    try {
+        applyOverfitDiagnostics(batchOptimizationResults, { blockCount: batchOptimizationConfig.blockCount });
+    } catch (error) {
+        console.warn('[Batch Optimization] Overfit diagnostics failed during sort:', error);
+    }
+
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
@@ -1805,10 +1855,11 @@ function renderBatchResultsTable() {
         row.className = 'hover:bg-gray-50';
         
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
-        
+        const overfitCellHtml = renderOverfitSummaryCell(result);
+
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
@@ -1864,9 +1915,10 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${overfitCellHtml}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
                         onclick="loadBatchStrategy(${index})">
                     載入
                 </button>
@@ -2602,6 +2654,421 @@ function formatPercentage(value) {
 function formatNumber(value) {
     if (value === null || value === undefined || isNaN(value)) return '-';
     return value.toFixed(2);
+}
+
+function getOverfitBadgeClass(level) {
+    switch (level) {
+        case 'robust':
+            return 'bg-emerald-100 text-emerald-700';
+        case 'good':
+            return 'bg-blue-100 text-blue-700';
+        case 'watch':
+            return 'bg-yellow-100 text-yellow-700';
+        case 'high':
+            return 'bg-red-100 text-red-700';
+        default:
+            return 'bg-gray-200 text-gray-600';
+    }
+}
+
+function renderOverfitSummaryCell(result) {
+    const diagnostics = result?.overfitDiagnostics || null;
+    if (!diagnostics) {
+        return '<span class="text-xs text-gray-400">尚未計算</span>';
+    }
+
+    const overfitScoreValue = diagnostics.overfitScore?.score;
+    if (Number.isFinite(overfitScoreValue)) {
+        const verdict = diagnostics.verdict || {};
+        const icon = verdict.icon || '';
+        const label = verdict.label || '已評估';
+        const badgeClass = getOverfitBadgeClass(verdict.level);
+        const pboText = Number.isFinite(diagnostics.globalPbo)
+            ? `${(diagnostics.globalPbo * 100).toFixed(1)}%`
+            : 'N/A';
+        const dsrValue = diagnostics.dsr && Number.isFinite(diagnostics.dsr.value)
+            ? diagnostics.dsr.value
+            : null;
+        const dsrText = dsrValue !== null
+            ? `${(dsrValue * 100).toFixed(0)}%`
+            : null;
+        const islandText = Number.isFinite(diagnostics.islandScore)
+            ? `${(diagnostics.islandScore * 100).toFixed(0)}%`
+            : '—';
+        const blockCountText = Number.isFinite(diagnostics.blockCount)
+            ? diagnostics.blockCount
+            : (Number.isFinite(diagnostics.blockCountUsed) ? diagnostics.blockCountUsed : null);
+        const fragments = [`PBO ${pboText}`];
+        if (dsrText) {
+            fragments.push(`DSR ${dsrText}`);
+        }
+        fragments.push(`島嶼 ${islandText}`);
+        let detailLine = fragments.join('｜');
+        if (blockCountText) {
+            detailLine += `｜區塊 ${blockCountText}`;
+        }
+        return `
+            <div class="flex flex-col leading-tight">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold" style="color: var(--foreground);">${overfitScoreValue.toFixed(1)}</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${badgeClass}">${icon ? icon + ' ' : ''}${label}</span>
+                </div>
+                <div class="text-[11px] text-gray-500">${detailLine}</div>
+            </div>
+        `;
+    }
+
+    if (Array.isArray(diagnostics.notes) && diagnostics.notes.length > 0) {
+        return `<span class="text-xs text-gray-400">${diagnostics.notes[0]}</span>`;
+    }
+
+    return '<span class="text-xs text-gray-400">等待資料</span>';
+}
+
+function resolveEffectiveBlockCount(totalPoints, requestedCount) {
+    if (!Number.isFinite(totalPoints) || totalPoints < 2) {
+        return 0;
+    }
+    let resolved = Number.isFinite(requestedCount) ? Math.floor(requestedCount) : 10;
+    if (resolved < 2) resolved = 2;
+    if (resolved % 2 !== 0) resolved += 1;
+    if (resolved > totalPoints) {
+        const fallback = Math.max(2, Math.floor(totalPoints / 2) * 2);
+        resolved = fallback;
+    }
+    if (resolved > totalPoints) {
+        resolved = totalPoints % 2 === 0 ? totalPoints : totalPoints - 1;
+    }
+    if (resolved < 2) return 0;
+    return resolved;
+}
+
+function buildBlockSegments(length, blockCount) {
+    const segments = [];
+    if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(blockCount) || blockCount <= 0) {
+        return segments;
+    }
+    const base = Math.floor(length / blockCount);
+    const remainder = length % blockCount;
+    let cursor = 0;
+    for (let i = 0; i < blockCount; i += 1) {
+        const size = base + (i < remainder ? 1 : 0);
+        const start = cursor;
+        const end = size > 0 ? cursor + size - 1 : cursor - 1;
+        segments.push({ start, end, size });
+        cursor += size;
+    }
+    return segments;
+}
+
+function findPreviousFinite(values, index) {
+    if (!Array.isArray(values)) return null;
+    for (let i = index; i >= 0; i -= 1) {
+        const value = Number(values[i]);
+        if (Number.isFinite(value)) {
+            return { index: i, value };
+        }
+    }
+    return null;
+}
+
+function findLastFiniteInRange(values, start, end) {
+    if (!Array.isArray(values)) return null;
+    for (let i = end; i >= start; i -= 1) {
+        const value = Number(values[i]);
+        if (Number.isFinite(value)) {
+            return { index: i, value };
+        }
+    }
+    return null;
+}
+
+function computeBlockDiagnostics(result, requestedBlockCount) {
+    const diagnostics = {
+        blockCount: 0,
+        blockReturns: [],
+        segments: [],
+        blockDates: [],
+        sampleSize: 0,
+        notes: [],
+        valid: false,
+    };
+
+    const returnsSeries = Array.isArray(result?.strategyReturns)
+        ? result.strategyReturns.map((value) => Number(value))
+        : [];
+    const datesSeries = Array.isArray(result?.dates) ? result.dates : [];
+    const dataLength = Math.min(returnsSeries.length, datesSeries.length);
+    diagnostics.sampleSize = dataLength;
+
+    if (dataLength < 2) {
+        diagnostics.notes.push('樣本不足，無法切分 CSCV 區塊');
+        return diagnostics;
+    }
+
+    const resolvedBlockCount = resolveEffectiveBlockCount(dataLength, requestedBlockCount);
+    diagnostics.blockCount = resolvedBlockCount;
+
+    if (resolvedBlockCount < 2) {
+        diagnostics.notes.push('有效區塊數不足，略過 PBO');
+        return diagnostics;
+    }
+
+    const segments = buildBlockSegments(dataLength, resolvedBlockCount);
+    const blockReturns = [];
+    const blockDates = [];
+    let valid = true;
+
+    for (const segment of segments) {
+        if (segment.size <= 0 || segment.start >= dataLength) {
+            valid = false;
+            break;
+        }
+        const baselineInfo = segment.start > 0
+            ? findPreviousFinite(returnsSeries, segment.start - 1)
+            : { index: -1, value: 0 };
+        const endInfo = findLastFiniteInRange(
+            returnsSeries,
+            segment.start,
+            Math.min(segment.end, dataLength - 1),
+        );
+        if (!endInfo) {
+            valid = false;
+            break;
+        }
+        const startRatio = baselineInfo && Number.isFinite(baselineInfo.value)
+            ? 1 + baselineInfo.value / 100
+            : 1;
+        const endRatio = 1 + endInfo.value / 100;
+        if (!Number.isFinite(startRatio) || startRatio <= 0 || !Number.isFinite(endRatio)) {
+            valid = false;
+            break;
+        }
+        const blockReturn = endRatio / startRatio - 1;
+        if (!Number.isFinite(blockReturn)) {
+            valid = false;
+            break;
+        }
+        blockReturns.push(blockReturn);
+        blockDates.push({
+            startIndex: segment.start,
+            endIndex: endInfo.index,
+            startDate: datesSeries[segment.start] || null,
+            endDate: datesSeries[endInfo.index] || null,
+        });
+    }
+
+    diagnostics.blockReturns = blockReturns;
+    diagnostics.segments = segments;
+    diagnostics.blockDates = blockDates;
+
+    if (!valid || blockReturns.length !== resolvedBlockCount) {
+        diagnostics.notes.push('區塊切分含無效報酬，略過 PBO 計算');
+        return diagnostics;
+    }
+
+    diagnostics.valid = true;
+    return diagnostics;
+}
+
+function applyOverfitDiagnostics(results, options = {}) {
+    if (!Array.isArray(results) || results.length === 0) return;
+    const diagnosticsNamespace = (typeof lazybacktestDiagnostics === 'object' && lazybacktestDiagnostics)
+        ? lazybacktestDiagnostics
+        : null;
+    if (!diagnosticsNamespace ||
+        typeof diagnosticsNamespace.computeCSCVPBO !== 'function' ||
+        typeof diagnosticsNamespace.extractIslands !== 'function') {
+        return;
+    }
+
+    const totalTrials = Math.max(1, results.length);
+
+    const requestedBlockCount = Number.isFinite(options.blockCount)
+        ? options.blockCount
+        : (batchOptimizationConfig.blockCount || 10);
+
+    const matrixEntries = [];
+    const indexMap = [];
+    let effectiveBlockCount = null;
+
+    for (let i = 0; i < results.length; i += 1) {
+        const result = results[i];
+        const blockDiagnostics = computeBlockDiagnostics(result, requestedBlockCount);
+        const overfitDiagnostics = {
+            version: BATCH_OVERFIT_VERSION,
+            blockCount: blockDiagnostics.blockCount,
+            blockCountUsed: blockDiagnostics.blockCount,
+            blockReturns: blockDiagnostics.blockReturns.slice(),
+            blockSegments: blockDiagnostics.segments.slice(),
+            blockDates: blockDiagnostics.blockDates.slice(),
+            sampleSize: blockDiagnostics.sampleSize,
+            notes: blockDiagnostics.notes.slice(),
+            dsr: null,
+        };
+
+        if (typeof diagnosticsNamespace.computeDeflatedSharpeRatioFromCumulative === 'function') {
+            try {
+                const dsrInfo = diagnosticsNamespace.computeDeflatedSharpeRatioFromCumulative(
+                    Array.isArray(result?.strategyReturns) ? result.strategyReturns : [],
+                    {
+                        sharpeRatio: Number.isFinite(result?.sharpeRatio) ? Number(result.sharpeRatio) : null,
+                        numTrials: totalTrials,
+                        annualizationFactor: 252,
+                    },
+                );
+                if (dsrInfo) {
+                    overfitDiagnostics.dsr = dsrInfo;
+                    if (Array.isArray(dsrInfo.notes) && dsrInfo.notes.length > 0) {
+                        const noteSet = new Set(overfitDiagnostics.notes);
+                        dsrInfo.notes.forEach((note) => {
+                            if (typeof note === 'string' && note && !noteSet.has(note)) {
+                                overfitDiagnostics.notes.push(note);
+                                noteSet.add(note);
+                            }
+                        });
+                    }
+                }
+            } catch (dsrError) {
+                console.warn('[Batch Optimization] Failed to compute DSR:', dsrError);
+            }
+        }
+        result.overfitDiagnostics = overfitDiagnostics;
+
+        if (blockDiagnostics.valid) {
+            if (effectiveBlockCount === null) {
+                effectiveBlockCount = blockDiagnostics.blockCount;
+            }
+            if (blockDiagnostics.blockCount === effectiveBlockCount) {
+                matrixEntries.push(blockDiagnostics.blockReturns);
+                indexMap.push(i);
+            }
+        }
+    }
+
+    if (effectiveBlockCount === null || matrixEntries.length < 2) {
+        results.forEach((result) => {
+            const diag = result.overfitDiagnostics || { version: BATCH_OVERFIT_VERSION };
+            if (!Array.isArray(diag.notes)) {
+                diag.notes = [];
+            }
+            const message = '需至少兩組策略才能計算 PBO';
+            if (!diag.notes.includes(message)) {
+                diag.notes.push(message);
+            }
+            diag.version = BATCH_OVERFIT_VERSION;
+            result.overfitDiagnostics = diag;
+        });
+        lastOverfitEvaluation = {
+            version: BATCH_OVERFIT_VERSION,
+            resultCount: results.length,
+            timestamp: Date.now(),
+        };
+        return;
+    }
+
+    const cscv = diagnosticsNamespace.computeCSCVPBO(matrixEntries, { method: 'mean' });
+    if (!cscv) {
+        return;
+    }
+
+    const buyKeys = Array.from(new Set(results.map((item) => item?.buyStrategy).filter(Boolean)));
+    const sellKeys = Array.from(new Set(results.map((item) => item?.sellStrategy).filter(Boolean)));
+    const buyIndexMap = Object.create(null);
+    const sellIndexMap = Object.create(null);
+    buyKeys.forEach((key, idx) => { buyIndexMap[key] = idx; });
+    sellKeys.forEach((key, idx) => { sellIndexMap[key] = idx; });
+
+    const grid = Array.from({ length: buyKeys.length }, () => Array(sellKeys.length).fill(null));
+
+    for (let entryIndex = 0; entryIndex < indexMap.length; entryIndex += 1) {
+        const resultIndex = indexMap[entryIndex];
+        const result = results[resultIndex];
+        const rowIdx = buyIndexMap[result.buyStrategy];
+        const colIdx = sellIndexMap[result.sellStrategy];
+        if (rowIdx === undefined || colIdx === undefined) continue;
+        const oosSummary = Array.isArray(cscv.perConfigOOS) ? cscv.perConfigOOS[entryIndex] : null;
+        const medianValue = oosSummary && Number.isFinite(oosSummary.median) ? oosSummary.median : null;
+        grid[rowIdx][colIdx] = medianValue;
+        const diag = result.overfitDiagnostics || {};
+        diag.oosSummary = oosSummary || null;
+        diag.oosMedian = medianValue;
+        diag.globalPbo = cscv.pbo;
+        diag.lambdaSamples = cscv.lambdaSamples || [];
+        diag.blockCountUsed = effectiveBlockCount;
+        result.overfitDiagnostics = diag;
+    }
+
+    const islandsInfo = diagnosticsNamespace.extractIslands(grid, { thresholdPercentile: 0.75 });
+    const normalizedIslandScore = diagnosticsNamespace.normalizeIslandScore(islandsInfo?.islands || []);
+
+    for (let entryIndex = 0; entryIndex < indexMap.length; entryIndex += 1) {
+        const resultIndex = indexMap[entryIndex];
+        const result = results[resultIndex];
+        const diag = result.overfitDiagnostics || {};
+        const rowIdx = buyIndexMap[result.buyStrategy];
+        const colIdx = sellIndexMap[result.sellStrategy];
+        let islandId = null;
+        let islandMeta = null;
+        if (islandsInfo && Array.isArray(islandsInfo.labels) && islandsInfo.labels[rowIdx]) {
+            const labelValue = islandsInfo.labels[rowIdx][colIdx];
+            if (Number.isInteger(labelValue) && labelValue >= 0) {
+                islandId = labelValue;
+                if (Array.isArray(islandsInfo.islands)) {
+                    islandMeta = islandsInfo.islands.find((item) => item.id === labelValue) || null;
+                }
+            }
+        }
+        const islandScore = islandMeta && Number.isFinite(islandMeta.score)
+            ? islandMeta.score
+            : normalizedIslandScore;
+        diag.islandId = islandId;
+        diag.islandSummary = islandMeta || null;
+        diag.islandScore = Number.isFinite(islandScore) ? islandScore : 0;
+        diag.normalizedIslandScore = normalizedIslandScore;
+        const dsrValue = diag.dsr && Number.isFinite(diag.dsr.value)
+            ? diag.dsr.value
+            : null;
+        const overfitScore = diagnosticsNamespace.computeOverfitScore({
+            pbo: cscv.pbo,
+            dsr: dsrValue,
+            islandScore: diag.islandScore,
+        }) || null;
+        diag.overfitScore = overfitScore;
+        const verdict = diagnosticsNamespace.computeOverfitVerdict({
+            pbo: cscv.pbo,
+            overfitScore: overfitScore && Number.isFinite(overfitScore.score) ? overfitScore.score : null,
+        }) || null;
+        diag.verdict = verdict;
+        diag.version = BATCH_OVERFIT_VERSION;
+        result.overfitDiagnostics = diag;
+    }
+
+    const evaluatedIndices = new Set(indexMap);
+    for (let i = 0; i < results.length; i += 1) {
+        if (evaluatedIndices.has(i)) continue;
+        const diag = results[i].overfitDiagnostics || { version: BATCH_OVERFIT_VERSION };
+        if (!Array.isArray(diag.notes)) {
+            diag.notes = [];
+        }
+        if (!diag.notes.includes('樣本不足，無法計算 PBO/島嶼')) {
+            diag.notes.push('樣本不足，無法計算 PBO/島嶼');
+        }
+        if (!diag.overfitScore) {
+            diag.overfitScore = { score: null, version: BATCH_OVERFIT_VERSION };
+        }
+        if (!diag.verdict) {
+            diag.verdict = { version: BATCH_OVERFIT_VERSION, level: 'unknown', icon: '❔', label: '需更多資料' };
+        }
+        diag.version = BATCH_OVERFIT_VERSION;
+        results[i].overfitDiagnostics = diag;
+    }
+
+    lastOverfitEvaluation = {
+        version: BATCH_OVERFIT_VERSION,
+        resultCount: results.length,
+        timestamp: Date.now(),
+    };
 }
 
 // 載入批量優化策略
