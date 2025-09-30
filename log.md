@@ -1,3 +1,19 @@
+## 2025-11-21 — Patch LB-OVERFIT-SCORE-20251120B
+- **Scope**: 補齊過擬合診斷的 DSR（Deflated Sharpe Ratio）計算與呈現。
+- **Highlights**:
+  - 新增 `dsr.js` 於 `lazybacktestDiagnostics` 命名空間，內含日報酬推導、常態分布近似、DSR 門檻與樣本筆數檢查。
+  - `applyOverfitDiagnostics` 自動帶入 Sharpe、試驗組數與日報酬，記錄 DSR 結果與警示並納入 Overfit Score 權重。
+  - 結果表顯示行同步加入 DSR 百分比，協助使用者一次掌握 PBO／DSR／島嶼穩健度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/islands.js','js/dsr.js','js/overfit-score.js','js/rating.js','js/batch-optimization.js'].forEach(file=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-20 — Patch LB-OVERFIT-SCORE-20251120A
+- **Scope**: 批量優化結果新增 CSCV PBO + 礁島穩健度整合評分機制。
+- **Highlights**:
+  - 新增 `pbo.js`、`islands.js`、`overfit-score.js`、`rating.js` 四個模組，建立過擬合機率估計與島嶼分數正規化工具。
+  - 批量優化流程計算各組合的區塊績效、PBO 分布、島嶼分佈與總體 Overfit Score，並以新欄位顯示風險徽章與細節。
+  - 介面提供 CSCV 區塊數設定輸入框，同步刷新排序與評分結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/islands.js','js/overfit-score.js','js/rating.js','js/backtest.js','js/main.js','js/worker.js','js/batch-optimization.js'].forEach(file=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
