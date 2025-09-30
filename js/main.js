@@ -2537,8 +2537,8 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
-// --- ML Forecast (LB-ML-KELLY-20250623A) ---
-const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
+// --- ML Forecast (LB-ML-KELLY-20250623B) ---
+const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
 
 (function initMlForecastTab() {
     if (typeof document === 'undefined') return;
@@ -2598,6 +2598,8 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         const features = [];
         const labels = [];
         const nextReturns = [];
+        const signalDates = [];
+        const tradeDates = [];
         for (let i = 21; i < rows.length - 1; i += 1) {
             const f1 = retLag(1, i);
             const f3 = retLag(3, i);
@@ -2609,8 +2611,10 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
             features.push(feat);
             labels.push(nextRet > 0 ? 1 : 0);
             nextReturns.push(nextRet);
+            signalDates.push(rows[i].date);
+            tradeDates.push(rows[i + 1].date);
         }
-        return { features, labels, nextReturns };
+        return { features, labels, nextReturns, signalDates, tradeDates };
     };
 
     const standardize = (matrix) => {
@@ -2689,7 +2693,7 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         return clamp(raw * multiplier, 0, cap);
     };
 
-    const simulate = (probs, returns, dates, avgUp, avgDown, threshold, multiplier, cap) => {
+    const simulate = (probs, returns, tradeDates, avgUp, avgDown, threshold, multiplier, cap, signalDates = tradeDates) => {
         let equityModel = 1;
         let equityBh = 1;
         const equitySeriesModel = [];
@@ -2699,7 +2703,8 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         for (let i = 0; i < probs.length; i += 1) {
             const prob = probs[i];
             const ret = returns[i];
-            const date = dates[i];
+            const tradeDate = tradeDates[i];
+            const signalDate = signalDates?.[i] || tradeDate;
 
             const bhGrowth = 1 + ret;
             equityBh *= Math.max(1e-6, bhGrowth);
@@ -2708,11 +2713,11 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
                 const fraction = kellyFraction(prob, avgUp, avgDown, multiplier, cap);
                 const growth = 1 + fraction * ret;
                 equityModel *= Math.max(1e-6, growth);
-                trades.push({ date, prob, fraction, ret, pnl: fraction * ret });
+                trades.push({ signalDate, tradeDate, prob, fraction, ret, pnl: fraction * ret });
             }
 
-            equitySeriesModel.push({ date, equity: equityModel });
-            equitySeriesBh.push({ date, equity: equityBh });
+            equitySeriesModel.push({ date: tradeDate, equity: equityModel });
+            equitySeriesBh.push({ date: tradeDate, equity: equityBh });
         }
 
         return {
@@ -2731,16 +2736,20 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         }
 
         const getInput = (id) => document.getElementById(id);
-        const trainStart = getInput('ml-train-start')?.value || '';
-        const trainEnd = getInput('ml-train-end')?.value || '';
-        const testStart = getInput('ml-test-start')?.value || '';
-        const testEnd = getInput('ml-test-end')?.value || '';
+        const trainPeriodInput = Number(getInput('ml-train-period')?.value || 0);
+        const testPeriodInput = Number(getInput('ml-test-period')?.value || 0);
         const lr = Number(getInput('ml-lr')?.value || 0.05);
         const epochs = Number(getInput('ml-epochs')?.value || 150);
         const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
         const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
-
-        const within = (date, start, end) => (!start || date >= start) && (!end || date <= end);
+        const minTrainSamples = 60;
+        const minTestSamples = 30;
+        const trainSamplesRequested = Number.isFinite(trainPeriodInput) ? Math.floor(trainPeriodInput) : 0;
+        const testSamplesRequested = Number.isFinite(testPeriodInput) ? Math.floor(testPeriodInput) : 0;
+        if (trainSamplesRequested < minTrainSamples || testSamplesRequested < minTestSamples) {
+            showError(`請至少提供 ${minTrainSamples} 日訓練與 ${minTestSamples} 日測試期間。`);
+            return;
+        }
         const rows = cachedStockData
             .map((r) => ({
                 date: r.date,
@@ -2751,32 +2760,40 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
                 volume: Number(r.volume),
             }))
             .filter((r) => Number.isFinite(r.close));
+        rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
 
-        const { features, labels, nextReturns } = buildFeatures(rows);
+        const { features, labels, nextReturns, signalDates, tradeDates } = buildFeatures(rows);
         if (!features.length || features.length !== labels.length || labels.length !== nextReturns.length) {
             showError('特徵構建失敗，請確認快取資料是否完整。');
             return;
         }
 
-        const dates = rows.slice(21, rows.length - 1).map((r) => r.date).slice(-features.length);
-        if (dates.length !== features.length) {
+        if (signalDates.length !== features.length || tradeDates.length !== features.length) {
             showError('日期對齊失敗，請重新執行回測。');
             return;
         }
 
-        const trainMask = dates.map((d) => within(d, trainStart, trainEnd));
-        const testMask = dates.map((d) => within(d, testStart, testEnd));
+        const totalRequested = trainSamplesRequested + testSamplesRequested;
+        if (totalRequested > features.length) {
+            showError(`快取樣本僅剩 ${features.length} 筆，請縮短訓練或測試期間。`);
+            return;
+        }
 
-        const Xtrain = features.filter((_, idx) => trainMask[idx]);
-        const yTrain = labels.filter((_, idx) => trainMask[idx]);
-        const rTrain = nextReturns.filter((_, idx) => trainMask[idx]);
-        const Xtest = features.filter((_, idx) => testMask[idx]);
-        const yTest = labels.filter((_, idx) => testMask[idx]);
-        const rTest = nextReturns.filter((_, idx) => testMask[idx]);
-        const dTest = dates.filter((_, idx) => testMask[idx]);
+        const startIndex = Math.max(0, features.length - totalRequested);
+        const trainEndIndex = startIndex + trainSamplesRequested;
+        const Xtrain = features.slice(startIndex, trainEndIndex);
+        const yTrain = labels.slice(startIndex, trainEndIndex);
+        const rTrain = nextReturns.slice(startIndex, trainEndIndex);
+        const signalTrain = signalDates.slice(startIndex, trainEndIndex);
 
-        if (Xtrain.length < 100 || Xtest.length < 50) {
-            showError('訓練或測試樣本過少，請調整日期區間。');
+        const Xtest = features.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+        const yTest = labels.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+        const rTest = nextReturns.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+        const signalTest = signalDates.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+        const tradeTest = tradeDates.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+
+        if (Xtrain.length < minTrainSamples || Xtest.length < minTestSamples) {
+            showError('訓練或測試樣本過少，請縮短期間或重新快取資料。');
             return;
         }
 
@@ -2791,15 +2808,24 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         const { threshold, accuracy, avgUp, avgDown, sampleSize } = fitThresholdAndEdge(pTrain, yTrain, rTrain);
 
         const pTest = Xtest.map((row) => model.predict(applyStandardization(row, mu, sigma)));
-        const simulation = simulate(pTest, rTest, dTest, avgUp, avgDown, threshold, kellyMultiplier, maxFraction);
+        const simulation = simulate(pTest, rTest, tradeTest, avgUp, avgDown, threshold, kellyMultiplier, maxFraction, signalTest);
 
         const hitRateTest = mean(pTest.map((prob, idx) => ((prob >= threshold) === (yTest[idx] === 1) ? 1 : 0)));
         const avgProbability = mean(pTrain);
         const indicativeKelly = kellyFraction(clamp(avgProbability || threshold, 0, 1), avgUp, avgDown, kellyMultiplier, maxFraction);
+        const trainRangeText = signalTrain.length ? `${signalTrain[0]} → ${signalTrain[signalTrain.length - 1]}` : '—';
+        const testSignalRange = signalTest.length ? `${signalTest[0]} → ${signalTest[signalTest.length - 1]}` : '—';
+        const testTradeRange = tradeTest.length ? `${tradeTest[0]} → ${tradeTest[tradeTest.length - 1]}` : '—';
 
         const cards = document.getElementById('ml-cards');
         if (cards) {
             cards.innerHTML = `
+                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
+                    <div class="text-[11px] uppercase tracking-wide">資料切分</div>
+                    <div class="text-xs">訓練 ${Xtrain.length} 日：${trainRangeText}</div>
+                    <div class="text-xs">測試 ${Xtest.length} 日：訊號 ${testSignalRange}</div>
+                    <div class="text-xs">測試交易落點：${testTradeRange}</div>
+                </div>
                 <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
                     <div class="text-[11px] uppercase tracking-wide">訓練最佳門檻</div>
                     <div class="text-lg font-semibold" style="color: var(--foreground);">${threshold.toFixed(2)}（樣本 ${sampleSize}）</div>
@@ -2921,7 +2947,7 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
                 ? simulation.trades
                     .map((trade) => `
                         <div class="border-b py-1 flex justify-between" style="border-color: var(--border); color: var(--muted-foreground);">
-                            <span>${trade.date}</span>
+                            <span>訊號 ${trade.signalDate} → 交易 ${trade.tradeDate}</span>
                             <span>P=${trade.prob.toFixed(2)} ｜ f=${(trade.fraction * 100).toFixed(1)}% ｜ 日報酬=${(trade.ret * 100).toFixed(2)}% ｜ PL=${(trade.pnl * 100).toFixed(2)}%</span>
                         </div>
                     `)
@@ -2935,32 +2961,47 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
         runButton.addEventListener('click', runMlForecast);
     }
 
-    const preloadDates = () => {
+    const preloadDurations = () => {
         try {
-            if (!Array.isArray(cachedStockData) || !cachedStockData.length) return;
-            const allDates = cachedStockData.map((row) => row.date).filter(Boolean);
-            if (!allDates.length) return;
-            const trainFieldStart = document.getElementById('ml-train-start');
-            const trainFieldEnd = document.getElementById('ml-train-end');
-            const testFieldStart = document.getElementById('ml-test-start');
-            const testFieldEnd = document.getElementById('ml-test-end');
-            const startDate = lastFetchSettings?.startDate || allDates[0];
-            const endDate = lastFetchSettings?.endDate || allDates[allDates.length - 1];
-            const splitIndex = Math.max(0, Math.floor(allDates.length * 0.7));
-            const midDate = allDates[Math.min(splitIndex, allDates.length - 1)];
-            if (trainFieldStart && !trainFieldStart.value) trainFieldStart.value = startDate;
-            if (trainFieldEnd && !trainFieldEnd.value) trainFieldEnd.value = midDate;
-            if (testFieldStart && !testFieldStart.value) testFieldStart.value = allDates[Math.min(splitIndex + 1, allDates.length - 1)] || midDate;
-            if (testFieldEnd && !testFieldEnd.value) testFieldEnd.value = endDate;
+            if (!Array.isArray(cachedStockData) || cachedStockData.length < 60) return;
+            const trainField = document.getElementById('ml-train-period');
+            const testField = document.getElementById('ml-test-period');
+            if (!trainField || !testField) return;
+            if (trainField.value && testField.value) return;
+
+            const rows = cachedStockData
+                .map((r) => ({
+                    date: r.date,
+                    close: Number(r.close),
+                    open: Number(r.open),
+                    high: Number(r.high),
+                    low: Number(r.low),
+                    volume: Number(r.volume),
+                }))
+                .filter((r) => Number.isFinite(r.close));
+            rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+            const { features } = buildFeatures(rows);
+            const total = features.length;
+            const minTrain = 60;
+            const minTest = 30;
+            if (total < minTrain + minTest) return;
+            let defaultTrain = Math.max(minTrain, Math.floor(total * 0.7));
+            let defaultTest = Math.max(minTest, total - defaultTrain);
+            if (defaultTrain + defaultTest > total) {
+                defaultTrain = Math.max(minTrain, total - minTest);
+                defaultTest = Math.max(minTest, total - defaultTrain);
+            }
+            if (!trainField.value) trainField.value = defaultTrain;
+            if (!testField.value) testField.value = defaultTest;
         } catch (error) {
-            console.warn('[ML Forecast] 預設日期填入失敗', error);
+            console.warn('[ML Forecast] 預設期間計算失敗', error);
         }
     };
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', preloadDates);
+        document.addEventListener('DOMContentLoaded', preloadDurations);
     } else {
-        preloadDates();
+        preloadDurations();
     }
 
     window.lazybacktestMlForecast = {
