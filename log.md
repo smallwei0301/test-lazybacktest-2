@@ -666,6 +666,12 @@
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-11-15 — Patch LB-SINGLE-OPT-20251115A
+- **Issue recap**: 單一參數優化沿用逐值 `JSON.stringify` 複製與完整敏感度分析，導致每一步都重新建立深層物件並重算敏感度網格，範圍稍大時執行時間暴增。
+- **Fix**: 建立參數範圍掃描器與可重用的優化模板，只在每輪生成淺層複本並標記 `skipSensitivity`，同時以 `suppressProgress` 避免額外的 Worker 訊息；新增版本旗標 `LB-SINGLE-OPT-20251115A` 以利追蹤。
+- **Diagnostics**: 於開發者工具觀察單一參數優化時 Worker 僅輸出範圍測試紀錄，且無再觸發敏感度計算；確認結果表格仍維持年化報酬、夏普值、下普值與回撤等欄位排序一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-QUICK-KEYIN-20251112A
 - **Issue recap**: 首頁「一鍵回測台積電」按鈕文字固定且無輸入提示，使用者難以察覺可替換標的；就算輸入其他名稱也無法同步至代碼欄，回測仍鎖在 2330。
 - **Fix**: 在按鈕內嵌可編輯欄位與閃爍光標，支援即時輸入並透過台股官方清單比對關鍵字，自動更新股票代碼與市場設定；回測進度改以狀態區塊呈現避免破壞可編輯元件，同步新增提示文案。
@@ -761,3 +767,4 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
