@@ -1,8 +1,12 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251210A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251219A';
 const FORECAST_ITERATION_DEFAULT = 5;
 const FORECAST_ITERATION_MIN = 1;
 const FORECAST_ITERATION_MAX = 12;
 let forecastChartInstance = null;
+let lastForecastResult = null;
+let lastForecastSeed = null;
+let seedStorageSupportCache = null;
+const FORECAST_SEED_STORAGE_KEY = 'lb-forecast-seeds-v1';
 
 function getSharedVisibleStockData() {
     const globalWindow = typeof window !== 'undefined' ? window : undefined;
@@ -119,6 +123,216 @@ function applySeedForForecast(seed) {
     }
 }
 
+function hasSeedStorageSupport() {
+    if (seedStorageSupportCache !== null) {
+        return seedStorageSupportCache;
+    }
+    if (typeof window === 'undefined' || !window.localStorage) {
+        seedStorageSupportCache = false;
+        return seedStorageSupportCache;
+    }
+    try {
+        const probeKey = '__lbForecastSeedProbe__';
+        window.localStorage.setItem(probeKey, '1');
+        window.localStorage.removeItem(probeKey);
+        seedStorageSupportCache = true;
+    } catch (error) {
+        console.warn('[Forecast] Seed storage unavailable', error);
+        seedStorageSupportCache = false;
+    }
+    return seedStorageSupportCache;
+}
+
+function readSeedStore() {
+    if (!hasSeedStorageSupport()) {
+        return {};
+    }
+    try {
+        const raw = window.localStorage.getItem(FORECAST_SEED_STORAGE_KEY);
+        if (!raw) {
+            return {};
+        }
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+            return parsed;
+        }
+    } catch (error) {
+        console.warn('[Forecast] Failed to parse seed storage', error);
+    }
+    return {};
+}
+
+function writeSeedStore(store) {
+    if (!hasSeedStorageSupport()) {
+        return false;
+    }
+    try {
+        window.localStorage.setItem(FORECAST_SEED_STORAGE_KEY, JSON.stringify(store));
+        return true;
+    } catch (error) {
+        console.warn('[Forecast] Failed to persist seed storage', error);
+        return false;
+    }
+}
+
+function resolveCurrentSeedKey() {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+    const stockInput = document.getElementById('stockNo');
+    const marketSelect = document.getElementById('marketSelect');
+    const stockText = stockInput?.value ? stockInput.value.toString().trim().toUpperCase() : '';
+    if (!stockText) {
+        return null;
+    }
+    const marketText = marketSelect?.value ? marketSelect.value.toString().trim().toUpperCase() : 'TWSE';
+    return `${marketText}|${stockText}`;
+}
+
+function loadStoredSeedForCurrentStock() {
+    const key = resolveCurrentSeedKey();
+    if (!key) {
+        return null;
+    }
+    const store = readSeedStore();
+    const entry = store[key];
+    if (!entry || !entry.seed) {
+        return null;
+    }
+    return {
+        seed: String(entry.seed),
+        savedAt: entry.savedAt || null,
+    };
+}
+
+function saveSeedForCurrentStock(seed) {
+    if (!seed) {
+        return null;
+    }
+    const key = resolveCurrentSeedKey();
+    if (!key) {
+        return null;
+    }
+    const store = readSeedStore();
+    const entry = {
+        seed: String(seed),
+        savedAt: new Date().toISOString(),
+    };
+    store[key] = entry;
+    const success = writeSeedStore(store);
+    return success ? entry : null;
+}
+
+function updateSeedStorageStatus(message, type = 'info') {
+    const statusEl = document.getElementById('forecastSeedStorageStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    const colorMap = {
+        info: 'var(--muted-foreground)',
+        success: '#047857',
+        error: '#b91c1c',
+        warning: '#b45309',
+    };
+    statusEl.style.color = colorMap[type] || 'var(--muted-foreground)';
+}
+
+function refreshSeedInputPlaceholder(storedEntry) {
+    const input = document.getElementById('forecastSeedInput');
+    if (!input) return;
+    if (input.value && input.value.trim()) {
+        return;
+    }
+    if (storedEntry && storedEntry.seed) {
+        input.placeholder = `已儲存：${storedEntry.seed}`;
+    } else {
+        input.placeholder = '輸入或貼上隨機種子';
+    }
+}
+
+function handleSeedContextChange() {
+    const stored = loadStoredSeedForCurrentStock();
+    refreshSeedInputPlaceholder(stored);
+    if (stored) {
+        updateSeedStorageStatus(`已儲存種子 ${stored.seed}${stored.savedAt ? `（${formatTimestamp(stored.savedAt)}）` : ''}。`, 'info');
+    } else if (hasSeedStorageSupport()) {
+        updateSeedStorageStatus('尚未為此標的儲存種子。', 'info');
+    } else {
+        updateSeedStorageStatus('瀏覽器不支援本地儲存，無法保存種子。', 'warning');
+    }
+}
+
+function handleSeedSaveRequest() {
+    const input = document.getElementById('forecastSeedInput');
+    const manualSeed = input?.value ? input.value.toString().trim() : '';
+    const seedToSave = manualSeed || lastForecastSeed;
+    if (!seedToSave) {
+        updateSeedStorageStatus('請先輸入種子或完成預測取得最佳種子。', 'warning');
+        return;
+    }
+    const entry = saveSeedForCurrentStock(seedToSave);
+    if (!entry) {
+        updateSeedStorageStatus('儲存種子失敗，請確認瀏覽器是否允許本地儲存。', 'error');
+        return;
+    }
+    if (input) {
+        input.value = seedToSave;
+    }
+    refreshSeedInputPlaceholder(entry);
+    updateSeedStorageStatus(`已儲存種子 ${entry.seed}（${formatTimestamp(entry.savedAt)}）。`, 'success');
+}
+
+function handleSeedLoadRequest() {
+    const stored = loadStoredSeedForCurrentStock();
+    if (!stored) {
+        updateSeedStorageStatus('目前沒有儲存的種子可載入。', hasSeedStorageSupport() ? 'warning' : 'error');
+        return;
+    }
+    const input = document.getElementById('forecastSeedInput');
+    if (input) {
+        input.value = stored.seed;
+        const changeEvent = new Event('change');
+        input.dispatchEvent(changeEvent);
+    }
+    refreshSeedInputPlaceholder(stored);
+    lastForecastSeed = stored.seed;
+    updateSeedStorageStatus(`已載入儲存種子 ${stored.seed}。`, 'success');
+}
+
+function initialiseSeedControls() {
+    const saveBtn = document.getElementById('forecastSeedSaveBtn');
+    const loadBtn = document.getElementById('forecastSeedLoadBtn');
+    const input = document.getElementById('forecastSeedInput');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', handleSeedSaveRequest);
+    }
+    if (loadBtn) {
+        loadBtn.addEventListener('click', handleSeedLoadRequest);
+    }
+    if (input) {
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                handleSeedSaveRequest();
+            }
+        });
+    }
+    const stockInput = document.getElementById('stockNo');
+    if (stockInput) {
+        stockInput.addEventListener('change', handleSeedContextChange);
+        stockInput.addEventListener('input', () => {
+            // 於輸入過程不頻繁重設狀態，僅在欄位清空時同步更新提示
+            if (!stockInput.value || !stockInput.value.trim()) {
+                handleSeedContextChange();
+            }
+        });
+    }
+    const marketSelect = document.getElementById('marketSelect');
+    if (marketSelect) {
+        marketSelect.addEventListener('change', handleSeedContextChange);
+    }
+    handleSeedContextChange();
+}
+
 function formatRatio(value, digits = 1) {
     if (!Number.isFinite(value)) return '--';
     return `${(value * 100).toFixed(digits)}%`;
@@ -133,6 +347,18 @@ function formatChange(value, digits = 2) {
 function formatNumber(value, digits = 2) {
     if (!Number.isFinite(value)) return '--';
     return value.toFixed(digits);
+}
+
+function formatTimestamp(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hour = String(date.getHours()).padStart(2, '0');
+    const minute = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 function describeCorrection(correction) {
@@ -535,15 +761,25 @@ function selectBetterForecastResult(currentBest, candidate) {
 }
 
 function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
+    const emptyResult = {
+        hitRate: NaN,
+        avgGain: NaN,
+        avgLoss: NaN,
+        totalReturn: NaN,
+        tradeCount: 0,
+        trades: [],
+        finalEquity: 1,
+    };
     if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length === 0) {
-        return { hitRate: NaN, avgGain: NaN, avgLoss: NaN, totalReturn: NaN, tradeCount: 0 };
+        return emptyResult;
     }
     if (!Array.isArray(rows) || rows.length === 0) {
-        return { hitRate: NaN, avgGain: NaN, avgLoss: NaN, totalReturn: NaN, tradeCount: 0 };
+        return emptyResult;
     }
 
     const gains = [];
     const losses = [];
+    const trades = [];
     let hits = 0;
     let tradeCount = 0;
     let equity = 1;
@@ -560,17 +796,14 @@ function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
 
         const prevClose = Number(prevRow?.close);
         const nextClose = Number(currentRow?.close);
-        const nextHigh = Number(currentRow?.high);
         const nextLow = Number(currentRow?.low);
-        const actualClose = Number(actuals[idx]);
+        const nextHigh = Number(currentRow?.high);
         const predictedClose = Number(predicted[idx]);
 
         if (
             !Number.isFinite(prevClose)
             || !Number.isFinite(nextClose)
             || !Number.isFinite(predictedClose)
-            || !Number.isFinite(actualClose)
-            || !Number.isFinite(nextHigh)
             || !Number.isFinite(nextLow)
         ) {
             continue;
@@ -584,11 +817,15 @@ function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
             continue;
         }
 
-        if (nextLow > prevClose || nextHigh < prevClose) {
+        if (nextLow > prevClose) {
             continue;
         }
 
         const tradeReturn = (nextClose - prevClose) / prevClose;
+        if (!Number.isFinite(tradeReturn)) {
+            continue;
+        }
+
         equity *= 1 + tradeReturn;
         tradeCount += 1;
 
@@ -599,6 +836,16 @@ function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
         } else {
             losses.push(tradePercent);
         }
+
+        trades.push({
+            entryDate: prevRow?.date || null,
+            executionDate: currentRow?.date || null,
+            entryPrice: prevClose,
+            exitPrice: nextClose,
+            intradayLow: Number.isFinite(nextLow) ? nextLow : null,
+            intradayHigh: Number.isFinite(nextHigh) ? nextHigh : null,
+            returnPercent: tradePercent,
+        });
     }
 
     const avgGain = gains.length > 0 ? gains.reduce((sum, v) => sum + v, 0) / gains.length : NaN;
@@ -612,6 +859,8 @@ function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
         avgLoss,
         totalReturn,
         tradeCount,
+        trades,
+        finalEquity: equity,
     };
 }
 
@@ -705,7 +954,10 @@ function updateForecastMetrics(result) {
     if (totalReturnEl) totalReturnEl.textContent = formatChange(metrics.totalReturn);
     if (tradeCountEl) {
         if (Number.isFinite(metrics.tradeCount) && metrics.tradeCount > 0) {
-            tradeCountEl.textContent = `共執行 ${metrics.tradeCount} 筆交易`;
+            const finalEquityText = Number.isFinite(metrics.finalEquity)
+                ? `，最終資金 ${formatNumber(metrics.finalEquity, 3)} 倍`
+                : '';
+            tradeCountEl.textContent = `共執行 ${metrics.tradeCount} 筆交易${finalEquityText}`;
         } else {
             tradeCountEl.textContent = '尚未產生交易';
         }
@@ -715,6 +967,7 @@ function updateForecastMetrics(result) {
     if (maeEl) maeEl.textContent = `${formatNumber(metrics.mae, 2)} （基準 ${formatNumber(metrics.baselineMae, 2)}）`;
     if (correctionEl) correctionEl.textContent = describeCorrection(result.correction);
     updateForecastSeedSummary(result);
+    renderForecastTradeLog(metrics?.trades);
 }
 
 function updateForecastSeedSummary(result) {
@@ -733,6 +986,56 @@ function updateForecastSeedSummary(result) {
     const hitRateText = formatRatio(result.metrics?.hitRate);
     seedEl.textContent = `${iterationText}，隨機種子 ${result.seed}（命中率 ${hitRateText}）。`;
     seedEl.style.color = 'var(--muted-foreground)';
+}
+
+function renderForecastTradeLog(trades) {
+    const container = document.getElementById('forecastTradeLog');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!Array.isArray(trades) || trades.length === 0) {
+        container.textContent = '尚未產生交易';
+        container.style.color = 'var(--muted-foreground)';
+        return;
+    }
+    container.style.color = 'var(--foreground)';
+    const fragment = document.createDocumentFragment();
+    const recentTrades = trades.slice(-12);
+    recentTrades.forEach((trade) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-wrap justify-between gap-2 py-1 border-b border-dashed last:border-b-0';
+        row.style.borderColor = 'var(--border)';
+
+        const title = document.createElement('div');
+        title.className = 'text-[11px] font-medium';
+        const percentText = formatChange(trade?.returnPercent);
+        title.textContent = `${trade?.executionDate || '--'} ｜ 報酬 ${percentText}`;
+        if (Number.isFinite(trade?.returnPercent) && trade.returnPercent < 0) {
+            title.style.color = '#b91c1c';
+        } else if (Number.isFinite(trade?.returnPercent)) {
+            title.style.color = '#047857';
+        } else {
+            title.style.color = 'var(--foreground)';
+        }
+
+        const detail = document.createElement('div');
+        detail.className = 'text-[11px]';
+        detail.style.color = 'var(--muted-foreground)';
+        const entryPriceText = formatNumber(trade?.entryPrice, 2);
+        const exitPriceText = formatNumber(trade?.exitPrice, 2);
+        detail.textContent = `前日收盤 ${entryPriceText} → 隔日收盤 ${exitPriceText}`;
+
+        row.appendChild(title);
+        row.appendChild(detail);
+        fragment.appendChild(row);
+    });
+    container.appendChild(fragment);
+    if (trades.length > recentTrades.length) {
+        const hint = document.createElement('div');
+        hint.className = 'text-[10px] mt-1';
+        hint.style.color = 'var(--muted-foreground)';
+        hint.textContent = `僅顯示最近 ${recentTrades.length} 筆，共 ${trades.length} 筆。`;
+        container.appendChild(hint);
+    }
 }
 
 function summariseForecastCompletion(result, { iterationCount = 1, iterationIndex = 0, seed, durationMs } = {}) {
@@ -863,6 +1166,8 @@ async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
             avgLoss: directionMetrics.avgLoss,
             totalReturn: directionMetrics.totalReturn,
             tradeCount: directionMetrics.tradeCount,
+            finalEquity: directionMetrics.finalEquity,
+            trades: directionMetrics.trades,
             mse,
             rmse,
             mae,
@@ -872,6 +1177,7 @@ async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
             baselineHitRate: baselineDirection.hitRate,
             baselineTotalReturn: baselineDirection.totalReturn,
             baselineTradeCount: baselineDirection.tradeCount,
+            baselineFinalEquity: baselineDirection.finalEquity,
         },
         chart: chartPayload,
     };
@@ -891,14 +1197,19 @@ async function handleForecastRequest(button) {
         const dataset = prepareForecastDataset();
         setForecastSamples(dataset.trainSamples, dataset.testSamples);
         const iterationCount = resolveIterationCount();
-        const seeds = generateSeedCandidates(iterationCount);
+        const seedInput = document.getElementById('forecastSeedInput');
+        const manualSeed = seedInput?.value ? seedInput.value.toString().trim() : '';
+        const seeds = manualSeed ? [manualSeed] : generateSeedCandidates(iterationCount);
+        const usingManualSeed = Boolean(manualSeed);
 
         let bestResult = null;
         const overallStart = performance.now();
 
         for (let idx = 0; idx < seeds.length; idx += 1) {
             const seed = seeds[idx];
-            const iterationLabel = iterationCount > 1 ? `第 ${idx + 1}/${iterationCount} 次` : '單次';
+            const iterationLabel = seeds.length > 1
+                ? `第 ${idx + 1}/${seeds.length} 次`
+                : (usingManualSeed ? '指定種子' : '單次');
             updateForecastStatus(`啟動${iterationLabel}預測（種子 ${seed}）...`, 'info');
 
             const iterationStart = performance.now();
@@ -906,11 +1217,11 @@ async function handleForecastRequest(button) {
             result.durationMs = performance.now() - iterationStart;
             result.seed = seed;
             result.iterationIndex = idx;
-            result.iterationCount = iterationCount;
+            result.iterationCount = seeds.length;
 
             bestResult = selectBetterForecastResult(bestResult, result);
 
-            if (iterationCount > 1) {
+            if (seeds.length > 1) {
                 const bestHitRate = bestResult?.metrics?.hitRate;
                 updateForecastStatus(
                     `完成${iterationLabel}預測：命中率 ${formatRatio(result.metrics.hitRate)}，目前最佳 ${formatRatio(bestHitRate)}（種子 ${bestResult?.seed || '--'}）。`,
@@ -927,11 +1238,22 @@ async function handleForecastRequest(button) {
         updateForecastMetrics(bestResult);
         renderForecastChart(bestResult.chart);
         summariseForecastCompletion(bestResult, {
-            iterationCount,
+            iterationCount: seeds.length,
             iterationIndex: bestResult.iterationIndex,
             seed: bestResult.seed,
             durationMs: totalDuration,
         });
+        lastForecastResult = bestResult;
+        lastForecastSeed = bestResult.seed || null;
+        const storedSeed = loadStoredSeedForCurrentStock();
+        refreshSeedInputPlaceholder(storedSeed);
+        if (bestResult.seed) {
+            if (storedSeed && storedSeed.seed === bestResult.seed) {
+                updateSeedStorageStatus(`已套用儲存種子 ${bestResult.seed}（${storedSeed.savedAt ? formatTimestamp(storedSeed.savedAt) : '未記錄時間'}）。`, 'success');
+            } else {
+                updateSeedStorageStatus(`最佳結果使用種子 ${bestResult.seed}，可點「儲存種子」保留紀錄。`, 'info');
+            }
+        }
     } catch (error) {
         console.error('[Forecast] Failed to generate prediction', error);
         updateForecastStatus(`預測失敗：${error.message}`, 'error');
@@ -944,6 +1266,7 @@ async function handleForecastRequest(button) {
 document.addEventListener('DOMContentLoaded', () => {
     setForecastVersion();
     initialiseIterationControl();
+    initialiseSeedControls();
     const runBtn = document.getElementById('runForecastBtn');
     if (runBtn) {
         runBtn.addEventListener('click', () => handleForecastRequest(runBtn));

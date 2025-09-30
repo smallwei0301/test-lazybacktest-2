@@ -793,3 +793,9 @@
 - **Fix**: 導入高低價解析並重寫命中率計算，只在模型預測隔日上漲且隔日高低價覆蓋前一收盤時入場，將累積報酬以複利方式統計；同時於預測分頁新增總報酬率卡片與交易次數說明。
 - **Diagnostics**: 以回測產生的可視股價資料執行預測，確認僅在條件滿足時計入交易、狀態列摘要會顯示總報酬率與筆數，預測卡片呈現新指標。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-19 — Patch LB-FORECAST-LSTMGA-20251219A
+- **Issue recap**: 預測流程缺少隨機種子儲存／載入能力，也未依指定「前一收盤限價、隔日低點觸價才成交並於隔日收盤平倉」輸出交易紀錄與複利報酬。
+- **Fix**: 建立種子輸入、儲存與載入介面，透過本地儲存綁定當前股票與市場並提示最佳種子；重寫投資回測僅在隔日低點觸及前收盤時進場，紀錄每筆交易並揭露最終資金倍數。
+- **Diagnostics**: 本地執行回測後切換代碼確認種子提示即時更新，載入既有種子可單次迭代重現命中率；預測卡片顯示交易清單、筆數與報酬與敘述一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

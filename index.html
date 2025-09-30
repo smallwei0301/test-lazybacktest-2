@@ -1457,6 +1457,32 @@
                                         <p class="text-[11px]" style="color: var(--muted-foreground);">
                                             系統會依設定次數重複訓練 LSTM 與 GA，並挑選命中率最高的隨機種子結果。
                                         </p>
+                                        <div class="space-y-2">
+                                            <div class="flex flex-wrap items-center gap-2 text-xs">
+                                                <label for="forecastSeedInput" class="font-medium" style="color: var(--muted-foreground);">指定種子</label>
+                                                <input
+                                                    id="forecastSeedInput"
+                                                    type="text"
+                                                    inputmode="text"
+                                                    placeholder="輸入或貼上隨機種子"
+                                                    class="px-2 py-1 text-xs rounded-md border focus:outline-none focus:ring-2"
+                                                    style="min-width: 12rem; border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                                                />
+                                                <button
+                                                    id="forecastSeedLoadBtn"
+                                                    type="button"
+                                                    class="px-3 py-1 text-xs rounded-md border"
+                                                    style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent); color: var(--foreground);"
+                                                >載入儲存種子</button>
+                                                <button
+                                                    id="forecastSeedSaveBtn"
+                                                    type="button"
+                                                    class="px-3 py-1 text-xs rounded-md"
+                                                    style="background-color: var(--primary); color: var(--primary-foreground);"
+                                                >儲存目前種子</button>
+                                            </div>
+                                            <p id="forecastSeedStorageStatus" class="text-[11px]" style="color: var(--muted-foreground);">尚未為此標的儲存種子。</p>
+                                        </div>
                                         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="forecastMetrics">
                                             <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
                                                 <p class="text-xs font-semibold" style="color: var(--primary);">隔日漲跌命中率</p>
@@ -1507,6 +1533,10 @@
                                             <h5 class="text-xs font-semibold mb-2" style="color: var(--foreground);">GA 誤差校正參數</h5>
                                             <p id="forecastCorrection" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">尚未建立誤差校正參數。</p>
                                             <p id="forecastSeedSummary" class="text-xs leading-relaxed mt-2" style="color: var(--muted-foreground);">尚未探索隨機種子。</p>
+                                            <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: var(--muted-foreground);">預測投資交易紀錄</p>
+                                                <div id="forecastTradeLog" class="mt-2 space-y-1 text-[11px]" style="color: var(--muted-foreground);">尚未產生交易</div>
+                                            </div>
                                         </div>
                                         <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                             注意：本功能僅為歷史資料模擬，實際投資仍需自行判斷。模型採用訓練區間的統計值進行標準化，預測時僅使用當下可取得的歷史資料，不會回頭修正既有資料。
