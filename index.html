@@ -1861,6 +1861,7 @@
                                                                 <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                                                     <option value="annualizedReturn">年化報酬率</option>
                                                                     <option value="sharpeRatio">夏普比率</option>
+                                                                    <option value="overfitScore">過擬合分數</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
                                                                     <option value="tradeCount">交易次數</option>
                                                                 </select>
@@ -1879,6 +1880,7 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">買入策略</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">過擬合分數</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
@@ -1889,6 +1891,75 @@
                                                                 </thead>
                                                                 <tbody id="batch-results-tbody" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
                                                             </table>
+                                                        </div>
+                                                        <div class="mt-6 space-y-4" id="overfit-analytics-panel">
+                                                            <div class="flex flex-wrap items-center gap-3">
+                                                                <label for="overfit-block-count" class="text-xs font-medium" style="color: var(--foreground);">CSCV 區塊數</label>
+                                                                <input
+                                                                    id="overfit-block-count"
+                                                                    type="number"
+                                                                    min="4"
+                                                                    step="2"
+                                                                    value="10"
+                                                                    class="px-3 py-2 border border-border rounded-md bg-input text-sm"
+                                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                                />
+                                                                <button
+                                                                    id="overfit-recompute-btn"
+                                                                    class="btn-outline text-xs px-3 py-2 rounded"
+                                                                >
+                                                                    重新計算過擬合評分
+                                                                </button>
+                                                                <span class="inline-flex items-center px-2 py-1 text-[11px] rounded border" id="overfit-version-badge" style="border-color: color-mix(in srgb, var(--primary) 45%, transparent); color: var(--primary);">
+                                                                    LB-OVERFIT-SCORING-20250709A
+                                                                </span>
+                                                            </div>
+                                                            <div id="overfit-score-summary" class="text-xs leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                                                <p>尚未計算過擬合評分，請先完成批量優化或調整區塊數後點選重新計算。</p>
+                                                            </div>
+                                                            <div id="overfit-toplist" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+                                                            <div id="overfit-lambda-hints" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);"></div>
+                                                            <div class="card mt-6" id="overfit-algorithm-notes">
+                                                                <div class="card-header flex flex-col gap-2">
+                                                                    <h3 class="card-title text-base">過擬合評分演算法說明</h3>
+                                                                    <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                                        以下步驟說明 LazyBacktest 在前端批量優化分頁執行 PBO、Deflated Sharpe Ratio、礁島穩健度與綜合過擬合分數的實作細節，協助使用者理解每一個指標的意義與限制。
+                                                                    </p>
+                                                                </div>
+                                                                <div class="card-content">
+                                                                    <div class="space-y-4 text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                                        <div class="space-y-2">
+                                                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">整體流程</h4>
+                                                                            <ol class="list-decimal pl-5 space-y-1">
+                                                                                <li>將回測日報酬依使用者設定的區塊數（預設 10，需為偶數）切片，計算每一區塊的 Sharpe 值並形成 K×S 矩陣。</li>
+                                                                                <li>使用 CSCV（Combinatorially Symmetric Cross-Validation）枚舉所有 S/2 訓練 vs. S/2 測試的切分，在每一組切分內記錄 λ 值、OOS 中位數與低於中位數的比例。</li>
+                                                                                <li>針對每個策略的完整日報酬計算 Deflated Sharpe Ratio，帶入批量優化的候選策略數作為 trial 數。</li>
+                                                                                <li>根據參數格點與 OOS 中位數建立礁島候選點，偵測鄰接區域並評估面積、分散度、坡度與 PBO 穩健度。</li>
+                                                                                <li>綜合 PBO、DSR 與 Island Score，輸出 0～100 的過擬合分數並回填至列表、摘要與 Top 卡片。</li>
+                                                                            </ol>
+                                                                        </div>
+                                                                        <div class="space-y-2">
+                                                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">模組計算重點</h4>
+                                                                            <ul class="list-disc pl-5 space-y-2">
+                                                                                <li><strong>CSCV PBO</strong>：採 Bailey 等人提出的 λ＝log((1−q)/q) 轉換，q 以 OOS 排名換算並在 1/(2k)～1−1/(2k) 之間截斷以避免無限值；若 Sharpe 矩陣樣本不足則標記為「樣本不足」。</li>
+                                                                                <li><strong>Deflated Sharpe Ratio</strong>：依 López de Prado 的近似式計算，使用每日報酬、252 作為年化換算係數，trial 數等於本次批量優化的有效策略數；同時輸出偏態、峰度與期望最大 Sharpe 方便診斷。</li>
+                                                                                <li><strong>Island Robustness</strong>：門檻預設為 OOS 中位數的 75 分位，使用參數間距 1.5 倍的鄰域連結格點；針對每座島記錄面積、標準差、IQR、邊界坡度與平均 PBO。</li>
+                                                                                <li><strong>Island Score</strong>：將面積、低分散、平滑邊界與低 PBO 轉換為 0～1 分數後加權平均，預設權重為 area:1、dispersion:0.5、edge:0.5、pbo:1。</li>
+                                                                                <li><strong>Overfit Score</strong>：以 100 分為滿分，分別對 PBO（50% 權重）、DSR（25%）與 Island Score（25%）施加懲罰，確保 PBO 仍是主要的過擬合判斷來源。</li>
+                                                                            </ul>
+                                                                        </div>
+                                                                        <div class="space-y-2">
+                                                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">與論文設定的差異說明</h4>
+                                                                            <ul class="list-disc pl-5 space-y-2">
+                                                                                <li>原論文可使用報酬或 Sharpe 值作為 CSCV 的績效輸入；LazyBacktest 直接採用區塊 Sharpe，並在前端以純 JavaScript 列舉所有切分，若區塊數過大（>12）會於 UI 提示效能成本。</li>
+                                                                                <li>Deflated Sharpe Ratio 的期望最大 Sharpe 值以閉式近似計算，未額外估計 serial correlation；若使用者需要考量多重市場或更長自相關修正，建議改在伺服器端離線計算。</li>
+                                                                                <li>礁島偵測採用 Lopez de Prado「穩健島嶼」概念，但實務上加入 1.5×格距的鄰域、IQR 與平滑度分數，避免過度依賴單一尖峰；Island Score 為本站自訂權重，可在未來於 UI 開放自訂。</li>
+                                                                                <li>過擬合總分結合 PBO、DSR 與 Island Score，屬於 LazyBacktest 的整合評分方式；原文並未提供權重化的單一分數，使用者仍可依個別指標做判讀。</li>
+                                                                            </ul>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -2125,6 +2196,10 @@
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/pbo.js"></script>
+    <script src="js/dsr.js"></script>
+    <script src="js/islands.js"></script>
+    <script src="js/overfit-score.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
