@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ai-predict"
+                                            >
+                                                <i data-lucide="brain" class="lucide-sm inline mr-1"></i>AI 預測
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2057,6 +2064,143 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden space-y-6" id="ai-predict-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="brain" class="lucide-sm"></i>
+                                                AI 預測實驗室
+                                            </h3>
+                                            <span id="aiPredictVersionLabel" class="text-[11px] font-medium uppercase tracking-wide" style="color: var(--muted-foreground);"></span>
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-4 text-sm" style="color: var(--muted-foreground);">
+                                        <p class="leading-relaxed">
+                                            參考近期 LSTM 於金融市場預測的研究（Fischer &amp; Krauss, 2018；Nelson et al., 2017；Hoseinzade &amp; Haratizadeh, 2019），我們設計一個以台股日收盤價為核心的序列模型，透過 TensorFlow.js 在瀏覽器端即時訓練，判斷隔日收盤價相較今日是上漲或下跌。
+                                        </p>
+                                        <p class="leading-relaxed">
+                                            模型將回測區間的有效交易資料依時間切分為 2:1 的訓練／測試集合，並以凱利公式（Kelly, 1956）計算每次多單進場應投入的資金比例，若預測隔日會上漲，於今日收盤價掛單，隔日確認高低點觸及後才算買入，並在隔日收盤價出場統計績效。
+                                        </p>
+                                        <div class="border border-dashed rounded-lg p-4" style="border-color: var(--border);">
+                                            <h4 class="font-semibold text-foreground text-sm mb-2">操作說明</h4>
+                                            <ul class="space-y-1 text-xs">
+                                                <li>• 先執行一般回測取得價格資料，再切換到「AI 預測」分頁。</li>
+                                                <li>• 模型僅做隔日漲跌（二擇一）預測，掛單價為今日收盤，隔日高低點需涵蓋該價位才算成功買入。</li>
+                                                <li>• 可切換是否套用凱利公式資金配置，同步比較策略曲線與原始買入持有。</li>
+                                                <li>• 若資料不足或缺乏連續收盤價，系統會提示補齊回測區間。</li>
+                                            </ul>
+                                        </div>
+                                        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                                            <button id="aiPredictRunBtn" class="btn-primary px-6 py-3 rounded-lg font-semibold flex items-center justify-center gap-2" type="button">
+                                                <i data-lucide="play" class="lucide-sm"></i>
+                                                執行 AI 預測
+                                            </button>
+                                            <span id="aiPredictStatus" class="text-xs" style="color: var(--muted-foreground);" aria-live="polite"></span>
+                                        </div>
+                                        <div class="flex flex-col sm:flex-row sm:items-center gap-3 text-xs" style="color: var(--muted-foreground);">
+                                            <label for="aiCapitalMode" class="font-medium">資金配置模式</label>
+                                            <select id="aiCapitalMode" class="border rounded px-3 py-2 text-sm" style="border-color: var(--border); color: var(--foreground); background-color: var(--background);">
+                                                <option value="kelly">套用凱利公式（動態部位）</option>
+                                                <option value="fixed">不套用凱利公式（全額投入）</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">模型評估與凱利資金配置</h3>
+                                    </div>
+                                    <div class="card-content">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm" id="aiPredictMetrics" style="color: var(--muted-foreground);">
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">訓練準確率</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTrainAccuracy">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">訓練勝率（預測為上漲時）</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTrainWinRate">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">訓練樣本數</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTrainSamples">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">測試準確率</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTestAccuracy">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">測試勝率（預測為上漲時）</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTestWinRate">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">測試樣本數</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTestSamples">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">凱利建議投入比例</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiKellyFraction">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">平均單筆獲利</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiAverageProfit">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">總報酬率</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTotalReturn">-</div>
+                                            </div>
+                                            <div class="p-3 rounded-lg border" style="border-color: var(--border);">
+                                                <div class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">測試集成交 / 預測筆數</div>
+                                                <div class="text-2xl font-semibold text-foreground" id="aiTradeCount">-</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">策略 vs. 買入持有資金曲線</h3>
+                                    </div>
+                                    <div class="card-content space-y-3" style="color: var(--muted-foreground);">
+                                        <div class="h-64 sm:h-72">
+                                            <canvas id="aiPredictEquityChart"></canvas>
+                                        </div>
+                                        <p class="text-xs leading-relaxed">曲線以初始本金為基準，顯示凱利部位、全額投入與買入持有在測試集期間的累積報酬。</p>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg">
+                                    <div class="card-header flex items-center justify-between">
+                                        <h3 class="card-title">交易模擬結果（僅做多）</h3>
+                                        <button id="aiPredictExportBtn" class="text-xs px-2 py-1 rounded border" style="border-color: var(--border); color: var(--muted-foreground);" type="button">匯出 CSV</button>
+                                    </div>
+                                    <div class="card-content overflow-x-auto">
+                                        <table class="min-w-full text-xs" id="aiPredictTradesTable">
+                                            <thead style="background-color: var(--muted); color: var(--foreground);">
+                                                <tr>
+                                                    <th class="px-3 py-2 text-left font-semibold">買進日期</th>
+                                                    <th class="px-3 py-2 text-left font-semibold">賣出日期</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">買進價</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">賣出價</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">價格差</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">報酬率</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">預測機率</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">交易前總資金</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">投入資金</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">損益</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">交易後總資金</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="aiPredictTradesBody" class="divide-y" style="border-color: var(--border); color: var(--muted-foreground);">
+                                                <tr>
+                                                    <td colspan="11" class="px-3 py-4 text-center text-xs">尚未執行 AI 預測或無符合條件的交易。</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2124,9 +2268,11 @@
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
+    <script src="js/ai-predict.js"></script>
     
     <script>
         // Initialize Lucide icons

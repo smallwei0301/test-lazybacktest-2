@@ -764,3 +764,28 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-12 — Patch LB-AI-PREDICT-20250921A
+- **Issue recap**: 缺乏原生 AI 預測分頁協助使用者快速檢視以 LSTM 為核心的隔日漲幅（≥2 元）判斷與凱利公式資金配置，導致想評估深度學習策略的使用者需另行撰寫腳本。
+- **Fix**: 新增「AI 預測」頁籤與 `js/ai-predict.js` 模組，導入 TensorFlow.js LSTM（20 日視窗、2:1 時序切分）即時訓練，計算訓練/測試勝率、凱利投入比例、以今日收盤買進隔日賣出的模擬報酬，並提供 CSV 匯出功能；同步在 UI 顯示版本碼 `LB-AI-PREDICT-20250921A` 與使用說明。
+- **Diagnostics**: 確認未執行回測時會顯示提示、資料不足時提示補抓，並於測試集觸發交易後更新指標卡與交易表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
+## 2025-12-14 — Patch LB-AI-PREDICT-20250927A
+- **Fix**: `js/ai-predict.js` 升級至版本碼 `LB-AI-PREDICT-20250927A`，新增測試流程旗標避免尚未執行時誤顯示「測試集無交易」訊息，並於測試樣本充足但未成交時輸出明確提醒。
+- **Analytics**: 訓練完成後揭露訓練／測試樣本數、僅以測試資料計算勝率與凱利配置，並將狀態列提示同步帶出樣本統計強化測試集驗證概念。
+- **UI**: `index.html` 新增訓練／測試樣本數指標卡，將交易卡片標題改為「測試集成交筆數」，確保所有績效與訊息皆對應測試資料。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
+## 2025-12-13 — Patch LB-AI-PREDICT-20250923A
+- **Issue recap**: 先前 LSTM 模組仍以「隔日+2 元」判斷買點，忽略實際漲跌方向，且未檢查隔日高低點導致測試投入金額為 0；同時欠缺凱利／非凱利資金配置切換與買入持有曲線對照。
+- **Fix**: 更新 `js/ai-predict.js` 為版本碼 `LB-AI-PREDICT-20250923A`，改用隔日收盤是否高於今日收盤的二元分類，新增隔日高低點觸價檢查、凱利與全額投入雙模模擬、資金曲線圖與 CSV 欄位調整；`index.html` 新增資金模式選單、策略曲線卡片與操作說明修正。
+- **Diagnostics**: 本地執行回測後切換至 AI 頁籤，驗證未觸及掛單價時不產生交易、切換資金模式時表格與資金曲線即時更新，並確認 UI 顯示「策略 vs. 買入持有」圖表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
+## 2025-12-18 — Patch LB-AI-PREDICT-20251005A
+- **Issue recap**: 測試集 2:1 切分後仍出現「預測樣本 399 但無成交」與「投入金額顯示為 0」之回報，研判資料整併缺乏高低價資訊、凱利部位回傳 0 與資金曲線缺乏複利更新造成混淆。
+- **Fix**: `js/ai-predict.js` 調整為版本碼 `LB-AI-PREDICT-20251005A`，整併主回測／趨勢分析／快取資料並依日期補齊 open/high/low，計算預測上漲筆數與因價差未成交的統計，並於狀態列與表格訊息揭露原因。
+- **Capital**: 交易模擬改為逐筆記錄「交易前總資金→投入→交易後總資金」，固定／凱利模式皆以最新本金計算下一筆部位，表格與 CSV 新增總資金欄位以利核對。
+- **UI/Diagnostics**: AI 頁籤的成交指標改為「成交 / 預測筆數」，交易表格與匯出檔加入交易前後總資金欄位，無成交時顯示預測與未成交筆數說明。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+
