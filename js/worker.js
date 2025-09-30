@@ -17,6 +17,8 @@ importScripts('config.js');
 // Patch Tag: LB-BLOB-RANGE-20250708A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -39,6 +41,7 @@ const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
+const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
 
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
@@ -2395,10 +2398,40 @@ async function tryFetchRangeFromBlob({
   });
   const requestUrl = `/.netlify/functions/stock-range?${params.toString()}`;
   const startedAt = Date.now();
+  rangeFetchInfo.timeoutMs = NETLIFY_BLOB_RANGE_TIMEOUT_MS;
   let response;
+  let abortTimer = null;
+  let controller = null;
+  if (typeof AbortController === "function") {
+    controller = new AbortController();
+    abortTimer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch (abortError) {
+        console.warn(
+          `[Worker] Netlify Blob 範圍逾時控制失敗 (${stockNo})：`,
+          abortError,
+        );
+      }
+    }, NETLIFY_BLOB_RANGE_TIMEOUT_MS);
+  }
   try {
-    response = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+    const fetchOptions = { headers: { Accept: "application/json" } };
+    if (controller && abortTimer) {
+      fetchOptions.signal = controller.signal;
+    }
+    response = await fetch(requestUrl, fetchOptions);
   } catch (error) {
+    if (abortTimer) clearTimeout(abortTimer);
+    if (controller && error?.name === "AbortError") {
+      rangeFetchInfo.status = "timeout";
+      rangeFetchInfo.error = "timeout";
+      rangeFetchInfo.durationMs = Date.now() - startedAt;
+      console.warn(
+        `[Worker] Netlify Blob 範圍請求逾時 (${stockNo})，改用 Proxy 逐月補抓。`,
+      );
+      return null;
+    }
     rangeFetchInfo.status = "network-error";
     rangeFetchInfo.error = error?.message || String(error);
     rangeFetchInfo.durationMs = Date.now() - startedAt;
@@ -2408,6 +2441,7 @@ async function tryFetchRangeFromBlob({
     );
     return null;
   }
+  if (abortTimer) clearTimeout(abortTimer);
 
   rangeFetchInfo.httpStatus = response.status;
   if (!response.ok) {
@@ -2951,6 +2985,17 @@ async function fetchStockData(
     if (blobRangeResult) {
       return blobRangeResult;
     }
+    const fallbackStatus = fetchDiagnostics?.rangeFetch?.status;
+    const fallbackMessage =
+      fallbackStatus === "timeout"
+        ? "Netlify Blob 範圍回應逾時，改用 Proxy 逐月補抓..."
+        : "Netlify Blob 範圍快取未命中，改用 Proxy 逐月補抓...";
+    const fallbackProgress = fallbackStatus === "timeout" ? 9 : 10;
+    self.postMessage({
+      type: "progress",
+      progress: fallbackProgress,
+      message: fallbackMessage,
+    });
   }
 
   if (adjusted) {
@@ -5781,22 +5826,36 @@ function runStrategy(data, params, options = {}) {
     const buildAggregatedLongEntry = () => {
       if (currentLongEntryBreakdown.length === 0) return null;
       const totalShares = currentLongEntryBreakdown.reduce(
-        (sum, info) => sum + (info.shares || 0),
+        (sum, info) => sum + (info.originalShares || info.shares || 0),
         0,
       );
       const totalPercent = currentLongEntryBreakdown.reduce(
         (sum, info) => sum + (info.allocationPercent || 0),
         0,
       );
+      const totalCostWithFee = currentLongEntryBreakdown.reduce(
+        (sum, info) =>
+          sum + (info.originalCost ?? info.cost ?? info.remainingCost ?? 0),
+        0,
+      );
+      const totalCostWithoutFee = currentLongEntryBreakdown.reduce(
+        (sum, info) =>
+          sum +
+          (info.originalCostWithoutFee ??
+            info.costWithoutFee ??
+            info.remainingCostWithoutFee ??
+            0),
+        0,
+      );
       const averageEntryPrice =
-        totalShares > 0 ? longPositionCostWithoutFee / totalShares : 0;
+        totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
       return {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
         shares: totalShares,
-        cost: longPositionCostWithFee,
-        costWithoutFee: longPositionCostWithoutFee,
+        cost: totalCostWithFee,
+        costWithoutFee: totalCostWithoutFee,
         averageEntryPrice,
         stageCount: currentLongEntryBreakdown.length,
         cumulativeStagePercent: totalPercent,

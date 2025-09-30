@@ -1,4 +1,150 @@
 /* --- 自訂 CSS --- */
+.loading-mascot-wrapper {
+    background: none;
+    background-color: transparent !important;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.loading-mascot-canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 0.25rem;
+    background: transparent;
+    background-color: transparent !important;
+    pointer-events: none;
+}
+
+.loading-mascot-wrapper.square .loading-mascot-canvas {
+    border-radius: 0;
+}
+
+.loading-mascot-canvas .tenor-gif-embed,
+.loading-mascot-canvas .tenor-gif-embed iframe {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.loading-mascot-canvas .tenor-gif-embed {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.loading-mascot-canvas .tenor-gif-embed iframe {
+    pointer-events: none !important;
+    border: none !important;
+    background: transparent !important;
+}
+
+.loading-mascot-canvas .tenor-gif-embed > a {
+    display: none !important;
+}
+
+.loading-mascot-image {
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    pointer-events: none;
+}
+
+.loading-mascot-canvas.loading-mascot-fallback {
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--muted-foreground);
+}
+.quick-backtest-editable {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: clamp(8ch, 10vw, 16ch);
+    min-height: 2.1rem;
+    padding: 0.25rem 0.55rem 0.35rem;
+    margin: 0 0.4rem;
+    border-bottom: 2px solid currentColor;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-align: center;
+    text-align-last: center;
+    outline: none;
+    cursor: text;
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quick-backtest-editable:focus {
+    color: var(--primary-foreground);
+    background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+    border-color: currentColor;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.quick-backtest-editable:empty::before {
+    content: attr(data-placeholder);
+    font-weight: 500;
+    color: color-mix(in srgb, var(--primary-foreground) 65%, transparent);
+    letter-spacing: normal;
+    display: block;
+    text-align: center;
+    width: 100%;
+}
+
+.quick-backtest-editable[aria-invalid="true"] {
+    color: var(--destructive);
+    border-color: var(--destructive);
+}
+
+.quick-backtest-editable::after {
+    content: '▏';
+    display: inline-block;
+    font-weight: 800;
+    font-size: 0.95em;
+    color: currentColor;
+    margin-left: -0.02em;
+    pointer-events: none;
+    user-select: none;
+    animation: quickCaretBlink 1.15s steps(2, jump-none) infinite;
+}
+
+.quick-backtest-editable[data-caret-hidden="true"]::after {
+    opacity: 0;
+    animation: none;
+}
+
+@keyframes quickCaretBlink {
+    0%, 48% {
+        opacity: 1;
+    }
+    52%, 100% {
+        opacity: 0;
+    }
+}
+
+.quick-backtest-hint {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
+
 .tooltip { position: relative; display: inline-block; vertical-align: middle; }
 .tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
 .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }

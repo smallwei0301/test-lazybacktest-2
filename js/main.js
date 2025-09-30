@@ -7,6 +7,8 @@
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116A
+// Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // 全局變量
 let stockChart = null;
@@ -1604,14 +1606,365 @@ function initDeveloperAreaToggle() {
     });
 }
 
-function showLoading(m="⌛ 處理中...") {
-    const el = document.getElementById("loading");
-    const loadingText = document.getElementById('loadingText');
+function getLoadingTextElement() {
+    return document.getElementById('loadingText');
+}
 
-    if (loadingText) loadingText.textContent = m;
+function normaliseLoadingMessage(message) {
+    if (typeof message !== 'string') return '處理中...';
+    return message.replace(/^⌛\s*/, '').trim() || '處理中...';
+}
+
+function initLoadingMascotSanitiser() {
+    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
+    const MAX_PRIMARY_ATTEMPTS = 3;
+    const MAX_LEGACY_ATTEMPTS = 2;
+    const RETRY_DELAY_MS = 1200;
+
+    const container = document.getElementById('loadingGif');
+    if (!container) {
+        return;
+    }
+
+    if (container.dataset.lbMascotSanitiser === VERSION) {
+        return;
+    }
+
+    const postId = container.dataset.tenorId?.trim();
+    const apiKey = container.dataset.tenorApiKey?.trim();
+    const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
+    const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
+        .split(',')
+        .map((src) => src.trim())
+        .filter(Boolean);
+
+    const existingImage = container.querySelector('img.loading-mascot-image');
+    const inlineSrc = existingImage?.getAttribute('src')?.trim();
+    if (existingImage) {
+        existingImage.loading = 'eager';
+        existingImage.decoding = 'async';
+        existingImage.referrerPolicy = 'no-referrer';
+        existingImage.setAttribute('aria-hidden', 'true');
+        if (typeof existingImage.decode === 'function') {
+            existingImage
+                .decode()
+                .catch(() => {
+                    /* ignore decode failures – the fallback loader will retry */
+                });
+        }
+    }
+
+    const fallbackSources = [];
+    if (inlineSrc) {
+        fallbackSources.push(inlineSrc);
+    }
+    for (const src of declaredFallbacks) {
+        if (!fallbackSources.includes(src)) {
+            fallbackSources.push(src);
+        }
+    }
+    let fallbackIndex = 0;
+
+    let embedObserver = null;
+    let embedSanitiseScheduled = false;
+
+    const markInitialised = () => {
+        container.dataset.lbMascotSanitiser = VERSION;
+    };
+
+    const resetContainer = () => {
+        container.classList.remove('loading-mascot-fallback');
+        if (embedObserver) {
+            embedObserver.disconnect();
+            embedObserver = null;
+        }
+    };
+
+    const ensureImageElement = () => {
+        resetContainer();
+        let img = container.querySelector('img.loading-mascot-image');
+        if (!img) {
+            container.innerHTML = '';
+            img = document.createElement('img');
+            img.className = 'loading-mascot-image';
+            img.alt = 'LazyBacktest 進度吉祥物動畫';
+            img.decoding = 'async';
+            img.loading = 'eager';
+            img.referrerPolicy = 'no-referrer';
+            img.setAttribute('aria-hidden', 'true');
+            container.appendChild(img);
+        } else {
+            const embeds = container.querySelectorAll('.tenor-gif-embed');
+            embeds.forEach((node) => node.remove());
+        }
+        return img;
+    };
+
+    const useFallbackImage = () => {
+        if (fallbackIndex >= fallbackSources.length) {
+            return false;
+        }
+        const img = ensureImageElement();
+        while (fallbackIndex < fallbackSources.length) {
+            const nextSrc = fallbackSources[fallbackIndex++];
+            if (!nextSrc) {
+                continue;
+            }
+
+            const handleError = () => {
+                img.removeEventListener('error', handleError);
+                if (!useFallbackImage()) {
+                    mountTenorEmbedFallback();
+                }
+            };
+            img.addEventListener('error', handleError, { once: true });
+            if (img.src !== nextSrc) {
+                img.src = nextSrc;
+            } else {
+                // If the same src is reused, force a repaint so browsers retry the request.
+                img.removeAttribute('src');
+                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+                    ? window.requestAnimationFrame.bind(window)
+                    : (cb) => setTimeout(() => cb(), 16);
+                rerender(() => {
+                    img.src = nextSrc;
+                });
+            }
+            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
+            return true;
+        }
+        return false;
+    };
+
+    const scheduleEmbedSanitise = () => {
+        if (embedSanitiseScheduled) {
+            return;
+        }
+        embedSanitiseScheduled = true;
+        queueMicrotask(() => {
+            embedSanitiseScheduled = false;
+            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
+            anchors.forEach((anchor) => anchor.remove());
+
+            const iframe = container.querySelector('.tenor-gif-embed iframe');
+            if (iframe) {
+                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
+                iframe.setAttribute('aria-hidden', 'true');
+                iframe.setAttribute('tabindex', '-1');
+                iframe.style.pointerEvents = 'none';
+                iframe.style.background = 'transparent';
+            }
+        });
+    };
+
+    function mountTenorEmbedFallback() {
+        if (!postId) {
+            return false;
+        }
+
+        container.innerHTML = '';
+        const embed = document.createElement('div');
+        embed.className = 'tenor-gif-embed';
+        embed.dataset.postid = postId;
+        embed.dataset.shareMethod = 'basic';
+        embed.dataset.width = '100%';
+        embed.dataset.aspectRatio = '1';
+        container.appendChild(embed);
+
+        container.dataset.lbMascotSource = 'tenor-embed';
+
+        scheduleEmbedSanitise();
+        embedObserver = new MutationObserver(scheduleEmbedSanitise);
+        embedObserver.observe(container, { childList: true, subtree: true });
+
+        if (!document.querySelector('script[data-tenor-embed]')) {
+            const script = document.createElement('script');
+            script.src = 'https://tenor.com/embed.js';
+            script.async = true;
+            script.dataset.tenorEmbed = 'true';
+            script.referrerPolicy = 'no-referrer';
+            document.body.appendChild(script);
+        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
+            window.Tenor.refresh();
+        }
+
+        return true;
+    }
+
+    const showHourglassFallback = () => {
+        container.classList.add('loading-mascot-fallback');
+        container.textContent = '⌛';
+        container.dataset.lbMascotSource = 'hourglass';
+    };
+
+    const showFallback = () => {
+        if (useFallbackImage()) {
+            markInitialised();
+            return;
+        }
+        if (mountTenorEmbedFallback()) {
+            markInitialised();
+            return;
+        }
+        showHourglassFallback();
+        markInitialised();
+    };
+
+    if (!postId || !apiKey || typeof fetch !== 'function') {
+        showFallback();
+        return;
+    }
+
+    const applyGifSource = (url) => {
+        const img = ensureImageElement();
+        if (img.src !== url) {
+            img.src = url;
+        }
+        container.dataset.lbMascotSource = `tenor:${url}`;
+        markInitialised();
+    };
+
+    const resolveGifUrl = (payload) => {
+        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+        if (!result) {
+            throw new Error('Tenor API 回傳空集合');
+        }
+
+        const formats = result.media_formats || {};
+        const mediaList = Array.isArray(result.media) ? result.media : [];
+        const gifCandidate =
+            formats.gif?.url ||
+            formats.mediumgif?.url ||
+            formats.tinygif?.url ||
+            formats.nanogif?.url ||
+            mediaList.reduce((selected, item) => {
+                if (selected) return selected;
+                if (item?.gif?.url) return item.gif.url;
+                if (item?.mediumgif?.url) return item.mediumgif.url;
+                if (item?.tinygif?.url) return item.tinygif.url;
+                if (item?.nanogif?.url) return item.nanogif.url;
+                return null;
+            }, null);
+
+        if (!gifCandidate) {
+            throw new Error('Tenor API 缺少 GIF 連結');
+        }
+
+        return gifCandidate;
+    };
+
+    const requestLegacy = (attempt = 1) => {
+        const legacyUrl = new URL('https://g.tenor.com/v1/gifs');
+        legacyUrl.searchParams.set('ids', postId);
+        legacyUrl.searchParams.set('key', apiKey);
+        legacyUrl.searchParams.set('client_key', clientKey);
+
+        fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) {
+                    const httpError = new Error(`Tenor Legacy API HTTP ${response.status}`);
+                    httpError.status = response.status;
+                    throw httpError;
+                }
+                return response.json();
+            })
+            .then((payload) => {
+                const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+                if (!result) {
+                    throw new Error('Tenor Legacy API 回傳空集合');
+                }
+
+                const media = result.media || {};
+                const gifCandidate =
+                    media.gif?.url ||
+                    media.mediumgif?.url ||
+                    media.tinygif?.url ||
+                    media.nanogif?.url;
+
+                if (!gifCandidate) {
+                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
+                }
+
+                applyGifSource(gifCandidate);
+            })
+            .catch((error) => {
+                console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
+                if (error?.status === 403) {
+                    showFallback();
+                    return;
+                }
+                if (attempt < MAX_LEGACY_ATTEMPTS) {
+                    setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
+                } else {
+                    showFallback();
+                }
+            });
+    };
+
+    const requestPrimary = (attempt = 1) => {
+        const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
+        requestUrl.searchParams.set('ids', postId);
+        requestUrl.searchParams.set('key', apiKey);
+        requestUrl.searchParams.set('client_key', clientKey);
+        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
+        requestUrl.searchParams.set('ar_range', 'all');
+
+        fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) {
+                    const httpError = new Error(`Tenor API HTTP ${response.status}`);
+                    httpError.status = response.status;
+                    throw httpError;
+                }
+                return response.json();
+            })
+            .then((payload) => resolveGifUrl(payload))
+            .then((gifUrl) => applyGifSource(gifUrl))
+            .catch((error) => {
+                console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
+                if (error?.status === 403) {
+                    showFallback();
+                    return;
+                }
+                if (attempt < MAX_PRIMARY_ATTEMPTS) {
+                    setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
+                } else {
+                    requestLegacy();
+                }
+            });
+    };
+
+    useFallbackImage();
+    requestPrimary();
+}
+
+function setLoadingBaseMessage(message) {
+    const el = getLoadingTextElement();
+    if (!el) return;
+    const normalised = normaliseLoadingMessage(message);
+    el.dataset.rawMessage = normalised;
+}
+
+function renderLoadingMessage(percent) {
+    const el = getLoadingTextElement();
+    if (!el) return;
+    const base = el.dataset.rawMessage || '處理中...';
+    if (Number.isFinite(percent)) {
+        const safe = Math.max(0, Math.min(100, Math.round(percent)));
+        el.textContent = `${base}（${safe}%）`;
+    } else {
+        el.textContent = base;
+    }
+}
+
+function showLoading(m = "處理中...") {
+    const el = document.getElementById("loading");
     if (el) el.classList.remove("hidden");
+
     progressAnimator.reset();
     progressAnimator.start();
+    setLoadingBaseMessage(m);
+    renderLoadingMessage(progressAnimator.getTarget());
 
     const spinner = el?.querySelector('.fa-spinner');
     if (spinner) spinner.classList.add('fa-spin');
@@ -1622,37 +1975,30 @@ function hideLoading() {
     if (el) el.classList.add("hidden");
 }
 function updateProgress(p) {
-    progressAnimator.update(p);
+    const target = progressAnimator.update(p);
+    const effective = Number.isFinite(target) ? target : progressAnimator.getTarget();
+    renderLoadingMessage(effective);
 }
 
 function createProgressAnimator() {
-    const AUTO_INTERVAL = 200;
-    const AUTO_STEP = 1.8;
-    const MAX_AUTO_PROGRESS = 99;
-    const MIN_DURATION = 320;
-    const MAX_DURATION = 2400;
-    const MS_PER_PERCENT = 45;
-    const SHORT_TASK_THRESHOLD = 4000;
-    const SHORT_FIRST_SEGMENT_PROGRESS = 50;
-    const SHORT_SECOND_SEGMENT_PROGRESS = 50;
-    const SHORT_FIRST_SEGMENT_SPEEDUP = 3;
-    const SHORT_SECOND_SEGMENT_SLOWDOWN = 2;
-    const SHORT_SECOND_SEGMENT_MULTIPLIER = 1 / SHORT_SECOND_SEGMENT_SLOWDOWN;
-    const SHORT_TIME_WEIGHT =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        + (SHORT_SECOND_SEGMENT_PROGRESS / SHORT_SECOND_SEGMENT_MULTIPLIER);
-    const SHORT_FIRST_SEGMENT_TIME_RATIO =
-        (SHORT_FIRST_SEGMENT_PROGRESS / SHORT_FIRST_SEGMENT_SPEEDUP)
-        / SHORT_TIME_WEIGHT;
-    const SHORT_FINAL_MIN_DURATION = 1700;
-    const SHORT_FINAL_MAX_DURATION = 2600;
+    const STAGES = [
+        { id: 'bootstrap', min: 0, max: 6, hold: 0.6 },
+        { id: 'cache', min: 6, max: 18, hold: 0.8 },
+        { id: 'fetch', min: 18, max: 55, hold: 1.4 },
+        { id: 'organise', min: 55, max: 70, hold: 1 },
+        { id: 'simulate', min: 70, max: 95, hold: 1.8 },
+        { id: 'finalise', min: 95, max: 100, hold: 0.3 },
+    ];
+    const MIN_DURATION = 200;
+    const MAX_DURATION = 900;
+    const MS_PER_PERCENT = 28;
 
     const raf =
-        (typeof window !== 'undefined' && window.requestAnimationFrame)
+        (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
             ? window.requestAnimationFrame.bind(window)
             : (cb) => setTimeout(() => cb(Date.now()), 16);
     const caf =
-        (typeof window !== 'undefined' && window.cancelAnimationFrame)
+        (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function')
             ? window.cancelAnimationFrame.bind(window)
             : clearTimeout;
 
@@ -1662,10 +2008,9 @@ function createProgressAnimator() {
     let animationStart = 0;
     let animationEnd = 0;
     let rafId = null;
-    let autoTimer = null;
-    let reportedValue = 0;
-    let autoCeiling = 0;
-    let startTimestamp = 0;
+    let lastReported = 0;
+    let lastDisplayTarget = 0;
+    let lastStageId = 'bootstrap';
 
     function now() {
         if (typeof performance !== 'undefined' && performance.now) {
@@ -1680,10 +2025,40 @@ function createProgressAnimator() {
         return Math.max(0, Math.min(100, num));
     }
 
+    function findStage(value) {
+        const stage = STAGES.find((entry) => value < entry.max);
+        return stage || STAGES[STAGES.length - 1];
+    }
+
+    function computeStageTarget(value) {
+        const stage = findStage(value);
+        const floor = stage.min;
+        const span = stage.max - floor;
+        const guard = Math.min(span, Math.max(0, stage.hold || 0));
+        const ceiling = stage.max - guard;
+        if (value >= stage.max - 0.01) {
+            return stage.max;
+        }
+        if (ceiling <= floor) {
+            return Math.max(floor, Math.min(value, stage.max));
+        }
+        const limited = Math.min(value, ceiling);
+        return Math.max(floor, limited);
+    }
+
     function apply(value) {
         const bar = document.getElementById('progressBar');
-        if (bar) {
-            bar.style.width = `${value}%`;
+        if (!bar) return;
+        bar.style.width = `${value}%`;
+        bar.setAttribute('aria-valuenow', value.toFixed(1));
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        const stage = findStage(value >= 100 ? 99.999 : value);
+        if (stage) {
+            if (stage.id !== lastStageId) {
+                lastStageId = stage.id;
+            }
+            bar.dataset.stage = stage.id;
         }
     }
 
@@ -1693,54 +2068,29 @@ function createProgressAnimator() {
             rafId = null;
         }
     }
-
-    function stopAutoTimer() {
-        if (autoTimer) {
-            clearInterval(autoTimer);
-            autoTimer = null;
+    function now() {
+        if (typeof performance !== 'undefined' && performance.now) {
+            return performance.now();
         }
+        return Date.now();
     }
 
-    function syncCurrent() {
-        if (!rafId) return;
-        const currentTime = now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
-            currentValue = targetValue;
-            stopAnimation();
-            return;
-        }
-        const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
-    }
-
-    function scheduleAnimation() {
+    function scheduleAnimation(newTarget) {
         stopAnimation();
-        if (targetValue <= currentValue + 0.01) {
-            currentValue = targetValue;
+        if (newTarget <= currentValue + 0.001) {
+            currentValue = newTarget;
             apply(currentValue);
             return;
         }
         animationFrom = currentValue;
         animationStart = now();
-        const distance = targetValue - animationFrom;
-        if (distance <= 0) {
-            currentValue = targetValue;
-            apply(currentValue);
-            return;
-        }
-        let duration = distance * MS_PER_PERCENT;
-        duration = Math.max(MIN_DURATION, Math.min(MAX_DURATION, duration));
-        if (targetValue >= 100) {
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                duration = Math.max(duration, SHORT_FINAL_MIN_DURATION);
-                duration = Math.min(duration, SHORT_FINAL_MAX_DURATION);
-            } else {
-                duration = Math.min(duration, 900);
-            }
-        }
+        const distance = newTarget - animationFrom;
+        const duration = Math.max(
+            MIN_DURATION,
+            Math.min(MAX_DURATION, distance * MS_PER_PERCENT),
+        );
         animationEnd = animationStart + duration;
+        targetValue = newTarget;
         apply(currentValue);
         rafId = raf(step);
     }
@@ -1748,54 +2098,22 @@ function createProgressAnimator() {
     function step(timestamp) {
         if (!rafId) return;
         const currentTime = typeof timestamp === 'number' ? timestamp : now();
-        if (animationEnd <= animationStart || currentTime >= animationEnd) {
+        if (currentTime >= animationEnd || animationEnd <= animationStart) {
             currentValue = targetValue;
             apply(currentValue);
             stopAnimation();
             return;
         }
         const ratio = (currentTime - animationStart) / (animationEnd - animationStart);
-        const easedRatio = Math.min(1, Math.max(0, ratio));
-        currentValue = animationFrom + (targetValue - animationFrom) * easedRatio;
+        const eased = ratio * ratio * (3 - 2 * ratio);
+        currentValue = animationFrom + (targetValue - animationFrom) * eased;
         apply(currentValue);
         rafId = raf(step);
     }
 
-    function ensureAutoTimer() {
-        if (autoTimer) return;
-        autoTimer = setInterval(() => {
-            if (reportedValue >= 100) {
-                autoCeiling = 100;
-                setTarget(100);
-                stopAutoTimer();
-                return;
-            }
-            let nextCeiling = Math.max(reportedValue, autoCeiling + AUTO_STEP);
-            const elapsed = startTimestamp ? now() - startTimestamp : 0;
-            if (elapsed > 0 && elapsed <= SHORT_TASK_THRESHOLD) {
-                const normalizedTime = elapsed / SHORT_TASK_THRESHOLD;
-                if (normalizedTime <= SHORT_FIRST_SEGMENT_TIME_RATIO) {
-                    const fastRatio = normalizedTime / SHORT_FIRST_SEGMENT_TIME_RATIO;
-                    const fastProgress = fastRatio * SHORT_FIRST_SEGMENT_PROGRESS;
-                    nextCeiling = Math.max(nextCeiling, fastProgress);
-                } else {
-                    const remainingTimeRatio = (normalizedTime - SHORT_FIRST_SEGMENT_TIME_RATIO)
-                        / (1 - SHORT_FIRST_SEGMENT_TIME_RATIO);
-                    const slowProgress = SHORT_FIRST_SEGMENT_PROGRESS
-                        + (remainingTimeRatio * SHORT_SECOND_SEGMENT_PROGRESS);
-                    nextCeiling = Math.max(nextCeiling, slowProgress);
-                }
-            }
-            autoCeiling = Math.min(MAX_AUTO_PROGRESS, nextCeiling);
-            if (autoCeiling > targetValue + 0.05) {
-                setTarget(autoCeiling);
-            }
-        }, AUTO_INTERVAL);
-    }
-
     function setTarget(value) {
         const clamped = clamp(value);
-        if (clamped <= currentValue + 0.01 && clamped <= targetValue + 0.01) {
+        if (clamped <= currentValue + 0.001 && clamped <= targetValue + 0.001) {
             targetValue = clamped;
             if (!rafId) {
                 currentValue = clamped;
@@ -1803,65 +2121,59 @@ function createProgressAnimator() {
             }
             return;
         }
-        syncCurrent();
-        if (clamped <= currentValue) {
-            targetValue = clamped;
+        if (clamped < currentValue) {
             currentValue = clamped;
-            apply(currentValue);
-            if (clamped >= 100) {
-                stopAnimation();
-                stopAutoTimer();
-            }
-            return;
-        }
-        if (Math.abs(clamped - targetValue) < 0.05) {
             targetValue = clamped;
+            apply(currentValue);
+            stopAnimation();
             return;
         }
-        targetValue = clamped;
-        scheduleAnimation();
-        if (clamped >= 100) {
-            stopAutoTimer();
-        }
+        scheduleAnimation(clamped);
     }
 
     return {
         start() {
-            startTimestamp = now();
-            ensureAutoTimer();
+            lastReported = 0;
+            lastDisplayTarget = 0;
+            apply(currentValue);
         },
         stop() {
-            stopAutoTimer();
             stopAnimation();
         },
         reset() {
-            stopAutoTimer();
             stopAnimation();
             currentValue = 0;
             targetValue = 0;
             animationFrom = 0;
             animationStart = 0;
             animationEnd = 0;
-            reportedValue = 0;
-            autoCeiling = 0;
-            startTimestamp = 0;
+            lastReported = 0;
+            lastDisplayTarget = 0;
+            lastStageId = 'bootstrap';
             apply(0);
         },
         update(nextProgress) {
             const clamped = clamp(nextProgress);
+            if (clamped <= lastReported) {
+                if (clamped >= 100) {
+                    lastDisplayTarget = 100;
+                    setTarget(100);
+                    return lastDisplayTarget;
+                }
+                return lastDisplayTarget;
+            }
+            lastReported = clamped;
+            const stageTarget = computeStageTarget(clamped);
+            lastDisplayTarget = stageTarget;
+            setTarget(stageTarget);
             if (clamped >= 100) {
-                reportedValue = 100;
+                lastDisplayTarget = 100;
                 setTarget(100);
-                return;
             }
-            if (clamped > reportedValue) {
-                reportedValue = clamped;
-            }
-            if (clamped > autoCeiling) {
-                autoCeiling = clamped;
-            }
-            setTarget(Math.max(targetValue, clamped));
-            ensureAutoTimer();
+            return lastDisplayTarget;
+        },
+        getTarget() {
+            return lastDisplayTarget;
         },
     };
 }
@@ -2377,6 +2689,8 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         // 初始化日期
         initDates();
+
+        initLoadingMascotSanitiser();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();

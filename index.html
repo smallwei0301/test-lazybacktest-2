@@ -386,9 +386,25 @@
                                     id="quickBacktestBtn"
                                     class="btn-primary px-8 py-4 text-lg font-semibold rounded-lg transition duration-150 ease-in-out flex items-center justify-center"
                                     style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                                    aria-label="一鍵回測台積電（可編輯）"
+                                    data-state="idle"
                                 >
                                     <i data-lucide="zap" class="lucide mr-3"></i>
-                                    一鍵回測台積電
+                                    <span id="quickBacktestDefaultLabel" class="flex items-center gap-2">
+                                        一鍵回測
+                                        <span
+                                            id="quickBacktestKeyword"
+                                            class="quick-backtest-editable"
+                                            contenteditable="true"
+                                            spellcheck="false"
+                                            role="textbox"
+                                            aria-live="polite"
+                                            aria-label="輸入想回測的股票名稱或代碼"
+                                            tabindex="0"
+                                            data-placeholder="輸入股票或代碼"
+                                        >台積電</span>
+                                    </span>
+                                    <span id="quickBacktestStatusText" class="hidden items-center gap-2 text-base font-semibold"></span>
                                 </button>
 
                                 <button
@@ -403,6 +419,10 @@
                                     開發者區域
                                 </button>
                             </div>
+
+                            <p id="quickBacktestHint" class="quick-backtest-hint text-center sm:text-left">
+                                將使用 2330（台積電）進行一鍵回測。
+                            </p>
 
                             <div
                                 id="developerAreaWrapper"
@@ -1107,7 +1127,39 @@
                                     <h3 class="card-title">執行中...</h3>
                                 </div>
                                 <div class="card-content">
-                                    <div class="space-y-2">
+                                    <div class="space-y-3">
+                                        <div class="flex items-center gap-3">
+                                            <div
+                                                class="loading-mascot-wrapper square w-14 h-14 overflow-hidden flex items-center justify-center"
+                                                aria-hidden="true"
+                                            >
+                                                <div
+                                                    id="loadingGif"
+                                                    class="loading-mascot-canvas"
+                                                    data-tenor-id="1718069610368761676"
+                                                    data-tenor-api-key="LIVDSRZULELA"
+                                                    data-tenor-client-key="lazybacktest-progress-mascot"
+                                                    data-tenor-fallback-src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media1.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media.tenor.com/ghm6KFFitx4AAAAd/hachiware.gif"
+                                                >
+                                                    <img
+                                                        class="loading-mascot-image"
+                                                        src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif"
+                                                        alt="LazyBacktest 進度吉祥物動畫"
+                                                        decoding="async"
+                                                        loading="eager"
+                                                        referrerpolicy="no-referrer"
+                                                        aria-hidden="true"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p
+                                                id="loadingText"
+                                                class="text-sm text-muted"
+                                                style="color: var(--muted-foreground);"
+                                            >
+                                                準備中...
+                                            </p>
+                                        </div>
                                         <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
                                             <div
                                                 id="progressBar"
@@ -1115,9 +1167,6 @@
                                                 style="width: 0%; background-color: var(--primary);"
                                             ></div>
                                         </div>
-                                        <p id="loadingText" class="text-sm text-muted" style="color: var(--muted-foreground);">
-                                            準備中...
-                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -2087,49 +2136,394 @@
             }
             
             // 一鍵回測台積電功能
+            const QUICK_BACKTEST_VERSION = 'LB-QUICK-KEYIN-20251114A';
             const quickBacktestBtn = document.getElementById('quickBacktestBtn');
-            if (quickBacktestBtn) {
-                let originalButtonContent = quickBacktestBtn.innerHTML;
-                let progressInterval;
+            const quickBacktestKeywordEl = document.getElementById('quickBacktestKeyword');
+            const quickBacktestDefaultLabelEl = document.getElementById('quickBacktestDefaultLabel');
+            const quickBacktestStatusTextEl = document.getElementById('quickBacktestStatusText');
+            const quickBacktestHintEl = document.getElementById('quickBacktestHint');
+
+            if (quickBacktestBtn && quickBacktestKeywordEl && quickBacktestStatusTextEl) {
+                const QUICK_DEFAULT = { keyword: '台積電', code: '2330', market: 'TWSE', name: '台積電' };
+                const quickBacktestState = {
+                    keyword: QUICK_DEFAULT.keyword,
+                    resolution: { code: QUICK_DEFAULT.code, market: QUICK_DEFAULT.market, name: QUICK_DEFAULT.name },
+                };
+                let progressInterval = null;
                 let currentProgress = 0;
-                
-                quickBacktestBtn.addEventListener('click', function() {
-                    // 禁用按鈕並改變樣式
-                    quickBacktestBtn.disabled = true;
-                    quickBacktestBtn.style.opacity = '0.7';
-                    currentProgress = 0;
-                    
-                    // 更新按鈕內容為回測中狀態
-                    const updateProgress = () => {
-                        currentProgress += Math.random() * 15 + 5; // 隨機增加 5-20%
-                        if (currentProgress > 95) currentProgress = 95; // 最多到 95%
-                        
-                        quickBacktestBtn.innerHTML = `
+
+                const refreshLucideIcons = () => {
+                    if (typeof lucide !== 'undefined') {
+                        lucide.createIcons();
+                    }
+                };
+
+                const refreshButtonLabel = () => {
+                    quickBacktestBtn.setAttribute(
+                        'aria-label',
+                        `一鍵回測${quickBacktestState.keyword || QUICK_DEFAULT.keyword}（可編輯）`
+                    );
+                };
+
+                const setCaretVisibility = (isHidden) => {
+                    if (!quickBacktestKeywordEl) return;
+                    if (isHidden) {
+                        quickBacktestKeywordEl.setAttribute('data-caret-hidden', 'true');
+                    } else {
+                        quickBacktestKeywordEl.removeAttribute('data-caret-hidden');
+                    }
+                };
+
+                const sanitizeQuickKeyword = (raw) => {
+                    if (typeof raw !== 'string') return '';
+                    return raw
+                        .replace(/[\n\r\t]+/g, ' ')
+                        .replace(/\u00A0/g, ' ')
+                        .replace(/\s{2,}/g, ' ')
+                        .trim()
+                        .slice(0, 18);
+                };
+
+                const toggleButtonState = (state, options = {}) => {
+                    quickBacktestBtn.dataset.state = state;
+                    if (state === 'idle') {
+                        quickBacktestBtn.disabled = false;
+                        quickBacktestBtn.style.opacity = '1';
+                        quickBacktestStatusTextEl.classList.add('hidden');
+                        if (quickBacktestDefaultLabelEl) {
+                            quickBacktestDefaultLabelEl.classList.remove('hidden');
+                        }
+                        quickBacktestStatusTextEl.innerHTML = '';
+                        refreshLucideIcons();
+                        return;
+                    }
+
+                    if (state === 'progress') {
+                        quickBacktestBtn.disabled = true;
+                        quickBacktestBtn.style.opacity = '0.7';
+                        if (quickBacktestDefaultLabelEl) {
+                            quickBacktestDefaultLabelEl.classList.add('hidden');
+                        }
+                        quickBacktestStatusTextEl.classList.remove('hidden');
+                        const progressText = Math.round(options.progress ?? 0);
+                        quickBacktestStatusTextEl.innerHTML = `
                             <i data-lucide="loader-2" class="lucide mr-3 animate-spin"></i>
-                            回測中...${Math.round(currentProgress)}%
+                            回測中...${progressText}%
                         `;
-                        
-                        // 重新初始化圖標
-                        if (typeof lucide !== 'undefined') {
-                            lucide.createIcons();
+                        refreshLucideIcons();
+                        return;
+                    }
+
+                    if (state === 'success') {
+                        quickBacktestBtn.disabled = false;
+                        quickBacktestBtn.style.opacity = '1';
+                        if (quickBacktestDefaultLabelEl) {
+                            quickBacktestDefaultLabelEl.classList.add('hidden');
+                        }
+                        quickBacktestStatusTextEl.classList.remove('hidden');
+                        const message = options.message || '完成！請看下面績效表現';
+                        quickBacktestStatusTextEl.innerHTML = `
+                            <i data-lucide="check-circle" class="lucide mr-3"></i>
+                            ${message}
+                        `;
+                        refreshLucideIcons();
+                        return;
+                    }
+
+                    if (state === 'error') {
+                        quickBacktestBtn.disabled = false;
+                        quickBacktestBtn.style.opacity = '1';
+                        if (quickBacktestDefaultLabelEl) {
+                            quickBacktestDefaultLabelEl.classList.remove('hidden');
+                        }
+                        quickBacktestStatusTextEl.classList.add('hidden');
+                        quickBacktestStatusTextEl.innerHTML = '';
+                        refreshLucideIcons();
+                    }
+                };
+
+                const updateHintDisplay = (resolution) => {
+                    if (!quickBacktestHintEl) return;
+                    if (resolution && resolution.code) {
+                        const marketLabel = resolution.market && typeof getMarketDisplayName === 'function'
+                            ? getMarketDisplayName(resolution.market)
+                            : resolution.market || '';
+                        const marketText = marketLabel ? `（${marketLabel}）` : '';
+                        const displayName = resolution.name
+                            ? resolution.name
+                            : (resolution.code !== quickBacktestState.keyword ? quickBacktestState.keyword : '');
+                        const nameText = displayName ? `（${displayName}）` : '';
+                        quickBacktestHintEl.textContent = `將使用 ${resolution.code}${nameText}${marketText}進行一鍵回測。`;
+                        quickBacktestHintEl.dataset.status = 'resolved';
+                    } else {
+                        quickBacktestHintEl.textContent = `找不到「${quickBacktestState.keyword}」對應的官方代碼，將以原文字嘗試回測。`;
+                        quickBacktestHintEl.dataset.status = 'unresolved';
+                    }
+                };
+
+                const setStockInputValue = (stockCode, options = {}) => {
+                    const stockInput = document.getElementById('stockNo');
+                    if (!stockInput) return;
+                    const normalized = options.keepCase
+                        ? (stockCode || '').trim()
+                        : (stockCode || '').trim().toUpperCase();
+                    if (!normalized) return;
+                    if (stockInput.value.trim() === normalized) return;
+                    stockInput.value = normalized;
+                    stockInput.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+
+                const updateMarketSelect = (market) => {
+                    if (!market) return;
+                    const marketSelect = document.getElementById('marketSelect');
+                    if (!marketSelect) return;
+                    if (marketSelect.value === market) return;
+                    marketSelect.value = market;
+                    marketSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+
+                const detectDirectStockCode = (keyword) => {
+                    const raw = (keyword || '').trim();
+                    if (!raw) return null;
+                    const upper = raw.toUpperCase();
+                    if (/^\d{4}$/.test(upper)) {
+                        return { code: upper, market: 'TWSE' };
+                    }
+                    if (/^\d{5,6}$/.test(upper)) {
+                        return { code: upper, market: upper.startsWith('00') ? 'TWSE' : null };
+                    }
+                    if (/^\d{4}[A-Z]$/.test(upper)) {
+                        return { code: upper, market: null };
+                    }
+                    if (/^[A-Z]{1,6}(?:\.[A-Z]{1,3}|-[A-Z]{1,2})?$/.test(upper)) {
+                        return { code: upper, market: 'US' };
+                    }
+                    return null;
+                };
+
+                const resolveKeywordToStock = async (keyword) => {
+                    const trimmed = (keyword || '').trim();
+                    if (!trimmed) {
+                        return { ...QUICK_DEFAULT };
+                    }
+
+                    const direct = detectDirectStockCode(trimmed);
+                    if (direct) {
+                        const cached = typeof resolveCachedStockNameInfo === 'function'
+                            ? resolveCachedStockNameInfo(direct.code, direct.market)
+                            : null;
+                        return {
+                            code: direct.code,
+                            market: cached?.market || direct.market || null,
+                            name: cached?.info?.name || null,
+                        };
+                    }
+
+                    if (trimmed.length < 2) {
+                        return null;
+                    }
+
+                    const tokens = trimmed
+                        .replace(/[，、,]+/g, ' ')
+                        .split(/\s+/)
+                        .map((token) => token.trim())
+                        .filter(Boolean);
+
+                    if (tokens.length === 0) {
+                        return null;
+                    }
+
+                    if (typeof ensureTaiwanDirectoryReady === 'function') {
+                        try {
+                            await ensureTaiwanDirectoryReady({});
+                        } catch (error) {
+                            console.warn(`[${QUICK_BACKTEST_VERSION}] 台股官方清單載入失敗:`, error);
+                        }
+                    }
+
+                    const directoryEntries = (typeof taiwanDirectoryState !== 'undefined'
+                        && taiwanDirectoryState.entries instanceof Map)
+                        ? Array.from(taiwanDirectoryState.entries.values())
+                        : [];
+
+                    let bestMatch = null;
+                    for (const entry of directoryEntries) {
+                        if (!entry || !entry.name || !entry.stockId) continue;
+                        const entryName = entry.name;
+                        const normalizedName = entryName.replace(/\s+/g, '');
+                        const upperId = entry.stockId.toUpperCase();
+                        let score = 0;
+                        for (const token of tokens) {
+                            const upperToken = token.toUpperCase();
+                            if (upperId.includes(upperToken)) {
+                                score += 6;
+                            }
+                            if (entryName.includes(token)) {
+                                score += entryName.startsWith(token) ? 6 : 4;
+                            } else if (normalizedName.includes(token)) {
+                                score += 3;
+                            }
+                        }
+                        if (score > 0) {
+                            if (!bestMatch || score > bestMatch.score || (
+                                score === bestMatch.score
+                                && upperId < bestMatch.entry.stockId
+                            )) {
+                                bestMatch = { entry, score };
+                            }
+                        }
+                    }
+
+                    if (!bestMatch) {
+                        return null;
+                    }
+
+                    return {
+                        code: bestMatch.entry.stockId,
+                        market: bestMatch.entry.market || null,
+                        name: bestMatch.entry.name || null,
+                    };
+                };
+
+                const commitQuickKeyword = async (options = {}) => {
+                    const rawValue = quickBacktestKeywordEl.textContent || '';
+                    const sanitized = sanitizeQuickKeyword(rawValue);
+                    if (sanitized !== rawValue) {
+                        quickBacktestKeywordEl.textContent = sanitized;
+                    }
+                    const keyword = sanitized || QUICK_DEFAULT.keyword;
+                    if (!sanitized) {
+                        quickBacktestKeywordEl.textContent = QUICK_DEFAULT.keyword;
+                    }
+                    quickBacktestState.keyword = keyword;
+                    refreshButtonLabel();
+
+                    const resolution = await resolveKeywordToStock(keyword);
+                    if (resolution && resolution.code) {
+                        quickBacktestState.resolution = resolution;
+                        quickBacktestKeywordEl.removeAttribute('aria-invalid');
+                        updateHintDisplay(resolution);
+                        setStockInputValue(resolution.code);
+                        updateMarketSelect(resolution.market);
+                        return resolution;
+                    }
+
+                    quickBacktestState.resolution = { code: null, market: null, name: null };
+                    quickBacktestKeywordEl.setAttribute('aria-invalid', 'true');
+                    updateHintDisplay(null);
+                    setStockInputValue(keyword, { keepCase: true });
+                    if (!options.silent && typeof showStockName === 'function') {
+                        showStockName(`找不到「${keyword}」對應的代碼`, 'error');
+                    }
+                    return null;
+                };
+
+                const startProgressCycle = () => {
+                    currentProgress = 0;
+                    toggleButtonState('progress', { progress: currentProgress });
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                    }
+                    progressInterval = setInterval(() => {
+                        currentProgress += Math.random() * 15 + 5;
+                        if (currentProgress > 95) {
+                            currentProgress = 95;
+                        }
+                        toggleButtonState('progress', { progress: currentProgress });
+                    }, 800);
+                };
+
+                const stopProgressCycle = () => {
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
+                };
+
+                const scheduleCompletionWatcher = () => {
+                    const checkBacktestComplete = () => {
+                        const resultElement = document.getElementById('backtest-result');
+                        if (resultElement && resultElement.textContent.trim() !== '執行回測後將顯示詳細結果') {
+                            stopProgressCycle();
+                            toggleButtonState('success');
+                            setTimeout(() => {
+                                toggleButtonState('idle');
+                            }, 3000);
+                        } else {
+                            setTimeout(checkBacktestComplete, 500);
                         }
                     };
-                    
-                    // 立即顯示進度並開始定期更新
-                    updateProgress();
-                    progressInterval = setInterval(updateProgress, 800);
-                    
-                    // 設定台積電的默認參數
-                    const stockInput = document.getElementById('stockInput');
-                    if (stockInput) {
-                        stockInput.value = '2330';
+                    setTimeout(checkBacktestComplete, 1800);
+                };
+
+                quickBacktestKeywordEl.addEventListener('focus', () => {
+                    setCaretVisibility(true);
+                });
+
+                quickBacktestKeywordEl.addEventListener('blur', () => {
+                    setCaretVisibility(false);
+                    commitQuickKeyword({ silent: true });
+                });
+
+                quickBacktestKeywordEl.addEventListener('keydown', (event) => {
+                    event.stopPropagation();
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        quickBacktestKeywordEl.blur();
                     }
-                    
-                    // 設定默認日期範圍（最近一年）
+                });
+
+                quickBacktestKeywordEl.addEventListener('input', () => {
+                    const sanitized = sanitizeQuickKeyword(quickBacktestKeywordEl.textContent || '');
+                    if (quickBacktestKeywordEl.textContent !== sanitized) {
+                        quickBacktestKeywordEl.textContent = sanitized;
+                        const range = document.createRange();
+                        range.selectNodeContents(quickBacktestKeywordEl);
+                        range.collapse(false);
+                        const selection = window.getSelection();
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                    quickBacktestState.keyword = sanitized || QUICK_DEFAULT.keyword;
+                    refreshButtonLabel();
+                });
+
+                quickBacktestKeywordEl.addEventListener('paste', (event) => {
+                    event.preventDefault();
+                    const text = sanitizeQuickKeyword((event.clipboardData || window.clipboardData).getData('text') || '');
+                    const selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) return;
+                    const range = selection.getRangeAt(0);
+                    range.deleteContents();
+                    range.insertNode(document.createTextNode(text));
+                    range.collapse(false);
+                    quickBacktestKeywordEl.dispatchEvent(new Event('input'));
+                });
+
+                quickBacktestKeywordEl.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                });
+
+                quickBacktestBtn.addEventListener('click', async () => {
+                    if (quickBacktestBtn.dataset.state === 'progress') {
+                        return;
+                    }
+
+                    stopProgressCycle();
+                    await commitQuickKeyword({ silent: false });
+                    const stockInput = document.getElementById('stockNo');
+                    const targetCode = stockInput ? stockInput.value.trim() : '';
+                    if (!targetCode) {
+                        toggleButtonState('error');
+                        return;
+                    }
+
+                    startProgressCycle();
+
                     const endDate = new Date();
                     const startDate = new Date();
                     startDate.setFullYear(endDate.getFullYear() - 1);
-                    
+
                     const startDateInput = document.getElementById('startDate');
                     const endDateInput = document.getElementById('endDate');
                     if (startDateInput) {
@@ -2138,63 +2532,28 @@
                     if (endDateInput) {
                         endDateInput.value = endDate.toISOString().split('T')[0];
                     }
-                    
-                    // 監聽回測完成事件
-                    const checkBacktestComplete = () => {
-                        const resultElement = document.getElementById('backtest-result');
-                        const tradeResultsElement = document.getElementById('trade-results');
-                        
-                        // 檢查是否有結果顯示（簡單檢查文本內容是否改變）
-                        if (resultElement && resultElement.textContent.trim() !== '執行回測後將顯示詳細結果') {
-                            // 回測完成
-                            clearInterval(progressInterval);
-                            
-                            // 顯示完成狀態
-                            quickBacktestBtn.innerHTML = `
-                                <i data-lucide="check-circle" class="lucide mr-3"></i>
-                                完成！請看下面績效表現
-                            `;
-                            
-                            // 重新初始化圖標
-                            if (typeof lucide !== 'undefined') {
-                                lucide.createIcons();
-                            }
-                            
-                            // 3秒後恢復原始狀態
-                            setTimeout(() => {
-                                quickBacktestBtn.innerHTML = originalButtonContent;
-                                quickBacktestBtn.disabled = false;
-                                quickBacktestBtn.style.opacity = '1';
-                                if (typeof lucide !== 'undefined') {
-                                    lucide.createIcons();
-                                }
-                            }, 3000);
-                            
-                        } else {
-                            // 繼續檢查
-                            setTimeout(checkBacktestComplete, 500);
-                        }
-                    };
-                    
-                    // 觸發回測
+
                     const backtestBtn = document.getElementById('backtestBtn');
                     if (backtestBtn) {
-                        // 滾動到左邊畫面的開始回測按鈕
-                        backtestBtn.scrollIntoView({ 
-                            behavior: 'smooth', 
+                        backtestBtn.scrollIntoView({
+                            behavior: 'smooth',
                             block: 'center',
                             inline: 'nearest'
                         });
-                        
-                        // 稍微延遲後觸發回測，確保滾動完成
                         setTimeout(() => {
                             backtestBtn.click();
+                            scheduleCompletionWatcher();
                         }, 800);
-                        
-                        // 開始檢查回測狀態
-                        setTimeout(checkBacktestComplete, 1800);
+                    } else {
+                        stopProgressCycle();
+                        toggleButtonState('idle');
                     }
                 });
+
+                // 初始化提示與輸入框狀態
+                quickBacktestKeywordEl.textContent = QUICK_DEFAULT.keyword;
+                refreshButtonLabel();
+                updateHintDisplay(quickBacktestState.resolution);
             }
             
             // Tab switching functionality with updated design
