@@ -1,3 +1,10 @@
+## 2025-09-24 — Patch LB-OFI-TABLE-20250924A
+- **Scope**: 補上 OFI 構面的完整參數表與 CSV，協助交叉檢查指標公式與權重。
+- **Implementation**:
+  - `docs/ofi-metrics-breakdown.md` 新增 LB-OFI-TABLE-20250924A 章節，彙整 Flow／Strategy 各子分數公式、正規化方式與權重。
+  - 建立 `assets/ofi-metrics-parameters.csv`，提供可下載的數據表格供驗證。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-23 — Patch LB-OFI-METRICS-20250923A
 - **Scope**: 新增批量優化 OFI（Overfit Indicator）評分流程與前端指標展示。
 - **Implementation**:

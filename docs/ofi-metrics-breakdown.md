@@ -1,4 +1,4 @@
-# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250924A）
+# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250924B）
 
 > 適用模組：`LB-OFI-METRICS-20250923A`
 
@@ -115,5 +115,36 @@
 | 加權 | 權重會依有效子分數重新正規化 | 避免任何一項缺資料時整體評分消失。【F:js/overfit-score.js†L986-L1019】 |
 
 ---
+## 6. 指標公式總表（LB-OFI-TABLE-20250924A）
+
+下表彙整 OFI 所有構面、計算公式與權重，可搭配 [下載用 CSV](../assets/ofi-metrics-parameters.csv) 交叉檢查設定。
+
+| 層級 | 構面 / 指標 | 計算公式 | 正規化 / 門檻 | 權重 / 參數 | 備註 |
+| --- | --- | --- | --- | --- | --- |
+| 前置 | CSCV 分段 | 將每日報酬切成 `S` 段，`S=desiredSegments=10`，`|I_t|=|O_t|=S/2` | 每段至少 `minPointsPerSegment=5` 筆樣本，無法均分時前段補一筆 | 聚合子 `agg=median`（可改 `mean`） | 參考 `DEFAULT_CONFIG.desiredSegments` 與 `aggregator` 設定。【F:js/overfit-score.js†L9-L29】【F:js/overfit-score.js†L248-L288】 |
+| Flow | OOS 分位 `q_t` | `q_t = \frac{\operatorname{rank}(A_{k^*}(O_t))}{K+1}` | 夾住於 `[1/(K+1+ε), 1-1/(K+1+ε)]`，`ε=1e-6` | 依有效 OOS 樣本計算排名 | 避免極端值導致 `\lambda` 無限大。【F:js/overfit-score.js†L313-L345】 |
+| Flow | `\lambda_t` | `\lambda_t = \log\frac{q_t}{1-q_t}` | 與 `q_t` 同 | 無額外權重 | 用於判斷 PBO。【F:js/overfit-score.js†L313-L345】 |
+| Flow | `R^{PBO}` | `R^{PBO} = 1 - \frac{1}{T}\sum 1_{\lambda_t < 0}` | 無需再正規化（結果落在 [0,1]） | `T = validSplits` | 失敗切分自動忽略。【F:js/overfit-score.js†L313-L366】 |
+| Flow | `R^{SPA}` | `R^{SPA} = \frac{1}{K}\sum 1_{p^{SPA}_k < \alpha}` | `\alpha = spaAlpha = 0.1` | 權重 `β_2 = 0.2` | 待伺服端回填資料時計算。【F:js/overfit-score.js†L404-L435】 |
+| Flow | `R^{MCS}` | `R^{MCS} = \frac{|\mathcal{S}_{MCS}|}{K}` | 不需額外正規化 | 權重 `β_3 = 0.2` | 需伺服端提供 MCS 結果。【F:js/overfit-score.js†L404-L463】 |
+| Flow | `R^{Flow}` | `R^{Flow} = 0.6 R^{PBO} + 0.2 R^{SPA} + 0.2 R^{MCS}` | 缺值時動態重算有效權重 | `β = (0.6, 0.2, 0.2)` | Flow 分數共用於所有策略。【F:js/overfit-score.js†L404-L419】【F:js/overfit-score.js†L986-L1019】 |
+| Strategy | `\tilde m_k` | OOS 中位數 | P10/P90 分位夾住至 [0,1] | - | 核心穩健度指標。【F:js/overfit-score.js†L465-L517】 |
+| Strategy | `\text{IQR}_k` | OOS IQR | P10/P90 分位夾住至 [0,1] | - | 缺值視為 1，代表最差穩健度。【F:js/overfit-score.js†L505-L521】 |
+| Strategy | `R^{OOS}_k` | `0.6 · \text{mid\_norm}_k + 0.4 · (1 - \text{iqr\_norm}_k)` | `mid\_norm`、`iqr\_norm` 均限制在 [0,1] | `α = oosAlpha = 0.6` | 提醒樣本不足時偏保守。【F:js/overfit-score.js†L505-L523】 |
+| Strategy | `\text{WR}_k` | `\text{WR}_k = \frac{1}{W}\sum 1_{r_{k,w}>0}` | 已在 [0,1] | - | Walk-forward 勝率。【F:js/overfit-score.js†L525-L556】 |
+| Strategy | `\bar r_k` | `\bar r_k = \frac{1}{W}\sum r_{k,w}`（以日報酬總和近似） | P10/P90 正規化為 `ret_norm` | - | 反映 OOS 平均報酬。【F:js/overfit-score.js†L541-L579】 |
+| Strategy | `R^{WF}_k` | `0.6 · \text{WR}_k + 0.4 · \text{ret\_norm}_k` | `ret_norm` 限制在 [0,1] | 權重比 `(0.6, 0.4)` | 加權勝率與報酬。【F:js/overfit-score.js†L557-L568】 |
+| Strategy | Island 門檻 | `\tau = P75(G)` | 高於門檻的格點進入島探索 | - | 採 8 連通尋找島嶼。【F:js/overfit-score.js†L644-L811】 |
+| Strategy | `A^{norm}_j` | 面積以 P25/P95 正規化 | 夾住 [0,1] | - | 反映穩定高原面積。【F:js/overfit-score.js†L812-L860】 |
+| Strategy | `D^{norm}_j` | IQR 以 P25/P95 正規化 | 夾住 [0,1] | - | 代表島內分散度。【F:js/overfit-score.js†L812-L860】 |
+| Strategy | `E^{pen}_j` | 邊緣懲罰取負值後 P25/P95 正規化 | 夾住 [0,1] | - | 避免尖銳邊界。【F:js/overfit-score.js†L812-L860】 |
+| Strategy | `S_j` | `S_j = A^{norm}_j · (1 - D^{norm}_j) · (1 - E^{pen}_j)` | - | - | 以最大島嶼為 1 正規化。【F:js/overfit-score.js†L598-L642】 |
+| Strategy | `R^{Island}_k` | `R^{Island}_k = S_{j(k)} / \max_j S_j` | 結果落在 [0,1] | - | `meta` 回傳 raw 與 normalised 值。【F:js/overfit-score.js†L598-L642】 |
+| Strategy | `\text{PSR}_k` | `\Pr(\text{Sharpe} > \theta)` | `\theta = dsrSharpeThreshold = 0` | - | 伺服端可覆蓋前端估計。【F:js/overfit-score.js†L580-L606】 |
+| Strategy | `\text{DSR}_k` | `\sigma(η · z)`，`z = \text{Sharpe}·\sqrt{n-1}` | 夾住 [0,1] | `η = dsrLogisticEta = 0.5` | 亦支援伺服端傳回機率。【F:js/overfit-score.js†L604-L617】 |
+| Strategy | `R^{DSR/PSR}_k` | `\max(\text{PSR}_k, \text{DSR}_k)` | - | 權重 `γ_1 = 0.25` | 取較保守的顯著性估計。【F:js/overfit-score.js†L604-L617】【F:js/overfit-score.js†L986-L1019】 |
+| Strategy | `R^{Strategy}_k` | `0.25 R^{DSR/PSR}_k + 0.25 R^{OOS}_k + 0.25 R^{WF}_k + 0.25 R^{Island}_k` | 缺值時重算有效權重 | `γ = (0.25, 0.25, 0.25, 0.25)` | 每策略獨立計算。【F:js/overfit-score.js†L986-L1019】 |
+| 綜合 | `OFI_k` | `100 · (0.30 R^{Flow} + 0.70 R^{Strategy}_k)` | - | `w_F = 0.30`、`w_S = 0.70` | 輸出 0–100 分並附評語。【F:js/overfit-score.js†L986-L1051】 |
+| 綜合 | Verdict 門檻 | 👍 ≥ 80、✅ 65–79、😐 50–64、⚠️ < 50 | - | - | 資料不足時顯示「資料不足」。【F:js/overfit-score.js†L1033-L1051】 |
 
 如需在 UI 顯示更多細節，可直接讀取 `result.ofiComponents` 與 `result.meta.island`；若需進一步驗證流程，可利用 `flow.lambda` / `flow.qValues` 重繪 CSCV 分布。還想追蹤哪個指標的調整對使用者決策影響最大呢？
