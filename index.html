@@ -1863,10 +1863,18 @@
                                                                     <option value="sharpeRatio">夏普比率</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
                                                                     <option value="tradeCount">交易次數</option>
+                                                                    <option value="ofiScore">策略穩健度 (OFI)</option>
+                                                                    <option value="ofi_cPBO">cPBO 掉隊率</option>
+                                                                    <option value="ofi_level">OOS 中位分位</option>
+                                                                    <option value="ofi_dsr">Deflated Sharpe Ratio</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
                                                                     <i data-lucide="arrow-down" class="lucide"></i>
                                                                 </button>
+                                                                <label class="flex items-center gap-2 text-xs text-muted-foreground ml-2" style="color: var(--muted-foreground);">
+                                                                    <input type="checkbox" id="batch-filter-spa" class="h-4 w-4 text-blue-600 border-border rounded" style="border-color: var(--border);">
+                                                                    只看通過 SPA/MCS
+                                                                </label>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1884,6 +1892,12 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">最大回撤</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">交易次數</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">策略穩健度 (OFI)</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">cPBO 掉隊率</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">OOS 中位分位</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">OOS IQR</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">Deflated Sharpe</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">補強檢定</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">操作</th>
                                                                     </tr>
                                                                 </thead>
