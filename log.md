@@ -1,3 +1,14 @@
+## 2025-11-19 — Patch LB-ML-KELLY-20250623B
+- **Scope**: 調整預測分頁改以「交易日期間」自動切分訓練與測試資料，並新增模型流程與參數解說卡片。
+- **Implementation**: 以最近樣本連續切分資料，保留訊號日與交易日日期軸，更新指標卡片、交易清單、凱利模擬流程與預設期間邏輯，確保模型僅需輸入交易日數即可運作。
+- **Testing**: `node --check js/main.js`
+
+## 2025-11-18 — Patch LB-ML-KELLY-20250623A
+- **Scope**: 新增「預測機制」分頁，整合最新研究摘要與前端即時計算的 Logistic Regression + Kelly sizing 模擬。
+- **UI/UX**: 在頁籤導覽加入預測分頁按鈕，卡片化呈現研究列表、參數表單、指標摘要、權益曲線與交易紀錄，維持現有設計系統的色彩與響應式排版。
+- **Implementation**: 以 cachedStockData 建立特徵、切分訓練/測試、標準化後使用原生 SGD Logistic Regression 訓練，套用凱利公式（含半凱利與曝險上限）於測試集模擬績效並繪製圖表。
+- **Testing**: `node --check js/main.js`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
