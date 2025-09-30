@@ -1,3 +1,12 @@
+## 2025-11-18 — Patch LB-AI-PREDICT-20251118A
+- **Scope**: 新增「AI 預測」獨立分頁與 Worker 擴充，導入 LSTM 隔日漲跌預測與凱利公式資金控管模組。
+- **Highlights**:
+  - 建立 `ai-predict.html` 單頁介面，提供參數表單、模型摘要、交易績效與交易明細表格，並揭露使用的學術參考文獻。
+  - 撰寫 `js/ai-predict.js` 控制器（v1.0），實作資料擷取、TensorFlow.js LSTM 訓練、2:1 訓練/測試切分、凱利公式部位計算與模擬交易成果輸出。
+  - 擴充 `js/worker.js` 新增 `fetchPriceSeries` 指令，沿用既有快取/Proxy 管線回傳實際收盤價序列，並支援錯誤訊息回傳給前端。
+  - 更新 `index.html` 導覽列露出 AI 預測入口，維持主站資訊層級的一致性。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');const{performance}=require('perf_hooks');const run=(f,s={})=>{const c=fs.readFileSync(f,'utf8');const ctx={console,setTimeout,clearTimeout,setInterval,clearInterval,performance,...s};vm.createContext(ctx);vm.runInContext(c,ctx,{filename:f});console.log("${f} ok");};run('js/worker.js',{importScripts:()=>{},self:{}});run('js/ai-predict.js',{window:{addEventListener:()=>{},tf:undefined},document:{addEventListener:()=>{},getElementById:()=>null}});NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

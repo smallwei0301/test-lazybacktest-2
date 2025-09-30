@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 預測｜LazyBacktest</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+  <link
+    rel="stylesheet"
+    as="style"
+    onload="this.rel='stylesheet'"
+    href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;600;700;900&family=Noto+Sans:wght@400;500;700;900"
+  />
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js" defer></script>
+  <script src="js/ai-predict.js" defer></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <header class="bg-slate-900/60 backdrop-blur border-b border-slate-800">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <a href="index.html" class="flex items-center space-x-3">
+        <span class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500/20 text-cyan-400 font-bold">LB</span>
+        <div>
+          <p class="text-sm uppercase tracking-[0.2em] text-cyan-300">LazyBacktest</p>
+          <p class="text-xs text-slate-400">AI 驅動回測與策略研究</p>
+        </div>
+      </a>
+      <nav class="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-300">
+        <a href="index.html" class="hover:text-white transition-colors">回測首頁</a>
+        <a href="ai-predict.html" class="text-cyan-300 font-semibold">AI 預測</a>
+        <a href="https://lazybacktest.netlify.app/log" target="_blank" rel="noreferrer" class="hover:text-white transition-colors">更新紀錄</a>
+      </nav>
+      <button id="mobile-menu-toggle" class="md:hidden rounded-lg border border-slate-700 p-2 text-slate-200" aria-label="展開選單">
+        <i data-lucide="menu"></i>
+      </button>
+    </div>
+    <div id="mobile-menu" class="md:hidden hidden border-t border-slate-800 bg-slate-900/90">
+      <div class="px-4 py-3 space-y-2 text-sm text-slate-300">
+        <a href="index.html" class="block rounded-md px-3 py-2 hover:bg-slate-800/80 hover:text-white">回測首頁</a>
+        <a href="ai-predict.html" class="block rounded-md px-3 py-2 bg-cyan-500/10 text-cyan-300">AI 預測</a>
+        <a href="https://lazybacktest.netlify.app/log" target="_blank" rel="noreferrer" class="block rounded-md px-3 py-2 hover:bg-slate-800/80 hover:text-white">更新紀錄</a>
+      </div>
+    </div>
+  </header>
+  <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-12">
+    <section class="grid gap-10 lg:grid-cols-[2fr,1fr] items-start">
+      <div class="space-y-6">
+        <p class="inline-flex items-center rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">LB-AI-PREDICT-20251118A</p>
+        <h1 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">AI 預測：以 LSTM 評估隔日漲跌與資金配置</h1>
+        <p class="text-base leading-relaxed text-slate-300">
+          本分頁整合最新的深度學習研究成果，採用長短期記憶網路（Long Short-Term Memory, LSTM）辨識台股與美股的價格動能，並以 2:1 的訓練／測試切分檢驗隔日收盤價漲跌。使用者可以選擇啟用凱利公式（Kelly Criterion）作為資金部位控管工具，僅在模型預測為上漲時入場，以今日收盤價買進、隔日收盤價賣出模擬回測。
+        </p>
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-xl shadow-black/20">
+          <h2 class="text-xl font-semibold text-white">方法論重點</h2>
+          <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+            <li class="flex items-start space-x-3"><span class="mt-1 h-2.5 w-2.5 rounded-full bg-cyan-400"></span><span>資料預處理遵循 Fischer 與 Krauss (2018) 的收益正規化策略，將價格視窗正規化至第一日，避免尺度漂移造成模型偏誤。</span></li>
+            <li class="flex items-start space-x-3"><span class="mt-1 h-2.5 w-2.5 rounded-full bg-cyan-400"></span><span>LSTM 結構採用 Bao 等人 (2017) 提出的堆疊式時間序列建模流程，保留序列順序並避免隨機抽樣打亂時間依存性。</span></li>
+            <li class="flex items-start space-x-3"><span class="mt-1 h-2.5 w-2.5 rounded-full bg-cyan-400"></span><span>資金管理引入 Kelly (1956) 的凱利公式，利用模型預測勝率與訓練期的盈虧比估計每筆交易的最適資金配置。</span></li>
+          </ul>
+        </div>
+      </div>
+      <aside class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 space-y-4">
+        <h3 class="text-lg font-semibold text-white">使用指引</h3>
+        <ol class="list-decimal list-inside space-y-2 text-sm leading-6 text-slate-300">
+          <li>輸入股票代號、回測區間與市場別，系統會自動透過 Proxy 抓取實際收盤價。</li>
+          <li>確認訓練／測試資料量至少能覆蓋 30 筆序列（預設視窗 20 日），以確保模型可收斂。</li>
+          <li>若啟用凱利公式，請留意預測勝率不足時資金配置會自動縮減為零，避免過度槓桿。</li>
+        </ol>
+        <p class="text-xs text-slate-500">提示：模型推論於瀏覽器端執行，建議使用桌機或具備充足運算能力的裝置。</p>
+      </aside>
+    </section>
+
+    <section class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/10">
+      <form id="ai-predict-form" class="space-y-6">
+        <div class="grid gap-6 md:grid-cols-2">
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">股票代號</span>
+            <input type="text" id="stock-no" name="stockNo" required placeholder="例如：2330 或 AAPL" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">市場</span>
+            <select id="market-type" name="marketType" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400">
+              <option value="TWSE">台灣上市</option>
+              <option value="TPEX">台灣上櫃</option>
+              <option value="US">美股（FinMind）</option>
+            </select>
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">開始日期</span>
+            <input type="date" id="start-date" name="startDate" required class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">結束日期</span>
+            <input type="date" id="end-date" name="endDate" required class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+        </div>
+        <div class="grid gap-6 md:grid-cols-3">
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">視窗長度（日）</span>
+            <input type="number" id="window-size" name="windowSize" min="10" max="120" step="1" value="20" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">訓練週期（Epochs）</span>
+            <input type="number" id="epochs" name="epochs" min="10" max="200" step="5" value="60" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">初始資金（元）</span>
+            <input type="number" id="initial-capital" name="initialCapital" min="10000" step="1000" value="100000" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2">
+          <label class="flex items-center space-x-3 text-sm text-slate-200">
+            <input type="checkbox" id="enable-kelly" name="enableKelly" class="h-4 w-4 rounded border-slate-700 bg-slate-950 text-cyan-500 focus:ring-cyan-500" checked />
+            <span>啟用凱利公式資金控管</span>
+          </label>
+          <label class="flex flex-col space-y-2 text-sm">
+            <span class="font-medium text-slate-200">固定部位比率（關閉凱利時使用）</span>
+            <input type="number" id="fixed-fraction" name="fixedFraction" min="0" max="1" step="0.05" value="0.5" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-cyan-400 focus:ring-cyan-400" />
+          </label>
+        </div>
+        <div class="flex items-center justify-between text-xs text-slate-400">
+          <span id="ai-predict-status">準備就緒，請輸入參數後執行。</span>
+          <span id="ai-predict-timer" class="hidden">計算中...</span>
+        </div>
+        <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">開始訓練與回測</button>
+      </form>
+    </section>
+
+    <section class="grid gap-8 lg:grid-cols-[1.1fr,0.9fr]">
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/10 space-y-4" id="ai-predict-summary">
+        <h2 class="text-xl font-semibold text-white">模型評估摘要</h2>
+        <div id="ai-predict-summary-content" class="space-y-4 text-sm leading-6 text-slate-300">
+          <p>尚未執行分析。</p>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/10 space-y-4" id="ai-predict-trade-metrics">
+        <h2 class="text-xl font-semibold text-white">回測績效指標</h2>
+        <div id="ai-predict-trade-content" class="space-y-4 text-sm leading-6 text-slate-300">
+          <p>尚未執行分析。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/10">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-white">交易明細（測試區間）</h2>
+        <span class="text-xs text-slate-500" id="trade-count">0 筆交易</span>
+      </div>
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-800 text-sm text-slate-300" id="trade-table">
+          <thead class="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-400">
+            <tr>
+              <th scope="col" class="px-3 py-2 text-left">買進日</th>
+              <th scope="col" class="px-3 py-2 text-left">賣出日</th>
+              <th scope="col" class="px-3 py-2 text-right">買進價</th>
+              <th scope="col" class="px-3 py-2 text-right">賣出價</th>
+              <th scope="col" class="px-3 py-2 text-right">預測勝率</th>
+              <th scope="col" class="px-3 py-2 text-right">投入資金</th>
+              <th scope="col" class="px-3 py-2 text-right">單筆報酬</th>
+              <th scope="col" class="px-3 py-2 text-right">報酬率</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800" id="trade-table-body">
+            <tr>
+              <td colspan="8" class="px-3 py-6 text-center text-slate-500">尚未執行交易模擬。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-inner shadow-black/20">
+      <h2 class="text-xl font-semibold text-white">參考文獻</h2>
+      <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-300">
+        <li>Fischer, T., &amp; Krauss, C. (2018). Deep learning with long short-term memory networks for financial market predictions. <em>European Journal of Operational Research, 270</em>(2), 654-669.</li>
+        <li>Bao, W., Yue, J., &amp; Rao, Y. (2017). A deep learning framework for financial time series using stacked autoencoders and long-short term memory. <em>PLOS ONE, 12</em>(7), e0180944.</li>
+        <li>Kelly, J. L. (1956). A new interpretation of information rate. <em>Bell System Technical Journal, 35</em>(4), 917-926.</li>
+      </ul>
+    </section>
+  </main>
+  <footer class="border-t border-slate-800 bg-slate-900/80 py-6">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-xs text-slate-500 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      <span>© 2025 LazyBacktest. 保留所有權利。</span>
+      <span>資料與策略僅供研究使用，投資前請審慎評估風險。</span>
+    </div>
+  </footer>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+      const toggle = document.getElementById('mobile-menu-toggle');
+      const menu = document.getElementById('mobile-menu');
+      toggle?.addEventListener('click', () => {
+        menu?.classList.toggle('hidden');
+      });
+    });
+  </script>
+</body>
+</html>

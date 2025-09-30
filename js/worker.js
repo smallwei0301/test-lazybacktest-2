@@ -19,6 +19,7 @@ importScripts('config.js');
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-PREDICT-20251118A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -9340,6 +9341,61 @@ self.onmessage = async function (e) {
     effectiveStartDate ||
     params?.startDate;
   try {
+    if (type === "fetchPriceSeries") {
+      const {
+        stockNo,
+        startDate,
+        endDate,
+        marketType = "TWSE",
+        adjustedPrice = false,
+        splitAdjustment = false,
+        effectiveStartDate: effectiveStart = null,
+      } = params || {};
+      if (!stockNo) {
+        throw new Error("fetchPriceSeries 缺少股票代號");
+      }
+      if (!startDate || !endDate) {
+        throw new Error("fetchPriceSeries 需提供開始與結束日期");
+      }
+      const fetchOutcome = await fetchStockData(stockNo, startDate, endDate, marketType, {
+        adjusted: adjustedPrice,
+        adjustedPrice,
+        splitAdjustment,
+        effectiveStartDate: effectiveStart || startDate,
+        lookbackDays,
+      });
+      const rows = Array.isArray(fetchOutcome?.data) ? fetchOutcome.data : [];
+      const priceSeries = rows
+        .filter((row) => row && row.date && Number.isFinite(Number(row.close)))
+        .map((row) => ({
+          date: row.date,
+          open: Number(row.open ?? row.close ?? 0),
+          high: Number(row.high ?? row.close ?? 0),
+          low: Number(row.low ?? row.close ?? 0),
+          close: Number(row.close),
+          volume: Number(row.volume ?? 0),
+        }));
+      self.postMessage({
+        type: "fetchPriceSeriesResult",
+        requestId: e.data?.requestId || null,
+        payload: {
+          priceSeries,
+          dataSource: fetchOutcome?.dataSource || null,
+          priceSource: fetchOutcome?.priceSource || null,
+          summary: fetchOutcome?.summary || null,
+          diagnostics: fetchOutcome?.diagnostics || null,
+          effectiveStartDate:
+            fetchOutcome?.effectiveStartDate || effectiveStart || startDate,
+          dataStartDate: fetchOutcome?.dataStartDate || startDate,
+          fetchRange:
+            fetchOutcome?.fetchRange || {
+              start: startDate,
+              end: endDate,
+            },
+        },
+      });
+      return;
+    }
     if (type === "runBacktest") {
       let dataToUse = null;
       let fetched = false;
@@ -10251,7 +10307,13 @@ self.onmessage = async function (e) {
     }
   } catch (error) {
     console.error(`Worker 執行 ${type} 期間錯誤:`, error);
-    if (type === "getSuggestion") {
+    if (type === "fetchPriceSeries") {
+      self.postMessage({
+        type: "fetchPriceSeriesError",
+        requestId: e.data?.requestId || null,
+        error: error?.message || "取得價格資料時發生錯誤",
+      });
+    } else if (type === "getSuggestion") {
       self.postMessage({
         type: "suggestionError",
         data: { message: `計算建議時發生錯誤: ${error.message || "未知錯誤"}` },
