@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ml-forecast"
+                                            >
+                                                <i data-lucide="line-chart" class="lucide-sm inline mr-1"></i>預測機制
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2052,6 +2059,110 @@
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-content hidden" id="ml-forecast-tab" data-lb-ml-forecast-version="LB-ML-KELLY-20251208A">
+                                <div class="space-y-6">
+                                    <div class="card">
+                                        <div class="card-header space-y-2">
+                                            <h3 class="card-title text-base flex items-center gap-2">
+                                                <span>最新研究速覽</span>
+                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">隔日方向 · 深度學習 · 凱利資金</span>
+                                            </h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                下列文獻聚焦於深度學習隔日預測與凱利資金管理，可作為迭代模型與風控設定的依據。
+                                            </p>
+                                        </div>
+                                        <div class="card-content">
+                                            <ul class="space-y-3 text-sm leading-relaxed" style="color: var(--foreground);">
+                                                <li>
+                                                    <span class="font-semibold">2025｜Integrating Deep Learning and Econometrics for Stock Prediction</span> — 比較 LSTM 與傳統模型並強調混合式框架優勢。<a href="https://www.sciencedirect.com/science/article/pii/S2666827025001136" target="_blank" rel="noopener" class="text-primary underline ml-1">ScienceDirect</a>
+                                                </li>
+                                                <li>
+                                                    <span class="font-semibold">2025｜Advanced Stock Market Prediction Using LSTM</span> — 多標的隔日預測架構與評估流程。<a href="https://arxiv.org/abs/2505.05325" target="_blank" rel="noopener" class="text-primary underline ml-1">arXiv</a>
+                                                </li>
+                                                <li>
+                                                    <span class="font-semibold">2025｜Stock Market Prediction Using ML &amp; DL（MDPI Review）</span> — 整理短線命中率與收益率指標的最新趨勢。<a href="https://www.mdpi.com/2673-9909/5/3/76" target="_blank" rel="noopener" class="text-primary underline ml-1">MDPI</a>
+                                                </li>
+                                                <li>
+                                                    <span class="font-semibold">2024｜Deep learning-based time series forecasting</span> — 盤點 LSTM/Transformer 在金融時間序列上的設計。<a href="https://link.springer.com/article/10.1007/s10462-024-10989-8" target="_blank" rel="noopener" class="text-primary underline ml-1">SpringerLink</a>
+                                                </li>
+                                                <li>
+                                                    <span class="font-semibold">2024｜Sizing the bets in a focused portfolio</span> — 凱利公式在投資組合中的實務限制與調校。<a href="https://arxiv.org/abs/2402.15588" target="_blank" rel="noopener" class="text-primary underline ml-1">arXiv</a>
+                                                </li>
+                                                <li>
+                                                    <span class="font-semibold">Kelly Criterion</span> — 凱利公式定義：<code class="bg-muted px-1 py-0.5 rounded text-[11px]">f* = p - (1 - p) / b</code>，其中 <code class="bg-muted px-1 py-0.5 rounded text-[11px]">b = g / |l|</code>。<a href="https://en.wikipedia.org/wiki/Kelly_criterion" target="_blank" rel="noopener" class="text-primary underline ml-1">Wikipedia</a>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header space-y-2">
+                                            <h3 class="card-title text-base">📈 預測機制（隔日漲跌 | ML + Kelly）</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                步驟：資料切分 → Logistic Regression 訓練 → 訓練集平均漲跌幅估計 → 凱利資金配置 → 測試集模擬與買進持有比較。
+                                            </p>
+                                        </div>
+                                        <div class="card-content space-y-6">
+                                            <div class="grid md:grid-cols-4 gap-3">
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-train-start">訓練區間起</label>
+                                                    <input id="ml-train-start" type="date" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-train-end">訓練區間迄</label>
+                                                    <input id="ml-train-end" type="date" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-test-start">測試區間起</label>
+                                                    <input id="ml-test-start" type="date" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-test-end">測試區間迄</label>
+                                                    <input id="ml-test-end" type="date" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                            </div>
+                                            <div class="grid md:grid-cols-4 gap-3">
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-lr">學習率</label>
+                                                    <input id="ml-lr" type="number" step="0.0001" value="0.05" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-epochs">迭代次數</label>
+                                                    <input id="ml-epochs" type="number" value="150" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-kelly-mult">半凱利係數</label>
+                                                    <input id="ml-kelly-mult" type="number" step="0.05" value="0.5" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[11px] mb-1" for="ml-max-f">單筆上限(%)</label>
+                                                    <input id="ml-max-f" type="number" step="1" value="25" class="w-full border px-2 py-1 rounded" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <button id="ml-run" type="button" class="px-4 py-2 rounded shadow text-sm font-semibold" style="background-color: var(--primary); color: var(--primary-foreground);">
+                                                    訓練 + 回測
+                                                </button>
+                                                <p class="text-[11px]" style="color: var(--muted-foreground);">提醒：請先於主回測執行一次，建立 cachedStockData 快取。</p>
+                                            </div>
+                                            <div id="ml-cards" class="grid gap-3 md:grid-cols-4"></div>
+                                            <div class="grid md:grid-cols-2 gap-4">
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border); background-color: var(--background);">
+                                                    <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">權益曲線（測試集）</h4>
+                                                    <canvas id="ml-equity-chart" height="220"></canvas>
+                                                </div>
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border); background-color: var(--background);">
+                                                    <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">預測機率分佈</h4>
+                                                    <canvas id="ml-prob-hist" height="220"></canvas>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">交易紀錄（測試集）</h4>
+                                                <div id="ml-trades" class="trade-list max-h-72 overflow-auto text-xs border rounded p-3" style="border-color: var(--border); background-color: var(--background);"></div>
                                             </div>
                                         </div>
                                     </div>
