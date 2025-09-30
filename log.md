@@ -1,3 +1,19 @@
+## 2025-09-16 — Patch LB-OVERFIT-DEGREE-20250916A
+- **Scope**: 批量優化新增「過擬合度」風險分數，提供與 Overfit Score 對稱的風險視角並擴充摘要資訊。
+- **Highlights**:
+  - `overfit-score.js` 導入風險權重彙整，產出 0~1 的過擬合度分數、風險貢獻細節與摘要卡片上的中位數指標。
+  - 批量優化結果表格新增過擬合度欄位與排序邏輯，結果徽章同時顯示「過擬合度 + DSR」提示。
+  - 排序選單增列「過擬合度」，摘要卡顯示過擬合度中位數，方便迅速辨識高風險策略組合。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/islands.js','js/overfit-score.js','js/batch-optimization.js'].forEach(file=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('modules ok');NODE`
+
+## 2025-09-15 — Patch LB-OVERFIT-SCORE-20250915A
+- **Scope**: 批量優化結果加入 CSCV PBO、礁島穩健度與 Overfit Score 評分模組；新增 UI 提示與排序選項。
+- **Highlights**:
+  - 實作 `pbo.js`、`islands.js`、`overfit-score.js` 模組，提供區塊績效矩陣、λ 分布、礁島評估與綜合過擬合分數。
+  - 批量優化流程整合 Overfit analytics，結果表新增過擬合分數 / PBO / 礁島穩健度欄位與交通號誌徽章，並提供摘要卡與 banner。
+  - 介面增加 CSCV 區塊數設定、排序選項與進度期間的摘要重置。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/pbo.js','js/islands.js','js/overfit-score.js','js/batch-optimization.js'].forEach(file=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('modules ok');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

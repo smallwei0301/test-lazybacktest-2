@@ -1731,7 +1731,7 @@
                                                                 </label>
                                                             </div>
                                                         </div>
-                                                        <div class="grid md:grid-cols-3 gap-4">
+                                                        <div class="grid md:grid-cols-4 gap-4">
                                                             <div>
                                                                 <label for="batch-optimize-parameter-trials" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">參數優化次數</label>
                                                                 <input type="number" id="batch-optimize-parameter-trials" value="100" min="10" max="1000" step="10" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
@@ -1746,6 +1746,11 @@
                                                                 <label for="batch-optimize-iteration-limit" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">迭代上限 (迭代次數上限)</label>
                                                                 <input type="number" id="batch-optimize-iteration-limit" value="6" min="1" max="100" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
                                                                 <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制每個組合在 "交替優化" 流程中的最大迭代次數。預設 6。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="batch-overfit-blocks" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">CSCV 區塊數 (S)</label>
+                                                                <input type="number" id="batch-overfit-blocks" value="10" min="4" max="20" step="2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">偶數區塊 (建議 8~12) 用於 CSCV / PBO 計算。</p>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1806,8 +1811,8 @@
                                                         </div>
                                                         <div class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">以下列出目前正在執行或剛完成的組合 (如多則顯示最新若干筆)</div>
                                                     </div>
-                                                    <div class="card-content">
-                                                        <div class="overflow-x-auto">
+                                                      <div class="card-content">
+                                                          <div class="overflow-x-auto">
                                                             <table id="batch-worker-status-list" class="min-w-full divide-y divide-border text-sm" style="border-color: var(--border);">
                                                                 <thead class="bg-muted" style="background-color: var(--muted);">
                                                                     <tr>
@@ -1863,6 +1868,10 @@
                                                                     <option value="sharpeRatio">夏普比率</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
                                                                     <option value="tradeCount">交易次數</option>
+                                                                    <option value="overfitScore">過擬合分數</option>
+                                                                    <option value="overfitDegree">過擬合度</option>
+                                                                    <option value="overfitPbo">PBO</option>
+                                                                    <option value="overfitIslandScore">礁島穩健度</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
                                                                     <i data-lucide="arrow-down" class="lucide"></i>
@@ -1879,6 +1888,10 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">買入策略</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">過擬合分數</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">過擬合度</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">PBO</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">礁島穩健度</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
@@ -2125,6 +2138,9 @@
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/pbo.js"></script>
+    <script src="js/islands.js"></script>
+    <script src="js/overfit-score.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     

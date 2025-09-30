@@ -180,7 +180,10 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            blockCount: 10,
+            sortKey: 'annualizedReturn',
+            sortDirection: 'desc'
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -317,6 +320,12 @@ function bindBatchOptimizationEvents() {
         if (sortKeySelect) {
             sortKeySelect.addEventListener('change', (e) => {
                 batchOptimizationConfig.sortKey = e.target.value;
+                if (batchOptimizationConfig.sortKey === 'overfitPbo' || batchOptimizationConfig.sortKey === 'overfitDegree') {
+                    batchOptimizationConfig.sortDirection = 'asc';
+                } else if (!batchOptimizationConfig.sortDirection) {
+                    batchOptimizationConfig.sortDirection = 'desc';
+                }
+                updateSortDirectionButton();
                 sortBatchResults();
             });
         }
@@ -389,7 +398,8 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+        batchOptimizationConfig = { ...batchOptimizationConfig, ...config };
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
@@ -517,6 +527,21 @@ function getBatchOptimizationConfig() {
             config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
         }
         
+        // 獲取 CSCV 區塊數
+        const blockCountElement = document.getElementById('batch-overfit-blocks');
+        if (blockCountElement && blockCountElement.value) {
+            let blockCount = parseInt(blockCountElement.value, 10);
+            if (!Number.isFinite(blockCount) || blockCount < 4) {
+                blockCount = 10;
+            }
+            if (blockCount % 2 !== 0) {
+                blockCount -= 1;
+            }
+            config.blockCount = Math.max(4, blockCount);
+        } else {
+            config.blockCount = 10;
+        }
+
         // 安全檢查優化目標
         const annualReturnElement = document.getElementById('optimize-annual-return');
         if (annualReturnElement && annualReturnElement.checked) {
@@ -540,7 +565,8 @@ function getBatchOptimizationConfig() {
             maxCombinations: 10000,
             optimizeTargets: ['annualizedReturn'],
             sortKey: 'annualizedReturn',
-            sortDirection: 'desc'
+            sortDirection: 'desc',
+            blockCount: 10
         };
     }
 }
@@ -558,7 +584,11 @@ function showBatchProgress() {
         if (resultsElement) {
             resultsElement.classList.add('hidden');
         }
-        
+
+        if (window.lazyOverfit && typeof window.lazyOverfit.renderSummary === 'function') {
+            window.lazyOverfit.renderSummary(null);
+        }
+
         // 重置進度
         currentBatchProgress = { current: 0, total: 0, phase: 'preparing' };
         updateBatchProgress();
@@ -1211,6 +1241,17 @@ async function processStrategyCombinations(combinations, config) {
                 
                 console.log(`[Batch Debug] Strategy preserved: ${combination.buyStrategy} -> ${combination.sellStrategy}`);
                 console.log(`[Batch Debug] Final result sellStrategy:`, combinedResult.sellStrategy);
+
+                if (window.lazyOverfit && typeof window.lazyOverfit.prepareResultAnalytics === 'function') {
+                    try {
+                        window.lazyOverfit.prepareResultAnalytics(combinedResult, {
+                            blockCount: config?.blockCount || batchOptimizationConfig.blockCount || 10,
+                        });
+                    } catch (analyticsError) {
+                        console.warn('[Batch Optimization] Overfit analytics prepare failed:', analyticsError);
+                    }
+                }
+
                 results.push(combinedResult);
             }
         } catch (error) {
@@ -1723,10 +1764,28 @@ function showBatchResults() {
         if (resultsDiv) {
             resultsDiv.classList.remove('hidden');
         }
-        
+
+        if (window.lazyOverfit && typeof window.lazyOverfit.aggregateBatchAnalytics === 'function') {
+            try {
+                const analytics = window.lazyOverfit.aggregateBatchAnalytics(batchOptimizationResults, {
+                    blockCount: batchOptimizationConfig.blockCount || 10,
+                });
+                if (typeof window.lazyOverfit.renderSummary === 'function') {
+                    window.lazyOverfit.renderSummary(analytics);
+                }
+            } catch (analyticsError) {
+                console.warn('[Batch Optimization] Aggregate overfit analytics failed:', analyticsError);
+                if (typeof window.lazyOverfit.renderSummary === 'function') {
+                    window.lazyOverfit.renderSummary(null);
+                }
+            }
+        } else if (window.lazyOverfit && typeof window.lazyOverfit.renderSummary === 'function') {
+            window.lazyOverfit.renderSummary(null);
+        }
+
         // 排序結果
         sortBatchResults();
-        
+
         // 渲染結果表格
         renderBatchResultsTable();
         
@@ -1745,9 +1804,14 @@ function sortBatchResults() {
     const sortDirection = config.sortDirection || 'desc';
     
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
+        let aValue = Number(a[sortKey]);
+        let bValue = Number(b[sortKey]);
+
+        if (sortKey === 'overfitPbo' || sortKey === 'overfitDegree') {
+            if (!Number.isFinite(aValue)) aValue = Number.POSITIVE_INFINITY;
+            if (!Number.isFinite(bValue)) bValue = Number.POSITIVE_INFINITY;
+        }
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1794,10 +1858,26 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
+    if (window.lazyOverfit && typeof window.lazyOverfit.aggregateBatchAnalytics === 'function') {
+        const needsAnalytics = batchOptimizationResults.some(result => typeof result.overfitScore === 'undefined');
+        if (needsAnalytics) {
+            try {
+                const analytics = window.lazyOverfit.aggregateBatchAnalytics(batchOptimizationResults, {
+                    blockCount: batchOptimizationConfig.blockCount || 10,
+                });
+                if (typeof window.lazyOverfit.renderSummary === 'function') {
+                    window.lazyOverfit.renderSummary(analytics);
+                }
+            } catch (analyticsError) {
+                console.warn('[Batch Optimization] Overfit analytics refresh failed:', analyticsError);
+            }
+        }
+    }
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
     tbody.innerHTML = '';
     
     batchOptimizationResults.forEach((result, index) => {
@@ -1860,13 +1940,17 @@ function renderBatchResultsTable() {
             </td>
             <td class="px-3 py-2 text-sm text-gray-900">${buyStrategyName}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${sellStrategyName}${riskManagementInfo}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${renderOverfitCell(result)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatFractionAsPercentage(result.overfitDegree)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatFractionAsPercentage(result.overfitPbo)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatFractionAsPercentage(result.overfitIslandScore)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
                         onclick="loadBatchStrategy(${index})">
                     載入
                 </button>
@@ -2602,6 +2686,44 @@ function formatPercentage(value) {
 function formatNumber(value) {
     if (value === null || value === undefined || isNaN(value)) return '-';
     return value.toFixed(2);
+}
+
+function formatFractionAsPercentage(value, digits = 1) {
+    if (!Number.isFinite(value)) return '-';
+    return `${(value * 100).toFixed(digits)}%`;
+}
+
+function renderOverfitBadge(verdict) {
+    if (!verdict || !verdict.label) return '';
+    const tone = verdict.tone || 'info';
+    const toneClassMap = {
+        success: 'bg-emerald-100 text-emerald-700',
+        info: 'bg-sky-100 text-sky-700',
+        warning: 'bg-amber-100 text-amber-700',
+        danger: 'bg-rose-100 text-rose-700'
+    };
+    const toneClass = toneClassMap[tone] || toneClassMap.info;
+    const icon = verdict.icon ? `${verdict.icon} ` : '';
+    return `<span class="px-2 py-0.5 text-xs rounded-full ${toneClass}">${icon}${verdict.label}</span>`;
+}
+
+function renderOverfitCell(result) {
+    const scoreText = Number.isFinite(result?.overfitScore) ? result.overfitScore.toFixed(1) : '-';
+    const badge = renderOverfitBadge(result?.overfitVerdict);
+    const dsrText = Number.isFinite(result?.overfitDsr)
+        ? `DSR ${(result.overfitDsr * 100).toFixed(0)}%`
+        : '';
+    const degreeText = Number.isFinite(result?.overfitDegree)
+        ? `過擬合度 ${formatFractionAsPercentage(result.overfitDegree, 0)}`
+        : '';
+    const metaLine = [degreeText, dsrText].filter(Boolean).join(' · ');
+    return `
+        <div class="flex items-center gap-2">
+            <span>${scoreText}</span>
+            ${badge}
+        </div>
+        <div class="text-[11px] text-gray-500">${metaLine}</div>
+    `;
 }
 
 // 載入批量優化策略
