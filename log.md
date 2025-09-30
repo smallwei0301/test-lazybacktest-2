@@ -757,3 +757,11 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-ML-KELLY-20251209A
+- **Scope**: 新增「預測機制（隔日漲跌 | ML + Kelly）」分頁，整合研究依據與前端即時計算模組。
+- **Features**:
+  - 在右側分頁導覽新增「預測機制」按鈕與分頁內容，包含 2024–2025 年隔日方向/深度學習/凱利控管文獻清單。
+  - 於分頁內建置訓練/測試區間、模型超參數、凱利係數等輸入欄位，並提供卡片、權益曲線、機率直方圖與交易紀錄。
+  - 新增 `js/ml-forecast.js`，以原生 JS Logistic Regression + 凱利資金控管（版本碼 `LB-ML-KELLY-20251209A`），直接使用 `cachedStockData` 進行切分、標準化、訓練、模擬與視覺化輸出。
+- **Testing**: 由於瀏覽器互動與 Proxy 依賴無法在 CI 容器內啟動，暫未執行實機回測；待部署後需於 Netlify 前端實際操作一次，確認 console 無錯誤並完成迴歸測試。

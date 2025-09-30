@@ -152,6 +152,31 @@
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
 }
+.ml-trade-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    line-height: 1.6;
+}
+
+.ml-trade-entry {
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background-color: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+.ml-trade-entry strong {
+    font-size: 0.75rem;
+    color: var(--foreground);
+}
+
+.ml-trade-entry span {
+    font-size: 0.7rem;
+    color: var(--muted-foreground);
+}
 .sensitivity-card {
     position: relative;
     overflow: visible;
