@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.0 ---
 // Patch note: small harmless edit to refresh editor diagnostics
+// Patch bundle: LB-BATCH-OVERFIT-20250718A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -46,6 +47,7 @@ function getWorkerStrategyName(batchStrategyName) {
 let batchOptimizationWorker = null;
 let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
+let batchOverfitDiagnostics = null;
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
@@ -180,7 +182,19 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            sortKey: 'annualizedReturn',
+            sortDirection: 'desc',
+            overfit: {
+                blockCount: 10,
+                blockMetric: 'sharpe',
+                islandPercentile: 0.75,
+                weights: {
+                    pbo: 0.5,
+                    dsr: 0.25,
+                    island: 0.25,
+                },
+            },
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -316,11 +330,18 @@ function bindBatchOptimizationEvents() {
         const sortKeySelect = document.getElementById('batch-sort-key');
         if (sortKeySelect) {
             sortKeySelect.addEventListener('change', (e) => {
-                batchOptimizationConfig.sortKey = e.target.value;
+                const selectedKey = e.target.value;
+                batchOptimizationConfig.sortKey = selectedKey;
+                if (selectedKey === 'configPbo' || selectedKey === 'maxDrawdown') {
+                    batchOptimizationConfig.sortDirection = 'asc';
+                } else {
+                    batchOptimizationConfig.sortDirection = 'desc';
+                }
+                updateSortDirectionButton();
                 sortBatchResults();
             });
         }
-        
+
         const sortDirectionBtn = document.getElementById('batch-sort-direction');
         if (sortDirectionBtn) {
             sortDirectionBtn.addEventListener('click', () => {
@@ -329,7 +350,77 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const cscvInput = document.getElementById('batch-cscv-blocks');
+        if (cscvInput) {
+            cscvInput.addEventListener('change', () => {
+                const rawValue = parseInt(cscvInput.value, 10);
+                if (!Number.isFinite(rawValue)) return;
+                const limited = Math.max(4, Math.min(20, rawValue));
+                const evenValue = limited % 2 === 0 ? limited : limited + 1;
+                batchOptimizationConfig.overfit.blockCount = evenValue;
+                cscvInput.value = evenValue.toString();
+                triggerOverfitRecalculation();
+            });
+        }
+
+        const blockMetricSelect = document.getElementById('batch-block-metric');
+        if (blockMetricSelect) {
+            blockMetricSelect.addEventListener('change', (event) => {
+                const metric = event.target.value || 'sharpe';
+                batchOptimizationConfig.overfit.blockMetric = metric;
+                triggerOverfitRecalculation();
+            });
+        }
+
+        const islandPercentileInput = document.getElementById('batch-island-percentile');
+        if (islandPercentileInput) {
+            islandPercentileInput.addEventListener('change', () => {
+                const rawValue = parseFloat(islandPercentileInput.value);
+                if (!Number.isFinite(rawValue)) return;
+                const bounded = Math.max(50, Math.min(95, rawValue));
+                islandPercentileInput.value = bounded.toString();
+                batchOptimizationConfig.overfit.islandPercentile = bounded / 100;
+                triggerOverfitRecalculation();
+            });
+        }
+
+        const pboWeightInput = document.getElementById('batch-overfit-weight-pbo');
+        if (pboWeightInput) {
+            pboWeightInput.addEventListener('change', () => {
+                const value = parseFloat(pboWeightInput.value);
+                if (!Number.isFinite(value)) return;
+                const bounded = Math.max(0, Math.min(1, value));
+                batchOptimizationConfig.overfit.weights.pbo = bounded;
+                pboWeightInput.value = bounded.toFixed(2);
+                triggerOverfitRecalculation();
+            });
+        }
+
+        const dsrWeightInput = document.getElementById('batch-overfit-weight-dsr');
+        if (dsrWeightInput) {
+            dsrWeightInput.addEventListener('change', () => {
+                const value = parseFloat(dsrWeightInput.value);
+                if (!Number.isFinite(value)) return;
+                const bounded = Math.max(0, Math.min(1, value));
+                batchOptimizationConfig.overfit.weights.dsr = bounded;
+                dsrWeightInput.value = bounded.toFixed(2);
+                triggerOverfitRecalculation();
+            });
+        }
+
+        const islandWeightInput = document.getElementById('batch-overfit-weight-island');
+        if (islandWeightInput) {
+            islandWeightInput.addEventListener('change', () => {
+                const value = parseFloat(islandWeightInput.value);
+                if (!Number.isFinite(value)) return;
+                const bounded = Math.max(0, Math.min(1, value));
+                batchOptimizationConfig.overfit.weights.island = bounded;
+                islandWeightInput.value = bounded.toFixed(2);
+                triggerOverfitRecalculation();
+            });
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -392,6 +483,8 @@ function startBatchOptimization() {
         
         // 重置結果
         batchOptimizationResults = [];
+        batchOverfitDiagnostics = null;
+        resetOverfitSummaryUI();
     // 初始化 worker 狀態面板
     resetBatchWorkerStatus();
     const panel = document.getElementById('batch-worker-status-panel');
@@ -482,66 +575,149 @@ function getSelectedStrategies(type) {
 // 獲取批量優化設定
 function getBatchOptimizationConfig() {
     try {
-        // 初始化配置，設定預設值
+        const existingConfig = typeof batchOptimizationConfig === 'object' ? batchOptimizationConfig : {};
+        const existingOverfit = typeof existingConfig.overfit === 'object' ? existingConfig.overfit : {};
+
         const config = {
-            batchSize: 100,        // 預設批次大小
-            maxCombinations: 10000, // 預設最大組合數  
-            parameterTrials: 100,   // 預設參數優化次數
-            targetMetric: 'annualizedReturn', // 預設優化目標指標
-            concurrency: 4,         // 預設併發數
-            iterationLimit: 6,      // 預設迭代上限
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
+            batchSize: 100,
+            maxCombinations: 10000,
+            parameterTrials: 100,
+            targetMetric: 'annualizedReturn',
+            concurrency: 4,
+            iterationLimit: 6,
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'],
         };
-        
-        // 獲取參數優化次數
+
         const parameterTrialsElement = document.getElementById('batch-optimize-parameter-trials');
         if (parameterTrialsElement && parameterTrialsElement.value) {
-            config.parameterTrials = parseInt(parameterTrialsElement.value) || 100;
+            const parsed = parseInt(parameterTrialsElement.value, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                config.parameterTrials = parsed;
+            }
         }
-        
-        // 獲取優化目標指標（單選按鈕）
+
         const targetMetricRadios = document.querySelectorAll('input[name="batch-target-metric"]:checked');
         if (targetMetricRadios.length > 0) {
             config.targetMetric = targetMetricRadios[0].value;
         }
-        
-        // 獲取併發數
+
         const concurrencyElement = document.getElementById('batch-optimize-concurrency');
         if (concurrencyElement && concurrencyElement.value) {
-            config.concurrency = parseInt(concurrencyElement.value) || 4;
+            const parsed = parseInt(concurrencyElement.value, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                config.concurrency = parsed;
+            }
         }
-        
-        // 獲取迭代上限
+
         const iterationLimitElement = document.getElementById('batch-optimize-iteration-limit');
         if (iterationLimitElement && iterationLimitElement.value) {
-            config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
+            const parsed = parseInt(iterationLimitElement.value, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                config.iterationLimit = parsed;
+            }
         }
-        
-        // 安全檢查優化目標
-        const annualReturnElement = document.getElementById('optimize-annual-return');
-        if (annualReturnElement && annualReturnElement.checked) {
+
+        const optimizeTargetSet = new Set(config.optimizeTargets);
+        const optimizeSharpeElement = document.getElementById('optimize-sharpe');
+        if (optimizeSharpeElement && optimizeSharpeElement.checked) {
+            optimizeTargetSet.add('sharpeRatio');
         }
-        
-        const sharpeElement = document.getElementById('optimize-sharpe');
-        if (sharpeElement && sharpeElement.checked) {
-            config.optimizeTargets.push('sharpeRatio');
+        const optimizeSortinoElement = document.getElementById('optimize-sortino');
+        if (optimizeSortinoElement && optimizeSortinoElement.checked) {
+            optimizeTargetSet.add('sortinoRatio');
         }
-        
-        // 設定排序鍵值為選擇的目標指標
+        config.optimizeTargets = Array.from(optimizeTargetSet);
+
         config.sortKey = config.targetMetric;
         config.sortDirection = 'desc';
-        
-        return config;
+
+        const blockInput = document.getElementById('batch-cscv-blocks');
+        let blockCount = Number.isFinite(existingOverfit.blockCount) ? existingOverfit.blockCount : 10;
+        if (blockInput && blockInput.value !== '') {
+            const parsed = parseInt(blockInput.value, 10);
+            if (Number.isFinite(parsed) && parsed >= 2) {
+                blockCount = parsed;
+            }
+        }
+        blockCount = Math.max(4, Math.min(20, Math.floor(blockCount)));
+        if (blockCount % 2 !== 0) {
+            blockCount += 1;
+        }
+
+        const blockMetricSelect = document.getElementById('batch-block-metric');
+        const blockMetric = blockMetricSelect && blockMetricSelect.value
+            ? blockMetricSelect.value
+            : (existingOverfit.blockMetric || 'sharpe');
+
+        const islandPercentileInput = document.getElementById('batch-island-percentile');
+        let islandPercentile = Number.isFinite(existingOverfit.islandPercentile)
+            ? existingOverfit.islandPercentile
+            : 0.75;
+        if (islandPercentileInput && islandPercentileInput.value !== '') {
+            const parsed = parseFloat(islandPercentileInput.value);
+            if (Number.isFinite(parsed)) {
+                const bounded = Math.max(50, Math.min(95, parsed));
+                islandPercentile = bounded / 100;
+            }
+        }
+
+        const readWeight = (id, fallback) => {
+            const element = document.getElementById(id);
+            if (!element || element.value === '') {
+                return Number.isFinite(fallback) ? fallback : 0;
+            }
+            const parsed = parseFloat(element.value);
+            if (!Number.isFinite(parsed)) {
+                return Number.isFinite(fallback) ? fallback : 0;
+            }
+            return Math.max(0, Math.min(1, parsed));
+        };
+
+        const weights = {
+            pbo: readWeight('batch-overfit-weight-pbo', existingOverfit.weights?.pbo ?? 0.5),
+            dsr: readWeight('batch-overfit-weight-dsr', existingOverfit.weights?.dsr ?? 0.25),
+            island: readWeight('batch-overfit-weight-island', existingOverfit.weights?.island ?? 0.25),
+        };
+
+        const overfitConfig = {
+            blockCount,
+            blockMetric,
+            islandPercentile,
+            weights,
+        };
+
+        const mergedConfig = {
+            ...existingConfig,
+            ...config,
+            overfit: {
+                ...existingOverfit,
+                ...overfitConfig,
+            },
+        };
+
+        batchOptimizationConfig = mergedConfig;
+        return mergedConfig;
     } catch (error) {
         console.error('[Batch Optimization] Error getting config:', error);
-        // 返回預設設定
-        return {
+        const fallbackConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn'],
+            parameterTrials: 100,
+            targetMetric: 'annualizedReturn',
+            concurrency: 4,
+            iterationLimit: 6,
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'],
             sortKey: 'annualizedReturn',
-            sortDirection: 'desc'
+            sortDirection: 'desc',
+            overfit: {
+                blockCount: 10,
+                blockMetric: 'sharpe',
+                islandPercentile: 0.75,
+                weights: { pbo: 0.5, dsr: 0.25, island: 0.25 },
+            },
         };
+        batchOptimizationConfig = fallbackConfig;
+        return fallbackConfig;
     }
 }
 
@@ -1723,13 +1899,14 @@ function showBatchResults() {
         if (resultsDiv) {
             resultsDiv.classList.remove('hidden');
         }
-        
+
         // 排序結果
-        sortBatchResults();
-        
+        evaluateOverfitScores();
+        sortBatchResults({ shouldRender: false });
+
         // 渲染結果表格
         renderBatchResultsTable();
-        
+
         // 重置運行狀態
         restoreBatchOptimizationUI();
     } catch (error) {
@@ -1739,7 +1916,8 @@ function showBatchResults() {
 }
 
 // 排序結果
-function sortBatchResults() {
+function sortBatchResults(options = {}) {
+    const { shouldRender = true } = options || {};
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
@@ -1773,8 +1951,9 @@ function sortBatchResults() {
         }
     });
     
-    // 重新渲染表格
-    renderBatchResultsTable();
+    if (shouldRender) {
+        renderBatchResultsTable();
+    }
 }
 
 // 更新排序方向按鈕
@@ -1794,12 +1973,12 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
     tbody.innerHTML = '';
-    
+
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
@@ -1863,10 +2042,14 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatPbo(result.configPbo)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.deflatedSharpeRatio)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatIslandScore(result.islandScore)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatOverfitScore(result.overfitScore)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
                         onclick="loadBatchStrategy(${index})">
                     載入
                 </button>
@@ -1875,6 +2058,136 @@ function renderBatchResultsTable() {
         
         tbody.appendChild(row);
     });
+}
+
+function evaluateOverfitScores() {
+    try {
+        if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+            batchOverfitDiagnostics = null;
+            updateOverfitSummaryUI(null);
+            return null;
+        }
+        if (!window.lazyOverfit || typeof window.lazyOverfit.evaluateBatchOverfitting !== 'function') {
+            console.warn('[Batch Optimization] lazyOverfit.evaluateBatchOverfitting not available');
+            return null;
+        }
+        const overfitConfig = batchOptimizationConfig?.overfit || {};
+        const evaluation = window.lazyOverfit.evaluateBatchOverfitting(batchOptimizationResults, {
+            cscvBlocks: overfitConfig.blockCount,
+            blockMetric: overfitConfig.blockMetric,
+            islandPercentile: overfitConfig.islandPercentile,
+            weights: overfitConfig.weights,
+            trials: batchOptimizationResults.length,
+        });
+        if (evaluation && Array.isArray(evaluation.perCombination)) {
+            evaluation.perCombination.forEach((item) => {
+                const result = batchOptimizationResults[item.index];
+                if (!result) return;
+                result.overfitScore = Number.isFinite(item.overfitScore) ? item.overfitScore : null;
+                result.overfitComponents = item.components || null;
+                result.deflatedSharpeRatio = Number.isFinite(item.dsr) ? item.dsr : null;
+                result.configPbo = Number.isFinite(item.configPbo) ? item.configPbo : null;
+                result.islandScore = Number.isFinite(item.islandScore) ? item.islandScore : null;
+                result.cscvBlocks = item.blockCount || overfitConfig.blockCount;
+                result.cscvMetricValues = item.blockMetricValues || null;
+                result.cscvMeta = item.blockMeta || null;
+            });
+        }
+        batchOverfitDiagnostics = evaluation || null;
+        updateOverfitSummaryUI(batchOverfitDiagnostics);
+        return batchOverfitDiagnostics;
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to evaluate overfit scores:', error);
+        return null;
+    }
+}
+
+function triggerOverfitRecalculation() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return;
+    }
+    evaluateOverfitScores();
+    sortBatchResults();
+}
+
+function resetOverfitSummaryUI() {
+    batchOverfitDiagnostics = null;
+    updateOverfitSummaryUI(null);
+}
+
+function updateOverfitSummaryUI(diagnostics) {
+    try {
+        const emptyEl = document.getElementById('batch-overfit-summary-empty');
+        const gridEl = document.getElementById('batch-overfit-summary-grid');
+        const versionEl = document.getElementById('batch-overfit-summary-version');
+        const listEl = document.getElementById('batch-overfit-summary-top-list');
+        const hasData = diagnostics && Array.isArray(diagnostics.perCombination) && diagnostics.perCombination.length > 0;
+        if (!hasData) {
+            if (emptyEl) emptyEl.classList.remove('hidden');
+            if (gridEl) gridEl.classList.add('hidden');
+            if (versionEl) versionEl.textContent = '';
+            setSummaryText('batch-overfit-summary-blocks', '-');
+            setSummaryText('batch-overfit-summary-pbo', '-');
+            setSummaryText('batch-overfit-summary-threshold', `P${Math.round((batchOptimizationConfig?.overfit?.islandPercentile || 0.75) * 100)}`);
+            setSummaryText('batch-overfit-summary-best', '-');
+            setSummaryText('batch-overfit-summary-median', '-');
+            setSummaryText('batch-overfit-summary-lambda', '-');
+            if (listEl) listEl.innerHTML = '';
+            return;
+        }
+        if (emptyEl) emptyEl.classList.add('hidden');
+        if (gridEl) gridEl.classList.remove('hidden');
+        if (versionEl) versionEl.textContent = diagnostics.version ? `Version ${diagnostics.version}` : '';
+        setSummaryText('batch-overfit-summary-blocks', diagnostics.blockCount ?? '-');
+        setSummaryText('batch-overfit-summary-pbo', formatPbo(diagnostics.globalPbo));
+        const percentile = Math.round((batchOptimizationConfig?.overfit?.islandPercentile || 0.75) * 100);
+        setSummaryText('batch-overfit-summary-threshold', `P${percentile}`);
+        const scores = diagnostics.perCombination
+            .map((item) => (Number.isFinite(item.overfitScore) ? item.overfitScore : null))
+            .filter((value) => value !== null);
+        const bestScore = scores.length > 0 ? Math.max(...scores) : null;
+        const medianScore = scores.length > 0 ? computeMedian(scores) : null;
+        setSummaryText('batch-overfit-summary-best', formatOverfitScore(bestScore));
+        setSummaryText('batch-overfit-summary-median', formatOverfitScore(medianScore));
+        const lambdaNegative = Array.isArray(diagnostics.lambdaSamples)
+            ? diagnostics.lambdaSamples.filter((lambda) => lambda < 0).length
+            : null;
+        setSummaryText('batch-overfit-summary-lambda', lambdaNegative !== null ? lambdaNegative.toString() : '-');
+        if (listEl) {
+            listEl.innerHTML = '';
+            const topList = batchOptimizationResults
+                .map((result, idx) => ({ idx, score: Number.isFinite(result.overfitScore) ? result.overfitScore : null }))
+                .filter((item) => item.score !== null)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 3);
+            topList.forEach((item) => {
+                const result = batchOptimizationResults[item.idx];
+                const li = document.createElement('li');
+                const buyName = getStrategyChineseName(result.buyStrategy);
+                const sellName = getStrategyChineseName(result.sellStrategy);
+                li.textContent = `${formatOverfitScore(item.score)}｜${buyName} × ${sellName}`;
+                listEl.appendChild(li);
+            });
+        }
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to update overfit summary:', error);
+    }
+}
+
+function setSummaryText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value === undefined || value === null ? '-' : value;
+}
+
+function computeMedian(values) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    return sorted[mid];
 }
 
 // 添加交叉優化控制面板
@@ -2037,7 +2350,7 @@ async function startEntryCrossOptimization() {
         if (results.length > 0) {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
-            sortBatchResults();
+            sortBatchResults({ shouldRender: false });
             renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 進場策略交叉優化完成！新增 ${results.length} 個優化結果`);
@@ -2185,7 +2498,7 @@ async function startExitCrossOptimization() {
         if (results.length > 0) {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
-            sortBatchResults();
+            sortBatchResults({ shouldRender: false });
             renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 出場策略交叉優化完成！新增 ${results.length} 個優化結果`);
@@ -2602,6 +2915,21 @@ function formatPercentage(value) {
 function formatNumber(value) {
     if (value === null || value === undefined || isNaN(value)) return '-';
     return value.toFixed(2);
+}
+
+function formatPbo(value) {
+    if (!Number.isFinite(value)) return '-';
+    return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatIslandScore(value) {
+    if (!Number.isFinite(value)) return '-';
+    return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatOverfitScore(value) {
+    if (!Number.isFinite(value)) return '-';
+    return value.toFixed(1);
 }
 
 // 載入批量優化策略
@@ -3536,7 +3864,7 @@ function updateCrossOptimizationProgress(currentTask = null) {
 function addCrossOptimizationResults(newResults) {
     newResults.forEach(newResult => {
         // 查找是否有相同的買入策略、賣出策略和年化報酬率的結果
-        const existingIndex = batchOptimizationResults.findIndex(existing => 
+        const existingIndex = batchOptimizationResults.findIndex(existing =>
             existing.buyStrategy === newResult.buyStrategy &&
             existing.sellStrategy === newResult.sellStrategy &&
             Math.abs(existing.annualizedReturn - newResult.annualizedReturn) < 0.0001 // 允許微小差異
@@ -3568,6 +3896,10 @@ function addCrossOptimizationResults(newResults) {
             console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
         }
     });
+
+    if (Array.isArray(newResults) && newResults.length > 0) {
+        evaluateOverfitScores();
+    }
 }
 
 // 快速優化單一策略參數（減少步數，用於交叉優化）
