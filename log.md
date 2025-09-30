@@ -764,3 +764,8 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-12 — Patch LB-AI-PREDICTION-20251212A
+- **Issue recap**: 使用者需要在 Lazybacktest 內建基於最新研究的 AI 預測分頁，快速評估隔日漲跌機率與凱利公式資金配置；現有介面缺乏深度學習模組與資金管理建議。
+- **Fix**: 新增「AI 預測」分頁，導入 TensorFlow.js LSTM 訓練流程（2:1 訓練／測試切分）、隔日漲跌方向推論、凱利公式資金比例計算與交易模擬摘要；提供研究來源說明與可調整參數。
+- **Diagnostics**: 檢查無回測資料時的提示、啟用／停用凱利公式情境、測試樣本不足提示、交易表格輸出與進場門檻；驗證 lucide 圖示在按鈕切換後仍正確渲染。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/ai-prediction.js','js/batch-optimization.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

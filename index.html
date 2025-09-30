@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ai-prediction"
+                                            >
+                                                <i data-lucide="brain-circuit" class="lucide-sm inline mr-1"></i>AI 預測
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2057,6 +2064,199 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden" id="ai-prediction-tab">
+                                <div class="space-y-6" id="ai-prediction-panel" data-ai-prediction-version="LB-AI-PREDICTION-20251212A">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="brain" class="lucide-sm"></i>
+                                                <span>AI 預測方法概覽</span>
+                                            </h3>
+                                        </div>
+                                        <div class="card-content space-y-3 text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                            <p>
+                                                此分頁延伸 Fischer &amp; Krauss (2018, <em>Journal of Finance and Data Science</em>) 與 Nelson et al. (2017, <em>Applied Soft Computing</em>) 的深度學習研究，採用 LSTM
+                                                對價格序列進行特徵抽取，並搭配 2:1 的訓練／測試切分評估隔日收盤價上漲機率。
+                                            </p>
+                                            <p>
+                                                凱利公式資金管理參考 Kelly (1956, <em>Bell System Technical Journal</em>) 與 Thorp (2017, <em>The Kelly Criterion in Blackjack, Sports Betting, and the Stock Market</em>) 的實證討論，透過平均盈虧比估算適合投入比例，協助多次交易後優化報酬。
+                                            </p>
+                                            <ul class="list-disc pl-5 space-y-1">
+                                                <li>僅針對上漲訊號進場，模擬以「今日收盤價買入、隔日收盤價賣出」。</li>
+                                                <li>提供可調整的序列長度、訓練輪數與進場門檻，以因應不同波動度。</li>
+                                                <li>凱利公式可視需求啟用，預設啟用並自動略過負值投入。</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="settings" class="lucide-sm"></i>
+                                                <span>模型與資金配置設定</span>
+                                            </h3>
+                                        </div>
+                                        <div class="card-content space-y-4 text-xs">
+                                            <div id="ai-prediction-status" class="rounded-md px-3 py-2" style="background-color: color-mix(in srgb, var(--card) 85%, transparent); color: var(--muted-foreground);">
+                                                請先於主分頁執行一次回測，以建立股價快取資料後再進行 AI 訓練。
+                                            </div>
+                                            <div id="ai-train-progress" class="hidden text-[11px] font-medium" style="color: var(--primary);"></div>
+                                            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                                <label class="space-y-2">
+                                                    <span class="block text-[11px] font-semibold" style="color: var(--foreground);">序列長度（日）</span>
+                                                    <input
+                                                        type="number"
+                                                        id="ai-lookback"
+                                                        min="10"
+                                                        max="120"
+                                                        value="30"
+                                                        class="w-full px-3 py-2 border rounded-md text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    />
+                                                    <span class="block text-[10px]" style="color: var(--muted-foreground);">決定 LSTM 觀察的歷史交易日數，建議 30~60 日。</span>
+                                                </label>
+                                                <label class="space-y-2">
+                                                    <span class="block text-[11px] font-semibold" style="color: var(--foreground);">訓練輪數（Epochs）</span>
+                                                    <input
+                                                        type="number"
+                                                        id="ai-epochs"
+                                                        min="10"
+                                                        max="200"
+                                                        value="40"
+                                                        class="w-full px-3 py-2 border rounded-md text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    />
+                                                    <span class="block text-[10px]" style="color: var(--muted-foreground);">輪數越高越易擬合，亦需衡量計算時間。</span>
+                                                </label>
+                                                <label class="space-y-2">
+                                                    <span class="block text-[11px] font-semibold" style="color: var(--foreground);">模擬本金（TWD）</span>
+                                                    <input
+                                                        type="number"
+                                                        id="ai-initial-capital"
+                                                        min="10000"
+                                                        step="1000"
+                                                        value="100000"
+                                                        class="w-full px-3 py-2 border rounded-md text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    />
+                                                    <span class="block text-[10px]" style="color: var(--muted-foreground);">作為凱利公式投入比例的基礎資金。</span>
+                                                </label>
+                                                <label class="space-y-2">
+                                                    <span class="block text-[11px] font-semibold" style="color: var(--foreground);">進場門檻（上漲機率）</span>
+                                                    <input
+                                                        type="number"
+                                                        id="ai-threshold"
+                                                        min="0.50"
+                                                        max="0.90"
+                                                        step="0.01"
+                                                        value="0.55"
+                                                        class="w-full px-3 py-2 border rounded-md text-sm"
+                                                        style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                    />
+                                                    <span class="block text-[10px]" style="color: var(--muted-foreground);">模型預測高於門檻時才會進場。</span>
+                                                </label>
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-4">
+                                                <button id="ai-train-btn" class="btn-primary text-sm px-5 py-2.5 rounded-md flex items-center gap-2">
+                                                    <i data-lucide="rocket" class="lucide-sm"></i>
+                                                    <span>開始訓練與回測</span>
+                                                </button>
+                                                <label class="inline-flex items-center gap-2 text-xs" style="color: var(--foreground);">
+                                                    <input type="checkbox" id="ai-enable-kelly" class="rounded border" style="border-color: var(--border);" checked />
+                                                    啟用凱利公式資金配置
+                                                </label>
+                                            </div>
+                                            <p id="ai-kelly-hint" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                凱利公式 <code>f* = (bp - q) / b</code> 中，<code>p</code> 為模型上漲機率、<code>q</code> 為下跌機率、<code>b</code> 為平均盈虧比；若結果為負值表示風險報酬不符，系統會自動跳過該筆交易。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="bar-chart-3" class="lucide-sm"></i>
+                                                <span>模型成效摘要</span>
+                                            </h3>
+                                        </div>
+                                        <div class="card-content space-y-4 text-xs">
+                                            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">訓練集預測準確率</div>
+                                                    <div id="ai-train-accuracy" class="text-lg font-semibold" style="color: var(--primary);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">測試集準確率</div>
+                                                    <div id="ai-test-accuracy" class="text-lg font-semibold" style="color: var(--primary);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">訓練資料實際勝率</div>
+                                                    <div id="ai-train-winrate" class="text-lg font-semibold" style="color: var(--primary);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">下一交易日上漲機率</div>
+                                                    <div id="ai-next-probability" class="text-lg font-semibold" style="color: var(--secondary);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">建議操作方向</div>
+                                                    <div id="ai-next-direction" class="text-lg font-semibold" style="color: var(--foreground);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">凱利建議投入比例</div>
+                                                    <div id="ai-next-kelly" class="text-lg font-semibold" style="color: var(--foreground);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">平均單筆報酬</div>
+                                                    <div id="ai-average-return" class="text-lg font-semibold" style="color: var(--foreground);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">模擬總報酬率</div>
+                                                    <div id="ai-total-return" class="text-lg font-semibold" style="color: var(--foreground);">—</div>
+                                                </div>
+                                                <div class="rounded-md border p-3" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                                    <div class="text-[11px] font-semibold" style="color: var(--muted-foreground);">測試樣本筆數</div>
+                                                    <div id="ai-sample-size" class="text-lg font-semibold" style="color: var(--foreground);">—</div>
+                                                </div>
+                                            </div>
+                                            <div id="ai-result-notes" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                尚未執行模型訓練。
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="clipboard-list" class="lucide-sm"></i>
+                                                <span>交易模擬紀錄</span>
+                                            </h3>
+                                        </div>
+                                        <div class="card-content space-y-4 text-xs">
+                                            <div id="ai-trade-summary" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                尚未產生交易紀錄。
+                                            </div>
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full text-[11px]" style="border-color: var(--border);">
+                                                    <thead style="background-color: var(--muted); color: var(--foreground);">
+                                                        <tr>
+                                                            <th class="px-3 py-2 text-left">買入日</th>
+                                                            <th class="px-3 py-2 text-left">賣出日</th>
+                                                            <th class="px-3 py-2 text-right">買入價</th>
+                                                            <th class="px-3 py-2 text-right">賣出價</th>
+                                                            <th class="px-3 py-2 text-right">報酬率</th>
+                                                            <th class="px-3 py-2 text-right">上漲機率</th>
+                                                            <th class="px-3 py-2 text-right">投入比例</th>
+                                                            <th class="px-3 py-2 text-right">損益 (TWD)</th>
+                                                            <th class="px-3 py-2 text-right">交易後資金</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="ai-trade-table" class="divide-y" style="border-color: var(--border);"></tbody>
+                                                </table>
+                                                <div id="ai-trade-empty" class="py-4 text-center text-[11px]" style="color: var(--muted-foreground);">
+                                                    尚無交易資料。
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2127,6 +2327,8 @@
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js" integrity="sha384-7wSqnX+AN0NhBBkN2bbEZ3cfsJ8GGgr4mtt0PdmXahtWV7piOJBis1KsVYdzFFVj" crossorigin="anonymous"></script>
+    <script src="js/ai-prediction.js"></script>
     
     <script>
         // Initialize Lucide icons

@@ -2712,7 +2712,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        if (window.aiPrediction && typeof window.aiPrediction.init === 'function') {
+            window.aiPrediction.init();
+        }
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
