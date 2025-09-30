@@ -1867,6 +1867,8 @@
                                                                     <option value="ofi_cPBO">cPBO 掉隊率</option>
                                                                     <option value="ofi_level">OOS 中位分位</option>
                                                                     <option value="ofi_dsr">Deflated Sharpe Ratio</option>
+                                                                    <option value="ofi_spaP">SPA p-value</option>
+                                                                    <option value="ofi_mcsP">MCS p-value</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
                                                                     <i data-lucide="arrow-down" class="lucide"></i>
@@ -1893,16 +1895,66 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">最大回撤</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">交易次數</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">策略穩健度 (OFI)</th>
-                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">cPBO 掉隊率</th>
-                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">OOS 中位分位</th>
-                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">OOS IQR</th>
-                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">Deflated Sharpe</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="cPBO_s = Pr[q^{OOS}_{s,t} &lt; 0.5 | q^{IS}_{s,t} ≥ 1-α]">cPBO 掉隊率</span></th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="\tilde{q}^{OOS}_s = median_t q^{OOS}_{s,t}">OOS 中位分位</span></th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="IQR^{OOS}_s = Q3(q^{OOS}_{s,t}) - Q1(q^{OOS}_{s,t})">OOS IQR</span></th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="DSR_s = Φ((SR_s - SR_{min})/σ_{SR})">Deflated Sharpe</span></th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="p_{SPA,s} = Pr^{*}[T^{*}_s ≥ T_s], T_s = max(0, √n·\bar{d}_s/σ_s)">SPA p值</span></th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);"><span class="cursor-help" title="p_{MCS,s} = Pr^{*}[Δ^{*}_s ≥ Δ^{obs}_s], Δ_s = max_j(\bar{r}_j - \bar{r}_s)">MCS p值</span></th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">補強檢定</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">操作</th>
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody id="batch-results-tbody" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
                                                             </table>
+                                                            <div id="ofi-formula-explainer" class="mt-6 text-xs leading-relaxed space-y-3" style="color: var(--muted-foreground);">
+                                                                <details open class="space-y-3 bg-muted/30 border border-border rounded-lg p-4" style="background-color: color-mix(in srgb, var(--muted) 18%, transparent); border-color: var(--border);">
+                                                                    <summary class="font-semibold text-sm" style="color: var(--foreground); cursor: pointer;">OFI 組成公式與來源 (版本 LB-OFI-20240701B)</summary>
+                                                                    <div class="grid gap-3 md:grid-cols-2">
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">cPBO<sub>s</sub></h6>
+                                                                            <p>條件式過擬合率：<span class="font-mono">cPBO<sub>s</sub> = Pr[q<sup>OOS</sup><sub>s,t</sub> &lt; 0.5 | q<sup>IS</sup><sub>s,t</sub> ≥ 1-α]</span>，以 CSCV 切分量測在訓練期表現亮眼時落入 OOS 後段的機率。</p>
+                                                                            <p class="text-[11px]">來源：Bailey &amp; López de Prado (Probability of Backtest Overfitting).</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">OOS 中位分位</h6>
+                                                                            <p>樣本外排名中位數：<span class="font-mono">\tilde{q}^{OOS}_s = median_t q^{OOS}_{s,t}</span>，衡量策略在不同切分下的相對水準。</p>
+                                                                            <p class="text-[11px]">來源：CSCV 排名統計。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">OOS IQR</h6>
+                                                                            <p>離散度指標：<span class="font-mono">IQR^{OOS}_s = Q3(q^{OOS}_{s,t}) - Q1(q^{OOS}_{s,t})</span>，越小代表樣本外穩定。</p>
+                                                                            <p class="text-[11px]">來源：CSCV 分位數分布。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">IslandScore<sub>s</sub></h6>
+                                                                            <p>參數鄰域穩健度：以 OOS 中位熱圖連通區計算面積、分散與邊緣懲罰後正規化，量化「不是單點幸運」。</p>
+                                                                            <p class="text-[11px]">來源：工程實務常用之參數島嶼檢查。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">DSR<sub>s</sub></h6>
+                                                                            <p>Deflated Sharpe Ratio：<span class="font-mono">DSR_s = Φ((SR_s - SR_{min}) / σ_{SR})</span>，修正多重檢定與厚尾後的夏普顯著性。</p>
+                                                                            <p class="text-[11px]">來源：Bailey &amp; López de Prado (Deflated Sharpe Ratio)。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">SPA p值</h6>
+                                                                            <p>Superior Predictive Ability 檢定：<span class="font-mono">T_s = max(0, √n·\bar{d}_s/σ_s)</span>，以平穩區塊自助法估計 <span class="font-mono">p_{SPA,s} = Pr^{*}[T^{*}_s ≥ T_s]</span>。</p>
+                                                                            <p class="text-[11px]">來源：Hansen (2005) SPA test。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">MCS p值</h6>
+                                                                            <p>Model Confidence Set：比較平均報酬差距 <span class="font-mono">Δ_s = max_j(\bar{r}_j - \bar{r}_s)</span>，以自助分布估計 <span class="font-mono">p_{MCS,s} = Pr^{*}[Δ^{*}_s ≥ Δ^{obs}_s]</span>。</p>
+                                                                            <p class="text-[11px]">來源：Hansen et al. (2011) Model Confidence Set。</p>
+                                                                        </div>
+                                                                        <div class="space-y-1">
+                                                                            <h6 class="font-semibold" style="color: var(--foreground);">OFI<sub>s</sub></h6>
+                                                                            <p>整體分數：<span class="font-mono">OFI_s = 100·∑ w_i R_i</span>，其中 <span class="font-mono">R_i</span> 為各構面 0~1 正規化結果，預設權重 <span class="font-mono">(0.35, 0.20, 0.15, 0.20, 0.10)</span>。</p>
+                                                                            <p class="text-[11px]">綜合流程 PBO、幾何穩健、樣本外統計與顯著性檢定。</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <p class="text-[11px]">SPA/MCS 在前端採 300 次平穩自助法估計，與後端嚴謹版採相同統計量，僅差在樣本數與伺服端可增補的更高迭代次數。</p>
+                                                                </details>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>

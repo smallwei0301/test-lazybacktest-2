@@ -57,10 +57,13 @@ let batchWorkerStatus = {
 };
 
 // --- 策略穩健度 (OFI) 版本與權重設定 ---
-const BATCH_OFI_VERSION = 'LB-OFI-20240701A';
+const BATCH_OFI_VERSION = 'LB-OFI-20240701B';
 const OFI_DEFAULT_ALPHA = 0.1;
 const OFI_DEFAULT_BLOCKS = 10;
 const OFI_MAX_SPLITS = 400; // 若超過此值則抽樣，避免在行動裝置上卡頓
+const OFI_SPA_SIGNIFICANCE = 0.1;
+const OFI_SPA_BOOTSTRAP_SAMPLES = 300;
+const OFI_SPA_AVG_BLOCK_LENGTH = 10;
 const OFI_COMPONENT_WEIGHTS = {
     cPBO: 0.35,
     level: 0.20,
@@ -355,6 +358,147 @@ function logit(value) {
     return Math.log(clamped / (1 - clamped));
 }
 
+function computeMean(values) {
+    const arr = safeArray(values).filter((value) => Number.isFinite(value));
+    if (arr.length === 0) return 0;
+    const sum = arr.reduce((acc, value) => acc + value, 0);
+    return sum / arr.length;
+}
+
+function computeStd(values, providedMean) {
+    const arr = safeArray(values).filter((value) => Number.isFinite(value));
+    if (arr.length < 2) return 0;
+    const mean = Number.isFinite(providedMean) ? providedMean : computeMean(arr);
+    const variance = arr.reduce((acc, value) => acc + (value - mean) * (value - mean), 0) / (arr.length - 1);
+    return Math.sqrt(Math.max(variance, 0));
+}
+
+function stationaryBootstrapSample(series, sampleSize, avgBlockLength) {
+    const data = safeArray(series).filter((value) => Number.isFinite(value));
+    if (data.length === 0) return [];
+    const length = Math.max(1, Number.isFinite(sampleSize) ? Math.floor(sampleSize) : data.length);
+    const blockLength = Math.max(1, Number.isFinite(avgBlockLength) ? avgBlockLength : 1);
+    const stayProbability = Math.max(0, Math.min(1, 1 - 1 / blockLength));
+    const result = new Array(length);
+    let index = Math.floor(Math.random() * data.length);
+    for (let i = 0; i < length; i += 1) {
+        result[i] = data[index];
+        if (Math.random() > stayProbability) {
+            index = Math.floor(Math.random() * data.length);
+        } else {
+            index = (index + 1) % data.length;
+        }
+    }
+    return result;
+}
+
+function computeSpaMcsMetrics(blockData, options = {}) {
+    const significance = Number.isFinite(options.significance)
+        ? options.significance
+        : OFI_SPA_SIGNIFICANCE;
+    const bootstrapSamples = Number.isFinite(options.bootstrapSamples)
+        ? Math.max(50, Math.floor(options.bootstrapSamples))
+        : OFI_SPA_BOOTSTRAP_SAMPLES;
+    const avgBlockLength = Number.isFinite(options.avgBlockLength)
+        ? Math.max(1, options.avgBlockLength)
+        : OFI_SPA_AVG_BLOCK_LENGTH;
+    const minSampleSize = Number.isFinite(options.minSampleSize)
+        ? Math.max(30, Math.floor(options.minSampleSize))
+        : 60;
+
+    const metrics = blockData.map(() => ({
+        spaStatistic: null,
+        spaPValue: null,
+        spaPassed: false,
+        mcsDelta: null,
+        mcsPValue: null,
+        mcsIncluded: false
+    }));
+
+    const validEntries = blockData
+        .map((data, index) => {
+            const series = safeArray(data?.dailyReturns).filter((value) => Number.isFinite(value));
+            return series.length >= minSampleSize ? { index, series } : null;
+        })
+        .filter((entry) => entry !== null);
+
+    if (validEntries.length === 0) {
+        return metrics;
+    }
+
+    const observedMeans = validEntries.map((entry) => computeMean(entry.series));
+    const observedStds = validEntries.map((entry, idx) => computeStd(entry.series, observedMeans[idx]));
+    const sampleSizes = validEntries.map((entry) => entry.series.length);
+    const spaStatistics = observedMeans.map((mean, idx) => {
+        const std = observedStds[idx];
+        if (!Number.isFinite(std) || std <= 1e-12) {
+            return mean > 0 ? Infinity : 0;
+        }
+        return Math.max(0, (Math.sqrt(sampleSizes[idx]) * mean) / std);
+    });
+    const bestObservedMean = Math.max(...observedMeans);
+    const observedDeltas = observedMeans.map((mean) => bestObservedMean - mean);
+
+    const spaExtremeCounts = new Array(validEntries.length).fill(0);
+    const mcsExtremeCounts = new Array(validEntries.length).fill(0);
+
+    for (let sampleIndex = 0; sampleIndex < bootstrapSamples; sampleIndex += 1) {
+        const bootstrapMeans = new Array(validEntries.length);
+        const bootstrapStds = new Array(validEntries.length);
+        for (let entryIndex = 0; entryIndex < validEntries.length; entryIndex += 1) {
+            const entry = validEntries[entryIndex];
+            const bootstrapSeries = stationaryBootstrapSample(
+                entry.series,
+                entry.series.length,
+                avgBlockLength
+            );
+            const mean = computeMean(bootstrapSeries);
+            bootstrapMeans[entryIndex] = mean;
+            bootstrapStds[entryIndex] = computeStd(bootstrapSeries, mean);
+        }
+
+        const bootstrapBestMean = Math.max(...bootstrapMeans);
+
+        for (let entryIndex = 0; entryIndex < validEntries.length; entryIndex += 1) {
+            const observedStd = observedStds[entryIndex];
+            const refStd = Number.isFinite(bootstrapStds[entryIndex]) && bootstrapStds[entryIndex] > 1e-12
+                ? bootstrapStds[entryIndex]
+                : observedStd;
+            const stat = refStd > 1e-12
+                ? Math.max(
+                    0,
+                    (Math.sqrt(sampleSizes[entryIndex]) *
+                        (bootstrapMeans[entryIndex] - observedMeans[entryIndex])) /
+                        refStd
+                )
+                : 0;
+            if (stat >= spaStatistics[entryIndex] - 1e-10) {
+                spaExtremeCounts[entryIndex] += 1;
+            }
+
+            const delta = bootstrapBestMean - bootstrapMeans[entryIndex];
+            if (delta >= observedDeltas[entryIndex] - 1e-10) {
+                mcsExtremeCounts[entryIndex] += 1;
+            }
+        }
+    }
+
+    validEntries.forEach((entry, idx) => {
+        const spaPValue = (spaExtremeCounts[idx] + 1) / (bootstrapSamples + 1);
+        const mcsPValue = (mcsExtremeCounts[idx] + 1) / (bootstrapSamples + 1);
+        metrics[entry.index] = {
+            spaStatistic: spaStatistics[idx],
+            spaPValue,
+            spaPassed: spaPValue <= significance,
+            mcsDelta: observedDeltas[idx],
+            mcsPValue,
+            mcsIncluded: mcsPValue >= significance
+        };
+    });
+
+    return metrics;
+}
+
 function buildParameterVector(result) {
     const values = {};
     const addParams = (params, prefix) => {
@@ -612,6 +756,12 @@ function updateOFIMetrics(options = {}) {
         const maxIQR = Math.max(0.05, ...iqrValues.map((value) => (Number.isFinite(value) ? value : 0)));
         const parameterVectors = blockData.map((data) => (data ? data.parameterVector : {}));
         const islandScores = computeIslandScores(batchOptimizationResults, medianQuantiles, parameterVectors);
+        const spaMcsMetrics = computeSpaMcsMetrics(blockData, {
+            significance: Number.isFinite(options.spaAlpha) ? options.spaAlpha : OFI_SPA_SIGNIFICANCE,
+            bootstrapSamples: options.bootstrapSamples,
+            avgBlockLength: options.avgBlockLength,
+            minSampleSize: options.minSampleSize
+        });
         const ofiResults = batchOptimizationResults.map((result, index) => {
             const data = blockData[index];
             if (!data) {
@@ -629,6 +779,7 @@ function updateOFIMetrics(options = {}) {
                 sharpeRatio: data.sharpeRatio,
                 trials: options.dsrTrials || batchOptimizationResults.length
             });
+            const spaMcs = spaMcsMetrics[index] || {};
             const weights = { ...OFI_COMPONENT_WEIGHTS };
             const score = 100 * (
                 weights.cPBO * rCPBO +
@@ -638,12 +789,8 @@ function updateOFIMetrics(options = {}) {
                 weights.dsr * dsr
             );
             const dsrClamped = clamp01(dsr);
-            const heuristics = {
-                spaPassed:
-                    score >= 70 && rCPBO >= 0.65 && level >= 0.6 && dsrClamped >= 0.55,
-                mcsIncluded:
-                    score >= 80 && island >= 0.5 && stability >= 0.6 && dsrClamped >= 0.6
-            };
+            const spaPValue = Number.isFinite(spaMcs.spaPValue) ? spaMcs.spaPValue : null;
+            const mcsPValue = Number.isFinite(spaMcs.mcsPValue) ? spaMcs.mcsPValue : null;
             return {
                 version: BATCH_OFI_VERSION,
                 score,
@@ -661,10 +808,16 @@ function updateOFIMetrics(options = {}) {
                     failures: fails[index],
                     alpha,
                     blockCount,
-                    sampleSize: data.dailyReturns.length
+                    sampleSize: data.dailyReturns.length,
+                    spaStatistic: Number.isFinite(spaMcs.spaStatistic) ? spaMcs.spaStatistic : null,
+                    spaPValue,
+                    mcsDelta: Number.isFinite(spaMcs.mcsDelta) ? spaMcs.mcsDelta : null,
+                    mcsPValue
                 },
-                spaPassed: heuristics.spaPassed,
-                mcsIncluded: heuristics.mcsIncluded
+                spaPassed: Boolean(spaMcs.spaPassed),
+                spaPValue,
+                mcsIncluded: Boolean(spaMcs.mcsIncluded),
+                mcsPValue
             };
         });
         ofiResults.forEach((ofi, index) => {
@@ -812,7 +965,11 @@ function initBatchOptimization() {
             sortKey: 'annualizedReturn',
             sortDirection: 'desc',
             ofiAlpha: OFI_DEFAULT_ALPHA,
-            ofiBlocks: OFI_DEFAULT_BLOCKS
+            ofiBlocks: OFI_DEFAULT_BLOCKS,
+            spaAlpha: OFI_SPA_SIGNIFICANCE,
+            spaBootstrapSamples: OFI_SPA_BOOTSTRAP_SAMPLES,
+            spaBlockLength: OFI_SPA_AVG_BLOCK_LENGTH,
+            spaMinSampleSize: 60
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -948,7 +1105,15 @@ function bindBatchOptimizationEvents() {
         const sortKeySelect = document.getElementById('batch-sort-key');
         if (sortKeySelect) {
             sortKeySelect.addEventListener('change', (e) => {
-                batchOptimizationConfig.sortKey = e.target.value;
+                const previousKey = batchOptimizationConfig.sortKey;
+                const selectedKey = e.target.value;
+                batchOptimizationConfig.sortKey = selectedKey;
+                if (selectedKey === 'ofi_spaP' || selectedKey === 'ofi_mcsP') {
+                    batchOptimizationConfig.sortDirection = 'asc';
+                } else if (previousKey === 'ofi_spaP' || previousKey === 'ofi_mcsP') {
+                    batchOptimizationConfig.sortDirection = 'desc';
+                }
+                updateSortDirectionButton();
                 sortBatchResults();
             });
         }
@@ -2368,7 +2533,11 @@ function showBatchResults() {
         updateOFIMetrics({
             alpha: batchOptimizationConfig.ofiAlpha,
             blockCount: batchOptimizationConfig.ofiBlocks,
-            dsrTrials: batchOptimizationResults.length
+            dsrTrials: batchOptimizationResults.length,
+            spaAlpha: batchOptimizationConfig.spaAlpha,
+            bootstrapSamples: batchOptimizationConfig.spaBootstrapSamples,
+            avgBlockLength: batchOptimizationConfig.spaBlockLength,
+            minSampleSize: batchOptimizationConfig.spaMinSampleSize
         });
 
         // 排序結果
@@ -2402,6 +2571,14 @@ function resolveResultSortValue(result, sortKey) {
         case 'ofi_dsr':
             return Number.isFinite(result.ofi?.components?.dsr)
                 ? result.ofi.components.dsr
+                : NaN;
+        case 'ofi_spaP':
+            return Number.isFinite(result.ofi?.spaPValue)
+                ? result.ofi.spaPValue
+                : NaN;
+        case 'ofi_mcsP':
+            return Number.isFinite(result.ofi?.mcsPValue)
+                ? result.ofi.mcsPValue
                 : NaN;
         case 'tradeCount':
             return Number.isFinite(result.tradeCount)
@@ -2582,6 +2759,8 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${ofi ? formatUnitPercent(ofi.components?.medianOOSQuantile) : '-'}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${ofi ? formatUnitPercent(ofi.components?.iqrOOSQuantile) : '-'}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${ofi ? formatUnitPercent(ofi.components?.dsr) : '-'}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${ofi ? formatPValue(ofi.spaPValue) : '-'}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${ofi ? formatPValue(ofi.mcsPValue) : '-'}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${buildSpaBadge(ofi)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
                 <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
@@ -3328,18 +3507,43 @@ function formatUnitPercent(value, digits = 1) {
     return `${(clamped * 100).toFixed(digits)}%`;
 }
 
+function formatPValue(value) {
+    if (!Number.isFinite(value)) return '-';
+    if (value < 0.001) return '&lt;0.001';
+    if (value > 0.999) return '&gt;0.999';
+    return value.toFixed(3);
+}
+
 function buildSpaBadge(ofi) {
     if (!ofi) {
         return '<span class="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-500">待檢</span>';
     }
     const badges = [];
-    if (ofi.spaPassed) {
-        badges.push('<span class="px-2 py-0.5 mr-1 text-xs rounded bg-emerald-100 text-emerald-700">SPA ✓</span>');
+    if (Number.isFinite(ofi.spaPValue)) {
+        if (ofi.spaPassed) {
+            badges.push(
+                `<span class="px-2 py-0.5 mr-1 text-xs rounded bg-emerald-100 text-emerald-700">SPA ✓ p=${formatPValue(ofi.spaPValue)}</span>`
+            );
+        } else {
+            badges.push(
+                `<span class="px-2 py-0.5 mr-1 text-xs rounded bg-amber-100 text-amber-700">SPA ✗ p=${formatPValue(ofi.spaPValue)}</span>`
+            );
+        }
     } else {
-        badges.push('<span class="px-2 py-0.5 mr-1 text-xs rounded bg-gray-100 text-gray-500">SPA 準備中</span>');
+        badges.push('<span class="px-2 py-0.5 mr-1 text-xs rounded bg-gray-100 text-gray-500">SPA 樣本不足</span>');
     }
-    if (ofi.mcsIncluded) {
-        badges.push('<span class="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-700">MCS</span>');
+    if (Number.isFinite(ofi.mcsPValue)) {
+        if (ofi.mcsIncluded) {
+            badges.push(
+                `<span class="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-700">MCS ✓ p=${formatPValue(ofi.mcsPValue)}</span>`
+            );
+        } else {
+            badges.push(
+                `<span class="px-2 py-0.5 text-xs rounded bg-rose-100 text-rose-700">MCS ✗ p=${formatPValue(ofi.mcsPValue)}</span>`
+            );
+        }
+    } else {
+        badges.push('<span class="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-500">MCS 樣本不足</span>');
     }
     return badges.join('');
 }
@@ -4312,7 +4516,11 @@ function addCrossOptimizationResults(newResults) {
     updateOFIMetrics({
         alpha: batchOptimizationConfig.ofiAlpha,
         blockCount: batchOptimizationConfig.ofiBlocks,
-        dsrTrials: batchOptimizationResults.length
+        dsrTrials: batchOptimizationResults.length,
+        spaAlpha: batchOptimizationConfig.spaAlpha,
+        bootstrapSamples: batchOptimizationConfig.spaBootstrapSamples,
+        avgBlockLength: batchOptimizationConfig.spaBlockLength,
+        minSampleSize: batchOptimizationConfig.spaMinSampleSize
     });
 }
 

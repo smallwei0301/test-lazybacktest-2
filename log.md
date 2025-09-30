@@ -1,6 +1,7 @@
-## 2025-11-13 — Patch LB-OFI-20240701A
-- **Scope**: 批量優化結果頁新增「策略過擬合指標 (OFI)」及 cPBO/OOS 分位/DSR 組合分數，支援 CSCV 交叉驗證、島嶼穩健度與 Deflated Sharpe Ratio；介面提供 OFI 排序、SPA/MCS 篩選與補強檢定標章。
-- **Testing**: 待與前端快取資料整合後於瀏覽器實測（此環境無法啟動實際回測流程）。
+## 2025-11-13 — Patch LB-OFI-20240701B
+- **Scope**: 升級批量優化 OFI 流程，導入 300 次平穩自助法計算逐策略 SPA 與 MCS p 值，移除「準備中」佔位；OFI 卡同場新增 SPA/MCS p 值欄與徽章、公式說明摺疊面板（涵蓋 cPBO、OOS 分位、IQR、IslandScore、DSR、SPA、MCS 與 OFI 權重）。
+- **Notes**: SPA/MCS 與 DSR 採與 Bailey & López de Prado／Hansen 文獻一致的統計量，前端版本僅以樣本長度決定是否輸出結果；若樣本不足則顯示「樣本不足」提示。
+- **Testing**: `node - <<'NODE' const fs = require('fs'); const vm = require('vm'); ['js/batch-optimization.js'].forEach((file) => { const code = fs.readFileSync(file, 'utf8'); new vm.Script(code, { filename: file }); }); console.log('batch-optimization.js compiled without syntax errors'); NODE`
 
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
