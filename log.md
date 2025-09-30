@@ -1,3 +1,11 @@
+## 2025-11-20 — Patch LB-GA-FUZZY-20251120A
+- **Scope**: 批量優化導入 GA＋模糊系統協同流程，啟動時先以基因演算法調整 RSI/KD 隸屬函數與預測誤差校正閥值，並回傳診斷資訊。
+- **Details**:
+  - 新增 `js/ga-fuzzy-optimizer.js` 封裝隸屬函數 GA、模糊推論、偏差校正評估與診斷輸出，並開放 `lazybacktestGA` API。
+  - `batch-optimization.js` 於迭代優化及交叉優化前套用 GA Bootstrap，保留診斷、回測指標與 δ 閥值，結果表新增 GA 評估摘要。
+  - `index.html` 注入模組腳本，維持批量優化流程與交叉優化共用 GA 設定、快取與 UI 呈現。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ga-fuzzy-optimizer.js','js/backtest.js','js/main.js','js/worker.js','js/batch-optimization.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

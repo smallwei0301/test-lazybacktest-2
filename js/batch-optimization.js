@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.0 ---
 // Patch note: small harmless edit to refresh editor diagnostics
+// Patch Tag: LB-GA-FUZZY-20251120A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -55,6 +56,201 @@ let batchWorkerStatus = {
     inFlightCount: 0,
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
+
+const DEFAULT_FUZZY_GA_OPTIONS = {
+    version: 'LB-GA-FUZZY-20251120A',
+    populationSize: 28,
+    generations: 16,
+    crossoverRate: 0.75,
+    mutationRate: 0.25,
+    eliteCount: 2,
+    tournamentSize: 3,
+    sampleSize: 600
+};
+
+function hasFuzzyGaModule() {
+    return typeof lazybacktestGA === 'object' && lazybacktestGA &&
+        typeof lazybacktestGA.prepareFuzzyContext === 'function' &&
+        typeof lazybacktestGA.runGeneticFuzzyOptimization === 'function';
+}
+
+function fallbackFuzzyStrategySet() {
+    return new Set([
+        'rsi_oversold',
+        'rsi_overbought',
+        'cover_rsi_oversold',
+        'short_rsi_overbought',
+        'k_d_cross',
+        'k_d_cross_exit',
+        'cover_k_d_cross',
+        'short_k_d_cross'
+    ]);
+}
+
+function shouldApplyFuzzyStrategy(strategy) {
+    if (!strategy) return false;
+    if (hasFuzzyGaModule() && typeof lazybacktestGA.shouldUseFuzzyStrategy === 'function') {
+        try {
+            return !!lazybacktestGA.shouldUseFuzzyStrategy(strategy);
+        } catch (error) {
+            console.warn('[Batch Optimization] Fuzzy strategy check failed, using fallback:', error);
+        }
+    }
+    return fallbackFuzzyStrategySet().has(strategy);
+}
+
+function clampFuzzyValue(value, min, max) {
+    if (hasFuzzyGaModule() && typeof lazybacktestGA.clamp === 'function') {
+        return lazybacktestGA.clamp(value, min, max);
+    }
+    if (!Number.isFinite(value)) return min;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+function resolveFuzzyGaOptions(configCandidate) {
+    const resolved = { ...DEFAULT_FUZZY_GA_OPTIONS };
+    const source = configCandidate && typeof configCandidate === 'object'
+        ? (configCandidate.fuzzyGaOptions || configCandidate)
+        : null;
+    if (source && typeof source === 'object') {
+        Object.keys(resolved).forEach(key => {
+            if (source[key] !== undefined && source[key] !== null) {
+                resolved[key] = source[key];
+            }
+        });
+    }
+    return resolved;
+}
+
+async function applyFuzzyBootstrapToCombination(combination, config) {
+    try {
+        if (!combination || typeof combination !== 'object') return null;
+        const entryRelevant = shouldApplyFuzzyStrategy(combination.buyStrategy);
+        const exitRelevant = shouldApplyFuzzyStrategy(combination.sellStrategy);
+        if (!entryRelevant && !exitRelevant) {
+            return null;
+        }
+        if (!Array.isArray(cachedStockData) || cachedStockData.length < 50) {
+            console.warn('[Batch Optimization] Skipping fuzzy GA bootstrap due to insufficient cached data');
+            return null;
+        }
+        if (!hasFuzzyGaModule()) {
+            console.warn('[Batch Optimization] lazybacktestGA module not available, skip fuzzy bootstrap');
+            return null;
+        }
+
+        const fuzzyOptions = resolveFuzzyGaOptions(config);
+        const context = lazybacktestGA.prepareFuzzyContext({
+            stockData: cachedStockData,
+            combination,
+            fuzzyOptions
+        });
+        if (!context) {
+            console.warn('[Batch Optimization] Fuzzy GA context not ready, skip bootstrap');
+            return null;
+        }
+
+        const gaResult = await lazybacktestGA.runGeneticFuzzyOptimization(context);
+        if (!gaResult || !gaResult.bestIndividual) {
+            console.warn('[Batch Optimization] Fuzzy GA did not return best individual');
+            return null;
+        }
+
+        const applied = applyFuzzyIndividualToCombination(combination, gaResult.bestIndividual, gaResult, { mutateOriginal: true });
+        console.log('[Batch Optimization] Applied fuzzy GA bootstrap diagnostics:', applied?.fuzzyDiagnostics);
+        return applied;
+    } catch (error) {
+        console.error('[Batch Optimization] Error applying fuzzy bootstrap:', error);
+        return null;
+    }
+}
+
+function applyFuzzyIndividualToCombination(combination, individual, gaResult, options = {}) {
+    if (!combination || typeof combination !== 'object') return null;
+    const mutateOriginal = options?.mutateOriginal === true;
+    const updated = {
+        buyStrategy: combination.buyStrategy,
+        sellStrategy: combination.sellStrategy,
+        buyParams: { ...(combination.buyParams || getDefaultStrategyParams(combination.buyStrategy)) },
+        sellParams: { ...(combination.sellParams || getDefaultStrategyParams(combination.sellStrategy)) }
+    };
+
+    applyFuzzyAdjustmentsToParams(updated.buyStrategy, updated.buyParams, individual);
+    applyFuzzyAdjustmentsToParams(updated.sellStrategy, updated.sellParams, individual);
+
+    const diagnostics = {
+        version: gaResult?.version || DEFAULT_FUZZY_GA_OPTIONS.version,
+        score: gaResult?.metrics?.score ?? null,
+        totalReturn: gaResult?.metrics?.totalReturn ?? null,
+        sharpe: gaResult?.metrics?.sharpe ?? null,
+        mse: gaResult?.metrics?.mse ?? null,
+        tradeCount: gaResult?.metrics?.tradeCount ?? null,
+        delta: individual?.delta ?? null,
+        membership: {
+            rsiOversoldCenter: individual?.rsiOversoldCenter ?? null,
+            rsiOversoldWidth: individual?.rsiOversoldWidth ?? null,
+            rsiOverboughtCenter: individual?.rsiOverboughtCenter ?? null,
+            rsiOverboughtWidth: individual?.rsiOverboughtWidth ?? null,
+            kOversoldCenter: individual?.kOversoldCenter ?? null,
+            kOversoldWidth: individual?.kOversoldWidth ?? null,
+            kOverboughtCenter: individual?.kOverboughtCenter ?? null,
+            kOverboughtWidth: individual?.kOverboughtWidth ?? null,
+            dOversoldCenter: individual?.dOversoldCenter ?? null,
+            dOversoldWidth: individual?.dOversoldWidth ?? null,
+            dOverboughtCenter: individual?.dOverboughtCenter ?? null,
+            dOverboughtWidth: individual?.dOverboughtWidth ?? null
+        },
+        diagnostics: gaResult?.diagnostics || null,
+        timestamp: new Date().toISOString()
+    };
+
+    updated.fuzzyDiagnostics = diagnostics;
+
+    if (mutateOriginal) {
+        combination.buyParams = updated.buyParams;
+        combination.sellParams = updated.sellParams;
+        combination.fuzzyDiagnostics = diagnostics;
+    }
+
+    return updated;
+}
+
+function applyFuzzyAdjustmentsToParams(strategyKey, params, individual) {
+    if (!strategyKey || !params || typeof params !== 'object' || !individual) {
+        return;
+    }
+
+    switch (strategyKey) {
+        case 'rsi_oversold':
+        case 'cover_rsi_oversold':
+            if (params.threshold !== undefined) {
+                params.threshold = clampFuzzyValue(individual.rsiOversoldCenter, 10, 45);
+            }
+            break;
+        case 'rsi_overbought':
+        case 'short_rsi_overbought':
+            if (params.threshold !== undefined) {
+                params.threshold = clampFuzzyValue(individual.rsiOverboughtCenter, 55, 90);
+            }
+            break;
+        case 'k_d_cross':
+        case 'cover_k_d_cross':
+            if (params.thresholdX !== undefined) {
+                params.thresholdX = clampFuzzyValue(individual.dOversoldCenter, 10, 50);
+            }
+            break;
+        case 'k_d_cross_exit':
+        case 'short_k_d_cross':
+            if (params.thresholdY !== undefined) {
+                params.thresholdY = clampFuzzyValue(individual.dOverboughtCenter, 50, 90);
+            }
+            break;
+        default:
+            break;
+    }
+}
 
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
@@ -180,7 +376,8 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            fuzzyGaOptions: { ...DEFAULT_FUZZY_GA_OPTIONS }
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -389,7 +586,12 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+        batchOptimizationConfig = {
+            ...batchOptimizationConfig,
+            ...config,
+            fuzzyGaOptions: { ...config.fuzzyGaOptions }
+        };
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
@@ -530,7 +732,10 @@ function getBatchOptimizationConfig() {
         // 設定排序鍵值為選擇的目標指標
         config.sortKey = config.targetMetric;
         config.sortDirection = 'desc';
-        
+
+        // 合併 GA 模糊優化設定
+        config.fuzzyGaOptions = resolveFuzzyGaOptions(batchOptimizationConfig);
+
         return config;
     } catch (error) {
         console.error('[Batch Optimization] Error getting config:', error);
@@ -540,7 +745,8 @@ function getBatchOptimizationConfig() {
             maxCombinations: 10000,
             optimizeTargets: ['annualizedReturn'],
             sortKey: 'annualizedReturn',
-            sortDirection: 'desc'
+            sortDirection: 'desc',
+            fuzzyGaOptions: { ...DEFAULT_FUZZY_GA_OPTIONS }
         };
     }
 }
@@ -736,11 +942,14 @@ async function executeBatchOptimization(config) {
         // 步驟1：取得策略列表
         let buyStrategies = getSelectedStrategies('batch-buy-strategies');
         let sellStrategies = getSelectedStrategies('batch-sell-strategies');
-        
+
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
-        
+
+        config.optimizeConcurrency = config.optimizeConcurrency || config.concurrency || navigator.hardwareConcurrency || 4;
+        config.fuzzyGaOptions = resolveFuzzyGaOptions(config);
+
         updateBatchProgress(5, '準備策略參數優化...');
-        
+
         // 步驟2：先生成所有選中的策略組合，然後逐個對每個組合依序優化參數
         console.log('[Batch Optimization] Generating strategy combinations...');
         const rawCombinations = generateStrategyCombinations(buyStrategies, sellStrategies);
@@ -826,11 +1035,19 @@ async function optimizeCombinationIterative(combination, config) {
         riskManagement: combination.riskManagement
     };
 
+    let fuzzyBootstrapResult = null;
+    if (config && config.fuzzyGaOptions) {
+        fuzzyBootstrapResult = await applyFuzzyBootstrapToCombination(currentCombo, config.fuzzyGaOptions);
+        if (fuzzyBootstrapResult?.fuzzyDiagnostics) {
+            console.log('[Batch Optimization] Fuzzy GA diagnostics before iterative loop:', fuzzyBootstrapResult.fuzzyDiagnostics);
+        }
+    }
+
     try {
         console.log(`[Batch Optimization] Initial combination:`, {
             buyStrategy: currentCombo.buyStrategy,
             buyParams: currentCombo.buyParams,
-            sellStrategy: currentCombo.sellStrategy, 
+            sellStrategy: currentCombo.sellStrategy,
             sellParams: currentCombo.sellParams,
             riskManagement: currentCombo.riskManagement
         });
@@ -908,9 +1125,19 @@ async function optimizeCombinationIterative(combination, config) {
         const finalResult = await executeBacktestForCombination(currentCombo);
         const finalMetric = getMetricFromResult(finalResult, config.targetMetric);
         console.log(`[Batch Optimization] Final combination metric (${config.targetMetric}): ${finalMetric.toFixed(4)}`);
-        
+
+        if (currentCombo.fuzzyDiagnostics) {
+            currentCombo.fuzzyDiagnostics.backtestMetric = Number.isFinite(finalMetric) ? finalMetric : null;
+            currentCombo.fuzzyDiagnostics.targetMetric = config.targetMetric;
+            if (finalResult) {
+                currentCombo.fuzzyDiagnostics.backtestAnnualizedReturn = finalResult.annualizedReturn ?? null;
+                currentCombo.fuzzyDiagnostics.backtestSharpe = finalResult.sharpeRatio ?? null;
+                currentCombo.fuzzyDiagnostics.backtestTradeCount = finalResult.tradeCount ?? finalResult.tradesCount ?? finalResult.totalTrades ?? null;
+            }
+        }
+
         return currentCombo;
-        
+
     } catch (error) {
         console.error(`[Batch Optimization] Error in iterative optimization for ${combination.buyStrategy} + ${combination.sellStrategy}:`, error);
         // 返回原始組合作為備用
@@ -1196,13 +1423,17 @@ async function processStrategyCombinations(combinations, config) {
                     buyParams: combination.buyParams,
                     sellParams: combination.sellParams
                 };
-                
+
                 // 保留風險管理參數（如果有的話）
                 if (combination.riskManagement) {
                     combinedResult.riskManagement = combination.riskManagement;
                     console.log(`[Batch Debug] Preserved risk management:`, combination.riskManagement);
                 }
-                
+
+                if (combination.fuzzyDiagnostics) {
+                    combinedResult.fuzzyDiagnostics = combination.fuzzyDiagnostics;
+                }
+
                 // 移除可能會造成混淆的字段
                 delete combinedResult.entryStrategy;
                 delete combinedResult.exitStrategy;
@@ -1852,7 +2083,20 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
+        if (result.fuzzyDiagnostics) {
+            const deltaText = Number.isFinite(result.fuzzyDiagnostics.delta) ? result.fuzzyDiagnostics.delta.toFixed(2) : '-';
+            const scoreText = Number.isFinite(result.fuzzyDiagnostics.score) ? result.fuzzyDiagnostics.score.toFixed(3) : '-';
+            const versionLabel = result.fuzzyDiagnostics.version || DEFAULT_FUZZY_GA_OPTIONS.version;
+            const metricValue = Number.isFinite(result.fuzzyDiagnostics.backtestMetric)
+                ? result.fuzzyDiagnostics.backtestMetric.toFixed(4)
+                : null;
+            const metricText = metricValue !== null
+                ? `｜${(result.fuzzyDiagnostics.targetMetric || 'metric')}:${metricValue}`
+                : '';
+            riskManagementInfo += `<small class="text-indigo-600 block">GA模糊(${versionLabel}) δ=${deltaText}｜Score=${scoreText}${metricText}</small>`;
+        }
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -2424,7 +2668,28 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             });
             return null;
         }
-        
+
+        let fuzzyDiagnostics = null;
+        if (shouldApplyFuzzyStrategy(entryStrategy) || shouldApplyFuzzyStrategy(exitStrategy)) {
+            try {
+                const fuzzyOptions = resolveFuzzyGaOptions(batchOptimizationConfig);
+                const fuzzyCombination = {
+                    buyStrategy: entryStrategy,
+                    sellStrategy: exitStrategy,
+                    buyParams: { ...(baseParams.entryParams || {}) },
+                    sellParams: { ...(baseParams.exitParams || {}) }
+                };
+                const applied = await applyFuzzyBootstrapToCombination(fuzzyCombination, fuzzyOptions);
+                if (applied) {
+                    baseParams.entryParams = applied.buyParams;
+                    baseParams.exitParams = applied.sellParams;
+                    fuzzyDiagnostics = applied.fuzzyDiagnostics;
+                }
+            } catch (error) {
+                console.warn('[Cross Optimization] Fuzzy GA bootstrap skipped:', error);
+            }
+        }
+
         console.log('[Cross Optimization] Final backtest params:', baseParams);
         
         // 執行回測
@@ -2441,7 +2706,15 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             result.sellStrategy = exitStrategy;
             result.buyParams = baseParams.entryParams;
             result.sellParams = baseParams.exitParams;
-            
+            if (fuzzyDiagnostics) {
+                result.fuzzyDiagnostics = {
+                    ...fuzzyDiagnostics,
+                    backtestAnnualizedReturn: result.annualizedReturn ?? null,
+                    backtestSharpe: result.sharpeRatio ?? null,
+                    backtestTradeCount: result.tradeCount ?? result.tradesCount ?? result.totalTrades ?? null
+                };
+            }
+
             console.log('[Cross Optimization] Final result with metadata:', result);
             return result;
         } else {
