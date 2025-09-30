@@ -8876,6 +8876,144 @@ function formatAbsoluteLabel(value) {
 }
 
 // --- 參數優化邏輯 ---
+const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
+
+function buildOptimizationValueSweep(range) {
+  const safeRange = range && typeof range === "object" ? range : {};
+  const rawFrom = Number.isFinite(Number(safeRange.from))
+    ? Number(safeRange.from)
+    : 1;
+  const rawTo = Number.isFinite(Number(safeRange.to))
+    ? Number(safeRange.to)
+    : rawFrom;
+  let rawStep = Number.isFinite(Number(safeRange.step))
+    ? Math.abs(Number(safeRange.step))
+    : 1;
+  if (!Number.isFinite(rawStep) || rawStep <= 0) {
+    rawStep = 1;
+  }
+  if (!Number.isFinite(rawFrom) || !Number.isFinite(rawTo)) {
+    return [];
+  }
+  const ascending = rawTo >= rawFrom;
+  const start = ascending ? rawFrom : rawTo;
+  const end = ascending ? rawTo : rawFrom;
+  const span = end - start;
+  if (span < 0) return [];
+  const approxSteps = Math.max(0, Math.floor(span / rawStep + 1e-9));
+  const values = [];
+  for (let idx = 0; idx <= approxSteps; idx++) {
+    const value = start + idx * rawStep;
+    if (value > end + rawStep * 1e-6) break;
+    values.push(parseFloat(value.toFixed(4)));
+  }
+  const finalValue = parseFloat(end.toFixed(4));
+  if (
+    values.length === 0 ||
+    Math.abs(values[values.length - 1] - finalValue) > 1e-6
+  ) {
+    values.push(finalValue);
+  }
+  if (!ascending) {
+    values.reverse();
+  }
+  const deduped = [];
+  const seen = new Set();
+  values.forEach((val) => {
+    const key = val.toFixed(4);
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(val);
+    }
+  });
+  return deduped;
+}
+
+function createOptimizationParamTemplate(baseParams = {}) {
+  const template = {
+    base: {},
+    entryParams: null,
+    exitParams: null,
+    shortEntryParams: null,
+    shortExitParams: null,
+    entryStages: null,
+    exitStages: null,
+  };
+  if (baseParams && typeof baseParams === "object") {
+    Object.keys(baseParams).forEach((key) => {
+      if (
+        key === "entryParams" ||
+        key === "exitParams" ||
+        key === "shortEntryParams" ||
+        key === "shortExitParams" ||
+        key === "entryStages" ||
+        key === "exitStages"
+      ) {
+        return;
+      }
+      template.base[key] = baseParams[key];
+    });
+    template.entryParams =
+      baseParams.entryParams && typeof baseParams.entryParams === "object"
+        ? { ...baseParams.entryParams }
+        : null;
+    template.exitParams =
+      baseParams.exitParams && typeof baseParams.exitParams === "object"
+        ? { ...baseParams.exitParams }
+        : null;
+    template.shortEntryParams =
+      baseParams.shortEntryParams &&
+      typeof baseParams.shortEntryParams === "object"
+        ? { ...baseParams.shortEntryParams }
+        : null;
+    template.shortExitParams =
+      baseParams.shortExitParams &&
+      typeof baseParams.shortExitParams === "object"
+        ? { ...baseParams.shortExitParams }
+        : null;
+    template.entryStages = Array.isArray(baseParams.entryStages)
+      ? baseParams.entryStages.map((stage) =>
+          stage && typeof stage === "object" ? { ...stage } : stage,
+        )
+      : null;
+    template.exitStages = Array.isArray(baseParams.exitStages)
+      ? baseParams.exitStages.map((stage) =>
+          stage && typeof stage === "object" ? { ...stage } : stage,
+        )
+      : null;
+  }
+  template.base.__skipSensitivity = true;
+  template.base.__optimizationMode = SINGLE_PARAMETER_OPTIMIZER_VERSION;
+  return template;
+}
+
+function instantiateOptimizationParams(template) {
+  const params = { ...template.base };
+  if (template.entryParams) {
+    params.entryParams = { ...template.entryParams };
+  }
+  if (template.exitParams) {
+    params.exitParams = { ...template.exitParams };
+  }
+  if (template.shortEntryParams) {
+    params.shortEntryParams = { ...template.shortEntryParams };
+  }
+  if (template.shortExitParams) {
+    params.shortExitParams = { ...template.shortExitParams };
+  }
+  if (template.entryStages) {
+    params.entryStages = template.entryStages.map((stage) =>
+      stage && typeof stage === "object" ? { ...stage } : stage,
+    );
+  }
+  if (template.exitStages) {
+    params.exitStages = template.exitStages.map((stage) =>
+      stage && typeof stage === "object" ? { ...stage } : stage,
+    );
+  }
+  return params;
+}
+
 async function runOptimization(
   baseParams,
   optimizeTargetStrategy,
@@ -8964,23 +9102,37 @@ async function runOptimization(
     throw new Error("優化失敗：無可用數據");
   }
 
-  const range = optRange || { from: 1, to: 20, step: 1 };
-  const totalSteps = Math.max(
-    1,
-    Math.floor((range.to - range.from) / range.step) + 1,
-  );
+  const sweepValues = buildOptimizationValueSweep(optRange);
+  if (sweepValues.length === 0) {
+    console.warn(
+      `[Worker Opt] Empty sweep detected for ${optParamName}, range:`,
+      optRange,
+    );
+    return { results: [], rawDataUsed: dataFetched ? stockData : null };
+  }
+  const template = createOptimizationParamTemplate(baseParams || {});
+  const totalSteps = sweepValues.length;
   let curStep = 0;
-  for (let val = range.from; val <= range.to; val += range.step) {
-    const curVal = parseFloat(val.toFixed(4));
-    if (curVal > range.to && Math.abs(curVal - range.to) > 1e-9) break;
+  const progressOffset = dataFetched ? 50 : 5;
+  const progressSpan = dataFetched ? 50 : 95;
+  const runOptions = { suppressProgress: true, skipSensitivity: true };
+  const contextRequiresShorting =
+    optimizeTargetStrategy === "shortEntry" ||
+    optimizeTargetStrategy === "shortExit";
+  for (const curVal of sweepValues) {
     curStep++;
-    const prog = 50 + Math.floor((curStep / totalSteps) * 50);
+    const progress = Math.min(
+      100,
+      progressOffset + Math.floor((curStep / totalSteps) * progressSpan),
+    );
     self.postMessage({
       type: "progress",
-      progress: Math.min(100, prog),
+      progress,
       message: `測試 ${optParamName}=${curVal}`,
     });
-    const testParams = JSON.parse(JSON.stringify(baseParams));
+    const testParams = instantiateOptimizationParams(template);
+    testParams.__optimizationParam = optParamName;
+    testParams.__optimizationValue = curVal;
     if (optimizeTargetStrategy === "risk") {
       if (optParamName === "stopLoss" || optParamName === "takeProfit") {
         testParams[optParamName] = curVal;
@@ -9004,29 +9156,14 @@ async function runOptimization(
         );
         continue;
       }
-      if (!testParams[targetObjKey]) testParams[targetObjKey] = {};
-      if (
-        testParams[targetObjKey].hasOwnProperty(optParamName) ||
-        typeof testParams[targetObjKey][optParamName] === "undefined"
-      ) {
-        testParams[targetObjKey][optParamName] = curVal;
-      } else {
-        console.warn(
-          `[Worker Opt] Could not find param ${optParamName} in ${targetObjKey}, skipping value ${curVal}`,
-        );
-        continue;
+      if (!testParams[targetObjKey] || typeof testParams[targetObjKey] !== "object") {
+        testParams[targetObjKey] = {};
       }
-      if (
-        optimizeTargetStrategy === "shortEntry" ||
-        optimizeTargetStrategy === "shortExit"
-      ) {
-        testParams.enableShorting = true;
-      } else {
-        testParams.enableShorting = false;
-      }
+      testParams[targetObjKey][optParamName] = curVal;
+      testParams.enableShorting = contextRequiresShorting;
     }
     try {
-      const result = runStrategy(stockData, testParams);
+      const result = runStrategy(stockData, testParams, runOptions);
       if (result) {
         results.push({
           paramValue: curVal,

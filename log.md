@@ -656,3 +656,9 @@
 - **Fix**: 保留上一輪趨勢原始資料快照並在缺少 `rawData` 時回填，`prepareRegimeBaseData` 支援使用快照與既有基礎資料，確保重新回測仍能以同一組 HMM 輸入校準；滑桿預設值因此穩定映射到最佳平均信心。
 - **Diagnostics**: 多次以相同標的重跑確認 `trendAnalysisState.calibration.bestSlider` 與預設值維持一致，且 `captureTrendAnalysisSource` 在缺資料時會沿用同日期序列的上一版快照。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-15 — Patch LB-SINGLE-OPT-20251115A
+- **Issue recap**: 單一參數優化沿用逐值 `JSON.stringify` 複製與完整敏感度分析，導致每一步都重新建立深層物件並重算敏感度網格，範圍稍大時執行時間暴增。
+- **Fix**: 建立參數範圍掃描器與可重用的優化模板，只在每輪生成淺層複本並標記 `skipSensitivity`，同時以 `suppressProgress` 避免額外的 Worker 訊息；新增版本旗標 `LB-SINGLE-OPT-20251115A` 以利追蹤。
+- **Diagnostics**: 於開發者工具觀察單一參數優化時 Worker 僅輸出範圍測試紀錄，且無再觸發敏感度計算；確認結果表格仍維持年化報酬、夏普值、下普值與回撤等欄位排序一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
