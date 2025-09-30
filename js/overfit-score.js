@@ -1,9 +1,9 @@
 /*
  * Overfit Indicator computation module
- * Version: LB-OFI-LAYERED-20250926A
+ * Version: LB-OFI-STRATONLY-20250928A
  */
 (function () {
-  const MODULE_VERSION = "LB-OFI-LAYERED-20250926A";
+  const MODULE_VERSION = "LB-OFI-STRATONLY-20250928A";
 
   const DEFAULT_CONFIG = {
     desiredSegments: 10,
@@ -115,18 +115,13 @@
       ofiScore: null,
       verdict: "資料不足",
       components: {
-        flow: null,
-        flowScoreRaw: null,
         strategy: null,
-        RPBO: null,
-        RLen: null,
-        RPool: null,
-        RSPA: null,
-        RMCS: null,
+        strategyScorePercent: null,
         ROOS: null,
         RWF: null,
         RDSRPSR: null,
         RIsland: null,
+        finalOfi: null,
       },
       meta: {
         version: MODULE_VERSION,
@@ -1115,15 +1110,19 @@
         item.islandScore = info.score;
         item.islandMeta = info.meta;
       } else {
-        item.islandScore = null;
-        item.islandMeta = null;
+        item.islandScore = 0;
+        item.islandMeta = {
+          reason: "no_island",
+          message: "未取得完整參數熱圖或無高分島嶼",
+          rawScore: 0,
+          normalisedScore: 0,
+        };
       }
     });
   }
 
   function buildStrategyEvaluations(preparedAll, preparedValid, flowMetrics, config) {
     const flowScore = flowMetrics.RFlow;
-    const flowScoreRaw = Number.isFinite(flowMetrics.flowScore) ? flowMetrics.flowScore : null;
     const allowRanking = flowMetrics.allowStrategyRanking !== false;
     const flowVerdictStatus = flowMetrics.flowVerdictStatus || "unknown";
     const flowVerdictLabel = flowMetrics.flowVerdict || "Flow 指標資料不足";
@@ -1136,6 +1135,7 @@
       ];
       const strategyScore = weightedAverage(components);
       item.strategyScore = strategyScore;
+      const strategyScorePercent = Number.isFinite(strategyScore) ? strategyScore * 100 : null;
       const finalComponents = [
         { value: flowScore, weight: config.weights.ofi.flow },
         { value: strategyScore, weight: config.weights.ofi.strategy },
@@ -1143,24 +1143,20 @@
       const ofi = weightedAverage(finalComponents);
       const computedOFI = Number.isFinite(ofi) ? ofi * 100 : null;
       item.finalOFI = allowRanking ? computedOFI : null;
+      item.displayScore = allowRanking ? strategyScorePercent : null;
       item.components = {
-        flow: flowScore,
-        flowScoreRaw,
         strategy: strategyScore,
-        RPBO: item.RPBO,
-        RLen: item.RLen,
-        RPool: item.RPool,
-        RSPA: item.RSPA,
-        RMCS: item.RMCS,
+        strategyScorePercent,
         ROOS: item.oosScore,
         RWF: item.wfScore,
         RDSRPSR: item.dsrpsrScore,
         RIsland: item.islandScore,
+        finalOfi: allowRanking ? computedOFI : null,
       };
       if (!allowRanking) {
         item.verdict = "🔒 暫停策略比較";
       } else {
-        const baseVerdict = deriveVerdict(item.finalOFI);
+        const baseVerdict = deriveVerdict(item.displayScore);
         if (flowVerdictStatus === "caution" && baseVerdict !== "資料不足") {
           item.verdict = `${baseVerdict}｜Flow 邊界`;
         } else {
@@ -1176,21 +1172,20 @@
         const empty = buildEmptyStrategyResult(item.index);
         if (!allowRanking) {
           empty.verdict = "🔒 暫停策略比較";
-          empty.components.flow = flowScore;
-          empty.components.flowScoreRaw = flowScoreRaw;
           empty.meta.flowVerdict = flowVerdictLabel;
         }
         return empty;
       }
       return {
         index: validItem.index,
-        ofiScore: validItem.finalOFI,
+        ofiScore: validItem.displayScore,
         verdict: validItem.verdict,
         components: validItem.components,
         meta: {
           version: MODULE_VERSION,
           island: validItem.islandMeta || null,
           flowVerdict: flowVerdictLabel,
+          finalOfi: validItem.finalOFI,
         },
       };
     });

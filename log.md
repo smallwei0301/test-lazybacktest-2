@@ -1,3 +1,12 @@
+## 2025-09-28 — Patch LB-OFI-STRATONLY-20250928A
+- **Scope**: 將批量優化 OFI 欄位改為僅顯示 Strategy 層分數，並補強 IslandScore 與文件對齊學術定義。
+- **Implementation**:
+  - `js/overfit-score.js` 調整評分模組版本、在缺乏高原時回傳 `R^{Island}=0` 與提示訊息，並將策略輸出新增 `strategyScorePercent`、`finalOfi` 等欄位供 UI 使用。
+  - `js/batch-optimization.js` 更新 OFI 欄位與 tooltip 僅呈現策略構面，維持 Flow 卡片獨立顯示，並記錄最終 OFI 於 `ofiFinalScore` 以便後續核對。
+  - `docs/ofi-metrics-breakdown.md` 對照文獻補充各 Strategy 指標公式與差異、標記 Flow/Strategy 分離的 UI 行為。
+- **Diagnostics**: 實際載入批量優化結果確認 Flow 未達標時欄位顯示「🔒」、Strategy 分數顯示 0.0~100 並附 Island 提示，Flow Banner 仍提供樣本長度與策略池建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-26 — Patch LB-OFI-LAYERED-20250926A
 - **Scope**: 重構 OFI Flow 層級，補上樣本長度與策略池診斷，並以 FlowScore 判定是否允許策略比較。
 - **Implementation**:

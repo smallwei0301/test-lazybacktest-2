@@ -1968,6 +1968,8 @@ function ensureBatchOfiComputed(force = false) {
             target.ofiVerdict = entry.verdict || (Number.isFinite(scoreValue) ? window.lazybacktestOFI.getVerdict(scoreValue) : '資料不足');
             target.ofiComponents = entry.components || null;
             target.ofiMeta = entry.meta || null;
+            const finalScoreValue = Number(entry.meta?.finalOfi);
+            target.ofiFinalScore = Number.isFinite(finalScoreValue) ? finalScoreValue : null;
             target.ofiVersion = evaluation.version || null;
         });
         batchOptimizationOFISignature = signature;
@@ -2065,12 +2067,8 @@ function getOfiBadgeClass(score) {
 }
 
 function formatOfiSummary(result, flowVerdictStatus) {
-    if (!result || !result.ofiComponents) return '';
-    const flowScore = formatScore(result.ofiComponents.flowScoreRaw);
-    const strategyScore = formatNormalisedScore(result.ofiComponents.strategy);
-    const parts = [];
-    if (flowScore !== '--') parts.push(`Flow ${flowScore}`);
-    if (strategyScore !== '--') parts.push(`Strat ${strategyScore}`);
+    if (!result || !Number.isFinite(result.ofiScore)) return '';
+    const parts = [`Strategy ${formatOfiScore(result.ofiScore)}`];
     const flowTag = formatFlowVerdictTag(result.ofiMeta?.flowVerdict, flowVerdictStatus);
     if (flowTag) parts.push(flowTag);
     return parts.join('｜');
@@ -2082,14 +2080,17 @@ function buildOfiTooltip(result) {
     }
     const c = result.ofiComponents;
     const lines = [
-        `OFI ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim(),
-        `FlowScore ${formatScore(c.flowScoreRaw)} ｜ Strategy ${formatNormalisedScore(c.strategy)}`,
-        `R^PBO ${formatComponentScore(c.RPBO)} ｜ R^Len ${formatComponentScore(c.RLen)} ｜ R^Pool ${formatComponentScore(c.RPool)}`,
-        `R^SPA ${formatComponentScore(c.RSPA)} ｜ R^MCS ${formatComponentScore(c.RMCS)}`,
-        `OOS ${formatComponentScore(c.ROOS)} ｜ WF ${formatComponentScore(c.RWF)} ｜ DSR/PSR ${formatComponentScore(c.RDSRPSR)} ｜ Island ${formatComponentScore(c.RIsland)}`,
+        `Strategy Score ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim(),
     ];
+    if (Number.isFinite(c.strategyScorePercent)) {
+        lines.push(`策略綜合 ${formatOfiScore(c.strategyScorePercent)} 分 (0-100)`);
+    }
+    lines.push(`R^DSR/PSR ${formatComponentScore(c.RDSRPSR)} ｜ R^OOS ${formatComponentScore(c.ROOS)} ｜ R^WF ${formatComponentScore(c.RWF)} ｜ R^Island ${formatComponentScore(c.RIsland)}`);
     if (result?.ofiMeta?.flowVerdict) {
         lines.push(`Flow 判定：${result.ofiMeta.flowVerdict}`);
+    }
+    if (result?.ofiMeta?.island?.message && (!result.ofiMeta.island.reason || result.ofiMeta.island.reason === 'no_island')) {
+        lines.push(`Island 提示：${result.ofiMeta.island.message}`);
     }
     return lines.join('\n');
 }
@@ -2105,24 +2106,15 @@ function buildOfiIndicatorsHtml(result) {
     }
     const c = result.ofiComponents;
 
-    const flowSection = buildOfiIndicatorSection('Flow 層', [
-        { label: 'FlowScore', value: formatScore(c.flowScoreRaw) },
-        { label: 'R^PBO', value: formatComponentScore(c.RPBO) },
-        { label: 'R^Len', value: formatComponentScore(c.RLen) },
-        { label: 'R^Pool', value: formatComponentScore(c.RPool) },
-        { label: 'R^SPA', value: formatComponentScore(c.RSPA) },
-        { label: 'R^MCS', value: formatComponentScore(c.RMCS) },
-    ]);
-
     const strategySection = buildOfiIndicatorSection('Strategy 層', [
         { label: 'Strategy', value: formatNormalisedScore(c.strategy) },
+        { label: 'R^DSR/PSR', value: formatComponentScore(c.RDSRPSR) },
         { label: 'R^OOS', value: formatComponentScore(c.ROOS) },
         { label: 'R^WF', value: formatComponentScore(c.RWF) },
-        { label: 'R^DSR/PSR', value: formatComponentScore(c.RDSRPSR) },
         { label: 'R^Island', value: formatComponentScore(c.RIsland) },
     ]);
 
-    const sections = [flowSection, strategySection].filter(Boolean);
+    const sections = [strategySection].filter(Boolean);
     if (sections.length === 0) {
         return '<span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">資料不足</span>';
     }
@@ -2130,8 +2122,11 @@ function buildOfiIndicatorsHtml(result) {
     const flowVerdict = result?.ofiMeta?.flowVerdict
         ? `<div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(result.ofiMeta.flowVerdict)}</div>`
         : '';
+    const islandNote = result?.ofiMeta?.island?.message
+        ? `<div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(result.ofiMeta.island.message)}</div>`
+        : '';
 
-    return `<div class="space-y-2">${sections.join('')}${flowVerdict}</div>`;
+    return `<div class="space-y-2">${sections.join('')}${islandNote}${flowVerdict}</div>`;
 }
 
 function buildOfiIndicatorSection(title, entries) {

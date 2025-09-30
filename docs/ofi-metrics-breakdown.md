@@ -1,6 +1,6 @@
-# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250926A）
+# OFI 指標拆解與規格對照（LB-OFI-DOCS-20250928A）
 
-> 適用模組：`LB-OFI-LAYERED-20250926A`
+> 適用模組：`LB-OFI-STRATONLY-20250928A`
 
 本文件將批量優化流程中每一個 OFI 構面、子分數與實作細節完整展開，並與原始規格比對差異與影響，方便前後端工程師與產品夥伴追蹤。
 
@@ -84,8 +84,9 @@
 - 先以 P25/P95 做穩健正規化後求出 `S_j = A^{norm}_j · (1 - D^{norm}_j) · (1 - E^{pen}_j)`，最後再除以所有島的 `max S_j`，得到 `R^{Island}_k`。【F:js/overfit-score.js†L598-L618】【F:js/overfit-score.js†L618-L642】
 
 **差異 & 影響**
-- 新增 `max S_j` 步驟，確保最佳島嶼分數被拉到 1，與原規格完全一致並維持相對排序。
-- `meta` 會回傳面積、分布、原始分數等資訊，供 UI/診斷使用。【F:js/overfit-score.js†L618-L642】
+- 新增 `max S_j` 步驟，確保最佳島嶼分數被拉到 1，與原規格完全一致並維持相對排序。【F:js/overfit-score.js†L914-L958】
+- 若無法建構島嶼（參數軸不足或僅有尖峰）會主動回傳 `R^{Island}_k = 0` 與「未取得完整參數熱圖」訊息，避免 UI 顯示空白。【F:js/overfit-score.js†L1099-L1107】
+- `meta` 會回傳面積、分布、原始分數等資訊，供 UI/診斷使用。【F:js/overfit-score.js†L926-L957】
 
 ### 2.4 DSR／PSR（顯著性）
 
@@ -104,16 +105,26 @@
 
 ## 3. 最終 OFI（0–100）
 
-- `OFI_k = 100 · (0.30 · R^{Flow} + 0.70 · R^{Strategy}_k)`。
-- 同步輸出評語：「👍 穩健／✅ 良好／😐 一般／⚠️ 高風險／資料不足」。【F:js/overfit-score.js†L986-L1032】【F:js/overfit-score.js†L1033-L1051】
+- `OFI_k = 100 · (0.30 · R^{Flow} + 0.70 · R^{Strategy}_k)`，最終值存於 `components.finalOfi` 與 `meta.finalOfi` 方便後續交叉驗證。【F:js/overfit-score.js†L1161-L1213】
+- 同步輸出評語：「👍 穩健／✅ 良好／😐 一般／⚠️ 高風險／資料不足」。【F:js/overfit-score.js†L1190-L1208】
+- 批量優化表格僅呈現 `R^{Strategy}_k · 100`，Flow 分數改由上方橫幅統一展示並決定是否允許排序，避免兩個層級混為一談。【F:js/batch-optimization.js†L1888-L1969】【F:js/batch-optimization.js†L2034-L2109】
+
+### 3.1 與原規格 / 文獻的比較
+
+- **OOS 穩健度**：維持規格的中位數 + IQR 組合；當 IQR 無法估計時以 0 分處理，與 Bailey et al. (2017) 對於樣本不足需降低信賴度的建議一致。【F:js/overfit-score.js†L735-L773】
+- **Walk-forward**：採用測試窗日報酬總和近似平均報酬，對短視窗與原文完全等價，對長視窗則更貼近資金曲線；勝率定義與規格一致。【F:js/overfit-score.js†L775-L851】
+- **IslandScore**：沿用 Lopez de Prado (2018) 的高原探勘，另在無島時回傳 0 分與提示訊息，提醒需要補齊參數網格或提升密度。【F:js/overfit-score.js†L902-L1107】
+- **DSR/PSR**：若伺服端尚未回傳 bootstrap 結果，前端以 Sharpe 近似 Probability/Deflated Sharpe Ratio；此近似較保守，待後端覆蓋即可回到文獻計算。【F:js/overfit-score.js†L853-L900】
+
+上述調整皆屬穩健性強化：僅在資料不足或伺服端尚未回填時提供保守估計，不會改變合格策略間的相對排序。
 
 ---
 
 ## 4. UI 與輸出欄位
 
-- `computeOFIForResults` 會回傳 `flow` 物件（含 `PBO/q/λ` 分布）與每個策略的 `components`，UI 以 tooltip 呈現所有子分數。【F:js/batch-optimization.js†L1865-L2050】
-- FlowScore 透過 `renderOfiFlowBanner` 呈現於結果卡片上，會顯示樣本長度／策略池狀態與改善建議，並在 FlowScore < 50 時鎖定排序按鈕與結果列。【F:js/batch-optimization.js†L1685-L1905】【F:js/batch-optimization.js†L2298-L2364】
-- IslandScore `meta` 包含原始/正規化數值，可直接渲染至診斷視窗。【F:js/overfit-score.js†L618-L642】
+- `computeOFIForResults` 會回傳 `flow` 物件（含 `PBO/q/λ` 分布）與每個策略的 `components`；tooltip 改為僅列出 Strategy 構面與 Flow 判定文字，避免在表格內混入 Flow 子分數。【F:js/batch-optimization.js†L1888-L2109】
+- FlowScore 透過 `renderOfiFlowBanner` 呈現於結果卡片上，會顯示樣本長度／策略池狀態與改善建議，並在 FlowScore < 50 時鎖定排序按鈕與結果列。【F:js/batch-optimization.js†L1685-L1905】【F:js/batch-optimization.js†L2441-L2515】
+- IslandScore `meta` 會提供島嶼原始分數、正規化值與缺島提示，tooltip 亦會顯示「Island 提示」協助定位參數網格不足。【F:js/overfit-score.js†L926-L1107】【F:js/batch-optimization.js†L2034-L2109】
 
 ---
 
