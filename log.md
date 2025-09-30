@@ -785,3 +785,9 @@
 - **Fix**: 將訓練/測試設定改為連動滑桿並更新資訊標籤，重構 LSTM 特徵切分與模擬邏輯以使用隔日開盤買入、收盤賣出報酬，新增自訂機率門檻與交易清單資金遞延資訊。
 - **Diagnostics**: 本地以 cachedStockData 反覆調整滑桿與門檻確認序列切分、權益曲線、交易記錄資金滾動均正確顯示，console 無錯誤。
 - **Testing**: `node --check js/main.js`
+
+## 2025-12-13 — Patch LB-ML-LSTM-20251213A
+- **Issue recap**: 預測分頁仍需人工拖曳滑桿分割資料、執行時缺乏進度提示，凱利公式預設值亦未對齊《Sizing the Bets in a Focused Portfolio》提出的風控建議。
+- **Fix**: 改為自動以最新資料進行訓練：測試 = 2：1 切分並同步更新說明卡片，新增前端進度條顯示資料處理與訓練階段，重構凱利 sizing 以套用 0.4 倍凱利 + 20% 曝險上限並依訓練波動度、樣本數折減下注比例。
+- **Diagnostics**: 在 cachedStockData 上反覆啟動預測，觀察進度條流程、權益曲線與交易清單均正常更新；比對凱利輸出可確認在樣本較少或波動較高時自動下修投入比例，console 無錯誤。
+- **Testing**: `node --check js/main.js`

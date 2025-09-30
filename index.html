@@ -2128,21 +2128,18 @@
                                         </div>
 
                                         <div class="grid md:grid-cols-2 gap-3">
-                                            <div class="border rounded px-3 py-3 space-y-3" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent); color: var(--muted-foreground);">
-                                                <div class="flex items-center justify-between text-xs">
-                                                    <label for="ml-train-slider" class="font-semibold" style="color: var(--foreground);">訓練／測試切分</label>
-                                                    <span>保持總長度不變</span>
-                                                </div>
-                                                <input id="ml-train-slider" type="range" min="60" max="260" step="1" value="0" class="w-full accent-blue-600" />
+                                            <div class="border rounded px-3 py-3 space-y-2" style="border-color: var(--border);background-color: color-mix(in srgb, var(--primary) 4%, transparent); color: var(--muted-foreground);">
+                                                <h4 class="font-semibold text-sm" style="color: var(--foreground);">資料切分（自動 2:1）</h4>
+                                                <p class="text-[11px] leading-relaxed">系統固定以 <span class="font-semibold" style="color: var(--foreground);">訓練：測試 = 2：1</span> 從最新交易日往回切分，確保時間序列完整且避免資料穿越。</p>
                                                 <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]" style="color: var(--muted-foreground);">
                                                     <span>訓練：<span id="ml-train-days">—</span> 日</span>
                                                     <span>測試：<span id="ml-test-days">—</span> 日</span>
                                                     <span>總計：<span id="ml-total-days">—</span> 日</span>
                                                 </div>
-                                                <p class="text-[11px] leading-relaxed">最少需保留 <span class="font-semibold" style="color: var(--foreground);">訓練 60 日、測試 30 日</span>。拖曳滑桿時會自動調整，確保兩端條件成立。</p>
+                                                <p class="text-[11px] leading-relaxed">若可用樣本不足 <span class="font-semibold" style="color: var(--foreground);">訓練 60 日、測試 30 日</span>，系統將提醒需重新抓取較長回測資料。</p>
                                             </div>
                                             <div class="border rounded px-3 py-3 text-xs leading-relaxed" style="border-color: var(--border); color: var(--muted-foreground); background-color: color-mix(in srgb, var(--accent) 6%, transparent);">
-                                                系統會依滑桿設定從 <span class="font-semibold" style="color: var(--foreground);">最新資料往回回溯</span>，先切出較舊的交易日作為訓練，再保留較新的交易日驗證。若尚未建立 cachedStockData，請先於回測分頁執行一次回測。
+                                                完成主回測後即可使用此分頁；若尚未建立 cachedStockData，請先於回測分頁執行一次回測。自動比例讓測試始終對齊最新行情，同時保留足夠的訓練序列供 LSTM 學習。
                                             </div>
                                         </div>
 
@@ -2162,11 +2159,13 @@
                                             </div>
                                             <div>
                                                 <label class="block text-xs mb-1">半凱利係數</label>
-                                                <input id="ml-kelly-mult" type="number" step="0.05" value="0.5" class="w-full border px-2 py-1 rounded" />
+                                                <input id="ml-kelly-mult" type="number" step="0.05" value="0.4" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">預設套用 <span class="font-semibold" style="color: var(--foreground);">Sizing the Bets in a Focused Portfolio</span> 提到的 0.4 倍凱利，降低估計誤差風險。</p>
                                             </div>
                                             <div>
                                                 <label class="block text-xs mb-1">單筆上限(%)</label>
-                                                <input id="ml-max-f" type="number" step="1" value="25" class="w-full border px-2 py-1 rounded" />
+                                                <input id="ml-max-f" type="number" step="1" value="20" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">同論文建議維持單日曝險上限 20%，必要時可再下修以符合自身風控。</p>
                                             </div>
                                         </div>
 
@@ -2206,7 +2205,7 @@
                                             <div class="border rounded px-3 py-3 space-y-2" style="border-color: var(--border); color: var(--muted-foreground);">
                                                 <h4 class="font-semibold text-sm" style="color: var(--foreground);">參數與計算解釋</h4>
                                                 <ul class="list-disc pl-4 space-y-1">
-                                                    <li><strong>訓練/測試切分</strong>：滑桿維持總樣本不變，同時確保訓練 ≥ 60 日、測試 ≥ 30 日，沿用最新資料向後分割。</li>
+                                                    <li><strong>訓練/測試切分</strong>：系統固定採訓練：測試 = 2：1，自動確保訓練 ≥ 60 日、測試 ≥ 30 日並沿用最新資料往回切分。</li>
                                                     <li><strong>自訂機率門檻</strong>：預設採訓練樣本最佳值；如需更保守，可輸入 0.55–0.65 等較高門檻。</li>
                                                     <li><strong>學習率</strong>：採 Adam 優化器的基準步伐，預設 0.01。</li>
                                                     <li><strong>迭代次數</strong>：掃描訓練資料的輪數，影響模型是否收斂。</li>
@@ -2222,6 +2221,16 @@
                                         </div>
 
                                         <button id="ml-run" class="px-4 py-2 bg-blue-600 text-white rounded shadow text-sm font-medium">訓練 + 回測</button>
+
+                                        <div id="ml-progress" class="hidden border rounded px-3 py-2 space-y-2" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                            <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
+                                                <span id="ml-progress-label" class="font-semibold" style="color: var(--foreground);">準備中...</span>
+                                                <span id="ml-progress-percent">0%</span>
+                                            </div>
+                                            <div class="h-2 w-full rounded-full overflow-hidden" style="background-color: color-mix(in srgb, var(--foreground) 12%, transparent);">
+                                                <div id="ml-progress-bar" class="h-full rounded-full" style="width: 0%; background-color: var(--primary);"></div>
+                                            </div>
+                                        </div>
 
                                         <div id="ml-cards" class="grid md:grid-cols-4 gap-3"></div>
 

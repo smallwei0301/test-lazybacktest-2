@@ -2537,8 +2537,8 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
-// --- ML Forecast (LB-ML-LSTM-20250625A) ---
-const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
+// --- ML Forecast (LB-ML-LSTM-20251213A) ---
+const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251213A';
 
 (function initMlForecastTab() {
     if (typeof document === 'undefined') return;
@@ -2553,7 +2553,7 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
 
     const MIN_TRAIN_SAMPLES = 60;
     const MIN_TEST_SAMPLES = 30;
-    const mlForecastState = { totalSamples: null };
+    const mlForecastState = { totalSamples: null, split: null };
 
     const renderSplitLabels = (train, test, total) => {
         const trainEl = document.getElementById('ml-train-days');
@@ -2567,45 +2567,41 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
 
     renderSplitLabels(null, null, null);
 
-    const resolveTrainTestSamples = (totalSamples, { coerceSliderValue = true } = {}) => {
-        const slider = document.getElementById('ml-train-slider');
-        if (!slider || !Number.isFinite(totalSamples)) return null;
-        if (totalSamples < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) return null;
-
-        const maxTrain = Math.max(MIN_TRAIN_SAMPLES, totalSamples - MIN_TEST_SAMPLES);
-        slider.min = String(MIN_TRAIN_SAMPLES);
-        slider.max = String(maxTrain);
-        slider.step = '1';
-
-        let sliderValue = Number(slider.value);
-        if (!Number.isFinite(sliderValue)) {
-            sliderValue = Math.floor(totalSamples * 0.7);
+    const computeAutoSplit = (totalSamples) => {
+        if (!Number.isFinite(totalSamples)) {
+            renderSplitLabels(null, null, null);
+            mlForecastState.split = null;
+            return null;
         }
-        sliderValue = clamp(Math.floor(sliderValue), MIN_TRAIN_SAMPLES, maxTrain);
-        let train = sliderValue;
+        if (totalSamples < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+            renderSplitLabels(null, null, totalSamples);
+            mlForecastState.split = null;
+            return null;
+        }
+
+        let train = Math.floor(totalSamples * (2 / 3));
         let test = totalSamples - train;
+
+        if (train < MIN_TRAIN_SAMPLES) {
+            train = MIN_TRAIN_SAMPLES;
+            test = totalSamples - train;
+        }
         if (test < MIN_TEST_SAMPLES) {
-            train = totalSamples - MIN_TEST_SAMPLES;
             test = MIN_TEST_SAMPLES;
-            sliderValue = train;
+            train = totalSamples - test;
         }
 
-        if (coerceSliderValue) {
-            slider.value = String(train);
+        if (train < MIN_TRAIN_SAMPLES || test < MIN_TEST_SAMPLES) {
+            renderSplitLabels(null, null, totalSamples);
+            mlForecastState.split = null;
+            return null;
         }
 
         renderSplitLabels(train, test, totalSamples);
-        return { train, test };
+        const split = { train, test };
+        mlForecastState.split = split;
+        return split;
     };
-
-    const trainSlider = document.getElementById('ml-train-slider');
-    if (trainSlider) {
-        trainSlider.addEventListener('input', () => {
-            if (Number.isFinite(mlForecastState.totalSamples)) {
-                resolveTrainTestSamples(mlForecastState.totalSamples, { coerceSliderValue: true });
-            }
-        });
-    }
 
     const computeRsi = (closes, period = 14) => {
         const out = Array(closes.length).fill(null);
@@ -3194,7 +3190,14 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
     };
 
     const evaluateThreshold = (probs, labels, returns, threshold) => {
-        const metrics = { threshold: Number.isFinite(threshold) ? Number(threshold.toFixed(2)) : threshold, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0 };
+        const metrics = {
+            threshold: Number.isFinite(threshold) ? Number(threshold.toFixed(2)) : threshold,
+            accuracy: 0,
+            avgUp: 0,
+            avgDown: 0,
+            sampleSize: 0,
+            volatility: 0,
+        };
         if (!Number.isFinite(threshold)) return metrics;
         const selected = [];
         for (let i = 0; i < probs.length; i += 1) {
@@ -3209,11 +3212,12 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
         const downMoves = selected.filter((item) => item.ret <= 0).map((item) => item.ret);
         metrics.avgUp = upMoves.length ? mean(upMoves) : 0;
         metrics.avgDown = downMoves.length ? mean(downMoves) : 0;
+        metrics.volatility = std(selected.map((item) => item.ret)) || 0;
         return metrics;
     };
 
     const fitThresholdAndEdge = (probs, labels, returns) => {
-        let best = { threshold: 0.5, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0 };
+        let best = { threshold: 0.5, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0, volatility: 0 };
         for (let thr = 0.35; thr <= 0.65; thr += 0.01) {
             const metrics = evaluateThreshold(probs, labels, returns, Number(thr.toFixed(2)));
             if (metrics.sampleSize < 20) continue;
@@ -3224,12 +3228,31 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
         return best;
     };
 
-    const kellyFraction = (prob, avgUp, avgDown, multiplier = 0.5, cap = 0.25) => {
+    const kellyFraction = (prob, avgUp, avgDown, multiplier = 0.4, cap = 0.2, options = {}) => {
         if (!(avgUp > 0) || !(avgDown < 0)) return 0;
-        const b = avgUp / Math.abs(avgDown || 1e-8);
-        const raw = prob - (1 - prob) / Math.max(b, 1e-8);
-        if (!Number.isFinite(raw)) return 0;
-        return clamp(raw * multiplier, 0, cap);
+        const edge = avgUp / Math.abs(avgDown || 1e-8);
+        const base = ((edge + 1) * prob - 1) / Math.max(edge, 1e-8);
+        if (!Number.isFinite(base)) return 0;
+
+        const shrink = clamp(Number.isFinite(multiplier) ? multiplier : 0.4, 0, 1);
+        let fraction = base * shrink;
+
+        const volatility = Number.isFinite(options.volatility) ? Math.abs(options.volatility) : 0;
+        if (volatility > 0) {
+            const penaltyStrength = Number.isFinite(options.riskPenalty) ? options.riskPenalty : 1.8;
+            const penalty = 1 / (1 + penaltyStrength * volatility);
+            fraction *= clamp(penalty, 0, 1);
+        }
+
+        const sampleSize = Number.isFinite(options.sampleSize) ? options.sampleSize : 0;
+        if (sampleSize > 0) {
+            const confidenceBias = Number.isFinite(options.confidenceBias) ? options.confidenceBias : 80;
+            const confidence = clamp(sampleSize / (sampleSize + confidenceBias), 0, 1);
+            fraction *= confidence;
+        }
+
+        const capped = Math.max(0, Math.min(Number.isFinite(cap) ? cap : 0.2, 1));
+        return clamp(fraction, 0, capped);
     };
 
     const simulate = (
@@ -3243,7 +3266,8 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
         cap,
         signalDates = tradeDates,
         entryPrices = [],
-        exitPrices = []
+        exitPrices = [],
+        kellyOptions = {}
     ) => {
         let equityModel = 1;
         let equityBh = 1;
@@ -3263,7 +3287,11 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
             equityBh *= Math.max(1e-6, bhGrowth);
 
             if (prob >= threshold) {
-                const fraction = kellyFraction(prob, avgUp, avgDown, multiplier, cap);
+                const fraction = kellyFraction(prob, avgUp, avgDown, multiplier, cap, {
+                    ...kellyOptions,
+                    probability: prob,
+                    returnEstimate: ret,
+                });
                 const capitalBefore = equityModel;
                 const pnlPct = fraction * ret;
                 const capitalAfter = Math.max(1e-6, capitalBefore * (1 + pnlPct));
@@ -3302,374 +3330,475 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
             return;
         }
 
-        const getInput = (id) => document.getElementById(id);
-        const lrRaw = Number(getInput('ml-lr')?.value || 0.01);
-        const epochsRaw = Number(getInput('ml-epochs')?.value || 80);
-        const seqLenRaw = Number(getInput('ml-seq-length')?.value || 30);
-        const hiddenRaw = Number(getInput('ml-hidden-size')?.value || 48);
-        const dropoutRaw = Number(getInput('ml-dropout')?.value || 0.2);
-        const batchRaw = Number(getInput('ml-batch-size')?.value || 24);
-        const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
-        const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
+        const progressEls = {
+            container: document.getElementById('ml-progress'),
+            bar: document.getElementById('ml-progress-bar'),
+            label: document.getElementById('ml-progress-label'),
+            percent: document.getElementById('ml-progress-percent'),
+        };
 
-        const learningRate = Number.isFinite(lrRaw) && lrRaw > 0 ? Math.min(lrRaw, 0.5) : 0.01;
-        const epochCount = Number.isFinite(epochsRaw) && epochsRaw > 0 ? Math.min(Math.floor(epochsRaw), 400) : 80;
-        const sequenceLengthInput = Number.isFinite(seqLenRaw) && seqLenRaw > 0 ? Math.floor(seqLenRaw) : 30;
-        const hiddenUnits = Number.isFinite(hiddenRaw) && hiddenRaw > 4 ? Math.floor(hiddenRaw) : 48;
-        const dropoutRate = Math.max(0, Math.min(0.6, Number.isFinite(dropoutRaw) ? dropoutRaw : 0.2));
-        const batchSize = Number.isFinite(batchRaw) && batchRaw > 0 ? Math.floor(batchRaw) : 24;
+        const setProgress = (percent, message) => {
+            if (!progressEls.container) return;
+            progressEls.container.classList.remove('hidden');
+            progressEls.container.setAttribute('aria-hidden', 'false');
+            const bounded = clamp(Number.isFinite(percent) ? percent : 0, 0, 100);
+            if (progressEls.bar) progressEls.bar.style.width = `${bounded}%`;
+            if (progressEls.percent) progressEls.percent.textContent = `${Math.round(bounded)}%`;
+            if (progressEls.label && message) progressEls.label.textContent = message;
+        };
 
-        const rows = cachedStockData
-            .map((r) => ({
-                date: r.date,
-                close: Number(r.close),
-                open: Number(r.open),
-                high: Number(r.high),
-                low: Number(r.low),
-                volume: Number(r.volume),
-            }))
-            .filter((r) => Number.isFinite(r.close) && Number.isFinite(r.open));
-        rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+        const resetProgressLabel = () => {
+            if (progressEls.label) progressEls.label.textContent = '準備中...';
+        };
 
-        const { features, labels, nextReturns, signalDates, tradeDates, entryPrices, exitPrices } = buildFeatures(rows);
-        if (!features.length || features.length !== labels.length || labels.length !== nextReturns.length) {
-            showError('特徵構建失敗，請確認快取資料是否完整。');
-            return;
-        }
-        if (
-            signalDates.length !== features.length ||
-            tradeDates.length !== features.length ||
-            entryPrices.length !== features.length ||
-            exitPrices.length !== features.length
-        ) {
-            showError('日期或報價對齊失敗，請重新執行回測。');
-            return;
-        }
+        const hideProgress = () => {
+            if (!progressEls.container) return;
+            progressEls.container.classList.add('hidden');
+            progressEls.container.setAttribute('aria-hidden', 'true');
+            if (progressEls.bar) progressEls.bar.style.width = '0%';
+            if (progressEls.percent) progressEls.percent.textContent = '0%';
+            resetProgressLabel();
+        };
 
-        if (features.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
-            showError(`快取樣本僅剩 ${features.length} 筆，需至少 ${MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES} 筆才能切分訓練與測試。`);
-            return;
-        }
+        const finishProgress = () => {
+            if (!progressEls.container) return;
+            setProgress(100, '完成');
+            setTimeout(() => {
+                hideProgress();
+            }, 800);
+        };
 
-        mlForecastState.totalSamples = features.length;
-        const split = resolveTrainTestSamples(features.length, { coerceSliderValue: true });
-        if (!split) {
-            showError('滑桿切分失敗，請確認資料量是否足夠。');
-            return;
-        }
-        const trainSamplesRequested = split.train;
-        const testSamplesRequested = split.test;
+        const abort = (message) => {
+            hideProgress();
+            showError(message);
+            return null;
+        };
 
-        if (trainSamplesRequested < MIN_TRAIN_SAMPLES || testSamplesRequested < MIN_TEST_SAMPLES) {
-            showError(`請至少保留訓練 ${MIN_TRAIN_SAMPLES} 日、測試 ${MIN_TEST_SAMPLES} 日。`);
-            return;
-        }
+        setProgress(5, '準備資料...');
 
-        const totalRequested = trainSamplesRequested + testSamplesRequested;
-        if (totalRequested > features.length) {
-            showError(`快取樣本僅剩 ${features.length} 筆，請縮短訓練或測試期間。`);
-            return;
-        }
+        try {
+            const getInput = (id) => document.getElementById(id);
+            const lrRaw = Number(getInput('ml-lr')?.value ?? 0.01);
+            const epochsRaw = Number(getInput('ml-epochs')?.value ?? 80);
+            const seqLenRaw = Number(getInput('ml-seq-length')?.value ?? 30);
+            const hiddenRaw = Number(getInput('ml-hidden-size')?.value ?? 48);
+            const dropoutRaw = Number(getInput('ml-dropout')?.value ?? 0.2);
+            const batchRaw = Number(getInput('ml-batch-size')?.value ?? 24);
+            const kellyMultiplierRaw = Number(getInput('ml-kelly-mult')?.value ?? 0.4);
+            const maxFractionRaw = Number(getInput('ml-max-f')?.value ?? 20);
 
-        const startIndex = Math.max(0, features.length - totalRequested);
-        const trainEndIndex = startIndex + trainSamplesRequested;
-        const testEndIndex = trainEndIndex + testSamplesRequested;
+            const learningRate = Number.isFinite(lrRaw) && lrRaw > 0 ? Math.min(lrRaw, 0.5) : 0.01;
+            const epochCount = Number.isFinite(epochsRaw) && epochsRaw > 0 ? Math.min(Math.floor(epochsRaw), 400) : 80;
+            const sequenceLengthInput = Number.isFinite(seqLenRaw) && seqLenRaw > 0 ? Math.floor(seqLenRaw) : 30;
+            const hiddenUnits = Number.isFinite(hiddenRaw) && hiddenRaw > 4 ? Math.floor(hiddenRaw) : 48;
+            const dropoutRate = Math.max(0, Math.min(0.6, Number.isFinite(dropoutRaw) ? dropoutRaw : 0.2));
+            const batchSize = Number.isFinite(batchRaw) && batchRaw > 0 ? Math.floor(batchRaw) : 24;
+            const kellyMultiplier = clamp(Number.isFinite(kellyMultiplierRaw) ? kellyMultiplierRaw : 0.4, 0, 1);
+            const maxFraction = clamp(Number.isFinite(maxFractionRaw) ? maxFractionRaw / 100 : 0.2, 0, 1);
 
-        const Xtrain = features.slice(startIndex, trainEndIndex);
-        const yTrain = labels.slice(startIndex, trainEndIndex);
-        const rTrain = nextReturns.slice(startIndex, trainEndIndex);
-        const signalTrain = signalDates.slice(startIndex, trainEndIndex);
-        const tradeTrain = tradeDates.slice(startIndex, trainEndIndex);
-        const entryTrain = entryPrices.slice(startIndex, trainEndIndex);
-        const exitTrain = exitPrices.slice(startIndex, trainEndIndex);
+            setProgress(15, '整理特徵...');
+            const rows = cachedStockData
+                .map((r) => ({
+                    date: r.date,
+                    close: Number(r.close),
+                    open: Number(r.open),
+                    high: Number(r.high),
+                    low: Number(r.low),
+                    volume: Number(r.volume),
+                }))
+                .filter((r) => Number.isFinite(r.close) && Number.isFinite(r.open));
+            rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
 
-        const Xtest = features.slice(trainEndIndex, testEndIndex);
-        const yTest = labels.slice(trainEndIndex, testEndIndex);
-        const rTest = nextReturns.slice(trainEndIndex, testEndIndex);
-        const signalTest = signalDates.slice(trainEndIndex, testEndIndex);
-        const tradeTest = tradeDates.slice(trainEndIndex, testEndIndex);
-        const entryTest = entryPrices.slice(trainEndIndex, testEndIndex);
-        const exitTest = exitPrices.slice(trainEndIndex, testEndIndex);
+            setProgress(22, '建立特徵...');
+            const { features, labels, nextReturns, signalDates, tradeDates, entryPrices, exitPrices } = buildFeatures(rows);
+            if (!features.length || features.length !== labels.length || labels.length !== nextReturns.length) {
+                abort('特徵構建失敗，請確認快取資料是否完整。');
+                return;
+            }
+            if (
+                signalDates.length !== features.length ||
+                tradeDates.length !== features.length ||
+                entryPrices.length !== features.length ||
+                exitPrices.length !== features.length
+            ) {
+                abort('日期或報價對齊失敗，請重新執行回測。');
+                return;
+            }
 
-        if (Xtrain.length < MIN_TRAIN_SAMPLES || Xtest.length < MIN_TEST_SAMPLES) {
-            showError('訓練或測試樣本過少，請調整滑桿或重新快取資料。');
-            return;
-        }
+            if (features.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+                abort(`快取樣本僅剩 ${features.length} 筆，需至少 ${MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES} 筆才能切分訓練與測試。`);
+                return;
+            }
 
-        const { scaled: Ztrain, mu, sigma } = standardize(Xtrain);
-        const Ztest = Xtest.map((row) => applyStandardization(row, mu, sigma));
-        const scaledAll = Ztrain.concat(Ztest);
-        const labelsAll = yTrain.concat(yTest);
-        const returnsAll = rTrain.concat(rTest);
-        const signalAll = signalTrain.concat(signalTest);
-        const tradeAll = tradeTrain.concat(tradeTest);
-        const entryAll = entryTrain.concat(entryTest);
-        const exitAll = exitTrain.concat(exitTest);
+            mlForecastState.totalSamples = features.length;
+            const split = computeAutoSplit(features.length);
+            if (!split) {
+                abort('可用樣本不足，請補齊回測期間後再執行。');
+                return;
+            }
+            const trainSamplesRequested = split.train;
+            const testSamplesRequested = split.test;
 
-        const minSeqLength = 8;
-        const maxSeqLength = Math.max(minSeqLength, Math.min(120, trainSamplesRequested - 1));
-        let sequenceLength = clamp(sequenceLengthInput, minSeqLength, maxSeqLength);
-        if (trainSamplesRequested <= sequenceLength) {
-            sequenceLength = Math.max(minSeqLength, trainSamplesRequested - 1);
-        }
-        if (sequenceLength < minSeqLength) {
-            showError('訓練樣本不足以建立指定的 LSTM 序列，請延長訓練期間或降低序列長度。');
-            return;
-        }
+            if (trainSamplesRequested < MIN_TRAIN_SAMPLES || testSamplesRequested < MIN_TEST_SAMPLES) {
+                abort(`請至少保留訓練 ${MIN_TRAIN_SAMPLES} 日、測試 ${MIN_TEST_SAMPLES} 日。`);
+                return;
+            }
 
-        const trainSequences = extractSequences(
-            scaledAll,
-            labelsAll,
-            returnsAll,
-            signalAll,
-            tradeAll,
-            entryAll,
-            exitAll,
-            0,
-            yTrain.length,
-            sequenceLength
-        );
-        const testSequences = extractSequences(
-            scaledAll,
-            labelsAll,
-            returnsAll,
-            signalAll,
-            tradeAll,
-            entryAll,
-            exitAll,
-            yTrain.length,
-            yTrain.length + yTest.length,
-            sequenceLength
-        );
+            const totalRequested = trainSamplesRequested + testSamplesRequested;
+            if (totalRequested > features.length) {
+                abort(`快取樣本僅剩 ${features.length} 筆，請縮短訓練或測試期間。`);
+                return;
+            }
 
-        if (trainSequences.sequences.length < 30 || testSequences.sequences.length < 10) {
-            showError('LSTM 序列樣本不足（訓練需 ≥ 30 筆、測試 ≥ 10 筆），請放大期間或降低序列長度。');
-            return;
-        }
+            const startIndex = Math.max(0, features.length - totalRequested);
+            const trainEndIndex = startIndex + trainSamplesRequested;
+            const testEndIndex = trainEndIndex + testSamplesRequested;
 
-        const model = trainLstmModel(trainSequences.sequences, trainSequences.labels, {
-            lr: learningRate,
-            epochs: epochCount,
-            hiddenSize: hiddenUnits,
-            batchSize,
-            dropout: dropoutRate,
-            gradClip: 5,
-        });
-        if (!model) {
-            showError('模型訓練失敗。');
-            return;
-        }
+            const Xtrain = features.slice(startIndex, trainEndIndex);
+            const yTrain = labels.slice(startIndex, trainEndIndex);
+            const rTrain = nextReturns.slice(startIndex, trainEndIndex);
+            const signalTrain = signalDates.slice(startIndex, trainEndIndex);
+            const tradeTrain = tradeDates.slice(startIndex, trainEndIndex);
+            const entryTrain = entryPrices.slice(startIndex, trainEndIndex);
+            const exitTrain = exitPrices.slice(startIndex, trainEndIndex);
 
-        const trainingSummary = model.trainingSummary || {};
-        const pTrain = trainSequences.sequences.map((seq) => model.predict(seq));
-        const bestMetrics = fitThresholdAndEdge(pTrain, trainSequences.labels, trainSequences.returns);
-        if (!bestMetrics || bestMetrics.sampleSize < 20) {
-            showError('訓練資料不足以取得穩定門檻，請延長訓練期間。');
-            return;
-        }
+            const Xtest = features.slice(trainEndIndex, testEndIndex);
+            const yTest = labels.slice(trainEndIndex, testEndIndex);
+            const rTest = nextReturns.slice(trainEndIndex, testEndIndex);
+            const signalTest = signalDates.slice(trainEndIndex, testEndIndex);
+            const tradeTest = tradeDates.slice(trainEndIndex, testEndIndex);
+            const entryTest = entryPrices.slice(trainEndIndex, testEndIndex);
+            const exitTest = exitPrices.slice(trainEndIndex, testEndIndex);
 
-        const thresholdInputEl = getInput('ml-threshold');
-        let thresholdSource = 'auto';
-        let thresholdUsed = bestMetrics.threshold;
-        if (thresholdInputEl) {
-            const rawValue = (thresholdInputEl.value || '').trim();
-            if (rawValue) {
-                const parsed = Number(rawValue);
-                if (Number.isFinite(parsed)) {
-                    const coerced = clamp(parsed, 0.05, 0.95);
-                    thresholdUsed = Number(coerced.toFixed(2));
-                    thresholdInputEl.value = thresholdUsed.toFixed(2);
-                    thresholdSource = 'custom';
+            if (Xtrain.length < MIN_TRAIN_SAMPLES || Xtest.length < MIN_TEST_SAMPLES) {
+                abort('訓練或測試樣本過少，請延長回測期間。');
+                return;
+            }
+
+            setProgress(35, '標準化資料...');
+            const { scaled: Ztrain, mu, sigma } = standardize(Xtrain);
+            const Ztest = Xtest.map((row) => applyStandardization(row, mu, sigma));
+            const scaledAll = Ztrain.concat(Ztest);
+            const labelsAll = yTrain.concat(yTest);
+            const returnsAll = rTrain.concat(rTest);
+            const signalAll = signalTrain.concat(signalTest);
+            const tradeAll = tradeTrain.concat(tradeTest);
+            const entryAll = entryTrain.concat(entryTest);
+            const exitAll = exitTrain.concat(exitTest);
+
+            const minSeqLength = 8;
+            const maxSeqLength = Math.max(minSeqLength, Math.min(120, trainSamplesRequested - 1));
+            let sequenceLength = clamp(sequenceLengthInput, minSeqLength, maxSeqLength);
+            if (trainSamplesRequested <= sequenceLength) {
+                sequenceLength = Math.max(minSeqLength, trainSamplesRequested - 1);
+            }
+            if (sequenceLength < minSeqLength) {
+                abort('訓練樣本不足以建立指定的 LSTM 序列，請延長訓練期間或降低序列長度。');
+                return;
+            }
+
+            setProgress(48, '建構序列...');
+            const trainSequences = extractSequences(
+                scaledAll,
+                labelsAll,
+                returnsAll,
+                signalAll,
+                tradeAll,
+                entryAll,
+                exitAll,
+                0,
+                yTrain.length,
+                sequenceLength
+            );
+            const testSequences = extractSequences(
+                scaledAll,
+                labelsAll,
+                returnsAll,
+                signalAll,
+                tradeAll,
+                entryAll,
+                exitAll,
+                yTrain.length,
+                yTrain.length + yTest.length,
+                sequenceLength
+            );
+
+            if (trainSequences.sequences.length < 30 || testSequences.sequences.length < 10) {
+                abort('LSTM 序列樣本不足（訓練需 ≥ 30 筆、測試 ≥ 10 筆），請放大期間或降低序列長度。');
+                return;
+            }
+
+            setProgress(60, '訓練 LSTM...');
+            const model = trainLstmModel(trainSequences.sequences, trainSequences.labels, {
+                lr: learningRate,
+                epochs: epochCount,
+                hiddenSize: hiddenUnits,
+                batchSize,
+                dropout: dropoutRate,
+                gradClip: 5,
+            });
+            if (!model) {
+                abort('模型訓練失敗。');
+                return;
+            }
+
+            const trainingSummary = model.trainingSummary || {};
+            const pTrain = trainSequences.sequences.map((seq) => model.predict(seq));
+
+            setProgress(72, '評估門檻...');
+            const bestMetrics = fitThresholdAndEdge(pTrain, trainSequences.labels, trainSequences.returns);
+            if (!bestMetrics || bestMetrics.sampleSize < 20) {
+                abort('訓練資料不足以取得穩定門檻，請延長訓練期間。');
+                return;
+            }
+
+            const thresholdInputEl = getInput('ml-threshold');
+            let thresholdSource = 'auto';
+            let thresholdUsed = bestMetrics.threshold;
+            if (thresholdInputEl) {
+                const rawValue = (thresholdInputEl.value || '').trim();
+                if (rawValue) {
+                    const parsed = Number(rawValue);
+                    if (Number.isFinite(parsed)) {
+                        const coerced = clamp(parsed, 0.05, 0.95);
+                        thresholdUsed = Number(coerced.toFixed(2));
+                        thresholdInputEl.value = thresholdUsed.toFixed(2);
+                        thresholdSource = 'custom';
+                    } else {
+                        thresholdInputEl.value = '';
+                    }
                 } else {
                     thresholdInputEl.value = '';
                 }
-            } else {
-                thresholdInputEl.value = '';
             }
-        }
 
-        let chosenMetrics = thresholdSource === 'auto'
-            ? bestMetrics
-            : evaluateThreshold(pTrain, trainSequences.labels, trainSequences.returns, thresholdUsed);
+            let chosenMetrics = thresholdSource === 'auto'
+                ? bestMetrics
+                : evaluateThreshold(pTrain, trainSequences.labels, trainSequences.returns, thresholdUsed);
 
-        if (!chosenMetrics || chosenMetrics.sampleSize < 20) {
-            showError('自訂門檻觸發樣本不足（需至少 20 筆），請調整門檻或增加訓練期間。');
-            return;
-        }
-
-        thresholdUsed = chosenMetrics.threshold;
-
-        const pTest = testSequences.sequences.map((seq) => model.predict(seq));
-        if (!pTest.length) {
-            showError('測試樣本不足以產生預測，請調整期間。');
-            return;
-        }
-
-        const simulation = simulate(
-            pTest,
-            testSequences.returns,
-            testSequences.tradeDates,
-            chosenMetrics.avgUp,
-            chosenMetrics.avgDown,
-            thresholdUsed,
-            kellyMultiplier,
-            maxFraction,
-            testSequences.signalDates,
-            testSequences.entryPrices,
-            testSequences.exitPrices
-        );
-
-        const hitRateTest = mean(
-            pTest.map((prob, idx) => ((prob >= thresholdUsed) === (testSequences.labels[idx] === 1) ? 1 : 0))
-        );
-
-        const indicativeKelly = kellyFraction(
-            chosenMetrics.accuracy,
-            chosenMetrics.avgUp,
-            chosenMetrics.avgDown,
-            kellyMultiplier,
-            maxFraction
-        );
-
-        const trainRangeText = trainSequences.signalDates.length
-            ? `${trainSequences.signalDates[0]} → ${trainSequences.signalDates[trainSequences.signalDates.length - 1]}`
-            : '—';
-        const testSignalRange = testSequences.signalDates.length
-            ? `${testSequences.signalDates[0]} → ${testSequences.signalDates[testSequences.signalDates.length - 1]}`
-            : '—';
-        const testTradeRange = testSequences.tradeDates.length
-            ? `${testSequences.tradeDates[0]} → ${testSequences.tradeDates[testSequences.tradeDates.length - 1]}`
-            : '—';
-
-        const lossHistory = Array.isArray(trainingSummary.lossHistory) ? trainingSummary.lossHistory : [];
-        const lastLoss = lossHistory.length ? lossHistory[lossHistory.length - 1] : null;
-        const firstLoss = lossHistory.length ? lossHistory[0] : null;
-        const lossDelta = Number.isFinite(lastLoss) && Number.isFinite(firstLoss) ? lastLoss - firstLoss : null;
-        const lossDeltaText = Number.isFinite(lossDelta)
-            ? `（Δ ${(lossDelta >= 0 ? '+' : '') + lossDelta.toFixed(4)}）`
-            : '';
-        const formatLossValue = (value) => (Number.isFinite(value) ? value.toFixed(4) : '—');
-        const formatLearningRate =
-            learningRate >= 0.001 ? learningRate.toFixed(3) : learningRate.toExponential(1).replace('+', '');
-        const trainSeqLengthDisplay = trainSequences.sequenceLength || sequenceLength;
-        const testSeqLengthDisplay = testSequences.sequenceLength || sequenceLength;
-
-        const bestThresholdDisplay = Number.isFinite(bestMetrics.threshold) ? bestMetrics.threshold.toFixed(2) : '—';
-        const bestSampleDisplay = Number.isFinite(bestMetrics.sampleSize) && bestMetrics.sampleSize > 0 ? bestMetrics.sampleSize : '—';
-        const chosenSampleDisplay = Number.isFinite(chosenMetrics.sampleSize) && chosenMetrics.sampleSize > 0 ? chosenMetrics.sampleSize : '—';
-        const formatPercent = (value, digits = 2) => (Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '—');
-        const formatReturn = (value) => (Number.isFinite(value) ? `${((value - 1) * 100).toFixed(2)}%` : '—');
-        const thresholdUsedDisplay = Number.isFinite(thresholdUsed) ? thresholdUsed.toFixed(2) : '—';
-
-        const cards = document.getElementById('ml-cards');
-        if (cards) {
-            cards.innerHTML = `
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">資料切分</div>\n                    <div class=\"text-xs\">訓練 ${trainSamplesRequested} 日（序列 ${trainSequences.sequences.length} 筆 × ${trainSeqLengthDisplay} 日）：${trainRangeText}</div>\n                    <div class=\"text-xs\">測試 ${testSamplesRequested} 日（序列 ${testSequences.sequences.length} 筆 × ${testSeqLengthDisplay} 日）：訊號 ${testSignalRange}</div>\n                    <div class=\"text-xs\">隔日開盤→收盤：${testTradeRange}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">門檻設定</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--foreground);\">${thresholdUsedDisplay}（${thresholdSource === 'auto' ? '最佳' : '自訂'}｜樣本 ${chosenSampleDisplay}）</div>\n                    <div class=\"text-xs\">訓練命中率：${formatPercent(chosenMetrics.accuracy, 1)}</div>\n                    <div class=\"text-xs\">最佳門檻參考：${bestThresholdDisplay}｜樣本 ${bestSampleDisplay}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">LSTM 超參數</div>\n                    <div class=\"text-xs\">隱藏單元：${hiddenUnits}｜Dropout：${(dropoutRate * 100).toFixed(0)}%</div>\n                    <div class=\"text-xs\">批次大小：${batchSize}｜學習率：${formatLearningRate}｜Epoch：${epochCount}</div>\n                    <div class=\"text-xs\">最後訓練損失：${formatLossValue(lastLoss)}${lossDeltaText}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">平均漲幅 / 跌幅</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--primary);\">${formatPercent(chosenMetrics.avgUp)}</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--destructive);\">${formatPercent(chosenMetrics.avgDown)}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">測試命中率</div>\n                    <div class=\"text-lg font-semibold\" style=\"color: var(--foreground);\">${formatPercent(hitRateTest, 1)}</div>\n                    <div class=\"text-xs\">半凱利建議（參考）：${formatPercent(indicativeKelly, 1)}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">累積報酬（測試）</div>\n                    <div class=\"text-sm\">LSTM + Kelly：<span style=\"color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalModel)}</span></div>\n                    <div class=\"text-sm\">買入持有：<span style=\"color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalBh)}</span></div>\n                </div>\n            `;
-        }
-
-        const equityCanvas = document.getElementById('ml-equity-chart');
-        if (equityCanvas && typeof Chart !== 'undefined') {
-            if (window.mlEquityChart) {
-                window.mlEquityChart.destroy();
+            if (!chosenMetrics || chosenMetrics.sampleSize < 20) {
+                abort('自訂門檻觸發樣本不足（需至少 20 筆），請調整門檻或增加訓練期間。');
+                return;
             }
-            window.mlEquityChart = new Chart(equityCanvas.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: simulation.equitySeriesModel.map((point) => point.date),
-                    datasets: [
-                        {
-                            label: 'LSTM + Kelly',
-                            data: simulation.equitySeriesModel.map((point) => point.equity),
-                            borderColor: 'rgba(8, 145, 178, 1)',
-                            backgroundColor: 'rgba(8, 145, 178, 0.1)',
-                            borderWidth: 1.5,
-                            fill: false,
-                            tension: 0.1,
+
+            thresholdUsed = chosenMetrics.threshold;
+
+            setProgress(80, '生成預測...');
+            const pTest = testSequences.sequences.map((seq) => model.predict(seq));
+            if (!pTest.length) {
+                abort('測試樣本不足以產生預測，請調整期間。');
+                return;
+            }
+
+            const kellyContext = {
+                volatility: chosenMetrics.volatility,
+                sampleSize: chosenMetrics.sampleSize,
+                riskPenalty: 1.8,
+                confidenceBias: 80,
+            };
+
+            const simulation = simulate(
+                pTest,
+                testSequences.returns,
+                testSequences.tradeDates,
+                chosenMetrics.avgUp,
+                chosenMetrics.avgDown,
+                thresholdUsed,
+                kellyMultiplier,
+                maxFraction,
+                testSequences.signalDates,
+                testSequences.entryPrices,
+                testSequences.exitPrices,
+                kellyContext
+            );
+
+            const hitRateTest = mean(
+                pTest.map((prob, idx) => ((prob >= thresholdUsed) === (testSequences.labels[idx] === 1) ? 1 : 0))
+            );
+
+            const indicativeKelly = kellyFraction(
+                chosenMetrics.accuracy,
+                chosenMetrics.avgUp,
+                chosenMetrics.avgDown,
+                kellyMultiplier,
+                maxFraction,
+                kellyContext
+            );
+
+            const trainRangeText = trainSequences.signalDates.length
+                ? `${trainSequences.signalDates[0]} → ${trainSequences.signalDates[trainSequences.signalDates.length - 1]}`
+                : '—';
+            const testSignalRange = testSequences.signalDates.length
+                ? `${testSequences.signalDates[0]} → ${testSequences.signalDates[testSequences.signalDates.length - 1]}`
+                : '—';
+            const testTradeRange = testSequences.tradeDates.length
+                ? `${testSequences.tradeDates[0]} → ${testSequences.tradeDates[testSequences.tradeDates.length - 1]}`
+                : '—';
+
+            const lossHistory = Array.isArray(trainingSummary.lossHistory) ? trainingSummary.lossHistory : [];
+            const lastLoss = lossHistory.length ? lossHistory[lossHistory.length - 1] : null;
+            const firstLoss = lossHistory.length ? lossHistory[0] : null;
+            const lossDelta = Number.isFinite(lastLoss) && Number.isFinite(firstLoss) ? lastLoss - firstLoss : null;
+            const lossDeltaText = Number.isFinite(lossDelta)
+                ? `（Δ ${(lossDelta >= 0 ? '+' : '') + lossDelta.toFixed(4)}）`
+                : '';
+            const formatLossValue = (value) => (Number.isFinite(value) ? value.toFixed(4) : '—');
+            const formatLearningRate =
+                learningRate >= 0.001 ? learningRate.toFixed(3) : learningRate.toExponential(1).replace('+', '');
+            const trainSeqLengthDisplay = trainSequences.sequenceLength || sequenceLength;
+            const testSeqLengthDisplay = testSequences.sequenceLength || sequenceLength;
+
+            const bestThresholdDisplay = Number.isFinite(bestMetrics.threshold) ? bestMetrics.threshold.toFixed(2) : '—';
+            const bestSampleDisplay = Number.isFinite(bestMetrics.sampleSize) && bestMetrics.sampleSize > 0 ? bestMetrics.sampleSize : '—';
+            const chosenSampleDisplay = Number.isFinite(chosenMetrics.sampleSize) && chosenMetrics.sampleSize > 0 ? chosenMetrics.sampleSize : '—';
+            const formatPercent = (value, digits = 2) => (Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '—');
+            const formatReturn = (value) => (Number.isFinite(value) ? `${((value - 1) * 100).toFixed(2)}%` : '—');
+            const thresholdUsedDisplay = Number.isFinite(thresholdUsed) ? thresholdUsed.toFixed(2) : '—';
+
+            setProgress(88, '更新指標...');
+            const cards = document.getElementById('ml-cards');
+            if (cards) {
+                cards.innerHTML = `
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">資料切分</div>
+                    <div class=\"text-xs\">訓練 ${trainSamplesRequested} 日（序列 ${trainSequences.sequences.length} 筆 × ${trainSeqLengthDisplay} 日）：${trainRangeText}</div>
+                    <div class=\"text-xs\">測試 ${testSamplesRequested} 日（序列 ${testSequences.sequences.length} 筆 × ${testSeqLengthDisplay} 日）：訊號 ${testSignalRange}</div>
+                    <div class=\"text-xs\">隔日開盤→收盤：${testTradeRange}</div>
+                </div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">門檻設定</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--foreground);\">${thresholdUsedDisplay}（${thresholdSource === 'auto' ? '最佳' : '自訂'}｜樣本 ${chosenSampleDisplay}）</div>
+                    <div class=\"text-xs\">訓練命中率：${formatPercent(chosenMetrics.accuracy, 1)}</div>
+                    <div class=\"text-xs\">最佳門檻參考：${bestThresholdDisplay}｜樣本 ${bestSampleDisplay}</div>
+                </div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">LSTM 超參數</div>
+                    <div class=\"text-xs\">隱藏單元：${hiddenUnits}｜Dropout：${(dropoutRate * 100).toFixed(0)}%</div>
+                    <div class=\"text-xs\">批次大小：${batchSize}｜學習率：${formatLearningRate}｜Epoch：${epochCount}</div>
+                    <div class=\"text-xs\">最後訓練損失：${formatLossValue(lastLoss)}${lossDeltaText}</div>
+                </div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">平均漲幅 / 跌幅</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--primary);\">${formatPercent(chosenMetrics.avgUp)}</div>
+                    <div class=\"text-sm font-semibold\" style=\"color: var(--destructive);\">${formatPercent(chosenMetrics.avgDown)}</div>
+                </div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">測試命中率</div>
+                    <div class=\"text-lg font-semibold\" style=\"color: var(--foreground);\">${formatPercent(hitRateTest, 1)}</div>
+                    <div class=\"text-xs\">半凱利建議（參考）：${formatPercent(indicativeKelly, 1)}</div>
+                </div>
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                    <div class=\"text-[11px] uppercase tracking-wide\">累積報酬（測試）</div>
+                    <div class=\"text-sm\">LSTM + Kelly：<span style=\"color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalModel)}</span></div>
+                    <div class=\"text-sm\">買入持有：<span style=\"color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalBh)}</span></div>
+                </div>
+            `;
+            }
+
+            setProgress(95, '繪製圖表...');
+            const equityCanvas = document.getElementById('ml-equity-chart');
+            if (equityCanvas && typeof Chart !== 'undefined') {
+                if (window.mlEquityChart) {
+                    window.mlEquityChart.destroy();
+                }
+                window.mlEquityChart = new Chart(equityCanvas.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: simulation.equitySeriesModel.map((point) => point.date),
+                        datasets: [
+                            {
+                                label: 'LSTM + Kelly',
+                                data: simulation.equitySeriesModel.map((point) => point.equity),
+                                borderColor: 'rgba(8, 145, 178, 1)',
+                                backgroundColor: 'rgba(8, 145, 178, 0.1)',
+                                borderWidth: 1.5,
+                                fill: false,
+                                tension: 0.1,
+                            },
+                            {
+                                label: '買入持有',
+                                data: simulation.equitySeriesBh.map((point) => point.equity),
+                                borderColor: 'rgba(107, 114, 128, 1)',
+                                backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                                borderWidth: 1.5,
+                                fill: false,
+                                tension: 0.1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'logarithmic',
+                                min: 0.5,
+                                ticks: {
+                                    callback: (value) => (Number(value).toFixed ? Number(value).toFixed(2) : value),
+                                },
+                            },
                         },
-                        {
-                            label: '買入持有',
-                            data: simulation.equitySeriesBh.map((point) => point.equity),
-                            borderColor: 'rgba(107, 114, 128, 1)',
-                            backgroundColor: 'rgba(107, 114, 128, 0.1)',
-                            borderWidth: 1.5,
-                            fill: false,
-                            tension: 0.1,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            type: 'logarithmic',
-                            min: 0.5,
-                            ticks: {
-                                callback: (value) => Number(value).toFixed ? Number(value).toFixed(2) : value,
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: getComputedStyle(document.body).getPropertyValue('--foreground') || '#111827',
+                                },
                             },
                         },
                     },
-                    plugins: {
-                        legend: {
-                            labels: {
-                                color: getComputedStyle(document.body).getPropertyValue('--foreground') || '#111827',
+                });
+            }
+
+            const histogramCanvas = document.getElementById('ml-prob-hist');
+            if (histogramCanvas && typeof Chart !== 'undefined') {
+                if (window.mlProbChart) {
+                    window.mlProbChart.destroy();
+                }
+                const bins = Array(11).fill(0);
+                pTest.forEach((prob) => {
+                    const bucket = clamp(Math.floor(prob * 10), 0, 10);
+                    bins[bucket] += 1;
+                });
+                window.mlProbChart = new Chart(histogramCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: bins.map((_, idx) => `${(idx / 10).toFixed(1)}–${((idx + 1) / 10).toFixed(1)}`),
+                        datasets: [
+                            {
+                                label: 'P(上漲)',
+                                data: bins,
+                                backgroundColor: 'rgba(8, 145, 178, 0.4)',
+                                borderColor: 'rgba(8, 145, 178, 1)',
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                            },
+                        },
+                        plugins: {
+                            legend: {
+                                display: false,
                             },
                         },
                     },
-                },
-            });
-        }
-
-        const histogramCanvas = document.getElementById('ml-prob-hist');
-        if (histogramCanvas && typeof Chart !== 'undefined') {
-            if (window.mlProbChart) {
-                window.mlProbChart.destroy();
+                });
             }
-            const bins = Array(11).fill(0);
-            pTest.forEach((prob) => {
-                const bucket = clamp(Math.floor(prob * 10), 0, 10);
-                bins[bucket] += 1;
-            });
-            window.mlProbChart = new Chart(histogramCanvas.getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: bins.map((_, idx) => `${(idx / 10).toFixed(1)}–${((idx + 1) / 10).toFixed(1)}`),
-                    datasets: [
-                        {
-                            label: 'P(上漲)',
-                            data: bins,
-                            backgroundColor: 'rgba(8, 145, 178, 0.4)',
-                            borderColor: 'rgba(8, 145, 178, 1)',
-                            borderWidth: 1,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                        },
-                    },
-                    plugins: {
-                        legend: {
-                            display: false,
-                        },
-                    },
-                },
-            });
-        }
 
-        const tradesContainer = document.getElementById('ml-trades');
-        if (tradesContainer) {
-            tradesContainer.innerHTML = simulation.trades.length
-                ? simulation.trades
-                    .map((trade) => `
-                        <div class="border-b py-2 space-y-1" style="border-color: var(--border); color: var(--muted-foreground);">
-                            <div class="flex justify-between text-xs">
+            const tradesContainer = document.getElementById('ml-trades');
+            if (tradesContainer) {
+                tradesContainer.innerHTML = simulation.trades.length
+                    ? simulation.trades
+                        .map((trade) => `
+                        <div class=\"border-b py-2 space-y-1\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
+                            <div class=\"flex justify-between text-xs\">
                                 <span>訊號 ${trade.signalDate}</span>
                                 <span>交易 ${trade.tradeDate}</span>
                             </div>
-                            <div class="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                            <div class=\"flex flex-wrap gap-x-3 gap-y-1 text-[11px]\">
                                 <span>P=${trade.prob.toFixed(2)}</span>
                                 <span>f=${(trade.fraction * 100).toFixed(1)}%</span>
                                 <span>日內=${(trade.ret * 100).toFixed(2)}%</span>
@@ -3679,8 +3808,16 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
                             </div>
                         </div>
                     `)
-                    .join('')
-                : '<div class="text-gray-500">無符合門檻之交易</div>';
+                        .join('')
+                    : '<div class=\"text-gray-500\">無符合門檻之交易</div>'
+                ;
+            }
+
+            finishProgress();
+        } catch (error) {
+            console.error('[ML Forecast] 執行失敗', error);
+            hideProgress();
+            showError('預測流程發生錯誤：' + (error?.message || error));
         }
     };
 
@@ -3691,8 +3828,9 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
 
     const preloadDurations = () => {
         try {
-            const slider = document.getElementById('ml-train-slider');
-            if (!slider || !Array.isArray(cachedStockData) || cachedStockData.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+            if (!Array.isArray(cachedStockData) || cachedStockData.length < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
+                mlForecastState.totalSamples = null;
+                mlForecastState.split = null;
                 renderSplitLabels(null, null, null);
                 return;
             }
@@ -3710,20 +3848,21 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
             rows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
             const { features } = buildFeatures(rows);
             const total = features.length;
+
+            mlForecastState.totalSamples = total;
+
             if (total < MIN_TRAIN_SAMPLES + MIN_TEST_SAMPLES) {
-                renderSplitLabels(null, null, null);
+                renderSplitLabels(null, null, total);
+                mlForecastState.split = null;
                 return;
             }
 
-            const maxTrain = Math.max(MIN_TRAIN_SAMPLES, total - MIN_TEST_SAMPLES);
-            let defaultTrain = Math.floor(total * 0.7);
-            defaultTrain = clamp(defaultTrain, MIN_TRAIN_SAMPLES, maxTrain);
-
-            slider.value = String(defaultTrain);
-            mlForecastState.totalSamples = total;
-            resolveTrainTestSamples(total, { coerceSliderValue: true });
+            computeAutoSplit(total);
         } catch (error) {
             console.warn('[ML Forecast] 預設期間計算失敗', error);
+            mlForecastState.totalSamples = null;
+            mlForecastState.split = null;
+            renderSplitLabels(null, null, null);
         }
     };
 
