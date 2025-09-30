@@ -1,4 +1,7 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251118A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251120A';
+const FORECAST_ITERATION_DEFAULT = 5;
+const FORECAST_ITERATION_MIN = 1;
+const FORECAST_ITERATION_MAX = 12;
 let forecastChartInstance = null;
 
 function getSharedVisibleStockData() {
@@ -41,6 +44,78 @@ function setForecastVersion() {
     if (el) {
         el.textContent = FORECAST_VERSION_CODE;
         el.style.color = 'var(--muted-foreground)';
+    }
+}
+
+function clampIterationCount(value) {
+    const numeric = Number.isFinite(value) ? Math.floor(value) : NaN;
+    if (!Number.isFinite(numeric)) {
+        return FORECAST_ITERATION_DEFAULT;
+    }
+    if (numeric < FORECAST_ITERATION_MIN) {
+        return FORECAST_ITERATION_MIN;
+    }
+    if (numeric > FORECAST_ITERATION_MAX) {
+        return FORECAST_ITERATION_MAX;
+    }
+    return numeric;
+}
+
+function resolveIterationCount() {
+    const input = document.getElementById('forecastIterationCount');
+    if (!input) {
+        return FORECAST_ITERATION_DEFAULT;
+    }
+    const parsed = Number.parseInt(input.value, 10);
+    const clamped = clampIterationCount(Number.isFinite(parsed) ? parsed : FORECAST_ITERATION_DEFAULT);
+    input.value = clamped;
+    return clamped;
+}
+
+function initialiseIterationControl() {
+    const input = document.getElementById('forecastIterationCount');
+    if (!input) return;
+    const initialParsed = Number.parseInt(input.value, 10);
+    input.value = clampIterationCount(Number.isFinite(initialParsed) ? initialParsed : FORECAST_ITERATION_DEFAULT);
+    input.addEventListener('change', () => {
+        const parsed = Number.parseInt(input.value, 10);
+        input.value = clampIterationCount(Number.isFinite(parsed) ? parsed : FORECAST_ITERATION_DEFAULT);
+    });
+}
+
+function generateSeedCandidates(count) {
+    const seeds = [];
+    const iterations = clampIterationCount(count);
+    const base = Date.now().toString(36);
+    const globalCrypto = typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function'
+        ? globalThis.crypto
+        : null;
+    for (let idx = 0; idx < iterations; idx += 1) {
+        if (globalCrypto) {
+            const buffer = new Uint32Array(2);
+            globalCrypto.getRandomValues(buffer);
+            seeds.push(`${base}-${idx.toString(36)}-${buffer[0].toString(36)}${buffer[1].toString(36)}`);
+        } else {
+            const randomFallback = Math.floor(Math.random() * 0xfffffff);
+            seeds.push(`${base}-${idx.toString(36)}-${randomFallback.toString(36)}`);
+        }
+    }
+    return seeds;
+}
+
+function applySeedForForecast(seed) {
+    if (seed === undefined || seed === null) return;
+    const seedText = String(seed);
+    if (typeof tf !== 'undefined' && tf.util && typeof tf.util.seedrandom === 'function') {
+        tf.util.seedrandom(seedText);
+        return;
+    }
+    if (typeof Math !== 'undefined' && typeof Math.seedrandom === 'function') {
+        Math.seedrandom(seedText);
+        return;
+    }
+    if (typeof seedrandom === 'function') {
+        seedrandom(seedText);
     }
 }
 
@@ -129,6 +204,47 @@ function denormalizeValue(value, stats) {
     return value * (stats.std || 1) + stats.mean;
 }
 
+function prepareForecastDataset() {
+    const rows = extractForecastRows();
+    if (rows.length < 80) {
+        throw new Error('資料不足，請拉長回測區間（至少 80 筆有效收盤價）。');
+    }
+    const closes = rows.map((row) => row.close);
+
+    let sequenceLength = 20;
+    if (rows.length < 160) {
+        sequenceLength = Math.max(12, Math.floor(rows.length * 0.15));
+    }
+    sequenceLength = Math.min(40, Math.max(12, sequenceLength));
+
+    let trainCount = Math.floor(rows.length * 0.75);
+    if (trainCount < sequenceLength + 15) {
+        trainCount = sequenceLength + 15;
+    }
+    if (trainCount > rows.length - 5) {
+        trainCount = rows.length - 5;
+    }
+    if (trainCount <= sequenceLength) {
+        throw new Error('資料區間過短，無法建立訓練樣本。');
+    }
+
+    const stats = computeStats(closes.slice(0, trainCount));
+    const normalizedSeries = closes.map((value) => normalizeValue(value, stats));
+    const trainSamples = Math.max(0, trainCount - sequenceLength);
+    const testSamples = Math.max(0, closes.length - trainCount);
+
+    return {
+        rows,
+        closes,
+        sequenceLength,
+        trainCount,
+        stats,
+        normalizedSeries,
+        trainSamples,
+        testSamples,
+    };
+}
+
 function createLstmModel(sequenceLength) {
     const model = tf.sequential();
     model.add(tf.layers.lstm({ units: 32, inputShape: [sequenceLength, 1], returnSequences: false }));
@@ -162,7 +278,7 @@ function buildTrainingTensors(normalizedSeries, sequenceLength, trainCount) {
     return { trainX, trainY, sampleCount: sequences.length };
 }
 
-async function fitLstmModel(model, trainX, trainY, sampleCount) {
+async function fitLstmModel(model, trainX, trainY, sampleCount, iterationLabel = '') {
     const epochs = Math.min(160, Math.max(60, Math.round(sampleCount * 1.2)));
     let batchSize = Math.max(8, Math.floor(sampleCount / 4));
     if (batchSize > 32) batchSize = 32;
@@ -176,7 +292,8 @@ async function fitLstmModel(model, trainX, trainY, sampleCount) {
         callbacks: {
             onEpochEnd: (epoch, logs) => {
                 if ((epoch + 1) % 10 === 0) {
-                    updateForecastStatus(`訓練模型中（${epoch + 1}/${epochs}） loss=${formatNumber(logs?.loss, 4)}`, 'info');
+                    const prefix = iterationLabel ? `[${iterationLabel}] ` : '';
+                    updateForecastStatus(`${prefix}訓練模型中（${epoch + 1}/${epochs}） loss=${formatNumber(logs?.loss, 4)}`, 'info');
                 }
             },
         },
@@ -316,6 +433,55 @@ function runGeneticOptimization({ rawPreds, actuals }) {
     return bestIndividual;
 }
 
+function selectBetterForecastResult(currentBest, candidate) {
+    if (!candidate) return currentBest;
+    if (!currentBest) return candidate;
+
+    const candidateHit = candidate?.metrics?.hitRate;
+    const currentHit = currentBest?.metrics?.hitRate;
+
+    if (Number.isFinite(candidateHit) && Number.isFinite(currentHit)) {
+        const delta = candidateHit - currentHit;
+        if (delta > 1e-6) {
+            return candidate;
+        }
+        if (delta < -1e-6) {
+            return currentBest;
+        }
+
+        const candidateMse = candidate?.metrics?.mse;
+        const currentMse = currentBest?.metrics?.mse;
+        if (Number.isFinite(candidateMse) && Number.isFinite(currentMse)) {
+            if (candidateMse + 1e-6 < currentMse) {
+                return candidate;
+            }
+            if (candidateMse - 1e-6 > currentMse) {
+                return currentBest;
+            }
+        }
+
+        const candidateFitness = candidate?.correction?.fitness;
+        const currentFitness = currentBest?.correction?.fitness;
+        if (Number.isFinite(candidateFitness) && Number.isFinite(currentFitness) && candidateFitness > currentFitness) {
+            return candidate;
+        }
+
+        return currentBest;
+    }
+
+    if (Number.isFinite(candidateHit)) {
+        return candidate;
+    }
+
+    if (!Number.isFinite(currentHit) && Number.isFinite(candidate?.metrics?.mse)) {
+        if (!Number.isFinite(currentBest?.metrics?.mse) || candidate.metrics.mse < currentBest.metrics.mse) {
+            return candidate;
+        }
+    }
+
+    return currentBest;
+}
+
 function computeDirectionMetrics(predicted, actuals, closes, startIndex) {
     if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length !== actuals.length || predicted.length === 0) {
         return { hitRate: NaN, avgGain: NaN, avgLoss: NaN };
@@ -440,45 +606,60 @@ function updateForecastMetrics(result) {
     if (rmseEl) rmseEl.textContent = `${formatNumber(metrics.rmse, 2)} （基準 ${formatNumber(metrics.baselineRmse, 2)}）`;
     if (maeEl) maeEl.textContent = `${formatNumber(metrics.mae, 2)} （基準 ${formatNumber(metrics.baselineMae, 2)}）`;
     if (correctionEl) correctionEl.textContent = describeCorrection(result.correction);
+    updateForecastSeedSummary(result);
 }
 
-function summariseForecastCompletion(result) {
-    const durationSeconds = Number.isFinite(result.durationMs) ? result.durationMs / 1000 : 0;
-    const summary = `完成預測：命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，MSE ${formatNumber(result.metrics.baselineMse, 2)} → ${formatNumber(result.metrics.mse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
+function updateForecastSeedSummary(result) {
+    const seedEl = document.getElementById('forecastSeedSummary');
+    if (!seedEl) return;
+    if (!result || !result.seed) {
+        seedEl.textContent = '尚未探索隨機種子。';
+        seedEl.style.color = 'var(--muted-foreground)';
+        return;
+    }
+    const iterationCount = Number.isFinite(result.iterationCount) ? result.iterationCount : 1;
+    const iterationIndex = Number.isFinite(result.iterationIndex) ? result.iterationIndex : 0;
+    const iterationText = iterationCount > 1
+        ? `最佳結果為第 ${iterationIndex + 1}/${iterationCount} 次迭代`
+        : '單次迭代結果';
+    const hitRateText = formatRatio(result.metrics?.hitRate);
+    seedEl.textContent = `${iterationText}，隨機種子 ${result.seed}（命中率 ${hitRateText}）。`;
+    seedEl.style.color = 'var(--muted-foreground)';
+}
+
+function summariseForecastCompletion(result, { iterationCount = 1, iterationIndex = 0, seed, durationMs } = {}) {
+    const effectiveDuration = Number.isFinite(durationMs)
+        ? durationMs
+        : (Number.isFinite(result?.durationMs) ? result.durationMs : 0);
+    const durationSeconds = Number.isFinite(effectiveDuration) ? effectiveDuration / 1000 : 0;
+    const seedText = seed || result?.seed || '--';
+    const iterationText = iterationCount > 1
+        ? `最佳迭代第 ${iterationIndex + 1}/${iterationCount} 次（種子 ${seedText}）`
+        : `隨機種子 ${seedText}`;
+    const summary = `完成預測：${iterationText}，命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，MSE ${formatNumber(result.metrics.baselineMse, 2)} → ${formatNumber(result.metrics.mse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
     updateForecastStatus(summary, 'success');
 }
 
-async function runForecastWorkflow() {
-    await ensureTensorflowReady();
-    const rows = extractForecastRows();
-    if (rows.length < 80) {
-        throw new Error('資料不足，請拉長回測區間（至少 80 筆有效收盤價）。');
+async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
+    if (!dataset) {
+        throw new Error('缺少預測資料集。');
     }
-    const closes = rows.map((row) => row.close);
+    applySeedForForecast(seed);
 
-    let sequenceLength = 20;
-    if (rows.length < 160) {
-        sequenceLength = Math.max(12, Math.floor(rows.length * 0.15));
-    }
-    sequenceLength = Math.min(40, Math.max(12, sequenceLength));
+    const {
+        normalizedSeries,
+        sequenceLength,
+        trainCount,
+        closes,
+        stats,
+        rows,
+    } = dataset;
 
-    let trainCount = Math.floor(rows.length * 0.75);
-    if (trainCount < sequenceLength + 15) {
-        trainCount = sequenceLength + 15;
-    }
-    if (trainCount > rows.length - 5) {
-        trainCount = rows.length - 5;
-    }
-    if (trainCount <= sequenceLength) {
-        throw new Error('資料區間過短，無法建立訓練樣本。');
-    }
-
-    const stats = computeStats(closes.slice(0, trainCount));
-    const normalizedSeries = closes.map((value) => normalizeValue(value, stats));
     const { trainX, trainY, sampleCount } = buildTrainingTensors(normalizedSeries, sequenceLength, trainCount);
-
     const model = createLstmModel(sequenceLength);
-    await fitLstmModel(model, trainX, trainY, sampleCount);
+
+    const label = seed ? `${iterationLabel || '預測'}｜種子 ${seed}` : iterationLabel;
+    await fitLstmModel(model, trainX, trainY, sampleCount, label);
 
     const trainPredTensor = model.predict(trainX);
     const trainPredNormArray = Array.from(await trainPredTensor.data());
@@ -502,7 +683,15 @@ async function runForecastWorkflow() {
         delta: gaResult.delta,
     });
 
-    const testResult = await predictSequential(model, normalizedSeries, closes, trainCount, sequenceLength, stats, rows);
+    const testResult = await predictSequential(
+        model,
+        normalizedSeries,
+        closes,
+        trainCount,
+        sequenceLength,
+        stats,
+        rows,
+    );
     const baselineMse = computeMse(testResult.predicted, testResult.actuals);
     const baselineRmse = Number.isFinite(baselineMse) ? Math.sqrt(baselineMse) : NaN;
     const baselineMae = computeMae(testResult.predicted, testResult.actuals);
@@ -539,8 +728,11 @@ async function runForecastWorkflow() {
         corrected: correctedResult.corrected,
     };
 
+    model.dispose();
+
     return {
         version: FORECAST_VERSION_CODE,
+        seed,
         sequenceLength,
         trainSamples: sampleCount,
         testSamples: testResult.actuals.length,
@@ -578,13 +770,51 @@ async function handleForecastRequest(button) {
     button.style.opacity = '0.7';
     updateForecastStatus('準備資料並載入 TensorFlow.js...', 'info');
     try {
-        const start = performance.now();
-        const result = await runForecastWorkflow();
-        result.durationMs = performance.now() - start;
-        setForecastSamples(result.trainSamples, result.testSamples);
-        updateForecastMetrics(result);
-        renderForecastChart(result.chart);
-        summariseForecastCompletion(result);
+        await ensureTensorflowReady();
+        const dataset = prepareForecastDataset();
+        setForecastSamples(dataset.trainSamples, dataset.testSamples);
+        const iterationCount = resolveIterationCount();
+        const seeds = generateSeedCandidates(iterationCount);
+
+        let bestResult = null;
+        const overallStart = performance.now();
+
+        for (let idx = 0; idx < seeds.length; idx += 1) {
+            const seed = seeds[idx];
+            const iterationLabel = iterationCount > 1 ? `第 ${idx + 1}/${iterationCount} 次` : '單次';
+            updateForecastStatus(`啟動${iterationLabel}預測（種子 ${seed}）...`, 'info');
+
+            const iterationStart = performance.now();
+            const result = await runForecastIteration(dataset, { seed, iterationLabel });
+            result.durationMs = performance.now() - iterationStart;
+            result.seed = seed;
+            result.iterationIndex = idx;
+            result.iterationCount = iterationCount;
+
+            bestResult = selectBetterForecastResult(bestResult, result);
+
+            if (iterationCount > 1) {
+                const bestHitRate = bestResult?.metrics?.hitRate;
+                updateForecastStatus(
+                    `完成${iterationLabel}預測：命中率 ${formatRatio(result.metrics.hitRate)}，目前最佳 ${formatRatio(bestHitRate)}（種子 ${bestResult?.seed || '--'}）。`,
+                    'info',
+                );
+            }
+        }
+
+        if (!bestResult) {
+            throw new Error('無法取得有效的預測結果。');
+        }
+
+        const totalDuration = performance.now() - overallStart;
+        updateForecastMetrics(bestResult);
+        renderForecastChart(bestResult.chart);
+        summariseForecastCompletion(bestResult, {
+            iterationCount,
+            iterationIndex: bestResult.iterationIndex,
+            seed: bestResult.seed,
+            durationMs: totalDuration,
+        });
     } catch (error) {
         console.error('[Forecast] Failed to generate prediction', error);
         updateForecastStatus(`預測失敗：${error.message}`, 'error');
@@ -596,6 +826,7 @@ async function handleForecastRequest(button) {
 
 document.addEventListener('DOMContentLoaded', () => {
     setForecastVersion();
+    initialiseIterationControl();
     const runBtn = document.getElementById('runForecastBtn');
     if (runBtn) {
         runBtn.addEventListener('click', () => handleForecastRequest(runBtn));

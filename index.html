@@ -1437,9 +1437,26 @@
                                                 <i data-lucide="play" class="lucide-sm"></i>
                                                 產生預測
                                             </button>
+                                            <div class="flex items-center gap-2 text-xs" style="color: var(--muted-foreground);">
+                                                <label for="forecastIterationCount" class="font-medium">跌代次數</label>
+                                                <input
+                                                    id="forecastIterationCount"
+                                                    type="number"
+                                                    inputmode="numeric"
+                                                    min="1"
+                                                    max="12"
+                                                    step="1"
+                                                    value="5"
+                                                    class="w-16 px-2 py-1 text-sm rounded-md border focus:outline-none focus:ring-2"
+                                                    style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                                                />
+                                            </div>
                                             <span id="forecastSamples" class="text-xs font-medium" style="color: var(--muted-foreground);">尚未建立樣本</span>
                                             <span id="forecastStatus" class="text-xs" style="color: var(--muted-foreground);">請先完成回測，再啟動預測模擬。</span>
                                         </div>
+                                        <p class="text-[11px]" style="color: var(--muted-foreground);">
+                                            系統會依設定次數重複訓練 LSTM 與 GA，並挑選命中率最高的隨機種子結果。
+                                        </p>
                                         <div class="grid gap-4 md:grid-cols-3" id="forecastMetrics">
                                             <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
                                                 <p class="text-xs font-semibold" style="color: var(--primary);">隔日漲跌命中率</p>
@@ -1483,6 +1500,7 @@
                                         <div class="p-4 rounded-lg border bg-background" style="border-color: var(--border);">
                                             <h5 class="text-xs font-semibold mb-2" style="color: var(--foreground);">GA 誤差校正參數</h5>
                                             <p id="forecastCorrection" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">尚未建立誤差校正參數。</p>
+                                            <p id="forecastSeedSummary" class="text-xs leading-relaxed mt-2" style="color: var(--muted-foreground);">尚未探索隨機種子。</p>
                                         </div>
                                         <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                             注意：本功能僅為歷史資料模擬，實際投資仍需自行判斷。模型採用訓練區間的統計值進行標準化，預測時僅使用當下可取得的歷史資料，不會回頭修正既有資料。

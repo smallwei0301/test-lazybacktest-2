@@ -781,3 +781,9 @@
 - **Fix**: 建立 `syncVisibleStockData` 同步機制，於回測更新時將資料寫回 `window.visibleStockData`，並在預測腳本新增 `getSharedVisibleStockData` 共用讀取邏輯，同步調整版本碼。
 - **Diagnostics**: 本地流程先執行回測，再啟動預測模擬確認不再出現提示，並能成功進入 LSTM+GA 訓練與圖表渲染。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-FORECAST-LSTMGA-20251120A
+- **Issue recap**: 單次 LSTM+GA 預測受隨機種子影響命中率波動，缺乏一鍵多次迭代找出最佳結果的能力。
+- **Fix**: 新增可調整的跌代次數輸入與隨機種子探索流程，透過多次重新訓練自動挑選命中率最高的種子並揭露最佳迭代資訊。
+- **Diagnostics**: 本地反覆啟動預測，確認狀態列逐次呈現進度、GA 概要顯示最佳種子與命中率，圖表僅保留最佳迭代結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
