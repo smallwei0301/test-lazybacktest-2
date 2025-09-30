@@ -1,3 +1,21 @@
+## 2025-11-18 — Patch LB-FORECAST-LSTMGA-20251118A
+- **Scope**: 重新調整 LSTM + GA 流程，導入以 MSE 反比為適應函數的演化邏輯並揭露訓練成效。
+- **GA Fitness**: 遺傳演算法改為最大化 `1 / (1 + MSE)` 的適應值，加入菁英保留與突變後重新評估，確保 δ 搜尋確實對準最小化 MSE。
+- **UI Feedback**: GA 摘要補充訓練前後的 MSE 與適應值，版本章更新為 `LB-FORECAST-LSTMGA-20251118A` 以利追蹤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-14 — Patch LB-FORECAST-LSTMGA-20251114A
+- **Scope**: 調整 LSTM + GA 預測流程，改以均方誤差作為遺傳演算法適應函數，並採累積誤差校正法。
+- **Error Correction**: 依據文獻流程建立累積誤差與閾值 δ 的修正邏輯，禁止回看未來資料，同步於訓練與測試階段套用。
+- **Metrics UI**: 預測面板新增 MSE 指標、更新 RMSE/MAE 文案與 GA 參數摘要，清楚揭露最佳化結果與閾值。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-13 — Patch LB-FORECAST-LSTMGA-20251113A
+- **Scope**: 新增預測分頁，提供 LSTM 與遺傳演算法誤差校正的隔日收盤價模擬。
+- **Forecast Tab**: 建立「預測」分頁、指標卡、GA 權重摘要與折線圖，導入版本章 `FORECAST_VERSION_CODE` 便於追蹤。
+- **ML Pipeline**: 以回測區間的可視價格序列訓練 TensorFlow.js LSTM 模型，並以 GA 最佳化殘差權重，計算命中率、RMSE/MAE 與平均漲跌幅指標。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
@@ -757,3 +775,15 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-FORECAST-LSTMGA-20251115A
+- **Issue recap**: 預測分頁在完成回測後仍提示「請先執行一次回測」，`runForecastWorkflow` 無法取得可視股價資料導致預測流程被阻斷。
+- **Fix**: 建立 `syncVisibleStockData` 同步機制，於回測更新時將資料寫回 `window.visibleStockData`，並在預測腳本新增 `getSharedVisibleStockData` 共用讀取邏輯，同步調整版本碼。
+- **Diagnostics**: 本地流程先執行回測，再啟動預測模擬確認不再出現提示，並能成功進入 LSTM+GA 訓練與圖表渲染。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-FORECAST-LSTMGA-20251209A
+- **Issue recap**: LSTM+GA 預測每次僅執行單輪隨機初始權重，命中率結果隨機波動，無法快速比較不同隨機種子的表現與挑選最佳參數。
+- **Fix**: 新增可調整的「迭代次數」輸入欄位並預設執行 5 輪，於每輪設定獨立隨機種子、種子化遺傳演算法與 Dropout，收集命中率後自動挑選最佳結果並更新圖表與誤差摘要。
+- **Diagnostics**: GA 誤差校正卡片會顯示最佳種子、命中率與 MSE，迭代摘要另以滑鼠提示列出各輪成績，方便追蹤不同種子的方向命中率。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
