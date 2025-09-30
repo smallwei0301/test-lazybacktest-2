@@ -2170,12 +2170,35 @@
                                             </div>
                                         </div>
 
+                                        <div class="grid md:grid-cols-4 gap-3">
+                                            <div>
+                                                <label class="block text-xs mb-1">序列長度（日）</label>
+                                                <input id="ml-seq-length" type="number" min="8" max="120" value="30" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">預設 30 日視窗，符合 arXiv:2505.05325 所建議的短期記憶長度。</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">隱藏單元數</label>
+                                                <input id="ml-hidden-size" type="number" min="8" max="128" value="48" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">決定 LSTM 記憶容量，預設 48。</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">Dropout（0–0.6）</label>
+                                                <input id="ml-dropout" type="number" step="0.05" min="0" max="0.6" value="0.2" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">訓練時隨機遮罩避免過擬合。</p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">批次大小</label>
+                                                <input id="ml-batch-size" type="number" min="4" max="128" value="24" class="w-full border px-2 py-1 rounded" />
+                                                <p class="mt-1 text-[11px]" style="color: var(--muted-foreground);">一次更新的序列數，預設 24。</p>
+                                            </div>
+                                        </div>
+
                                         <div class="grid md:grid-cols-2 gap-3 text-xs leading-relaxed">
                                             <div class="border rounded px-3 py-3 space-y-2" style="border-color: var(--border); color: var(--muted-foreground);">
                                                 <h4 class="font-semibold text-sm" style="color: var(--foreground);">模型流程說明</h4>
                                                 <ul class="list-disc pl-4 space-y-1">
-                                                    <li>以 cachedStockData 建立報酬、波動度、RSI、均線落差等特徵，並以訓練期間資料計算平均與標準差完成標準化。</li>
-                                                    <li>自動取近期 16 日（不足時會調整）的序列輸入輕量 LSTM，使用隨機梯度下降最小化交叉熵，輸出隔日上漲機率。</li>
+                                                    <li>以 cachedStockData 建立隔日報酬、價量變化、波動度、技術指標（RSI、均線落差、真實波幅等）多維特徵，並依訓練集統計量完成 Z-score 標準化。</li>
+                                                    <li>依序列長度將標準化後特徵堆疊成時間視窗，餵入一層 LSTM（Adam + Dropout）求得隔日上漲機率，設定符合 arXiv:2505.05325 強調的短期序列與正規化流程。</li>
                                                     <li>訓練樣本中掃描機率門檻 0.35–0.65，挑選命中率最高且樣本數 ≥ 20 的門檻，同時估計平均漲幅 <em>g</em> 與跌幅 <em>l</em>（可於上方自訂門檻覆蓋）。</li>
                                                     <li>測試階段僅在機率 ≥ 門檻時於隔日開盤進場、收盤出場，依凱利公式 <em>f*</em> = <em>p</em> − (1−<em>p</em>)/(<em>g</em>/|<em>l</em>|) 乘以半凱利與曝險上限模擬資金配置。</li>
                                                 </ul>
@@ -2183,14 +2206,17 @@
                                             <div class="border rounded px-3 py-3 space-y-2" style="border-color: var(--border); color: var(--muted-foreground);">
                                                 <h4 class="font-semibold text-sm" style="color: var(--foreground);">參數與計算解釋</h4>
                                                 <ul class="list-disc pl-4 space-y-1">
-                                                    <li><strong>訓練/測試切分</strong>：滑桿維持總樣本不變，同時確保訓練 ≥ 60 日、測試 ≥ 30 日。</li>
+                                                    <li><strong>訓練/測試切分</strong>：滑桿維持總樣本不變，同時確保訓練 ≥ 60 日、測試 ≥ 30 日，沿用最新資料向後分割。</li>
                                                     <li><strong>自訂機率門檻</strong>：預設採訓練樣本最佳值；如需更保守，可輸入 0.55–0.65 等較高門檻。</li>
-                                                    <li><strong>學習率</strong>：每次梯度更新的步伐，預設 0.05。過高易震盪，過低收斂變慢。</li>
+                                                    <li><strong>學習率</strong>：採 Adam 優化器的基準步伐，預設 0.01。</li>
                                                     <li><strong>迭代次數</strong>：掃描訓練資料的輪數，影響模型是否收斂。</li>
+                                                    <li><strong>序列長度</strong>：視窗越長模型記憶越多天，但需保留足夠樣本；預設 30 日參考 arXiv:2505.05325。</li>
+                                                    <li><strong>隱藏單元</strong>：控制 LSTM 記憶維度，越大越能捕捉複雜模式，但需留意過擬合。</li>
+                                                    <li><strong>Dropout</strong>：僅在訓練時套用，降低樣本相關性並提升泛化能力。</li>
+                                                    <li><strong>批次大小</strong>：一次累積梯度的序列數，影響訓練噪音與速度。</li>
                                                     <li><strong>半凱利係數</strong>：對 <em>f*</em> 乘上係數（預設 0.5），保留安全邊際避免全凱利過度槓桿。</li>
                                                     <li><strong>單筆上限</strong>：限制單日投入資金比例（%），對應風控或券商槓桿限制。</li>
                                                     <li>平均漲跌幅取自訓練資料中符合門檻的樣本，用於推算勝率與資金配置。</li>
-                                                    <li>序列長度會依可用資料自動調整（預設 16 日），兼顧記憶深度與樣本量。</li>
                                                 </ul>
                                             </div>
                                         </div>

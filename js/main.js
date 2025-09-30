@@ -2537,8 +2537,8 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
-// --- ML Forecast (LB-ML-LSTM-20251212A) ---
-const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
+// --- ML Forecast (LB-ML-LSTM-20250625A) ---
+const ML_FORECAST_VERSION = 'LB-ML-LSTM-20250625A';
 
 (function initMlForecastTab() {
     if (typeof document === 'undefined') return;
@@ -2631,24 +2631,88 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
     };
 
     const buildFeatures = (rows) => {
-        const closePrices = rows.map((r) => Number(r.close));
-        const vol20 = closePrices.map((_, index) => {
-            const start = Math.max(0, index - 19);
-            const slice = closePrices.slice(start, index + 1);
-            return std(slice);
-        });
-        const rsi14 = computeRsi(closePrices, 14);
-        const sma20 = closePrices.map((_, index) => {
-            const start = Math.max(0, index - 19);
-            const slice = closePrices.slice(start, index + 1);
-            return slice.length < 20 ? null : mean(slice);
+        if (!Array.isArray(rows) || rows.length === 0) {
+            return {
+                features: [],
+                labels: [],
+                nextReturns: [],
+                signalDates: [],
+                tradeDates: [],
+                entryPrices: [],
+                exitPrices: [],
+            };
+        }
+
+        const toNumber = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : NaN;
+        };
+
+        const closePrices = rows.map((r) => toNumber(r.close));
+        const openPrices = rows.map((r) => toNumber(r.open));
+        const highPrices = rows.map((r) => toNumber(r.high));
+        const lowPrices = rows.map((r) => toNumber(r.low));
+        const volumes = rows.map((r) => {
+            const num = Number(r.volume);
+            return Number.isFinite(num) && num > 0 ? num : 0;
         });
 
-        const retLag = (k, index) => {
+        const dailyReturns = closePrices.map((close, index) => {
+            if (index === 0) return 0;
+            const prevClose = closePrices[index - 1];
+            if (!Number.isFinite(close) || !Number.isFinite(prevClose) || prevClose === 0) return NaN;
+            return (close - prevClose) / prevClose;
+        });
+
+        const vol20 = dailyReturns.map((_, index) => {
+            const start = Math.max(0, index - 19);
+            const slice = dailyReturns.slice(start, index + 1).filter((v) => Number.isFinite(v));
+            return slice.length >= 5 ? std(slice) : null;
+        });
+
+        const rsi14 = computeRsi(closePrices, 14);
+        const sma10 = closePrices.map((_, index) => {
+            const start = Math.max(0, index - 9);
+            const slice = closePrices.slice(start, index + 1).filter((v) => Number.isFinite(v));
+            return slice.length === 10 ? mean(slice) : null;
+        });
+        const sma20 = closePrices.map((_, index) => {
+            const start = Math.max(0, index - 19);
+            const slice = closePrices.slice(start, index + 1).filter((v) => Number.isFinite(v));
+            return slice.length === 20 ? mean(slice) : null;
+        });
+
+        const trueRanges = closePrices.map((close, index) => {
+            const high = highPrices[index];
+            const low = lowPrices[index];
+            if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
+            if (index === 0 || !Number.isFinite(closePrices[index - 1])) return high - low;
+            const prevClose = closePrices[index - 1];
+            return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        });
+
+        const atr14 = trueRanges.map((_, index) => {
+            const start = Math.max(0, index - 13);
+            const slice = trueRanges.slice(start, index + 1).filter((v) => Number.isFinite(v));
+            return slice.length === 14 ? mean(slice) : null;
+        });
+
+        const logVolumes = volumes.map((value) => Math.log(value + 1));
+        const volumeZ = logVolumes.map((_, index) => {
+            const start = Math.max(0, index - 19);
+            const slice = logVolumes.slice(start, index + 1);
+            if (slice.length < 10) return null;
+            const mu = mean(slice);
+            const sigmaVal = std(slice);
+            return sigmaVal > 1e-8 ? (logVolumes[index] - mu) / sigmaVal : 0;
+        });
+
+        const retLag = (series, k, index) => {
             if (index - k < 0) return null;
-            const base = closePrices[index - k];
-            if (!Number.isFinite(base) || base === 0) return null;
-            return (closePrices[index] - base) / base;
+            const base = series[index - k];
+            const current = series[index];
+            if (!Number.isFinite(base) || !Number.isFinite(current) || base === 0) return null;
+            return (current - base) / base;
         };
 
         const features = [];
@@ -2658,18 +2722,63 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         const tradeDates = [];
         const entryPrices = [];
         const exitPrices = [];
-        for (let i = 21; i < rows.length - 1; i += 1) {
-            const f1 = retLag(1, i);
-            const f3 = retLag(3, i);
-            const f5 = retLag(5, i);
-            if ([f1, f3, f5, vol20[i], rsi14[i], sma20[i]].some((v) => v === null || Number.isNaN(v))) continue;
-            const gap = sma20[i] === 0 ? 0 : (closePrices[i] - sma20[i]) / sma20[i];
-            const feat = [f1, f3, f5, vol20[i], rsi14[i] / 100, gap];
-            const nextOpen = Number(rows[i + 1].open);
-            const nextClose = Number(rows[i + 1].close);
-            if (!Number.isFinite(nextOpen) || !Number.isFinite(nextClose) || nextOpen <= 0) continue;
+
+        for (let i = 20; i < rows.length - 1; i += 1) {
+            const f1 = retLag(closePrices, 1, i);
+            const f3 = retLag(closePrices, 3, i);
+            const f5 = retLag(closePrices, 5, i);
+            const f10 = retLag(closePrices, 10, i);
+            const momentum = retLag(closePrices, 15, i);
+            const intraday = Number.isFinite(openPrices[i]) && openPrices[i] !== 0 ? (closePrices[i] - openPrices[i]) / openPrices[i] : null;
+            const gap =
+                Number.isFinite(openPrices[i]) && Number.isFinite(closePrices[i - 1]) && closePrices[i - 1] !== 0
+                    ? (openPrices[i] - closePrices[i - 1]) / closePrices[i - 1]
+                    : null;
+            const rangeRatio =
+                Number.isFinite(highPrices[i]) &&
+                Number.isFinite(lowPrices[i]) &&
+                Number.isFinite(closePrices[i]) &&
+                closePrices[i] !== 0
+                    ? (highPrices[i] - lowPrices[i]) / closePrices[i]
+                    : null;
+            const smaGap10 = Number.isFinite(sma10[i]) && sma10[i] !== 0 ? (closePrices[i] - sma10[i]) / sma10[i] : null;
+            const smaGap20 = Number.isFinite(sma20[i]) && sma20[i] !== 0 ? (closePrices[i] - sma20[i]) / sma20[i] : null;
+            const atrNorm =
+                Number.isFinite(atr14[i]) && Number.isFinite(closePrices[i]) && closePrices[i] !== 0 ? atr14[i] / closePrices[i] : null;
+            const volatility = vol20[i];
+            const volumeScore = volumeZ[i];
+            const rsiValue = Number.isFinite(rsi14[i]) ? rsi14[i] / 100 : null;
+
+            const featureVector = [
+                f1,
+                f3,
+                f5,
+                f10,
+                momentum,
+                intraday,
+                gap,
+                rangeRatio,
+                volatility,
+                rsiValue,
+                smaGap10,
+                smaGap20,
+                atrNorm,
+                volumeScore,
+            ];
+
+            if (!featureVector.every((value) => Number.isFinite(value))) {
+                continue;
+            }
+
+            const nextOpen = openPrices[i + 1];
+            const nextClose = closePrices[i + 1];
+            if (!Number.isFinite(nextOpen) || !Number.isFinite(nextClose) || nextOpen <= 0) {
+                continue;
+            }
+
             const nextRet = (nextClose - nextOpen) / nextOpen;
-            features.push(feat);
+
+            features.push(featureVector);
             labels.push(nextRet > 0 ? 1 : 0);
             nextReturns.push(nextRet);
             signalDates.push(rows[i].date);
@@ -2677,6 +2786,7 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
             entryPrices.push(nextOpen);
             exitPrices.push(nextClose);
         }
+
         return { features, labels, nextReturns, signalDates, tradeDates, entryPrices, exitPrices };
     };
 
@@ -2723,7 +2833,121 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
             bc: createZeroVector(hiddenSize),
             Wy: Array.from({ length: hiddenSize }, () => (Math.random() * 2 - 1) * scale),
             by: 0,
+            sequenceLength: 0,
         };
+    };
+
+    const zeroLikeParams = (params) => ({
+        Wf: createZeroMatrix(params.hiddenSize, params.inputSize + params.hiddenSize),
+        Wi: createZeroMatrix(params.hiddenSize, params.inputSize + params.hiddenSize),
+        Wo: createZeroMatrix(params.hiddenSize, params.inputSize + params.hiddenSize),
+        Wc: createZeroMatrix(params.hiddenSize, params.inputSize + params.hiddenSize),
+        bf: createZeroVector(params.hiddenSize),
+        bi: createZeroVector(params.hiddenSize),
+        bo: createZeroVector(params.hiddenSize),
+        bc: createZeroVector(params.hiddenSize),
+        Wy: createZeroVector(params.hiddenSize),
+        by: 0,
+    });
+
+    const addGradients = (target, source) => {
+        const addMatrix = (t, s) => {
+            for (let i = 0; i < t.length; i += 1) {
+                for (let j = 0; j < t[i].length; j += 1) {
+                    t[i][j] += s[i][j];
+                }
+            }
+        };
+        const addVector = (t, s) => {
+            for (let i = 0; i < t.length; i += 1) {
+                t[i] += s[i];
+            }
+        };
+        addMatrix(target.Wf, source.Wf);
+        addMatrix(target.Wi, source.Wi);
+        addMatrix(target.Wo, source.Wo);
+        addMatrix(target.Wc, source.Wc);
+        addVector(target.bf, source.bf);
+        addVector(target.bi, source.bi);
+        addVector(target.bo, source.bo);
+        addVector(target.bc, source.bc);
+        addVector(target.Wy, source.Wy);
+        target.by += source.by;
+    };
+
+    const scaleGradients = (grads, factor) => {
+        const scaleMatrix = (matrix) => {
+            for (let i = 0; i < matrix.length; i += 1) {
+                for (let j = 0; j < matrix[i].length; j += 1) {
+                    matrix[i][j] *= factor;
+                }
+            }
+        };
+        const scaleVector = (vector) => {
+            for (let i = 0; i < vector.length; i += 1) {
+                vector[i] *= factor;
+            }
+        };
+        scaleMatrix(grads.Wf);
+        scaleMatrix(grads.Wi);
+        scaleMatrix(grads.Wo);
+        scaleMatrix(grads.Wc);
+        scaleVector(grads.bf);
+        scaleVector(grads.bi);
+        scaleVector(grads.bo);
+        scaleVector(grads.bc);
+        scaleVector(grads.Wy);
+        grads.by *= factor;
+    };
+
+    const initAdamState = (params) => ({
+        t: 0,
+        m: zeroLikeParams(params),
+        v: zeroLikeParams(params),
+    });
+
+    const adamStep = (params, grads, state, lr, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8) => {
+        state.t += 1;
+        const biasCorrection1 = 1 - Math.pow(beta1, state.t);
+        const biasCorrection2 = 1 - Math.pow(beta2, state.t);
+
+        const updateMatrix = (matrix, grad, mMatrix, vMatrix) => {
+            for (let i = 0; i < matrix.length; i += 1) {
+                for (let j = 0; j < matrix[i].length; j += 1) {
+                    mMatrix[i][j] = beta1 * mMatrix[i][j] + (1 - beta1) * grad[i][j];
+                    vMatrix[i][j] = beta2 * vMatrix[i][j] + (1 - beta2) * grad[i][j] * grad[i][j];
+                    const mHat = mMatrix[i][j] / biasCorrection1;
+                    const vHat = vMatrix[i][j] / biasCorrection2;
+                    matrix[i][j] -= lr * mHat / (Math.sqrt(vHat) + epsilon);
+                }
+            }
+        };
+
+        const updateVector = (vector, grad, mVector, vVector) => {
+            for (let i = 0; i < vector.length; i += 1) {
+                mVector[i] = beta1 * mVector[i] + (1 - beta1) * grad[i];
+                vVector[i] = beta2 * vVector[i] + (1 - beta2) * grad[i] * grad[i];
+                const mHat = mVector[i] / biasCorrection1;
+                const vHat = vVector[i] / biasCorrection2;
+                vector[i] -= lr * mHat / (Math.sqrt(vHat) + epsilon);
+            }
+        };
+
+        updateMatrix(params.Wf, grads.Wf, state.m.Wf, state.v.Wf);
+        updateMatrix(params.Wi, grads.Wi, state.m.Wi, state.v.Wi);
+        updateMatrix(params.Wo, grads.Wo, state.m.Wo, state.v.Wo);
+        updateMatrix(params.Wc, grads.Wc, state.m.Wc, state.v.Wc);
+        updateVector(params.bf, grads.bf, state.m.bf, state.v.bf);
+        updateVector(params.bi, grads.bi, state.m.bi, state.v.bi);
+        updateVector(params.bo, grads.bo, state.m.bo, state.v.bo);
+        updateVector(params.bc, grads.bc, state.m.bc, state.v.bc);
+        updateVector(params.Wy, grads.Wy, state.m.Wy, state.v.Wy);
+
+        state.m.by = beta1 * state.m.by + (1 - beta1) * grads.by;
+        state.v.by = beta2 * state.v.by + (1 - beta2) * grads.by * grads.by;
+        const mHatBy = state.m.by / biasCorrection1;
+        const vHatBy = state.v.by / biasCorrection2;
+        params.by -= lr * mHatBy / (Math.sqrt(vHatBy) + epsilon);
     };
 
     const computeGate = (weights, bias, input, activation) => {
@@ -2739,8 +2963,10 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         return output;
     };
 
-    const forwardLstm = (sequence, params) => {
+    const forwardLstm = (sequence, params, options = {}) => {
         const { hiddenSize } = params;
+        const dropoutRate = Math.max(0, Math.min(0.9, Number(options.dropoutRate) || 0));
+        const training = Boolean(options.training);
         let hPrev = createZeroVector(hiddenSize);
         let cPrev = createZeroVector(hiddenSize);
         const steps = [];
@@ -2774,35 +3000,39 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
             hPrev = hidden;
             cPrev = cell;
         }
-        const linearOutput = params.by + params.Wy.reduce((sum, weight, idx) => sum + weight * hPrev[idx], 0);
+
+        const baseHidden = hPrev.slice();
+        let dropoutMask = Array(hiddenSize).fill(1);
+        let droppedHidden = baseHidden.slice();
+        if (training && dropoutRate > 0) {
+            const keepProb = 1 - dropoutRate;
+            dropoutMask = baseHidden.map(() => {
+                const keep = Math.random() < keepProb ? 1 : 0;
+                return keep ? 1 / keepProb : 0;
+            });
+            droppedHidden = baseHidden.map((value, idx) => value * dropoutMask[idx]);
+        }
+
+        const linearOutput = params.by + droppedHidden.reduce((sum, value, idx) => sum + params.Wy[idx] * value, 0);
         const prob = sigmoidClamped(linearOutput);
-        return { prob, steps, lastH: hPrev, lastC: cPrev };
+        return { prob, steps, lastH: baseHidden, lastC: cPrev, droppedH: droppedHidden, dropoutMask };
     };
 
     const backwardLstm = (label, params, cache, gradClip = 5) => {
         const { hiddenSize, inputSize } = params;
-        const gradients = {
-            Wf: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
-            Wi: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
-            Wo: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
-            Wc: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
-            bf: createZeroVector(hiddenSize),
-            bi: createZeroVector(hiddenSize),
-            bo: createZeroVector(hiddenSize),
-            bc: createZeroVector(hiddenSize),
-            Wy: createZeroVector(hiddenSize),
-            by: 0,
-        };
-
+        const gradients = zeroLikeParams(params);
         const clip = (value) => Math.max(-gradClip, Math.min(gradClip, value));
+        const dropoutMask = Array.isArray(cache.dropoutMask) && cache.dropoutMask.length === hiddenSize
+            ? cache.dropoutMask
+            : Array(hiddenSize).fill(1);
 
         const error = cache.prob - label;
         gradients.by += error;
         for (let h = 0; h < hiddenSize; h += 1) {
-            gradients.Wy[h] += error * cache.lastH[h];
+            gradients.Wy[h] += error * cache.droppedH[h];
         }
 
-        let dhNext = params.Wy.map((w) => clip(w * error));
+        let dhNext = params.Wy.map((w, idx) => clip(w * error * dropoutMask[idx]));
         let dcNext = createZeroVector(hiddenSize);
 
         for (let t = cache.steps.length - 1; t >= 0; t -= 1) {
@@ -2861,55 +3091,79 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         return gradients;
     };
 
-    const applyGradients = (params, grads, lr, gradClip = 5) => {
-        const clip = (value) => Math.max(-gradClip, Math.min(gradClip, value));
-        const updateMatrix = (matrix, grad) => {
-            for (let i = 0; i < matrix.length; i += 1) {
-                for (let j = 0; j < matrix[i].length; j += 1) {
-                    matrix[i][j] -= lr * clip(grad[i][j]);
-                }
-            }
-        };
-        const updateVector = (vector, grad) => {
-            for (let i = 0; i < vector.length; i += 1) {
-                vector[i] -= lr * clip(grad[i]);
-            }
-        };
-
-        updateMatrix(params.Wf, grads.Wf);
-        updateMatrix(params.Wi, grads.Wi);
-        updateMatrix(params.Wo, grads.Wo);
-        updateMatrix(params.Wc, grads.Wc);
-        updateVector(params.bf, grads.bf);
-        updateVector(params.bi, grads.bi);
-        updateVector(params.bo, grads.bo);
-        updateVector(params.bc, grads.bc);
-        updateVector(params.Wy, grads.Wy);
-        params.by -= lr * clip(grads.by);
-    };
-
     const trainLstmModel = (sequences, labels, options = {}) => {
-        const { lr = 0.01, epochs = 80, hiddenSize = 12, gradClip = 5 } = options;
+        const lr = Number.isFinite(options.lr) && options.lr > 0 ? options.lr : 0.01;
+        const epochs = Number.isFinite(options.epochs) && options.epochs > 0 ? Math.floor(options.epochs) : 80;
+        const hiddenSize = Number.isFinite(options.hiddenSize) && options.hiddenSize > 4 ? Math.floor(options.hiddenSize) : 48;
+        const gradClip = Number.isFinite(options.gradClip) && options.gradClip > 0 ? options.gradClip : 5;
+        const dropoutRate = Math.max(0, Math.min(0.8, Number.isFinite(options.dropout) ? options.dropout : 0.2));
+        const batchSizeRaw = Number.isFinite(options.batchSize) && options.batchSize > 0 ? Math.floor(options.batchSize) : 24;
         if (!Array.isArray(sequences) || sequences.length === 0) return null;
+        if (!Array.isArray(labels) || labels.length !== sequences.length) return null;
         const inputSize = sequences[0][0]?.length || 0;
         if (!inputSize) return null;
+        const sequenceLength = sequences[0].length;
+        if (!sequenceLength) return null;
         const params = initLstmParameters(inputSize, hiddenSize);
-        params.sequenceLength = sequences[0].length;
+        params.sequenceLength = sequenceLength;
+        const adamState = initAdamState(params);
+        const lossHistory = [];
+        const sampleCount = sequences.length;
+        const effectiveBatchSize = Math.max(1, Math.min(batchSizeRaw, sampleCount));
 
         for (let epoch = 0; epoch < epochs; epoch += 1) {
-            for (let i = 0; i < sequences.length; i += 1) {
-                const forward = forwardLstm(sequences[i], params);
-                const grads = backwardLstm(labels[i], params, forward, gradClip);
-                applyGradients(params, grads, lr, gradClip);
+            const order = Array.from({ length: sampleCount }, (_, idx) => idx);
+            for (let i = order.length - 1; i > 0; i -= 1) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [order[i], order[j]] = [order[j], order[i]];
             }
+
+            let epochLossSum = 0;
+            let epochSampleCount = 0;
+
+            for (let start = 0; start < sampleCount; start += effectiveBatchSize) {
+                const end = Math.min(sampleCount, start + effectiveBatchSize);
+                const batchIndices = order.slice(start, end);
+                const batchGrads = zeroLikeParams(params);
+                let batchLossSum = 0;
+
+                for (let idx = 0; idx < batchIndices.length; idx += 1) {
+                    const sampleIndex = batchIndices[idx];
+                    const sequence = sequences[sampleIndex];
+                    const label = labels[sampleIndex];
+                    const forward = forwardLstm(sequence, params, { dropoutRate, training: true });
+                    const grads = backwardLstm(label, params, forward, gradClip);
+                    addGradients(batchGrads, grads);
+                    const prob = Math.min(Math.max(forward.prob, 1e-6), 1 - 1e-6);
+                    batchLossSum += -(label * Math.log(prob) + (1 - label) * Math.log(1 - prob));
+                }
+
+                const batchSizeActual = batchIndices.length;
+                if (batchSizeActual > 0) {
+                    scaleGradients(batchGrads, 1 / batchSizeActual);
+                    adamStep(params, batchGrads, adamState, lr, options.beta1, options.beta2);
+                    epochLossSum += batchLossSum;
+                    epochSampleCount += batchSizeActual;
+                }
+            }
+
+            lossHistory.push(epochSampleCount ? epochLossSum / epochSampleCount : 0);
         }
 
         return {
             predict: (sequence) => {
                 if (!Array.isArray(sequence) || sequence.length !== params.sequenceLength) return 0.5;
-                return forwardLstm(sequence, params).prob;
+                return forwardLstm(sequence, params, { dropoutRate, training: false }).prob;
             },
             params,
+            trainingSummary: {
+                lossHistory,
+                dropout: dropoutRate,
+                batchSize: effectiveBatchSize,
+                hiddenSize,
+                epochs,
+                learningRate: lr,
+            },
         };
     };
 
@@ -2936,7 +3190,7 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
             entryPrices.push(entryAll[idx]);
             exitPrices.push(exitAll[idx]);
         }
-        return { sequences, labels, returns, signalDates, tradeDates, entryPrices, exitPrices };
+        return { sequences, labels, returns, signalDates, tradeDates, entryPrices, exitPrices, sequenceLength: seqLen };
     };
 
     const evaluateThreshold = (probs, labels, returns, threshold) => {
@@ -3051,10 +3305,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         const getInput = (id) => document.getElementById(id);
         const lrRaw = Number(getInput('ml-lr')?.value || 0.01);
         const epochsRaw = Number(getInput('ml-epochs')?.value || 80);
+        const seqLenRaw = Number(getInput('ml-seq-length')?.value || 30);
+        const hiddenRaw = Number(getInput('ml-hidden-size')?.value || 48);
+        const dropoutRaw = Number(getInput('ml-dropout')?.value || 0.2);
+        const batchRaw = Number(getInput('ml-batch-size')?.value || 24);
         const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
         const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
-        const learningRate = Number.isFinite(lrRaw) && lrRaw > 0 ? lrRaw : 0.01;
-        const epochCount = Number.isFinite(epochsRaw) && epochsRaw > 0 ? Math.floor(epochsRaw) : 80;
+
+        const learningRate = Number.isFinite(lrRaw) && lrRaw > 0 ? Math.min(lrRaw, 0.5) : 0.01;
+        const epochCount = Number.isFinite(epochsRaw) && epochsRaw > 0 ? Math.min(Math.floor(epochsRaw), 400) : 80;
+        const sequenceLengthInput = Number.isFinite(seqLenRaw) && seqLenRaw > 0 ? Math.floor(seqLenRaw) : 30;
+        const hiddenUnits = Number.isFinite(hiddenRaw) && hiddenRaw > 4 ? Math.floor(hiddenRaw) : 48;
+        const dropoutRate = Math.max(0, Math.min(0.6, Number.isFinite(dropoutRaw) ? dropoutRaw : 0.2));
+        const batchSize = Number.isFinite(batchRaw) && batchRaw > 0 ? Math.floor(batchRaw) : 24;
 
         const rows = cachedStockData
             .map((r) => ({
@@ -3143,13 +3406,14 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         const entryAll = entryTrain.concat(entryTest);
         const exitAll = exitTrain.concat(exitTest);
 
-        let sequenceLength = 16;
-        if (trainSamplesRequested < sequenceLength + 10) {
-            sequenceLength = Math.max(8, Math.floor(trainSamplesRequested * 0.4));
+        const minSeqLength = 8;
+        const maxSeqLength = Math.max(minSeqLength, Math.min(120, trainSamplesRequested - 1));
+        let sequenceLength = clamp(sequenceLengthInput, minSeqLength, maxSeqLength);
+        if (trainSamplesRequested <= sequenceLength) {
+            sequenceLength = Math.max(minSeqLength, trainSamplesRequested - 1);
         }
-        sequenceLength = Math.max(5, Math.min(sequenceLength, trainSamplesRequested));
-        if (sequenceLength < 5 || trainSamplesRequested < sequenceLength) {
-            showError('訓練樣本不足以建立 LSTM 序列，請延長訓練期間。');
+        if (sequenceLength < minSeqLength) {
+            showError('訓練樣本不足以建立指定的 LSTM 序列，請延長訓練期間或降低序列長度。');
             return;
         }
 
@@ -3179,16 +3443,24 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         );
 
         if (trainSequences.sequences.length < 30 || testSequences.sequences.length < 10) {
-            showError('LSTM 序列樣本不足，請放大訓練或測試期間。');
+            showError('LSTM 序列樣本不足（訓練需 ≥ 30 筆、測試 ≥ 10 筆），請放大期間或降低序列長度。');
             return;
         }
 
-        const model = trainLstmModel(trainSequences.sequences, trainSequences.labels, { lr: learningRate, epochs: epochCount });
+        const model = trainLstmModel(trainSequences.sequences, trainSequences.labels, {
+            lr: learningRate,
+            epochs: epochCount,
+            hiddenSize: hiddenUnits,
+            batchSize,
+            dropout: dropoutRate,
+            gradClip: 5,
+        });
         if (!model) {
             showError('模型訓練失敗。');
             return;
         }
 
+        const trainingSummary = model.trainingSummary || {};
         const pTrain = trainSequences.sequences.map((seq) => model.predict(seq));
         const bestMetrics = fitThresholdAndEdge(pTrain, trainSequences.labels, trainSequences.returns);
         if (!bestMetrics || bestMetrics.sampleSize < 20) {
@@ -3269,6 +3541,19 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
             ? `${testSequences.tradeDates[0]} → ${testSequences.tradeDates[testSequences.tradeDates.length - 1]}`
             : '—';
 
+        const lossHistory = Array.isArray(trainingSummary.lossHistory) ? trainingSummary.lossHistory : [];
+        const lastLoss = lossHistory.length ? lossHistory[lossHistory.length - 1] : null;
+        const firstLoss = lossHistory.length ? lossHistory[0] : null;
+        const lossDelta = Number.isFinite(lastLoss) && Number.isFinite(firstLoss) ? lastLoss - firstLoss : null;
+        const lossDeltaText = Number.isFinite(lossDelta)
+            ? `（Δ ${(lossDelta >= 0 ? '+' : '') + lossDelta.toFixed(4)}）`
+            : '';
+        const formatLossValue = (value) => (Number.isFinite(value) ? value.toFixed(4) : '—');
+        const formatLearningRate =
+            learningRate >= 0.001 ? learningRate.toFixed(3) : learningRate.toExponential(1).replace('+', '');
+        const trainSeqLengthDisplay = trainSequences.sequenceLength || sequenceLength;
+        const testSeqLengthDisplay = testSequences.sequenceLength || sequenceLength;
+
         const bestThresholdDisplay = Number.isFinite(bestMetrics.threshold) ? bestMetrics.threshold.toFixed(2) : '—';
         const bestSampleDisplay = Number.isFinite(bestMetrics.sampleSize) && bestMetrics.sampleSize > 0 ? bestMetrics.sampleSize : '—';
         const chosenSampleDisplay = Number.isFinite(chosenMetrics.sampleSize) && chosenMetrics.sampleSize > 0 ? chosenMetrics.sampleSize : '—';
@@ -3279,34 +3564,7 @@ const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251212A';
         const cards = document.getElementById('ml-cards');
         if (cards) {
             cards.innerHTML = `
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
-                    <div class=\"text-[11px] uppercase tracking-wide\">資料切分</div>
-                    <div class=\"text-xs\">訓練 ${trainSamplesRequested} 日（序列 ${trainSequences.sequences.length} 筆）：${trainRangeText}</div>
-                    <div class=\"text-xs\">測試 ${testSamplesRequested} 日（序列 ${testSequences.sequences.length} 筆）：訊號 ${testSignalRange}</div>
-                    <div class=\"text-xs\">隔日開盤→收盤：${testTradeRange}</div>
-                </div>
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
-                    <div class=\"text-[11px] uppercase tracking-wide\">門檻設定</div>
-                    <div class=\"text-sm font-semibold\" style=\"color: var(--foreground);\">${thresholdUsedDisplay}（${thresholdSource === 'auto' ? '最佳' : '自訂'}｜樣本 ${chosenSampleDisplay}）</div>
-                    <div class=\"text-xs\">訓練命中率：${formatPercent(chosenMetrics.accuracy, 1)}</div>
-                    <div class=\"text-xs\">最佳門檻參考：${bestThresholdDisplay}｜樣本 ${bestSampleDisplay}</div>
-                </div>
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
-                    <div class=\"text-[11px] uppercase tracking-wide\">平均漲幅 / 跌幅</div>
-                    <div class=\"text-sm font-semibold\" style=\"color: var(--primary);\">${formatPercent(chosenMetrics.avgUp)}</div>
-                    <div class=\"text-sm font-semibold\" style=\"color: var(--destructive);\">${formatPercent(chosenMetrics.avgDown)}</div>
-                </div>
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
-                    <div class=\"text-[11px] uppercase tracking-wide\">測試命中率</div>
-                    <div class=\"text-lg font-semibold\" style=\"color: var(--foreground);\">${formatPercent(hitRateTest, 1)}</div>
-                    <div class=\"text-xs\">半凱利建議（參考）：${formatPercent(indicativeKelly, 1)}</div>
-                </div>
-                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">
-                    <div class=\"text-[11px] uppercase tracking-wide\">累積報酬（測試）</div>
-                    <div class=\"text-sm\">LSTM + Kelly：<span style=\"color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalModel)}</span></div>
-                    <div class=\"text-sm\">買入持有：<span style=\"color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalBh)}</span></div>
-                </div>
-            `;
+                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">資料切分</div>\n                    <div class=\"text-xs\">訓練 ${trainSamplesRequested} 日（序列 ${trainSequences.sequences.length} 筆 × ${trainSeqLengthDisplay} 日）：${trainRangeText}</div>\n                    <div class=\"text-xs\">測試 ${testSamplesRequested} 日（序列 ${testSequences.sequences.length} 筆 × ${testSeqLengthDisplay} 日）：訊號 ${testSignalRange}</div>\n                    <div class=\"text-xs\">隔日開盤→收盤：${testTradeRange}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">門檻設定</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--foreground);\">${thresholdUsedDisplay}（${thresholdSource === 'auto' ? '最佳' : '自訂'}｜樣本 ${chosenSampleDisplay}）</div>\n                    <div class=\"text-xs\">訓練命中率：${formatPercent(chosenMetrics.accuracy, 1)}</div>\n                    <div class=\"text-xs\">最佳門檻參考：${bestThresholdDisplay}｜樣本 ${bestSampleDisplay}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">LSTM 超參數</div>\n                    <div class=\"text-xs\">隱藏單元：${hiddenUnits}｜Dropout：${(dropoutRate * 100).toFixed(0)}%</div>\n                    <div class=\"text-xs\">批次大小：${batchSize}｜學習率：${formatLearningRate}｜Epoch：${epochCount}</div>\n                    <div class=\"text-xs\">最後訓練損失：${formatLossValue(lastLoss)}${lossDeltaText}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">平均漲幅 / 跌幅</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--primary);\">${formatPercent(chosenMetrics.avgUp)}</div>\n                    <div class=\"text-sm font-semibold\" style=\"color: var(--destructive);\">${formatPercent(chosenMetrics.avgDown)}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">測試命中率</div>\n                    <div class=\"text-lg font-semibold\" style=\"color: var(--foreground);\">${formatPercent(hitRateTest, 1)}</div>\n                    <div class=\"text-xs\">半凱利建議（參考）：${formatPercent(indicativeKelly, 1)}</div>\n                </div>\n                <div class=\"p-3 rounded border bg-white\" style=\"border-color: var(--border); color: var(--muted-foreground);\">\n                    <div class=\"text-[11px] uppercase tracking-wide\">累積報酬（測試）</div>\n                    <div class=\"text-sm\">LSTM + Kelly：<span style=\"color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalModel)}</span></div>\n                    <div class=\"text-sm\">買入持有：<span style=\"color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};\">${formatReturn(simulation.finalBh)}</span></div>\n                </div>\n            `;
         }
 
         const equityCanvas = document.getElementById('ml-equity-chart');
