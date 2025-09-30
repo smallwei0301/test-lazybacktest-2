@@ -52,7 +52,7 @@ let batchOptimizationOFIMetrics = null;
 let batchOptimizationOFISignature = null;
 
 // 版本標記：批量優化 OFI 指標表整合
-const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250926B';
+const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250927A';
 const OFI_METRICS_CSV_PATH = 'assets/ofi-metrics-parameters.csv';
 let ofiMetricsTableCache = null;
 let ofiMetricsFetchPromise = null;
@@ -1894,6 +1894,7 @@ function renderBatchResultsTable() {
         const ofiTooltip = buildOfiTooltip(result);
         const ofiTooltipAttr = escapeHtmlAttr(ofiTooltip);
         const ofiSummaryHtml = ofiSummary ? `<span class="text-xs text-gray-500">${escapeHtml(ofiSummary)}</span>` : '';
+        const ofiIndicatorsHtml = buildOfiIndicatorsHtml(result);
         const loadButtonDisabled = allowStrategyRanking ? '' : 'disabled aria-disabled="true"';
         const loadButtonClass = allowStrategyRanking
             ? 'px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border'
@@ -1913,6 +1914,7 @@ function renderBatchResultsTable() {
                     ${ofiSummaryHtml}
                 </div>
             </td>
+            <td class="px-3 py-2 text-sm text-gray-900">${ofiIndicatorsHtml}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
@@ -2095,6 +2097,67 @@ function buildOfiTooltip(result) {
 function formatComponentScore(value) {
     if (!Number.isFinite(value)) return '--';
     return value.toFixed(2);
+}
+
+function buildOfiIndicatorsHtml(result) {
+    if (!result || !result.ofiComponents) {
+        return '<span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">資料不足</span>';
+    }
+    const c = result.ofiComponents;
+
+    const flowSection = buildOfiIndicatorSection('Flow 層', [
+        { label: 'FlowScore', value: formatScore(c.flowScoreRaw) },
+        { label: 'R^PBO', value: formatComponentScore(c.RPBO) },
+        { label: 'R^Len', value: formatComponentScore(c.RLen) },
+        { label: 'R^Pool', value: formatComponentScore(c.RPool) },
+        { label: 'R^SPA', value: formatComponentScore(c.RSPA) },
+        { label: 'R^MCS', value: formatComponentScore(c.RMCS) },
+    ]);
+
+    const strategySection = buildOfiIndicatorSection('Strategy 層', [
+        { label: 'Strategy', value: formatNormalisedScore(c.strategy) },
+        { label: 'R^OOS', value: formatComponentScore(c.ROOS) },
+        { label: 'R^WF', value: formatComponentScore(c.RWF) },
+        { label: 'R^DSR/PSR', value: formatComponentScore(c.RDSRPSR) },
+        { label: 'R^Island', value: formatComponentScore(c.RIsland) },
+    ]);
+
+    const sections = [flowSection, strategySection].filter(Boolean);
+    if (sections.length === 0) {
+        return '<span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">資料不足</span>';
+    }
+
+    const flowVerdict = result?.ofiMeta?.flowVerdict
+        ? `<div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(result.ofiMeta.flowVerdict)}</div>`
+        : '';
+
+    return `<div class="space-y-2">${sections.join('')}${flowVerdict}</div>`;
+}
+
+function buildOfiIndicatorSection(title, entries) {
+    const badges = entries
+        .map((entry) => {
+            if (!entry || entry.value === '--') return '';
+            return buildOfiIndicatorBadge(entry.label, entry.value);
+        })
+        .filter(Boolean)
+        .join('');
+    if (!badges) return '';
+    return `
+        <div>
+            <div class="text-[11px] font-semibold text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(title)}</div>
+            <div class="mt-1 flex flex-wrap gap-1">${badges}</div>
+        </div>
+    `;
+}
+
+function buildOfiIndicatorBadge(label, value) {
+    return `
+        <span class="inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[11px] font-medium" style="background-color: color-mix(in srgb, var(--muted) 55%, transparent); color: var(--foreground); border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);">
+            ${escapeHtml(label)}
+            <span class="font-semibold">${escapeHtml(value)}</span>
+        </span>
+    `;
 }
 
 function escapeHtml(value) {
@@ -2411,8 +2474,20 @@ function renderOfiFlowBanner(flow) {
     if (!banner) return;
 
     if (!flow || typeof flow !== 'object') {
-        banner.classList.add('hidden');
-        banner.innerHTML = '';
+        banner.innerHTML = `
+            <div class="border border-border bg-muted/20 rounded-lg p-4" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">FlowScore</div>
+                        <div class="text-2xl font-semibold" style="color: var(--foreground);">--</div>
+                    </div>
+                    <div class="text-sm font-semibold text-gray-600">Flow 指標資料不足</div>
+                </div>
+                <p class="mt-2 text-xs leading-relaxed" style="color: var(--foreground);">待批量優化完成或伺服端回傳 Flow 指標後將顯示判定摘要。</p>
+                <p class="mt-2 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">版本 ${escapeHtml(BATCH_OFI_UI_VERSION)}｜Flow 權重 0.40 / 0.20 / 0.15 / 0.15 / 0.10</p>
+            </div>
+        `;
+        banner.classList.remove('hidden');
         return;
     }
 

@@ -801,3 +801,9 @@
 - **Fix**: 調整 `computeIslandScores` 以 `max S_j` 正規化島嶼得分並回傳中繼資訊，同步新增 `docs/ofi-metrics-breakdown.md` 整理 Flow/Strategy 各構面公式、差異與影響。
 - **Diagnostics**: 檢查 `result.meta.island.normalisedScore` 落在 [0,1]、最大島嶼等於 1，並交叉對照文件中的流程對照表；批量優化介面 tooltip 可看到最新分數。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-OFI-FLOWCARD-20250927A
+- **Issue recap**: Flow 指標卡僅存在於執行狀態面板且結果列表缺乏子指標明細，使用者在批量優化結果區無法直接檢視 Flow 判定與各構面分數。
+- **Fix**: 將 FlowScore 卡片移至結果卡片頂部並持續顯示成功/失敗訊息，同步於結果表新增「OFI 指標分數」欄位列出 Flow 與 Strategy 子分數徽章。
+- **Diagnostics**: 本地載入批量優化流程檢查 Flow 卡片在結果頁常駐顯示，確認各策略列的 R^PBO/R^Len/Strategy 等指標與 tooltip 保持一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
