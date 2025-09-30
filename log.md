@@ -1,3 +1,19 @@
+## 2025-11-17 — Patch LB-OFI-METRICS-20251117A
+- **Scope**: 批量優化結果新增 OFI 穩健度評分、條件式 PBO 統計、IslandScore 幾何檢查、DSR 估計與 SPA/MCS 快篩控制。
+- **Highlights**:
+  - 以 CSCV 切片重建 per-strategy OOS 分位分布，計算條件式 PBO、OOS 中位／IQR，並合成 0–100 的 OFI 指標。
+  - 分析參數鄰域密度建立 IslandScore，搭配 DSR（Deflated Sharpe）修正多重檢定後的顯著性，前端同步揭露細項。
+  - 新增「策略穩健度排序」與「🛡️ 僅看 SPA/MCS」篩選，UI 表格加入穩健度欄位與統計摘要，支援進階用戶快速篩選。
+- **Testing**: `node - <<'NODE'
+const fs = require('fs');
+const vm = require('vm');
+['js/main.js','js/batch-optimization.js','js/worker.js'].forEach((file) => {
+  const code = fs.readFileSync(file, 'utf8');
+  new vm.Script(code, { filename: file });
+});
+console.log('scripts compile');
+NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
