@@ -816,3 +816,9 @@
 - **Fix**: 將 FlowScore 卡片移至結果卡片頂部並持續顯示成功/失敗訊息，同步於結果表新增「OFI 指標分數」欄位列出 Flow 與 Strategy 子分數徽章。
 - **Diagnostics**: 本地載入批量優化流程檢查 Flow 卡片在結果頁常駐顯示，確認各策略列的 R^PBO/R^Len/Strategy 等指標與 tooltip 保持一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-OFI-DUALSCORE-20250930A
+- **Issue recap**: 批量優化表格僅顯示策略層分數，無法直接看到最終 OFI；IslandScore 正規化在分位範圍塌縮時會將邊緣懲罰映射為 1，讓平坦島嶼被錯誤判為 0 分。
+- **Fix**: 將 OFI 模組升級為 `LB-OFI-DUALSCORE-20250930A`，調整 `normaliseWithQuantiles` 在上下分位重疊時維持 0 懲罰，並於策略評分輸出 Flow 與 Strategy 兩層分數及最終 OFI；結果表同步更新 tooltip 與指標欄位，直接呈現 OFI 0–100 與 Flow/Strategy 子指標。
+- **Diagnostics**: 使用測試批次確認平坦島嶼的 `edgeNorm` 維持 0、`R^{Island}` 為 1，表格顯示 `OFI`、`Flow`、`Strategy` 三段摘要且 tooltip 列出 R^PBO～R^Island；Flow 不合格時仍鎖定排序。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

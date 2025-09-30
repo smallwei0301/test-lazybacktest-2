@@ -52,7 +52,7 @@ let batchOptimizationOFIMetrics = null;
 let batchOptimizationOFISignature = null;
 
 // 版本標記：批量優化 OFI 指標表整合
-const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250927A';
+const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250930A';
 const OFI_METRICS_CSV_PATH = 'assets/ofi-metrics-parameters.csv';
 let ofiMetricsTableCache = null;
 let ofiMetricsFetchPromise = null;
@@ -2068,7 +2068,14 @@ function getOfiBadgeClass(score) {
 
 function formatOfiSummary(result, flowVerdictStatus) {
     if (!result || !Number.isFinite(result.ofiScore)) return '';
-    const parts = [`Strategy ${formatOfiScore(result.ofiScore)}`];
+    const components = result.ofiComponents || {};
+    const parts = [`OFI ${formatOfiScore(result.ofiScore)}`];
+    if (Number.isFinite(components.strategyScorePercent)) {
+        parts.push(`Strategy ${formatOfiScore(components.strategyScorePercent)}`);
+    }
+    if (Number.isFinite(components.RFlowPercent)) {
+        parts.push(`Flow ${formatOfiScore(components.RFlowPercent)}`);
+    }
     const flowTag = formatFlowVerdictTag(result.ofiMeta?.flowVerdict, flowVerdictStatus);
     if (flowTag) parts.push(flowTag);
     return parts.join('｜');
@@ -2079,13 +2086,31 @@ function buildOfiTooltip(result) {
         return 'OFI 指標：資料不足';
     }
     const c = result.ofiComponents;
-    const lines = [
-        `Strategy Score ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim(),
-    ];
-    if (Number.isFinite(c.strategyScorePercent)) {
-        lines.push(`策略綜合 ${formatOfiScore(c.strategyScorePercent)} 分 (0-100)`);
+    const lines = [];
+    lines.push(`OFI ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim());
+    if (Number.isFinite(c.RFlowPercent)) {
+        lines.push(`Flow 層 ${formatOfiScore(c.RFlowPercent)} 分 (0-100)`);
+        const flowDetails = [];
+        if (Number.isFinite(c.RPBO)) flowDetails.push(`R^PBO ${formatComponentScore(c.RPBO)}`);
+        if (Number.isFinite(c.RLen)) flowDetails.push(`R^Len ${formatComponentScore(c.RLen)}`);
+        if (Number.isFinite(c.RPool)) flowDetails.push(`R^Pool ${formatComponentScore(c.RPool)}`);
+        if (Number.isFinite(c.RSPA)) flowDetails.push(`R^SPA ${formatComponentScore(c.RSPA)}`);
+        if (Number.isFinite(c.RMCS)) flowDetails.push(`R^MCS ${formatComponentScore(c.RMCS)}`);
+        if (flowDetails.length > 0) {
+            lines.push(`Flow 子指標：${flowDetails.join(' ｜ ')}`);
+        }
     }
-    lines.push(`R^DSR/PSR ${formatComponentScore(c.RDSRPSR)} ｜ R^OOS ${formatComponentScore(c.ROOS)} ｜ R^WF ${formatComponentScore(c.RWF)} ｜ R^Island ${formatComponentScore(c.RIsland)}`);
+    if (Number.isFinite(c.strategyScorePercent)) {
+        lines.push(`Strategy 層 ${formatOfiScore(c.strategyScorePercent)} 分 (0-100)`);
+    }
+    const strategyDetails = [];
+    if (Number.isFinite(c.RDSRPSR)) strategyDetails.push(`R^DSR/PSR ${formatComponentScore(c.RDSRPSR)}`);
+    if (Number.isFinite(c.ROOS)) strategyDetails.push(`R^OOS ${formatComponentScore(c.ROOS)}`);
+    if (Number.isFinite(c.RWF)) strategyDetails.push(`R^WF ${formatComponentScore(c.RWF)}`);
+    if (Number.isFinite(c.RIsland)) strategyDetails.push(`R^Island ${formatComponentScore(c.RIsland)}`);
+    if (strategyDetails.length > 0) {
+        lines.push(`Strategy 子指標：${strategyDetails.join(' ｜ ')}`);
+    }
     if (result?.ofiMeta?.flowVerdict) {
         lines.push(`Flow 判定：${result.ofiMeta.flowVerdict}`);
     }
@@ -2106,6 +2131,14 @@ function buildOfiIndicatorsHtml(result) {
     }
     const c = result.ofiComponents;
 
+    const flowSection = buildOfiIndicatorSection('Flow 層', [
+        { label: 'Flow', value: formatNormalisedScore(c.RFlow) },
+        { label: 'R^PBO', value: formatComponentScore(c.RPBO) },
+        { label: 'R^Len', value: formatComponentScore(c.RLen) },
+        { label: 'R^Pool', value: formatComponentScore(c.RPool) },
+        { label: 'R^SPA', value: formatComponentScore(c.RSPA) },
+        { label: 'R^MCS', value: formatComponentScore(c.RMCS) },
+    ]);
     const strategySection = buildOfiIndicatorSection('Strategy 層', [
         { label: 'Strategy', value: formatNormalisedScore(c.strategy) },
         { label: 'R^DSR/PSR', value: formatComponentScore(c.RDSRPSR) },
@@ -2114,7 +2147,7 @@ function buildOfiIndicatorsHtml(result) {
         { label: 'R^Island', value: formatComponentScore(c.RIsland) },
     ]);
 
-    const sections = [strategySection].filter(Boolean);
+    const sections = [flowSection, strategySection].filter(Boolean);
     if (sections.length === 0) {
         return '<span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">資料不足</span>';
     }

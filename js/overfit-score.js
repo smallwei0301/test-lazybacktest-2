@@ -1,9 +1,9 @@
 /*
  * Overfit Indicator computation module
- * Version: LB-OFI-STRATONLY-20250928A
+ * Version: LB-OFI-DUALSCORE-20250930A
  */
 (function () {
-  const MODULE_VERSION = "LB-OFI-STRATONLY-20250928A";
+  const MODULE_VERSION = "LB-OFI-DUALSCORE-20250930A";
 
   const DEFAULT_CONFIG = {
     desiredSegments: 10,
@@ -1123,6 +1123,7 @@
 
   function buildStrategyEvaluations(preparedAll, preparedValid, flowMetrics, config) {
     const flowScore = flowMetrics.RFlow;
+    const flowScorePercent = Number.isFinite(flowScore) ? flowScore * 100 : null;
     const allowRanking = flowMetrics.allowStrategyRanking !== false;
     const flowVerdictStatus = flowMetrics.flowVerdictStatus || "unknown";
     const flowVerdictLabel = flowMetrics.flowVerdict || "Flow 指標資料不足";
@@ -1140,10 +1141,11 @@
         { value: flowScore, weight: config.weights.ofi.flow },
         { value: strategyScore, weight: config.weights.ofi.strategy },
       ];
-      const ofi = weightedAverage(finalComponents);
-      const computedOFI = Number.isFinite(ofi) ? ofi * 100 : null;
+      const ofiNormalised = weightedAverage(finalComponents);
+      const computedOFI = Number.isFinite(ofiNormalised) ? ofiNormalised * 100 : null;
+      const displayScore = allowRanking ? computedOFI : null;
       item.finalOFI = allowRanking ? computedOFI : null;
-      item.displayScore = allowRanking ? strategyScorePercent : null;
+      item.displayScore = displayScore;
       item.components = {
         strategy: strategyScore,
         strategyScorePercent,
@@ -1151,12 +1153,20 @@
         RWF: item.wfScore,
         RDSRPSR: item.dsrpsrScore,
         RIsland: item.islandScore,
+        RFlow: flowScore,
+        RFlowPercent: flowScorePercent,
+        RPBO: item.RPBO,
+        RLen: item.RLen,
+        RPool: item.RPool,
+        RSPA: item.RSPA,
+        RMCS: item.RMCS,
         finalOfi: allowRanking ? computedOFI : null,
+        finalOfiNormalised: allowRanking && Number.isFinite(ofiNormalised) ? ofiNormalised : null,
       };
       if (!allowRanking) {
         item.verdict = "🔒 暫停策略比較";
       } else {
-        const baseVerdict = deriveVerdict(item.displayScore);
+        const baseVerdict = deriveVerdict(displayScore);
         if (flowVerdictStatus === "caution" && baseVerdict !== "資料不足") {
           item.verdict = `${baseVerdict}｜Flow 邊界`;
         } else {
@@ -1164,6 +1174,7 @@
         }
       }
       item.metaFlowVerdict = flowVerdictLabel;
+      item.metaStrategyScore = strategyScorePercent;
     });
 
     return preparedAll.map((item) => {
@@ -1186,6 +1197,8 @@
           island: validItem.islandMeta || null,
           flowVerdict: flowVerdictLabel,
           finalOfi: validItem.finalOFI,
+          strategyScorePercent: validItem.metaStrategyScore,
+          flowScore: flowScorePercent,
         },
       };
     });
@@ -1253,8 +1266,20 @@
 
   function normaliseWithQuantiles(value, lower, upper) {
     if (!Number.isFinite(value)) return 0;
-    if (!Number.isFinite(lower) || !Number.isFinite(upper) || Math.abs(upper - lower) < EPSILON) {
-      if (Number.isFinite(upper) && value >= upper) return 1;
+    const lowerFinite = Number.isFinite(lower);
+    const upperFinite = Number.isFinite(upper);
+    if (!lowerFinite && !upperFinite) {
+      return 0;
+    }
+    if (!lowerFinite && upperFinite) {
+      return value > upper ? 1 : 0;
+    }
+    if (lowerFinite && !upperFinite) {
+      return value <= lower ? 0 : 1;
+    }
+    if (Math.abs(upper - lower) < EPSILON) {
+      if (value > upper) return 1;
+      if (value < lower) return 0;
       return 0;
     }
     const raw = (value - lower) / (upper - lower);
