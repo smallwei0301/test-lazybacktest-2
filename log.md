@@ -1,3 +1,12 @@
+## 2025-11-18 — Patch LB-OFI-20250224A
+- **Scope**: 批量優化結果新增「過擬合指標（OFI）」計算與展示，內含策略層級 cPBO、OOS 分位統計、Island 穩健度、Deflated Sharpe Ratio。
+- **Implementation**:
+  - 導入 CSCV 切分（預設 10 區塊）與條件 PBO 評估，為每個策略組合建立 OOS quantile 分佈與掉隊率。
+  - 以參數鄰域距離評分 IslandScore，並加入 DSR 估計多重檢定風險，彙整為 0–100 的 OFI 分數與等級徽章。
+  - 結果表支援依 OFI 排序、SPA/MCS 快速篩選，顯示 cPBO/OOS/DSR 明細與近似 SPA 判斷。
+- **UI**: 排序選單新增「策略穩健度 (OFI)」、提供「只看通過 SPA/MCS」切換按鈕，表格增列 OFI 資訊欄。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/batch-optimization.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
