@@ -48,6 +48,8 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let batchOptimizationOFIMetrics = null;
+let batchOptimizationOFISignature = null;
 
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
@@ -180,7 +182,9 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            sortKey: 'ofiScore',
+            sortDirection: 'desc'
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -392,7 +396,9 @@ function startBatchOptimization() {
         
         // 重置結果
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
+        batchOptimizationOFISignature = null;
+        batchOptimizationOFIMetrics = null;
+        // 初始化 worker 狀態面板
     resetBatchWorkerStatus();
     const panel = document.getElementById('batch-worker-status-panel');
     if (panel) panel.classList.remove('hidden');
@@ -528,7 +534,7 @@ function getBatchOptimizationConfig() {
         }
         
         // 設定排序鍵值為選擇的目標指標
-        config.sortKey = config.targetMetric;
+        config.sortKey = 'ofiScore';
         config.sortDirection = 'desc';
         
         return config;
@@ -539,7 +545,7 @@ function getBatchOptimizationConfig() {
             batchSize: 100,
             maxCombinations: 10000,
             optimizeTargets: ['annualizedReturn'],
-            sortKey: 'annualizedReturn',
+            sortKey: 'ofiScore',
             sortDirection: 'desc'
         };
     }
@@ -1740,14 +1746,15 @@ function showBatchResults() {
 
 // 排序結果
 function sortBatchResults() {
+    ensureBatchOfiComputed();
     const config = batchOptimizationConfig;
-    const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
+    const sortKey = config.sortKey || config.targetMetric || 'ofiScore';
     const sortDirection = config.sortDirection || 'desc';
-    
+
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
+        let aValue = Number(a[sortKey]);
+        let bValue = Number(b[sortKey]);
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1760,12 +1767,12 @@ function sortBatchResults() {
                 return bValue - aValue;
             }
         }
-        
+
         // 處理 NaN 值，將它們排到最後
-        if (isNaN(aValue) && isNaN(bValue)) return 0;
-        if (isNaN(aValue)) return 1;
-        if (isNaN(bValue)) return -1;
-        
+        if (Number.isNaN(aValue) && Number.isNaN(bValue)) return 0;
+        if (Number.isNaN(aValue)) return 1;
+        if (Number.isNaN(bValue)) return -1;
+
         if (sortDirection === 'asc') {
             return aValue - bValue;
         } else {
@@ -1794,12 +1801,14 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
+    ensureBatchOfiComputed();
+
     tbody.innerHTML = '';
-    
+
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
@@ -1853,6 +1862,14 @@ function renderBatchResultsTable() {
             }
         }
         
+        const ofiScoreDisplay = formatOfiScore(result.ofiScore);
+        const ofiVerdict = result.ofiVerdict || '資料不足';
+        const ofiBadgeClass = getOfiBadgeClass(result.ofiScore);
+        const ofiSummary = formatOfiSummary(result);
+        const ofiTooltip = buildOfiTooltip(result);
+        const ofiTooltipAttr = escapeHtmlAttr(ofiTooltip);
+        const ofiSummaryHtml = ofiSummary ? `<span class="text-xs text-gray-500">${escapeHtml(ofiSummary)}</span>` : '';
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -1860,6 +1877,13 @@ function renderBatchResultsTable() {
             </td>
             <td class="px-3 py-2 text-sm text-gray-900">${buyStrategyName}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${sellStrategyName}${riskManagementInfo}</td>
+            <td class="px-3 py-2 text-sm text-gray-900" title="${ofiTooltipAttr}">
+                <div class="flex flex-col">
+                    <span class="font-semibold">${ofiScoreDisplay}</span>
+                    <span class="text-xs font-medium ${ofiBadgeClass}">${escapeHtml(ofiVerdict)}</span>
+                    ${ofiSummaryHtml}
+                </div>
+            </td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
@@ -1875,6 +1899,132 @@ function renderBatchResultsTable() {
         
         tbody.appendChild(row);
     });
+}
+
+function ensureBatchOfiComputed(force = false) {
+    try {
+        if (!Array.isArray(batchOptimizationResults)) return;
+        if (!window.lazybacktestOFI || typeof window.lazybacktestOFI.computeOFIForResults !== 'function') {
+            return;
+        }
+        const signature = buildOfiSignature(batchOptimizationResults);
+        if (!force && signature === batchOptimizationOFISignature) {
+            return;
+        }
+        if (batchOptimizationResults.length === 0) {
+            batchOptimizationOFIMetrics = null;
+            batchOptimizationOFISignature = signature;
+            return;
+        }
+        const evaluation = window.lazybacktestOFI.computeOFIForResults(batchOptimizationResults);
+        if (!evaluation || !Array.isArray(evaluation.strategies)) {
+            batchOptimizationOFIMetrics = null;
+            batchOptimizationOFISignature = null;
+            return;
+        }
+        batchOptimizationOFIMetrics = evaluation.flow || null;
+        evaluation.strategies.forEach((entry) => {
+            const target = batchOptimizationResults[entry.index];
+            if (!target) return;
+            const scoreValue = Number(entry.ofiScore);
+            target.ofiScore = Number.isFinite(scoreValue) ? scoreValue : null;
+            target.ofiVerdict = entry.verdict || (Number.isFinite(scoreValue) ? window.lazybacktestOFI.getVerdict(scoreValue) : '資料不足');
+            target.ofiComponents = entry.components || null;
+            target.ofiMeta = entry.meta || null;
+            target.ofiVersion = evaluation.version || null;
+        });
+        batchOptimizationOFISignature = signature;
+    } catch (error) {
+        console.error('[Batch Optimization][OFI] 無法計算 OFI 指標：', error);
+        batchOptimizationOFISignature = null;
+    }
+}
+
+function buildOfiSignature(results) {
+    if (!Array.isArray(results) || results.length === 0) {
+        return '0';
+    }
+    const parts = results.map((result) => {
+        const entryStrategy = result.buyStrategy || '';
+        const exitStrategy = result.sellStrategy || '';
+        const entryParams = formatParamSignature(result.buyParams);
+        const exitParams = formatParamSignature(result.sellParams);
+        const metrics = [
+            formatMetricSignature(result.annualizedReturn),
+            formatMetricSignature(result.sharpeRatio),
+            formatMetricSignature(result.maxDrawdown),
+        ].join('|');
+        return `${entryStrategy}::${exitStrategy}::${entryParams}::${exitParams}::${metrics}`;
+    });
+    return `${results.length}::${parts.join('||')}`;
+}
+
+function formatParamSignature(params) {
+    if (!params || typeof params !== 'object') return '';
+    return Object.keys(params)
+        .sort()
+        .map((key) => `${key}:${formatMetricSignature(params[key])}`)
+        .join(',');
+}
+
+function formatMetricSignature(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 'NaN';
+    return numeric.toFixed(6);
+}
+
+function formatOfiScore(value) {
+    if (!Number.isFinite(value)) return '--';
+    return value.toFixed(1);
+}
+
+function getOfiBadgeClass(score) {
+    if (!Number.isFinite(score)) return 'text-gray-500';
+    if (score >= 80) return 'text-green-600';
+    if (score >= 65) return 'text-emerald-600';
+    if (score >= 50) return 'text-amber-600';
+    return 'text-red-600';
+}
+
+function formatOfiSummary(result) {
+    if (!result || !result.ofiComponents) return '';
+    const flow = formatComponentScore(result.ofiComponents.flow);
+    const strategy = formatComponentScore(result.ofiComponents.strategy);
+    if (flow === '--' && strategy === '--') return '';
+    return `Flow ${flow}｜Strat ${strategy}`;
+}
+
+function buildOfiTooltip(result) {
+    if (!result || !result.ofiComponents) {
+        return 'OFI 指標：資料不足';
+    }
+    const c = result.ofiComponents;
+    const lines = [
+        `OFI ${formatOfiScore(result.ofiScore)}｜${result.ofiVerdict || ''}`.trim(),
+        `Flow ${formatComponentScore(c.flow)} ｜ Strategy ${formatComponentScore(c.strategy)}`,
+        `PBO ${formatComponentScore(c.RPBO)} ｜ SPA ${formatComponentScore(c.RSPA)} ｜ MCS ${formatComponentScore(c.RMCS)}`,
+        `OOS ${formatComponentScore(c.ROOS)} ｜ WF ${formatComponentScore(c.RWF)} ｜ DSR/PSR ${formatComponentScore(c.RDSRPSR)} ｜ Island ${formatComponentScore(c.RIsland)}`,
+    ];
+    return lines.join('\n');
+}
+
+function formatComponentScore(value) {
+    if (!Number.isFinite(value)) return '--';
+    return value.toFixed(2);
+}
+
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeHtmlAttr(value) {
+    return escapeHtml(value).replace(/\n/g, '&#10;');
 }
 
 // 添加交叉優化控制面板
@@ -3345,7 +3495,7 @@ function testFullRiskManagementOptimization() {
         sellStrategies: ['fixed_stop_loss'],
         maxCombinations: 2,
         batchSize: 1,
-        sortKey: 'annualizedReturn',
+        sortKey: 'ofiScore',
         sortDirection: 'desc'
     };
     

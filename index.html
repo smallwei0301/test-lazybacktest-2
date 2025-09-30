@@ -1859,6 +1859,7 @@
                                                             <div class="flex items-center gap-2">
                                                                 <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
                                                                 <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    <option value="ofiScore">OFI 評分</option>
                                                                     <option value="annualizedReturn">年化報酬率</option>
                                                                     <option value="sharpeRatio">夏普比率</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
@@ -1879,6 +1880,7 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">買入策略</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">賣出策略</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">OFI 評分</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">年化報酬率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
@@ -2125,6 +2127,7 @@
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/overfit-score.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
