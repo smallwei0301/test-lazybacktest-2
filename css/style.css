@@ -70,6 +70,50 @@
     line-height: 1;
     color: var(--muted-foreground);
 }
+
+.batch-progress-mascot-wrapper {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0.5rem;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: transparent;
+    background-color: transparent !important;
+}
+
+.batch-progress-mascot-wrapper.inactive {
+    opacity: 0.45;
+    filter: grayscale(0.4);
+}
+
+.batch-progress-mascot-wrapper .tenor-gif-embed,
+.batch-progress-mascot-wrapper .tenor-gif-embed iframe {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.batch-progress-mascot-wrapper .tenor-gif-embed {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.batch-progress-mascot-wrapper .tenor-gif-embed > a {
+    display: none !important;
+}
+
+.batch-progress-mascot-wrapper iframe {
+    border: none !important;
+    background: transparent !important;
+    pointer-events: none !important;
+}
 .quick-backtest-editable {
     position: relative;
     display: inline-flex;
