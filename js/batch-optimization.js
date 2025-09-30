@@ -56,6 +56,853 @@ let batchWorkerStatus = {
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
 
+// --- 批量優化過擬合指標 (OFI) - LB-OFI-20250224A ---
+const BATCH_OFI_VERSION = 'LB-OFI-20250224A';
+const DEFAULT_CSCV_BLOCKS = 10;
+const MIN_CSCV_BLOCKS = 6;
+const MAX_CSCV_BLOCKS = 12;
+const DEFAULT_CSCV_ALPHA = 0.1;
+const DEFAULT_CSCV_MEDIAN_THRESHOLD = 0.5;
+const OFI_WEIGHT_PRESET = {
+    cpbo: 0.35,
+    level: 0.20,
+    stability: 0.15,
+    island: 0.20,
+    dsr: 0.10
+};
+let lastOfiComputationSignature = null;
+
+function computeOfiForBatchResults(options = {}) {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return;
+    }
+
+    const blockPreference = Number.isFinite(options.blockCount) ? options.blockCount : DEFAULT_CSCV_BLOCKS;
+    const alpha = Number.isFinite(options.alpha) ? options.alpha : DEFAULT_CSCV_ALPHA;
+    const oosMedianThreshold = Number.isFinite(options.oosMedianThreshold)
+        ? options.oosMedianThreshold
+        : DEFAULT_CSCV_MEDIAN_THRESHOLD;
+
+    const strategyCount = batchOptimizationResults.length;
+    const signature = `${strategyCount}-${blockPreference}-${alpha}-${oosMedianThreshold}-${BATCH_OFI_VERSION}`;
+    if (lastOfiComputationSignature === signature) {
+        return;
+    }
+
+    const sanitizedBlocks = determineCscvBlockCount(batchOptimizationResults, blockPreference);
+    const contexts = batchOptimizationResults.map((result, index) =>
+        buildOfiContext(result, {
+            blockCount: sanitizedBlocks,
+            alpha,
+            trials: Math.max(1, strategyCount),
+            index
+        })
+    );
+
+    const validContexts = contexts.filter(context => context && context.valid);
+    if (validContexts.length === 0) {
+        batchOptimizationResults.forEach(result => {
+            result.ofi = buildEmptyOfiPayload('insufficient-data');
+        });
+        lastOfiComputationSignature = signature;
+        return;
+    }
+
+    runCscvOverfitDiagnostics(validContexts, sanitizedBlocks, {
+        alpha,
+        oosMedianThreshold
+    });
+
+    computeIslandScores(validContexts);
+
+    finalizeOfiScores(contexts, {
+        weights: OFI_WEIGHT_PRESET,
+        alpha
+    });
+
+    lastOfiComputationSignature = signature;
+}
+
+function determineCscvBlockCount(results, preferred) {
+    let blockCount = Number.isFinite(preferred) ? preferred : DEFAULT_CSCV_BLOCKS;
+    blockCount = Math.max(MIN_CSCV_BLOCKS, Math.min(MAX_CSCV_BLOCKS, blockCount));
+    if (blockCount % 2 !== 0) {
+        blockCount += 1;
+        if (blockCount > MAX_CSCV_BLOCKS) {
+            blockCount -= 2;
+        }
+    }
+
+    let fallback = blockCount;
+    const minSampleLength = results
+        .map(result => Array.isArray(result?.strategyReturns) ? result.strategyReturns.length : 0)
+        .filter(length => Number.isFinite(length) && length > 0);
+    const smallestSample = minSampleLength.length > 0 ? Math.min(...minSampleLength) : 0;
+
+    while (fallback >= MIN_CSCV_BLOCKS) {
+        if (fallback % 2 !== 0) {
+            fallback -= 1;
+            continue;
+        }
+        const minRequired = fallback * 2;
+        if (smallestSample > minRequired) {
+            return fallback;
+        }
+        fallback -= 2;
+    }
+
+    return Math.max(4, blockCount % 2 === 0 ? blockCount : blockCount - 1);
+}
+
+function buildOfiContext(result, options) {
+    if (!result || !Array.isArray(result.strategyReturns) || result.strategyReturns.length < options.blockCount + 5) {
+        return {
+            result,
+            valid: false,
+            reason: 'insufficient-series'
+        };
+    }
+
+    const cumulativeReturns = result.strategyReturns
+        .map(value => Number.isFinite(value) ? Number(value) : null);
+    const dates = Array.isArray(result.dates) ? result.dates : [];
+
+    const validPairs = cumulativeReturns
+        .map((value, idx) => ({
+            value,
+            date: dates[idx] || null
+        }))
+        .filter(entry => entry.value !== null && entry.value !== undefined);
+
+    if (validPairs.length < options.blockCount + 4) {
+        return {
+            result,
+            valid: false,
+            reason: 'insufficient-valid-series'
+        };
+    }
+
+    const cleanedCumulative = validPairs.map(entry => entry.value);
+    const cleanedDates = validPairs.map(entry => entry.date);
+    const dailyReturns = computeDailyReturns(cleanedCumulative);
+
+    if (dailyReturns.length < options.blockCount) {
+        return {
+            result,
+            valid: false,
+            reason: 'insufficient-daily-returns'
+        };
+    }
+
+    const blockReturns = computeBlockReturns(cleanedCumulative, dailyReturns, options.blockCount);
+    const sampleSharpe = computeSampleSharpe(dailyReturns);
+    const moments = computeReturnMoments(dailyReturns);
+    const dsr = computeDeflatedSharpeRatio({
+        sharpe: sampleSharpe,
+        sampleSize: dailyReturns.length,
+        skewness: moments.skewness,
+        kurtosis: moments.kurtosis,
+        trials: Math.max(1, options.trials)
+    });
+
+    return {
+        result,
+        valid: true,
+        blockReturns,
+        dailyReturns,
+        dates: cleanedDates,
+        sharpe: sampleSharpe,
+        dsr,
+        sampleSize: dailyReturns.length,
+        alpha: options.alpha,
+        buyStrategy: result.buyStrategy,
+        sellStrategy: result.sellStrategy,
+        buyParams: result.buyParams,
+        sellParams: result.sellParams,
+        index: options.index,
+        cpboQualified: 0,
+        cpboFailures: 0,
+        oosQuantiles: [],
+        islandScore: 0,
+        islandMeta: null
+    };
+}
+
+function computeBlockReturns(cumulativeReturns, dailyReturns, blockCount) {
+    const blockReturns = [];
+    if (!Array.isArray(dailyReturns) || dailyReturns.length === 0 || blockCount <= 0) {
+        return blockReturns;
+    }
+
+    const dailyCount = dailyReturns.length;
+    const baseSize = Math.floor(dailyCount / blockCount);
+    let remainder = dailyCount % blockCount;
+    let cursor = 0;
+
+    for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+        let windowSize = baseSize;
+        if (remainder > 0) {
+            windowSize += 1;
+            remainder -= 1;
+        }
+        const startIdx = cursor;
+        const endIdx = Math.min(dailyCount - 1, cursor + windowSize - 1);
+        cursor = endIdx + 1;
+
+        if (endIdx < startIdx) {
+            blockReturns.push(0);
+            continue;
+        }
+
+        let growth = 1;
+        for (let i = startIdx; i <= endIdx; i++) {
+            const step = dailyReturns[i];
+            if (Number.isFinite(step)) {
+                growth *= (1 + step);
+            }
+        }
+        const blockReturn = Number.isFinite(growth) ? growth - 1 : 0;
+        blockReturns.push(blockReturn);
+    }
+
+    return blockReturns;
+}
+
+function runCscvOverfitDiagnostics(contexts, blockCount, options) {
+    if (!Array.isArray(contexts) || contexts.length === 0) return;
+
+    const splits = enumerateCscvSplits(blockCount);
+    if (splits.length === 0) return;
+
+    splits.forEach(split => {
+        const isMetrics = contexts.map(ctx => aggregateBlocks(ctx.blockReturns, split.inSample));
+        const oosMetrics = contexts.map(ctx => aggregateBlocks(ctx.blockReturns, split.outOfSample));
+
+        const validIsMetrics = isMetrics.filter(value => Number.isFinite(value));
+        const validOosMetrics = oosMetrics.filter(value => Number.isFinite(value));
+        if (validIsMetrics.length === 0 || validOosMetrics.length === 0) {
+            return;
+        }
+
+        const isRanks = buildQuantileRanks(isMetrics);
+        const oosRanks = buildQuantileRanks(oosMetrics);
+
+        contexts.forEach((ctx, idx) => {
+            const isRank = isRanks[idx];
+            const oosRank = oosRanks[idx];
+            if (!Number.isFinite(isRank) || !Number.isFinite(oosRank)) {
+                return;
+            }
+
+            if (isRank >= 1 - options.alpha) {
+                ctx.cpboQualified += 1;
+                if (oosRank < options.oosMedianThreshold) {
+                    ctx.cpboFailures += 1;
+                }
+            }
+            ctx.oosQuantiles.push(oosRank);
+        });
+    });
+
+    contexts.forEach(ctx => {
+        if (!ctx) return;
+        const quantiles = ctx.oosQuantiles.filter(value => Number.isFinite(value));
+        if (quantiles.length > 0) {
+            ctx.oosMedian = computeMedian(quantiles);
+            ctx.oosIqr = computeIqr(quantiles);
+        } else {
+            ctx.oosMedian = null;
+            ctx.oosIqr = null;
+        }
+
+        if (ctx.cpboQualified > 0) {
+            ctx.cpbo = ctx.cpboFailures / ctx.cpboQualified;
+        } else {
+            ctx.cpbo = 0.5; // 不足以評估時給予中立值
+        }
+    });
+}
+
+function computeIslandScores(contexts) {
+    if (!Array.isArray(contexts) || contexts.length === 0) return;
+
+    const medianValues = contexts
+        .map(ctx => Number.isFinite(ctx.oosMedian) ? ctx.oosMedian : null)
+        .filter(value => value !== null);
+    if (medianValues.length === 0) {
+        contexts.forEach(ctx => {
+            ctx.islandScore = 0;
+        });
+        return;
+    }
+
+    const globalMedian = computeMedian(medianValues);
+    const globalP75 = computePercentile(medianValues, 0.75);
+
+    const groupMap = new Map();
+    contexts.forEach(ctx => {
+        const key = `${ctx.buyStrategy || 'unknown'}__${ctx.sellStrategy || 'unknown'}`;
+        if (!groupMap.has(key)) {
+            groupMap.set(key, []);
+        }
+        groupMap.get(key).push(ctx);
+    });
+
+    groupMap.forEach(groupContexts => {
+        if (!Array.isArray(groupContexts) || groupContexts.length <= 1) {
+            groupContexts.forEach(ctx => {
+                ctx.islandScore = 0;
+            });
+            return;
+        }
+
+        const parameterKeys = collectParameterKeys(groupContexts);
+        const normalizedVectors = normalizeParameterVectors(groupContexts, parameterKeys);
+
+        groupContexts.forEach((ctx, idx) => {
+            const vector = normalizedVectors[idx];
+            if (!Array.isArray(vector)) {
+                ctx.islandScore = 0;
+                return;
+            }
+
+            const neighbors = [];
+            normalizedVectors.forEach((otherVector, otherIdx) => {
+                if (otherIdx === idx || !Array.isArray(otherVector)) return;
+                const distance = computeEuclideanDistance(vector, otherVector);
+                if (Number.isFinite(distance)) {
+                    neighbors.push({ index: otherIdx, distance });
+                }
+            });
+
+            if (neighbors.length === 0) {
+                ctx.islandScore = 0;
+                return;
+            }
+
+            neighbors.sort((a, b) => a.distance - b.distance);
+            const closeNeighbors = neighbors.filter(item => item.distance <= 0.45).slice(0, 6);
+            if (closeNeighbors.length === 0) {
+                ctx.islandScore = 0;
+                return;
+            }
+
+            const neighborValues = closeNeighbors
+                .map(item => groupContexts[item.index].oosMedian)
+                .filter(value => Number.isFinite(value));
+            const averageNeighbor = neighborValues.length > 0
+                ? neighborValues.reduce((sum, value) => sum + value, 0) / neighborValues.length
+                : null;
+
+            const sizeScore = clamp(closeNeighbors.length / Math.max(1, groupContexts.length - 1), 0, 1);
+            const qualityScore = Number.isFinite(averageNeighbor)
+                ? clamp((averageNeighbor - globalMedian) / Math.max(0.05, globalP75 - globalMedian || 0.05), 0, 1)
+                : 0;
+            const smoothnessPenalty = closeNeighbors.reduce((sum, item) => sum + item.distance, 0) / closeNeighbors.length;
+            const smoothnessScore = clamp(1 - smoothnessPenalty, 0, 1);
+
+            const combinedScore = clamp(0.4 * sizeScore + 0.4 * qualityScore + 0.2 * smoothnessScore, 0, 1);
+            ctx.islandScore = combinedScore;
+            ctx.islandMeta = {
+                neighbors: closeNeighbors.length,
+                averageNeighbor,
+                sizeScore,
+                qualityScore,
+                smoothnessScore
+            };
+        });
+    });
+}
+
+function finalizeOfiScores(contexts, options) {
+    const weights = options?.weights || OFI_WEIGHT_PRESET;
+    const totalWeight = weights.cpbo + weights.level + weights.stability + weights.island + weights.dsr;
+
+    const normalizedWeights = {
+        cpbo: weights.cpbo / totalWeight,
+        level: weights.level / totalWeight,
+        stability: weights.stability / totalWeight,
+        island: weights.island / totalWeight,
+        dsr: weights.dsr / totalWeight
+    };
+
+    contexts.forEach(context => {
+        const result = context.result;
+        if (!context.valid) {
+            result.ofi = buildEmptyOfiPayload(context.reason || 'invalid');
+            return;
+        }
+
+        const cpbo = Number.isFinite(context.cpbo) ? clamp(context.cpbo, 0, 1) : 0.5;
+        const level = Number.isFinite(context.oosMedian) ? clamp(context.oosMedian, 0, 1) : 0;
+        const iqr = Number.isFinite(context.oosIqr) ? clamp(context.oosIqr, 0, 1) : 1;
+        const islandScore = Number.isFinite(context.islandScore) ? clamp(context.islandScore, 0, 1) : 0;
+        const dsr = Number.isFinite(context.dsr) ? clamp(context.dsr, 0, 1) : 0;
+
+        const rCpbo = 1 - cpbo;
+        const rLevel = level;
+        const rStability = 1 - clamp(iqr / 0.5, 0, 1);
+        const rIsland = islandScore;
+        const rDsr = dsr;
+
+        const rawScore =
+            normalizedWeights.cpbo * rCpbo +
+            normalizedWeights.level * rLevel +
+            normalizedWeights.stability * rStability +
+            normalizedWeights.island * rIsland +
+            normalizedWeights.dsr * rDsr;
+
+        const ofiScore = clamp(rawScore * 100, 0, 100);
+        const grade = classifyOfiScore(ofiScore);
+
+        const spa = determineSpaMcsStatus(result, context);
+
+        result.ofi = {
+            version: BATCH_OFI_VERSION,
+            weights: normalizedWeights,
+            cpbo,
+            cpboQualified: context.cpboQualified,
+            cpboFailures: context.cpboFailures,
+            oosMedian: level,
+            oosIqr: iqr,
+            oosQuantiles: context.oosQuantiles.slice(),
+            islandScore,
+            dsr,
+            sharpe: context.sharpe,
+            sampleSize: context.sampleSize,
+            score: ofiScore,
+            grade,
+            spa,
+            summary: buildOfiSummary({
+                cpbo,
+                level,
+                iqr,
+                islandScore,
+                dsr,
+                grade,
+                spa
+            })
+        };
+    });
+}
+
+function buildEmptyOfiPayload(reason) {
+    return {
+        version: BATCH_OFI_VERSION,
+        score: 0,
+        cpbo: null,
+        cpboQualified: 0,
+        cpboFailures: 0,
+        oosMedian: null,
+        oosIqr: null,
+        oosQuantiles: [],
+        islandScore: 0,
+        dsr: null,
+        grade: 'insufficient',
+        spa: {
+            status: 'pending',
+            approved: false,
+            reason: reason || 'insufficient-data'
+        },
+        summary: '資料不足，無法評估過擬合風險'
+    };
+}
+
+function enumerateCscvSplits(blockCount) {
+    if (!Number.isFinite(blockCount) || blockCount < 2 || blockCount % 2 !== 0) return [];
+    const indices = Array.from({ length: blockCount }, (_, idx) => idx);
+    const chooseCount = blockCount / 2;
+    const splits = [];
+
+    function backtrack(start, combination) {
+        if (combination.length === chooseCount) {
+            const inSample = combination.slice();
+            const outOfSample = indices.filter(idx => !inSample.includes(idx));
+            splits.push({ inSample, outOfSample });
+            return;
+        }
+        for (let i = start; i < indices.length; i++) {
+            combination.push(indices[i]);
+            backtrack(i + 1, combination);
+            combination.pop();
+        }
+    }
+
+    backtrack(0, []);
+    return splits;
+}
+
+function aggregateBlocks(values, indices) {
+    if (!Array.isArray(values) || !Array.isArray(indices) || indices.length === 0) return NaN;
+    const picked = indices
+        .map(idx => values[idx])
+        .filter(value => Number.isFinite(value));
+    if (picked.length === 0) return NaN;
+    const sum = picked.reduce((acc, value) => acc + value, 0);
+    return sum / picked.length;
+}
+
+function buildQuantileRanks(values) {
+    const processed = values.map(value => (Number.isFinite(value) ? value : null));
+    const sorted = processed
+        .filter(value => value !== null)
+        .sort((a, b) => a - b);
+    const n = sorted.length;
+
+    return processed.map(value => {
+        if (value === null || n === 0) return NaN;
+        let lower = 0;
+        let equal = 0;
+        for (let i = 0; i < n; i++) {
+            if (sorted[i] < value) lower += 1;
+            else if (sorted[i] === value) equal += 1;
+            else break;
+        }
+        return (lower + 0.5 * equal) / n;
+    });
+}
+
+function computeDailyReturns(cumulativeReturns) {
+    const returns = [];
+    if (!Array.isArray(cumulativeReturns) || cumulativeReturns.length < 2) return returns;
+    for (let i = 1; i < cumulativeReturns.length; i++) {
+        const prev = cumulativeReturns[i - 1];
+        const current = cumulativeReturns[i];
+        if (!Number.isFinite(prev) || !Number.isFinite(current)) continue;
+        const base = 1 + prev;
+        const next = 1 + current;
+        if (base <= 0 || next <= 0) continue;
+        const dayReturn = next / base - 1;
+        if (Number.isFinite(dayReturn)) {
+            returns.push(dayReturn);
+        }
+    }
+    return returns;
+}
+
+function computeSampleSharpe(dailyReturns) {
+    if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
+    const stats = computeReturnMoments(dailyReturns);
+    if (!Number.isFinite(stats.stdDev) || stats.stdDev === 0) {
+        return 0;
+    }
+    return (stats.mean / stats.stdDev) * Math.sqrt(252);
+}
+
+function computeReturnMoments(returns) {
+    if (!Array.isArray(returns) || returns.length === 0) {
+        return {
+            mean: 0,
+            stdDev: 0,
+            skewness: 0,
+            kurtosis: 3
+        };
+    }
+
+    const n = returns.length;
+    const mean = returns.reduce((sum, value) => sum + value, 0) / n;
+    const variance = returns.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / n;
+    const stdDev = Math.sqrt(Math.max(variance, 0));
+
+    let skewness = 0;
+    let kurtosis = 3;
+    if (stdDev > 0) {
+        const skewSum = returns.reduce((sum, value) => sum + Math.pow((value - mean) / stdDev, 3), 0);
+        const kurtSum = returns.reduce((sum, value) => sum + Math.pow((value - mean) / stdDev, 4), 0);
+        skewness = skewSum / n;
+        kurtosis = kurtSum / n;
+    }
+
+    return {
+        mean,
+        stdDev,
+        skewness,
+        kurtosis
+    };
+}
+
+function computeDeflatedSharpeRatio({ sharpe, sampleSize, skewness, kurtosis, trials }) {
+    if (!Number.isFinite(sharpe) || !Number.isFinite(sampleSize) || sampleSize < 30) return null;
+    const adjustedSkew = Number.isFinite(skewness) ? skewness : 0;
+    const adjustedKurtosis = Number.isFinite(kurtosis) ? kurtosis : 3;
+    const n = sampleSize;
+    const srStdNumerator = 1 - adjustedSkew * sharpe + ((adjustedKurtosis - 1) / 4) * Math.pow(sharpe, 2);
+    if (srStdNumerator <= 0) return null;
+    const srStd = Math.sqrt(srStdNumerator / (n - 1));
+    if (!Number.isFinite(srStd) || srStd <= 0) return null;
+
+    const effectiveTrials = Math.max(1, trials || 1);
+    const z = normalInv(1 - 1 / effectiveTrials);
+    if (!Number.isFinite(z)) return null;
+
+    const sharpeThreshold = sharpe - srStd * z;
+    const probability = normalCdf((sharpe - sharpeThreshold) / srStd);
+    return clamp(probability, 0, 1);
+}
+
+function computeMedian(values) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    return sorted[mid];
+}
+
+function computePercentile(values, percentile) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const position = (sorted.length - 1) * percentile;
+    const lowerIndex = Math.floor(position);
+    const upperIndex = Math.ceil(position);
+    if (lowerIndex === upperIndex) {
+        return sorted[lowerIndex];
+    }
+    const weight = position - lowerIndex;
+    return sorted[lowerIndex] * (1 - weight) + sorted[upperIndex] * weight;
+}
+
+function computeIqr(values) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const q75 = computePercentile(values, 0.75);
+    const q25 = computePercentile(values, 0.25);
+    if (!Number.isFinite(q75) || !Number.isFinite(q25)) return null;
+    return q75 - q25;
+}
+
+function collectParameterKeys(contexts) {
+    const keySet = new Set();
+    contexts.forEach(ctx => {
+        Object.entries(ctx.buyParams || {}).forEach(([key, value]) => {
+            if (Number.isFinite(value)) {
+                keySet.add(`B.${key}`);
+            }
+        });
+        Object.entries(ctx.sellParams || {}).forEach(([key, value]) => {
+            if (Number.isFinite(value)) {
+                keySet.add(`S.${key}`);
+            }
+        });
+    });
+    return Array.from(keySet).sort();
+}
+
+function normalizeParameterVectors(contexts, keys) {
+    if (!Array.isArray(keys) || keys.length === 0) {
+        return contexts.map(() => null);
+    }
+
+    const rawVectors = contexts.map(ctx => createParameterVector(ctx, keys));
+    const bounds = keys.map(() => ({ min: Infinity, max: -Infinity }));
+
+    rawVectors.forEach(vector => {
+        if (!Array.isArray(vector)) return;
+        vector.forEach((value, idx) => {
+            if (Number.isFinite(value)) {
+                bounds[idx].min = Math.min(bounds[idx].min, value);
+                bounds[idx].max = Math.max(bounds[idx].max, value);
+            }
+        });
+    });
+
+    return rawVectors.map(vector => {
+        if (!Array.isArray(vector)) return null;
+        return vector.map((value, idx) => {
+            if (!Number.isFinite(value)) return 0.5;
+            const min = bounds[idx].min;
+            const max = bounds[idx].max;
+            if (!Number.isFinite(min) || !Number.isFinite(max) || Math.abs(max - min) < 1e-9) {
+                return 0.5;
+            }
+            return (value - min) / (max - min);
+        });
+    });
+}
+
+function createParameterVector(ctx, keys) {
+    const vector = [];
+    keys.forEach(key => {
+        const [prefix, paramKey] = key.split('.');
+        if (prefix === 'B') {
+            const value = ctx.buyParams ? ctx.buyParams[paramKey] : undefined;
+            vector.push(Number.isFinite(value) ? Number(value) : null);
+        } else if (prefix === 'S') {
+            const value = ctx.sellParams ? ctx.sellParams[paramKey] : undefined;
+            vector.push(Number.isFinite(value) ? Number(value) : null);
+        } else {
+            vector.push(null);
+        }
+    });
+    return vector;
+}
+
+function computeEuclideanDistance(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return NaN;
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) {
+        const av = Number.isFinite(a[i]) ? a[i] : 0.5;
+        const bv = Number.isFinite(b[i]) ? b[i] : 0.5;
+        const diff = av - bv;
+        sum += diff * diff;
+    }
+    return Math.sqrt(sum / a.length);
+}
+
+function classifyOfiScore(score) {
+    if (!Number.isFinite(score)) return 'insufficient';
+    if (score >= 80) return 'robust';
+    if (score >= 60) return 'balanced';
+    return 'fragile';
+}
+
+function buildOfiSummary({ cpbo, level, iqr, islandScore, dsr, grade, spa }) {
+    const cpboText = Number.isFinite(cpbo) ? `${Math.round(cpbo * 100)}%` : '--';
+    const levelText = Number.isFinite(level) ? `${Math.round(level * 100)}%` : '--';
+    const iqrText = Number.isFinite(iqr) ? `${Math.round(iqr * 100)}%` : '--';
+    const islandText = Number.isFinite(islandScore) ? `${Math.round(islandScore * 100)}%` : '--';
+    const dsrText = Number.isFinite(dsr) ? dsr.toFixed(2) : '--';
+    const gradeText = grade === 'robust' ? '穩健' : grade === 'balanced' ? '中性' : grade === 'fragile' ? '需警戒' : '資料不足';
+    const spaText = spa?.status === 'approved' ? 'SPA/MCS：通過' : spa?.status === 'rejected' ? 'SPA/MCS：未通過' : 'SPA/MCS：待驗證';
+    return `等級：${gradeText}｜cPBO：${cpboText}｜OOS中位：${levelText}｜IQR：${iqrText}｜Island：${islandText}｜DSR：${dsrText}｜${spaText}`;
+}
+
+function determineSpaMcsStatus(result, context) {
+    const serverHint = result?.spaMcs || result?.spaMcsStatus || null;
+    if (serverHint && typeof serverHint === 'object') {
+        const approved = Boolean(serverHint.approved || serverHint.passed);
+        const status = serverHint.status || (approved ? 'approved' : 'rejected');
+        return {
+            status,
+            approved,
+            source: 'server',
+            reason: serverHint.reason || null,
+            detail: serverHint.detail || null
+        };
+    }
+
+    const cpbo = Number.isFinite(context.cpbo) ? context.cpbo : 0.5;
+    const dsr = Number.isFinite(context.dsr) ? context.dsr : -Infinity;
+    const level = Number.isFinite(context.oosMedian) ? context.oosMedian : 0;
+    const qualified = context.cpboQualified || 0;
+
+    if (dsr >= 0.7 && cpbo <= 0.2 && level >= 0.65 && qualified >= 3) {
+        return {
+            status: 'approved',
+            approved: true,
+            source: 'proxy',
+            reason: 'DSR>=0.7, cPBO<=20%, OOS>=65%, 次數>=3'
+        };
+    }
+    if (dsr <= 0 || cpbo >= 0.55 || level < 0.5) {
+        return {
+            status: 'rejected',
+            approved: false,
+            source: 'proxy',
+            reason: '未達 SPA/MCS 門檻 (DSR、cPBO 或 OOS 表現偏弱)'
+        };
+    }
+    if (dsr >= 0.5 && cpbo <= 0.35 && level >= 0.6) {
+        return {
+            status: 'probable',
+            approved: false,
+            source: 'proxy',
+            reason: '條件接近，但建議伺服端再驗證'
+        };
+    }
+    return {
+        status: 'pending',
+        approved: false,
+        source: 'proxy',
+        reason: qualified === 0 ? '尚未進入過 IS Top 區間' : '待伺服端 SPA/MCS 驗證'
+    };
+}
+
+function clamp(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+function erf(x) {
+    const sign = x >= 0 ? 1 : -1;
+    const absX = Math.abs(x);
+    const a1 = 0.254829592;
+    const a2 = -0.284496736;
+    const a3 = 1.421413741;
+    const a4 = -1.453152027;
+    const a5 = 1.061405429;
+    const p = 0.3275911;
+    const t = 1 / (1 + p * absX);
+    const poly = (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t;
+    const approximation = 1 - poly * Math.exp(-absX * absX);
+    return sign * approximation;
+}
+
+function normalCdf(x) {
+    if (!Number.isFinite(x)) return x > 0 ? 1 : 0;
+    return 0.5 * (1 + erf(x / Math.SQRT2));
+}
+
+function normalInv(p) {
+    if (p <= 0 || p >= 1) {
+        if (p === 0) return -Infinity;
+        if (p === 1) return Infinity;
+        return NaN;
+    }
+
+    const a = [
+        -3.969683028665376e+01,
+        2.209460984245205e+02,
+        -2.759285104469687e+02,
+        1.383577518672690e+02,
+        -3.066479806614716e+01,
+        2.506628277459239e+00
+    ];
+    const b = [
+        -5.447609879822406e+01,
+        1.615858368580409e+02,
+        -1.556989798598866e+02,
+        6.680131188771972e+01,
+        -1.328068155288572e+01
+    ];
+    const c = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e+00,
+        -2.549732539343734e+00,
+        4.374664141464968e+00,
+        2.938163982698783e+00
+    ];
+    const d = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e+00,
+        3.754408661907416e+00
+    ];
+
+    const plow = 0.02425;
+    const phigh = 1 - plow;
+    let q, r;
+
+    if (p < plow) {
+        q = Math.sqrt(-2 * Math.log(p));
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+    if (p > phigh) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+
+    q = p - 0.5;
+    r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+        (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
     const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
@@ -180,9 +1027,16 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            sortKey: 'annualizedReturn',
+            sortDirection: 'desc',
+            filterSpaApproved: false,
+            ofiOptions: {
+                blockCount: DEFAULT_CSCV_BLOCKS,
+                alpha: DEFAULT_CSCV_ALPHA
+            }
         };
-        
+
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
         try {
             const hint = document.getElementById('batch-optimize-concurrency-hint');
@@ -192,7 +1046,9 @@ function initBatchOptimization() {
         } catch (e) {
             // ignore
         }
-        
+
+        updateSpaFilterButton();
+
         console.log('[Batch Optimization] Initialized successfully');
     } catch (error) {
         console.error('[Batch Optimization] Initialization failed:', error);
@@ -329,7 +1185,16 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const spaFilterBtn = document.getElementById('batch-filter-spa');
+        if (spaFilterBtn) {
+            spaFilterBtn.addEventListener('click', () => {
+                batchOptimizationConfig.filterSpaApproved = !batchOptimizationConfig.filterSpaApproved;
+                updateSpaFilterButton();
+                renderBatchResultsTable();
+            });
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -797,9 +1662,38 @@ function isBetterMetric(a, b, metric) {
 // 取得 result 的目標指標值，若無則回傳 NaN
 function getMetricFromResult(result, metric) {
     if (!result) return NaN;
-    const val = result[metric];
-    if (val === undefined || val === null || isNaN(val)) return NaN;
-    return val;
+
+    switch (metric) {
+        case 'ofiScore':
+        case 'ofi':
+            return Number.isFinite(result?.ofi?.score) ? result.ofi.score : NaN;
+        case 'cpbo':
+        case 'cPBO':
+            return Number.isFinite(result?.ofi?.cpbo) ? result.ofi.cpbo : NaN;
+        case 'ofiLevel':
+        case 'oosMedian':
+            return Number.isFinite(result?.ofi?.oosMedian) ? result.ofi.oosMedian : NaN;
+        case 'ofiIqr':
+        case 'oosIqr':
+            return Number.isFinite(result?.ofi?.oosIqr) ? result.ofi.oosIqr : NaN;
+        case 'ofiDsr':
+        case 'dsr':
+            return Number.isFinite(result?.ofi?.dsr) ? result.ofi.dsr : NaN;
+        case 'tradeCount':
+        case 'tradesCount':
+        case 'totalTrades':
+            if (Number.isFinite(result?.tradesCount)) return result.tradesCount;
+            if (Number.isFinite(result?.totalTrades)) return result.totalTrades;
+            if (Number.isFinite(result?.tradeCount)) return result.tradeCount;
+            return NaN;
+        default:
+            break;
+    }
+
+    const rawValue = result[metric];
+    if (rawValue === undefined || rawValue === null) return NaN;
+    const numeric = Number(rawValue);
+    return Number.isFinite(numeric) ? numeric : NaN;
 }
 
 // 用來深度比較參數物件是否相等（簡單 JSON 比較）
@@ -1226,7 +2120,8 @@ async function processStrategyCombinations(combinations, config) {
     
     // 將結果添加到全局結果中
     batchOptimizationResults.push(...results);
-    
+    lastOfiComputationSignature = null;
+
     console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
 }
 
@@ -1724,11 +2619,11 @@ function showBatchResults() {
             resultsDiv.classList.remove('hidden');
         }
         
-        // 排序結果
+        computeOfiForBatchResults(batchOptimizationConfig.ofiOptions || {});
+        updateSpaFilterButton();
+
+        // 排序結果並渲染
         sortBatchResults();
-        
-        // 渲染結果表格
-        renderBatchResultsTable();
         
         // 重置運行狀態
         restoreBatchOptimizationUI();
@@ -1743,29 +2638,31 @@ function sortBatchResults() {
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+
+    computeOfiForBatchResults(config.ofiOptions || {});
+
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
+        let aValue = getMetricFromResult(a, sortKey);
+        let bValue = getMetricFromResult(b, sortKey);
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
-            aValue = Math.abs(aValue);
-            bValue = Math.abs(bValue);
-            // 對於回撤，我們要倒序排列（小的值排在前面）
+            aValue = Number.isFinite(aValue) ? Math.abs(aValue) : Infinity;
+            bValue = Number.isFinite(bValue) ? Math.abs(bValue) : Infinity;
             if (sortDirection === 'desc') {
                 return aValue - bValue;
-            } else {
-                return bValue - aValue;
             }
+            return bValue - aValue;
         }
-        
+
         // 處理 NaN 值，將它們排到最後
-        if (isNaN(aValue) && isNaN(bValue)) return 0;
-        if (isNaN(aValue)) return 1;
-        if (isNaN(bValue)) return -1;
-        
+        const aNaN = isNaN(aValue);
+        const bNaN = isNaN(bValue);
+        if (aNaN && bNaN) return 0;
+        if (aNaN) return 1;
+        if (bNaN) return -1;
+
         if (sortDirection === 'asc') {
             return aValue - bValue;
         } else {
@@ -1790,29 +2687,136 @@ function updateSortDirectionButton() {
     }
 }
 
+function updateSpaFilterButton() {
+    const button = document.getElementById('batch-filter-spa');
+    if (!button) return;
+
+    if (batchOptimizationConfig.filterSpaApproved) {
+        button.classList.remove('btn-outline');
+        button.classList.add('bg-emerald-600', 'text-white', 'border', 'border-emerald-600');
+        button.textContent = '顯示全部結果';
+    } else {
+        button.classList.remove('bg-emerald-600', 'text-white', 'border', 'border-emerald-600');
+        button.classList.add('btn-outline');
+        button.textContent = '只看通過 SPA/MCS';
+    }
+}
+
 // 渲染結果表格
+function getVisibleBatchResults() {
+    if (batchOptimizationConfig.filterSpaApproved) {
+        return batchOptimizationResults.filter(result => Boolean(result?.ofi?.spa?.approved));
+    }
+    return batchOptimizationResults.slice();
+}
+
+function buildOfiCellContent(ofi) {
+    if (!ofi) {
+        return '<span class="text-xs text-gray-500">--</span>';
+    }
+    const badge = formatOfiBadge(ofi);
+    const spaBadge = formatSpaBadge(ofi);
+    const cpboText = formatCompactPercent(ofi.cpbo);
+    const oosText = formatCompactPercent(ofi.oosMedian);
+    const iqrText = formatCompactPercent(ofi.oosIqr);
+    const dsrText = formatOptionalNumber(ofi.dsr);
+    return `
+        <div class="flex flex-wrap items-center gap-2">${badge}${spaBadge}</div>
+        <div class="mt-1 text-[11px] text-gray-500 space-x-2">
+            <span>cPBO ${cpboText}</span>
+            <span>OOS ${oosText}</span>
+            <span>IQR ${iqrText}</span>
+            <span>DSR ${dsrText}</span>
+        </div>
+    `;
+}
+
+function formatOfiBadge(ofi) {
+    if (!ofi) return '<span class="px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">OFI --</span>';
+    let badgeClass = 'bg-emerald-100 text-emerald-700';
+    let label = '穩健';
+    if (ofi.grade === 'balanced') {
+        badgeClass = 'bg-amber-100 text-amber-700';
+        label = '中性';
+    } else if (ofi.grade === 'fragile') {
+        badgeClass = 'bg-rose-100 text-rose-700';
+        label = '警示';
+    } else if (ofi.grade === 'insufficient') {
+        badgeClass = 'bg-gray-200 text-gray-600';
+        label = '資料不足';
+    }
+    const scoreText = Number.isFinite(ofi.score) ? ofi.score.toFixed(0) : '--';
+    return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${badgeClass}" title="${ofi.summary}">OFI ${scoreText}｜${label}</span>`;
+}
+
+function formatSpaBadge(ofi) {
+    if (!ofi || !ofi.spa) return '';
+    const status = ofi.spa.status || 'pending';
+    let badgeClass = 'bg-gray-100 text-gray-600';
+    let label = 'SPA/MCS 待驗證';
+    if (status === 'approved') {
+        badgeClass = 'bg-emerald-100 text-emerald-700';
+        label = 'SPA/MCS 通過';
+    } else if (status === 'probable') {
+        badgeClass = 'bg-blue-100 text-blue-700';
+        label = 'SPA/MCS 接近';
+    } else if (status === 'rejected') {
+        badgeClass = 'bg-rose-100 text-rose-700';
+        label = 'SPA/MCS 未通過';
+    }
+    const reason = ofi.spa.reason ? `
+${ofi.spa.reason}` : '';
+    return `<span class="px-2 py-0.5 rounded-full text-[11px] font-medium ${badgeClass}" title="${ofi.summary}${reason}">${label}</span>`;
+}
+
+function formatCompactPercent(value) {
+    if (!Number.isFinite(value)) return '--';
+    return `${Math.round(value * 100)}%`;
+}
+
+function formatOptionalNumber(value, decimals = 2) {
+    if (!Number.isFinite(value)) return '--';
+    return value.toFixed(decimals);
+}
+
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+    updateSpaFilterButton();
+
     tbody.innerHTML = '';
-    
-    batchOptimizationResults.forEach((result, index) => {
+
+    const visibleResults = getVisibleBatchResults();
+
+    if (visibleResults.length === 0) {
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = `
+            <td class="px-3 py-4 text-sm text-muted-foreground text-center" colspan="11" style="color: var(--muted-foreground);">
+                無符合條件的策略組合，請調整篩選條件。
+            </td>
+        `;
+        tbody.appendChild(emptyRow);
+        return;
+    }
+
+    visibleResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
-        
+
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
-        
+
+        const globalIndex = batchOptimizationResults.indexOf(result);
+
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
-        
+
         if (result.optimizationTypes && result.optimizationTypes.length > 1) {
             // 多重結果，顯示合併標籤
             const typeMap = {
@@ -1852,7 +2856,9 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
+        const ofiCellContent = buildOfiCellContent(result.ofi);
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -1864,15 +2870,16 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${ofiCellContent}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
-                        onclick="loadBatchStrategy(${index})">
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
+                        onclick="loadBatchStrategy(${globalIndex})">
                     載入
                 </button>
             </td>
         `;
-        
+
         tbody.appendChild(row);
     });
 }
@@ -3568,6 +4575,9 @@ function addCrossOptimizationResults(newResults) {
             console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
         }
     });
+
+    lastOfiComputationSignature = null;
+    computeOfiForBatchResults(batchOptimizationConfig.ofiOptions || {});
 }
 
 // 快速優化單一策略參數（減少步數，用於交叉優化）
