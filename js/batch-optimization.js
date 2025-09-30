@@ -49,6 +49,8 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+const BATCH_OFI_VERSION = 'LB-OFI-RATING-20251113A';
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -1743,11 +1745,27 @@ function sortBatchResults() {
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+
+    if (sortKey === 'ofiScore') {
+        batchOptimizationResults.forEach(result => {
+            const evaluation = ensureOfiEvaluation(result);
+            if (evaluation && Number.isFinite(evaluation.score)) {
+                result.ofiScore = evaluation.score;
+            } else if (!Number.isFinite(result.ofiScore)) {
+                result.ofiScore = null;
+            }
+        });
+    }
+
     batchOptimizationResults.sort((a, b) => {
         let aValue = a[sortKey] || 0;
         let bValue = b[sortKey] || 0;
-        
+
+        if (sortKey === 'ofiScore') {
+            aValue = Number.isFinite(a.ofiScore) ? a.ofiScore : (sortDirection === 'asc' ? Infinity : -Infinity);
+            bValue = Number.isFinite(b.ofiScore) ? b.ofiScore : (sortDirection === 'asc' ? Infinity : -Infinity);
+        }
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1853,6 +1871,8 @@ function renderBatchResultsTable() {
             }
         }
         
+        const ofiEvaluation = ensureOfiEvaluation(result);
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -1864,9 +1884,10 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${formatOfiCell(ofiEvaluation)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
                         onclick="loadBatchStrategy(${index})">
                     載入
                 </button>
@@ -2602,6 +2623,76 @@ function formatPercentage(value) {
 function formatNumber(value) {
     if (value === null || value === undefined || isNaN(value)) return '-';
     return value.toFixed(2);
+}
+
+function ensureOfiEvaluation(result) {
+    if (!result) return null;
+    if (result.__ofiCache && result.__ofiCache.version === BATCH_OFI_VERSION) {
+        return result.__ofiCache;
+    }
+
+    let evaluation = null;
+    try {
+        if (typeof lazybacktestOfi === 'object' && typeof lazybacktestOfi.evaluateBatchResult === 'function') {
+            evaluation = lazybacktestOfi.evaluateBatchResult(result, { version: BATCH_OFI_VERSION });
+        }
+    } catch (error) {
+        console.error('[Batch Optimization] evaluate OFI error:', error);
+    }
+
+    if (evaluation && typeof evaluation === 'object') {
+        const score = Number.isFinite(evaluation.score) ? Math.min(100, Math.max(0, evaluation.score)) : null;
+        const verdict = evaluation.verdict
+            || (typeof lazybacktestOfi === 'object'
+                && typeof lazybacktestOfi.deriveVerdict === 'function'
+                && Number.isFinite(score)
+                ? lazybacktestOfi.deriveVerdict(score)
+                : null);
+        const cache = {
+            version: BATCH_OFI_VERSION,
+            score,
+            verdict,
+            flow: evaluation.flow || null,
+            components: evaluation.components || null,
+            strategyScore: evaluation.strategyScore ?? null
+        };
+        result.__ofiCache = cache;
+        if (Number.isFinite(score)) {
+            result.ofiScore = score;
+        }
+        if (verdict) {
+            result.ofiVerdict = verdict;
+        }
+        return cache;
+    }
+
+    const fallbackScore = Number.isFinite(result.ofiScore)
+        ? Math.min(100, Math.max(0, result.ofiScore))
+        : (Number.isFinite(result.ofi) ? Math.min(100, Math.max(0, result.ofi)) : null);
+    const fallbackVerdict = result.ofiVerdict
+        || (typeof lazybacktestOfi === 'object'
+            && typeof lazybacktestOfi.deriveVerdict === 'function'
+            && Number.isFinite(fallbackScore)
+            ? lazybacktestOfi.deriveVerdict(fallbackScore)
+            : null);
+    const cache = {
+        version: BATCH_OFI_VERSION,
+        score: Number.isFinite(fallbackScore) ? fallbackScore : null,
+        verdict: fallbackVerdict,
+        flow: null,
+        components: null,
+        strategyScore: null
+    };
+    result.__ofiCache = cache;
+    return cache;
+}
+
+function formatOfiCell(ofiResult) {
+    if (!ofiResult || !Number.isFinite(ofiResult.score)) {
+        return '<span class="text-gray-400">-</span>';
+    }
+    const verdictText = ofiResult.verdict ? `<div class="text-xs text-muted-foreground">${ofiResult.verdict}</div>` : '';
+    return `<span class="font-semibold">${ofiResult.score.toFixed(1)}</span>${verdictText}`;
 }
 
 // 載入批量優化策略
