@@ -1,3 +1,11 @@
+## 2025-09-24 — Patch LB-OFI-UI-20250924A
+- **Scope**: 將 OFI 指標公式表整合進批量優化結果頁面，提供即時查詢與下載。
+- **Implementation**:
+  - 批量優化卡片新增「查看 OFI 指標表」按鈕與專屬彈窗，解析 `assets/ofi-metrics-parameters.csv` 並顯示 Flow/Strategy 欄位說明。
+  - Modal 同步呈現最新 Flow 層綜合分數、PBO/SPA/MCS 子指標摘要，支援 CSV 下載與 ESC/Backdrop 關閉。
+  - `docs/ofi-metrics-breakdown.md` 更新 UI 取得方式，標記資料可直接在前端下載核對。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-24 — Patch LB-OFI-TABLE-20250924A
 - **Scope**: 補上 OFI 構面的完整參數表與 CSV，協助交叉檢查指標公式與權重。
 - **Implementation**:

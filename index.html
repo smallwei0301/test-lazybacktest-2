@@ -1854,9 +1854,19 @@
                                             <div id="batch-optimization-results" class="hidden">
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
-                                                        <div class="flex items-center justify-between">
-                                                            <h4 class="card-title text-lg font-semibold">優化結果</h4>
-                                                            <div class="flex items-center gap-2">
+                                                        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                                            <div class="flex items-center gap-3">
+                                                                <h4 class="card-title text-lg font-semibold">優化結果</h4>
+                                                                <button id="open-ofi-metrics-modal" type="button" class="hidden md:inline-flex items-center gap-1 px-3 py-1 text-xs font-medium border border-border rounded-md bg-input hover:bg-muted transition-colors" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    <i data-lucide="table" class="lucide w-3.5 h-3.5"></i>
+                                                                    查看 OFI 指標表
+                                                                </button>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                <button id="open-ofi-metrics-modal-mobile" type="button" class="md:hidden inline-flex items-center gap-1 px-3 py-1 text-xs font-medium border border-border rounded-md bg-input hover:bg-muted transition-colors" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    <i data-lucide="table" class="lucide w-3.5 h-3.5"></i>
+                                                                    OFI 指標表
+                                                                </button>
                                                                 <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
                                                                 <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                                                     <option value="ofiScore">OFI 評分</option>
@@ -1893,16 +1903,52 @@
                                                             </table>
                                                         </div>
                                                     </div>
-                                                </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-content hidden" id="rolling-test-tab">
-                                <div class="space-y-6">
-                                    <div class="card">
-                                        <div class="card-header flex flex-col gap-2">
+                            <div id="ofi-metrics-modal" class="hidden fixed inset-0 z-[70] items-center justify-center">
+                                <div id="ofi-metrics-backdrop" class="absolute inset-0 bg-black/50"></div>
+                                <div class="relative z-[71] w-[95vw] max-w-6xl max-h-[90vh] overflow-hidden rounded-xl border border-border shadow-xl" style="background-color: var(--background); border-color: var(--border);">
+                                    <div class="flex items-start justify-between gap-4 border-b border-border px-6 py-4" style="border-color: var(--border);">
+                                        <div>
+                                            <h3 class="text-lg font-semibold">OFI 指標公式表</h3>
+                                            <p class="mt-1 text-xs text-muted-foreground" style="color: var(--muted-foreground);">版本 LB-OFI-TABLE-20250924A｜依據批量優化結果的最新設定即時解析</p>
+                                        </div>
+                                        <button type="button" data-ofi-metrics-close class="rounded-full p-2 hover:bg-muted" aria-label="關閉" style="color: var(--muted-foreground);">
+                                            <i data-lucide="x" class="lucide"></i>
+                                        </button>
+                                    </div>
+                                    <div class="px-6 py-4 space-y-4">
+                                        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                            <div class="text-xs text-muted-foreground" id="ofi-metrics-status" style="color: var(--muted-foreground);">載入中...</div>
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <a id="ofi-metrics-download" href="assets/ofi-metrics-parameters.csv" download class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted" style="border-color: var(--border); color: var(--foreground);">
+                                                    <i data-lucide="download" class="lucide w-4 h-4"></i>
+                                                    下載 CSV
+                                                </a>
+                                                <button type="button" data-ofi-metrics-close class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted" style="border-color: var(--border); color: var(--foreground);">
+                                                    <i data-lucide="x-circle" class="lucide w-4 h-4"></i>
+                                                    關閉
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div id="ofi-metrics-flow-summary" class="grid gap-3 rounded-lg border border-dashed border-border bg-muted/30 p-4 text-xs" style="border-color: var(--border);"></div>
+                                        <div class="overflow-auto rounded-lg border border-border" style="max-height: 55vh; border-color: var(--border);">
+                                            <table id="ofi-metrics-table" class="min-w-full text-left text-xs leading-5" style="color: var(--foreground);">
+                                                <thead id="ofi-metrics-table-head" class="bg-muted text-[11px] uppercase tracking-wider" style="background-color: var(--muted); color: var(--muted-foreground);"></thead>
+                                                <tbody id="ofi-metrics-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-content hidden" id="rolling-test-tab">
+                            <div class="space-y-6">
+                                <div class="card">
+                                    <div class="card-header flex flex-col gap-2">
                                             <h3 class="card-title text-base">滾動測試設定</h3>
                                             <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
                                                 參考國際量化機構常見的 Walk-Forward 測試（先以固定視窗訓練，再用下一段資料驗證），快速檢查策略在不同市況的穩健度。

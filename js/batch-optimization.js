@@ -51,6 +51,15 @@ let batchOptimizationStartTime = null;
 let batchOptimizationOFIMetrics = null;
 let batchOptimizationOFISignature = null;
 
+// 版本標記：批量優化 OFI 指標表整合
+const BATCH_OFI_UI_VERSION = 'LB-OFI-UI-20250924A';
+const OFI_METRICS_CSV_PATH = 'assets/ofi-metrics-parameters.csv';
+let ofiMetricsTableCache = null;
+let ofiMetricsFetchPromise = null;
+let ofiMetricsModalInitialised = false;
+let ofiMetricsKeydownAttached = false;
+let ofiMetricsBodyOverflowBackup = null;
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -172,7 +181,10 @@ function initBatchOptimization() {
         
         // 綁定事件
         bindBatchOptimizationEvents();
-        
+
+        // 初始化 OFI 指標表互動
+        initOfiMetricsSupport();
+
         // 添加測試按鈕（僅在開發模式）
         if (window.location.hostname === 'localhost') {
             addTestButton();
@@ -1914,15 +1926,18 @@ function ensureBatchOfiComputed(force = false) {
         if (batchOptimizationResults.length === 0) {
             batchOptimizationOFIMetrics = null;
             batchOptimizationOFISignature = signature;
+            renderOfiFlowSummary();
             return;
         }
         const evaluation = window.lazybacktestOFI.computeOFIForResults(batchOptimizationResults);
         if (!evaluation || !Array.isArray(evaluation.strategies)) {
             batchOptimizationOFIMetrics = null;
             batchOptimizationOFISignature = null;
+            renderOfiFlowSummary();
             return;
         }
         batchOptimizationOFIMetrics = evaluation.flow || null;
+        renderOfiFlowSummary();
         evaluation.strategies.forEach((entry) => {
             const target = batchOptimizationResults[entry.index];
             if (!target) return;
@@ -2025,6 +2040,318 @@ function escapeHtml(value) {
 
 function escapeHtmlAttr(value) {
     return escapeHtml(value).replace(/\n/g, '&#10;');
+}
+
+// --- OFI 指標表 Modal ---
+function initOfiMetricsSupport() {
+    try {
+        if (ofiMetricsModalInitialised) return;
+
+        const modal = document.getElementById('ofi-metrics-modal');
+        if (!modal) {
+            return;
+        }
+
+        const openButtons = [
+            document.getElementById('open-ofi-metrics-modal'),
+            document.getElementById('open-ofi-metrics-modal-mobile')
+        ].filter(Boolean);
+
+        if (openButtons.length === 0) {
+            return;
+        }
+
+        openButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                openOfiMetricsModal();
+            });
+        });
+
+        const closeButtons = document.querySelectorAll('[data-ofi-metrics-close]');
+        closeButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                closeOfiMetricsModal();
+            });
+        });
+
+        const backdrop = document.getElementById('ofi-metrics-backdrop');
+        if (backdrop) {
+            backdrop.addEventListener('click', () => {
+                closeOfiMetricsModal();
+            });
+        }
+
+        ofiMetricsModalInitialised = true;
+    } catch (error) {
+        console.error('[Batch Optimization][OFI Modal] init error:', error);
+    }
+}
+
+function openOfiMetricsModal() {
+    try {
+        const modal = document.getElementById('ofi-metrics-modal');
+        if (!modal) return;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        if (ofiMetricsBodyOverflowBackup === null) {
+            ofiMetricsBodyOverflowBackup = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+        }
+
+        setOfiMetricsStatus('載入中...');
+        renderOfiFlowSummary();
+
+        if (!ofiMetricsKeydownAttached) {
+            document.addEventListener('keydown', handleOfiMetricsKeydown, true);
+            ofiMetricsKeydownAttached = true;
+        }
+
+        if (ofiMetricsTableCache) {
+            renderOfiMetricsTable(ofiMetricsTableCache);
+            setOfiMetricsStatus(`已載入 OFI 指標表（${BATCH_OFI_UI_VERSION}）`);
+            return;
+        }
+
+        ensureOfiMetricsTableLoaded()
+            .then((dataset) => {
+                renderOfiMetricsTable(dataset);
+                setOfiMetricsStatus(`已載入 OFI 指標表（${BATCH_OFI_UI_VERSION}）`);
+            })
+            .catch((error) => {
+                console.error('[Batch Optimization][OFI Modal] load error:', error);
+                setOfiMetricsStatus('無法載入 OFI 指標表，請稍後再試或使用下方連結下載 CSV。', true);
+            });
+    } catch (error) {
+        console.error('[Batch Optimization][OFI Modal] open error:', error);
+    }
+}
+
+function closeOfiMetricsModal() {
+    try {
+        const modal = document.getElementById('ofi-metrics-modal');
+        if (!modal) return;
+
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+
+        if (ofiMetricsBodyOverflowBackup !== null) {
+            document.body.style.overflow = ofiMetricsBodyOverflowBackup;
+            ofiMetricsBodyOverflowBackup = null;
+        }
+
+        if (ofiMetricsKeydownAttached) {
+            document.removeEventListener('keydown', handleOfiMetricsKeydown, true);
+            ofiMetricsKeydownAttached = false;
+        }
+    } catch (error) {
+        console.error('[Batch Optimization][OFI Modal] close error:', error);
+    }
+}
+
+function handleOfiMetricsKeydown(event) {
+    if (event.key === 'Escape') {
+        closeOfiMetricsModal();
+    }
+}
+
+function ensureOfiMetricsTableLoaded() {
+    if (ofiMetricsTableCache) {
+        return Promise.resolve(ofiMetricsTableCache);
+    }
+    if (ofiMetricsFetchPromise) {
+        return ofiMetricsFetchPromise;
+    }
+    ofiMetricsFetchPromise = fetch(OFI_METRICS_CSV_PATH, { cache: 'no-cache' })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.text();
+        })
+        .then((text) => {
+            ofiMetricsTableCache = parseOfiMetricsCsv(text);
+            return ofiMetricsTableCache;
+        })
+        .catch((error) => {
+            ofiMetricsFetchPromise = null;
+            throw error;
+        });
+    return ofiMetricsFetchPromise;
+}
+
+function parseOfiMetricsCsv(csvText) {
+    const rawText = typeof csvText === 'string' ? csvText : '';
+    const text = rawText.replace(/^\uFEFF/, '');
+    const rows = [];
+    let current = '';
+    let row = [];
+    let insideQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        if (char === '"') {
+            if (insideQuotes && text[i + 1] === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                insideQuotes = !insideQuotes;
+            }
+        } else if (char === ',' && !insideQuotes) {
+            row.push(current.trim());
+            current = '';
+        } else if ((char === '\n' || char === '\r') && !insideQuotes) {
+            if (char === '\r' && text[i + 1] === '\n') {
+                i += 1;
+            }
+            row.push(current.trim());
+            current = '';
+            if (row.length > 0 && row.some((cell) => cell !== '')) {
+                rows.push(row);
+            }
+            row = [];
+        } else {
+            current += char;
+        }
+    }
+
+    if (current.length > 0 || row.length > 0) {
+        row.push(current.trim());
+        if (row.some((cell) => cell !== '')) {
+            rows.push(row);
+        }
+    }
+
+    if (rows.length === 0) {
+        return { headers: [], rows: [] };
+    }
+
+    const headers = rows.shift();
+    return {
+        headers,
+        rows,
+    };
+}
+
+function renderOfiMetricsTable(dataset) {
+    try {
+        const tableHead = document.getElementById('ofi-metrics-table-head');
+        const tableBody = document.getElementById('ofi-metrics-table-body');
+        if (!tableHead || !tableBody) return;
+
+        if (!dataset || !Array.isArray(dataset.headers) || dataset.headers.length === 0) {
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            setOfiMetricsStatus('目前沒有可顯示的 OFI 指標表資料。', true);
+            return;
+        }
+
+        const headerLabels = {
+            level: '層級',
+            component: '構面 / 指標',
+            formula: '計算公式',
+            normalization_or_threshold: '正規化 / 門檻',
+            weights_or_parameters: '權重 / 參數',
+            notes: '備註',
+        };
+
+        const displayHeaders = dataset.headers.map((header) => headerLabels[header] || header);
+        tableHead.innerHTML = `
+            <tr>
+                ${displayHeaders.map((text) => `<th class="px-3 py-2 text-left">${escapeHtml(text)}</th>`).join('')}
+            </tr>
+        `;
+
+        tableBody.innerHTML = '';
+        dataset.rows.forEach((cells) => {
+            const tr = document.createElement('tr');
+            tr.className = 'bg-background';
+
+            const fullCells = dataset.headers.map((_, idx) => (idx < cells.length ? cells[idx] : ''));
+
+            fullCells.forEach((cell, idx) => {
+                const td = document.createElement('td');
+                td.className = 'px-3 py-2 text-xs align-top whitespace-pre-wrap';
+                td.style.color = 'var(--foreground)';
+
+                const text = typeof cell === 'string' ? cell : '';
+
+                if (idx === 0) {
+                    td.innerHTML = `<span class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold" style="background-color: color-mix(in srgb, var(--muted) 65%, transparent); color: var(--foreground);">${escapeHtml(text)}</span>`;
+                } else if (idx === 2 || idx === 3 || idx === 4) {
+                    td.innerHTML = `<code class="text-[11px] leading-5">${escapeHtml(text)}</code>`;
+                } else {
+                    td.textContent = text;
+                }
+
+                tr.appendChild(td);
+            });
+
+            tableBody.appendChild(tr);
+        });
+    } catch (error) {
+        console.error('[Batch Optimization][OFI Modal] render table error:', error);
+    }
+}
+
+function renderOfiFlowSummary() {
+    const container = document.getElementById('ofi-metrics-flow-summary');
+    if (!container) return;
+
+    const flow = batchOptimizationOFIMetrics;
+    if (!flow || typeof flow !== 'object') {
+        container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">尚未完成批量優化，因此暫無 Flow 層指標摘要。</p>`;
+        return;
+    }
+
+    const entries = [
+        { label: 'Flow 總分', value: formatComponentScore(flow.RFlow) },
+        { label: 'R^{PBO}', value: formatComponentScore(flow.RPBO) },
+        { label: 'R^{SPA}', value: formatComponentScore(flow.RSPA) },
+        { label: 'R^{MCS}', value: formatComponentScore(flow.RMCS) },
+        { label: 'PBO', value: Number.isFinite(flow.PBO) ? `${(flow.PBO * 100).toFixed(2)}%` : '--' },
+        { label: '有效切分', value: Number.isFinite(flow.validSplits) && Number.isFinite(flow.totalSplits)
+            ? `${flow.validSplits}/${flow.totalSplits}`
+            : '--' },
+    ];
+
+    const cards = entries.map((entry) => {
+        return `
+            <div class="rounded-lg border border-border bg-background p-3 shadow-sm" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                <div class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">${escapeHtml(entry.label)}</div>
+                <div class="mt-1 text-sm font-semibold">${escapeHtml(entry.value)}</div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = `
+        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            ${cards.join('')}
+        </div>
+        <p class="mt-2 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">版本 ${escapeHtml(BATCH_OFI_UI_VERSION)}｜Flow 權重 0.6 / 0.2 / 0.2</p>
+    `;
+}
+
+function setOfiMetricsStatus(message, isError = false) {
+    const statusEl = document.getElementById('ofi-metrics-status');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    if (isError) {
+        statusEl.style.color = '#dc2626';
+    } else {
+        statusEl.style.color = 'var(--muted-foreground)';
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.openOfiMetricsModal = openOfiMetricsModal;
+    window.closeOfiMetricsModal = closeOfiMetricsModal;
+    window.lazybacktestOfiModal = Object.assign({}, window.lazybacktestOfiModal, {
+        version: BATCH_OFI_UI_VERSION,
+        open: openOfiMetricsModal,
+        close: closeOfiMetricsModal,
+    });
 }
 
 // 添加交叉優化控制面板
