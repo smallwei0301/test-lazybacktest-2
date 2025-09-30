@@ -1,3 +1,9 @@
+## 2025-12-08 — Patch LB-ML-KELLY-20251208A
+- **Issue recap**: 站內缺少可直接在瀏覽器端操作的隔日預測與凱利資金控管模組，使用者無法在不影響原本回測頁的前提下快速實驗機器學習配置。
+- **Fix**: 於主介面新增「預測機制」分頁，整合最新文獻摘要與瀏覽器端 Logistic Regression + 凱利公式流程，支援自訂區間、學習率、迭代次數與資金上限，並輸出權益曲線、機率分佈與交易清單。
+- **Diagnostics**: DOMContentLoaded 後確認分頁按鈕切換正常、版本代碼標記為 `LB-ML-KELLY-20251208A`，空資料、樣本不足與 Chart.js 缺失情境均顯示友善提醒。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
