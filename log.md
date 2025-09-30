@@ -1,3 +1,11 @@
+## 2025-09-15 — Patch LB-AI-PREDICT-20250915A
+- **Scope**: 新增「AI 預測」分頁與 LSTM 隔日走勢模組，串接主回測資料供使用者進行深度學習輔助判斷。
+- **Features**:
+  - 導入 TensorFlow.js 建立可調視窗長度的 LSTM 模型，依照 2:1 的訓練／測試比例推估隔日漲跌機率。
+  - 新增凱利公式資金配置開關與回測模擬，只在預測上漲時以今日收盤價進場、隔日收盤價出場計算總報酬。
+  - 對應主執行緒快取事件，更新資料摘要、交易紀錄與統計指標，並輸出策略敘述與資金建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-prediction.js','js/backtest.js','js/main.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。

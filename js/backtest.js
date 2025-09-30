@@ -52,6 +52,56 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+const DATASET_BROADCAST_EVENT = 'lazybacktest:dataset-updated';
+const DATASET_BROADCAST_VERSION = 'LB-AI-PREDICT-20250915A';
+
+function updateLastFetchContext(settings, extraMeta = null) {
+    const snapshot = settings && typeof settings === 'object'
+        ? { ...settings }
+        : null;
+    lastFetchSettings = snapshot;
+    if (typeof window !== 'undefined') {
+        window.lastFetchSettings = snapshot;
+        if (typeof window.dispatchEvent === 'function') {
+            try {
+                window.dispatchEvent(new CustomEvent('lazybacktest:last-fetch-updated', {
+                    detail: {
+                        settings: snapshot,
+                        meta: extraMeta || null,
+                        version: DATASET_BROADCAST_VERSION,
+                    },
+                }));
+            } catch (error) {
+                console.warn('[Main] Failed to dispatch last fetch update event', error);
+            }
+        }
+    }
+    return snapshot;
+}
+
+function broadcastCachedDataset(rows, meta = {}) {
+    const normalizedRows = Array.isArray(rows) ? rows : null;
+    cachedStockData = normalizedRows;
+    if (typeof window !== 'undefined') {
+        window.cachedStockData = normalizedRows;
+        if (typeof window.dispatchEvent === 'function') {
+            const detail = {
+                rows: normalizedRows,
+                meta: {
+                    version: DATASET_BROADCAST_VERSION,
+                    ...(meta || {}),
+                },
+            };
+            try {
+                window.dispatchEvent(new CustomEvent(DATASET_BROADCAST_EVENT, { detail }));
+            } catch (error) {
+                console.warn('[Main] Failed to dispatch dataset update event', error);
+            }
+        }
+    }
+    return normalizedRows;
+}
+
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
     const text = typeof value === 'string' ? value : String(value);
@@ -4648,8 +4698,10 @@ function runBacktestInternal() {
             cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             visibleStockData = extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate);
-            cachedStockData = cachedEntry.data;
-            lastFetchSettings = { ...curSettings };
+            broadcastCachedDataset(cachedEntry.data, {
+                source: 'cache-hit',
+                settings: updateLastFetchContext(curSettings),
+            });
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
@@ -4801,8 +4853,12 @@ function runBacktestInternal() {
                         splitAdjustment: params.splitAdjustment,
                      }, cacheEntry.data);
                      visibleStockData = extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate);
-                     cachedStockData = mergedData;
-                     lastFetchSettings = { ...curSettings };
+                     broadcastCachedDataset(mergedData, {
+                        source: 'merged-cache',
+                        settings: updateLastFetchContext(curSettings),
+                        effectiveStartDate: rawEffectiveStart || effectiveStartDate,
+                        fetchRange: fetchedRange,
+                     });
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
@@ -4891,8 +4947,12 @@ function runBacktestInternal() {
                         splitAdjustment: params.splitAdjustment,
                     }, updatedEntry.data);
                     visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
-                    cachedStockData = updatedEntry.data;
-                    lastFetchSettings = { ...curSettings };
+                    broadcastCachedDataset(updatedEntry.data, {
+                        source: 'cache-refresh',
+                        settings: updateLastFetchContext(curSettings),
+                        effectiveStartDate: updatedEntry.effectiveStartDate || effectiveStartDate,
+                        fetchRange: updatedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
+                    });
                     refreshPriceInspectorControls();
                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
@@ -8119,8 +8179,12 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     });
     cachedDataStore.set(cacheKey, updatedEntry);
     visibleStockData = extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate);
-    cachedStockData = updatedEntry.data;
-    lastFetchSettings = { ...curSettings };
+    broadcastCachedDataset(updatedEntry.data, {
+        source: 'post-backtest-sync',
+        settings: updateLastFetchContext(curSettings),
+        effectiveStartDate: updatedEntry.effectiveStartDate || effectiveStartDate,
+        fetchRange: fetchedRange,
+    });
     refreshPriceInspectorControls();
     updatePriceDebug(updatedEntry);
     return updatedEntry;
@@ -8378,7 +8442,12 @@ async function runStagingOptimization() {
                     cachedPayload = rawDataUsed;
                     cachedMeta = null;
                     datasetReady = true;
-                    cachedStockData = rawDataUsed;
+                    broadcastCachedDataset(rawDataUsed, {
+                        source: 'staging-optimizer',
+                        settings: updateLastFetchContext(curSettings),
+                        effectiveStartDate,
+                        fetchRange: { start: dataStartDate, end: baseParams.endDate },
+                    });
                 }
             } else if (updatedEntry && Array.isArray(updatedEntry.data)) {
                 cachedEntry = updatedEntry;
@@ -8714,9 +8783,9 @@ function resetSettings() {
     updateStrategyParams('shortEntry');
     document.getElementById("shortExitStrategy").value = "cover_ma_cross";
     updateStrategyParams('shortExit');
-    cachedStockData = null;
+    broadcastCachedDataset(null, { source: 'reset' });
     cachedDataStore.clear();
-    lastFetchSettings = null;
+    updateLastFetchContext(null);
     refreshPriceInspectorControls();
     clearPreviousResults();
     showSuccess("設定已重置");
