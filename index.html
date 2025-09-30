@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ml-forecast"
+                                            >
+                                                <i data-lucide="bot" class="lucide-sm inline mr-1"></i>預測機制
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2053,6 +2060,123 @@
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="tab-content hidden space-y-6" id="ml-forecast-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="library" class="lucide-sm"></i>
+                                            最新研究重點（隔日預測 × 深度學習 × 凱利）
+                                        </h3>
+                                        <p class="text-xs mt-2" style="color: var(--muted-foreground);">
+                                            精選近一年針對隔日方向預測、深度學習應用與凱利資金控管的研究，提供後續模型升級的依據。
+                                        </p>
+                                    </div>
+                                    <div class="card-content">
+                                        <ol class="list-decimal space-y-3 pl-5 text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">2025｜Integrating Deep Learning and Econometrics for Stock Prediction</span>
+                                                ：比較 LSTM 與計量模型並指出混合式架構在金融時間序列的優勢。
+                                                <a href="https://www.sciencedirect.com/science/article/pii/S2666827025001136" target="_blank" rel="noopener" class="text-primary underline">ScienceDirect</a>
+                                            </li>
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">2025｜Advanced Stock Market Prediction Using LSTM</span>
+                                                ：展示多標的隔日／短期預測流程與評估方法。
+                                                <a href="https://arxiv.org/abs/2505.05325" target="_blank" rel="noopener" class="text-primary underline">arXiv</a>
+                                            </li>
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">2025｜Stock Market Prediction Using ML &amp; DL（Review）</span>
+                                                ：綜觀近期資料來源、指標與績效衡量，可作為平台功能擴充的對照。
+                                                <a href="https://www.mdpi.com/2673-9909/5/3/76" target="_blank" rel="noopener" class="text-primary underline">MDPI</a>
+                                            </li>
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">2024｜Deep learning-based time series forecasting</span>
+                                                ：整理 2014–2024 深度學習時序模型（含 Transformer/LSTM）對金融資料的設計重點。
+                                                <a href="https://link.springer.com/article/10.1007/s10462-024-10989-8" target="_blank" rel="noopener" class="text-primary underline">SpringerLink</a>
+                                            </li>
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">2024｜Sizing the bets in a focused portfolio</span>
+                                                ：討論實務上凱利資金控管的上限、半凱利與約束設定。
+                                                <a href="https://arxiv.org/abs/2402.15588" target="_blank" rel="noopener" class="text-primary underline">arXiv</a>
+                                            </li>
+                                            <li>
+                                                <span class="font-medium" style="color: var(--foreground);">凱利公式定義與推導</span>
+                                                ：提供本頁面資金配置公式的引用來源。
+                                                <a href="https://en.wikipedia.org/wiki/Kelly_criterion" target="_blank" rel="noopener" class="text-primary underline">Wikipedia</a>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="cpu" class="lucide-sm"></i>
+                                            📈 預測機制（隔日漲跌｜Logistic + Kelly）
+                                        </h3>
+                                        <p class="text-xs" style="color: var(--muted-foreground);">
+                                            使用既有回測快取（cachedStockData）即時產生特徵，切分訓練／測試、訓練 Logistic Regression，並套用半凱利與曝險上限模擬測試期間績效。
+                                        </p>
+                                    </div>
+                                    <div class="card-content space-y-4">
+                                        <div class="rounded-md border px-3 py-2 text-xs leading-relaxed" style="color: var(--muted-foreground); border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                            提醒：請先在主回測頁執行一次回測建立 cachedStockData，再切換至此分頁操作。必要時可調整半凱利係數與曝險上限降低波動。
+                                        </div>
+
+                                        <div class="grid md:grid-cols-4 gap-3">
+                                            <div>
+                                                <label class="block text-xs mb-1">訓練區間起</label>
+                                                <input id="ml-train-start" type="date" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">訓練區間迄</label>
+                                                <input id="ml-train-end" type="date" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">測試區間起</label>
+                                                <input id="ml-test-start" type="date" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">測試區間迄</label>
+                                                <input id="ml-test-end" type="date" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                        </div>
+
+                                        <div class="grid md:grid-cols-4 gap-3">
+                                            <div>
+                                                <label class="block text-xs mb-1">學習率</label>
+                                                <input id="ml-lr" type="number" step="0.0001" value="0.05" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">迭代次數</label>
+                                                <input id="ml-epochs" type="number" value="150" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">半凱利係數</label>
+                                                <input id="ml-kelly-mult" type="number" step="0.05" value="0.5" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs mb-1">單筆上限(%)</label>
+                                                <input id="ml-max-f" type="number" step="1" value="25" class="w-full border px-2 py-1 rounded" />
+                                            </div>
+                                        </div>
+
+                                        <button id="ml-run" class="px-4 py-2 bg-blue-600 text-white rounded shadow text-sm font-medium">訓練 + 回測</button>
+
+                                        <div id="ml-cards" class="grid md:grid-cols-4 gap-3"></div>
+
+                                        <div class="grid md:grid-cols-2 gap-4">
+                                            <canvas id="ml-equity-chart" height="220"></canvas>
+                                            <canvas id="ml-prob-hist" height="220"></canvas>
+                                        </div>
+
+                                        <div>
+                                            <h4 class="font-semibold text-sm mb-2" style="color: var(--foreground);">交易紀錄（測試集）</h4>
+                                            <div id="ml-trades" class="trade-list max-h-72 overflow-auto text-xs border rounded p-2 bg-white"></div>
                                         </div>
                                     </div>
                                 </div>

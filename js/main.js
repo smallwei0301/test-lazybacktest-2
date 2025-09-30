@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-ML-KELLY-20250623A
 
 // 全局變量
 let stockChart = null;
@@ -2536,6 +2537,438 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
+// --- ML Forecast (LB-ML-KELLY-20250623A) ---
+const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623A';
+
+(function initMlForecastTab() {
+    if (typeof document === 'undefined') return;
+
+    const clamp = (value, minValue, maxValue) => Math.max(minValue, Math.min(maxValue, value));
+    const mean = (arr) => (Array.isArray(arr) && arr.length ? arr.reduce((sum, v) => sum + v, 0) / arr.length : 0);
+    const std = (arr) => {
+        if (!Array.isArray(arr) || arr.length <= 1) return 0;
+        const m = mean(arr);
+        return Math.sqrt(mean(arr.map((v) => (v - m) * (v - m))));
+    };
+
+    const computeRsi = (closes, period = 14) => {
+        const out = Array(closes.length).fill(null);
+        let gains = 0;
+        let losses = 0;
+        for (let i = 1; i <= period; i += 1) {
+            const change = closes[i] - closes[i - 1];
+            if (change > 0) gains += change;
+            else losses -= change;
+        }
+        let avgGain = gains / period;
+        let avgLoss = losses / period;
+        out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+        for (let i = period + 1; i < closes.length; i += 1) {
+            const change = closes[i] - closes[i - 1];
+            const gain = change > 0 ? change : 0;
+            const loss = change < 0 ? -change : 0;
+            avgGain = (avgGain * (period - 1) + gain) / period;
+            avgLoss = (avgLoss * (period - 1) + loss) / period;
+            out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+        }
+        return out;
+    };
+
+    const buildFeatures = (rows) => {
+        const closePrices = rows.map((r) => Number(r.close));
+        const vol20 = closePrices.map((_, index) => {
+            const start = Math.max(0, index - 19);
+            const slice = closePrices.slice(start, index + 1);
+            return std(slice);
+        });
+        const rsi14 = computeRsi(closePrices, 14);
+        const sma20 = closePrices.map((_, index) => {
+            const start = Math.max(0, index - 19);
+            const slice = closePrices.slice(start, index + 1);
+            return slice.length < 20 ? null : mean(slice);
+        });
+
+        const retLag = (k, index) => {
+            if (index - k < 0) return null;
+            const base = closePrices[index - k];
+            if (!Number.isFinite(base) || base === 0) return null;
+            return (closePrices[index] - base) / base;
+        };
+
+        const features = [];
+        const labels = [];
+        const nextReturns = [];
+        for (let i = 21; i < rows.length - 1; i += 1) {
+            const f1 = retLag(1, i);
+            const f3 = retLag(3, i);
+            const f5 = retLag(5, i);
+            if ([f1, f3, f5, vol20[i], rsi14[i], sma20[i]].some((v) => v === null || Number.isNaN(v))) continue;
+            const gap = sma20[i] === 0 ? 0 : (closePrices[i] - sma20[i]) / sma20[i];
+            const feat = [f1, f3, f5, vol20[i], rsi14[i] / 100, gap];
+            const nextRet = (closePrices[i + 1] - closePrices[i]) / closePrices[i];
+            features.push(feat);
+            labels.push(nextRet > 0 ? 1 : 0);
+            nextReturns.push(nextRet);
+        }
+        return { features, labels, nextReturns };
+    };
+
+    const standardize = (matrix) => {
+        if (!Array.isArray(matrix) || matrix.length === 0) return { scaled: [], mu: [], sigma: [] };
+        const dimension = matrix[0].length;
+        const mu = Array(dimension).fill(0);
+        const sigma = Array(dimension).fill(0);
+        for (let j = 0; j < dimension; j += 1) {
+            const column = matrix.map((row) => row[j]);
+            mu[j] = mean(column);
+            const computedStd = std(column);
+            sigma[j] = computedStd > 0 ? computedStd : 1e-8;
+        }
+        const scaled = matrix.map((row) => row.map((value, idx) => (value - mu[idx]) / sigma[idx]));
+        return { scaled, mu, sigma };
+    };
+
+    const applyStandardization = (row, mu, sigma) => row.map((value, idx) => (value - mu[idx]) / (sigma[idx] || 1e-8));
+
+    const trainLogisticRegression = (matrix, labels, options = {}) => {
+        const { lr = 0.05, epochs = 150 } = options;
+        if (!Array.isArray(matrix) || matrix.length === 0) return null;
+        const rows = matrix.length;
+        const cols = matrix[0].length;
+        const weights = Array(cols).fill(0);
+        let bias = 0;
+        const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+
+        for (let epoch = 0; epoch < epochs; epoch += 1) {
+            for (let i = 0; i < rows; i += 1) {
+                const dot = matrix[i].reduce((sum, value, idx) => sum + weights[idx] * value, bias);
+                const prob = sigmoid(dot);
+                const error = prob - labels[i];
+                for (let j = 0; j < cols; j += 1) {
+                    weights[j] -= lr * error * matrix[i][j];
+                }
+                bias -= lr * error;
+            }
+        }
+
+        const predict = (row) => {
+            const dot = row.reduce((sum, value, idx) => sum + weights[idx] * value, bias);
+            return 1 / (1 + Math.exp(-dot));
+        };
+
+        return { weights, bias, predict };
+    };
+
+    const fitThresholdAndEdge = (probs, labels, returns) => {
+        let best = { threshold: 0.5, accuracy: 0, avgUp: 0, avgDown: 0, sampleSize: 0 };
+        for (let thr = 0.35; thr <= 0.65; thr += 0.01) {
+            const selected = [];
+            for (let i = 0; i < probs.length; i += 1) {
+                if (probs[i] >= thr) {
+                    selected.push({ hit: labels[i] === 1, ret: returns[i] });
+                }
+            }
+            if (selected.length < 20) continue;
+            const accuracy = mean(selected.map((item) => (item.hit ? 1 : 0)));
+            const upMoves = selected.filter((item) => item.ret > 0).map((item) => item.ret);
+            const downMoves = selected.filter((item) => item.ret <= 0).map((item) => item.ret);
+            const avgUp = upMoves.length ? mean(upMoves) : 0;
+            const avgDown = downMoves.length ? mean(downMoves) : 0;
+            if (accuracy > best.accuracy) {
+                best = { threshold: Number(thr.toFixed(2)), accuracy, avgUp, avgDown, sampleSize: selected.length };
+            }
+        }
+        return best;
+    };
+
+    const kellyFraction = (prob, avgUp, avgDown, multiplier = 0.5, cap = 0.25) => {
+        if (!(avgUp > 0) || !(avgDown < 0)) return 0;
+        const b = avgUp / Math.abs(avgDown || 1e-8);
+        const raw = prob - (1 - prob) / Math.max(b, 1e-8);
+        if (!Number.isFinite(raw)) return 0;
+        return clamp(raw * multiplier, 0, cap);
+    };
+
+    const simulate = (probs, returns, dates, avgUp, avgDown, threshold, multiplier, cap) => {
+        let equityModel = 1;
+        let equityBh = 1;
+        const equitySeriesModel = [];
+        const equitySeriesBh = [];
+        const trades = [];
+
+        for (let i = 0; i < probs.length; i += 1) {
+            const prob = probs[i];
+            const ret = returns[i];
+            const date = dates[i];
+
+            const bhGrowth = 1 + ret;
+            equityBh *= Math.max(1e-6, bhGrowth);
+
+            if (prob >= threshold) {
+                const fraction = kellyFraction(prob, avgUp, avgDown, multiplier, cap);
+                const growth = 1 + fraction * ret;
+                equityModel *= Math.max(1e-6, growth);
+                trades.push({ date, prob, fraction, ret, pnl: fraction * ret });
+            }
+
+            equitySeriesModel.push({ date, equity: equityModel });
+            equitySeriesBh.push({ date, equity: equityBh });
+        }
+
+        return {
+            finalModel: equityModel,
+            finalBh: equityBh,
+            equitySeriesModel,
+            equitySeriesBh,
+            trades,
+        };
+    };
+
+    const runMlForecast = () => {
+        if (!Array.isArray(cachedStockData) || cachedStockData.length < 60) {
+            showError('請先執行一次回測以建立快取股價資料。');
+            return;
+        }
+
+        const getInput = (id) => document.getElementById(id);
+        const trainStart = getInput('ml-train-start')?.value || '';
+        const trainEnd = getInput('ml-train-end')?.value || '';
+        const testStart = getInput('ml-test-start')?.value || '';
+        const testEnd = getInput('ml-test-end')?.value || '';
+        const lr = Number(getInput('ml-lr')?.value || 0.05);
+        const epochs = Number(getInput('ml-epochs')?.value || 150);
+        const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
+        const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
+
+        const within = (date, start, end) => (!start || date >= start) && (!end || date <= end);
+        const rows = cachedStockData
+            .map((r) => ({
+                date: r.date,
+                close: Number(r.close),
+                open: Number(r.open),
+                high: Number(r.high),
+                low: Number(r.low),
+                volume: Number(r.volume),
+            }))
+            .filter((r) => Number.isFinite(r.close));
+
+        const { features, labels, nextReturns } = buildFeatures(rows);
+        if (!features.length || features.length !== labels.length || labels.length !== nextReturns.length) {
+            showError('特徵構建失敗，請確認快取資料是否完整。');
+            return;
+        }
+
+        const dates = rows.slice(21, rows.length - 1).map((r) => r.date).slice(-features.length);
+        if (dates.length !== features.length) {
+            showError('日期對齊失敗，請重新執行回測。');
+            return;
+        }
+
+        const trainMask = dates.map((d) => within(d, trainStart, trainEnd));
+        const testMask = dates.map((d) => within(d, testStart, testEnd));
+
+        const Xtrain = features.filter((_, idx) => trainMask[idx]);
+        const yTrain = labels.filter((_, idx) => trainMask[idx]);
+        const rTrain = nextReturns.filter((_, idx) => trainMask[idx]);
+        const Xtest = features.filter((_, idx) => testMask[idx]);
+        const yTest = labels.filter((_, idx) => testMask[idx]);
+        const rTest = nextReturns.filter((_, idx) => testMask[idx]);
+        const dTest = dates.filter((_, idx) => testMask[idx]);
+
+        if (Xtrain.length < 100 || Xtest.length < 50) {
+            showError('訓練或測試樣本過少，請調整日期區間。');
+            return;
+        }
+
+        const { scaled: Ztrain, mu, sigma } = standardize(Xtrain);
+        const model = trainLogisticRegression(Ztrain, yTrain, { lr, epochs });
+        if (!model) {
+            showError('模型訓練失敗。');
+            return;
+        }
+
+        const pTrain = Ztrain.map((row) => model.predict(row));
+        const { threshold, accuracy, avgUp, avgDown, sampleSize } = fitThresholdAndEdge(pTrain, yTrain, rTrain);
+
+        const pTest = Xtest.map((row) => model.predict(applyStandardization(row, mu, sigma)));
+        const simulation = simulate(pTest, rTest, dTest, avgUp, avgDown, threshold, kellyMultiplier, maxFraction);
+
+        const hitRateTest = mean(pTest.map((prob, idx) => ((prob >= threshold) === (yTest[idx] === 1) ? 1 : 0)));
+        const avgProbability = mean(pTrain);
+        const indicativeKelly = kellyFraction(clamp(avgProbability || threshold, 0, 1), avgUp, avgDown, kellyMultiplier, maxFraction);
+
+        const cards = document.getElementById('ml-cards');
+        if (cards) {
+            cards.innerHTML = `
+                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
+                    <div class="text-[11px] uppercase tracking-wide">訓練最佳門檻</div>
+                    <div class="text-lg font-semibold" style="color: var(--foreground);">${threshold.toFixed(2)}（樣本 ${sampleSize}）</div>
+                    <div class="text-xs">訓練命中率：${(accuracy * 100).toFixed(1)}%</div>
+                </div>
+                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
+                    <div class="text-[11px] uppercase tracking-wide">平均漲幅 / 跌幅</div>
+                    <div class="text-sm font-semibold" style="color: var(--primary);">${(avgUp * 100).toFixed(2)}%</div>
+                    <div class="text-sm font-semibold" style="color: var(--destructive);">${(avgDown * 100).toFixed(2)}%</div>
+                </div>
+                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
+                    <div class="text-[11px] uppercase tracking-wide">測試命中率</div>
+                    <div class="text-lg font-semibold" style="color: var(--foreground);">${(hitRateTest * 100).toFixed(1)}%</div>
+                    <div class="text-xs">半凱利建議（參考）：${(indicativeKelly * 100).toFixed(1)}%</div>
+                </div>
+                <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
+                    <div class="text-[11px] uppercase tracking-wide">累積報酬（測試）</div>
+                    <div class="text-sm">ML + Kelly：<span style="color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalModel - 1) * 100).toFixed(2)}%</span></div>
+                    <div class="text-sm">買入持有：<span style="color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalBh - 1) * 100).toFixed(2)}%</span></div>
+                </div>
+            `;
+        }
+
+        const equityCanvas = document.getElementById('ml-equity-chart');
+        if (equityCanvas && typeof Chart !== 'undefined') {
+            if (window.mlEquityChart) {
+                window.mlEquityChart.destroy();
+            }
+            window.mlEquityChart = new Chart(equityCanvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: simulation.equitySeriesModel.map((point) => point.date),
+                    datasets: [
+                        {
+                            label: 'ML + Kelly',
+                            data: simulation.equitySeriesModel.map((point) => point.equity),
+                            borderColor: 'rgba(8, 145, 178, 1)',
+                            backgroundColor: 'rgba(8, 145, 178, 0.1)',
+                            borderWidth: 1.5,
+                            fill: false,
+                            tension: 0.1,
+                        },
+                        {
+                            label: '買入持有',
+                            data: simulation.equitySeriesBh.map((point) => point.equity),
+                            borderColor: 'rgba(107, 114, 128, 1)',
+                            backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                            borderWidth: 1.5,
+                            fill: false,
+                            tension: 0.1,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            type: 'logarithmic',
+                            min: 0.5,
+                            ticks: {
+                                callback: (value) => Number(value).toFixed ? Number(value).toFixed(2) : value,
+                            },
+                        },
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: getComputedStyle(document.body).getPropertyValue('--foreground') || '#111827',
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        const histogramCanvas = document.getElementById('ml-prob-hist');
+        if (histogramCanvas && typeof Chart !== 'undefined') {
+            if (window.mlProbChart) {
+                window.mlProbChart.destroy();
+            }
+            const bins = Array(11).fill(0);
+            pTest.forEach((prob) => {
+                const bucket = clamp(Math.floor(prob * 10), 0, 10);
+                bins[bucket] += 1;
+            });
+            window.mlProbChart = new Chart(histogramCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: bins.map((_, idx) => `${(idx / 10).toFixed(1)}–${((idx + 1) / 10).toFixed(1)}`),
+                    datasets: [
+                        {
+                            label: 'P(上漲)',
+                            data: bins,
+                            backgroundColor: 'rgba(8, 145, 178, 0.4)',
+                            borderColor: 'rgba(8, 145, 178, 1)',
+                            borderWidth: 1,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                        },
+                    },
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                    },
+                },
+            });
+        }
+
+        const tradesContainer = document.getElementById('ml-trades');
+        if (tradesContainer) {
+            tradesContainer.innerHTML = simulation.trades.length
+                ? simulation.trades
+                    .map((trade) => `
+                        <div class="border-b py-1 flex justify-between" style="border-color: var(--border); color: var(--muted-foreground);">
+                            <span>${trade.date}</span>
+                            <span>P=${trade.prob.toFixed(2)} ｜ f=${(trade.fraction * 100).toFixed(1)}% ｜ 日報酬=${(trade.ret * 100).toFixed(2)}% ｜ PL=${(trade.pnl * 100).toFixed(2)}%</span>
+                        </div>
+                    `)
+                    .join('')
+                : '<div class="text-gray-500">無符合門檻之交易</div>';
+        }
+    };
+
+    const runButton = document.getElementById('ml-run');
+    if (runButton) {
+        runButton.addEventListener('click', runMlForecast);
+    }
+
+    const preloadDates = () => {
+        try {
+            if (!Array.isArray(cachedStockData) || !cachedStockData.length) return;
+            const allDates = cachedStockData.map((row) => row.date).filter(Boolean);
+            if (!allDates.length) return;
+            const trainFieldStart = document.getElementById('ml-train-start');
+            const trainFieldEnd = document.getElementById('ml-train-end');
+            const testFieldStart = document.getElementById('ml-test-start');
+            const testFieldEnd = document.getElementById('ml-test-end');
+            const startDate = lastFetchSettings?.startDate || allDates[0];
+            const endDate = lastFetchSettings?.endDate || allDates[allDates.length - 1];
+            const splitIndex = Math.max(0, Math.floor(allDates.length * 0.7));
+            const midDate = allDates[Math.min(splitIndex, allDates.length - 1)];
+            if (trainFieldStart && !trainFieldStart.value) trainFieldStart.value = startDate;
+            if (trainFieldEnd && !trainFieldEnd.value) trainFieldEnd.value = midDate;
+            if (testFieldStart && !testFieldStart.value) testFieldStart.value = allDates[Math.min(splitIndex + 1, allDates.length - 1)] || midDate;
+            if (testFieldEnd && !testFieldEnd.value) testFieldEnd.value = endDate;
+        } catch (error) {
+            console.warn('[ML Forecast] 預設日期填入失敗', error);
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', preloadDates);
+    } else {
+        preloadDates();
+    }
+
+    window.lazybacktestMlForecast = {
+        version: ML_FORECAST_VERSION,
+        run: runMlForecast,
+    };
+})();
+
 // --- 新增：請求並顯示策略建議 ---
 function getSuggestion() {
     console.log("[Main] getSuggestion called");
