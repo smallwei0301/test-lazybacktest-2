@@ -1,12 +1,15 @@
-/* global tf, lastOverallResult, cachedStockData, trendAnalysisState */
-// --- AI 預測模組 - 版本碼 LB-AI-PREDICT-20250921A ---
+/* global tf, lastOverallResult, cachedStockData, trendAnalysisState, Chart */
+// --- AI 預測模組 - 版本碼 LB-AI-PREDICT-20250923A ---
 (function initAIPredictor() {
-    const VERSION_CODE = 'LB-AI-PREDICT-20250921A';
+    const VERSION_CODE = 'LB-AI-PREDICT-20250923A';
     const WINDOW_SIZE = 20;
     const EPOCHS = 40;
     const BATCH_SIZE = 32;
-    const POSITIVE_GAP = 2; // 元
     const PREDICTION_THRESHOLD = 0.5;
+    const CAPITAL_MODES = {
+        KELLY: 'kelly',
+        FIXED: 'fixed',
+    };
 
     const percentFormatter = new Intl.NumberFormat('zh-TW', {
         style: 'percent',
@@ -26,11 +29,19 @@
 
     const state = {
         running: false,
+        kellyFraction: 0,
+        initialCapital: 0,
+        tradeCandidates: [],
+        simulations: {},
+        equityCurves: null,
+        currentMode: CAPITAL_MODES.KELLY,
         trades: [],
+        equityChart: null,
         elements: {
             runBtn: null,
             status: null,
             version: null,
+            capitalMode: null,
             metrics: {
                 trainAccuracy: null,
                 trainWinRate: null,
@@ -44,8 +55,6 @@
             tradesBody: null,
             exportBtn: null,
         },
-        kellyFraction: 0,
-        initialCapital: 0,
     };
 
     function formatPercent(value) {
@@ -56,6 +65,11 @@
     function formatPercentFromRatio(value) {
         if (!Number.isFinite(value)) return '-';
         return `${decimalFormatter.format(value * 100)}%`;
+    }
+
+    function formatPercentDisplay(value) {
+        if (!Number.isFinite(value)) return '-';
+        return `${decimalFormatter.format(value)}%`;
     }
 
     function formatCurrency(value) {
@@ -90,6 +104,13 @@
         if (target) target.textContent = value;
     }
 
+    function destroyChart() {
+        if (state.equityChart && typeof state.equityChart.destroy === 'function') {
+            state.equityChart.destroy();
+        }
+        state.equityChart = null;
+    }
+
     function resetMetrics() {
         Object.keys(state.elements.metrics).forEach((key) => {
             setMetric(key, '-');
@@ -97,11 +118,20 @@
         if (state.elements.tradesBody) {
             state.elements.tradesBody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-3 py-4 text-center text-xs">尚未執行 AI 預測或無符合條件的交易。</td>
+                    <td colspan="9" class="px-3 py-4 text-center text-xs">尚未執行 AI 預測或無符合條件的交易。</td>
                 </tr>`;
         }
+        destroyChart();
         state.trades = [];
+        state.tradeCandidates = [];
+        state.simulations = {};
+        state.equityCurves = null;
         state.kellyFraction = 0;
+        state.initialCapital = 0;
+        state.currentMode = CAPITAL_MODES.KELLY;
+        if (state.elements.capitalMode) {
+            state.elements.capitalMode.value = CAPITAL_MODES.KELLY;
+        }
     }
 
     function setRunning(running) {
@@ -113,12 +143,31 @@
         }
     }
 
+    function pickNumeric(row, keys) {
+        for (let i = 0; i < keys.length; i += 1) {
+            const value = Number(row[keys[i]]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+        return Number.NaN;
+    }
+
     function sanitizeRow(row) {
         if (!row || typeof row !== 'object') return null;
         const date = typeof row.date === 'string' ? row.date.slice(0, 10) : null;
-        const close = Number(row.close ?? row.Close ?? NaN);
+        const close = pickNumeric(row, ['close', 'Close', 'closingPrice', 'ClosingPrice']);
         if (!date || !Number.isFinite(close)) return null;
-        return { date, close };
+        const open = pickNumeric(row, ['open', 'Open', 'openingPrice', 'OpeningPrice', 'startPrice']);
+        const high = pickNumeric(row, ['high', 'High', 'max', 'Max', 'highestPrice', 'HighPrice']);
+        const low = pickNumeric(row, ['low', 'Low', 'min', 'Min', 'lowestPrice', 'LowPrice']);
+        return {
+            date,
+            open,
+            high,
+            low,
+            close,
+        };
     }
 
     function collectRawRows() {
@@ -176,14 +225,12 @@
                 continue;
             }
             const sequence = windowSlice.map((item) => item.close);
-            const priceDiff = tomorrow.close - today.close;
-            const label = priceDiff >= POSITIVE_GAP ? 1 : 0;
+            const label = tomorrow.close > today.close ? 1 : 0;
             sequences.push(sequence);
             labels.push(label);
             meta.push({
-                today,
-                tomorrow,
-                priceDiff,
+                today: { ...today },
+                tomorrow: { ...tomorrow },
             });
         }
         return { sequences, labels, meta };
@@ -196,7 +243,6 @@
         }
         let trainCount = Math.floor((total * 2) / 3);
         trainCount = Math.max(1, Math.min(total - 1, trainCount));
-        const testCount = total - trainCount;
         const train = {
             sequences: sequences.slice(0, trainCount),
             labels: labels.slice(0, trainCount),
@@ -258,35 +304,48 @@
     function computeTradeOutcomes(predictions, labels, meta) {
         const trades = [];
         let wins = 0;
-        let totalPredicted = 0;
+        let executed = 0;
         predictions.forEach((probability, index) => {
-            const predictedPositive = probability >= PREDICTION_THRESHOLD;
-            if (!predictedPositive) return;
-            totalPredicted += 1;
-            const label = labels[index] === 1;
-            if (label) wins += 1;
-            const today = meta[index].today;
-            const tomorrow = meta[index].tomorrow;
-            const buyPrice = today.close;
-            const sellPrice = tomorrow.close;
+            if (probability < PREDICTION_THRESHOLD) return;
+            const metaItem = meta[index];
+            if (!metaItem || !metaItem.today || !metaItem.tomorrow) return;
+            const buyPrice = Number(metaItem.today.close);
+            const sellPrice = Number(metaItem.tomorrow.close);
+            if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice)) return;
+            const rangeHigh = Number(metaItem.tomorrow.high);
+            const rangeLow = Number(metaItem.tomorrow.low);
+            const openPrice = Number(metaItem.tomorrow.open);
+            let filled = false;
+            if (Number.isFinite(rangeHigh) && Number.isFinite(rangeLow)) {
+                filled = rangeLow <= buyPrice && buyPrice <= rangeHigh;
+            } else if (Number.isFinite(openPrice)) {
+                const maxPrice = Math.max(openPrice, sellPrice);
+                const minPrice = Math.min(openPrice, sellPrice);
+                filled = buyPrice >= minPrice && buyPrice <= maxPrice;
+            }
+            if (!filled) return;
+            executed += 1;
+            const actualWin = labels[index] === 1;
+            if (actualWin) wins += 1;
             const priceDiff = sellPrice - buyPrice;
-            const returnPct = Number.isFinite(buyPrice) && buyPrice !== 0 ? priceDiff / buyPrice : 0;
+            const returnPct = buyPrice !== 0 ? priceDiff / buyPrice : 0;
             trades.push({
-                date: today.date,
+                date: metaItem.today.date,
+                sellDate: metaItem.tomorrow.date,
                 buyPrice,
                 sellPrice,
                 priceDiff,
                 returnPct,
                 probability,
-                actualWin: label,
+                actualWin,
             });
         });
-        const winRate = totalPredicted > 0 ? wins / totalPredicted : 0;
-        return { trades, winRate, totalPredicted };
+        const winRate = executed > 0 ? wins / executed : 0;
+        return { trades, winRate, executed };
     }
 
     function computeKelly(trades) {
-        if (trades.length === 0) {
+        if (!Array.isArray(trades) || trades.length === 0) {
             return {
                 fraction: 0,
                 winProbability: 0,
@@ -304,9 +363,10 @@
             : 0;
         const winProbability = winning.length / trades.length;
         const b = avgLoss > 0 ? avgGain / avgLoss : null;
-        const fraction = b && Number.isFinite(b)
-            ? Math.max(0, Math.min(1, winProbability - (1 - winProbability) / b))
+        const rawFraction = b && Number.isFinite(b)
+            ? winProbability - (1 - winProbability) / b
             : 0;
+        const fraction = Math.max(0, Math.min(1, rawFraction));
         return {
             fraction,
             winProbability,
@@ -315,11 +375,22 @@
         };
     }
 
-    function simulateKellyTrades(trades, initialCapital, fraction) {
+    function simulateTrades(trades, initialCapital, options) {
+        const { mode, fraction = 0 } = options;
+        if (!Array.isArray(trades) || trades.length === 0 || !Number.isFinite(initialCapital) || initialCapital <= 0) {
+            return {
+                results: [],
+                totalReturn: 0,
+                averageProfit: 0,
+                finalCapital: initialCapital || 0,
+            };
+        }
+        const sortedTrades = trades.slice().sort((a, b) => new Date(a.sellDate) - new Date(b.sellDate));
         const results = [];
         let capital = initialCapital;
-        trades.forEach((trade) => {
-            const invest = capital * fraction;
+        sortedTrades.forEach((trade) => {
+            const positionFraction = mode === CAPITAL_MODES.KELLY ? fraction : 1;
+            const invest = capital * positionFraction;
             const profit = invest * trade.returnPct;
             capital += profit;
             results.push({
@@ -330,8 +401,8 @@
             });
         });
         const totalReturn = initialCapital > 0 ? (capital - initialCapital) / initialCapital : 0;
-        const averageProfit = trades.length > 0
-            ? results.reduce((sum, trade) => sum + trade.profit, 0) / trades.length
+        const averageProfit = results.length > 0
+            ? results.reduce((sum, trade) => sum + trade.profit, 0) / results.length
             : 0;
         return {
             results,
@@ -346,13 +417,14 @@
         if (!Array.isArray(trades) || trades.length === 0) {
             state.elements.tradesBody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="px-3 py-4 text-center text-xs">模型於測試集未產生符合條件的交易。</td>
+                    <td colspan="9" class="px-3 py-4 text-center text-xs">模型於測試集未產生符合條件且能成交的交易。</td>
                 </tr>`;
             return;
         }
         const rows = trades.map((trade) => `
             <tr>
                 <td class="px-3 py-2 text-left">${trade.date}</td>
+                <td class="px-3 py-2 text-left">${trade.sellDate || '-'}</td>
                 <td class="px-3 py-2 text-right">${formatCurrency(trade.buyPrice)}</td>
                 <td class="px-3 py-2 text-right">${formatCurrency(trade.sellPrice)}</td>
                 <td class="px-3 py-2 text-right">${formatCurrency(trade.priceDiff)}</td>
@@ -372,6 +444,183 @@
         return 100000;
     }
 
+    function buildEquityCurves(meta, initialCapital, simulations) {
+        if (!Array.isArray(meta) || meta.length === 0 || !Number.isFinite(initialCapital) || initialCapital <= 0) {
+            return null;
+        }
+        const priceByDate = new Map();
+        meta.forEach((entry) => {
+            if (entry.today?.date && Number.isFinite(entry.today.close)) {
+                priceByDate.set(entry.today.date, Number(entry.today.close));
+            }
+            if (entry.tomorrow?.date && Number.isFinite(entry.tomorrow.close)) {
+                priceByDate.set(entry.tomorrow.date, Number(entry.tomorrow.close));
+            }
+        });
+        const sortedDates = Array.from(priceByDate.keys()).sort((a, b) => new Date(a) - new Date(b));
+        if (sortedDates.length === 0) return null;
+        const startPrice = priceByDate.get(sortedDates[0]);
+        const safeStartPrice = Number.isFinite(startPrice) && startPrice !== 0 ? startPrice : null;
+        const buyHold = sortedDates.map((date) => {
+            const price = priceByDate.get(date);
+            const ratio = safeStartPrice ? price / safeStartPrice : 1;
+            return {
+                date,
+                capital: initialCapital * ratio,
+            };
+        });
+
+        const buildFromSimulation = (simulation) => {
+            if (!simulation || !Array.isArray(simulation.results)) {
+                return buyHold.map(({ date }) => ({ date, capital: initialCapital }));
+            }
+            const capitalByDate = new Map();
+            simulation.results.forEach((trade) => {
+                if (trade.sellDate) {
+                    capitalByDate.set(trade.sellDate, trade.capitalAfter);
+                }
+            });
+            let currentCapital = initialCapital;
+            return sortedDates.map((date) => {
+                if (capitalByDate.has(date)) {
+                    currentCapital = capitalByDate.get(date);
+                }
+                return {
+                    date,
+                    capital: currentCapital,
+                };
+            });
+        };
+
+        return {
+            buyHold,
+            kelly: buildFromSimulation(simulations[CAPITAL_MODES.KELLY]),
+            fixed: buildFromSimulation(simulations[CAPITAL_MODES.FIXED]),
+        };
+    }
+
+    function renderEquityChart(curves, activeMode) {
+        if (!curves) {
+            destroyChart();
+            return;
+        }
+        const canvas = document.getElementById('aiPredictEquityChart');
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+        const labels = curves.buyHold.map((point) => point.date);
+        const baseValue = state.initialCapital > 0 ? state.initialCapital : 1;
+        const toPercentSeries = (series) => series.map((point) => {
+            if (!Number.isFinite(point.capital)) return 0;
+            return ((point.capital / baseValue) - 1) * 100;
+        });
+        const datasets = [
+            {
+                key: CAPITAL_MODES.KELLY,
+                label: '凱利資金策略',
+                borderColor: '#0ea5a4',
+                backgroundColor: '#0ea5a4',
+                data: toPercentSeries(curves.kelly),
+            },
+            {
+                key: CAPITAL_MODES.FIXED,
+                label: '固定全額策略',
+                borderColor: '#f59e0b',
+                backgroundColor: '#f59e0b',
+                data: toPercentSeries(curves.fixed),
+            },
+            {
+                key: 'buyHold',
+                label: '買入持有',
+                borderColor: '#6366f1',
+                backgroundColor: '#6366f1',
+                data: toPercentSeries(curves.buyHold),
+            },
+        ];
+        destroyChart();
+        const ctx = canvas.getContext('2d');
+        state.equityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: datasets.map((dataset) => ({
+                    label: dataset.label,
+                    data: dataset.data,
+                    borderColor: dataset.borderColor,
+                    backgroundColor: dataset.backgroundColor,
+                    borderWidth: dataset.key === activeMode ? 3 : 1.5,
+                    borderDash: dataset.key === activeMode || dataset.key === 'buyHold' ? [] : [6, 4],
+                    tension: 0.25,
+                    pointRadius: 0,
+                })),
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 8,
+                            color: 'var(--muted-foreground)',
+                        },
+                        grid: {
+                            color: 'rgba(148, 163, 184, 0.15)',
+                        },
+                    },
+                    y: {
+                        ticks: {
+                            callback: (value) => `${Number(value).toFixed(1)}%`,
+                            color: 'var(--muted-foreground)',
+                        },
+                        grid: {
+                            color: 'rgba(148, 163, 184, 0.15)',
+                        },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: 'var(--muted-foreground)',
+                        },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => {
+                                const value = Number(context.parsed.y);
+                                return `${context.dataset.label}: ${formatPercentDisplay(value)}`;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function applySimulationMode(mode) {
+        const selectedMode = mode === CAPITAL_MODES.FIXED ? CAPITAL_MODES.FIXED : CAPITAL_MODES.KELLY;
+        state.currentMode = selectedMode;
+        const simulation = state.simulations[selectedMode];
+        if (!simulation) {
+            renderTrades([]);
+            setMetric('averageProfit', '-');
+            setMetric('totalReturn', '-');
+            setMetric('tradeCount', '0');
+            setMetric('kellyFraction', selectedMode === CAPITAL_MODES.KELLY ? formatPercent(state.kellyFraction) : '不適用');
+            return;
+        }
+        setMetric('averageProfit', simulation.results.length > 0 ? formatCurrency(simulation.averageProfit) : '-');
+        setMetric('totalReturn', formatPercent(simulation.totalReturn));
+        setMetric('tradeCount', simulation.results.length.toString());
+        if (selectedMode === CAPITAL_MODES.KELLY) {
+            setMetric('kellyFraction', formatPercent(state.kellyFraction));
+        } else {
+            setMetric('kellyFraction', '不適用');
+        }
+        state.trades = simulation.results;
+        renderTrades(simulation.results);
+        renderEquityChart(state.equityCurves, selectedMode);
+    }
+
     function exportCsv() {
         if (!Array.isArray(state.trades) || state.trades.length === 0) {
             setStatus('目前沒有可匯出的 AI 預測交易。', 'warning');
@@ -379,17 +628,19 @@
         }
         const headers = [
             '買進日期',
+            '賣出日期',
             '買進價',
-            '隔日收盤價',
+            '賣出價',
             '價格差',
-            '報酬率',
-            '預測機率',
+            '報酬率(%)',
+            '預測機率(%)',
             '投入資金',
             '損益',
-            '是否達成 +2 元',
+            '預測是否正確',
         ];
         const rows = state.trades.map((trade) => [
             trade.date,
+            trade.sellDate || '',
             trade.buyPrice.toFixed(2),
             trade.sellPrice.toFixed(2),
             trade.priceDiff.toFixed(2),
@@ -451,7 +702,9 @@
                 callbacks: {
                     onEpochEnd: async (epoch, logs) => {
                         const loss = formatNumber(logs?.loss, 4);
-                        const acc = Number.isFinite(logs?.acc) ? formatPercent(logs.acc) : (Number.isFinite(logs?.accuracy) ? formatPercent(logs.accuracy) : '');
+                        const acc = Number.isFinite(logs?.acc)
+                            ? formatPercent(logs.acc)
+                            : (Number.isFinite(logs?.accuracy) ? formatPercent(logs.accuracy) : '');
                         setStatus(`訓練中（${epoch + 1}/${totalEpochs}）：loss=${loss}${acc ? `，accuracy=${acc}` : ''}`, 'progress');
                         await tf.nextFrame();
                     },
@@ -486,27 +739,39 @@
             const testTrades = computeTradeOutcomes(testPredictions, split.test.labels, split.test.meta);
             const kelly = computeKelly(testTrades.trades);
             const initialCapital = getInitialCapital();
-            const simulation = simulateKellyTrades(testTrades.trades, initialCapital, kelly.fraction);
+            const kellySimulation = simulateTrades(testTrades.trades, initialCapital, {
+                mode: CAPITAL_MODES.KELLY,
+                fraction: kelly.fraction,
+            });
+            const fixedSimulation = simulateTrades(testTrades.trades, initialCapital, {
+                mode: CAPITAL_MODES.FIXED,
+                fraction: 1,
+            });
 
-            state.trades = simulation.results;
             state.kellyFraction = kelly.fraction;
             state.initialCapital = initialCapital;
+            state.tradeCandidates = testTrades.trades;
+            state.simulations = {
+                [CAPITAL_MODES.KELLY]: kellySimulation,
+                [CAPITAL_MODES.FIXED]: fixedSimulation,
+            };
+            state.equityCurves = buildEquityCurves(split.test.meta, initialCapital, state.simulations);
 
             setMetric('trainAccuracy', formatPercent(trainAccuracy));
             setMetric('trainWinRate', formatPercent(trainTrades.winRate));
             setMetric('testAccuracy', formatPercent(testAccuracy));
             setMetric('testWinRate', formatPercent(testTrades.winRate));
-            setMetric('kellyFraction', formatPercent(kelly.fraction));
-            setMetric('averageProfit', simulation.results.length > 0 ? formatCurrency(simulation.averageProfit) : '-');
-            setMetric('totalReturn', formatPercent(simulation.totalReturn));
-            setMetric('tradeCount', simulation.results.length.toString());
 
-            renderTrades(simulation.results);
+            const selectedMode = state.elements.capitalMode?.value === CAPITAL_MODES.FIXED
+                ? CAPITAL_MODES.FIXED
+                : CAPITAL_MODES.KELLY;
+            state.elements.capitalMode.value = selectedMode;
+            applySimulationMode(selectedMode);
 
-            if (simulation.results.length === 0) {
-                setStatus('模型於測試集未觸發任何符合 2 元漲幅的做多交易。', 'warning');
+            if (!state.tradeCandidates.length) {
+                setStatus('模型於測試集未找到符合條件且能成交的做多機會。', 'warning');
             } else {
-                const summary = `AI 預測完成，測試集共觸發 ${simulation.results.length} 筆交易，凱利建議投入 ${formatPercent(kelly.fraction)}。`;
+                const summary = `AI 預測完成，測試集共成交 ${state.tradeCandidates.length} 筆交易，凱利建議投入 ${formatPercent(state.kellyFraction)}。`;
                 setStatus(summary, 'success');
             }
         } catch (error) {
@@ -522,6 +787,7 @@
         state.elements.runBtn = getElement('aiPredictRunBtn');
         state.elements.status = getElement('aiPredictStatus');
         state.elements.version = getElement('aiPredictVersionLabel');
+        state.elements.capitalMode = getElement('aiCapitalMode');
         state.elements.metrics.trainAccuracy = getElement('aiTrainAccuracy');
         state.elements.metrics.trainWinRate = getElement('aiTrainWinRate');
         state.elements.metrics.testAccuracy = getElement('aiTestAccuracy');
@@ -544,6 +810,11 @@
         state.elements.runBtn.addEventListener('click', runPrediction);
         if (state.elements.exportBtn) {
             state.elements.exportBtn.addEventListener('click', exportCsv);
+        }
+        if (state.elements.capitalMode) {
+            state.elements.capitalMode.addEventListener('change', (event) => {
+                applySimulationMode(event.target.value);
+            });
         }
     }
 

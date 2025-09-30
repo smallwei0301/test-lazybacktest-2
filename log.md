@@ -770,3 +770,9 @@
 - **Diagnostics**: 確認未執行回測時會顯示提示、資料不足時提示補抓，並於測試集觸發交易後更新指標卡與交易表。
 - **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
 
+## 2025-12-13 — Patch LB-AI-PREDICT-20250923A
+- **Issue recap**: 先前 LSTM 模組仍以「隔日+2 元」判斷買點，忽略實際漲跌方向，且未檢查隔日高低點導致測試投入金額為 0；同時欠缺凱利／非凱利資金配置切換與買入持有曲線對照。
+- **Fix**: 更新 `js/ai-predict.js` 為版本碼 `LB-AI-PREDICT-20250923A`，改用隔日收盤是否高於今日收盤的二元分類，新增隔日高低點觸價檢查、凱利與全額投入雙模模擬、資金曲線圖與 CSV 欄位調整；`index.html` 新增資金模式選單、策略曲線卡片與操作說明修正。
+- **Diagnostics**: 本地執行回測後切換至 AI 頁籤，驗證未觸及掛單價時不產生交易、切換資金模式時表格與資金曲線即時更新，並確認 UI 顯示「策略 vs. 買入持有」圖表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/ai-predict.js'].forEach((file)=>{new Function(fs.readFileSync(file,'utf8'));});console.log('ai predictor script ok');NODE`
+

@@ -2077,16 +2077,17 @@
                                     </div>
                                     <div class="card-content space-y-4 text-sm" style="color: var(--muted-foreground);">
                                         <p class="leading-relaxed">
-                                            參考近期 LSTM 於金融市場預測的研究（Fischer &amp; Krauss, 2018；Nelson et al., 2017；Hoseinzade &amp; Haratizadeh, 2019），我們設計一個以台股日收盤價為核心的序列模型，透過 TensorFlow.js 在瀏覽器端即時訓練，判斷隔日收盤價是否相對今日上漲至少 2 元。
+                                            參考近期 LSTM 於金融市場預測的研究（Fischer &amp; Krauss, 2018；Nelson et al., 2017；Hoseinzade &amp; Haratizadeh, 2019），我們設計一個以台股日收盤價為核心的序列模型，透過 TensorFlow.js 在瀏覽器端即時訓練，判斷隔日收盤價相較今日是上漲或下跌。
                                         </p>
                                         <p class="leading-relaxed">
-                                            模型將回測區間的有效交易資料依時間切分為 2:1 的訓練／測試集合，並以凱利公式（Kelly, 1956）計算每次多單進場應投入的資金比例，僅在預測隔日上漲時於今日收盤價買入，隔日收盤價全數出清以計算實測績效。
+                                            模型將回測區間的有效交易資料依時間切分為 2:1 的訓練／測試集合，並以凱利公式（Kelly, 1956）計算每次多單進場應投入的資金比例，若預測隔日會上漲，於今日收盤價掛單，隔日確認高低點觸及後才算買入，並在隔日收盤價出場統計績效。
                                         </p>
                                         <div class="border border-dashed rounded-lg p-4" style="border-color: var(--border);">
                                             <h4 class="font-semibold text-foreground text-sm mb-2">操作說明</h4>
                                             <ul class="space-y-1 text-xs">
                                                 <li>• 先執行一般回測取得價格資料，再切換到「AI 預測」分頁。</li>
-                                                <li>• 點擊下方按鈕即會在本機訓練 LSTM，計算預測勝率、凱利資金與模擬報酬。</li>
+                                                <li>• 模型僅做隔日漲跌（二擇一）預測，掛單價為今日收盤，隔日高低點需涵蓋該價位才算成功買入。</li>
+                                                <li>• 可切換是否套用凱利公式資金配置，同步比較策略曲線與原始買入持有。</li>
                                                 <li>• 若資料不足或缺乏連續收盤價，系統會提示補齊回測區間。</li>
                                             </ul>
                                         </div>
@@ -2096,6 +2097,13 @@
                                                 執行 AI 預測
                                             </button>
                                             <span id="aiPredictStatus" class="text-xs" style="color: var(--muted-foreground);" aria-live="polite"></span>
+                                        </div>
+                                        <div class="flex flex-col sm:flex-row sm:items-center gap-3 text-xs" style="color: var(--muted-foreground);">
+                                            <label for="aiCapitalMode" class="font-medium">資金配置模式</label>
+                                            <select id="aiCapitalMode" class="border rounded px-3 py-2 text-sm" style="border-color: var(--border); color: var(--foreground); background-color: var(--background);">
+                                                <option value="kelly">套用凱利公式（動態部位）</option>
+                                                <option value="fixed">不套用凱利公式（全額投入）</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </div>
@@ -2143,6 +2151,18 @@
                                 </div>
 
                                 <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title">策略 vs. 買入持有資金曲線</h3>
+                                    </div>
+                                    <div class="card-content space-y-3" style="color: var(--muted-foreground);">
+                                        <div class="h-64 sm:h-72">
+                                            <canvas id="aiPredictEquityChart"></canvas>
+                                        </div>
+                                        <p class="text-xs leading-relaxed">曲線以初始本金為基準，顯示凱利部位、全額投入與買入持有在測試集期間的累積報酬。</p>
+                                    </div>
+                                </div>
+
+                                <div class="card shadow-lg">
                                     <div class="card-header flex items-center justify-between">
                                         <h3 class="card-title">交易模擬結果（僅做多）</h3>
                                         <button id="aiPredictExportBtn" class="text-xs px-2 py-1 rounded border" style="border-color: var(--border); color: var(--muted-foreground);" type="button">匯出 CSV</button>
@@ -2152,8 +2172,9 @@
                                             <thead style="background-color: var(--muted); color: var(--foreground);">
                                                 <tr>
                                                     <th class="px-3 py-2 text-left font-semibold">買進日期</th>
+                                                    <th class="px-3 py-2 text-left font-semibold">賣出日期</th>
                                                     <th class="px-3 py-2 text-right font-semibold">買進價</th>
-                                                    <th class="px-3 py-2 text-right font-semibold">隔日收盤價</th>
+                                                    <th class="px-3 py-2 text-right font-semibold">賣出價</th>
                                                     <th class="px-3 py-2 text-right font-semibold">價格差</th>
                                                     <th class="px-3 py-2 text-right font-semibold">報酬率</th>
                                                     <th class="px-3 py-2 text-right font-semibold">預測機率</th>
@@ -2163,7 +2184,7 @@
                                             </thead>
                                             <tbody id="aiPredictTradesBody" class="divide-y" style="border-color: var(--border); color: var(--muted-foreground);">
                                                 <tr>
-                                                    <td colspan="8" class="px-3 py-4 text-center text-xs">尚未執行 AI 預測或無符合條件的交易。</td>
+                                                    <td colspan="9" class="px-3 py-4 text-center text-xs">尚未執行 AI 預測或無符合條件的交易。</td>
                                                 </tr>
                                             </tbody>
                                         </table>
