@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ai-prediction"
+                                            >
+                                                <i data-lucide="bot" class="lucide-sm inline mr-1"></i>AI預測
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2057,6 +2064,135 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden" id="ai-prediction-tab">
+                                <div class="space-y-6">
+                                    <div class="card" data-ai-prediction-version="LB-AI-LSTM-20251120A">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">AI 預測 — LSTM × 凱利資金管理</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                參考 Fischer &amp; Krauss (2018) 對台股量化可行性的序列模型，以及 Sirignano &amp; Cont (2019)
+                                                強調的非線性市場結構，本模組使用長短期記憶網路（LSTM）分析今日至過去多日的收盤價變化，
+                                                判斷隔日收盤價是否有機會比今日高出 2 元以上。結果僅供量化研究，實際交易請再自行審慎評估。
+                                            </p>
+                                        </div>
+                                        <div class="card-content text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                            <p>流程包含：建立時間序列視窗 → 訓練集與測試集依 2:1 比例分割 → 使用 LSTM 分類器估計隔日漲幅達 2 元的機率 → 以凱利公式決定資金權重 → 依實際隔日收盤價回測。</p>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">模型參數</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">
+                                                預設視窗 20 日、閾值 0.55 來降低過度交易的風險；可依策略彈性調整。
+                                            </p>
+                                        </div>
+                                        <div class="card-content space-y-4">
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" style="color: var(--foreground);">
+                                                <label class="flex flex-col gap-1">
+                                                    視窗長度（日）
+                                                    <input id="ai-window-size" type="number" min="10" max="90" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數文獻以 15~30 日捕捉短期動量。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1">
+                                                    訓練週期（Epoch）
+                                                    <input id="ai-training-epochs" type="number" min="10" max="200" step="5" value="60" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">愈多 Epoch 收斂愈充分，但訓練時間亦增加。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1">
+                                                    進場閾值（預測機率）
+                                                    <input id="ai-entry-threshold" type="number" min="0.5" max="0.9" step="0.01" value="0.55" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">高於閾值才執行買入，避免低信心訊號。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1">
+                                                    初始資金（依主回測單位）
+                                                    <input id="ai-initial-capital" type="number" min="10000" step="1000" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若留空，系統會沿用左側主回測設定。</span>
+                                                </label>
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-3">
+                                                <button id="ai-run-prediction" class="btn-primary px-5 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
+                                                    <i data-lucide="cpu" class="lucide w-4 h-4"></i>
+                                                    訓練並回測
+                                                </button>
+                                                <span id="ai-status" class="text-xs" style="color: var(--muted-foreground);">等待資料...</span>
+                                            </div>
+                                            <div id="ai-progress-bar" class="w-full h-2 rounded-full bg-muted hidden" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
+                                                <div id="ai-progress-indicator" class="h-2 rounded-full" style="background-color: var(--primary); width: 0%;"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">模型摘要</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">訓練集與測試集依時間序列切割，勝率與報酬皆以預測為依據，不含交易成本。</p>
+                                        </div>
+                                        <div class="card-content">
+                                            <dl class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 text-xs" style="color: var(--foreground);">
+                                                <div>
+                                                    <dt class="font-medium">訓練樣本數</dt>
+                                                    <dd id="ai-train-samples" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                                <div>
+                                                    <dt class="font-medium">測試樣本數</dt>
+                                                    <dd id="ai-test-samples" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                                <div>
+                                                    <dt class="font-medium">訓練進場勝率</dt>
+                                                    <dd id="ai-train-winrate" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                                <div>
+                                                    <dt class="font-medium">測試預測準確率</dt>
+                                                    <dd id="ai-test-accuracy" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                                <div>
+                                                    <dt class="font-medium">凱利建議投入比</dt>
+                                                    <dd id="ai-kelly-ratio" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                                <div>
+                                                    <dt class="font-medium">平均單筆獲利</dt>
+                                                    <dd id="ai-average-profit" class="text-lg font-semibold">--</dd>
+                                                </div>
+                                            </dl>
+                                            <div class="mt-4 text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                <p id="ai-summary-note">尚未產生模型結果。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">交易模擬</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">僅在模型預測隔日漲幅 ≥ 2 元且機率超過閾值時進場，採隔日收盤出場。</p>
+                                        </div>
+                                        <div class="card-content space-y-3">
+                                            <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--foreground);">
+                                                <span>總投入次數：<strong id="ai-trade-count">0</strong></span>
+                                                <span>最終資金：<strong id="ai-final-capital">--</strong></span>
+                                                <span>總報酬率：<strong id="ai-total-return">--</strong></span>
+                                                <span>測試勝率：<strong id="ai-test-winrate">--</strong></span>
+                                            </div>
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                    <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                        <tr>
+                                                            <th class="px-3 py-2 text-left font-semibold">進場日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">出場日</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">進場價</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">出場價</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">投入資金</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">持股數</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">預測機率</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">凱利比重</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">單筆損益</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="ai-trade-table" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                </table>
+                                            </div>
+                                            <p id="ai-trade-empty" class="text-[11px]" style="color: var(--muted-foreground);">尚未有模擬交易資料。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2119,7 +2255,7 @@
             </footer>
         </div>
     </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
@@ -2127,6 +2263,7 @@
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
+    <script src="js/ai-prediction.js"></script>
     
     <script>
         // Initialize Lucide icons
