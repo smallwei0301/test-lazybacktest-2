@@ -57,7 +57,7 @@ let batchWorkerStatus = {
 };
 
 // --- 策略穩健度 (OFI) 版本與權重設定 ---
-const BATCH_OFI_VERSION = 'LB-OFI-20240701B';
+const BATCH_OFI_VERSION = 'LB-OFI-20240705A';
 const OFI_DEFAULT_ALPHA = 0.1;
 const OFI_DEFAULT_BLOCKS = 10;
 const OFI_MAX_SPLITS = 400; // 若超過此值則抽樣，避免在行動裝置上卡頓
@@ -72,6 +72,149 @@ const OFI_COMPONENT_WEIGHTS = {
     dsr: 0.10
 };
 
+const OFI_DOCUMENTATION_ROWS = [
+    {
+        category: '核心構面',
+        label: '條件式過擬合率',
+        symbol: 'cPBO_s',
+        definition: 'Pr[q^{OOS}_{s,t} < 0.5 | q^{IS}_{s,t} ≥ 1-α]',
+        normalization: 'R^{cPBO}_s = 1 - cPBO_s；components.rCPBO 儲存正向得分',
+        reference: 'Bailey & López de Prado (2014) — Probability of Backtest Overfitting',
+        field: 'ofi.components.cPBO、ofi.components.rCPBO、ofi.components.qualifies、ofi.components.failures',
+        notes: 'CSCV α 預設 0.10，可透過 updateOFIMetrics options 調整'
+    },
+    {
+        category: '核心構面',
+        label: '樣本外水準',
+        symbol: '\u03C3^{OOS}_s (\u007E q^{OOS}_s)',
+        definition: '\u007E q^{OOS}_s = median_t q^{OOS}_{s,t}',
+        normalization: 'R^{Level}_s = \u007E q^{OOS}_s',
+        reference: 'CSCV ranking distribution',
+        field: 'ofi.components.medianOOSQuantile',
+        notes: '值域 0~1，越接近 1 表示樣本外排名越前段'
+    },
+    {
+        category: '核心構面',
+        label: '樣本外穩定度',
+        symbol: 'IQR^{OOS}_s',
+        definition: 'IQR^{OOS}_s = Q3(q^{OOS}_{s,t}) - Q1(q^{OOS}_{s,t})',
+        normalization: 'R^{Stab}_s = 1 - normIQR，normIQR = IQR^{OOS}_s / max(0.05, max_s IQR^{OOS}_s)',
+        reference: 'CSCV dispersion',
+        field: 'ofi.components.iqrOOSQuantile、ofi.components.stability',
+        notes: '將分母下限設為 0.05 以避免全零樣本導致除以 0'
+    },
+    {
+        category: '核心構面',
+        label: '參數島穩健度',
+        symbol: 'IslandScore_s',
+        definition: '基於參數空間連通圖的島嶼面積/分散/邊緣懲罰正規化',
+        normalization: 'R^{Island}_s = IslandScore_s \u2208 [0,1]',
+        reference: '工程實務 — 參數島檢查',
+        field: 'ofi.components.island',
+        notes: '使用參數向量距離第 75 百分位作為連線閾值，以聚類近鄰組合'
+    },
+    {
+        category: '核心構面',
+        label: 'Deflated Sharpe Ratio',
+        symbol: 'DSR_s',
+        definition: 'DSR_s = Φ((SR_s - SR_{min}) / σ_{SR})',
+        normalization: 'R^{DSR}_s = clamp01(DSR_s)',
+        reference: 'Bailey & López de Prado (2014) — Deflated Sharpe Ratio',
+        field: 'ofi.components.dsr',
+        notes: '以每日報酬估計偏態與峰度後修正夏普顯著性'
+    },
+    {
+        category: '核心構面',
+        label: '整體 OFI 分數',
+        symbol: 'OFI_s',
+        definition: 'OFI_s = 100 · ∑ w_i R_i',
+        normalization: '預設權重 (0.35, 0.20, 0.15, 0.20, 0.10)',
+        reference: '條件 PBO + OOS 統計 + IslandScore + DSR 綜合指標',
+        field: 'ofiScore、ofi.score、ofi.version',
+        notes: '版本碼 BATCH_OFI_VERSION 會寫入 ofi.version'
+    },
+    {
+        category: '補強檢定',
+        label: 'SPA p 值',
+        symbol: 'p_{SPA,s}',
+        definition: 'p_{SPA,s} = Pr^{*}[T^{*}_s ≥ T_s], T_s = max(0, √n·\u0304d_s/σ_s)',
+        normalization: '通過條件：p_{SPA,s} ≤ α_{SPA}',
+        reference: 'Hansen (2005) — Superior Predictive Ability test',
+        field: 'ofi.spaPValue、ofi.components.spaStatistic、ofi.spaPassed',
+        notes: '前端以平穩自助法抽樣 300 次'
+    },
+    {
+        category: '補強檢定',
+        label: 'MCS p 值',
+        symbol: 'p_{MCS,s}',
+        definition: 'p_{MCS,s} = Pr^{*}[Δ^{*}_s ≥ Δ^{obs}_s], Δ_s = max_j(\u0304r_j - \u0304r_s)',
+        normalization: '納入集合條件：p_{MCS,s} ≥ α_{SPA}',
+        reference: 'Hansen et al. (2011) — Model Confidence Set',
+        field: 'ofi.mcsPValue、ofi.components.mcsDelta、ofi.mcsIncluded',
+        notes: '與 SPA 共用 300 次平穩自助法抽樣'
+    },
+    {
+        category: '參數',
+        label: 'CSCV IS 門檻',
+        symbol: 'α',
+        definition: '進入樣本內前 α 分位視為可能被選中',
+        normalization: '預設 α = 0.10，可依需求調整',
+        reference: 'Bailey & López de Prado (2014)',
+        field: 'ofi.components.alpha',
+        notes: '可透過 updateOFIMetrics({ alpha }) 覆寫'
+    },
+    {
+        category: '參數',
+        label: 'CSCV 切塊數',
+        symbol: 'S',
+        definition: 'decideCSCVBlockCount(minLength, preferred)',
+        normalization: '偶數切塊且每塊至少 8 筆資料',
+        reference: 'CSCV procedure',
+        field: 'ofi.components.blockCount',
+        notes: '預設 preferred = 10，不足時改採 12/8/6 等候選'
+    },
+    {
+        category: '參數',
+        label: '平穩自助法樣本數',
+        symbol: 'B',
+        definition: 'OFI_SPA_BOOTSTRAP_SAMPLES = 300 (前端)',
+        normalization: '樣本足夠時保證 ≥ 300 次抽樣',
+        reference: 'Politis & Romano (1994) stationary bootstrap',
+        field: 'OFI_SPA_BOOTSTRAP_SAMPLES、ofi.components.sampleSize',
+        notes: '可於 updateOFIMetrics({ bootstrapSamples }) 調整'
+    },
+    {
+        category: '參數',
+        label: '平均區塊長度',
+        symbol: '\u2113',
+        definition: 'OFI_SPA_AVG_BLOCK_LENGTH = 10',
+        normalization: '抽樣時以 1-1/\u2113 為續接機率',
+        reference: 'Politis & Romano (1994)',
+        field: 'OFI_SPA_AVG_BLOCK_LENGTH',
+        notes: '可於 updateOFIMetrics({ avgBlockLength }) 覆寫'
+    },
+    {
+        category: '參數',
+        label: '抽樣切分上限',
+        symbol: 'maxSplits',
+        definition: 'OFI_MAX_SPLITS = 400',
+        normalization: '超出則隨機抽樣避免前端當機',
+        reference: '工程落地限制',
+        field: 'OFI_MAX_SPLITS',
+        notes: '可透過 updateOFIMetrics({ maxSplits }) 調整'
+    },
+    {
+        category: '參數',
+        label: '構面權重',
+        symbol: 'w',
+        definition: 'w = (w_{cPBO}, w_{Level}, w_{Stab}, w_{Island}, w_{DSR})',
+        normalization: 'OFI_COMPONENT_WEIGHTS = {0.35, 0.20, 0.15, 0.20, 0.10}',
+        reference: '需求規格 — 重視 PBO、島穩健度',
+        field: 'OFI_COMPONENT_WEIGHTS',
+        notes: '可傳入 updateOFIMetrics({ weights }) 客製'
+    }
+];
+
 // --- OFI 計算公用函式 ---
 function clamp01(value) {
     if (!Number.isFinite(value)) return 0;
@@ -82,6 +225,218 @@ function clamp01(value) {
 
 function safeArray(arrayLike) {
     return Array.isArray(arrayLike) ? arrayLike : [];
+}
+
+function formatCsvValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'boolean') {
+        return value ? 'TRUE' : 'FALSE';
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return value.toString();
+        }
+        if (value === 0) {
+            return '0';
+        }
+        const absValue = Math.abs(value);
+        const precision = absValue >= 1 ? 4 : 6;
+        return value.toFixed(precision).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+    }
+    return String(value);
+}
+
+function downloadCsvFile(filename, rows) {
+    if (typeof document === 'undefined' || !Array.isArray(rows) || rows.length === 0) {
+        console.warn('[Batch Optimization][OFI] 無有效資料可供匯出');
+        return;
+    }
+    const csvContent = rows
+        .map((row) =>
+            row
+                .map((value) => {
+                    const text = value === null || value === undefined ? '' : String(value);
+                    const escaped = text.replace(/"/g, '""');
+                    return `"${escaped}"`;
+                })
+                .join(',')
+        )
+        .join('\r\n');
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function setOfiVersionLabels() {
+    if (typeof document === 'undefined') return;
+    const targets = document.querySelectorAll('[data-ofi-version-label]');
+    targets.forEach((element) => {
+        element.textContent = BATCH_OFI_VERSION;
+    });
+}
+
+function renderOfiDefinitionTable() {
+    if (typeof document === 'undefined') return;
+    const tbody = document.getElementById('ofi-definition-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const formulaColumns = new Set([2, 3]);
+    OFI_DOCUMENTATION_ROWS.forEach((entry) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t';
+        tr.style.borderColor = 'var(--border)';
+        const cells = [
+            entry.category,
+            entry.symbol ? `${entry.label} (${entry.symbol})` : entry.label,
+            entry.definition,
+            entry.normalization,
+            entry.notes ? `${entry.reference}；${entry.notes}` : entry.reference,
+            entry.field
+        ];
+        tbody.appendChild(tr);
+        cells.forEach((value, index) => {
+            const td = document.createElement('td');
+            td.className = 'px-3 py-2 text-xs';
+            td.style.color = 'var(--foreground)';
+            td.style.wordBreak = 'break-word';
+            td.style.verticalAlign = 'top';
+            td.textContent = value || '';
+            if (formulaColumns.has(index)) {
+                td.classList.add('font-mono');
+            }
+            if (index === 0) {
+                td.style.whiteSpace = 'nowrap';
+                td.style.color = 'var(--muted-foreground)';
+            }
+            tr.appendChild(td);
+        });
+    });
+}
+
+function bindOfiDocumentationEvents() {
+    if (typeof document === 'undefined') return;
+    const definitionButton = document.getElementById('ofi-definition-download-btn');
+    if (definitionButton && !definitionButton.dataset.bound) {
+        definitionButton.addEventListener('click', downloadOfiDefinitionCsv);
+        definitionButton.dataset.bound = 'true';
+    }
+    const metricsButton = document.getElementById('ofi-metrics-download-btn');
+    if (metricsButton && !metricsButton.dataset.bound) {
+        metricsButton.addEventListener('click', downloadOfiMetricsCsv);
+        metricsButton.dataset.bound = 'true';
+    }
+}
+
+function downloadOfiDefinitionCsv() {
+    const header = ['類別', '名稱 / 符號', '公式 / 定義', '正規化 / 權重', '參考 / 備註', '對應欄位'];
+    const rows = [header];
+    OFI_DOCUMENTATION_ROWS.forEach((entry) => {
+        rows.push([
+            entry.category,
+            entry.symbol ? `${entry.label} (${entry.symbol})` : entry.label,
+            entry.definition,
+            entry.normalization,
+            entry.notes ? `${entry.reference}；${entry.notes}` : entry.reference,
+            entry.field
+        ]);
+    });
+    downloadCsvFile(`lazybacktest-ofi-definition-${BATCH_OFI_VERSION}-${Date.now()}.csv`, rows);
+}
+
+function collectOfiMetricsRows() {
+    const header = [
+        'Index',
+        'Buy Strategy',
+        'Sell Strategy',
+        'OFI Score (rounded)',
+        'OFI Score (raw)',
+        'cPBO',
+        '1 - cPBO',
+        'Level (median OOS quantile)',
+        'OOS IQR',
+        'Stability (1 - normIQR)',
+        'IslandScore',
+        'DSR',
+        'Qualifies (IS top α)',
+        'Failures (OOS < 0.5)',
+        'Alpha',
+        'CSCV Blocks',
+        'Daily Sample Size',
+        'SPA Statistic',
+        'SPA p-value',
+        'SPA Passed',
+        'MCS Δ',
+        'MCS p-value',
+        'MCS Included',
+        'SPA Alpha',
+        'Bootstrap Samples',
+        'Avg Block Length',
+        'OFI Version'
+    ];
+    const rows = [header];
+    if (!Array.isArray(batchOptimizationResults)) {
+        return rows;
+    }
+    batchOptimizationResults.forEach((result, index) => {
+        const ofi = result?.ofi;
+        if (!ofi || !ofi.components) {
+            return;
+        }
+        const components = ofi.components;
+        rows.push([
+            formatCsvValue(index + 1),
+            result?.buyStrategy || '',
+            result?.sellStrategy || '',
+            formatCsvValue(result?.ofiScore),
+            formatCsvValue(ofi.score),
+            formatCsvValue(components.cPBO),
+            formatCsvValue(components.rCPBO),
+            formatCsvValue(components.level),
+            formatCsvValue(components.iqrOOSQuantile),
+            formatCsvValue(components.stability),
+            formatCsvValue(components.island),
+            formatCsvValue(components.dsr),
+            formatCsvValue(components.qualifies),
+            formatCsvValue(components.failures),
+            formatCsvValue(components.alpha),
+            formatCsvValue(components.blockCount),
+            formatCsvValue(components.sampleSize),
+            formatCsvValue(components.spaStatistic),
+            formatCsvValue(ofi.spaPValue),
+            formatCsvValue(ofi.spaPassed),
+            formatCsvValue(components.mcsDelta),
+            formatCsvValue(ofi.mcsPValue),
+            formatCsvValue(ofi.mcsIncluded),
+            formatCsvValue(OFI_SPA_SIGNIFICANCE),
+            formatCsvValue(OFI_SPA_BOOTSTRAP_SAMPLES),
+            formatCsvValue(OFI_SPA_AVG_BLOCK_LENGTH),
+            ofi.version || BATCH_OFI_VERSION
+        ]);
+    });
+    return rows;
+}
+
+function downloadOfiMetricsCsv() {
+    const rows = collectOfiMetricsRows();
+    if (rows.length <= 1) {
+        if (typeof window !== 'undefined') {
+            window.alert('請先完成批量優化並成功計算 OFI，再匯出策略明細。');
+        }
+        return;
+    }
+    downloadCsvFile(`lazybacktest-ofi-metrics-${BATCH_OFI_VERSION}-${Date.now()}.csv`, rows);
+}
+
+function initOfiDocumentation() {
+    setOfiVersionLabels();
+    renderOfiDefinitionTable();
+    bindOfiDocumentationEvents();
 }
 
 function computeMedian(values) {
@@ -937,7 +1292,9 @@ function renderBatchWorkerStatus() {
 // 初始化批量優化功能
 function initBatchOptimization() {
     console.log('[Batch Optimization] Initializing...');
-    
+
+    initOfiDocumentation();
+
     try {
         // 檢查必要的依賴是否存在
         if (typeof strategyDescriptions === 'undefined') {

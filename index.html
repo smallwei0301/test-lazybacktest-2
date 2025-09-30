@@ -1909,8 +1909,42 @@
                                                             </table>
                                                             <div id="ofi-formula-explainer" class="mt-6 text-xs leading-relaxed space-y-3" style="color: var(--muted-foreground);">
                                                                 <details open class="space-y-3 bg-muted/30 border border-border rounded-lg p-4" style="background-color: color-mix(in srgb, var(--muted) 18%, transparent); border-color: var(--border);">
-                                                                    <summary class="font-semibold text-sm" style="color: var(--foreground); cursor: pointer;">OFI 組成公式與來源 (版本 LB-OFI-20240701B)</summary>
-                                                                    <div class="grid gap-3 md:grid-cols-2">
+                                                                    <summary class="font-semibold text-sm" style="color: var(--foreground); cursor: pointer;">OFI 組成公式與來源 (版本 <span data-ofi-version-label class="font-mono"></span>)</summary>
+                                                                    <div class="mt-3 space-y-4">
+                                                                        <div class="flex flex-wrap gap-2">
+                                                                            <button
+                                                                                id="ofi-definition-download-btn"
+                                                                                type="button"
+                                                                                class="px-3 py-1.5 text-xs font-medium rounded-md border"
+                                                                                style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                                                                            >
+                                                                                下載 OFI 定義 CSV
+                                                                            </button>
+                                                                            <button
+                                                                                id="ofi-metrics-download-btn"
+                                                                                type="button"
+                                                                                class="px-3 py-1.5 text-xs font-medium rounded-md border"
+                                                                                style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                                                                            >
+                                                                                下載策略 OFI 明細 CSV
+                                                                            </button>
+                                                                        </div>
+                                                                        <div class="overflow-x-auto border rounded-md" style="border-color: var(--border); background-color: var(--background);">
+                                                                            <table class="min-w-full text-xs" style="color: var(--foreground);">
+                                                                                <thead style="background-color: var(--muted); color: var(--foreground);">
+                                                                                    <tr>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">類別</th>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">名稱 / 符號</th>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">公式 / 定義</th>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">正規化 / 權重</th>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">參考 / 備註</th>
+                                                                                        <th class="px-3 py-2 text-left font-medium uppercase tracking-wider">對應欄位</th>
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody id="ofi-definition-table-body" class="divide-y" style="border-color: var(--border);"></tbody>
+                                                                            </table>
+                                                                        </div>
+                                                                        <div class="grid gap-3 md:grid-cols-2">
                                                                         <div class="space-y-1">
                                                                             <h6 class="font-semibold" style="color: var(--foreground);">cPBO<sub>s</sub></h6>
                                                                             <p>條件式過擬合率：<span class="font-mono">cPBO<sub>s</sub> = Pr[q<sup>OOS</sup><sub>s,t</sub> &lt; 0.5 | q<sup>IS</sup><sub>s,t</sub> ≥ 1-α]</span>，以 CSCV 切分量測在訓練期表現亮眼時落入 OOS 後段的機率。</p>
@@ -1953,6 +1987,7 @@
                                                                         </div>
                                                                     </div>
                                                                     <p class="text-[11px]">SPA/MCS 在前端採 300 次平穩自助法估計，與後端嚴謹版採相同統計量，僅差在樣本數與伺服端可增補的更高迭代次數。</p>
+                                                                </div>
                                                                 </details>
                                                             </div>
                                                         </div>
