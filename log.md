@@ -1,3 +1,43 @@
+## 2025-09-28 — Patch LB-OFI-STRATONLY-20250928A
+- **Scope**: 將批量優化 OFI 欄位改為僅顯示 Strategy 層分數，並補強 IslandScore 與文件對齊學術定義。
+- **Implementation**:
+  - `js/overfit-score.js` 調整評分模組版本、在缺乏高原時回傳 `R^{Island}=0` 與提示訊息，並將策略輸出新增 `strategyScorePercent`、`finalOfi` 等欄位供 UI 使用。
+  - `js/batch-optimization.js` 更新 OFI 欄位與 tooltip 僅呈現策略構面，維持 Flow 卡片獨立顯示，並記錄最終 OFI 於 `ofiFinalScore` 以便後續核對。
+  - `docs/ofi-metrics-breakdown.md` 對照文獻補充各 Strategy 指標公式與差異、標記 Flow/Strategy 分離的 UI 行為。
+- **Diagnostics**: 實際載入批量優化結果確認 Flow 未達標時欄位顯示「🔒」、Strategy 分數顯示 0.0~100 並附 Island 提示，Flow Banner 仍提供樣本長度與策略池建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-26 — Patch LB-OFI-LAYERED-20250926A
+- **Scope**: 重構 OFI Flow 層級，補上樣本長度與策略池診斷，並以 FlowScore 判定是否允許策略比較。
+- **Implementation**:
+  - `js/overfit-score.js` 加入 `R^{Len}`、`R^{Pool}` 與 FlowScore 判定，提供樣本長度、策略池摘要與改善建議，FlowScore < 50 時鎖定策略排序。
+  - `js/batch-optimization.js` 新增 FlowScore 橫幅、Tooltip 與排序鎖定邏輯，OFI 列顯示 Flow/Strategy 分數與 Flow 判定提醒。
+  - 更新 `docs/ofi-metrics-breakdown.md` 與 `assets/ofi-metrics-parameters.csv`，同步記錄新權重與門檻，`index.html` Modal 版本碼一併調整。
+- **Diagnostics**: 實際執行批量優化確認 FlowScore 卡片顯示樣本長度/策略池狀態、Flow 邊界時仍允許排序但附加提醒，Flow 未達標則列出淡灰鎖定列表並顯示改善建議；檢查 tooltip 與 CSV 下載內容對齊文件描述。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-24 — Patch LB-OFI-UI-20250924A
+- **Scope**: 將 OFI 指標公式表整合進批量優化結果頁面，提供即時查詢與下載。
+- **Implementation**:
+  - 批量優化卡片新增「查看 OFI 指標表」按鈕與專屬彈窗，解析 `assets/ofi-metrics-parameters.csv` 並顯示 Flow/Strategy 欄位說明。
+  - Modal 同步呈現最新 Flow 層綜合分數、PBO/SPA/MCS 子指標摘要，支援 CSV 下載與 ESC/Backdrop 關閉。
+  - `docs/ofi-metrics-breakdown.md` 更新 UI 取得方式，標記資料可直接在前端下載核對。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-24 — Patch LB-OFI-TABLE-20250924A
+- **Scope**: 補上 OFI 構面的完整參數表與 CSV，協助交叉檢查指標公式與權重。
+- **Implementation**:
+  - `docs/ofi-metrics-breakdown.md` 新增 LB-OFI-TABLE-20250924A 章節，彙整 Flow／Strategy 各子分數公式、正規化方式與權重。
+  - 建立 `assets/ofi-metrics-parameters.csv`，提供可下載的數據表格供驗證。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-23 — Patch LB-OFI-METRICS-20250923A
+- **Scope**: 新增批量優化 OFI（Overfit Indicator）評分流程與前端指標展示。
+- **Implementation**:
+  - 建立 `js/overfit-score.js` 模組，依據 CSCV、PBO、WF、IslandScore、DSR/PSR 等規格計算 Flow／Strategy 分數並輸出最終 OFI。
+  - 批量優化結果新增 OFI 欄位、排序選項與詳細 tooltip，並以快取簽章避免重複計算，UI 預設改依 OFI 排序。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-12 — Patch LB-TRADE-ENTRY-20251112A
 - **Issue recap**: 分段進場在全部出場後，`buildAggregatedLongEntry` 仍以已被清零的 `longPositionCost*` 值計算，導致交易紀錄中的買入價格被顯示為 0。
 - **Fix**: 改用每段進場快照的 `originalCost`／`originalCostWithoutFee` 與 `originalShares` 彙總平均成本，確保整併後的買入價格維持原始交易成本。
@@ -764,3 +804,27 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2025-12-08 — Patch LB-OFI-ALIGN-20250924A
+- **Issue recap**: 原版 IslandScore 未再除以所有島嶼的最大分數，且缺乏完整文件說明各子指標與規格差異，讓前端與產品難以對齊 OFI 評估。
+- **Fix**: 調整 `computeIslandScores` 以 `max S_j` 正規化島嶼得分並回傳中繼資訊，同步新增 `docs/ofi-metrics-breakdown.md` 整理 Flow/Strategy 各構面公式、差異與影響。
+- **Diagnostics**: 檢查 `result.meta.island.normalisedScore` 落在 [0,1]、最大島嶼等於 1，並交叉對照文件中的流程對照表；批量優化介面 tooltip 可看到最新分數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-OFI-FLOWCARD-20250927A
+- **Issue recap**: Flow 指標卡僅存在於執行狀態面板且結果列表缺乏子指標明細，使用者在批量優化結果區無法直接檢視 Flow 判定與各構面分數。
+- **Fix**: 將 FlowScore 卡片移至結果卡片頂部並持續顯示成功/失敗訊息，同步於結果表新增「OFI 指標分數」欄位列出 Flow 與 Strategy 子分數徽章。
+- **Diagnostics**: 本地載入批量優化流程檢查 Flow 卡片在結果頁常駐顯示，確認各策略列的 R^PBO/R^Len/Strategy 等指標與 tooltip 保持一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-OFI-DUALSCORE-20250930A
+- **Issue recap**: 批量優化表格僅顯示策略層分數，無法直接看到最終 OFI；IslandScore 正規化在分位範圍塌縮時會將邊緣懲罰映射為 1，讓平坦島嶼被錯誤判為 0 分。
+- **Fix**: 將 OFI 模組升級為 `LB-OFI-DUALSCORE-20250930A`，調整 `normaliseWithQuantiles` 在上下分位重疊時維持 0 懲罰，並於策略評分輸出 Flow 與 Strategy 兩層分數及最終 OFI；結果表同步更新 tooltip 與指標欄位，直接呈現 OFI 0–100 與 Flow/Strategy 子指標。
+- **Diagnostics**: 使用測試批次確認平坦島嶼的 `edgeNorm` 維持 0、`R^{Island}` 為 1，表格顯示 `OFI`、`Flow`、`Strategy` 三段摘要且 tooltip 列出 R^PBO～R^Island；Flow 不合格時仍鎖定排序。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-OFI-STRATWEIGHT-20251013A
+- **Issue recap**: 策略層綜合分數會因缺值重新分配權重，與規格書「四構面等權」定義不符，導致 Flow 與 Strategy 層級加權方式被混淆。
+- **Fix**: 新增 `computeStrategyCompositeScore` 與 `computeFinalOfiScore`，缺失子分數時改以 0 分處理並保留原權重，並回傳 Flow/Strategy 貢獻拆解；同步更新文件、CSV 與版本碼對齊最新邏輯。
+- **Diagnostics**: 以缺少 IslandScore 的策略驗證 `R^{Strategy}` 會扣除 0.25 權重且 `components.finalOfiFlowContribution`、`finalOfiStrategyContribution` 正確反映 0.30/0.70 的加總，CSV 與說明書描述與實作一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
