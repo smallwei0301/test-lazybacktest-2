@@ -822,3 +822,9 @@
 - **Fix**: 將 OFI 模組升級為 `LB-OFI-DUALSCORE-20250930A`，調整 `normaliseWithQuantiles` 在上下分位重疊時維持 0 懲罰，並於策略評分輸出 Flow 與 Strategy 兩層分數及最終 OFI；結果表同步更新 tooltip 與指標欄位，直接呈現 OFI 0–100 與 Flow/Strategy 子指標。
 - **Diagnostics**: 使用測試批次確認平坦島嶼的 `edgeNorm` 維持 0、`R^{Island}` 為 1，表格顯示 `OFI`、`Flow`、`Strategy` 三段摘要且 tooltip 列出 R^PBO～R^Island；Flow 不合格時仍鎖定排序。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-OFI-STRATWEIGHT-20251013A
+- **Issue recap**: 策略層綜合分數會因缺值重新分配權重，與規格書「四構面等權」定義不符，導致 Flow 與 Strategy 層級加權方式被混淆。
+- **Fix**: 新增 `computeStrategyCompositeScore` 與 `computeFinalOfiScore`，缺失子分數時改以 0 分處理並保留原權重，並回傳 Flow/Strategy 貢獻拆解；同步更新文件、CSV 與版本碼對齊最新邏輯。
+- **Diagnostics**: 以缺少 IslandScore 的策略驗證 `R^{Strategy}` 會扣除 0.25 權重且 `components.finalOfiFlowContribution`、`finalOfiStrategyContribution` 正確反映 0.30/0.70 的加總，CSV 與說明書描述與實作一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

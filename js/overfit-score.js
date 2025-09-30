@@ -1,9 +1,9 @@
 /*
  * Overfit Indicator computation module
- * Version: LB-OFI-DUALSCORE-20250930A
+ * Version: LB-OFI-STRATWEIGHT-20251013A
  */
 (function () {
-  const MODULE_VERSION = "LB-OFI-DUALSCORE-20250930A";
+  const MODULE_VERSION = "LB-OFI-STRATWEIGHT-20251013A";
 
   const DEFAULT_CONFIG = {
     desiredSegments: 10,
@@ -1128,20 +1128,11 @@
     const flowVerdictStatus = flowMetrics.flowVerdictStatus || "unknown";
     const flowVerdictLabel = flowMetrics.flowVerdict || "Flow 指標資料不足";
     preparedValid.forEach((item) => {
-      const components = [
-        { value: item.dsrpsrScore, weight: config.weights.strategy.dsrpsr },
-        { value: item.oosScore, weight: config.weights.strategy.oos },
-        { value: item.wfScore, weight: config.weights.strategy.wf },
-        { value: item.islandScore, weight: config.weights.strategy.island },
-      ];
-      const strategyScore = weightedAverage(components);
+      const strategyScore = computeStrategyCompositeScore(item, config.weights.strategy);
       item.strategyScore = strategyScore;
       const strategyScorePercent = Number.isFinite(strategyScore) ? strategyScore * 100 : null;
-      const finalComponents = [
-        { value: flowScore, weight: config.weights.ofi.flow },
-        { value: strategyScore, weight: config.weights.ofi.strategy },
-      ];
-      const ofiNormalised = weightedAverage(finalComponents);
+      const ofiOutcome = computeFinalOfiScore(flowScore, strategyScore, config.weights.ofi);
+      const ofiNormalised = ofiOutcome.value;
       const computedOFI = Number.isFinite(ofiNormalised) ? ofiNormalised * 100 : null;
       const displayScore = allowRanking ? computedOFI : null;
       item.finalOFI = allowRanking ? computedOFI : null;
@@ -1149,6 +1140,8 @@
       item.components = {
         strategy: strategyScore,
         strategyScorePercent,
+        RStrategy: strategyScore,
+        RStrategyPercent: strategyScorePercent,
         ROOS: item.oosScore,
         RWF: item.wfScore,
         RDSRPSR: item.dsrpsrScore,
@@ -1162,6 +1155,10 @@
         RMCS: item.RMCS,
         finalOfi: allowRanking ? computedOFI : null,
         finalOfiNormalised: allowRanking && Number.isFinite(ofiNormalised) ? ofiNormalised : null,
+        finalOfiFlowContribution: ofiOutcome.breakdown.flowContribution,
+        finalOfiStrategyContribution: ofiOutcome.breakdown.strategyContribution,
+        missingFlowComponent: ofiOutcome.breakdown.missingFlow,
+        missingStrategyComponent: ofiOutcome.breakdown.missingStrategy,
       };
       if (!allowRanking) {
         item.verdict = "🔒 暫停策略比較";
@@ -1215,6 +1212,54 @@
     }
     const score = available.reduce((sum, component) => sum + (component.value * component.weight) / totalWeight, 0);
     return clamp(score, 0, 1);
+  }
+
+  function computeStrategyCompositeScore(item, weights) {
+    const components = [
+      { value: item.dsrpsrScore, weight: weights.dsrpsr },
+      { value: item.oosScore, weight: weights.oos },
+      { value: item.wfScore, weight: weights.wf },
+      { value: item.islandScore, weight: weights.island },
+    ];
+    const hasFinite = components.some((component) => Number.isFinite(component.value));
+    if (!hasFinite) {
+      return null;
+    }
+    const aggregate = components.reduce((sum, component) => {
+      const contribution = Number.isFinite(component.value) ? component.value : 0;
+      return sum + component.weight * contribution;
+    }, 0);
+    return clamp(aggregate, 0, 1);
+  }
+
+  function computeFinalOfiScore(flowScore, strategyScore, weights) {
+    const hasFlow = Number.isFinite(flowScore);
+    const hasStrategy = Number.isFinite(strategyScore);
+    if (!hasFlow && !hasStrategy) {
+      return {
+        value: null,
+        breakdown: {
+          flowContribution: null,
+          strategyContribution: null,
+          missingFlow: true,
+          missingStrategy: true,
+        },
+      };
+    }
+    const boundedFlow = hasFlow ? clamp(flowScore, 0, 1) : 0;
+    const boundedStrategy = hasStrategy ? clamp(strategyScore, 0, 1) : 0;
+    const flowContribution = weights.flow * boundedFlow;
+    const strategyContribution = weights.strategy * boundedStrategy;
+    const combined = clamp(flowContribution + strategyContribution, 0, 1);
+    return {
+      value: combined,
+      breakdown: {
+        flowContribution,
+        strategyContribution,
+        missingFlow: !hasFlow,
+        missingStrategy: !hasStrategy,
+      },
+    };
   }
 
   function deriveVerdict(ofiScore) {
