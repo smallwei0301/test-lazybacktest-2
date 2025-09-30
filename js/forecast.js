@@ -1,4 +1,4 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251115A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251209A';
 let forecastChartInstance = null;
 
 function getSharedVisibleStockData() {
@@ -68,7 +68,16 @@ function describeCorrection(correction) {
     const carryText = Number.isFinite(correction.finalCumulativeError)
         ? formatNumber(correction.finalCumulativeError, 4)
         : '--';
-    return `校正閾值 δ = ${deltaText}% ｜ 訓練累積誤差 = ${carryText}`;
+    const trainingMse = Number.isFinite(correction.trainingMse)
+        ? formatNumber(correction.trainingMse, 4)
+        : '--';
+    const baselineMse = Number.isFinite(correction.baselineTrainingMse)
+        ? formatNumber(correction.baselineTrainingMse, 4)
+        : '--';
+    const mseSegment = Number.isFinite(correction.trainingMse)
+        ? ` ｜ 訓練 MSE = ${trainingMse}${Number.isFinite(correction.baselineTrainingMse) ? `（基準 ${baselineMse}）` : ''}`
+        : '';
+    return `校正閾值 δ = ${deltaText}% ｜ 訓練累積誤差 = ${carryText}${mseSegment}`;
 }
 
 function resolveCloseValue(row) {
@@ -255,8 +264,10 @@ function runGeneticOptimization({ rawPreds, actuals }) {
     const maxDelta = 0.2;
 
     if (!Array.isArray(rawPreds) || rawPreds.length === 0 || !Array.isArray(actuals) || actuals.length !== rawPreds.length) {
-        return { delta: 0, mse: NaN };
+        return { delta: 0, mse: NaN, baselineMse: NaN, fitness: 0 };
     }
+
+    const baselineMse = computeMse(rawPreds, actuals);
 
     const randomDelta = () => minDelta + Math.random() * (maxDelta - minDelta);
 
@@ -269,51 +280,73 @@ function runGeneticOptimization({ rawPreds, actuals }) {
 
     const evaluate = (delta) => {
         const { corrected } = applyErrorCorrection({ rawPreds, actuals, initialCumulativeError: 0, delta });
-        return computeMse(corrected, actuals);
+        const mse = computeMse(corrected, actuals);
+        if (!Number.isFinite(mse)) {
+            return { mse: Number.POSITIVE_INFINITY, fitness: 0 };
+        }
+        const fitness = 1 / (1 + mse);
+        return { mse, fitness };
     };
 
-    let population = Array.from({ length: populationSize }, randomDelta);
-    let bestDelta = population[0];
-    let bestScore = evaluate(bestDelta);
+    let population = Array.from({ length: populationSize }, () => {
+        const delta = randomDelta();
+        const evaluation = evaluate(delta);
+        return { delta, mse: evaluation.mse, fitness: evaluation.fitness };
+    });
 
-    const selectParent = (scores) => {
+    let best = population.reduce((acc, individual) => {
+        if (!acc || individual.fitness > acc.fitness) {
+            return individual;
+        }
+        return acc;
+    }, null);
+    if (!best) {
+        best = { delta: minDelta, mse: Number.POSITIVE_INFINITY, fitness: 0 };
+    }
+
+    const selectParent = () => {
         const tournamentSize = 3;
-        let bestIdx = 0;
-        let bestValue = Infinity;
-        for (let i = 0; i < tournamentSize; i += 1) {
-            const candidateIndex = Math.floor(Math.random() * population.length);
-            const candidateScore = scores[candidateIndex];
-            if (candidateScore < bestValue) {
-                bestValue = candidateScore;
-                bestIdx = candidateIndex;
+        let selected = population[Math.floor(Math.random() * population.length)];
+        for (let i = 1; i < tournamentSize; i += 1) {
+            const contender = population[Math.floor(Math.random() * population.length)];
+            if ((contender?.fitness || 0) > (selected?.fitness || 0)) {
+                selected = contender;
             }
         }
-        return population[bestIdx];
+        return selected;
     };
 
     for (let generation = 0; generation < generations; generation += 1) {
-        const scores = population.map(evaluate);
-        scores.forEach((score, idx) => {
-            if (score < bestScore) {
-                bestScore = score;
-                bestDelta = population[idx];
-            }
-        });
-
         const nextPopulation = [];
         while (nextPopulation.length < populationSize) {
-            const parentA = selectParent(scores);
-            const parentB = selectParent(scores);
-            let child = (parentA + parentB) / 2;
+            const parentA = selectParent();
+            const parentB = selectParent();
+            const parentDeltaA = parentA?.delta ?? randomDelta();
+            const parentDeltaB = parentB?.delta ?? randomDelta();
+            let childDelta = (parentDeltaA + parentDeltaB) / 2;
             if (Math.random() < mutationRate) {
-                child += (Math.random() * 2 - 1) * mutationScale;
+                childDelta += (Math.random() * 2 - 1) * mutationScale;
             }
-            nextPopulation.push(clampDelta(child));
+            childDelta = clampDelta(childDelta);
+            const evaluation = evaluate(childDelta);
+            const child = { delta: childDelta, mse: evaluation.mse, fitness: evaluation.fitness };
+            nextPopulation.push(child);
+            if ((child.fitness || 0) > (best.fitness || 0)) {
+                best = child;
+            }
         }
         population = nextPopulation;
     }
 
-    return { delta: clampDelta(bestDelta), mse: bestScore };
+    const resultMse = Number.isFinite(best.mse) ? best.mse : baselineMse;
+    const resultFitness = Number.isFinite(best.fitness) ? best.fitness : (Number.isFinite(baselineMse) ? 1 / (1 + baselineMse) : 0);
+
+    return {
+        delta: clampDelta(best.delta),
+        mse: resultMse,
+        baselineMse,
+        fitness: resultFitness,
+    };
 }
 
 function computeDirectionMetrics(predicted, actuals, closes, startIndex) {
@@ -490,9 +523,16 @@ async function runForecastWorkflow() {
     const trainPredActuals = trainPredNormArray.map((value) => denormalizeValue(value, stats));
     const trainActuals = closes.slice(sequenceLength, trainCount);
 
+    const baselineTrainingMse = computeMse(trainPredActuals, trainActuals);
+
     const gaResult = trainPredActuals.length >= 5
         ? runGeneticOptimization({ rawPreds: trainPredActuals, actuals: trainActuals })
-        : { delta: 0, mse: NaN };
+        : {
+            delta: 0,
+            mse: baselineTrainingMse,
+            baselineMse: baselineTrainingMse,
+            fitness: Number.isFinite(baselineTrainingMse) ? 1 / (1 + baselineTrainingMse) : 0,
+        };
 
     const trainingCorrection = applyErrorCorrection({
         rawPreds: trainPredActuals,
@@ -547,6 +587,7 @@ async function runForecastWorkflow() {
             delta: gaResult.delta,
             finalCumulativeError: trainingCorrection.finalCumulativeError,
             trainingMse: gaResult.mse,
+            baselineTrainingMse: gaResult.baselineMse,
         },
         durationMs: 0,
         metrics: {

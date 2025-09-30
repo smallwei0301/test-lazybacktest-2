@@ -775,3 +775,9 @@
 - **Fix**: 建立 `syncVisibleStockData` 同步機制，於回測更新時將資料寫回 `window.visibleStockData`，並在預測腳本新增 `getSharedVisibleStockData` 共用讀取邏輯，同步調整版本碼。
 - **Diagnostics**: 本地流程先執行回測，再啟動預測模擬確認不再出現提示，並能成功進入 LSTM+GA 訓練與圖表渲染。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-FORECAST-LSTMGA-20251209A
+- **Issue recap**: 基因演算法僅以誤差值排序個體，未導入以 MSE 為適應函數的最大化流程，δ 搜尋容易卡在局部解並導致校正結果不穩定。
+- **Fix**: 建立 `fitness = 1 / (1 + MSE)` 適應度函數、競賽選擇與突變流程，讓 GA 系統性最小化經校正後的 MSE，並回傳基準 MSE 以於 UI 呈現校正前後差距，同步更新版本碼。
+- **Diagnostics**: 本地回測後重複執行預測，確認「訓練 MSE」欄位顯示 GA 最佳結果與基準值，並觀察命中率／RMSE 在多次模擬間維持穩定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
