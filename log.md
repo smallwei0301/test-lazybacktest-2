@@ -787,3 +787,9 @@
 - **Fix**: 新增可調整的跌代次數輸入與隨機種子探索流程，透過多次重新訓練自動挑選命中率最高的種子並揭露最佳迭代資訊。
 - **Diagnostics**: 本地反覆啟動預測，確認狀態列逐次呈現進度、GA 概要顯示最佳種子與命中率，圖表僅保留最佳迭代結果。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-FORECAST-LSTMGA-20251210A
+- **Issue recap**: 預測報酬僅以收盤漲跌百分比估算，未依指示採用「前一收盤限價、隔日高低價觸價後以隔日收盤結算」的交易邏輯，也缺少總報酬率揭露。
+- **Fix**: 導入高低價解析並重寫命中率計算，只在模型預測隔日上漲且隔日高低價覆蓋前一收盤時入場，將累積報酬以複利方式統計；同時於預測分頁新增總報酬率卡片與交易次數說明。
+- **Diagnostics**: 以回測產生的可視股價資料執行預測，確認僅在條件滿足時計入交易、狀態列摘要會顯示總報酬率與筆數，預測卡片呈現新指標。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/forecast.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

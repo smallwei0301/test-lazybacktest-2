@@ -1,4 +1,4 @@
-const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251120A';
+const FORECAST_VERSION_CODE = 'LB-FORECAST-LSTMGA-20251210A';
 const FORECAST_ITERATION_DEFAULT = 5;
 const FORECAST_ITERATION_MIN = 1;
 const FORECAST_ITERATION_MAX = 12;
@@ -163,6 +163,46 @@ function resolveCloseValue(row) {
     return null;
 }
 
+function resolveHighValue(row) {
+    const candidates = [
+        row?.high,
+        row?.High,
+        row?.adjustedHigh,
+        row?.adjHigh,
+        row?.rawHigh,
+        row?.max,
+        row?.highest,
+        row?.dayHigh,
+    ];
+    for (const candidate of candidates) {
+        const numeric = typeof candidate === 'string' ? Number(candidate) : candidate;
+        if (Number.isFinite(numeric)) {
+            return numeric;
+        }
+    }
+    return null;
+}
+
+function resolveLowValue(row) {
+    const candidates = [
+        row?.low,
+        row?.Low,
+        row?.adjustedLow,
+        row?.adjLow,
+        row?.rawLow,
+        row?.min,
+        row?.lowest,
+        row?.dayLow,
+    ];
+    for (const candidate of candidates) {
+        const numeric = typeof candidate === 'string' ? Number(candidate) : candidate;
+        if (Number.isFinite(numeric)) {
+            return numeric;
+        }
+    }
+    return null;
+}
+
 function extractForecastRows() {
     const source = getSharedVisibleStockData();
     if (!Array.isArray(source) || source.length === 0) {
@@ -174,13 +214,25 @@ function extractForecastRows() {
         if (!dateText) return;
         const closeValue = resolveCloseValue(row);
         if (!Number.isFinite(closeValue)) return;
+        const highValue = resolveHighValue(row);
+        const lowValue = resolveLowValue(row);
         const dateObj = new Date(dateText);
         if (Number.isNaN(dateObj.getTime())) return;
         const iso = dateObj.toISOString().slice(0, 10);
-        dedup.set(iso, closeValue);
+        const entry = {
+            date: iso,
+            close: closeValue,
+        };
+        if (Number.isFinite(highValue)) {
+            entry.high = highValue;
+        }
+        if (Number.isFinite(lowValue)) {
+            entry.low = lowValue;
+        }
+        dedup.set(iso, entry);
     });
-    const sorted = Array.from(dedup.entries())
-        .map(([date, close]) => ({ date, close }))
+    const sorted = Array.from(dedup.values())
+        .map((entry) => ({ ...entry }))
         .sort((a, b) => new Date(a.date) - new Date(b.date));
     return sorted;
 }
@@ -482,38 +534,84 @@ function selectBetterForecastResult(currentBest, candidate) {
     return currentBest;
 }
 
-function computeDirectionMetrics(predicted, actuals, closes, startIndex) {
-    if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length !== actuals.length || predicted.length === 0) {
-        return { hitRate: NaN, avgGain: NaN, avgLoss: NaN };
+function computeDirectionMetrics(predicted, actuals, rows, startIndex) {
+    if (!Array.isArray(predicted) || !Array.isArray(actuals) || predicted.length === 0) {
+        return { hitRate: NaN, avgGain: NaN, avgLoss: NaN, totalReturn: NaN, tradeCount: 0 };
     }
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return { hitRate: NaN, avgGain: NaN, avgLoss: NaN, totalReturn: NaN, tradeCount: 0 };
+    }
+
     const gains = [];
     const losses = [];
     let hits = 0;
-    for (let idx = 0; idx < predicted.length; idx += 1) {
+    let tradeCount = 0;
+    let equity = 1;
+
+    const sampleLength = Math.min(predicted.length, actuals.length);
+
+    for (let idx = 0; idx < sampleLength; idx += 1) {
         const dataIndex = startIndex + idx;
-        const prevClose = closes[dataIndex - 1];
-        const actualClose = actuals[idx];
-        const predictedClose = predicted[idx];
-        if (!Number.isFinite(prevClose) || !Number.isFinite(actualClose) || !Number.isFinite(predictedClose)) {
+        const prevRow = rows[dataIndex - 1];
+        const currentRow = rows[dataIndex];
+        if (!prevRow || !currentRow) {
             continue;
         }
-        const actualChange = ((actualClose - prevClose) / prevClose) * 100;
-        const predictedChange = ((predictedClose - prevClose) / prevClose) * 100;
-        if (actualChange > 0) gains.push(actualChange);
-        if (actualChange < 0) losses.push(actualChange);
-        const actualDirection = actualChange >= 0 ? 1 : -1;
-        const predictedDirection = predictedChange >= 0 ? 1 : -1;
-        if (actualDirection === predictedDirection) {
+
+        const prevClose = Number(prevRow?.close);
+        const nextClose = Number(currentRow?.close);
+        const nextHigh = Number(currentRow?.high);
+        const nextLow = Number(currentRow?.low);
+        const actualClose = Number(actuals[idx]);
+        const predictedClose = Number(predicted[idx]);
+
+        if (
+            !Number.isFinite(prevClose)
+            || !Number.isFinite(nextClose)
+            || !Number.isFinite(predictedClose)
+            || !Number.isFinite(actualClose)
+            || !Number.isFinite(nextHigh)
+            || !Number.isFinite(nextLow)
+        ) {
+            continue;
+        }
+
+        if (prevClose <= 0) {
+            continue;
+        }
+
+        if (predictedClose <= prevClose) {
+            continue;
+        }
+
+        if (nextLow > prevClose || nextHigh < prevClose) {
+            continue;
+        }
+
+        const tradeReturn = (nextClose - prevClose) / prevClose;
+        equity *= 1 + tradeReturn;
+        tradeCount += 1;
+
+        const tradePercent = tradeReturn * 100;
+        if (tradeReturn >= 0) {
             hits += 1;
+            gains.push(tradePercent);
+        } else {
+            losses.push(tradePercent);
         }
     }
-    const total = predicted.length;
+
     const avgGain = gains.length > 0 ? gains.reduce((sum, v) => sum + v, 0) / gains.length : NaN;
     const avgLoss = losses.length > 0 ? losses.reduce((sum, v) => sum + v, 0) / losses.length : NaN;
+    const hitRate = tradeCount > 0 ? hits / tradeCount : NaN;
+    const totalReturn = tradeCount > 0 ? (equity - 1) * 100 : NaN;
+
     return {
-        hitRate: total > 0 ? hits / total : NaN,
+        hitRate,
         avgGain,
         avgLoss,
+        totalReturn,
+        tradeCount,
     };
 }
 
@@ -594,6 +692,8 @@ function updateForecastMetrics(result) {
     const hitRateEl = document.getElementById('forecastHitRate');
     const gainEl = document.getElementById('forecastAvgGain');
     const lossEl = document.getElementById('forecastAvgLoss');
+    const totalReturnEl = document.getElementById('forecastTotalReturn');
+    const tradeCountEl = document.getElementById('forecastTradeCount');
     const mseEl = document.getElementById('forecastMse');
     const rmseEl = document.getElementById('forecastRmse');
     const maeEl = document.getElementById('forecastMae');
@@ -602,6 +702,14 @@ function updateForecastMetrics(result) {
     if (hitRateEl) hitRateEl.textContent = formatRatio(metrics.hitRate);
     if (gainEl) gainEl.textContent = formatChange(metrics.avgGain);
     if (lossEl) lossEl.textContent = formatChange(metrics.avgLoss);
+    if (totalReturnEl) totalReturnEl.textContent = formatChange(metrics.totalReturn);
+    if (tradeCountEl) {
+        if (Number.isFinite(metrics.tradeCount) && metrics.tradeCount > 0) {
+            tradeCountEl.textContent = `共執行 ${metrics.tradeCount} 筆交易`;
+        } else {
+            tradeCountEl.textContent = '尚未產生交易';
+        }
+    }
     if (mseEl) mseEl.textContent = `${formatNumber(metrics.mse, 2)} （基準 ${formatNumber(metrics.baselineMse, 2)}）`;
     if (rmseEl) rmseEl.textContent = `${formatNumber(metrics.rmse, 2)} （基準 ${formatNumber(metrics.baselineRmse, 2)}）`;
     if (maeEl) maeEl.textContent = `${formatNumber(metrics.mae, 2)} （基準 ${formatNumber(metrics.baselineMae, 2)}）`;
@@ -636,7 +744,12 @@ function summariseForecastCompletion(result, { iterationCount = 1, iterationInde
     const iterationText = iterationCount > 1
         ? `最佳迭代第 ${iterationIndex + 1}/${iterationCount} 次（種子 ${seedText}）`
         : `隨機種子 ${seedText}`;
-    const summary = `完成預測：${iterationText}，命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，MSE ${formatNumber(result.metrics.baselineMse, 2)} → ${formatNumber(result.metrics.mse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
+    const baselineReturnText = formatChange(result.metrics?.baselineTotalReturn);
+    const totalReturnText = formatChange(result.metrics?.totalReturn);
+    const tradeCountText = Number.isFinite(result.metrics?.tradeCount) && result.metrics.tradeCount > 0
+        ? `${result.metrics.tradeCount} 筆交易`
+        : '無交易';
+    const summary = `完成預測：${iterationText}，命中率 ${formatRatio(result.metrics.baselineHitRate)} → ${formatRatio(result.metrics.hitRate)}，總報酬率 ${baselineReturnText} → ${totalReturnText}（${tradeCountText}），MSE ${formatNumber(result.metrics.baselineMse, 2)} → ${formatNumber(result.metrics.mse, 2)}，耗時 ${formatNumber(durationSeconds, 1)} 秒。`;
     updateForecastStatus(summary, 'success');
 }
 
@@ -710,14 +823,14 @@ async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
     const directionMetrics = computeDirectionMetrics(
         correctedResult.corrected,
         testResult.actuals,
-        closes,
+        rows,
         trainCount,
     );
 
     const baselineDirection = computeDirectionMetrics(
         testResult.predicted,
         testResult.actuals,
-        closes,
+        rows,
         trainCount,
     );
 
@@ -748,6 +861,8 @@ async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
             hitRate: directionMetrics.hitRate,
             avgGain: directionMetrics.avgGain,
             avgLoss: directionMetrics.avgLoss,
+            totalReturn: directionMetrics.totalReturn,
+            tradeCount: directionMetrics.tradeCount,
             mse,
             rmse,
             mae,
@@ -755,6 +870,8 @@ async function runForecastIteration(dataset, { seed, iterationLabel } = {}) {
             baselineMae,
             baselineMse,
             baselineHitRate: baselineDirection.hitRate,
+            baselineTotalReturn: baselineDirection.totalReturn,
+            baselineTradeCount: baselineDirection.tradeCount,
         },
         chart: chartPayload,
     };

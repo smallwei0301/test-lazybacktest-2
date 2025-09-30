@@ -1457,7 +1457,7 @@
                                         <p class="text-[11px]" style="color: var(--muted-foreground);">
                                             系統會依設定次數重複訓練 LSTM 與 GA，並挑選命中率最高的隨機種子結果。
                                         </p>
-                                        <div class="grid gap-4 md:grid-cols-3" id="forecastMetrics">
+                                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="forecastMetrics">
                                             <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
                                                 <p class="text-xs font-semibold" style="color: var(--primary);">隔日漲跌命中率</p>
                                                 <p id="forecastHitRate" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
@@ -1472,6 +1472,12 @@
                                                 <p class="text-xs font-semibold" style="color: #b91c1c;">平均跌幅</p>
                                                 <p id="forecastAvgLoss" class="text-2xl font-bold" style="color: #b91c1c;">--</p>
                                                 <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">測試期間內，實際下跌日的平均百分比變動。</p>
+                                            </div>
+                                            <div class="p-4 rounded-lg border shadow-sm" style="border-color: var(--border); background-color: color-mix(in srgb, var(--accent) 8%, transparent);">
+                                                <p class="text-xs font-semibold" style="color: var(--accent);">總報酬率</p>
+                                                <p id="forecastTotalReturn" class="text-2xl font-bold" style="color: var(--foreground);">--</p>
+                                                <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">僅在預測隔日上漲時進場，若隔日高低價觸及前一收盤即視為買入，並以隔日收盤價計算報酬。</p>
+                                                <p id="forecastTradeCount" class="text-[11px] mt-2" style="color: var(--muted-foreground);">尚未產生交易</p>
                                             </div>
                                         </div>
                                         <div class="grid gap-4 md:grid-cols-3" id="forecastErrorMetrics">
