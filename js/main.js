@@ -2537,8 +2537,8 @@ function needsDataFetch(cur) {
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
 }
-// --- ML Forecast (LB-ML-KELLY-20250623B) ---
-const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
+// --- ML Forecast (LB-ML-LSTM-20251208A) ---
+const ML_FORECAST_VERSION = 'LB-ML-LSTM-20251208A';
 
 (function initMlForecastTab() {
     if (typeof document === 'undefined') return;
@@ -2634,33 +2634,242 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
 
     const applyStandardization = (row, mu, sigma) => row.map((value, idx) => (value - mu[idx]) / (sigma[idx] || 1e-8));
 
-    const trainLogisticRegression = (matrix, labels, options = {}) => {
-        const { lr = 0.05, epochs = 150 } = options;
-        if (!Array.isArray(matrix) || matrix.length === 0) return null;
-        const rows = matrix.length;
-        const cols = matrix[0].length;
-        const weights = Array(cols).fill(0);
-        let bias = 0;
-        const sigmoid = (z) => 1 / (1 + Math.exp(-z));
+    const sigmoidClamped = (value) => {
+        const limited = Math.max(-30, Math.min(30, value));
+        return 1 / (1 + Math.exp(-limited));
+    };
+
+    const createZeroVector = (size) => Array(size).fill(0);
+    const createZeroMatrix = (rows, cols) => Array.from({ length: rows }, () => Array(cols).fill(0));
+    const randomMatrix = (rows, cols, scale) =>
+        Array.from({ length: rows }, () => Array.from({ length: cols }, () => (Math.random() * 2 - 1) * scale));
+
+    const initLstmParameters = (inputSize, hiddenSize) => {
+        const combined = inputSize + hiddenSize;
+        const scale = 1 / Math.sqrt(combined);
+        return {
+            hiddenSize,
+            inputSize,
+            Wf: randomMatrix(hiddenSize, combined, scale),
+            Wi: randomMatrix(hiddenSize, combined, scale),
+            Wo: randomMatrix(hiddenSize, combined, scale),
+            Wc: randomMatrix(hiddenSize, combined, scale),
+            bf: createZeroVector(hiddenSize),
+            bi: createZeroVector(hiddenSize),
+            bo: createZeroVector(hiddenSize),
+            bc: createZeroVector(hiddenSize),
+            Wy: Array.from({ length: hiddenSize }, () => (Math.random() * 2 - 1) * scale),
+            by: 0,
+        };
+    };
+
+    const computeGate = (weights, bias, input, activation) => {
+        const output = new Array(bias.length);
+        for (let h = 0; h < bias.length; h += 1) {
+            let sum = bias[h];
+            const row = weights[h];
+            for (let j = 0; j < input.length; j += 1) {
+                sum += row[j] * input[j];
+            }
+            output[h] = activation(sum);
+        }
+        return output;
+    };
+
+    const forwardLstm = (sequence, params) => {
+        const { hiddenSize } = params;
+        let hPrev = createZeroVector(hiddenSize);
+        let cPrev = createZeroVector(hiddenSize);
+        const steps = [];
+        for (let t = 0; t < sequence.length; t += 1) {
+            const x = sequence[t];
+            const z = hPrev.concat(x);
+            const forgetGate = computeGate(params.Wf, params.bf, z, sigmoidClamped);
+            const inputGate = computeGate(params.Wi, params.bi, z, sigmoidClamped);
+            const outputGate = computeGate(params.Wo, params.bo, z, sigmoidClamped);
+            const candidate = computeGate(params.Wc, params.bc, z, Math.tanh);
+            const prevC = cPrev.slice();
+            const cell = new Array(hiddenSize);
+            const hidden = new Array(hiddenSize);
+            const tanhCell = new Array(hiddenSize);
+            for (let h = 0; h < hiddenSize; h += 1) {
+                cell[h] = forgetGate[h] * cPrev[h] + inputGate[h] * candidate[h];
+                tanhCell[h] = Math.tanh(cell[h]);
+                hidden[h] = outputGate[h] * tanhCell[h];
+            }
+            steps.push({
+                z,
+                forgetGate,
+                inputGate,
+                outputGate,
+                candidate,
+                cell,
+                tanhCell,
+                prevC,
+                prevH: hPrev.slice(),
+            });
+            hPrev = hidden;
+            cPrev = cell;
+        }
+        const linearOutput = params.by + params.Wy.reduce((sum, weight, idx) => sum + weight * hPrev[idx], 0);
+        const prob = sigmoidClamped(linearOutput);
+        return { prob, steps, lastH: hPrev, lastC: cPrev };
+    };
+
+    const backwardLstm = (label, params, cache, gradClip = 5) => {
+        const { hiddenSize, inputSize } = params;
+        const gradients = {
+            Wf: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
+            Wi: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
+            Wo: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
+            Wc: createZeroMatrix(hiddenSize, inputSize + hiddenSize),
+            bf: createZeroVector(hiddenSize),
+            bi: createZeroVector(hiddenSize),
+            bo: createZeroVector(hiddenSize),
+            bc: createZeroVector(hiddenSize),
+            Wy: createZeroVector(hiddenSize),
+            by: 0,
+        };
+
+        const clip = (value) => Math.max(-gradClip, Math.min(gradClip, value));
+
+        const error = cache.prob - label;
+        gradients.by += error;
+        for (let h = 0; h < hiddenSize; h += 1) {
+            gradients.Wy[h] += error * cache.lastH[h];
+        }
+
+        let dhNext = params.Wy.map((w) => clip(w * error));
+        let dcNext = createZeroVector(hiddenSize);
+
+        for (let t = cache.steps.length - 1; t >= 0; t -= 1) {
+            const step = cache.steps[t];
+            const dz = createZeroVector(hiddenSize + inputSize);
+            const dcPrev = createZeroVector(hiddenSize);
+            const df = createZeroVector(hiddenSize);
+            const di = createZeroVector(hiddenSize);
+            const doGate = createZeroVector(hiddenSize);
+            const dg = createZeroVector(hiddenSize);
+
+            for (let h = 0; h < hiddenSize; h += 1) {
+                const tanhCell = step.tanhCell[h];
+                const dh = dhNext[h];
+                const dc = dh * step.outputGate[h] * (1 - tanhCell * tanhCell) + dcNext[h];
+                const forgetGrad = dc * step.prevC[h] * step.forgetGate[h] * (1 - step.forgetGate[h]);
+                const inputGrad = dc * step.candidate[h] * step.inputGate[h] * (1 - step.inputGate[h]);
+                const outputGrad = dh * tanhCell * step.outputGate[h] * (1 - step.outputGate[h]);
+                const candidateGrad = dc * step.inputGate[h] * (1 - step.candidate[h] * step.candidate[h]);
+
+                df[h] = clip(forgetGrad);
+                di[h] = clip(inputGrad);
+                doGate[h] = clip(outputGrad);
+                dg[h] = clip(candidateGrad);
+                dcPrev[h] = clip(dc * step.forgetGate[h]);
+
+                gradients.bf[h] += df[h];
+                gradients.bi[h] += di[h];
+                gradients.bo[h] += doGate[h];
+                gradients.bc[h] += dg[h];
+
+                const concatLength = step.z.length;
+                for (let j = 0; j < concatLength; j += 1) {
+                    gradients.Wf[h][j] += df[h] * step.z[j];
+                    gradients.Wi[h][j] += di[h] * step.z[j];
+                    gradients.Wo[h][j] += doGate[h] * step.z[j];
+                    gradients.Wc[h][j] += dg[h] * step.z[j];
+                }
+            }
+
+            for (let h = 0; h < hiddenSize; h += 1) {
+                const rowLength = step.z.length;
+                for (let j = 0; j < rowLength; j += 1) {
+                    dz[j] +=
+                        params.Wf[h][j] * df[h] +
+                        params.Wi[h][j] * di[h] +
+                        params.Wo[h][j] * doGate[h] +
+                        params.Wc[h][j] * dg[h];
+                }
+            }
+
+            dhNext = dz.slice(0, hiddenSize).map(clip);
+            dcNext = dcPrev;
+        }
+
+        return gradients;
+    };
+
+    const applyGradients = (params, grads, lr, gradClip = 5) => {
+        const clip = (value) => Math.max(-gradClip, Math.min(gradClip, value));
+        const updateMatrix = (matrix, grad) => {
+            for (let i = 0; i < matrix.length; i += 1) {
+                for (let j = 0; j < matrix[i].length; j += 1) {
+                    matrix[i][j] -= lr * clip(grad[i][j]);
+                }
+            }
+        };
+        const updateVector = (vector, grad) => {
+            for (let i = 0; i < vector.length; i += 1) {
+                vector[i] -= lr * clip(grad[i]);
+            }
+        };
+
+        updateMatrix(params.Wf, grads.Wf);
+        updateMatrix(params.Wi, grads.Wi);
+        updateMatrix(params.Wo, grads.Wo);
+        updateMatrix(params.Wc, grads.Wc);
+        updateVector(params.bf, grads.bf);
+        updateVector(params.bi, grads.bi);
+        updateVector(params.bo, grads.bo);
+        updateVector(params.bc, grads.bc);
+        updateVector(params.Wy, grads.Wy);
+        params.by -= lr * clip(grads.by);
+    };
+
+    const trainLstmModel = (sequences, labels, options = {}) => {
+        const { lr = 0.01, epochs = 80, hiddenSize = 12, gradClip = 5 } = options;
+        if (!Array.isArray(sequences) || sequences.length === 0) return null;
+        const inputSize = sequences[0][0]?.length || 0;
+        if (!inputSize) return null;
+        const params = initLstmParameters(inputSize, hiddenSize);
+        params.sequenceLength = sequences[0].length;
 
         for (let epoch = 0; epoch < epochs; epoch += 1) {
-            for (let i = 0; i < rows; i += 1) {
-                const dot = matrix[i].reduce((sum, value, idx) => sum + weights[idx] * value, bias);
-                const prob = sigmoid(dot);
-                const error = prob - labels[i];
-                for (let j = 0; j < cols; j += 1) {
-                    weights[j] -= lr * error * matrix[i][j];
-                }
-                bias -= lr * error;
+            for (let i = 0; i < sequences.length; i += 1) {
+                const forward = forwardLstm(sequences[i], params);
+                const grads = backwardLstm(labels[i], params, forward, gradClip);
+                applyGradients(params, grads, lr, gradClip);
             }
         }
 
-        const predict = (row) => {
-            const dot = row.reduce((sum, value, idx) => sum + weights[idx] * value, bias);
-            return 1 / (1 + Math.exp(-dot));
+        return {
+            predict: (sequence) => {
+                if (!Array.isArray(sequence) || sequence.length !== params.sequenceLength) return 0.5;
+                return forwardLstm(sequence, params).prob;
+            },
+            params,
         };
+    };
 
-        return { weights, bias, predict };
+    const extractSequences = (featuresAll, labelsAll, returnsAll, signalAll, tradeAll, startIdx, endIdx, seqLen) => {
+        const sequences = [];
+        const labels = [];
+        const returns = [];
+        const signalDates = [];
+        const tradeDates = [];
+        for (let idx = startIdx; idx < endIdx; idx += 1) {
+            const seqStart = idx - seqLen + 1;
+            if (seqStart < 0) continue;
+            const sequence = [];
+            for (let offset = seqStart; offset <= idx; offset += 1) {
+                sequence.push(featuresAll[offset]);
+            }
+            sequences.push(sequence);
+            labels.push(labelsAll[idx]);
+            returns.push(returnsAll[idx]);
+            signalDates.push(signalAll[idx]);
+            tradeDates.push(tradeAll[idx]);
+        }
+        return { sequences, labels, returns, signalDates, tradeDates };
     };
 
     const fitThresholdAndEdge = (probs, labels, returns) => {
@@ -2738,14 +2947,16 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
         const getInput = (id) => document.getElementById(id);
         const trainPeriodInput = Number(getInput('ml-train-period')?.value || 0);
         const testPeriodInput = Number(getInput('ml-test-period')?.value || 0);
-        const lr = Number(getInput('ml-lr')?.value || 0.05);
-        const epochs = Number(getInput('ml-epochs')?.value || 150);
+        const lr = Number(getInput('ml-lr')?.value || 0.01);
+        const epochs = Number(getInput('ml-epochs')?.value || 80);
         const kellyMultiplier = Number(getInput('ml-kelly-mult')?.value || 0.5);
         const maxFraction = Number(getInput('ml-max-f')?.value || 25) / 100;
         const minTrainSamples = 60;
         const minTestSamples = 30;
         const trainSamplesRequested = Number.isFinite(trainPeriodInput) ? Math.floor(trainPeriodInput) : 0;
         const testSamplesRequested = Number.isFinite(testPeriodInput) ? Math.floor(testPeriodInput) : 0;
+        const learningRate = Number.isFinite(lr) && lr > 0 ? lr : 0.01;
+        const epochCount = Number.isFinite(epochs) && epochs > 0 ? Math.floor(epochs) : 80;
         if (trainSamplesRequested < minTrainSamples || testSamplesRequested < minTestSamples) {
             showError(`請至少提供 ${minTrainSamples} 日訓練與 ${minTestSamples} 日測試期間。`);
             return;
@@ -2781,16 +2992,19 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
 
         const startIndex = Math.max(0, features.length - totalRequested);
         const trainEndIndex = startIndex + trainSamplesRequested;
+        const testEndIndex = trainEndIndex + testSamplesRequested;
+
         const Xtrain = features.slice(startIndex, trainEndIndex);
         const yTrain = labels.slice(startIndex, trainEndIndex);
         const rTrain = nextReturns.slice(startIndex, trainEndIndex);
         const signalTrain = signalDates.slice(startIndex, trainEndIndex);
+        const tradeTrain = tradeDates.slice(startIndex, trainEndIndex);
 
-        const Xtest = features.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
-        const yTest = labels.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
-        const rTest = nextReturns.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
-        const signalTest = signalDates.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
-        const tradeTest = tradeDates.slice(trainEndIndex, trainEndIndex + testSamplesRequested);
+        const Xtest = features.slice(trainEndIndex, testEndIndex);
+        const yTest = labels.slice(trainEndIndex, testEndIndex);
+        const rTest = nextReturns.slice(trainEndIndex, testEndIndex);
+        const signalTest = signalDates.slice(trainEndIndex, testEndIndex);
+        const tradeTest = tradeDates.slice(trainEndIndex, testEndIndex);
 
         if (Xtrain.length < minTrainSamples || Xtest.length < minTestSamples) {
             showError('訓練或測試樣本過少，請縮短期間或重新快取資料。');
@@ -2798,33 +3012,109 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
         }
 
         const { scaled: Ztrain, mu, sigma } = standardize(Xtrain);
-        const model = trainLogisticRegression(Ztrain, yTrain, { lr, epochs });
+        const Ztest = Xtest.map((row) => applyStandardization(row, mu, sigma));
+        const scaledAll = Ztrain.concat(Ztest);
+        const labelsAll = yTrain.concat(yTest);
+        const returnsAll = rTrain.concat(rTest);
+        const signalAll = signalTrain.concat(signalTest);
+        const tradeAll = tradeTrain.concat(tradeTest);
+
+        let sequenceLength = 16;
+        if (trainSamplesRequested < sequenceLength + 10) {
+            sequenceLength = Math.max(8, Math.floor(trainSamplesRequested * 0.4));
+        }
+        sequenceLength = Math.max(5, Math.min(sequenceLength, trainSamplesRequested));
+        if (sequenceLength < 5 || trainSamplesRequested < sequenceLength) {
+            showError('訓練樣本不足以建立 LSTM 序列，請延長訓練期間。');
+            return;
+        }
+
+        const trainSequences = extractSequences(
+            scaledAll,
+            labelsAll,
+            returnsAll,
+            signalAll,
+            tradeAll,
+            0,
+            yTrain.length,
+            sequenceLength
+        );
+        const testSequences = extractSequences(
+            scaledAll,
+            labelsAll,
+            returnsAll,
+            signalAll,
+            tradeAll,
+            yTrain.length,
+            yTrain.length + yTest.length,
+            sequenceLength
+        );
+
+        if (trainSequences.sequences.length < 30 || testSequences.sequences.length < 10) {
+            showError('LSTM 序列樣本不足，請放大訓練或測試期間。');
+            return;
+        }
+
+        const model = trainLstmModel(trainSequences.sequences, trainSequences.labels, { lr: learningRate, epochs: epochCount });
         if (!model) {
             showError('模型訓練失敗。');
             return;
         }
 
-        const pTrain = Ztrain.map((row) => model.predict(row));
-        const { threshold, accuracy, avgUp, avgDown, sampleSize } = fitThresholdAndEdge(pTrain, yTrain, rTrain);
+        const pTrain = trainSequences.sequences.map((seq) => model.predict(seq));
+        const { threshold, accuracy, avgUp, avgDown, sampleSize } = fitThresholdAndEdge(
+            pTrain,
+            trainSequences.labels,
+            trainSequences.returns
+        );
 
-        const pTest = Xtest.map((row) => model.predict(applyStandardization(row, mu, sigma)));
-        const simulation = simulate(pTest, rTest, tradeTest, avgUp, avgDown, threshold, kellyMultiplier, maxFraction, signalTest);
+        const pTest = testSequences.sequences.map((seq) => model.predict(seq));
+        if (!pTest.length) {
+            showError('測試樣本不足以產生預測，請調整期間。');
+            return;
+        }
 
-        const hitRateTest = mean(pTest.map((prob, idx) => ((prob >= threshold) === (yTest[idx] === 1) ? 1 : 0)));
+        const simulation = simulate(
+            pTest,
+            testSequences.returns,
+            testSequences.tradeDates,
+            avgUp,
+            avgDown,
+            threshold,
+            kellyMultiplier,
+            maxFraction,
+            testSequences.signalDates
+        );
+
+        const hitRateTest = mean(
+            pTest.map((prob, idx) => ((prob >= threshold) === (testSequences.labels[idx] === 1) ? 1 : 0))
+        );
         const avgProbability = mean(pTrain);
-        const indicativeKelly = kellyFraction(clamp(avgProbability || threshold, 0, 1), avgUp, avgDown, kellyMultiplier, maxFraction);
-        const trainRangeText = signalTrain.length ? `${signalTrain[0]} → ${signalTrain[signalTrain.length - 1]}` : '—';
-        const testSignalRange = signalTest.length ? `${signalTest[0]} → ${signalTest[signalTest.length - 1]}` : '—';
-        const testTradeRange = tradeTest.length ? `${tradeTest[0]} → ${tradeTest[tradeTest.length - 1]}` : '—';
+        const indicativeKelly = kellyFraction(
+            clamp(avgProbability || threshold, 0, 1),
+            avgUp,
+            avgDown,
+            kellyMultiplier,
+            maxFraction
+        );
+        const trainRangeText = trainSequences.signalDates.length
+            ? `${trainSequences.signalDates[0]} → ${trainSequences.signalDates[trainSequences.signalDates.length - 1]}`
+            : '—';
+        const testSignalRange = testSequences.signalDates.length
+            ? `${testSequences.signalDates[0]} → ${testSequences.signalDates[testSequences.signalDates.length - 1]}`
+            : '—';
+        const testTradeRange = testSequences.tradeDates.length
+            ? `${testSequences.tradeDates[0]} → ${testSequences.tradeDates[testSequences.tradeDates.length - 1]}`
+            : '—';
 
         const cards = document.getElementById('ml-cards');
         if (cards) {
             cards.innerHTML = `
                 <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
                     <div class="text-[11px] uppercase tracking-wide">資料切分</div>
-                    <div class="text-xs">訓練 ${Xtrain.length} 日：${trainRangeText}</div>
-                    <div class="text-xs">測試 ${Xtest.length} 日：訊號 ${testSignalRange}</div>
-                    <div class="text-xs">測試交易落點：${testTradeRange}</div>
+                    <div class="text-xs">訓練 ${trainSequences.sequences.length} 筆序列：${trainRangeText}</div>
+                    <div class="text-xs">測試 ${testSequences.sequences.length} 筆序列：訊號 ${testSignalRange}</div>
+                    <div class="text-xs">序列長度：${sequenceLength} 日｜交易落點：${testTradeRange}</div>
                 </div>
                 <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
                     <div class="text-[11px] uppercase tracking-wide">訓練最佳門檻</div>
@@ -2843,7 +3133,7 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
                 </div>
                 <div class="p-3 rounded border bg-white" style="border-color: var(--border); color: var(--muted-foreground);">
                     <div class="text-[11px] uppercase tracking-wide">累積報酬（測試）</div>
-                    <div class="text-sm">ML + Kelly：<span style="color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalModel - 1) * 100).toFixed(2)}%</span></div>
+                    <div class="text-sm">LSTM + Kelly：<span style="color:${simulation.finalModel >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalModel - 1) * 100).toFixed(2)}%</span></div>
                     <div class="text-sm">買入持有：<span style="color:${simulation.finalBh >= 1 ? 'var(--primary)' : 'var(--destructive)'};">${((simulation.finalBh - 1) * 100).toFixed(2)}%</span></div>
                 </div>
             `;
@@ -2860,7 +3150,7 @@ const ML_FORECAST_VERSION = 'LB-ML-KELLY-20250623B';
                     labels: simulation.equitySeriesModel.map((point) => point.date),
                     datasets: [
                         {
-                            label: 'ML + Kelly',
+                            label: 'LSTM + Kelly',
                             data: simulation.equitySeriesModel.map((point) => point.equity),
                             borderColor: 'rgba(8, 145, 178, 1)',
                             backgroundColor: 'rgba(8, 145, 178, 0.1)',

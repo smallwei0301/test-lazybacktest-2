@@ -768,3 +768,9 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-08 — Patch LB-ML-LSTM-20251208A
+- **Issue recap**: 預測分頁仍採用 Logistic Regression，缺乏序列記憶能力且無法反映近年深度學習 × 凱利資金控管的需求。
+- **Fix**: 將模型核心改寫為輕量 LSTM，採 16 日（自動調整）序列輸入與梯度裁剪，結合訓練門檻掃描、凱利 sizing 與全新指標卡片；同步更新 UI 文案、預設超參數與版本代碼。
+- **Diagnostics**: 實際於 cachedStockData 執行訓練/測試期間切分，確認序列樣本統計、權益曲線、機率直方圖與交易清單皆成功生成，無 console 錯誤。
+- **Testing**: `node --check js/main.js`

@@ -2116,10 +2116,10 @@
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
                                             <i data-lucide="cpu" class="lucide-sm"></i>
-                                            📈 預測機制（隔日漲跌｜Logistic + Kelly）
+                                            📈 預測機制（隔日漲跌｜LSTM + Kelly）
                                         </h3>
                                         <p class="text-xs" style="color: var(--muted-foreground);">
-                                            使用既有回測快取（cachedStockData）即時產生特徵，切分訓練／測試、訓練 Logistic Regression，並套用半凱利與曝險上限模擬測試期間績效。
+                                            使用既有回測快取（cachedStockData）建立時間序列特徵，切分訓練／測試後訓練輕量 LSTM，再以半凱利與曝險上限模擬測試期間績效。
                                         </p>
                                     </div>
                                     <div class="card-content space-y-4">
@@ -2146,11 +2146,11 @@
                                         <div class="grid md:grid-cols-4 gap-3">
                                             <div>
                                                 <label class="block text-xs mb-1">學習率</label>
-                                                <input id="ml-lr" type="number" step="0.0001" value="0.05" class="w-full border px-2 py-1 rounded" />
+                                                <input id="ml-lr" type="number" step="0.0001" value="0.01" class="w-full border px-2 py-1 rounded" />
                                             </div>
                                             <div>
                                                 <label class="block text-xs mb-1">迭代次數</label>
-                                                <input id="ml-epochs" type="number" value="150" class="w-full border px-2 py-1 rounded" />
+                                                <input id="ml-epochs" type="number" value="80" class="w-full border px-2 py-1 rounded" />
                                             </div>
                                             <div>
                                                 <label class="block text-xs mb-1">半凱利係數</label>
@@ -2167,7 +2167,7 @@
                                                 <h4 class="font-semibold text-sm" style="color: var(--foreground);">模型流程說明</h4>
                                                 <ul class="list-disc pl-4 space-y-1">
                                                     <li>以 cachedStockData 建立報酬、波動度、RSI、均線落差等特徵，並以訓練期間資料計算平均與標準差完成標準化。</li>
-                                                    <li>使用隨機梯度下降訓練 Logistic Regression，模型函數為 σ(<em>w·x + b</em>)，輸出隔日上漲機率。</li>
+                                                    <li>自動取近期 16 日（不足時會調整）的序列輸入輕量 LSTM，使用隨機梯度下降最小化交叉熵，輸出隔日上漲機率。</li>
                                                     <li>訓練樣本中掃描機率門檻 0.35–0.65，挑選命中率最高且樣本數 ≥ 20 的門檻，同時估計平均漲幅 <em>g</em> 與跌幅 <em>l</em>。</li>
                                                     <li>測試階段僅在機率 ≥ 門檻時進場，依凱利公式 <em>f*</em> = <em>p</em> − (1−<em>p</em>)/(<em>g</em>/|<em>l</em>|) 乘以半凱利與曝險上限模擬資金配置。</li>
                                                 </ul>
@@ -2181,6 +2181,7 @@
                                                     <li><strong>半凱利係數</strong>：對 <em>f*</em> 乘上係數（預設 0.5），保留安全邊際避免全凱利過度槓桿。</li>
                                                     <li><strong>單筆上限</strong>：限制單日投入資金比例（%），對應風控或券商槓桿限制。</li>
                                                     <li>平均漲跌幅取自訓練資料中符合門檻的樣本，用於推算勝率與資金配置。</li>
+                                                    <li>序列長度會依可用資料自動調整（預設 16 日），兼顧記憶深度與樣本量。</li>
                                                 </ul>
                                             </div>
                                         </div>
