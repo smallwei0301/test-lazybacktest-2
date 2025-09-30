@@ -1748,6 +1748,50 @@
                                                                 <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制每個組合在 "交替優化" 流程中的最大迭代次數。預設 6。</p>
                                                             </div>
                                                         </div>
+                                                        <div class="border-t border-dashed pt-4 space-y-3" style="border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
+                                                            <div class="flex items-center justify-between gap-3">
+                                                                <div>
+                                                                    <h4 class="font-medium text-foreground" style="color: var(--foreground);">過擬合風險評估</h4>
+                                                                    <p class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">套用 CSCV PBO、Deflated Sharpe Ratio 與參數礁島分析，於批量優化完成後給出 Overfit Score 排名。</p>
+                                                                </div>
+                                                                <span class="inline-flex items-center text-[11px] font-semibold px-2 py-1 rounded-full" style="background-color: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);">LB-OVERFIT-SCORING-20250915A</span>
+                                                            </div>
+                                                            <div class="grid gap-4 md:grid-cols-3">
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    CSCV 區塊數 (S，需為偶數)
+                                                                    <input id="batch-overfit-blocks" type="number" min="4" max="20" step="2" value="10" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <span class="mt-1 text-[11px] font-normal" style="color: var(--muted-foreground);">建議 8~12 區，確保每折 Out-of-Sample 有足夠交易日。</span>
+                                                                </label>
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    區塊績效指標
+                                                                    <select id="batch-overfit-metric" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                        <option value="sharpe" selected>Sharpe Ratio（預設）</option>
+                                                                        <option value="return">區段報酬率</option>
+                                                                    </select>
+                                                                    <span class="mt-1 text-[11px] font-normal" style="color: var(--muted-foreground);">Sharpe 更能反映波動調整後的穩健度，亦可改用純報酬量化。</span>
+                                                                </label>
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    礁島門檻分位數
+                                                                    <input id="batch-overfit-island-quantile" type="number" min="0.5" max="0.95" step="0.05" value="0.75" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <span class="mt-1 text-[11px] font-normal" style="color: var(--muted-foreground);">取 OOS 成績位於此分位以上的格點串連成穩健島。</span>
+                                                                </label>
+                                                            </div>
+                                                            <div class="grid gap-4 md:grid-cols-3">
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    PBO 權重 w₁
+                                                                    <input id="batch-overfit-weight-pbo" type="number" min="0" max="1" step="0.05" value="0.5" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                </label>
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    DSR 權重 w₂
+                                                                    <input id="batch-overfit-weight-dsr" type="number" min="0" max="1" step="0.05" value="0.25" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                </label>
+                                                                <label class="flex flex-col text-xs font-medium" style="color: var(--foreground);">
+                                                                    礁島權重 w₃
+                                                                    <input id="batch-overfit-weight-island" type="number" min="0" max="1" step="0.05" value="0.25" class="mt-1 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <span class="mt-1 text-[11px] font-normal" style="color: var(--muted-foreground);">三者會自動正規化，預設以 PBO 為主、DSR 與穩健島共同補強。</span>
+                                                                </label>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1863,6 +1907,10 @@
                                                                     <option value="sharpeRatio">夏普比率</option>
                                                                     <option value="maxDrawdown">最大回撤</option>
                                                                     <option value="tradeCount">交易次數</option>
+                                                                    <option value="overfitScore">過擬合分數</option>
+                                                                    <option value="pboProbability">PBO（小越好）</option>
+                                                                    <option value="dsr">DSR</option>
+                                                                    <option value="islandScore">穩健島分數</option>
                                                                 </select>
                                                                 <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
                                                                     <i data-lucide="arrow-down" class="lucide"></i>
@@ -1871,6 +1919,39 @@
                                                         </div>
                                                     </div>
                                                     <div class="card-content">
+                                                        <div id="overfit-diagnostics-panel" class="mb-6 hidden">
+                                                            <div class="grid gap-4 md:grid-cols-3">
+                                                                <div class="rounded-lg border p-4" style="border-color: color-mix(in srgb, var(--accent) 20%, transparent); background-color: color-mix(in srgb, var(--accent) 8%, transparent);">
+                                                                    <div class="text-[11px] uppercase tracking-wide font-semibold" style="color: var(--accent);">CSCV PBO</div>
+                                                                    <div id="overfit-pbo-value" class="mt-2 text-2xl font-semibold" style="color: var(--foreground);">-</div>
+                                                                    <p id="overfit-block-config" class="mt-1 text-xs" style="color: var(--muted-foreground);">-</p>
+                                                                    <p id="overfit-lambda-summary" class="mt-2 text-xs leading-relaxed" style="color: var(--muted-foreground);">-</p>
+                                                                </div>
+                                                                <div class="rounded-lg border p-4" style="border-color: color-mix(in srgb, var(--primary) 25%, transparent); background-color: color-mix(in srgb, var(--primary) 8%, transparent);">
+                                                                    <div class="text-[11px] uppercase tracking-wide font-semibold" style="color: var(--primary);">Deflated Sharpe Ratio</div>
+                                                                    <div id="overfit-dsr-median" class="mt-2 text-2xl font-semibold" style="color: var(--foreground);">-</div>
+                                                                    <p id="overfit-dsr-summary" class="mt-2 text-xs leading-relaxed" style="color: var(--muted-foreground);">-</p>
+                                                                </div>
+                                                                <div class="rounded-lg border p-4" style="border-color: color-mix(in srgb, var(--secondary) 25%, transparent); background-color: color-mix(in srgb, var(--secondary) 10%, transparent);">
+                                                                    <div class="text-[11px] uppercase tracking-wide font-semibold" style="color: var(--secondary);">Overfit Score</div>
+                                                                    <div id="overfit-score-summary" class="mt-2 text-2xl font-semibold" style="color: var(--foreground);">-</div>
+                                                                    <p id="overfit-score-detail" class="mt-2 text-xs leading-relaxed" style="color: var(--muted-foreground);">-</p>
+                                                                </div>
+                                                            </div>
+                                                            <div class="grid gap-4 md:grid-cols-2 mt-4">
+                                                                <div class="rounded-lg border p-4" style="border-color: var(--border); background-color: var(--background);">
+                                                                    <h5 class="text-sm font-semibold mb-2" style="color: var(--foreground);">Top 穩健策略（Overfit Score）</h5>
+                                                                    <ol id="overfit-top-combos" class="list-decimal list-inside space-y-1 text-xs" style="color: var(--muted-foreground);">
+                                                                        <li>尚無資料</li>
+                                                                    </ol>
+                                                                </div>
+                                                                <div class="rounded-lg border p-4" style="border-color: var(--border); background-color: var(--background);">
+                                                                    <h5 class="text-sm font-semibold mb-2" style="color: var(--foreground);">礁島診斷</h5>
+                                                                    <p id="overfit-top-island" class="text-xs" style="color: var(--muted-foreground);">尚未計算</p>
+                                                                    <p id="overfit-island-detail" class="text-[11px] mt-2 leading-relaxed" style="color: var(--muted-foreground);"></p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                         <div class="overflow-x-auto">
                                                             <table id="batch-results-table" class="min-w-full divide-y divide-border" style="border-color: var(--border);">
                                                                 <thead class="bg-muted" style="background-color: var(--muted);">
@@ -1883,6 +1964,10 @@
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">夏普比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">索提諾比率</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">最大回撤</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">過擬合分數</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">PBO</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">DSR</th>
+                                                                        <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">穩健島</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">交易次數</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">操作</th>
                                                                     </tr>
@@ -2125,6 +2210,10 @@
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/pbo.js"></script>
+    <script src="js/dsr.js"></script>
+    <script src="js/islands.js"></script>
+    <script src="js/overfit-score.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     

@@ -757,3 +757,12 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-15 — Patch LB-OVERFIT-SCORING-20250915A
+- **Objective**: 將 PBO（CSCV）、Deflated Sharpe Ratio 與參數礁島檢驗整合為批量優化的過擬合評分機制，提供 0~100 的 Overfit Score 供排序參考。
+- **Implementation**:
+  - 新增 `js/pbo.js`、`js/dsr.js`、`js/islands.js`、`js/overfit-score.js`，統一掛載在 `window.lazybacktestOverfit`，實作 CSCV 切分、DSR 計算、礁島偵測與分數整合。
+  - `batch-optimization.js` 讀入 UI 新參數（區塊數、指標、權重、門檻），在結果輸出前執行 `computeOverfitEvaluation`，對每組策略寫入 `overfitScore`、`pboProbability`、`dsr`、`islandScore` 與診斷。
+  - 更新結果表格與排序下拉選單，顯示 Overfit Score / PBO / DSR / 穩健島；新增「過擬合風險評估」摘要面板呈現 PBO、λ 統計、DSR 分布、Top 島嶼與 Top 策略。
+  - `index.html` 新增 UI 控制項、結果摘要區與腳本載入順序；`batch-optimization.js` 調整排序邏輯、預設設定與 grid mapping。
+- **Testing**: 受限於非瀏覽器環境，無法實際執行 Netlify 前端回測流程；已確認組態與運算邏輯不依賴 Proxy/回測結果，後續需於網頁實際跑批量優化驗證 console 無錯誤。

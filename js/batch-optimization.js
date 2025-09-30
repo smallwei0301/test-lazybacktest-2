@@ -180,7 +180,22 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            sortKey: 'annualizedReturn',
+            sortDirection: 'desc',
+            overfitSettings: {
+                blockCount: 10,
+                metric: 'sharpe',
+                islandQuantile: 0.75,
+                weights: {
+                    pbo: 0.5,
+                    dsr: 0.25,
+                    island: 0.25
+                }
+            },
+            selectedBuyStrategies: [],
+            selectedSellStrategies: [],
+            overfitEvaluation: null
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -389,7 +404,17 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+        batchOptimizationConfig = {
+            ...batchOptimizationConfig,
+            ...config,
+            overfitSettings: {
+                ...(batchOptimizationConfig.overfitSettings || {}),
+                ...(config.overfitSettings || {})
+            }
+        };
+        batchOptimizationConfig.overfitEvaluation = null;
+        try { renderOverfitSummary(null); } catch (e) { /* ignore */ }
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
@@ -530,7 +555,45 @@ function getBatchOptimizationConfig() {
         // 設定排序鍵值為選擇的目標指標
         config.sortKey = config.targetMetric;
         config.sortDirection = 'desc';
-        
+
+        const blockInput = document.getElementById('batch-overfit-blocks');
+        let blockCount = blockInput ? parseInt(blockInput.value, 10) : 10;
+        if (!Number.isInteger(blockCount)) {
+            blockCount = 10;
+        }
+        if (blockCount < 4) blockCount = 4;
+        if (blockCount > 20) blockCount = 20;
+        if (blockCount % 2 !== 0) {
+            blockCount = blockCount < 20 ? blockCount + 1 : blockCount - 1;
+        }
+
+        const metricSelect = document.getElementById('batch-overfit-metric');
+        const islandQuantileInput = document.getElementById('batch-overfit-island-quantile');
+        let islandQuantile = islandQuantileInput ? parseFloat(islandQuantileInput.value) : 0.75;
+        if (!Number.isFinite(islandQuantile)) {
+            islandQuantile = 0.75;
+        }
+        islandQuantile = Math.min(Math.max(islandQuantile, 0.5), 0.95);
+
+        const weightPboInput = document.getElementById('batch-overfit-weight-pbo');
+        const weightDsrInput = document.getElementById('batch-overfit-weight-dsr');
+        const weightIslandInput = document.getElementById('batch-overfit-weight-island');
+
+        const weightPbo = weightPboInput ? parseFloat(weightPboInput.value) : 0.5;
+        const weightDsr = weightDsrInput ? parseFloat(weightDsrInput.value) : 0.25;
+        const weightIsland = weightIslandInput ? parseFloat(weightIslandInput.value) : 0.25;
+
+        config.overfitSettings = {
+            blockCount,
+            metric: metricSelect ? metricSelect.value : 'sharpe',
+            islandQuantile,
+            weights: {
+                pbo: Number.isFinite(weightPbo) ? weightPbo : 0.5,
+                dsr: Number.isFinite(weightDsr) ? weightDsr : 0.25,
+                island: Number.isFinite(weightIsland) ? weightIsland : 0.25
+            }
+        };
+
         return config;
     } catch (error) {
         console.error('[Batch Optimization] Error getting config:', error);
@@ -540,7 +603,17 @@ function getBatchOptimizationConfig() {
             maxCombinations: 10000,
             optimizeTargets: ['annualizedReturn'],
             sortKey: 'annualizedReturn',
-            sortDirection: 'desc'
+            sortDirection: 'desc',
+            overfitSettings: {
+                blockCount: 10,
+                metric: 'sharpe',
+                islandQuantile: 0.75,
+                weights: {
+                    pbo: 0.5,
+                    dsr: 0.25,
+                    island: 0.25
+                }
+            }
         };
     }
 }
@@ -736,9 +809,12 @@ async function executeBatchOptimization(config) {
         // 步驟1：取得策略列表
         let buyStrategies = getSelectedStrategies('batch-buy-strategies');
         let sellStrategies = getSelectedStrategies('batch-sell-strategies');
-        
+
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
-        
+
+        batchOptimizationConfig.selectedBuyStrategies = Array.isArray(buyStrategies) ? buyStrategies.slice() : [];
+        batchOptimizationConfig.selectedSellStrategies = Array.isArray(sellStrategies) ? sellStrategies.slice() : [];
+
         updateBatchProgress(5, '準備策略參數優化...');
         
         // 步驟2：先生成所有選中的策略組合，然後逐個對每個組合依序優化參數
@@ -823,7 +899,8 @@ async function optimizeCombinationIterative(combination, config) {
         sellStrategy: combination.sellStrategy,
         buyParams: { ...combination.buyParams },
         sellParams: { ...combination.sellParams },
-        riskManagement: combination.riskManagement
+        riskManagement: combination.riskManagement,
+        gridPosition: combination.gridPosition ? { ...combination.gridPosition } : null
     };
 
     try {
@@ -1194,7 +1271,12 @@ async function processStrategyCombinations(combinations, config) {
                     buyStrategy: combination.buyStrategy,
                     sellStrategy: combination.sellStrategy,
                     buyParams: combination.buyParams,
-                    sellParams: combination.sellParams
+                    sellParams: combination.sellParams,
+                    gridPosition: combination.gridPosition ? { ...combination.gridPosition } : null,
+                    overfitScore: null,
+                    pboProbability: null,
+                    dsr: null,
+                    islandScore: null
                 };
                 
                 // 保留風險管理參數（如果有的話）
@@ -1723,10 +1805,12 @@ function showBatchResults() {
         if (resultsDiv) {
             resultsDiv.classList.remove('hidden');
         }
-        
+
+        computeOverfitEvaluation();
+
         // 排序結果
         sortBatchResults();
-        
+
         // 渲染結果表格
         renderBatchResultsTable();
         
@@ -1747,7 +1831,24 @@ function sortBatchResults() {
     batchOptimizationResults.sort((a, b) => {
         let aValue = a[sortKey] || 0;
         let bValue = b[sortKey] || 0;
-        
+
+        if (sortKey === 'overfitScore') {
+            aValue = Number.isFinite(a.overfitScore) ? a.overfitScore : -Infinity;
+            bValue = Number.isFinite(b.overfitScore) ? b.overfitScore : -Infinity;
+        }
+        if (sortKey === 'pboProbability') {
+            aValue = Number.isFinite(a.pboProbability) ? 1 - a.pboProbability : -Infinity;
+            bValue = Number.isFinite(b.pboProbability) ? 1 - b.pboProbability : -Infinity;
+        }
+        if (sortKey === 'dsr') {
+            aValue = Number.isFinite(a.dsr) ? a.dsr : -Infinity;
+            bValue = Number.isFinite(b.dsr) ? b.dsr : -Infinity;
+        }
+        if (sortKey === 'islandScore') {
+            aValue = Number.isFinite(a.islandScore) ? a.islandScore : -Infinity;
+            bValue = Number.isFinite(b.islandScore) ? b.islandScore : -Infinity;
+        }
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1790,16 +1891,148 @@ function updateSortDirectionButton() {
     }
 }
 
+// 過擬合評估
+function computeOverfitEvaluation() {
+    try {
+        if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+            batchOptimizationConfig.overfitEvaluation = null;
+            return null;
+        }
+        const overfitNamespace = window.lazybacktestOverfit;
+        if (!overfitNamespace || typeof overfitNamespace.evaluateBatchResults !== 'function') {
+            return null;
+        }
+        const evaluation = overfitNamespace.evaluateBatchResults({
+            results: batchOptimizationResults,
+            config: batchOptimizationConfig,
+            buyStrategies: batchOptimizationConfig.selectedBuyStrategies || [],
+            sellStrategies: batchOptimizationConfig.selectedSellStrategies || [],
+        });
+        batchOptimizationConfig.overfitEvaluation = evaluation || null;
+        return evaluation || null;
+    } catch (error) {
+        console.warn('[Batch Optimization] Overfit evaluation failed:', error);
+        batchOptimizationConfig.overfitEvaluation = null;
+        return null;
+    }
+}
+
+function renderOverfitSummary(evaluation) {
+    const panel = document.getElementById('overfit-diagnostics-panel');
+    if (!panel) return;
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = text;
+        }
+    };
+
+    const listEl = document.getElementById('overfit-top-combos');
+
+    if (!evaluation) {
+        panel.classList.add('hidden');
+        setText('overfit-pbo-value', '-');
+        setText('overfit-block-config', '-');
+        setText('overfit-lambda-summary', '-');
+        setText('overfit-dsr-median', '-');
+        setText('overfit-dsr-summary', '-');
+        setText('overfit-score-summary', '-');
+        setText('overfit-score-detail', '-');
+        setText('overfit-top-island', '尚未計算');
+        setText('overfit-island-detail', '');
+        if (listEl) {
+            listEl.innerHTML = '<li>尚無資料</li>';
+        }
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    const metricLabel = evaluation.metricType === 'return' ? '區段報酬率' : 'Sharpe Ratio';
+    setText('overfit-block-config', `S=${evaluation.blockCount}，指標 ${metricLabel}，樣本 ${evaluation.combinations} 組`);
+
+    const pboValueText = Number.isFinite(evaluation?.pbo?.value) ? formatProbability(evaluation.pbo.value) : '-';
+    setText('overfit-pbo-value', pboValueText);
+
+    const lambdaMedian = Number.isFinite(evaluation?.pbo?.lambdaMedian) ? evaluation.pbo.lambdaMedian.toFixed(2) : '-';
+    const lambdaNegative = Number.isFinite(evaluation?.pbo?.lambdaNegativeShare)
+        ? formatProbability(evaluation.pbo.lambdaNegativeShare)
+        : '-';
+    setText('overfit-lambda-summary', `λ 中位數 ${lambdaMedian}，負值比例 ${lambdaNegative}`);
+
+    const dsrMedian = Number.isFinite(evaluation?.dsr?.median) ? formatProbability(evaluation.dsr.median) : '-';
+    setText('overfit-dsr-median', dsrMedian);
+    const dsrRange = Number.isFinite(evaluation?.dsr?.min) && Number.isFinite(evaluation?.dsr?.max)
+        ? `${formatProbability(evaluation.dsr.min)} ~ ${formatProbability(evaluation.dsr.max)}`
+        : '-';
+    const dsrSample = evaluation?.dsr?.sampleSize || 0;
+    setText('overfit-dsr-summary', `樣本 ${dsrSample}，範圍 ${dsrRange}`);
+
+    const avgScoreText = Number.isFinite(evaluation?.scoreStats?.average)
+        ? `${evaluation.scoreStats.average.toFixed(1)} 分`
+        : '-';
+    setText('overfit-score-summary', avgScoreText);
+
+    let scoreDetail = '-';
+    if (evaluation?.scoreStats) {
+        const percentile = Number.isFinite(evaluation.scoreStats.percentile75)
+            ? evaluation.scoreStats.percentile75.toFixed(1)
+            : '-';
+        const minScore = Number.isFinite(evaluation.scoreStats.min)
+            ? evaluation.scoreStats.min.toFixed(1)
+            : '-';
+        const maxScore = Number.isFinite(evaluation.scoreStats.max)
+            ? evaluation.scoreStats.max.toFixed(1)
+            : '-';
+        scoreDetail = `75 分位 ${percentile}，範圍 ${minScore} ~ ${maxScore}`;
+    }
+    setText('overfit-score-detail', scoreDetail);
+
+    if (listEl) {
+        if (Array.isArray(evaluation.topScores) && evaluation.topScores.length > 0) {
+            const items = evaluation.topScores.map((item) => {
+                const buyName = getStrategyChineseName(item.buyStrategy || '');
+                const sellName = getStrategyChineseName(item.sellStrategy || '');
+                const score = Number.isFinite(item.score) ? `${item.score.toFixed(1)} 分` : '分數缺資料';
+                const pbo = Number.isFinite(item.pbo) ? formatProbability(item.pbo) : '-';
+                const dsr = Number.isFinite(item.dsr) ? formatProbability(item.dsr) : '-';
+                const island = Number.isFinite(item.island) ? formatProbability(item.island) : '-';
+                return `<li>${buyName} / ${sellName} — ${score}（PBO ${pbo}、DSR ${dsr}、島 ${island}）</li>`;
+            }).join('');
+            listEl.innerHTML = items;
+        } else {
+            listEl.innerHTML = '<li>尚無資料</li>';
+        }
+    }
+
+    const topIsland = evaluation?.islands?.topIsland;
+    if (topIsland) {
+        const areaText = typeof topIsland.size === 'number' ? `${topIsland.size} 格` : 'N/A';
+        const normAreaText = Number.isFinite(topIsland.normArea) ? formatProbability(topIsland.normArea) : '-';
+        const normalizedText = Number.isFinite(topIsland.normalizedScore) ? formatProbability(topIsland.normalizedScore) : '-';
+        setText('overfit-top-island', `最大島嶼 ${areaText}，覆蓋率 ${normAreaText}，歸一化 ${normalizedText}`);
+        const avgValueText = Number.isFinite(topIsland.avgValue) ? topIsland.avgValue.toFixed(2) : '-';
+        const dispersionText = Number.isFinite(topIsland.dispersion) ? topIsland.dispersion.toFixed(2) : '-';
+        const avgPboText = Number.isFinite(topIsland.avgPbo) ? formatProbability(topIsland.avgPbo) : '-';
+        setText('overfit-island-detail', `島內均值 ${avgValueText}，分散 ${dispersionText}，平均 PBO ${avgPboText}`);
+    } else {
+        setText('overfit-top-island', '尚未偵測到穩健島');
+        setText('overfit-island-detail', '');
+    }
+}
+
 // 渲染結果表格
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
+    renderOverfitSummary(batchOptimizationConfig.overfitEvaluation || null);
+
     tbody.innerHTML = '';
-    
+
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
@@ -1852,7 +2085,17 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
+        const overfitScoreDisplay = formatScore(result.overfitScore);
+        const pboDisplay = formatProbability(result.pboProbability);
+        const dsrDisplay = formatProbability(result.dsr);
+        const islandDisplay = formatProbability(result.islandScore);
+        const overfitTooltipParts = [];
+        if (pboDisplay !== '-') overfitTooltipParts.push(`PBO ${pboDisplay}`);
+        if (dsrDisplay !== '-') overfitTooltipParts.push(`DSR ${dsrDisplay}`);
+        if (islandDisplay !== '-') overfitTooltipParts.push(`島 ${islandDisplay}`);
+        const overfitTooltip = overfitTooltipParts.length > 0 ? overfitTooltipParts.join(' ｜ ') : '尚未評估';
+
         row.innerHTML = `
             <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
             <td class="px-3 py-2 text-sm">
@@ -1864,9 +2107,13 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
+            <td class="px-3 py-2 text-sm text-gray-900" title="${overfitTooltip}">${overfitScoreDisplay}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${pboDisplay}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${dsrDisplay}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${islandDisplay}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
                         onclick="loadBatchStrategy(${index})">
                     載入
                 </button>
@@ -2604,6 +2851,16 @@ function formatNumber(value) {
     return value.toFixed(2);
 }
 
+function formatProbability(value, digits = 1) {
+    if (!Number.isFinite(value)) return '-';
+    return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatScore(value) {
+    if (!Number.isFinite(value)) return '-';
+    return value.toFixed(1);
+}
+
 // 載入批量優化策略
 function loadBatchStrategy(index) {
     const result = batchOptimizationResults[index];
@@ -3013,16 +3270,17 @@ function generateOptimizedStrategyCombinations(optimizedBuyStrategies, optimized
 function generateStrategyCombinations(buyStrategies, sellStrategies) {
     const combinations = [];
 
-    for (const buyStrategy of buyStrategies) {
+    buyStrategies.forEach((buyStrategy, buyIndex) => {
         const buyParams = getDefaultStrategyParams(buyStrategy) || {};
 
-        for (const sellStrategy of sellStrategies) {
+        sellStrategies.forEach((sellStrategy, sellIndex) => {
             const sellParams = getDefaultStrategyParams(sellStrategy) || {};
             const combination = {
                 buyStrategy: buyStrategy,
                 sellStrategy: sellStrategy,
                 buyParams: { ...buyParams },
-                sellParams: { ...sellParams }
+                sellParams: { ...sellParams },
+                gridPosition: { buyIndex, sellIndex }
             };
 
             // 處理風險管理策略（如 fixed_stop_loss, cover_fixed_stop_loss）
@@ -3032,8 +3290,8 @@ function generateStrategyCombinations(buyStrategies, sellStrategies) {
             }
 
             combinations.push(combination);
-        }
-    }
+        });
+    });
 
     return combinations;
 }
