@@ -771,3 +771,9 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2025-12-08 — Patch LB-OFI-ALIGN-20250924A
+- **Issue recap**: 原版 IslandScore 未再除以所有島嶼的最大分數，且缺乏完整文件說明各子指標與規格差異，讓前端與產品難以對齊 OFI 評估。
+- **Fix**: 調整 `computeIslandScores` 以 `max S_j` 正規化島嶼得分並回傳中繼資訊，同步新增 `docs/ofi-metrics-breakdown.md` 整理 Flow/Strategy 各構面公式、差異與影響。
+- **Diagnostics**: 檢查 `result.meta.island.normalisedScore` 落在 [0,1]、最大島嶼等於 1，並交叉對照文件中的流程對照表；批量優化介面 tooltip 可看到最新分數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

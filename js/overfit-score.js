@@ -666,28 +666,34 @@
 
     const scoreMap = new Map();
     islands.forEach((island) => {
-      const areaNorm = normaliseWithQuantiles(island.area, areaP25, areaP95);
-      const dispersionNorm = normaliseWithQuantiles(island.dispersion, dispersionP25, dispersionP95);
-      const edgeNorm = normaliseWithQuantiles(island.edgePenaltyRaw, edgeP25, edgeP95);
-      const score = areaNorm * (1 - dispersionNorm) * (1 - edgeNorm);
-      island.score = clamp(score, 0, 1);
+      island.areaNorm = normaliseWithQuantiles(island.area, areaP25, areaP95);
+      island.dispersionNorm = normaliseWithQuantiles(island.dispersion, dispersionP25, dispersionP95);
+      island.edgeNorm = normaliseWithQuantiles(island.edgePenaltyRaw, edgeP25, edgeP95);
+      const rawScore = island.areaNorm * (1 - island.dispersionNorm) * (1 - island.edgeNorm);
+      island.rawScore = clamp(rawScore, 0, 1);
     });
 
+    const maxIslandScore = islands.reduce((max, island) => (island.rawScore > max ? island.rawScore : max), 0);
+
     islands.forEach((island) => {
+      const normalisedScore = maxIslandScore > EPSILON ? clamp(island.rawScore / maxIslandScore, 0, 1) : 0;
       island.cells.forEach((cellKey) => {
         const owners = island.group.cellOwners.get(cellKey) || [];
         owners.forEach((ownerIndex) => {
           const existing = scoreMap.get(ownerIndex);
-          if (!existing || island.score > existing.score) {
+          if (!existing || normalisedScore > existing.score) {
             scoreMap.set(ownerIndex, {
-              score: island.score,
+              score: normalisedScore,
               meta: {
                 area: island.area,
                 dispersion: island.dispersion,
                 edgePenalty: island.edgePenaltyRaw,
-                areaNorm: normaliseWithQuantiles(island.area, areaP25, areaP95),
-                dispersionNorm: normaliseWithQuantiles(island.dispersion, dispersionP25, dispersionP95),
-                edgeNorm: normaliseWithQuantiles(island.edgePenaltyRaw, edgeP25, edgeP95),
+                areaNorm: island.areaNorm,
+                dispersionNorm: island.dispersionNorm,
+                edgeNorm: island.edgeNorm,
+                rawScore: island.rawScore,
+                maxScore: maxIslandScore,
+                normalisedScore,
                 groupKey: island.groupKey,
               },
             });
