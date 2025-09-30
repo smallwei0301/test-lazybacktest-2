@@ -1258,6 +1258,13 @@
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="ai-forecast"
+                                            >
+                                                <i data-lucide="bot" class="lucide-sm inline mr-1"></i>AI預測
+                                            </button>
                                         </nav>
                                     </div>
                                 </div>
@@ -2058,6 +2065,112 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="tab-content hidden space-y-6" id="ai-forecast-tab">
+                            <div class="card shadow-lg">
+                                <div class="card-header pb-4">
+                                    <div class="flex items-center justify-between flex-wrap gap-3">
+                                        <div>
+                                            <h3 class="card-title">AI 預測：隔日 ±2 元漲跌判讀</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">
+                                                版本 <span id="ai-forecast-version" class="font-semibold"></span>｜以 LSTM 與凱利公式推估隔日收盤價是否上漲 2 元以上，僅在預測上漲時模擬買入。
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            id="ai-forecast-run"
+                                            class="btn-primary px-4 py-2 rounded-md text-sm font-semibold flex items-center gap-2"
+                                            style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);"
+                                        >
+                                            <i data-lucide="brain" class="lucide-sm"></i>
+                                            啟動 AI 訓練
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-content space-y-4">
+                                    <div class="grid md:grid-cols-2 gap-4" id="ai-forecast-dataset-summary">
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">資料概況</p>
+                                            <p class="text-sm mt-2" style="color: var(--foreground);">等待回測資料同步...</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">訓練狀態</p>
+                                            <p id="ai-forecast-status" class="text-sm mt-2" style="color: var(--muted-foreground);">尚未啟動訓練。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow-lg" id="ai-forecast-metrics-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">模型評估</h3>
+                                </div>
+                                <div class="card-content">
+                                    <div class="grid sm:grid-cols-3 gap-4">
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">訓練勝率</p>
+                                            <p id="ai-forecast-train-accuracy" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">以 2:1 訓練/測試拆分取得之訓練資料分類準確率。</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">測試勝率</p>
+                                            <p id="ai-forecast-test-accuracy" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">Out-of-sample 測試資料分類準確率。</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">下一交易日判讀</p>
+                                            <p id="ai-forecast-next-decision" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">機率 <span id="ai-forecast-next-prob" class="font-semibold">—</span> ｜ 依據最新 20 日收盤報酬的 LSTM 輸出。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow-lg" id="ai-forecast-backtest-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">凱利公式資金配置與測試報酬</h3>
+                                </div>
+                                <div class="card-content space-y-4">
+                                    <div class="grid sm:grid-cols-2 gap-4">
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">回測總報酬率</p>
+                                            <p id="ai-forecast-total-return" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">以凱利公式分配資金、僅在預測上漲時買入，隔日收盤平倉的累積報酬。</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">平均單筆報酬</p>
+                                            <p id="ai-forecast-average-return" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+        
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">計入獲利與虧損後的幾何平均報酬。</p>
+                                        </div>
+                                    </div>
+                                    <div class="grid sm:grid-cols-2 gap-4">
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">執行交易次數</p>
+                                            <p id="ai-forecast-trade-count" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">只統計預測上漲且成功下單的交易筆數。</p>
+                                        </div>
+                                        <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                            <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">建議凱利投資比例</p>
+                                            <p id="ai-forecast-kelly-fraction" class="text-2xl font-semibold" style="color: var(--foreground);">—</p>
+                                            <p class="text-[11px] mt-1" style="color: var(--muted-foreground);">依訓練集勝率與盈虧比推算的基準資金配置。</p>
+                                        </div>
+                                    </div>
+                                    <div class="p-4 rounded-lg border" style="border-color: var(--border); background-color: var(--background);">
+                                        <p class="text-xs uppercase tracking-wide" style="color: var(--muted-foreground);">凱利公式說明</p>
+                                        <p class="text-sm mt-2" style="color: var(--muted-foreground); line-height: 1.6;">
+                                            以上資金配置採 MacLean、Thorp 與 Ziemba（2011）提出的凱利增長準則推導，使用訓練集估計的平均盈虧幅度計算最適下注比例，並限制於 0–100% 之間以避免過度槓桿。
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card shadow-lg">
+                                <div class="card-header">
+                                    <h3 class="card-title">研究依據</h3>
+                                </div>
+                                <div class="card-content text-sm space-y-3" style="color: var(--muted-foreground); line-height: 1.7;">
+                                    <p>本頁 AI 模型以長短期記憶（LSTM）架構為核心，參考 Hochreiter &amp; Schmidhuber（1997）提出的門控記憶單元設計，以及 Fischer &amp; Krauss（2018）將 LSTM 應用於股票報酬方向預測的流程，並以近 20 日報酬序列作為特徵。</p>
+                                    <p>資金管理部分採用 MacLean、Thorp 與 Ziemba（2011）整理的凱利增長準則，將訓練集中估計的勝率與盈虧比帶入，以求得理論上的最佳下注比例，再於回測中動態調整資金部位。</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </main>
@@ -2124,6 +2237,8 @@
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+    <script src="js/ai-forecast.js"></script>
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>

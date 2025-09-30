@@ -5049,8 +5049,8 @@ function clearPreviousResults() {
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
     document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
     if(stockChart){
-        stockChart.destroy(); 
-        stockChart=null; 
+        stockChart.destroy();
+        stockChart=null;
         const chartContainer = document.getElementById('chart-container');
         if (chartContainer) {
             chartContainer.innerHTML = '<canvas id="chart" class="w-full h-full absolute inset-0"></canvas><div class="text-muted text-center" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>執行回測後將顯示淨值曲線</p></div>';
@@ -5077,6 +5077,13 @@ function clearPreviousResults() {
     renderPricePipelineSteps();
     renderPriceInspectorDebug();
     refreshDataDiagnosticsPanel();
+    if (typeof window.resetAiForecastTab === 'function') {
+        try {
+            window.resetAiForecastTab();
+        } catch (error) {
+            console.warn('[AI Forecast] reset tab failed:', error);
+        }
+    }
 }
 
 const adjustmentReasonLabels = {
@@ -6188,6 +6195,13 @@ function handleBacktestResult(result, stockName, dataSource) {
         displayTradeResults(result);
         renderChart(result);
         updateChartTrendOverlay();
+        if (typeof window.updateAiForecastTab === 'function') {
+            try {
+                window.updateAiForecastTab({ result, stockName });
+            } catch (error) {
+                console.warn('[AI Forecast] 更新資料失敗:', error);
+            }
+        }
         activateTab('summary');
 
         setTimeout(() => {
