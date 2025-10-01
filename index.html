@@ -2123,6 +2123,39 @@
                                                 </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 items-start">
+                                                <label class="flex flex-col gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    勝率門檻
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <input id="ai-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預測上漲機率需達門檻才會進場。</span>
+                                                    </div>
+                                                </label>
+                                                <div class="flex flex-col gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    最佳化工具
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <button id="ai-threshold-optimize" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-semibold transition-colors" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground); border-color: var(--border);">
+                                                            一鍵最佳報酬
+                                                        </button>
+                                                        <span id="ai-threshold-feedback" class="text-[11px] font-normal" style="color: var(--muted-foreground);">掃描 50%~100% 門檻，找出交易報酬中位數最佳值。</span>
+                                                    </div>
+                                                </div>
+                                                <div class="flex flex-col gap-2 text-xs font-medium md:col-span-2" style="color: var(--foreground);">
+                                                    種子儲存與載入
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors" style="background-color: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary-foreground);">
+                                                            儲存種子
+                                                        </button>
+                                                        <div class="flex items-center gap-2 grow md:grow-0">
+                                                            <select id="ai-seed-list" multiple size="4" class="min-w-[200px] px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
+                                                            <button id="ai-load-seed" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-semibold transition-colors" style="background-color: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--foreground); border-color: var(--border);">
+                                                                載入種子
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預設名稱為訓練期勝率與測試正確率，可多選管理已儲存種子。</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="card">
@@ -2150,20 +2183,19 @@
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
-                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均每筆：—</p>
+                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均報酬：—｜交易數：—｜標準差：—</p>
                                                 </div>
                                             </div>
+                                            <div id="ai-next-prediction" class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">尚未產生隔日預測。</div>
                                             <div class="overflow-x-auto">
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                     <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
                                                         <tr>
-                                                            <th class="px-3 py-2 text-left font-semibold">買進日</th>
-                                                            <th class="px-3 py-2 text-left font-semibold">賣出日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">交易日</th>
                                                             <th class="px-3 py-2 text-right font-semibold">預測上漲機率</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">投入比例</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">交易盈虧</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">累積資金</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">交易報酬%</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody id="ai-trade-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
