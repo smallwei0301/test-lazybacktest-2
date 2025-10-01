@@ -799,3 +799,8 @@
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-13 — Patch LB-AI-ANNS-20251213A
+- **Issue recap**: ANNS 模型仍採用 Adam + Binary Crossentropy，且僅輸入 MACD Diff，與參考論文的 SGD/MSE 設定與 MACD Signal/Hist 指標不符。
+- **Fix**: 將 ANN 管線改用固定學習率 0.01 的 SGD 與均方誤差，並在特徵矩陣加入 MACD Signal 與 Histogram 欄位後同步更新標準化流程。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('worker compiles');NODE`
+
