@@ -1,6 +1,7 @@
 
 importScripts('shared-lookback.js');
 importScripts('config.js');
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
@@ -19,6 +20,7 @@ importScripts('config.js');
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251117A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -204,6 +206,352 @@ function mergeYearSupersetRows(existingEntry, rows) {
   );
   rebuildCoverageFromData(existingEntry);
   existingEntry.lastUpdated = Date.now();
+}
+
+const ANN_PREDICTION_VERSION = 'LB-AI-ANNS-20251117A';
+const ANN_MIN_SAMPLES = 60;
+
+function annSma(values, n) {
+  const out = Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function annWma(values, n) {
+  const out = Array(values.length).fill(null);
+  const denom = (n * (n + 1)) / 2;
+  for (let i = n - 1; i < values.length; i++) {
+    let numerator = 0;
+    for (let k = 0; k < n; k++) {
+      numerator += (n - k) * values[i - k];
+    }
+    out[i] = numerator / denom;
+  }
+  return out;
+}
+
+function annEma(values, n) {
+  const out = Array(values.length).fill(null);
+  const alpha = 2 / (n + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const cur = values[i];
+    if (!Number.isFinite(cur)) {
+      out[i] = prev;
+      continue;
+    }
+    if (prev == null) {
+      out[i] = cur;
+    } else {
+      out[i] = prev + alpha * (cur - prev);
+    }
+    prev = out[i];
+  }
+  return out;
+}
+
+function annMomentum(values, n) {
+  return values.map((val, idx) => (idx >= n ? val - values[idx - n] : null));
+}
+
+function annRollingExtrema(values, n, comparer) {
+  const out = Array(values.length).fill(null);
+  const deque = [];
+  for (let i = 0; i < values.length; i++) {
+    while (deque.length && deque[0] <= i - n) deque.shift();
+    while (deque.length && comparer(values[deque[deque.length - 1]], values[i])) deque.pop();
+    deque.push(i);
+    if (i >= n - 1) out[i] = values[deque[0]];
+  }
+  return out;
+}
+
+function annHighest(values, n) {
+  return annRollingExtrema(values, n, (a, b) => a <= b);
+}
+
+function annLowest(values, n) {
+  return annRollingExtrema(values, n, (a, b) => a >= b);
+}
+
+function annStochasticKD(high, low, close, periodK = 14, periodD = 3) {
+  const highestVals = annHighest(high, periodK);
+  const lowestVals = annLowest(low, periodK);
+  const rawK = close.map((price, idx) => {
+    if (idx < periodK - 1) return null;
+    const range = highestVals[idx] - lowestVals[idx];
+    if (!Number.isFinite(range) || range === 0) return null;
+    return ((price - lowestVals[idx]) / range) * 100;
+  });
+  const smoothK = annSma(rawK.map((val) => (Number.isFinite(val) ? val : 0)), periodD);
+  const finalD = smoothK.map((val, idx) => (idx >= periodK - 1 ? val : null));
+  return { K: rawK, D: finalD };
+}
+
+function annRsi(close, period = 14) {
+  const out = Array(close.length).fill(null);
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i < close.length; i++) {
+    const change = close[i] - close[i - 1];
+    const up = Math.max(change, 0);
+    const down = Math.max(-change, 0);
+    if (i <= period) {
+      gain += up;
+      loss += down;
+      if (i === period) {
+        const rs = (gain / period) / ((loss / period) || 1e-12);
+        out[i] = 100 - 100 / (1 + rs);
+      }
+    } else {
+      gain = (gain * (period - 1) + up) / period;
+      loss = (loss * (period - 1) + down) / period;
+      const rs = gain / (loss || 1e-12);
+      out[i] = 100 - 100 / (1 + rs);
+    }
+  }
+  return out;
+}
+
+function annMacd(close, fast = 12, slow = 26, signal = 9) {
+  const emaFast = annEma(close, fast);
+  const emaSlow = annEma(close, slow);
+  const diff = close.map((_, idx) => (
+    Number.isFinite(emaFast[idx]) && Number.isFinite(emaSlow[idx])
+      ? emaFast[idx] - emaSlow[idx]
+      : null
+  ));
+  const signalLine = annEma(diff.map((val) => (Number.isFinite(val) ? val : 0)), signal);
+  const hist = diff.map((val, idx) => (
+    Number.isFinite(val) && Number.isFinite(signalLine[idx])
+      ? val - signalLine[idx]
+      : null
+  ));
+  return { diff, signal: signalLine, hist };
+}
+
+function annCci(high, low, close, period = 20) {
+  const tp = close.map((c, idx) => (high[idx] + low[idx] + c) / 3);
+  const tpSma = annSma(tp, period);
+  const out = Array(close.length).fill(null);
+  for (let i = period - 1; i < close.length; i++) {
+    let meanDev = 0;
+    for (let k = 0; k < period; k++) {
+      meanDev += Math.abs(tp[i - k] - tpSma[i]);
+    }
+    meanDev /= period;
+    out[i] = (tp[i] - tpSma[i]) / (0.015 * (meanDev || 1e-12));
+  }
+  return out;
+}
+
+function annWilliamsR(high, low, close, period = 14) {
+  const highestVals = annHighest(high, period);
+  const lowestVals = annLowest(low, period);
+  return close.map((c, idx) => {
+    if (idx < period - 1 || !Number.isFinite(highestVals[idx]) || !Number.isFinite(lowestVals[idx])) {
+      return null;
+    }
+    const range = highestVals[idx] - lowestVals[idx] || 1e-12;
+    return ((highestVals[idx] - c) / range) * 100;
+  });
+}
+
+function annBuildFeatures(rows) {
+  const close = rows.map((r) => Number(r.close));
+  const high = rows.map((r) => Number.isFinite(r.high) ? Number(r.high) : Number(r.close));
+  const low = rows.map((r) => Number.isFinite(r.low) ? Number(r.low) : Number(r.close));
+
+  const ma = annSma(close, 30);
+  const wma = annWma(close, 15);
+  const ema = annEma(close, 12);
+  const mom = annMomentum(close, 10);
+  const { K, D } = annStochasticKD(high, low, close, 14, 3);
+  const rsiValues = annRsi(close, 14);
+  const macdValues = annMacd(close, 12, 26, 9);
+  const cciValues = annCci(high, low, close, 20);
+  const wr = annWilliamsR(high, low, close, 14);
+
+  const X = [];
+  const y = [];
+  const idxMap = [];
+  for (let i = 0; i < rows.length - 1; i++) {
+    const features = [
+      ma[i],
+      wma[i],
+      ema[i],
+      mom[i],
+      K[i],
+      D[i],
+      rsiValues[i],
+      macdValues.diff[i],
+      cciValues[i],
+      wr[i],
+    ];
+    if (features.every((val) => Number.isFinite(val))) {
+      X.push(features.map((val) => Number(val)));
+      const nextRise = Number(rows[i + 1].close) > Number(rows[i].close) ? 1 : 0;
+      y.push(nextRise);
+      idxMap.push(i);
+    }
+  }
+  return { X, y, idxMap };
+}
+
+function annStandardize(X) {
+  const n = X.length;
+  const dims = X[0].length;
+  const mean = Array(dims).fill(0);
+  const std = Array(dims).fill(0);
+  for (let dim = 0; dim < dims; dim++) {
+    for (let row = 0; row < n; row++) {
+      mean[dim] += X[row][dim];
+    }
+    mean[dim] /= n;
+    for (let row = 0; row < n; row++) {
+      std[dim] += (X[row][dim] - mean[dim]) ** 2;
+    }
+    std[dim] = Math.sqrt(std[dim] / Math.max(1, n - 1)) || 1;
+  }
+  const Z = X.map((row) => row.map((val, idx) => (val - mean[idx]) / std[idx]));
+  return { Z, mean, std };
+}
+
+function annSplitTrainTest(Z, y, idxMap, ratio) {
+  const n = Z.length;
+  if (n < 2) {
+    throw new Error('有效樣本不足，請擴大資料期間。');
+  }
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : 0.8;
+  let trainCount = Math.floor(n * safeRatio);
+  if (trainCount < 1) trainCount = 1;
+  if (trainCount > n - 1) trainCount = n - 1;
+  return {
+    Xtr: Z.slice(0, trainCount),
+    ytr: y.slice(0, trainCount),
+    idxTr: idxMap.slice(0, trainCount),
+    Xte: Z.slice(trainCount),
+    yte: y.slice(trainCount),
+    idxTe: idxMap.slice(trainCount),
+  };
+}
+
+function annBuildModel(inputDim) {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.sgd(0.01), loss: 'meanSquaredError', metrics: ['accuracy'] });
+  return model;
+}
+
+async function annTrainAndEval(Xtr, ytr, Xte, yte, onProgress, epochs, batchSize) {
+  const trainX = tf.tensor2d(Xtr);
+  const trainY = tf.tensor2d(ytr, [ytr.length, 1]);
+  const testX = tf.tensor2d(Xte);
+  const testY = tf.tensor2d(yte, [yte.length, 1]);
+  const model = annBuildModel(Xtr[0].length);
+
+  await model.fit(trainX, trainY, {
+    epochs,
+    batchSize,
+    verbose: 0,
+    callbacks: {
+      onEpochEnd: (epoch) => {
+        if (typeof onProgress === 'function') {
+          const progress = (epoch + 1) / epochs;
+          onProgress(Math.min(1, Math.max(0, progress)));
+        }
+      },
+    },
+  });
+
+  const predTensor = model.predict(testX);
+  const predData = Array.from(await predTensor.data());
+  const predLabels = predData.map((val) => (val >= 0.5 ? 1 : 0));
+  const acc = predLabels.filter((val, idx) => val === yte[idx]).length / yte.length;
+
+  let TP = 0;
+  let TN = 0;
+  let FP = 0;
+  let FN = 0;
+  for (let i = 0; i < predLabels.length; i++) {
+    if (yte[i] === 1 && predLabels[i] === 1) TP++;
+    else if (yte[i] === 0 && predLabels[i] === 0) TN++;
+    else if (yte[i] === 0 && predLabels[i] === 1) FP++;
+    else if (yte[i] === 1 && predLabels[i] === 0) FN++;
+  }
+
+  trainX.dispose();
+  trainY.dispose();
+  testX.dispose();
+  testY.dispose();
+  predTensor.dispose();
+  model.dispose();
+
+  return { acc, confusion: { TP, TN, FP, FN }, predLabels };
+}
+
+function annEstimateKelly(rows, idxTe, predLabels) {
+  if (!Array.isArray(idxTe) || !Array.isArray(predLabels) || idxTe.length !== predLabels.length) {
+    return { p: 0.5, b: 1, k: 0 };
+  }
+  const gains = [];
+  const losses = [];
+  for (let i = 0; i < idxTe.length; i++) {
+    if (predLabels[i] !== 1) continue;
+    const idx = idxTe[i];
+    if (!rows[idx + 1]) continue;
+    const ret = (rows[idx + 1].close - rows[idx].close) / rows[idx].close;
+    if (ret > 0) gains.push(ret);
+    else if (ret < 0) losses.push(Math.abs(ret));
+  }
+  const total = gains.length + losses.length;
+  const p = total > 0 ? gains.length / total : 0.5;
+  const avgGain = gains.length > 0 ? gains.reduce((a, b) => a + b, 0) / gains.length : 0;
+  const avgLoss = losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0;
+  const b = avgLoss > 0 ? avgGain / avgLoss : 1;
+  const q = 1 - p;
+  const k = Math.max(0, (b * p - q) / (b || 1));
+  return { p, b, k };
+}
+
+async function annRunPipeline(rows, options, onProgress) {
+  if (!Array.isArray(rows) || rows.length < ANN_MIN_SAMPLES) {
+    throw new Error('資料不足（至少 60 根 K 線）。');
+  }
+  if (typeof tf === 'undefined') {
+    throw new Error('TensorFlow.js 未正確載入。');
+  }
+  const { X, y, idxMap } = annBuildFeatures(rows);
+  if (!Array.isArray(X) || X.length < ANN_MIN_SAMPLES) {
+    throw new Error('有效樣本不足，請延長資料期間。');
+  }
+  const { Z } = annStandardize(X);
+  const trainRatio = Number.isFinite(options?.trainRatio) ? options.trainRatio : 0.8;
+  const { Xtr, ytr, Xte, yte, idxTe } = annSplitTrainTest(Z, y, idxMap, trainRatio);
+  if (Xte.length === 0 || yte.length === 0) {
+    throw new Error('測試集樣本不足，請重新設定資料區間。');
+  }
+  const epochsRaw = Number.isFinite(options?.epochs) ? options.epochs : 60;
+  const epochs = Math.min(200, Math.max(5, Math.round(epochsRaw)));
+  const batchRaw = Number.isFinite(options?.batchSize) ? options.batchSize : 32;
+  const batchSize = Math.max(1, Math.min(Xtr.length, Math.round(batchRaw)));
+  const progressCb = typeof onProgress === 'function' ? onProgress : null;
+  const evaluation = await annTrainAndEval(Xtr, ytr, Xte, yte, progressCb, epochs, batchSize);
+  const kellyInfo = annEstimateKelly(rows, idxTe, evaluation.predLabels);
+  return {
+    version: ANN_PREDICTION_VERSION,
+    acc: evaluation.acc,
+    confusion: evaluation.confusion,
+    kelly: Number.isFinite(kellyInfo.k) ? kellyInfo.k : 0,
+    kellyDetails: kellyInfo,
+  };
 }
 
 function recordYearSupersetSlices({
@@ -9340,6 +9688,32 @@ self.onmessage = async function (e) {
     effectiveStartDate ||
     params?.startDate;
   try {
+    if (type === "ANN_RUN") {
+      try {
+        const rows = Array.isArray(e.data?.payload?.rows) ? e.data.payload.rows : [];
+        const options = e.data?.payload?.options || {};
+        const result = await annRunPipeline(rows, options, (progress) => {
+          self.postMessage({ type: "ANN_PROGRESS", payload: { progress } });
+        });
+        self.postMessage({
+          type: "ANN_DONE",
+          payload: {
+            acc: result.acc,
+            confusion: result.confusion,
+            kelly: result.kelly,
+            details: result.kellyDetails,
+            version: result.version,
+          },
+        });
+      } catch (annError) {
+        self.postMessage({
+          type: "ANN_ERROR",
+          payload: { message: annError?.message || String(annError) },
+        });
+      }
+      return;
+    }
+
     if (type === "runBacktest") {
       let dataToUse = null;
       let fetched = false;

@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251117A
 
 // 全局變量
 let stockChart = null;
@@ -2682,10 +2683,144 @@ function initRollingTestFeature() {
     }
 }
 
+const ANN_WORKER_VERSION = 'LB-AI-ANNS-20251117A';
+
+function ensureAnnWorker() {
+    if (window.lbWorker) {
+        return window.lbWorker;
+    }
+    const fallbackPath = 'js/worker.js';
+    const workerPath = typeof workerUrl === 'string' && workerUrl ? workerUrl : fallbackPath;
+    try {
+        const workerInstance = new Worker(workerPath);
+        workerInstance.__lbAnnVersion = ANN_WORKER_VERSION;
+        window.lbWorker = workerInstance;
+        return workerInstance;
+    } catch (err) {
+        console.error('[ANN] 建立 worker 失敗：', err);
+        return null;
+    }
+}
+
+function initAnnPredictionUi() {
+    const onDomReady = () => {
+        const btn = document.getElementById('run-ann');
+        const statusEl = document.getElementById('ann-status');
+        const resCard = document.getElementById('ann-result');
+        const accEl = document.getElementById('ann-acc');
+        const kellyEl = document.getElementById('ann-kelly');
+        const cmEl = document.getElementById('ann-cm');
+        const advEl = document.getElementById('ann-adv');
+
+        if (!btn || !statusEl || !resCard || !accEl || !kellyEl || !cmEl || !advEl) {
+            return;
+        }
+
+        const formatPercent = (value, digits = 2) => {
+            if (!Number.isFinite(value)) return '—';
+            return `${(value * 100).toFixed(digits)}%`;
+        };
+
+        const handleWorkerMessage = (event) => {
+            const msg = event.data || {};
+            if (!msg || typeof msg.type !== 'string') return;
+            if (msg.type === 'ANN_PROGRESS') {
+                const progress = Number.isFinite(msg.payload?.progress)
+                    ? Math.min(1, Math.max(0, msg.payload.progress))
+                    : 0;
+                statusEl.textContent = `訓練中… ${(progress * 100).toFixed(0)}%`;
+            } else if (msg.type === 'ANN_DONE') {
+                const acc = Number(msg.payload?.acc);
+                const kelly = Number(msg.payload?.kelly);
+                const confusion = msg.payload?.confusion || {};
+                accEl.textContent = `測試集準確率：${formatPercent(acc)}`;
+                kellyEl.textContent = `凱利資金比率（估算）：${formatPercent(kelly)}`;
+                const tp = Number(confusion.TP) || 0;
+                const tn = Number(confusion.TN) || 0;
+                const fp = Number(confusion.FP) || 0;
+                const fn = Number(confusion.FN) || 0;
+                cmEl.innerHTML = [
+                    `TP（預測漲且漲）：${tp}`,
+                    `TN（預測跌且跌）：${tn}`,
+                    `FP（預測漲實際跌）：${fp}`,
+                    `FN（預測跌實際漲）：${fn}`,
+                ].map((line) => `<div>${line}</div>`).join('');
+                if (Number.isFinite(acc) && acc > 0.5 && Number.isFinite(kelly) && kelly > 0) {
+                    advEl.textContent = `依據 ANN 預測，建議做多部位 ≈ ${formatPercent(kelly, 1)}（請與您的風控模組比對）`;
+                } else {
+                    advEl.textContent = '暫不具優勢，建議觀望或降低部位。';
+                }
+                resCard.classList.remove('hidden');
+                statusEl.textContent = '完成';
+            } else if (msg.type === 'ANN_ERROR') {
+                const message = msg.payload?.message || '未知錯誤';
+                statusEl.textContent = `執行失敗：${message}`;
+                resCard.classList.add('hidden');
+                console.error('[ANN] 執行失敗：', message, msg.payload);
+            }
+        };
+
+        let boundWorker = null;
+        const bindWorker = (workerInstance) => {
+            if (!workerInstance || workerInstance === boundWorker) {
+                return;
+            }
+            workerInstance.addEventListener('message', handleWorkerMessage);
+            boundWorker = workerInstance;
+        };
+
+        const initialWorker = ensureAnnWorker();
+        if (!initialWorker) {
+            statusEl.textContent = '背景運算引擎尚未就緒，請稍後再試。';
+        }
+        bindWorker(initialWorker);
+
+        btn.addEventListener('click', () => {
+            const rows = Array.isArray(cachedStockData) ? cachedStockData : null;
+            if (!rows || rows.length < 60) {
+                statusEl.textContent = '需要先完成一次回測或延長日期區間（至少 60 根 K 線）。';
+                resCard.classList.add('hidden');
+                return;
+            }
+            const activeWorker = ensureAnnWorker();
+            bindWorker(activeWorker);
+            if (!activeWorker) {
+                statusEl.textContent = '送交背景運算失敗，請重新整理頁面後再試。';
+                return;
+            }
+            resCard.classList.add('hidden');
+            statusEl.textContent = '準備資料…';
+            try {
+                activeWorker.postMessage({
+                    type: 'ANN_RUN',
+                    payload: {
+                        rows,
+                        options: {
+                            trainRatio: 0.8,
+                            epochs: 60,
+                            batchSize: 32,
+                        },
+                    },
+                });
+                statusEl.textContent = '訓練中…';
+            } catch (err) {
+                console.error('[ANN] 送交 worker 失敗：', err);
+                statusEl.textContent = `送交 worker 失敗：${err?.message || err}`;
+            }
+        });
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onDomReady);
+    } else {
+        onDomReady();
+    }
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
         // 初始化日期
         initDates();
@@ -2718,6 +2853,8 @@ document.addEventListener('DOMContentLoaded', function() {
             initBatchOptimizationFeature();
             initRollingTestFeature();
         }, 100);
+
+        initAnnPredictionUi();
 
         console.log('[Main] Initialization completed');
     } catch (error) {
