@@ -781,6 +781,12 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-05 — Patch LB-AI-ANN-20260105A
+- **Issue recap**: ANNS 擴充 MACD Signal/Hist 後，舊版種子載入時 `tf.io.decodeWeights` 取得的權重順序與現行模型不符，導致 `model.setWeights` 嘗試讀取 `undefined.dtype` 而終止。
+- **Fix**: 在 ANN 回放流程比對儲存權重規格與當前模型權重數量、Shape，若不相容即釋放資源並提示使用者重新訓練；同時更新前端版本碼以利追蹤。
+- **Diagnostics**: 以舊版種子測試確認改為顯示「權重不相容」提示且不再丟出例外，新訓練的種子則可順利回放並重現預測。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-ANN-20251230B
 - **Issue recap**: 已儲存的 ANNS 種子在隔日載入時無法判斷 UI 價格表是否已含最新交易日，導致每次皆需補抓資料或忽略表格現有資料；回放後也未集中管理權重與標準化快照，難以確保預測值重現。
 - **Fix**: 新增表格快照檢查，若已含當日交易資料則直接以表格資料與 ANN 權重回放，否則才向 API 補抓缺口天數；回放流程統一透過 `runAnnReplayWithRows` 套用儲存的權重、標準化統計與訓練窗格，確保歷史預測機率一致。

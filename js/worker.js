@@ -1035,12 +1035,66 @@ async function handleAIReplayANNMessage(message) {
       throw new Error('無法解析模型權重資料。');
     }
 
-    const model = annBuildModel(Xte[0].length, Number.isFinite(hyperparameters.learningRate) ? hyperparameters.learningRate : 0.01);
+    // Patch Tag: LB-AI-ANN-20260105A — Guard ANN replay from incompatible weight specs post-architecture updates.
+    const model = annBuildModel(
+      Xte[0].length,
+      Number.isFinite(hyperparameters.learningRate) ? hyperparameters.learningRate : 0.01,
+    );
     const weightMap = await tf.io.decodeWeights(weightBuffer, weightSnapshot.specs);
-    const orderedWeights = Array.isArray(weightSnapshot.specs)
-      ? weightSnapshot.specs.map((spec) => weightMap[spec.name])
-      : Object.values(weightMap);
-    model.setWeights(orderedWeights);
+    const referenceWeights = model.getWeights();
+    const expectedCount = referenceWeights.length;
+
+    let orderedWeights = [];
+    const missingSpecs = [];
+    if (Array.isArray(weightSnapshot.specs) && weightSnapshot.specs.length > 0) {
+      orderedWeights = weightSnapshot.specs.map((spec) => {
+        const tensor = weightMap[spec.name];
+        if (!tensor) {
+          missingSpecs.push(spec.name);
+        }
+        return tensor;
+      });
+    } else {
+      orderedWeights = Object.values(weightMap);
+    }
+
+    let shapeMismatch = false;
+    if (orderedWeights.length === expectedCount) {
+      for (let i = 0; i < expectedCount; i += 1) {
+        const expectedShape = Array.isArray(referenceWeights[i]?.shape) ? referenceWeights[i].shape : [];
+        const candidate = orderedWeights[i];
+        const candidateShape = Array.isArray(candidate?.shape) ? candidate.shape : [];
+        if (
+          !candidate
+          || expectedShape.length !== candidateShape.length
+          || expectedShape.some((dim, index) => candidateShape[index] !== dim)
+        ) {
+          shapeMismatch = true;
+          break;
+        }
+      }
+    }
+    referenceWeights.forEach((tensor) => {
+      if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+    });
+
+    if (missingSpecs.length > 0 || orderedWeights.length !== expectedCount || shapeMismatch) {
+      Object.values(weightMap).forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+      });
+      throw new Error('儲存的 ANN 權重與目前的模型結構不相容，請重新訓練並更新種子。');
+    }
+
+    try {
+      model.setWeights(orderedWeights);
+    } catch (setError) {
+      Object.values(weightMap).forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+      });
+      const reason = setError instanceof Error ? setError.message : String(setError || '未知原因');
+      throw new Error(`載入 ANN 權重失敗：${reason}`);
+    }
+
     Object.values(weightMap).forEach((tensor) => {
       if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
     });

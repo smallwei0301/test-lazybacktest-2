@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-ANN-20251230B — Deterministic ANN seed replay with table merge & gap refresh.
+// Patch Tag: LB-AI-ANN-20260105A — ANN seed replay compatibility checks for updated feature set.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-ANN-20251230B';
+    const VERSION_TAG = 'LB-AI-ANN-20260105A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
