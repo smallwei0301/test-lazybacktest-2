@@ -1,3 +1,9 @@
+## 2025-12-18 — Patch LB-AI-REPRO-20251218A
+- **Issue recap**: AI 背景訓練在不同瀏覽器/重載時存在隨機差異，ANN/LSTM 模型無法重現同一批資料的測試成績，亦缺乏標準化參數與模型存檔供之後的推論重播。
+- **Fix**: 將 `worker.js` 導入固定隨機種子與 WASM 後端、為 ANN/LSTM 建立帶種子初始化器並關閉 shuffle/dropout，統一以時間切分與訓練集均值/標準差標準化，回傳混淆矩陣與分類閾值，同步保存 IndexedDB 模型與本地中繼資料；`ai-prediction.js` 則新增 AI meta 快取並改用 Worker 回傳的實際超參數。
+- **Diagnostics**: 透過多次啟動 ANN/LSTM 訓練比對混淆矩陣與測試正確率，確認同一資料批次在連續執行下輸出完全一致，且 localStorage 會儲存 `mean/std`、切分索引與後端資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

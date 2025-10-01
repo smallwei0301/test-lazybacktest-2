@@ -12,6 +12,10 @@
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
+    const AI_META_STORAGE_KEYS = {
+        [MODEL_TYPES.ANNS]: 'LB_AI_ANN_META',
+        [MODEL_TYPES.LSTM]: 'LB_AI_LSTM_META',
+    };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const createModelState = () => ({
         lastSummary: null,
@@ -96,6 +100,26 @@
             window.lazybacktestAIBridge = {};
         }
         return window.lazybacktestAIBridge;
+    };
+
+    const persistAIMeta = (modelType, meta) => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        const storageKey = AI_META_STORAGE_KEYS[modelType];
+        if (!storageKey) return;
+        try {
+            window.localStorage.setItem(storageKey, JSON.stringify(meta));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存 AI 模型中繼資料：', error);
+        }
+    };
+
+    const handleWorkerMetaUpdate = (type, meta) => {
+        if (!meta || typeof meta !== 'object') return;
+        if (type === 'ai-train-ann-meta') {
+            persistAIMeta(MODEL_TYPES.ANNS, meta);
+        } else if (type === 'ai-train-lstm-meta') {
+            persistAIMeta(MODEL_TYPES.LSTM, meta);
+        }
     };
 
     const loadStoredSeeds = () => {
@@ -281,6 +305,10 @@
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
         const { type, id, data, error, message } = event.data;
+        if (type === 'ai-train-ann-meta' || type === 'ai-train-lstm-meta') {
+            handleWorkerMetaUpdate(type, data);
+            return;
+        }
         const isProgress = type === 'ai-train-lstm-progress' || type === 'ai-train-ann-progress';
         if (isProgress) {
             const pending = id ? aiWorkerRequests.get(id) : null;
@@ -852,7 +880,10 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
-        predictionsPayload.hyperparameters = {
+        const workerHyper = (predictionsPayload && typeof predictionsPayload.hyperparameters === 'object')
+            ? predictionsPayload.hyperparameters
+            : null;
+        const fallbackHyper = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
             batchSize: effectiveBatchSize,
@@ -860,14 +891,9 @@
             trainRatio: hyperparameters.trainRatio,
             modelType: resultModelType,
         };
-
-        modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-        };
+        const effectiveHyper = { ...fallbackHyper, ...(workerHyper || {}) };
+        predictionsPayload.hyperparameters = effectiveHyper;
+        modelState.hyperparameters = { ...effectiveHyper };
 
         applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
 
@@ -909,7 +935,10 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
-        predictionsPayload.hyperparameters = {
+        const workerHyper = (predictionsPayload && typeof predictionsPayload.hyperparameters === 'object')
+            ? predictionsPayload.hyperparameters
+            : null;
+        const fallbackHyper = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
             batchSize: hyperparameters.batchSize,
@@ -917,14 +946,9 @@
             trainRatio: hyperparameters.trainRatio,
             modelType,
         };
-
-        modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-        };
+        const effectiveHyper = { ...fallbackHyper, ...(workerHyper || {}) };
+        predictionsPayload.hyperparameters = effectiveHyper;
+        modelState.hyperparameters = { ...effectiveHyper };
 
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
 
