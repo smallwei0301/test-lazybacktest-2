@@ -601,6 +601,8 @@ function annPrepareDataset(rows) {
       kd.d[i],
       rsi[i],
       mac.diff[i],
+      mac.signal[i],
+      mac.hist[i],
       cci[i],
       wr[i],
     ];
@@ -683,13 +685,14 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
   };
 }
 
-function annBuildModel(inputDim, learningRate = 0.005) {
+// Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
+function annBuildModel(inputDim, learningRate = 0.01) {
   const model = tf.sequential();
   model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
   model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
   model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
-  const optimizer = tf.train.adam(learningRate);
-  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  const optimizer = tf.train.sgd(learningRate);
+  model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
 }
 
@@ -725,7 +728,7 @@ async function handleAITrainANNMessage(message) {
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
     const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
     const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
-    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.005;
+    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate);
     const xTrain = tf.tensor2d(split.Xtr);
