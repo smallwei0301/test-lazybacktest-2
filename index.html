@@ -2172,7 +2172,7 @@
                                                 </div>
                                                 <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
                                                     <span class="text-xs font-medium" style="color: var(--foreground);">種子管理</span>
-                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="測試勝率XX.X%｜交易報酬中位數YY.Y%｜平均報酬ZZ.Z%｜交易次數N" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="測試期預測正確率XX.X%｜交易報酬率中位數YY.Y%｜平均報酬率ZZ.Z%｜交易次數N" style="border-color: var(--border); background-color: var(--input);" />
                                                     <div class="flex flex-wrap gap-2">
                                                         <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors" style="background-color: var(--secondary); color: var(--secondary-foreground);">
                                                             <i data-lucide="save" class="lucide-xs"></i>儲存種子
@@ -2185,7 +2185,7 @@
                                                         </button>
                                                     </div>
                                                     <select id="ai-saved-seeds" multiple size="5" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
-                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱會帶入測試勝率、交易報酬中位數、平均報酬與交易次數，可多選載入比較策略成果，刪除僅影響本機儲存。</span>
+                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱會帶入測試期預測正確率、交易報酬率中位數、平均報酬率與交易次數，可多選載入比較策略成果，刪除僅影響本機儲存。</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -2193,7 +2193,7 @@
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
                                             <h3 class="card-title text-base">模型與交易成果</h3>
-                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、勝率門檻調整後的交易統計，以及隔日預測的即時摘要。</p>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試期預測正確率、勝率門檻調整後的交易統計，以及隔日預測的即時摘要。</p>
                                         </div>
                                         <div class="card-content space-y-4">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" id="ai-metrics-overview" style="color: var(--foreground);">

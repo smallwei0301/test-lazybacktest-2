@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-UX-20251220A — Default to ANNS, enriched seed management, next-trading-day forecast label.
+// Patch Tag: LB-AI-SEED-20251222A — Restore saved AI seed snapshots & refine default labels.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-UX-20251220A';
+    const VERSION_TAG = 'LB-AI-SEED-20251222A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -110,7 +110,53 @@
                     const normalizedModel = Object.values(MODEL_TYPES).includes(seed.modelType)
                         ? seed.modelType
                         : DEFAULT_MODEL;
-                    return { ...seed, modelType: normalizedModel };
+                    const normalizedSummary = seed.summary && typeof seed.summary === 'object'
+                        ? {
+                            threshold: Number.isFinite(seed.summary.threshold) ? seed.summary.threshold : 0.5,
+                            usingKelly: Boolean(seed.summary.usingKelly),
+                            fixedFraction: Number.isFinite(seed.summary.fixedFraction)
+                                ? sanitizeFraction(seed.summary.fixedFraction)
+                                : sanitizeFraction(0.2),
+                        }
+                        : {
+                            threshold: 0.5,
+                            usingKelly: false,
+                            fixedFraction: sanitizeFraction(0.2),
+                        };
+                    const normalizedPayload = seed.payload && typeof seed.payload === 'object'
+                        ? {
+                            predictions: Array.isArray(seed.payload.predictions) ? seed.payload.predictions : [],
+                            meta: Array.isArray(seed.payload.meta) ? seed.payload.meta : [],
+                            returns: Array.isArray(seed.payload.returns) ? seed.payload.returns : [],
+                            trainingOdds: Number.isFinite(seed.payload.trainingOdds) ? seed.payload.trainingOdds : NaN,
+                            forecast: normalizeSeedForecast(seed.payload.forecast),
+                            datasetLastDate: typeof seed.payload.datasetLastDate === 'string'
+                                ? seed.payload.datasetLastDate
+                                : null,
+                            hyperparameters: seed.payload.hyperparameters || null,
+                        }
+                        : {
+                            predictions: [],
+                            meta: [],
+                            returns: [],
+                            trainingOdds: NaN,
+                            forecast: null,
+                            datasetLastDate: null,
+                            hyperparameters: null,
+                        };
+                    const evaluation = seed.evaluation && typeof seed.evaluation === 'object'
+                        ? {
+                            summary: normalizeSeedSummary(seed.evaluation.summary),
+                            trades: normalizeSeedTrades(seed.evaluation.trades),
+                        }
+                        : { summary: null, trades: [] };
+                    return {
+                        ...seed,
+                        modelType: normalizedModel,
+                        summary: normalizedSummary,
+                        payload: normalizedPayload,
+                        evaluation,
+                    };
                 })
                 .filter(Boolean);
         } catch (error) {
@@ -146,6 +192,92 @@
     const formatNumber = (value, digits = 2) => {
         if (!Number.isFinite(value)) return '—';
         return value.toFixed(digits);
+    };
+
+    const cloneSeedValue = (value) => {
+        if (value === null || typeof value !== 'object') return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                // 瀏覽器若不支援 structuredClone，改用 JSON 備援。
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法複製種子快照：', error);
+            return value;
+        }
+    };
+
+    const normalizeSeedForecast = (forecast) => {
+        if (!forecast || typeof forecast !== 'object') return null;
+        const normalized = {};
+        const probability = Number(forecast.probability);
+        if (Number.isFinite(probability)) {
+            normalized.probability = Math.min(Math.max(probability, 0), 1);
+        }
+        const fractionValue = Number(forecast.fraction);
+        if (Number.isFinite(fractionValue)) {
+            normalized.fraction = Math.min(Math.max(fractionValue, 0), 1);
+        }
+        if (typeof forecast.basisDate === 'string' && forecast.basisDate) {
+            normalized.basisDate = forecast.basisDate;
+        }
+        if (typeof forecast.referenceDate === 'string' && forecast.referenceDate) {
+            normalized.referenceDate = forecast.referenceDate;
+        }
+        if (typeof forecast.displayDate === 'string' && forecast.displayDate) {
+            normalized.displayDate = forecast.displayDate;
+        }
+        return Object.keys(normalized).length > 0 ? normalized : null;
+    };
+
+    const normalizeSeedSummary = (summary) => {
+        if (!summary || typeof summary !== 'object') return null;
+        const normalized = {
+            version: typeof summary.version === 'string' ? summary.version : VERSION_TAG,
+            trainAccuracy: Number.isFinite(summary.trainAccuracy) ? summary.trainAccuracy : NaN,
+            trainLoss: Number.isFinite(summary.trainLoss) ? summary.trainLoss : NaN,
+            testAccuracy: Number.isFinite(summary.testAccuracy) ? summary.testAccuracy : NaN,
+            testLoss: Number.isFinite(summary.testLoss) ? summary.testLoss : NaN,
+            totalPredictions: Number.isFinite(summary.totalPredictions) ? summary.totalPredictions : 0,
+            executedTrades: Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0,
+            hitRate: Number.isFinite(summary.hitRate) ? Math.min(Math.max(summary.hitRate, 0), 1) : NaN,
+            tradeReturnMedian: Number.isFinite(summary.tradeReturnMedian) ? summary.tradeReturnMedian : NaN,
+            tradeReturnAverage: Number.isFinite(summary.tradeReturnAverage) ? summary.tradeReturnAverage : NaN,
+            tradeReturnStdDev: Number.isFinite(summary.tradeReturnStdDev) ? summary.tradeReturnStdDev : NaN,
+            usingKelly: Boolean(summary.usingKelly),
+            fixedFraction: Number.isFinite(summary.fixedFraction)
+                ? sanitizeFraction(summary.fixedFraction)
+                : sanitizeFraction(0.2),
+            threshold: Number.isFinite(summary.threshold) ? summary.threshold : 0.5,
+            datasetLastDate: typeof summary.datasetLastDate === 'string' ? summary.datasetLastDate : null,
+            forecast: normalizeSeedForecast(summary.forecast),
+        };
+        return normalized;
+    };
+
+    const normalizeSeedTrades = (trades) => {
+        if (!Array.isArray(trades)) return [];
+        return trades
+            .map((trade) => {
+                if (!trade || typeof trade !== 'object') return null;
+                const probability = Number(trade.probability);
+                const actualReturn = Number(trade.actualReturn);
+                const fraction = Number(trade.fraction);
+                const tradeReturn = Number(trade.tradeReturn);
+                return {
+                    tradeDate: typeof trade.tradeDate === 'string' ? trade.tradeDate : null,
+                    probability: Number.isFinite(probability) ? Math.min(Math.max(probability, 0), 1) : NaN,
+                    actualReturn: Number.isFinite(actualReturn) ? actualReturn : NaN,
+                    fraction: Number.isFinite(fraction) ? Math.min(Math.max(fraction, 0), 1) : NaN,
+                    tradeReturn: Number.isFinite(tradeReturn) ? tradeReturn : NaN,
+                    isForecast: Boolean(trade.isForecast),
+                };
+            })
+            .filter(Boolean);
     };
 
     const computeMedian = (values) => {
@@ -250,7 +382,7 @@
         const medianText = formatPercent(summary.tradeReturnMedian, 1);
         const averageText = formatPercent(summary.tradeReturnAverage, 1);
         const executedTrades = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
-        return `測試勝率${hitRateText}｜交易報酬中位數${medianText}｜平均報酬${averageText}｜交易次數${executedTrades}`;
+        return `測試期預測正確率${hitRateText}｜交易報酬率中位數${medianText}｜平均報酬率${averageText}｜交易次數${executedTrades}`;
     };
 
     const applySeedDefaultName = (summary) => {
@@ -1088,25 +1220,38 @@
         const defaultName = buildSeedDefaultName(summary) || '未命名種子';
         const inputName = elements.seedName?.value?.trim();
         const seedName = inputName || defaultName;
+        const payloadSource = modelState.predictionsPayload || {};
+        const payloadSnapshot = {
+            predictions: Array.isArray(payloadSource.predictions) ? cloneSeedValue(payloadSource.predictions) : [],
+            meta: Array.isArray(payloadSource.meta) ? cloneSeedValue(payloadSource.meta) : [],
+            returns: Array.isArray(payloadSource.returns) ? cloneSeedValue(payloadSource.returns) : [],
+            trainingOdds: payloadSource.trainingOdds,
+            forecast: cloneSeedValue(payloadSource.forecast),
+            datasetLastDate: payloadSource.datasetLastDate,
+            hyperparameters: payloadSource.hyperparameters ? { ...payloadSource.hyperparameters } : null,
+        };
+        const summarySnapshot = summary ? cloneSeedValue(summary) : null;
+        const tradesSnapshot = Array.isArray(modelState.currentTrades)
+            ? cloneSeedValue(modelState.currentTrades)
+            : [];
+        const trainingMetricsSnapshot = modelState.trainingMetrics
+            ? cloneSeedValue(modelState.trainingMetrics)
+            : null;
         const newSeed = {
             id: `seed-${Date.now()}`,
             name: seedName,
             createdAt: Date.now(),
             modelType,
-            payload: {
-                predictions: Array.isArray(modelState.predictionsPayload.predictions) ? modelState.predictionsPayload.predictions : [],
-                meta: Array.isArray(modelState.predictionsPayload.meta) ? modelState.predictionsPayload.meta : [],
-                returns: Array.isArray(modelState.predictionsPayload.returns) ? modelState.predictionsPayload.returns : [],
-                trainingOdds: modelState.predictionsPayload.trainingOdds,
-                forecast: modelState.predictionsPayload.forecast,
-                datasetLastDate: modelState.predictionsPayload.datasetLastDate,
-                hyperparameters: modelState.predictionsPayload.hyperparameters,
-            },
-            trainingMetrics: modelState.trainingMetrics,
+            payload: payloadSnapshot,
+            trainingMetrics: trainingMetricsSnapshot,
             summary: {
                 threshold: summary.threshold,
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
+            },
+            evaluation: {
+                summary: summarySnapshot,
+                trades: tradesSnapshot,
             },
             version: VERSION_TAG,
         };
@@ -1120,26 +1265,46 @@
         if (!seed) return;
         const modelType = globalState.activeModel;
         const modelState = getModelState(modelType);
+        const payload = seed.payload || {};
         modelState.predictionsPayload = {
-            predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
-            meta: Array.isArray(seed.payload?.meta) ? seed.payload.meta : [],
-            returns: Array.isArray(seed.payload?.returns) ? seed.payload.returns : [],
-            trainingOdds: seed.payload?.trainingOdds,
-            forecast: seed.payload?.forecast || null,
-            datasetLastDate: seed.payload?.datasetLastDate || null,
-            hyperparameters: seed.payload?.hyperparameters || null,
+            predictions: Array.isArray(payload.predictions) ? cloneSeedValue(payload.predictions) : [],
+            meta: Array.isArray(payload.meta) ? cloneSeedValue(payload.meta) : [],
+            returns: Array.isArray(payload.returns) ? cloneSeedValue(payload.returns) : [],
+            trainingOdds: Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : NaN,
+            forecast: cloneSeedValue(payload.forecast),
+            datasetLastDate: typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null,
+            hyperparameters: payload.hyperparameters ? { ...payload.hyperparameters } : null,
         };
-        const metrics = seed.trainingMetrics || {
-            trainAccuracy: NaN,
-            trainLoss: NaN,
-            testAccuracy: NaN,
-            testLoss: NaN,
-            totalPredictions: Array.isArray(modelState.predictionsPayload.predictions)
-                ? modelState.predictionsPayload.predictions.length
-                : 0,
+        const metricsSource = seed.trainingMetrics || {};
+        const metrics = {
+            trainAccuracy: Number.isFinite(metricsSource.trainAccuracy) ? metricsSource.trainAccuracy : NaN,
+            trainLoss: Number.isFinite(metricsSource.trainLoss) ? metricsSource.trainLoss : NaN,
+            testAccuracy: Number.isFinite(metricsSource.testAccuracy) ? metricsSource.testAccuracy : NaN,
+            testLoss: Number.isFinite(metricsSource.testLoss) ? metricsSource.testLoss : NaN,
+            totalPredictions: Number.isFinite(metricsSource.totalPredictions)
+                ? metricsSource.totalPredictions
+                : (Array.isArray(modelState.predictionsPayload.predictions)
+                    ? modelState.predictionsPayload.predictions.length
+                    : 0),
         };
         modelState.trainingMetrics = metrics;
-        modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
+        const restoredOdds = Number.isFinite(modelState.predictionsPayload.trainingOdds)
+            ? modelState.predictionsPayload.trainingOdds
+            : (Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : NaN);
+        if (Number.isFinite(restoredOdds)) {
+            modelState.odds = restoredOdds;
+        }
+
+        const evaluationSummary = seed.evaluation?.summary ? cloneSeedValue(seed.evaluation.summary) : null;
+        const evaluationTrades = Array.isArray(seed.evaluation?.trades)
+            ? cloneSeedValue(seed.evaluation.trades)
+            : [];
+        modelState.lastSummary = evaluationSummary;
+        modelState.currentTrades = Array.isArray(evaluationTrades) ? evaluationTrades : [];
+
+        if (globalState.activeModel === modelType) {
+            renderActiveModelOutputs();
+        }
 
         const hyper = seed.payload?.hyperparameters || {};
         if (elements.lookback && Number.isFinite(hyper.lookback)) {

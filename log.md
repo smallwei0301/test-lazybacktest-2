@@ -781,6 +781,12 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-22 — Patch LB-AI-SEED-20251222A
+- **Issue recap**: AI 種子載入後僅復原門檻與風險參數，交易統計、隔日預測與訓練指標需重新跑模型才會一致；預設命名仍顯示「測試勝率」，與近期文件用語不符。
+- **Fix**: 種子儲存時一併快照訓練指標、交易紀錄與隔日預測，載入時立即套用並確保同模型重算結果與儲存時一致；同步調整預設命名與說明文案為「測試期預測正確率／交易報酬率」。
+- **Diagnostics**: 本地載入既有種子可即時還原交易表與勝率摘要，再次調整門檻時與儲存當下的結果保持一致；名稱預設值與 placeholder 文字更新為新版術語。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-16 — Patch LB-AI-HYBRID-20251212B
 - **Issue recap**: 勝率門檻掃描完成後僅提示交易報酬% 中位數，缺乏平均報酬與交易次數資訊；AI 種子預設名稱仍沿用訓練/測試正確率，與目前交易重點不符。
 - **Fix**: 最佳化結果訊息改為同步呈現中位數、平均報酬% 與交易次數，協助使用者快速掌握門檻效果；種子預設名稱改寫為測試勝率、交易報酬中位數、平均報酬與交易次數，確保儲存時即標示核心績效。版本碼更新為 `LB-AI-HYBRID-20251212B`。
