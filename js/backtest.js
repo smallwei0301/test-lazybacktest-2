@@ -9037,10 +9037,12 @@ const LOCAL_STOCK_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 台股名稱�
 const LOCAL_US_NAME_CACHE_KEY = 'LB_US_NAME_CACHE_V20250622A';
 const LOCAL_US_NAME_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3; // 美股名稱保留 3 天
 const TAIWAN_DIRECTORY_CACHE_KEY = 'LB_TW_DIRECTORY_CACHE_V20250620A';
+// Patch Tag: LB-INDEX-LOOKUP-20251005A
 const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單 24 小時過期
 const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
+const TAIWAN_INDEX_FALLBACK_PATH = '/assets/taiwan-indices.json';
 const persistentTaiwanNameCache = loadPersistentTaiwanNameCache();
 const persistentUSNameCache = loadPersistentUSNameCache();
 const taiwanDirectoryState = {
@@ -9052,9 +9054,18 @@ const taiwanDirectoryState = {
     cache: null,
     cachedAt: null,
     entries: new Map(),
+    aliasMap: new Map(),
     lastError: null,
 };
 let taiwanDirectoryReadyPromise = null;
+const taiwanIndexFallbackState = {
+    ready: false,
+    loading: false,
+    entries: new Map(),
+    aliasMap: new Map(),
+    lastError: null,
+};
+let taiwanIndexFallbackPromise = null;
 hydrateTaiwanNameCache();
 hydrateUSNameCache();
 preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
@@ -9067,6 +9078,7 @@ const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
+    INDEX: { label: '指數', fetchName: fetchStockNameFromIndex },
 };
 
 function loadPersistentTaiwanNameCache() {
@@ -9323,7 +9335,7 @@ function shouldRestrictToTaiwanMarkets(symbol) {
 
 function isTaiwanMarket(market) {
     const normalized = normalizeMarketValue(market || '');
-    return normalized === 'TWSE' || normalized === 'TPEX';
+    return normalized === 'TWSE' || normalized === 'TPEX' || normalized === 'INDEX';
 }
 
 function isStockNameCacheEntryFresh(entry, ttlMs) {
@@ -9407,10 +9419,21 @@ function normaliseDirectoryEntry(entry) {
     const name = (entry.name || entry.stock_name || '').toString().trim();
     if (!stockId || !name) return null;
     const market = entry.market ? normalizeMarketValue(entry.market) : null;
-    const board = entry.board || (market === 'TWSE' ? '上市' : market === 'TPEX' ? '上櫃' : null);
-    const instrumentType = entry.instrumentType || (entry.isETF ? 'ETF' : null);
+    let board = entry.board || (market === 'TWSE' ? '上市' : market === 'TPEX' ? '上櫃' : null);
+    let instrumentType = entry.instrumentType || (entry.isETF ? 'ETF' : null);
+    if (market === 'INDEX') {
+        board = board || '指數';
+        if (!instrumentType) {
+            instrumentType = '指數';
+        }
+    }
     const isETF = entry.isETF === true || /^00\d{2,4}$/.test(stockId);
     const marketCategory = entry.marketCategory || entry.rawType || null;
+    const aliases = Array.isArray(entry.aliases)
+        ? entry.aliases
+            .map((alias) => (alias || '').toString().trim().toUpperCase())
+            .filter(Boolean)
+        : [];
     return {
         stockId,
         name,
@@ -9419,6 +9442,7 @@ function normaliseDirectoryEntry(entry) {
         instrumentType,
         isETF,
         marketCategory,
+        aliases,
     };
 }
 
@@ -9435,6 +9459,7 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
                     ? Object.values(payload.entries)
                     : [];
     const map = new Map();
+    const aliasMap = new Map();
     const sourceLabel = payload.source || '台股官方清單';
     const versionLabel = payload.version ? `${sourceLabel}｜${payload.version}` : sourceLabel;
 
@@ -9442,6 +9467,14 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
         const entry = normaliseDirectoryEntry(raw);
         if (!entry) continue;
         map.set(entry.stockId, entry);
+        if (Array.isArray(entry.aliases)) {
+            entry.aliases.forEach((alias) => {
+                if (!alias || alias === entry.stockId) return;
+                if (!aliasMap.has(alias)) {
+                    aliasMap.set(alias, entry.stockId);
+                }
+            });
+        }
 
         if (seedCache && entry.market) {
             const info = {
@@ -9463,6 +9496,7 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
     if (map.size === 0) return false;
 
     taiwanDirectoryState.entries = map;
+    taiwanDirectoryState.aliasMap = aliasMap;
     taiwanDirectoryState.version = payload.version || TAIWAN_DIRECTORY_VERSION;
     taiwanDirectoryState.updatedAt = payload.updatedAt || payload.fetchedAt || null;
     taiwanDirectoryState.source = sourceLabel;
@@ -9480,6 +9514,7 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
             instrumentType: entry.instrumentType,
             isETF: entry.isETF,
             marketCategory: entry.marketCategory,
+            aliases: entry.aliases || [],
         }));
         saveTaiwanDirectoryToStorage({
             version: taiwanDirectoryState.version,
@@ -9582,15 +9617,125 @@ function getTaiwanDirectoryEntry(stockCode) {
     const normalized = stockCode.trim().toUpperCase();
     if (!normalized) return null;
     if (!(taiwanDirectoryState.entries instanceof Map)) return null;
-    return taiwanDirectoryState.entries.get(normalized) || null;
+    const direct = taiwanDirectoryState.entries.get(normalized);
+    if (direct) return direct;
+    if (taiwanDirectoryState.aliasMap instanceof Map) {
+        const mapped = taiwanDirectoryState.aliasMap.get(normalized);
+        if (mapped) {
+            return taiwanDirectoryState.entries.get(mapped) || null;
+        }
+    }
+    return null;
+}
+
+function normaliseTaiwanIndexFallbackEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const stockId = (entry.symbol || entry.stockId || '').toString().trim().toUpperCase();
+    const name = (entry.name || entry.stock_name || '').toString().trim();
+    if (!stockId || !name) return null;
+    const aliases = Array.isArray(entry.aliases)
+        ? entry.aliases
+            .map((alias) => (alias || '').toString().trim().toUpperCase())
+            .filter(Boolean)
+        : [];
+    return {
+        stockId,
+        name,
+        market: 'INDEX',
+        board: '指數',
+        instrumentType: '指數',
+        marketCategory: entry.provider || entry.source || null,
+        aliases,
+        source: entry.source || entry.provider || 'Taiwan Index Fallback',
+        matchStrategy: 'taiwan-index-fallback',
+    };
+}
+
+async function ensureTaiwanIndexFallbackLoaded() {
+    if (taiwanIndexFallbackState.ready) {
+        return taiwanIndexFallbackState;
+    }
+    if (taiwanIndexFallbackState.loading && taiwanIndexFallbackPromise) {
+        await taiwanIndexFallbackPromise;
+        return taiwanIndexFallbackState;
+    }
+    taiwanIndexFallbackState.loading = true;
+    taiwanIndexFallbackPromise = (async () => {
+        try {
+            const response = await fetch(TAIWAN_INDEX_FALLBACK_PATH, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            const rawEntries = Array.isArray(payload) ? payload : [];
+            const map = new Map();
+            const aliasMap = new Map();
+            rawEntries.forEach((raw) => {
+                const entry = normaliseTaiwanIndexFallbackEntry(raw);
+                if (!entry) return;
+                map.set(entry.stockId, entry);
+                if (Array.isArray(entry.aliases)) {
+                    entry.aliases.forEach((alias) => {
+                        if (!alias || alias === entry.stockId) return;
+                        if (!aliasMap.has(alias)) {
+                            aliasMap.set(alias, entry.stockId);
+                        }
+                    });
+                }
+            });
+            taiwanIndexFallbackState.entries = map;
+            taiwanIndexFallbackState.aliasMap = aliasMap;
+            taiwanIndexFallbackState.ready = true;
+            taiwanIndexFallbackState.lastError = null;
+        } catch (error) {
+            taiwanIndexFallbackState.lastError = error;
+            console.warn('[Taiwan Index Fallback] 載入失敗:', error);
+        } finally {
+            taiwanIndexFallbackState.loading = false;
+            taiwanIndexFallbackPromise = null;
+        }
+        return taiwanIndexFallbackState;
+    })();
+    await taiwanIndexFallbackPromise;
+    return taiwanIndexFallbackState;
+}
+
+function getTaiwanIndexFallbackEntry(symbol) {
+    if (!symbol) return null;
+    const normalized = symbol.toString().trim().toUpperCase();
+    if (!normalized) return null;
+    const direct = taiwanIndexFallbackState.entries.get(normalized);
+    if (direct) return direct;
+    const mapped = taiwanIndexFallbackState.aliasMap.get(normalized);
+    if (mapped) {
+        return taiwanIndexFallbackState.entries.get(mapped) || null;
+    }
+    return null;
+}
+
+function isKnownTaiwanIndexSymbol(symbol) {
+    if (!symbol) return false;
+    const normalized = symbol.toString().trim().toUpperCase();
+    if (!normalized) return false;
+    if (normalized === 'TAIEX') return true;
+    const directoryEntry = getTaiwanDirectoryEntry(normalized);
+    if (directoryEntry && directoryEntry.market === 'INDEX') return true;
+    if (taiwanIndexFallbackState.ready && taiwanIndexFallbackState.entries instanceof Map) {
+        if (getTaiwanIndexFallbackEntry(normalized)) return true;
+    }
+    return ['OTC', 'TPEX'].includes(normalized);
+}
+
+if (typeof window !== 'undefined') {
+    window.isKnownTaiwanIndexSymbol = isKnownTaiwanIndexSymbol;
 }
 
 function resolveCachedStockNameInfo(stockCode, preferredMarket) {
     const normalized = (stockCode || '').trim().toUpperCase();
     if (!normalized) return null;
     const candidateMarkets = preferredMarket
-        ? [normalizeMarketValue(preferredMarket), 'TWSE', 'TPEX', 'US']
-        : ['TWSE', 'TPEX', 'US'];
+        ? [normalizeMarketValue(preferredMarket), 'TWSE', 'TPEX', 'US', 'INDEX']
+        : ['TWSE', 'TPEX', 'US', 'INDEX'];
     const cacheHit = findStockNameCacheEntry(normalized, candidateMarkets.filter(Boolean));
     if (cacheHit && cacheHit.info) {
         return {
@@ -9662,6 +9807,7 @@ function deriveNameSourceLabel(market) {
     if (normalized === 'US') return 'FinMind USStockInfo';
     if (normalized === 'TPEX') return 'TPEX 公開資訊';
     if (normalized === 'TWSE') return 'TWSE 日成交資訊';
+    if (normalized === 'INDEX') return '台灣指數清單';
     return '';
 }
 
@@ -9677,13 +9823,20 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const startsWithFourDigits = leadingDigits >= MIN_STOCK_LOOKUP_LENGTH;
     const restrictToTaiwan = shouldRestrictToTaiwanMarkets(normalizedCode);
     const preferred = normalizeMarketValue(preferredMarket || '');
+    const considerIndex = hasAlpha && !isNumeric && (leadingDigits === 0 || isKnownTaiwanIndexSymbol(normalizedCode));
     const baseOrder = [];
+    if (considerIndex) {
+        baseOrder.push('INDEX');
+    }
     if (restrictToTaiwan || startsWithFourDigits) {
         baseOrder.push('TWSE', 'TPEX');
     } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
         baseOrder.push('US', 'TWSE', 'TPEX');
     } else {
         baseOrder.push('TWSE', 'TPEX', 'US');
+    }
+    if (!considerIndex) {
+        baseOrder.push('INDEX');
     }
     const order = [];
     const seen = new Set();
@@ -9812,7 +9965,7 @@ function initializeMarketSwitch() {
         }
 
         const stockCode = stockNoInput.value.trim().toUpperCase();
-        if (stockCode && stockCode !== 'TAIEX') {
+        if (stockCode) {
             debouncedFetchStockName(stockCode, { force: true, immediate: true });
         }
         setDefaultFees(stockCode);
@@ -9826,10 +9979,6 @@ function initializeMarketSwitch() {
         }
         manualOverrideCodeSnapshot = stockCode;
         hideStockName();
-        if (stockCode === 'TAIEX') {
-            showStockName('台灣加權指數', 'success');
-            return;
-        }
         if (stockCode) {
             debouncedFetchStockName(stockCode);
         }
@@ -9837,7 +9986,7 @@ function initializeMarketSwitch() {
 
     stockNoInput.addEventListener('blur', function() {
         const stockCode = this.value.trim().toUpperCase();
-        if (stockCode && stockCode !== 'TAIEX') {
+        if (stockCode) {
             debouncedFetchStockName(stockCode, { force: true, immediate: true });
         }
     });
@@ -9848,7 +9997,7 @@ let stockNameTimeout;
 function debouncedFetchStockName(stockCode, options = {}) {
     clearTimeout(stockNameTimeout);
     const normalizedCode = (stockCode || '').trim().toUpperCase();
-    if (!normalizedCode || normalizedCode === 'TAIEX') return;
+    if (!normalizedCode) return;
     const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
     if (!options.force && enforceGate) {
         const leadingDigits = getLeadingDigitCount(normalizedCode);
@@ -9876,7 +10025,7 @@ async function resolveStockName(fetcher, stockCode, market) {
 }
 
 async function fetchStockName(stockCode, options = {}) {
-    if (!stockCode || stockCode === 'TAIEX') return;
+    if (!stockCode) return;
     const normalizedCode = stockCode.trim().toUpperCase();
     const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
     if (!options.force && enforceGate) {
@@ -9938,7 +10087,8 @@ async function fetchStockName(stockCode, options = {}) {
 
             storeStockNameCacheEntry(market, normalizedCode, info);
 
-            if (market === currentMarket || !allowAutoSwitch) {
+            const marketMeta = MARKET_META[market] || {};
+            if (market === currentMarket || !allowAutoSwitch || marketMeta.autoSwitch === false) {
                 const display = formatStockNameDisplay(info);
                 showStockName(composeStockNameText(display, info.name), 'success');
                 return;
@@ -10064,6 +10214,54 @@ async function fetchStockNameFromTPEX(stockCode) {
         console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
         return null;
     }
+}
+
+async function fetchStockNameFromIndex(stockCode) {
+    const normalized = (stockCode || '').trim().toUpperCase();
+    if (!normalized) return null;
+    try {
+        await ensureTaiwanDirectoryReady();
+    } catch (error) {
+        console.warn('[Index Name] 台股官方清單載入失敗:', error);
+    }
+
+    const directoryEntry = getTaiwanDirectoryEntry(normalized);
+    if (directoryEntry && directoryEntry.market === 'INDEX') {
+        return {
+            name: directoryEntry.name,
+            board: directoryEntry.board || '指數',
+            source: taiwanDirectoryState.source
+                ? `${taiwanDirectoryState.source}${taiwanDirectoryState.version ? `｜${taiwanDirectoryState.version}` : ''}`
+                : '台股官方清單',
+            instrumentType: directoryEntry.instrumentType || '指數',
+            market: 'INDEX',
+            marketCategory: directoryEntry.marketCategory || null,
+            matchStrategy: 'taiwan-directory',
+            directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+            resolvedSymbol: directoryEntry.stockId,
+        };
+    }
+
+    try {
+        await ensureTaiwanIndexFallbackLoaded();
+    } catch (error) {
+        console.warn('[Index Name] 指數補充清單載入失敗:', error);
+    }
+    const fallbackEntry = getTaiwanIndexFallbackEntry(normalized);
+    if (fallbackEntry) {
+        return {
+            name: fallbackEntry.name,
+            board: fallbackEntry.board || '指數',
+            source: fallbackEntry.source || '台灣指數清單',
+            instrumentType: fallbackEntry.instrumentType || '指數',
+            market: 'INDEX',
+            marketCategory: fallbackEntry.marketCategory || null,
+            matchStrategy: fallbackEntry.matchStrategy || 'taiwan-index-fallback',
+            resolvedSymbol: fallbackEntry.stockId,
+        };
+    }
+
+    return null;
 }
 
 async function fetchStockNameFromUS(stockCode) {

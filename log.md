@@ -1,3 +1,11 @@
+## 2025-10-05 — Patch LB-FUGLE-PRIMARY-20251005A / LB-INDEX-LOOKUP-20251005A
+- **Scope**: 將台股資料主來源改為 Fugle API 並打通指數代碼查詢。
+- **Changes**:
+  - TWSE/TPEX Netlify 函式優先呼叫 Fugle (`FUGLE_API_TOKEN`) 取得日 K，失敗時再回退 TWSE/FinMind/Yahoo，並保留來源摘要於 `dataSource`。
+  - `taiwan-directory` 函式併入 `assets/taiwan-indices.json` 指數清單並建立別名對應，前端名稱快取也同步支援指數別名。
+  - `backtest.js`/`index.html` 開放 `TAIEX`、`OTC` 等指數自動查名，市場清單新增 `INDEX` 處理、快取與 quick backtest 皆可辨識指數代碼。
+- **Testing**: 尚未連線實測（Fugle/FinMind API 需部署環境 Token）；後續於 Netlify 佈署時再完成實際回測驗證。
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
