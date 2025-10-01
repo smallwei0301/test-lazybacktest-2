@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251215A
 
 // 全局變量
 let stockChart = null;
@@ -27,6 +28,11 @@ let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
+
+const annWorkerBridge = {
+    listener: null,
+    worker: null,
+};
 
 // --- Utility Functions ---
 function initDates() { const eD=new Date(); const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-5); document.getElementById('endDate').value=formatDate(eD); document.getElementById('startDate').value=formatDate(sD); document.getElementById('recentYears').value=5; }
@@ -2682,6 +2688,152 @@ function initRollingTestFeature() {
     }
 }
 
+function ensureAnnWorkerInstance() {
+    if (typeof window === 'undefined') return null;
+    if (window.lbWorker && typeof window.lbWorker.postMessage === 'function') {
+        return window.lbWorker;
+    }
+    const fallbackUrl = (typeof workerUrl === 'string' && workerUrl) ? workerUrl : 'js/worker.js';
+    try {
+        window.lbWorker = new Worker(fallbackUrl);
+    } catch (err) {
+        console.error('建立 worker 失敗：', err);
+        window.lbWorker = null;
+    }
+    return window.lbWorker || null;
+}
+
+function attachAnnWorkerListener(worker, handler) {
+    if (!worker || typeof worker.addEventListener !== 'function' || typeof handler !== 'function') {
+        return;
+    }
+    if (annWorkerBridge.listener && annWorkerBridge.worker) {
+        try {
+            annWorkerBridge.worker.removeEventListener('message', annWorkerBridge.listener);
+        } catch (err) {
+            console.warn('[ANN] 移除舊監聽器失敗：', err);
+        }
+    }
+    worker.addEventListener('message', handler);
+    annWorkerBridge.listener = handler;
+    annWorkerBridge.worker = worker;
+}
+
+function initAnnPredictionUI() {
+    const btn = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resCard = document.getElementById('ann-result');
+    const accEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const cmEl = document.getElementById('ann-cm');
+    const advEl = document.getElementById('ann-adv');
+
+    if (!btn || !statusEl || !resCard || !accEl || !kellyEl || !cmEl || !advEl) {
+        return;
+    }
+
+    const setStatus = (text) => {
+        statusEl.textContent = text || '';
+    };
+
+    const renderConfusion = (confusion) => {
+        const safe = {
+            TP: Number.isFinite(confusion?.TP) ? confusion.TP : 0,
+            TN: Number.isFinite(confusion?.TN) ? confusion.TN : 0,
+            FP: Number.isFinite(confusion?.FP) ? confusion.FP : 0,
+            FN: Number.isFinite(confusion?.FN) ? confusion.FN : 0,
+        };
+        cmEl.innerHTML = `
+          <div>TP（預測漲且漲）：${safe.TP}</div>
+          <div>TN（預測跌且跌）：${safe.TN}</div>
+          <div>FP（預測漲實際跌）：${safe.FP}</div>
+          <div>FN（預測跌實際漲）：${safe.FN}</div>
+        `;
+    };
+
+    const annMessageHandler = (event) => {
+        const msg = event?.data || {};
+        if (msg.type === 'ANN_PROGRESS') {
+            const progress = Number.isFinite(msg?.payload?.progress)
+                ? Math.max(0, Math.min(1, msg.payload.progress))
+                : 0;
+            setStatus(`訓練中… ${(progress * 100).toFixed(0)}%`);
+        } else if (msg.type === 'ANN_DONE') {
+            const acc = Number(msg?.payload?.acc);
+            const kelly = Number(msg?.payload?.kelly);
+            const confusion = msg?.payload?.confusion || {};
+            const actionable = Number.isFinite(acc) && acc > 0.5 && Number.isFinite(kelly) && kelly > 0;
+
+            accEl.textContent = Number.isFinite(acc)
+                ? `測試集準確率：${(acc * 100).toFixed(2)}%`
+                : '測試集準確率：—';
+            kellyEl.textContent = Number.isFinite(kelly)
+                ? `凱利資金比率（估算）：${(kelly * 100).toFixed(2)}%`
+                : '凱利資金比率（估算）：—';
+            renderConfusion(confusion);
+            advEl.textContent = actionable
+                ? `依據 ANN 預測，建議做多部位 ≈ ${(kelly * 100).toFixed(1)}%（可與你的建議模組比對）`
+                : '暫不具優勢，建議觀望或降低部位。';
+
+            resCard.classList.remove('hidden');
+            setStatus('完成');
+        } else if (msg.type === 'ANN_ERROR') {
+            const errMsg = msg?.payload?.message || '未知錯誤';
+            setStatus(`執行失敗：${errMsg}`);
+            console.error('ANN_ERROR:', msg.payload);
+        }
+    };
+
+    const ensureWorkerReady = () => {
+        const worker = ensureAnnWorkerInstance();
+        if (worker) {
+            attachAnnWorkerListener(worker, annMessageHandler);
+        }
+        return worker;
+    };
+
+    ensureWorkerReady();
+
+    btn.addEventListener('click', () => {
+        const worker = ensureWorkerReady();
+        if (!worker) {
+            setStatus('建立 worker 失敗，請稍後重試。');
+            return;
+        }
+
+        if (!Array.isArray(window.cachedStockData) || window.cachedStockData.length < 60) {
+            resCard.classList.add('hidden');
+            setStatus('需要先跑一次回測或加長日期區間，至少 60 根 K 線。');
+            return;
+        }
+
+        resCard.classList.add('hidden');
+        accEl.textContent = '';
+        kellyEl.textContent = '';
+        cmEl.innerHTML = '';
+        advEl.textContent = '';
+        setStatus('準備資料…');
+
+        try {
+            worker.postMessage({
+                type: 'ANN_RUN',
+                payload: {
+                    rows: window.cachedStockData,
+                    options: {
+                        trainRatio: 0.8,
+                        epochs: 60,
+                        batchSize: 32,
+                    },
+                },
+            });
+            setStatus('訓練中…');
+        } catch (err) {
+            console.error('[ANN] Failed to post message:', err);
+            setStatus(`送交 worker 失敗：${err?.message || err}`);
+        }
+    });
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -2718,6 +2870,8 @@ document.addEventListener('DOMContentLoaded', function() {
             initBatchOptimizationFeature();
             initRollingTestFeature();
         }, 100);
+
+        initAnnPredictionUI();
 
         console.log('[Main] Initialization completed');
     } catch (error) {
