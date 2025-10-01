@@ -2,7 +2,7 @@
 
 // Patch Tag: LB-AI-HYBRID-20251212A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-ANNS-REPRO-20251215B';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -13,6 +13,25 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const ANN_META_STORAGE_KEY = 'LB_ANN_META';
+    const ANN_MODEL_STORAGE_KEY = 'indexeddb://anns_v1_model';
+    const ANN_REPRO_VERSION = 'LB-AI-ANNS-REPRO-20251215B';
+    const ANN_TRAIN_RATIO_LOCKED = 0.8;
+    const ANN_EPOCHS_LOCKED = 200;
+    const ANN_LEARNING_RATE_LOCKED = 0.01;
+    const ANN_THRESHOLD_LOCKED = 0.5;
+    const ANN_FEATURE_ORDER = [
+        'SMA30',
+        'WMA15',
+        'EMA12',
+        'Momentum10',
+        'StochK14',
+        'StochD3',
+        'RSI14',
+        'MACDdiff',
+        'CCI20',
+        'WilliamsR14',
+    ];
     const createModelState = () => ({
         lastSummary: null,
         odds: 1,
@@ -39,6 +58,14 @@
             [MODEL_TYPES.ANNS]: createModelState(),
         },
     };
+    globalState.models[MODEL_TYPES.ANNS].hyperparameters = {
+        lookback: 20,
+        epochs: ANN_EPOCHS_LOCKED,
+        batchSize: 0,
+        learningRate: ANN_LEARNING_RATE_LOCKED,
+        trainRatio: ANN_TRAIN_RATIO_LOCKED,
+    };
+    globalState.models[MODEL_TYPES.ANNS].winThreshold = ANN_THRESHOLD_LOCKED;
     const getModelState = (model) => {
         if (!model || !globalState.models[model]) {
             return globalState.models[MODEL_TYPES.LSTM];
@@ -128,6 +155,47 @@
         }
     };
 
+    const loadAnnMeta = () => {
+        if (typeof window === 'undefined' || !window.localStorage) return null;
+        try {
+            const raw = window.localStorage.getItem(ANN_META_STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取 ANN 模型資訊：', error);
+            return null;
+        }
+    };
+
+    const storeAnnMeta = (meta) => {
+        if (!meta || typeof meta !== 'object') return;
+        if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+                window.localStorage.setItem(ANN_META_STORAGE_KEY, JSON.stringify(meta));
+            } catch (error) {
+                console.warn('[AI Prediction] 無法儲存 ANN 模型資訊：', error);
+            }
+        }
+        const annState = globalState.models[MODEL_TYPES.ANNS];
+        if (annState) {
+            annState.hyperparameters = {
+                lookback: annState.hyperparameters?.lookback || 20,
+                epochs: Number.isFinite(meta.epochs) ? meta.epochs : ANN_EPOCHS_LOCKED,
+                batchSize: Number.isFinite(meta.batchSize) ? meta.batchSize : (annState.hyperparameters?.batchSize || 0),
+                learningRate: ANN_LEARNING_RATE_LOCKED,
+                trainRatio: Number.isFinite(meta.trainRatio) ? meta.trainRatio : ANN_TRAIN_RATIO_LOCKED,
+            };
+            if (Number.isFinite(meta.threshold)) {
+                annState.winThreshold = meta.threshold;
+            }
+        }
+        if (globalState.activeModel === MODEL_TYPES.ANNS) {
+            applyModelSettingsToUI(globalState.models[MODEL_TYPES.ANNS]);
+            recomputeTradesFromState(MODEL_TYPES.ANNS);
+        }
+    };
+
     const escapeHTML = (value) => {
         if (typeof value !== 'string') return '';
         return value
@@ -187,8 +255,22 @@
     };
 
     const parseTrainRatio = () => {
+        const modelState = getActiveModelState();
+        if (globalState.activeModel === MODEL_TYPES.ANNS) {
+            updateTrainRatioBadge(ANN_TRAIN_RATIO_LOCKED);
+            if (elements.trainRatio) {
+                elements.trainRatio.value = String(ANN_TRAIN_RATIO_LOCKED);
+            }
+            if (modelState?.hyperparameters) {
+                modelState.hyperparameters.trainRatio = ANN_TRAIN_RATIO_LOCKED;
+            }
+            return ANN_TRAIN_RATIO_LOCKED;
+        }
         if (!elements.trainRatio) {
             updateTrainRatioBadge(0.8);
+            if (modelState?.hyperparameters) {
+                modelState.hyperparameters.trainRatio = 0.8;
+            }
             return 0.8;
         }
         const raw = Number(elements.trainRatio.value);
@@ -198,18 +280,30 @@
             elements.trainRatio.value = '0.8';
         }
         updateTrainRatioBadge(ratio);
-        const modelState = getActiveModelState();
-        modelState.hyperparameters.trainRatio = ratio;
+        if (modelState?.hyperparameters) {
+            modelState.hyperparameters.trainRatio = ratio;
+        }
         return ratio;
     };
 
     const parseWinThreshold = () => {
+        const modelState = getActiveModelState();
+        if (globalState.activeModel === MODEL_TYPES.ANNS) {
+            if (elements.winThreshold) {
+                elements.winThreshold.value = String(Math.round(ANN_THRESHOLD_LOCKED * 100));
+            }
+            if (modelState) {
+                modelState.winThreshold = ANN_THRESHOLD_LOCKED;
+            }
+            return ANN_THRESHOLD_LOCKED;
+        }
         if (!elements.winThreshold) return 0.5;
         const percent = Math.round(parseNumberInput(elements.winThreshold, 60, { min: 50, max: 100 }));
         elements.winThreshold.value = String(percent);
         const threshold = percent / 100;
-        const modelState = getActiveModelState();
-        modelState.winThreshold = threshold;
+        if (modelState) {
+            modelState.winThreshold = threshold;
+        }
         return threshold;
     };
 
@@ -290,6 +384,37 @@
             if (typeof message === 'string' && message) {
                 showStatus(`[${label}] ${message}`, 'info');
             }
+            return;
+        }
+        if (type === 'ai-train-ann-meta') {
+            if (data && typeof data === 'object') {
+                storeAnnMeta(data);
+            }
+            return;
+        }
+        if (type === 'ai-replay-ann-result') {
+            if (!id || !aiWorkerRequests.has(id)) {
+                return;
+            }
+            const pending = aiWorkerRequests.get(id);
+            aiWorkerRequests.delete(id);
+            const payload = data && typeof data === 'object' ? data : {};
+            payload.modelType = pending.modelType || MODEL_TYPES.ANNS;
+            payload.taskType = pending.taskType;
+            pending.resolve(payload);
+            return;
+        }
+        if (type === 'ai-replay-ann-error') {
+            if (!id || !aiWorkerRequests.has(id)) {
+                return;
+            }
+            const pending = aiWorkerRequests.get(id);
+            aiWorkerRequests.delete(id);
+            const reason = error && typeof error.message === 'string'
+                ? new Error(error.message)
+                : new Error('ANN 重現失敗');
+            reason.modelType = pending.modelType || MODEL_TYPES.ANNS;
+            pending.reject(reason);
             return;
         }
         if (!id || !aiWorkerRequests.has(id)) {
@@ -396,6 +521,33 @@
             }
         }
         return [];
+    };
+
+    const requestAnnReplay = async (rows, metaOverride = null) => {
+        const dataset = Array.isArray(rows) && rows.length > 0 ? rows : getVisibleData();
+        if (!Array.isArray(dataset) || dataset.length === 0) {
+            throw new Error('尚未取得可供重現的股價資料。');
+        }
+        const meta = metaOverride && typeof metaOverride === 'object' ? metaOverride : loadAnnMeta();
+        if (!meta) {
+            throw new Error('尚未找到 ANN 模型的重現資訊，請先訓練一次模型。');
+        }
+        const result = await sendAIWorkerTrainingTask('ai-replay-ann', { rows: dataset, meta }, { modelType: MODEL_TYPES.ANNS });
+        return result || {};
+    };
+
+    const registerAnnReplayBridge = () => {
+        const bridge = ensureBridge();
+        if (!bridge) return;
+        if (!bridge.annReplay) {
+            bridge.annReplay = {
+                version: ANN_REPRO_VERSION,
+                getMeta: () => loadAnnMeta(),
+                getFeatureOrder: () => ANN_FEATURE_ORDER.slice(),
+                getModelStorageKey: () => ANN_MODEL_STORAGE_KEY,
+                replay: (rows, meta) => requestAnnReplay(rows, meta),
+            };
+        }
     };
 
     const resolveCloseValue = (row) => {
@@ -735,10 +887,17 @@
         const modelState = getActiveModelState();
         if (!modelState) return;
         const lookback = Math.round(parseNumberInput(elements.lookback, modelState.hyperparameters.lookback, { min: 5, max: 60 }));
-        const epochs = Math.round(parseNumberInput(elements.epochs, modelState.hyperparameters.epochs, { min: 10, max: 300 }));
-        const batchSize = Math.round(parseNumberInput(elements.batchSize, modelState.hyperparameters.batchSize, { min: 8, max: 512 }));
-        const learningRate = parseNumberInput(elements.learningRate, modelState.hyperparameters.learningRate, { min: 0.0001, max: 0.05 });
-        const trainRatio = parseTrainRatio();
+        const isAnn = globalState.activeModel === MODEL_TYPES.ANNS;
+        const epochs = isAnn
+            ? ANN_EPOCHS_LOCKED
+            : Math.round(parseNumberInput(elements.epochs, modelState.hyperparameters.epochs, { min: 10, max: 300 }));
+        const batchSize = isAnn
+            ? (Number.isFinite(modelState.hyperparameters.batchSize) ? modelState.hyperparameters.batchSize : 0)
+            : Math.round(parseNumberInput(elements.batchSize, modelState.hyperparameters.batchSize, { min: 8, max: 512 }));
+        const learningRate = isAnn
+            ? ANN_LEARNING_RATE_LOCKED
+            : parseNumberInput(elements.learningRate, modelState.hyperparameters.learningRate, { min: 0.0001, max: 0.05 });
+        const trainRatio = isAnn ? ANN_TRAIN_RATIO_LOCKED : parseTrainRatio();
 
         modelState.hyperparameters = {
             lookback,
@@ -750,6 +909,75 @@
         modelState.winThreshold = parseWinThreshold();
         modelState.kellyEnabled = Boolean(elements.enableKelly?.checked);
         modelState.fixedFraction = sanitizeFraction(parseNumberInput(elements.fixedFraction, modelState.fixedFraction, { min: 0.01, max: 1 }));
+    };
+
+    const setInputDisabledState = (input, disabled, options = {}) => {
+        if (!input) return;
+        input.disabled = disabled;
+        input.classList.toggle('opacity-60', disabled);
+        input.classList.toggle('cursor-not-allowed', disabled);
+        if (disabled && Object.prototype.hasOwnProperty.call(options, 'value')) {
+            input.value = typeof options.value === 'number' ? String(options.value) : options.value;
+        }
+        if (Object.prototype.hasOwnProperty.call(options, 'placeholder')) {
+            input.placeholder = options.placeholder;
+        }
+        if (disabled && options.title) {
+            input.title = options.title;
+        } else if (!disabled) {
+            input.title = '';
+        }
+    };
+
+    const updateHyperparameterLocks = (modelState) => {
+        const isAnn = globalState.activeModel === MODEL_TYPES.ANNS;
+        if (isAnn) {
+            setInputDisabledState(elements.epochs, true, { value: ANN_EPOCHS_LOCKED, title: 'ANNS 重現模式鎖定訓練輪數' });
+            setInputDisabledState(elements.learningRate, true, { value: ANN_LEARNING_RATE_LOCKED, title: 'ANNS 重現模式鎖定學習率' });
+            if (elements.batchSize) {
+                const batchValue = Number.isFinite(modelState?.hyperparameters?.batchSize)
+                    ? modelState.hyperparameters.batchSize
+                    : '';
+                setInputDisabledState(elements.batchSize, true, {
+                    value: batchValue,
+                    placeholder: batchValue === '' ? '自動使用全量' : '',
+                    title: 'ANNS 重現模式將自動使用全量批次',
+                });
+            }
+            if (elements.trainRatio) {
+                setInputDisabledState(elements.trainRatio, true, {
+                    value: ANN_TRAIN_RATIO_LOCKED,
+                    title: 'ANNS 重現模式固定 80/20 切分',
+                });
+            }
+            if (elements.winThreshold) {
+                setInputDisabledState(elements.winThreshold, true, {
+                    value: Math.round(ANN_THRESHOLD_LOCKED * 100),
+                    title: 'ANNS 重現模式固定 50% 勝率門檻',
+                });
+            }
+        } else {
+            setInputDisabledState(elements.epochs, false);
+            setInputDisabledState(elements.learningRate, false);
+            if (elements.batchSize) {
+                setInputDisabledState(elements.batchSize, false, { placeholder: '' });
+            }
+            if (elements.trainRatio) {
+                setInputDisabledState(elements.trainRatio, false);
+            }
+            if (elements.winThreshold) {
+                setInputDisabledState(elements.winThreshold, false);
+            }
+        }
+        if (isAnn) {
+            updateTrainRatioBadge(ANN_TRAIN_RATIO_LOCKED);
+            if (modelState?.hyperparameters) {
+                modelState.hyperparameters.trainRatio = ANN_TRAIN_RATIO_LOCKED;
+            }
+            if (modelState) {
+                modelState.winThreshold = ANN_THRESHOLD_LOCKED;
+            }
+        }
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -787,6 +1015,7 @@
         }
         parseTrainRatio();
         parseWinThreshold();
+        updateHyperparameterLocks(modelState);
     };
 
     const renderActiveModelOutputs = () => {
@@ -885,15 +1114,23 @@
             return;
         }
 
-        showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
+        const lockedHyperparameters = {
+            lookback: hyperparameters.lookback,
+            epochs: ANN_EPOCHS_LOCKED,
+            batchSize: Number.isFinite(hyperparameters.batchSize) ? hyperparameters.batchSize : 0,
+            learningRate: ANN_LEARNING_RATE_LOCKED,
+            trainRatio: ANN_TRAIN_RATIO_LOCKED,
+        };
+
+        showStatus(`[${label}] 訓練中（共 ${lockedHyperparameters.epochs} 輪）...`, 'info');
         const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', {
             rows,
             options: {
-                epochs: hyperparameters.epochs,
-                batchSize: hyperparameters.batchSize,
-                learningRate: hyperparameters.learningRate,
-                trainRatio: hyperparameters.trainRatio,
-                lookback: hyperparameters.lookback,
+                epochs: lockedHyperparameters.epochs,
+                batchSize: lockedHyperparameters.batchSize,
+                learningRate: lockedHyperparameters.learningRate,
+                trainRatio: lockedHyperparameters.trainRatio,
+                lookback: lockedHyperparameters.lookback,
             },
         }, { modelType });
 
@@ -909,22 +1146,24 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
+        const workerHyper = predictionsPayload.hyperparameters && typeof predictionsPayload.hyperparameters === 'object'
+            ? predictionsPayload.hyperparameters
+            : {};
         predictionsPayload.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            ...workerHyper,
+            lookback: lockedHyperparameters.lookback,
+            learningRate: ANN_LEARNING_RATE_LOCKED,
             modelType,
         };
 
         modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            lookback: lockedHyperparameters.lookback,
+            epochs: Number.isFinite(workerHyper.epochs) ? workerHyper.epochs : lockedHyperparameters.epochs,
+            batchSize: Number.isFinite(workerHyper.batchSize) ? workerHyper.batchSize : lockedHyperparameters.batchSize,
+            learningRate: ANN_LEARNING_RATE_LOCKED,
+            trainRatio: Number.isFinite(workerHyper.trainRatio) ? workerHyper.trainRatio : lockedHyperparameters.trainRatio,
         };
+        modelState.winThreshold = ANN_THRESHOLD_LOCKED;
 
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
 
@@ -959,6 +1198,10 @@
 
     const optimiseWinThreshold = () => {
         const modelType = globalState.activeModel;
+        if (modelType === MODEL_TYPES.ANNS) {
+            showStatus('[ANNS 技術指標感知器] 門檻已鎖定 50%，如需調整請重新評估開放重現模式的需求。', 'warning');
+            return;
+        }
         const modelState = getModelState(modelType);
         if (!modelState || !modelState.predictionsPayload || !modelState.trainingMetrics) {
             showStatus('請先完成一次 AI 預測或載入已儲存的種子。', 'warning');
@@ -1304,6 +1547,7 @@
         applyModelSettingsToUI(getActiveModelState());
         renderActiveModelOutputs();
         refreshSeedOptions();
+        registerAnnReplayBridge();
 
         updateDatasetSummary(getVisibleData());
 
