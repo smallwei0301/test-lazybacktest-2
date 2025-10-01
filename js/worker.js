@@ -334,6 +334,21 @@ function annResolveClose(row) {
   return NaN;
 }
 
+function annResolveOpen(row, fallback) {
+  const candidates = [
+    row?.open,
+    row?.adjustedOpen,
+    row?.rawOpen,
+    row?.baseOpen,
+    row?.referenceOpen,
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : NaN;
+}
+
 function annResolveHigh(row, fallback) {
   const value = Number(row?.high);
   if (Number.isFinite(value) && value > 0) return value;
@@ -559,9 +574,11 @@ function annPrepareDataset(rows) {
         .filter((row) => row && typeof row.date === 'string')
         .map((row) => {
           const close = annResolveClose(row);
+          const open = annResolveOpen(row, close);
           return {
             date: row.date,
             close,
+            open,
             high: annResolveHigh(row, close),
             low: annResolveLow(row, close),
           };
@@ -571,6 +588,7 @@ function annPrepareDataset(rows) {
     : [];
 
   const close = parsed.map((row) => row.close);
+  const open = parsed.map((row) => row.open);
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
 
@@ -627,6 +645,10 @@ function annPrepareDataset(rows) {
       tradeDate: next.date,
       buyClose: current.close,
       sellClose: next.close,
+      nextOpen: next.open,
+      nextLow: next.low,
+      nextClose: next.close,
+      nextHigh: next.high,
     });
     returns.push(change);
   }

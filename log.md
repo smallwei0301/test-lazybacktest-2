@@ -1,3 +1,11 @@
+## 2025-09-24 — Patch LB-AI-ENTRY-20250924A
+- **Scope**: AI 預測頁面買入規則、資金控管與交易表格調整。
+- **Features**:
+  - 新增「收盤價掛單」與「開盤價買入」兩種買入規則，可即時切換並於表格下方顯示完整邏輯說明。
+  - 交易表格補上買入價格／賣出價格欄位，並依選定規則重算實際報酬與交易報酬%。
+  - 固定投入比例改以百分比顯示並預設 100%，凱利開關與買入規則切換時會同步重算交易摘要與隔日預測。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
