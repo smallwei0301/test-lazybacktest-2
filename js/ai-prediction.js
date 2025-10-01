@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-ENTRY-20250924A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-ENTRY-20250924A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -13,6 +13,20 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const BUY_RULES = {
+        CLOSE_LIMIT: 'close-limit',
+        OPEN_MARKET: 'open-market',
+    };
+    const BUY_RULE_LABELS = {
+        [BUY_RULES.CLOSE_LIMIT]: '收盤價掛單',
+        [BUY_RULES.OPEN_MARKET]: '開盤價買入',
+    };
+    const BUY_RULE_DESCRIPTIONS = {
+        [BUY_RULES.CLOSE_LIMIT]: '收盤價掛單：隔日預測上漲且隔日最低價低於今日收盤，若開盤價低於今日收盤則以開盤價成交，否則以今日收盤價掛單，賣出價為隔日收盤。',
+        [BUY_RULES.OPEN_MARKET]: '開盤價買入：隔日預測上漲即於隔日開盤價買入，當日收盤價賣出。',
+    };
+    const formatBuyRuleLabel = (rule) => BUY_RULE_LABELS[rule] || BUY_RULE_LABELS[BUY_RULES.CLOSE_LIMIT];
+    const normalizeBuyRule = (rule) => (Object.values(BUY_RULES).includes(rule) ? rule : BUY_RULES.CLOSE_LIMIT);
     const createModelState = () => ({
         lastSummary: null,
         odds: 1,
@@ -22,7 +36,8 @@
         lastSeedDefault: '',
         winThreshold: 0.5,
         kellyEnabled: false,
-        fixedFraction: 0.2,
+        fixedFraction: 1,
+        buyRule: BUY_RULES.CLOSE_LIMIT,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -63,6 +78,7 @@
         learningRate: null,
         enableKelly: null,
         fixedFraction: null,
+        buyRuleSelect: null,
         winThreshold: null,
         optimizeThreshold: null,
         trainRatioBadge: null,
@@ -77,6 +93,7 @@
         tradeTableBody: null,
         tradeSummary: null,
         nextDayForecast: null,
+        buyRuleDescription: null,
         seedName: null,
         saveSeedButton: null,
         savedSeedList: null,
@@ -148,6 +165,11 @@
         return value.toFixed(digits);
     };
 
+    const formatPrice = (value) => {
+        if (!Number.isFinite(value)) return '—';
+        return value.toFixed(2);
+    };
+
     const computeMedian = (values) => {
         if (!Array.isArray(values) || values.length === 0) return NaN;
         const sorted = [...values].sort((a, b) => a - b);
@@ -174,8 +196,20 @@
 
     const sanitizeFraction = (value) => {
         const num = Number(value);
-        if (!Number.isFinite(num)) return 0.01;
-        return Math.min(Math.max(num, 0.01), 1);
+        if (!Number.isFinite(num)) return 1;
+        const normalized = num > 1 ? (num / 100) : num;
+        return Math.min(Math.max(normalized, 0.01), 1);
+    };
+
+    const formatFractionInput = (fraction) => {
+        const sanitized = sanitizeFraction(fraction);
+        return (sanitized * 100).toFixed(0);
+    };
+
+    const updateBuyRuleDescription = (rule) => {
+        if (!elements.buyRuleDescription) return;
+        const normalized = normalizeBuyRule(rule);
+        elements.buyRuleDescription.textContent = BUY_RULE_DESCRIPTIONS[normalized];
     };
 
     const updateTrainRatioBadge = (ratio) => {
@@ -415,6 +449,45 @@
         return null;
     };
 
+    const resolveOpenValue = (row, fallback) => {
+        const candidates = [
+            row?.open,
+            row?.adjustedOpen,
+            row?.rawOpen,
+            row?.baseOpen,
+            row?.referenceOpen,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const value = Number(candidates[i]);
+            if (Number.isFinite(value) && value > 0) {
+                return value;
+            }
+        }
+        return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+    };
+
+    const resolveHighValue = (row, fallback) => {
+        const candidates = [row?.high, row?.rawHigh, row?.baseHigh];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const value = Number(candidates[i]);
+            if (Number.isFinite(value) && value > 0) {
+                return value;
+            }
+        }
+        return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+    };
+
+    const resolveLowValue = (row, fallback) => {
+        const candidates = [row?.low, row?.rawLow, row?.baseLow];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const value = Number(candidates[i]);
+            if (Number.isFinite(value) && value > 0) {
+                return value;
+            }
+        }
+        return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+    };
+
     const buildDataset = (rows, lookback) => {
         if (!Array.isArray(rows)) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
@@ -424,6 +497,9 @@
             .map((row) => ({
                 date: row.date,
                 close: resolveCloseValue(row),
+                open: resolveOpenValue(row, resolveCloseValue(row)),
+                high: resolveHighValue(row, resolveCloseValue(row)),
+                low: resolveLowValue(row, resolveCloseValue(row)),
             }))
             .filter((row) => Number.isFinite(row.close) && row.close > 0)
             .sort((a, b) => a.date.localeCompare(b.date));
@@ -445,6 +521,10 @@
                 sellDate: curr.date,
                 buyClose: prev.close,
                 sellClose: curr.close,
+                nextOpen: Number.isFinite(curr.open) ? curr.open : curr.close,
+                nextLow: Number.isFinite(curr.low) ? curr.low : curr.close,
+                nextClose: curr.close,
+                nextHigh: Number.isFinite(curr.high) ? curr.high : curr.close,
                 actualReturn: change,
             });
         }
@@ -475,6 +555,55 @@
         const b = Math.max(odds, 1e-6);
         const fraction = sanitizedProb - ((1 - sanitizedProb) / b);
         return Math.max(0, Math.min(fraction, 1));
+    };
+
+    const evaluateTradeEntry = (metaItem, buyRule) => {
+        if (!metaItem) return null;
+        const normalizedRule = normalizeBuyRule(buyRule);
+        const toPositive = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num) && num > 0 ? num : NaN;
+        };
+        const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
+            ? metaItem.sellDate
+            : (typeof metaItem.tradeDate === 'string' ? metaItem.tradeDate : null);
+        if (!tradeDate) return null;
+        const buyClose = toPositive(metaItem.buyClose);
+        const sellClose = toPositive(metaItem.sellClose);
+        const nextCloseRaw = toPositive(metaItem.nextClose);
+        const nextClose = Number.isFinite(nextCloseRaw) ? nextCloseRaw : sellClose;
+        if (!Number.isFinite(nextClose)) return null;
+        if (normalizedRule === BUY_RULES.OPEN_MARKET) {
+            const nextOpenRaw = toPositive(metaItem.nextOpen);
+            const resolvedOpen = Number.isFinite(nextOpenRaw) ? nextOpenRaw : nextClose;
+            if (!Number.isFinite(resolvedOpen) || resolvedOpen <= 0) return null;
+            const actualReturn = (nextClose - resolvedOpen) / resolvedOpen;
+            return {
+                tradeDate,
+                buyPrice: resolvedOpen,
+                sellPrice: nextClose,
+                actualReturn,
+            };
+        }
+        if (!Number.isFinite(buyClose) || buyClose <= 0) return null;
+        const nextLowRaw = toPositive(metaItem.nextLow);
+        const resolvedLow = Number.isFinite(nextLowRaw) ? nextLowRaw : Number.POSITIVE_INFINITY;
+        if (!Number.isFinite(resolvedLow) || resolvedLow >= buyClose) {
+            return null;
+        }
+        const nextOpenRaw = toPositive(metaItem.nextOpen);
+        const resolvedOpen = Number.isFinite(nextOpenRaw) ? nextOpenRaw : nextClose;
+        const entryPrice = Number.isFinite(resolvedOpen) && resolvedOpen < buyClose
+            ? resolvedOpen
+            : buyClose;
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0) return null;
+        const actualReturn = (nextClose - entryPrice) / entryPrice;
+        return {
+            tradeDate,
+            buyPrice: entryPrice,
+            sellPrice: nextClose,
+            actualReturn,
+        };
     };
 
     const updateDatasetSummary = (rows) => {
@@ -508,6 +637,8 @@
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
                         <td class="px-3 py-2 text-right">—</td>
+                        <td class="px-3 py-2 text-right">—</td>
+                        <td class="px-3 py-2 text-right">—</td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                         <td class="px-3 py-2 text-right">—</td>
                     </tr>
@@ -521,6 +652,8 @@
             const actualReturnText = formatPercent(trade.actualReturn, 2);
             const fractionText = formatPercent(trade.fraction, 2);
             const tradeReturnText = formatPercent(trade.tradeReturn, 2);
+            const buyPriceText = formatPrice(trade.buyPrice);
+            const sellPriceText = formatPrice(trade.sellPrice);
             const actualClass = Number.isFinite(trade.actualReturn) && trade.actualReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
             const tradeReturnClass = Number.isFinite(trade.tradeReturn) && trade.tradeReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
             const badge = trade.isForecast
@@ -530,6 +663,8 @@
                 <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.tradeDate || '—')}${badge}</td>
                     <td class="px-3 py-2 text-right">${probabilityText}</td>
+                    <td class="px-3 py-2 text-right">${buyPriceText}</td>
+                    <td class="px-3 py-2 text-right">${sellPriceText}</td>
                     <td class="px-3 py-2 text-right ${actualClass}">${actualReturnText}</td>
                     <td class="px-3 py-2 text-right">${fractionText}</td>
                     <td class="px-3 py-2 text-right ${tradeReturnClass}">${tradeReturnText}</td>
@@ -542,6 +677,8 @@
                 <tr class="bg-muted/30">
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                    <td class="px-3 py-2 text-right">—</td>
+                    <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                     <td class="px-3 py-2 text-right">—</td>
@@ -564,6 +701,7 @@
         if (elements.tradeSummary) elements.tradeSummary.textContent = '尚未生成交易結果。';
         if (elements.nextDayForecast) elements.nextDayForecast.textContent = '尚未計算隔日預測。';
         if (elements.tradeTableBody) elements.tradeTableBody.innerHTML = '';
+        updateBuyRuleDescription(getActiveModelState()?.buyRule);
     };
 
     const updateSummaryMetrics = (summary) => {
@@ -586,9 +724,10 @@
             const strategyLabel = summary.usingKelly
                 ? '已啟用凱利公式'
                 : `固定投入 ${formatPercent(summary.fixedFraction, 2)}`;
+            const ruleLabel = formatBuyRuleLabel(summary.buyRule);
             const medianText = formatPercent(summary.tradeReturnMedian, 2);
             const averageText = formatPercent(summary.tradeReturnAverage, 2);
-            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${summary.executedTrades} 筆交易，${strategyLabel}。交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}。`;
+            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${summary.executedTrades} 筆交易，${strategyLabel}，採用${ruleLabel}策略。交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}。`;
         }
         if (elements.nextDayForecast) {
             const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
@@ -608,15 +747,16 @@
                 elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
+        updateBuyRuleDescription(summary.buyRule);
     };
 
     const computeTradeOutcomes = (payload, options, trainingOdds) => {
         const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
         const meta = Array.isArray(payload?.meta) ? payload.meta : [];
-        const returns = Array.isArray(payload?.returns) ? payload.returns : [];
         const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
         const useKelly = Boolean(options.useKelly);
         const fixedFraction = sanitizeFraction(options.fixedFraction);
+        const buyRule = normalizeBuyRule(options.buyRule);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -625,34 +765,31 @@
         for (let i = 0; i < predictions.length; i += 1) {
             const probability = Number(predictions[i]);
             const metaItem = meta[i];
-            const actualReturn = returns[i];
-            if (!Number.isFinite(probability) || !metaItem || !Number.isFinite(actualReturn)) {
+            if (!Number.isFinite(probability) || !metaItem) {
                 continue;
             }
             if (probability < threshold) {
                 continue;
             }
-            const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
-                ? metaItem.sellDate
-                : (typeof metaItem.tradeDate === 'string' && metaItem.tradeDate
-                    ? metaItem.tradeDate
-                    : (typeof metaItem.date === 'string' && metaItem.date ? metaItem.date : null));
-            if (!tradeDate) {
+            const decision = evaluateTradeEntry(metaItem, buyRule);
+            if (!decision || !Number.isFinite(decision.actualReturn)) {
                 continue;
             }
             const fraction = useKelly
                 ? computeKellyFraction(probability, trainingOdds)
                 : fixedFraction;
-            const tradeReturn = actualReturn * fraction;
-            if (actualReturn > 0) {
+            const tradeReturn = decision.actualReturn * fraction;
+            if (decision.actualReturn > 0) {
                 wins += 1;
             }
             executedTrades.push({
-                tradeDate,
+                tradeDate: decision.tradeDate,
                 probability,
-                actualReturn,
+                actualReturn: decision.actualReturn,
                 fraction,
                 tradeReturn,
+                buyPrice: decision.buyPrice,
+                sellPrice: decision.sellPrice,
             });
             tradeReturns.push(tradeReturn);
         }
@@ -687,7 +824,8 @@
         };
         const fallbackOdds = Number.isFinite(modelState.odds) ? modelState.odds : 1;
         const trainingOdds = Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : fallbackOdds;
-        const evaluation = computeTradeOutcomes(payload, options, trainingOdds);
+        const normalizedRule = normalizeBuyRule(options.buyRule);
+        const evaluation = computeTradeOutcomes(payload, { ...options, buyRule: normalizedRule }, trainingOdds);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? { ...payload.forecast }
             : null;
@@ -715,6 +853,7 @@
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            buyRule: normalizedRule,
             forecast,
         };
 
@@ -723,6 +862,7 @@
         modelState.currentTrades = evaluation.trades;
         modelState.odds = trainingOdds;
         modelState.predictionsPayload = payload;
+        modelState.buyRule = normalizedRule;
 
         if (globalState.activeModel === modelType) {
             updateSummaryMetrics(summary);
@@ -749,7 +889,14 @@
         };
         modelState.winThreshold = parseWinThreshold();
         modelState.kellyEnabled = Boolean(elements.enableKelly?.checked);
-        modelState.fixedFraction = sanitizeFraction(parseNumberInput(elements.fixedFraction, modelState.fixedFraction, { min: 0.01, max: 1 }));
+        const fractionInput = parseNumberInput(
+            elements.fixedFraction,
+            Number(formatFractionInput(modelState.fixedFraction)),
+            { min: 1, max: 100 },
+        );
+        modelState.fixedFraction = sanitizeFraction(fractionInput);
+        const selectedRule = elements.buyRuleSelect ? elements.buyRuleSelect.value : modelState.buyRule;
+        modelState.buyRule = normalizeBuyRule(selectedRule);
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -779,14 +926,18 @@
             elements.enableKelly.checked = Boolean(modelState.kellyEnabled);
         }
         if (elements.fixedFraction) {
-            elements.fixedFraction.value = sanitizeFraction(modelState.fixedFraction || 0.2);
+            elements.fixedFraction.value = formatFractionInput(modelState.fixedFraction || 1);
         }
         if (elements.winThreshold) {
             const thresholdPercent = Math.round(((Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5) * 100));
             elements.winThreshold.value = String(thresholdPercent);
         }
+        if (elements.buyRuleSelect) {
+            elements.buyRuleSelect.value = normalizeBuyRule(modelState.buyRule);
+        }
         parseTrainRatio();
         parseWinThreshold();
+        updateBuyRuleDescription(modelState.buyRule);
     };
 
     const renderActiveModelOutputs = () => {
@@ -941,19 +1092,28 @@
         let threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
         let useKelly = Boolean(modelState.kellyEnabled);
         let fixedFraction = sanitizeFraction(modelState.fixedFraction);
+        let buyRule = normalizeBuyRule(modelState.buyRule);
 
         if (modelType === globalState.activeModel) {
             threshold = parseWinThreshold();
             useKelly = Boolean(elements.enableKelly?.checked);
-            fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+            const fractionInput = parseNumberInput(
+                elements.fixedFraction,
+                Number(formatFractionInput(modelState.fixedFraction)),
+                { min: 1, max: 100 },
+            );
             modelState.kellyEnabled = useKelly;
-            modelState.fixedFraction = sanitizeFraction(fixedFraction);
+            fixedFraction = sanitizeFraction(fractionInput);
+            modelState.fixedFraction = fixedFraction;
+            buyRule = normalizeBuyRule(elements.buyRuleSelect?.value || buyRule);
+            modelState.buyRule = buyRule;
         }
 
         applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, {
             threshold,
             useKelly,
             fixedFraction,
+            buyRule,
         });
     };
 
@@ -965,7 +1125,14 @@
             return;
         }
         const useKelly = Boolean(elements.enableKelly?.checked);
-        const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+        const fractionInput = parseNumberInput(
+            elements.fixedFraction,
+            Number(formatFractionInput(modelState.fixedFraction)),
+            { min: 1, max: 100 },
+        );
+        const fixedFraction = sanitizeFraction(fractionInput);
+        const buyRule = normalizeBuyRule(elements.buyRuleSelect?.value || modelState.buyRule);
+        modelState.buyRule = buyRule;
         const payload = modelState.predictionsPayload;
         const trainingOdds = Number.isFinite(payload.trainingOdds)
             ? payload.trainingOdds
@@ -979,6 +1146,7 @@
                 threshold,
                 useKelly,
                 fixedFraction,
+                buyRule,
             }, trainingOdds);
             const median = evaluation.stats.median;
             const average = evaluation.stats.average;
@@ -1040,6 +1208,7 @@
                 threshold: summary.threshold,
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
+                buyRule: summary.buyRule,
             },
             version: VERSION_TAG,
         };
@@ -1113,12 +1282,20 @@
         modelState.fixedFraction = Number.isFinite(seed.summary?.fixedFraction)
             ? sanitizeFraction(seed.summary.fixedFraction)
             : modelState.fixedFraction;
+        if (elements.fixedFraction) {
+            elements.fixedFraction.value = formatFractionInput(modelState.fixedFraction);
+        }
+        modelState.buyRule = normalizeBuyRule(seed.summary?.buyRule);
         modelState.winThreshold = Number.isFinite(seed.summary?.threshold)
             ? seed.summary.threshold
             : modelState.winThreshold;
 
         parseTrainRatio();
         parseWinThreshold();
+        if (elements.buyRuleSelect) {
+            elements.buyRuleSelect.value = modelState.buyRule;
+        }
+        updateBuyRuleDescription(modelState.buyRule);
         recomputeTradesFromState(modelType);
         showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
     };
@@ -1167,6 +1344,7 @@
                 threshold: Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5,
                 useKelly: Boolean(modelState.kellyEnabled),
                 fixedFraction: sanitizeFraction(modelState.fixedFraction),
+                buyRule: normalizeBuyRule(modelState.buyRule),
             };
 
             const rows = getVisibleData();
@@ -1222,6 +1400,7 @@
         elements.learningRate = document.getElementById('ai-learning-rate');
         elements.enableKelly = document.getElementById('ai-enable-kelly');
         elements.fixedFraction = document.getElementById('ai-fixed-fraction');
+        elements.buyRuleSelect = document.getElementById('ai-buy-rule');
         elements.winThreshold = document.getElementById('ai-win-threshold');
         elements.optimizeThreshold = document.getElementById('ai-optimize-threshold');
         elements.trainAccuracy = document.getElementById('ai-train-accuracy');
@@ -1235,6 +1414,7 @@
         elements.tradeTableBody = document.getElementById('ai-trade-table-body');
         elements.tradeSummary = document.getElementById('ai-trade-summary');
         elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
+        elements.buyRuleDescription = document.getElementById('ai-buy-rule-description');
         elements.seedName = document.getElementById('ai-seed-name');
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
@@ -1270,6 +1450,17 @@
                 recomputeTradesFromState();
             });
             elements.fixedFraction.addEventListener('blur', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.buyRuleSelect) {
+            elements.buyRuleSelect.addEventListener('change', () => {
+                const modelState = getActiveModelState();
+                if (modelState) {
+                    modelState.buyRule = normalizeBuyRule(elements.buyRuleSelect.value);
+                }
+                updateBuyRuleDescription(elements.buyRuleSelect.value);
                 recomputeTradesFromState();
             });
         }

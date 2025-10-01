@@ -2125,8 +2125,16 @@
                                                         </label>
                                                         <label class="flex items-center gap-2 text-xs">
                                                             <span class="min-w-[120px]">固定投入比例</span>
-                                                            <input id="ai-fixed-fraction" type="number" min="0.01" max="1" step="0.01" value="0.2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
+                                                            <input id="ai-fixed-fraction" type="number" min="1" max="100" step="1" value="100" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，百分比表示投入現金比例。</span>
+                                                        </label>
+                                                        <label class="flex items-center gap-2 text-xs">
+                                                            <span class="min-w-[120px]">買入規則</span>
+                                                            <select id="ai-buy-rule" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="close-limit">收盤價掛單（預設）</option>
+                                                                <option value="open-market">開盤價買入</option>
+                                                            </select>
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">切換後即時重算交易結果。</span>
                                                         </label>
                                                     </div>
                                                 </label>
@@ -2207,6 +2215,8 @@
                                                         <tr>
                                                             <th class="px-3 py-2 text-left font-semibold">交易日</th>
                                                             <th class="px-3 py-2 text-right font-semibold">預測上漲機率</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">買入價格</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">賣出價格</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">投入比例</th>
                                                             <th class="px-3 py-2 text-right font-semibold">交易報酬%</th>
@@ -2216,6 +2226,7 @@
                                                 </table>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                <p id="ai-buy-rule-description">收盤價掛單：隔日預測上漲且隔日最低價低於今日收盤，若開盤價低於今日收盤則以開盤價成交，否則以今日收盤價掛單，賣出價為隔日收盤。</p>
                                                 <p id="ai-trade-summary">尚未生成交易結果。</p>
                                                 <p id="ai-next-day-forecast" class="mt-1">尚未計算隔日預測。</p>
                                             </div>
