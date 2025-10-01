@@ -1,3 +1,11 @@
+## 2025-09-23 — Patch LB-FUGLE-SOURCE-20250923A
+- **Scope**: Fugle 台股主來源導入與官方清單支援指數。
+- **Features**:
+  - TWSE/TPEX Proxy 以 Fugle 為預設來源，失敗時依序落回 TWSE/FinMind（含 Yahoo 還原），並調整快取標籤與來源摘要。
+  - 前端資料來源測試器新增 Fugle 按鈕與提示文案，更新預設來源說明為「Fugle → TWSE/FinMind」。
+  - 台股官方清單整合 FinMind TaiwanIndexInfo，輸出上市/上櫃主要指數並升級版本碼 `LB-TW-DIRECTORY-20250923A`。
+- **Testing**: `node - <<'NODE' const fs = require('fs'); const vm = require('vm'); ['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{ const code = fs.readFileSync(file,'utf8'); new vm.Script(code,{filename:file}); }); console.log('scripts compile'); NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
