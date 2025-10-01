@@ -781,6 +781,12 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-12 — Patch LB-AI-HYBRID-20251212A
+- **Issue recap**: 隔日 AI 模型僅支援 LSTM，預設訓練/測試比例為 2:1，無法切換 ANNS 或於 UI 調整 80/20 等比例，也缺乏背景執行緒的 ANNS 管線。
+- **Fix**: 於 `index.html` 新增模型與切分比例選項，`js/ai-prediction.js` 重構成多模型狀態管理，並整合 ANN 與 LSTM 共同的訓練流程、門檻/種子設定；`js/worker.js` 導入技術指標 ANN 資料管線、統一訓練比例預設 80/20、補上 ANN 訊息型別處理與 TensorFlow.js 4.20 載入。
+- **Diagnostics**: 切換模型時檢查勝率門檻/凱利/種子是否維持各自設定，確認 Worker 回傳訊息分流（`ai-train-ann`、`ai-train-lstm`）。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-10 — Patch LB-AI-LSTM-20250929B
 - **Issue recap**: LSTM 模型仍在主執行緒訓練，啟動 AI 預測時頁面易凍結且進度無法掌握，亦缺乏背景錯誤通知機制。
 - **Fix**: 建立 `LB-AI-LSTM-20250929B` 管線，改以 `worker.js` 執行 TensorFlow.js 訓練並透過訊息回傳進度、結果與錯誤，前端僅負責資料切片與結果渲染。
