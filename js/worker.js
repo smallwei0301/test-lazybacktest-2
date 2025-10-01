@@ -1,5 +1,5 @@
 
-// Patch Tag: LB-AI-ANNS-REPRO-20251223A — Restore ANN 12-feature set & dataset-wide normalisation.
+// Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -9,7 +9,7 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251223A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251224B';
 
 let tfBackendReadyPromise = Promise.resolve();
 
@@ -291,6 +291,12 @@ async function handleAITrainLSTMMessage(message) {
               ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
               : null,
           };
+          const lastClose = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+            ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close)
+            : null;
+          if (Number.isFinite(lastClose)) {
+            nextDayForecast.buyPrice = lastClose;
+          }
           forecastTensor.dispose();
           forecastInput.dispose();
         }
@@ -312,6 +318,9 @@ async function handleAITrainLSTMMessage(message) {
         forecast: nextDayForecast,
         datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
           ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+          : null,
+        lastClose: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+          ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close) || null
           : null,
         hyperparameters: {
           lookback,
@@ -374,6 +383,20 @@ function annResolveClose(row) {
     if (Number.isFinite(value) && value > 0) return value;
   }
   return NaN;
+}
+
+function annResolveOpen(row, fallback) {
+  const candidates = [
+    row?.open,
+    row?.adjustedOpen,
+    row?.adjOpen,
+    row?.rawOpen,
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : NaN;
 }
 
 function annResolveHigh(row, fallback) {
@@ -604,6 +627,7 @@ function annPrepareDataset(rows) {
           return {
             date: row.date,
             close,
+            open: annResolveOpen(row, close),
             high: annResolveHigh(row, close),
             low: annResolveLow(row, close),
           };
@@ -660,7 +684,17 @@ function annPrepareDataset(rows) {
     }
     const current = parsed[i];
     const next = parsed[i + 1];
-    const change = (next.close - current.close) / current.close;
+    const entryTrigger = current.close;
+    const nextLow = Number.isFinite(next.low) ? next.low : entryTrigger;
+    const nextOpen = Number.isFinite(next.open) ? next.open : entryTrigger;
+    const entryEligible = Number.isFinite(nextLow) && nextLow < entryTrigger;
+    const buyPrice = entryEligible
+      ? (Number.isFinite(nextOpen) && nextOpen < entryTrigger ? nextOpen : entryTrigger)
+      : entryTrigger;
+    const sellPrice = next.close;
+    const actualReturn = entryEligible && Number.isFinite(buyPrice) && buyPrice > 0
+      ? (sellPrice - buyPrice) / buyPrice
+      : 0;
     X.push(features.map(Number));
     y.push(next.close > current.close ? 1 : 0);
     meta.push({
@@ -669,8 +703,15 @@ function annPrepareDataset(rows) {
       tradeDate: next.date,
       buyClose: current.close,
       sellClose: next.close,
+      buyPrice,
+      sellPrice,
+      nextOpen,
+      nextLow,
+      entryEligible,
+      actualReturn,
+      buyTrigger: entryTrigger,
     });
-    returns.push(change);
+    returns.push(actualReturn);
   }
 
   return {
@@ -681,6 +722,7 @@ function annPrepareDataset(rows) {
     forecastFeature,
     forecastDate,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
+    datasetLastClose: parsed.length > 0 ? parsed[parsed.length - 1].close : null,
   };
 }
 
@@ -878,6 +920,9 @@ async function handleAITrainANNMessage(message) {
             probability: forecastArray[0],
             referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
           };
+          if (Number.isFinite(prepared.datasetLastClose)) {
+            forecast.buyPrice = prepared.datasetLastClose;
+          }
           forecastOutput.dispose();
           forecastTensor.dispose();
         }
@@ -898,6 +943,7 @@ async function handleAITrainANNMessage(message) {
         trainingOdds,
         forecast,
         datasetLastDate: prepared.datasetLastDate,
+        lastClose: Number.isFinite(prepared.datasetLastClose) ? prepared.datasetLastClose : null,
         hyperparameters: {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,

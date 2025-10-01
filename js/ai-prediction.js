@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251222A
+// Patch Tag: LB-AI-HYBRID-20251224A — Trade execution pricing & UI uplift.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251222A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20251224A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -37,7 +37,7 @@
     });
     const globalState = {
         running: false,
-        activeModel: MODEL_TYPES.LSTM,
+        activeModel: MODEL_TYPES.ANNS,
         models: {
             [MODEL_TYPES.LSTM]: createModelState(),
             [MODEL_TYPES.ANNS]: createModelState(),
@@ -45,7 +45,7 @@
     };
     const getModelState = (model) => {
         if (!model || !globalState.models[model]) {
-            return globalState.models[MODEL_TYPES.LSTM];
+            return globalState.models[MODEL_TYPES.ANNS];
         }
         return globalState.models[model];
     };
@@ -86,6 +86,8 @@
         saveSeedButton: null,
         savedSeedList: null,
         loadSeedButton: null,
+        deleteSeedButton: null,
+        tradeRules: null,
     };
 
     const colorMap = {
@@ -93,6 +95,41 @@
         success: 'var(--primary)',
         warning: 'var(--secondary)',
         error: 'var(--destructive)',
+    };
+    const TRADE_RULE_TEXT = '買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。';
+
+    const formatPrice = (value, digits = 2) => {
+        if (!Number.isFinite(value)) return '—';
+        return value.toFixed(digits);
+    };
+
+    const computeNextTradingDate = (dateString) => {
+        if (typeof dateString !== 'string' || !dateString) return null;
+        const base = new Date(`${dateString}T00:00:00Z`);
+        if (Number.isNaN(base.getTime())) return null;
+        const candidate = new Date(base.getTime());
+        candidate.setUTCDate(candidate.getUTCDate() + 1);
+        let weekday = candidate.getUTCDay();
+        while (weekday === 0 || weekday === 6) {
+            candidate.setUTCDate(candidate.getUTCDate() + 1);
+            weekday = candidate.getUTCDay();
+        }
+        return candidate.toISOString().slice(0, 10);
+    };
+
+    const resolveOpenValue = (row, fallback) => {
+        const candidates = [row?.open, row?.adjustedOpen, row?.adjOpen, row?.rawOpen];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const value = Number(candidates[i]);
+            if (Number.isFinite(value) && value > 0) return value;
+        }
+        return Number.isFinite(fallback) && fallback > 0 ? fallback : NaN;
+    };
+
+    const resolveLowValue = (row, fallback) => {
+        const value = Number(row?.low);
+        if (Number.isFinite(value)) return value;
+        return Number.isFinite(fallback) ? fallback : NaN;
     };
 
     const ensureBridge = () => {
@@ -198,6 +235,27 @@
         return Math.min(Math.max(num, 0.01), 1);
     };
 
+    const annotateForecast = (forecast, payload) => {
+        if (!forecast || !Number.isFinite(forecast.probability)) return null;
+        const annotated = { ...forecast };
+        const referenceDate = typeof annotated.referenceDate === 'string'
+            ? annotated.referenceDate
+            : (typeof payload?.datasetLastDate === 'string' ? payload.datasetLastDate : null);
+        if (!annotated.tradeDate || typeof annotated.tradeDate !== 'string') {
+            const computedDate = computeNextTradingDate(referenceDate);
+            if (computedDate) {
+                annotated.tradeDate = computedDate;
+            }
+        }
+        if (!Number.isFinite(annotated.buyPrice) && Number.isFinite(payload?.lastClose)) {
+            annotated.buyPrice = payload.lastClose;
+        }
+        if (referenceDate && !annotated.referenceDate) {
+            annotated.referenceDate = referenceDate;
+        }
+        return annotated;
+    };
+
     const generateRuntimeSeed = () => {
         if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.getRandomValues === 'function') {
             const array = new Uint32Array(1);
@@ -261,9 +319,11 @@
 
     const buildSeedDefaultName = (summary) => {
         if (!summary) return '';
-        const trainText = formatPercent(summary.trainAccuracy, 1);
         const testText = formatPercent(summary.testAccuracy, 1);
-        return `訓練勝率${trainText}｜測試正確率${testText}`;
+        const medianText = formatPercent(summary.tradeReturnMedian, 2);
+        const averageText = formatPercent(summary.tradeReturnAverage, 2);
+        const tradeCountText = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+        return `測試勝率${testText}｜交易報酬中位數${medianText}｜平均報酬${averageText}｜交易次數${tradeCountText}`;
     };
 
     const applySeedDefaultName = (summary) => {
@@ -468,43 +528,68 @@
         }
         const sorted = rows
             .filter((row) => row && typeof row.date === 'string')
-            .map((row) => ({
-                date: row.date,
-                close: resolveCloseValue(row),
-            }))
+            .map((row) => {
+                const close = resolveCloseValue(row);
+                return {
+                    date: row.date,
+                    close,
+                    open: resolveOpenValue(row, close),
+                    low: resolveLowValue(row, close),
+                };
+            })
             .filter((row) => Number.isFinite(row.close) && row.close > 0)
             .sort((a, b) => a.date.localeCompare(b.date));
 
         if (sorted.length <= lookback + 2) {
-            return { sequences: [], labels: [], meta: [], returns: [], baseRows: sorted };
+            return { sequences: [], labels: [], meta: [], returns: [], baseRows: sorted, lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null };
         }
 
-        const returns = [];
+        const priceChanges = [];
+        const tradeReturns = [];
         const meta = [];
         for (let i = 1; i < sorted.length; i += 1) {
             const prev = sorted[i - 1];
             const curr = sorted[i];
-            if (!Number.isFinite(prev.close) || prev.close <= 0) continue;
-            const change = (curr.close - prev.close) / prev.close;
-            returns.push(change);
+            if (!Number.isFinite(prev.close) || prev.close <= 0 || !Number.isFinite(curr.close)) continue;
+            const rawChange = (curr.close - prev.close) / prev.close;
+            const nextLow = Number.isFinite(curr.low) ? curr.low : prev.close;
+            const entryTrigger = prev.close;
+            const nextOpen = Number.isFinite(curr.open) ? curr.open : entryTrigger;
+            const entryEligible = Number.isFinite(nextLow) && nextLow < entryTrigger;
+            const buyPrice = entryEligible
+                ? (Number.isFinite(nextOpen) && nextOpen < entryTrigger ? nextOpen : entryTrigger)
+                : entryTrigger;
+            const sellPrice = curr.close;
+            const actualReturn = entryEligible && Number.isFinite(buyPrice) && buyPrice > 0
+                ? (sellPrice - buyPrice) / buyPrice
+                : 0;
+            priceChanges.push(rawChange);
+            tradeReturns.push(actualReturn);
             meta.push({
                 buyDate: prev.date,
                 sellDate: curr.date,
+                tradeDate: curr.date,
                 buyClose: prev.close,
                 sellClose: curr.close,
-                actualReturn: change,
+                buyPrice,
+                sellPrice,
+                nextOpen,
+                nextLow,
+                entryEligible,
+                actualReturn,
+                buyTrigger: entryTrigger,
             });
         }
 
         const sequences = [];
         const labels = [];
         const targetReturns = [];
-        for (let i = lookback; i < returns.length; i += 1) {
-            const feature = returns.slice(i - lookback, i);
+        for (let i = lookback; i < priceChanges.length; i += 1) {
+            const feature = priceChanges.slice(i - lookback, i);
             if (feature.length !== lookback) continue;
             sequences.push(feature);
-            labels.push(returns[i] > 0 ? 1 : 0);
-            targetReturns.push(returns[i]);
+            labels.push(priceChanges[i] > 0 ? 1 : 0);
+            targetReturns.push(tradeReturns[i]);
         }
 
         const metaAligned = meta.slice(lookback);
@@ -514,6 +599,7 @@
             meta: metaAligned,
             returns: targetReturns,
             baseRows: sorted,
+            lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
         };
     };
 
@@ -550,10 +636,12 @@
             elements.tradeTableBody.innerHTML = forecast && Number.isFinite(forecast.probability)
                 ? `
                     <tr class="bg-muted/30">
-                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤')}
                             <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                        <td class="px-3 py-2 text-right">${formatPrice(forecast.buyPrice)}</td>
+                        <td class="px-3 py-2 text-right">—</td>
                         <td class="px-3 py-2 text-right">—</td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                         <td class="px-3 py-2 text-right">—</td>
@@ -568,6 +656,8 @@
             const actualReturnText = formatPercent(trade.actualReturn, 2);
             const fractionText = formatPercent(trade.fraction, 2);
             const tradeReturnText = formatPercent(trade.tradeReturn, 2);
+            const buyPriceText = formatPrice(trade.buyPrice);
+            const sellPriceText = formatPrice(trade.sellPrice);
             const actualClass = Number.isFinite(trade.actualReturn) && trade.actualReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
             const tradeReturnClass = Number.isFinite(trade.tradeReturn) && trade.tradeReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
             const badge = trade.isForecast
@@ -577,6 +667,8 @@
                 <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.tradeDate || '—')}${badge}</td>
                     <td class="px-3 py-2 text-right">${probabilityText}</td>
+                    <td class="px-3 py-2 text-right">${buyPriceText}</td>
+                    <td class="px-3 py-2 text-right">${sellPriceText}</td>
                     <td class="px-3 py-2 text-right ${actualClass}">${actualReturnText}</td>
                     <td class="px-3 py-2 text-right">${fractionText}</td>
                     <td class="px-3 py-2 text-right ${tradeReturnClass}">${tradeReturnText}</td>
@@ -585,10 +677,13 @@
         });
 
         if (forecast && Number.isFinite(forecast.probability)) {
+            const tradeDateLabel = forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤';
             htmlParts.push(`
                 <tr class="bg-muted/30">
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(tradeDateLabel)}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                    <td class="px-3 py-2 text-right">${formatPrice(forecast.buyPrice)}</td>
+                    <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                     <td class="px-3 py-2 text-right">—</td>
@@ -611,10 +706,12 @@
         if (elements.tradeSummary) elements.tradeSummary.textContent = '尚未生成交易結果。';
         if (elements.nextDayForecast) elements.nextDayForecast.textContent = '尚未計算隔日預測。';
         if (elements.tradeTableBody) elements.tradeTableBody.innerHTML = '';
+        if (elements.tradeRules) elements.tradeRules.textContent = TRADE_RULE_TEXT;
     };
 
     const updateSummaryMetrics = (summary) => {
         if (!summary) return;
+        if (elements.tradeRules) elements.tradeRules.textContent = TRADE_RULE_TEXT;
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = formatPercent(summary.trainAccuracy, 2);
         if (elements.trainLoss) elements.trainLoss.textContent = `Loss：${formatNumber(summary.trainLoss, 4)}`;
         if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercent(summary.testAccuracy, 2);
@@ -672,11 +769,42 @@
         for (let i = 0; i < predictions.length; i += 1) {
             const probability = Number(predictions[i]);
             const metaItem = meta[i];
-            const actualReturn = returns[i];
-            if (!Number.isFinite(probability) || !metaItem || !Number.isFinite(actualReturn)) {
+            if (!Number.isFinite(probability) || !metaItem) {
                 continue;
             }
             if (probability < threshold) {
+                continue;
+            }
+            const prevClose = Number(metaItem.buyClose);
+            const nextLow = Number(metaItem.nextLow);
+            let entryEligible = typeof metaItem.entryEligible === 'boolean' ? metaItem.entryEligible : null;
+            if (entryEligible === null) {
+                if (Number.isFinite(nextLow) && Number.isFinite(prevClose)) {
+                    entryEligible = nextLow < prevClose;
+                } else {
+                    entryEligible = true;
+                }
+            }
+            if (!entryEligible) {
+                continue;
+            }
+            const resolvedBuyPrice = Number.isFinite(metaItem.buyPrice)
+                ? metaItem.buyPrice
+                : (Number.isFinite(prevClose) ? prevClose : NaN);
+            const resolvedSellPrice = Number.isFinite(metaItem.sellPrice)
+                ? metaItem.sellPrice
+                : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
+            if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0 || !Number.isFinite(resolvedSellPrice)) {
+                continue;
+            }
+            let actualReturn = Number(returns[i]);
+            if (!Number.isFinite(actualReturn)) {
+                actualReturn = Number(metaItem.actualReturn);
+            }
+            if (!Number.isFinite(actualReturn)) {
+                actualReturn = (resolvedSellPrice - resolvedBuyPrice) / resolvedBuyPrice;
+            }
+            if (!Number.isFinite(actualReturn)) {
                 continue;
             }
             const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
@@ -700,6 +828,8 @@
                 actualReturn,
                 fraction,
                 tradeReturn,
+                buyPrice: resolvedBuyPrice,
+                sellPrice: resolvedSellPrice,
             });
             tradeReturns.push(tradeReturn);
         }
@@ -736,7 +866,7 @@
         const trainingOdds = Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : fallbackOdds;
         const evaluation = computeTradeOutcomes(payload, options, trainingOdds);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
-            ? { ...payload.forecast }
+            ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
         if (forecast) {
             const forecastFraction = options.useKelly
@@ -926,7 +1056,11 @@
         const finalMessage = typeof workerResult?.finalMessage === 'string'
             ? workerResult.finalMessage
             : `完成：訓練勝率 ${formatPercent(trainingMetrics.trainAccuracy, 2)}，測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}。`;
-        showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}`, 'success');
+        const summary = modelState.lastSummary;
+        const appended = summary
+            ? `｜平均報酬% ${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            : '';
+        showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${appended}`, 'success');
     };
 
     const runAnnModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
@@ -1011,7 +1145,11 @@
             ? workerResult.finalMessage
             : `完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`;
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
-        showStatus(`[${label}] ${finalMessage}${seedSuffix}`, 'success');
+        const summary = modelState.lastSummary;
+        const appended = summary
+            ? `｜平均報酬% ${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            : '';
+        showStatus(`[${label}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
 
     const recomputeTradesFromState = (modelType = globalState.activeModel) => {
@@ -1082,7 +1220,11 @@
         modelState.winThreshold = bestThreshold;
         parseWinThreshold();
         recomputeTradesFromState(modelType);
-        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}。`, 'success');
+        const updatedSummary = getModelState(modelType)?.lastSummary;
+        const extra = updatedSummary
+            ? `｜平均報酬% ${formatPercent(updatedSummary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(updatedSummary.executedTrades) ? updatedSummary.executedTrades : 0}`
+            : '';
+        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}${extra}。`, 'success');
     };
 
     const handleSaveSeed = () => {
@@ -1113,6 +1255,7 @@
                 trainingOdds: modelState.predictionsPayload.trainingOdds,
                 forecast: modelState.predictionsPayload.forecast,
                 datasetLastDate: modelState.predictionsPayload.datasetLastDate,
+                lastClose: modelState.predictionsPayload.lastClose,
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
             },
             trainingMetrics: modelState.trainingMetrics,
@@ -1140,6 +1283,7 @@
             trainingOdds: seed.payload?.trainingOdds,
             forecast: seed.payload?.forecast || null,
             datasetLastDate: seed.payload?.datasetLastDate || null,
+            lastClose: Number.isFinite(seed.payload?.lastClose) ? seed.payload.lastClose : null,
             hyperparameters: seed.payload?.hyperparameters || null,
         };
         const metrics = seed.trainingMetrics || {
@@ -1224,6 +1368,27 @@
         }
         const latestSeed = selectedSeeds[selectedSeeds.length - 1];
         activateSeed(latestSeed);
+    };
+
+    const handleDeleteSeeds = () => {
+        if (!elements.savedSeedList) return;
+        const selectedIds = Array.from(elements.savedSeedList.selectedOptions || []).map((option) => option.value).filter(Boolean);
+        if (selectedIds.length === 0) {
+            showStatus('請先選擇要刪除的種子。', 'warning');
+            return;
+        }
+        const seeds = loadStoredSeeds();
+        const remaining = seeds.filter((seed) => !selectedIds.includes(seed.id));
+        if (remaining.length === seeds.length) {
+            showStatus('未刪除任何種子。', 'warning');
+            return;
+        }
+        persistSeeds(remaining);
+        refreshSeedOptions();
+        if (elements.savedSeedList) {
+            elements.savedSeedList.selectedIndex = -1;
+        }
+        showStatus(`已刪除 ${selectedIds.length} 筆種子。`, 'success');
     };
 
     const runPrediction = async (options = {}) => {
@@ -1336,6 +1501,8 @@
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
         elements.loadSeedButton = document.getElementById('ai-load-seed');
+        elements.deleteSeedButton = document.getElementById('ai-delete-seed');
+        elements.tradeRules = document.getElementById('ai-trade-rules');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -1404,11 +1571,21 @@
             });
         }
 
+        if (elements.deleteSeedButton) {
+            elements.deleteSeedButton.addEventListener('click', () => {
+                handleDeleteSeeds();
+            });
+        }
+
         applyModelSettingsToUI(getActiveModelState());
         renderActiveModelOutputs();
         refreshSeedOptions();
 
         updateDatasetSummary(getVisibleData());
+
+        if (elements.tradeRules) {
+            elements.tradeRules.textContent = TRADE_RULE_TEXT;
+        }
 
         const bridge = ensureBridge();
         if (bridge) {

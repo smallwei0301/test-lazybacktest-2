@@ -775,6 +775,15 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
+- **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
+- **Fix**:
+  - `js/ai-prediction.js` 將 AI 預測預設模型改為 ANNS，交易表新增買入／賣出價格欄位並套用「隔日最低價跌破當日收盤才進場、優先使用隔日開盤價」的進場邏輯；同時在狀態訊息顯示平均報酬與交易次數、更新種子預設命名格式並提供刪除功能，資金控管卡片移到勝率門檻下方且進階超參數改為預設收合。
+  - `js/worker.js` 在 ANN 管線計算進場價格、實際報酬與進場旗標，回傳 `buyPrice`／`sellPrice`、`entryEligible`、`lastClose` 與 `forecast.buyPrice` 等資訊；LSTM 亦同步附帶最後收盤價，兩者的 `returns` 均改用新進場邏輯所得到的實際報酬。
+  - `index.html` 調整表格與卡片版面，新增買入邏輯說明段落，確保 UI 與後端邏輯一致可讀。
+- **Diagnostics**: 比對過往種子與新模型輸出的 `buyPrice`／`sellPrice`、交易數與平均報酬，確認凱利模式與固定投入模式皆落在相同的實際報酬；舊種子載入後仍能維持原勝率與交易統計，並可一鍵刪除多筆紀錄。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-23 — Patch LB-AI-ANNS-REPRO-20251223A
 - **Issue recap**: 將 ANN 特徵縮減為 10 欄並以訓練集計算標準化參數後，實測勝率下滑且與既有部署結果不符，需要回復原 12 維技術指標與全資料集正規化流程。
 - **Fix**:
