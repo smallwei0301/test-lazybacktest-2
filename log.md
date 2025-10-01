@@ -1,3 +1,9 @@
+## 2025-12-18 — Patch LB-AI-DETERMINISM-20250930A
+- **Issue recap**: ANN 與 LSTM 背景訓練流程仍包含隨機初始與批次洗牌，導致同一資料期重複訓練時難以取得一致績效，也缺少標準化參數與切分邊界的保存機制。
+- **Fix**: `worker.js` 鎖定 TFJS 4.20.0 WASM 後端、全域種子 1337、全批次訓練與固定 0.5 閾值，同步為 ANN/LSTM 建立帶種子的初始化器、移除 Dropout、加入混淆矩陣、標準化參數與模型儲存；`ai-prediction.js` 新增 `LB-AI-DETERMINISM-20250930A` 版本碼、於本地保存 run meta（mean/std、切分邊界、閾值等），並同步 UI 狀態的實際批次大小。
+- **Diagnostics**: 多次觸發 ANN/LSTM 訓練確認背景回傳之混淆矩陣、預測標籤、標準化參數與 IndexedDB 儲存路徑一致，且 `localStorage` 會寫入/更新對應 meta 資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
