@@ -793,3 +793,8 @@
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-10-01 — Patch LB-AI-HYBRID-20251001A
+- **Issue recap**: AI 預測僅支援 LSTM 序列模型，使用者無法切換為技術指標神經網路或調整訓練/測試比例，診斷卡也缺少混淆矩陣與凱利資訊。
+- **Fix**: 新增 ANNS 模型流程與 UI 切換，兩種模型共用訓練參數、訓練/測試拆分比例下拉、混淆矩陣與凱利摘要診斷卡，並確保種子儲存時保留模型別與比例設定。
+- **Diagnostics**: 透過 AI 分頁 UI 驗證模型切換、比例標籤、診斷卡與交易結果表格可隨門檻即時更新，ANN 執行完成後顯示混淆矩陣與資金建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
