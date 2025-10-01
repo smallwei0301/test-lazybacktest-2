@@ -2135,20 +2135,40 @@
                                                 <button id="ai-run-fresh-button" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
                                                     <i data-lucide="refresh-cw" class="lucide-sm"></i>新的預測
                                                 </button>
+                                                <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 12%, transparent); color: var(--secondary-foreground);">
+                                                    <i data-lucide="save" class="lucide-sm"></i>儲存此次結果
+                                                </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
                                             <div class="grid gap-4 md:grid-cols-2">
                                                 <div class="flex flex-col gap-4">
-                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
-                                                        <div class="flex items-center justify-between">
-                                                            <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
-                                                            <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
-                                                                <i data-lucide="gauge" class="lucide-xs"></i>一鍵最佳報酬
-                                                            </button>
-                                                        </div>
-                                                        <div class="flex items-center gap-2">
-                                                            <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                            <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                    <div class="flex flex-col gap-3 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
+                                                        <div class="flex flex-col gap-2">
+                                                            <div class="flex items-center justify-between flex-wrap gap-2">
+                                                                <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
+                                                                <div class="flex flex-wrap items-center gap-2">
+                                                                    <label class="flex items-center gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                                        <span>最佳化目標</span>
+                                                                        <select id="ai-optimize-target" class="px-2 py-1 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-1 focus:ring-ring text-[11px]" style="border-color: var(--border); background-color: var(--input);">
+                                                                            <option value="median">交易報酬中位數</option>
+                                                                            <option value="single">單次平均報酬</option>
+                                                                            <option value="monthly">月平均報酬</option>
+                                                                            <option value="yearly">年平均報酬</option>
+                                                                        </select>
+                                                                    </label>
+                                                                    <label class="flex items-center gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                                        <span>最小交易總次數</span>
+                                                                        <input id="ai-optimize-min-trades" type="number" min="0" step="1" value="1" class="w-20 px-2 py-1 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-1 focus:ring-ring text-[11px]" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
+                                                                        <i data-lucide="gauge" class="lucide-xs"></i>執行門檻最佳化
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div class="flex items-center gap-2">
+                                                                <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                     <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
@@ -2166,11 +2186,8 @@
                                                 </div>
                                                 <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
                                                     <span class="text-xs font-medium" style="color: var(--foreground);">種子管理</span>
-                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="測試勝率XX.X%｜交易報酬中位數YY.Y%｜平均報酬ZZ.Z%｜交易次數N" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="【ANNS】測試勝率60.0%｜交易報酬中位數5.0%｜單次平均報酬2.5%｜月平均報酬4.0%｜年平均報酬48.0%｜交易次數12" style="border-color: var(--border); background-color: var(--input);" />
                                                     <div class="flex flex-wrap gap-2">
-                                                        <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors" style="background-color: var(--secondary); color: var(--secondary-foreground);">
-                                                            <i data-lucide="save" class="lucide-xs"></i>儲存種子
-                                                        </button>
                                                         <button id="ai-load-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); color: var(--foreground);">
                                                             <i data-lucide="download" class="lucide-xs"></i>載入選取種子
                                                         </button>
@@ -2179,7 +2196,7 @@
                                                         </button>
                                                     </div>
                                                     <select id="ai-saved-seeds" multiple size="5" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
-                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱包含測試勝率、交易報酬中位數、平均報酬與交易次數，可同時選擇多個種子載入或刪除。</span>
+                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱會自動帶入模型別（【LSTM】或【ANNS】）、測試勝率、交易報酬中位數、單次／月／年平均報酬與交易次數；可同時選擇多筆種子進行載入或刪除，儲存請於上方點選「儲存此次結果」。</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -2207,9 +2224,9 @@
                                                     <p id="ai-hit-rate" class="text-[11px]" style="color: var(--muted-foreground);">命中率：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
-                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（交易報酬% 中位數）</p>
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（中位數與平均指標）</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
-                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均報酬%・標準差</p>
+                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">單次／月／年平均報酬%・標準差</p>
                                                 </div>
                                             </div>
                                             <div class="overflow-x-auto">

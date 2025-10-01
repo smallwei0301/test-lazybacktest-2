@@ -809,6 +809,15 @@
 - **Diagnostics**: 於同一資料集先後按「啟動 AI 預測」與「新的預測」比對混淆矩陣、勝率與種子欄位，再重按「啟動 AI 預測」確認可依最新種子重播完全一致的結果。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-27 — Patch LB-AI-HYBRID-20251227B
+- **Issue recap**: 種子預設名稱未標示模型別且 LSTM 會沿用 ANNS 勝率，勝率最佳化僅能針對交易報酬中位數，無法限制交易筆數；UI 亦缺少月／年平均報酬等指標與儲存動態回饋。
+- **Fix**:
+  - 調整 `ai-prediction.js` 交易評估邏輯，計算交易報酬總和、單次／月／年平均報酬與測試期間範圍，並在狀態列、種子預設名稱與摘要同步顯示。
+  - 新增門檻最佳化目標下拉與最小交易次數輸入，狀態訊息會依目標顯示對應績效，並更新 LSTM／ANNS 訓練完成訊息的指標清單。
+  - 將「儲存種子」移到啟動區塊，新增按鈕成功後的視覺回饋，並在種子清單標註模型前綴；UI 說明更新為單次／月／年平均報酬。
+- **Diagnostics**: 本地操作切換 LSTM 與 ANNS，確認種子預設名稱皆以【模型】開頭且指標數值對應；執行門檻最佳化時驗證最小交易筆數限制與目標指標切換生效。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-20 — Patch LB-AI-ANNS-REPRO-20251220A
 - **Issue recap**: ANNS 管線仍存在隨機初始值、批次洗牌與後端不一致等因素，導致相同資料重跑時正確率與混淆矩陣無法 100% 重現，也缺乏標準化參數與切分邊界的保存機制。
 - **Fix**:

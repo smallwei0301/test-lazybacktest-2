@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251224A — Trade execution pricing & UI uplift.
+// Patch Tag: LB-AI-HYBRID-20251227B — Threshold objectives & seed labelling uplift.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251226A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20251227B';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -72,6 +72,8 @@
         fixedFraction: null,
         winThreshold: null,
         optimizeThreshold: null,
+        optimizeTarget: null,
+        optimizeMinTrades: null,
         trainRatioBadge: null,
         trainAccuracy: null,
         trainLoss: null,
@@ -99,6 +101,9 @@
         error: 'var(--destructive)',
     };
     const TRADE_RULE_TEXT = '買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。';
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    let seedSaveFeedbackTimer = null;
 
     const formatPrice = (value, digits = 2) => {
         if (!Number.isFinite(value)) return '—';
@@ -329,29 +334,48 @@
         const activeModel = globalState.activeModel;
         const options = seeds
             .filter((seed) => (seed.modelType || MODEL_TYPES.LSTM) === activeModel)
+            .sort((a, b) => (Number(b?.createdAt || 0) - Number(a?.createdAt || 0)))
             .map((seed) => `<option value="${escapeHTML(seed.id)}">${escapeHTML(seed.name || '未命名種子')}</option>`)
             .join('');
         elements.savedSeedList.innerHTML = options;
     };
 
-    const buildSeedDefaultName = (summary) => {
-        if (!summary) return '';
+    const buildSeedDefaultName = (summary, modelType = globalState.activeModel) => {
+        const prefix = modelType === MODEL_TYPES.LSTM ? '【LSTM】' : '【ANNS】';
+        if (!summary) {
+            return `${prefix}尚未產生預設名稱`;
+        }
         const testText = formatPercent(summary.testAccuracy, 1);
         const medianText = formatPercent(summary.tradeReturnMedian, 2);
-        const averageText = formatPercent(summary.tradeReturnAverage, 2);
+        const singleAverage = Number.isFinite(summary.tradeReturnAverageSingle)
+            ? formatPercent(summary.tradeReturnAverageSingle, 2)
+            : formatPercent(summary.tradeReturnAverage, 2);
+        const monthlyText = formatPercent(summary.tradeReturnAverageMonthly, 2);
+        const yearlyText = formatPercent(summary.tradeReturnAverageYearly, 2);
         const tradeCountText = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
-        return `測試勝率${testText}｜交易報酬中位數${medianText}｜平均報酬${averageText}｜交易次數${tradeCountText}`;
+        return `${prefix}測試勝率${testText}｜交易報酬中位數${medianText}｜單次平均報酬${singleAverage}｜月平均報酬${monthlyText}｜年平均報酬${yearlyText}｜交易次數${tradeCountText}`;
     };
 
-    const applySeedDefaultName = (summary) => {
-        if (!elements.seedName) return;
-        const defaultName = buildSeedDefaultName(summary);
+    const applySeedDefaultName = (summary, modelType = globalState.activeModel, options = {}) => {
+        const modelState = getModelState(modelType);
+        const previousDefault = modelState?.lastSeedDefault || '';
+        const defaultName = buildSeedDefaultName(summary, modelType);
+        if (modelState) {
+            modelState.lastSeedDefault = defaultName;
+        }
+        if (!elements.seedName || globalState.activeModel !== modelType) {
+            return;
+        }
+        const currentValue = elements.seedName.value || '';
+        const previousDatasetDefault = elements.seedName.dataset?.defaultName || '';
+        const shouldUpdate = Boolean(options.force)
+            || !currentValue
+            || currentValue === previousDatasetDefault
+            || currentValue === previousDefault;
         elements.seedName.dataset.defaultName = defaultName;
-        const modelState = getActiveModelState();
-        if (!elements.seedName.value || elements.seedName.value === modelState.lastSeedDefault) {
+        if (shouldUpdate) {
             elements.seedName.value = defaultName;
         }
-        modelState.lastSeedDefault = defaultName;
     };
 
     const showStatus = (message, type = 'info') => {
@@ -725,7 +749,7 @@
         if (elements.tradeCount) elements.tradeCount.textContent = '—';
         if (elements.hitRate) elements.hitRate.textContent = '命中率：—｜勝率門檻：—';
         if (elements.totalReturn) elements.totalReturn.textContent = '—';
-        if (elements.averageProfit) elements.averageProfit.textContent = '平均報酬%：—｜交易次數：0｜標準差：—';
+        if (elements.averageProfit) elements.averageProfit.textContent = '單次平均報酬%：—｜月平均報酬%：—｜年平均報酬%：—｜交易次數：0｜標準差：—';
         if (elements.tradeSummary) elements.tradeSummary.textContent = '尚未生成交易結果。';
         if (elements.nextDayForecast) elements.nextDayForecast.textContent = '尚未計算隔日預測。';
         if (elements.tradeTableBody) elements.tradeTableBody.innerHTML = '';
@@ -747,15 +771,34 @@
         if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.tradeReturnMedian, 2);
         if (elements.averageProfit) {
             const stdText = formatPercent(summary.tradeReturnStdDev, 2);
-            elements.averageProfit.textContent = `平均報酬%：${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數：${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}｜標準差：${stdText}`;
+            const singleText = formatPercent(Number.isFinite(summary.tradeReturnAverageSingle)
+                ? summary.tradeReturnAverageSingle
+                : summary.tradeReturnAverage, 2);
+            const monthlyText = formatPercent(summary.tradeReturnAverageMonthly, 2);
+            const yearlyText = formatPercent(summary.tradeReturnAverageYearly, 2);
+            const tradeCount = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+            elements.averageProfit.textContent = `單次平均報酬%：${singleText}｜月平均報酬%：${monthlyText}｜年平均報酬%：${yearlyText}｜交易次數：${tradeCount}｜標準差：${stdText}`;
         }
         if (elements.tradeSummary) {
             const strategyLabel = summary.usingKelly
                 ? '已啟用凱利公式'
                 : `固定投入 ${formatPercent(summary.fixedFraction, 2)}`;
             const medianText = formatPercent(summary.tradeReturnMedian, 2);
-            const averageText = formatPercent(summary.tradeReturnAverage, 2);
-            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${summary.executedTrades} 筆交易，${strategyLabel}。交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}。`;
+            const singleText = formatPercent(Number.isFinite(summary.tradeReturnAverageSingle)
+                ? summary.tradeReturnAverageSingle
+                : summary.tradeReturnAverage, 2);
+            const monthlyText = formatPercent(summary.tradeReturnAverageMonthly, 2);
+            const yearlyText = formatPercent(summary.tradeReturnAverageYearly, 2);
+            const totalText = Number.isFinite(summary.tradeReturnTotal)
+                ? formatPercent(summary.tradeReturnTotal, 2)
+                : null;
+            const totalPredictions = Number.isFinite(summary.totalPredictions) ? summary.totalPredictions : 0;
+            const executedCount = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+            const periodClause = summary.tradePeriodStart && summary.tradePeriodEnd
+                ? `測試期間 ${summary.tradePeriodStart} ~ ${summary.tradePeriodEnd}，`
+                : '';
+            const totalClause = totalText ? `交易報酬% 總和 ${totalText}，` : '';
+            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}。`;
         }
         if (elements.nextDayForecast) {
             const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
@@ -787,7 +830,19 @@
 
         const executedTrades = [];
         const tradeReturns = [];
+        const executedDateValues = [];
         let wins = 0;
+
+        const parseDateToUTC = (value) => {
+            if (typeof value !== 'string' || !value) return NaN;
+            const isoCandidate = value.length <= 10 ? `${value}T00:00:00Z` : value;
+            const timestamp = Date.parse(isoCandidate);
+            if (Number.isFinite(timestamp)) {
+                return timestamp;
+            }
+            const fallback = Date.parse(value);
+            return Number.isFinite(fallback) ? fallback : NaN;
+        };
 
         for (let i = 0; i < predictions.length; i += 1) {
             const probability = Number(predictions[i]);
@@ -845,6 +900,10 @@
             if (actualReturn > 0) {
                 wins += 1;
             }
+            const tradeTimestamp = parseDateToUTC(tradeDate);
+            if (Number.isFinite(tradeTimestamp)) {
+                executedDateValues.push(tradeTimestamp);
+            }
             executedTrades.push({
                 tradeDate,
                 probability,
@@ -862,6 +921,36 @@
         const median = tradeReturns.length > 0 ? computeMedian(tradeReturns) : NaN;
         const average = tradeReturns.length > 0 ? computeMean(tradeReturns) : NaN;
         const stdDev = tradeReturns.length > 1 ? computeStd(tradeReturns, average) : NaN;
+        const totalReturn = tradeReturns.reduce((acc, value) => acc + value, 0);
+
+        const metaDates = meta
+            .map((item) => parseDateToUTC(item?.sellDate || item?.tradeDate || item?.date || item?.buyDate))
+            .filter((value) => Number.isFinite(value));
+        const dateCandidates = metaDates.length > 0 ? metaDates : executedDateValues;
+        let averageMonthly = NaN;
+        let averageYearly = NaN;
+        let periodStart = null;
+        let periodEnd = null;
+        let periodMonths = NaN;
+        let periodYears = NaN;
+        if (dateCandidates.length > 0) {
+            const minTime = Math.min(...dateCandidates);
+            const maxTime = Math.max(...dateCandidates);
+            if (Number.isFinite(minTime) && Number.isFinite(maxTime) && maxTime >= minTime) {
+                const diffMs = Math.max(0, maxTime - minTime);
+                const diffDays = Math.max(1, (diffMs / DAY_MS) + 1);
+                periodMonths = diffDays / 30.4375;
+                periodYears = diffDays / 365.25;
+                if (periodMonths > 0) {
+                    averageMonthly = totalReturn / periodMonths;
+                }
+                if (periodYears > 0) {
+                    averageYearly = totalReturn / periodYears;
+                }
+                periodStart = new Date(minTime).toISOString().slice(0, 10);
+                periodEnd = new Date(maxTime).toISOString().slice(0, 10);
+            }
+        }
 
         return {
             trades: executedTrades,
@@ -871,6 +960,13 @@
                 median,
                 average,
                 stdDev,
+                total: totalReturn,
+                averageMonthly,
+                averageYearly,
+                periodStart,
+                periodEnd,
+                periodMonths,
+                periodYears,
             },
         };
     };
@@ -911,7 +1007,15 @@
             hitRate: evaluation.stats.hitRate,
             tradeReturnMedian: evaluation.stats.median,
             tradeReturnAverage: evaluation.stats.average,
+            tradeReturnAverageSingle: evaluation.stats.average,
+            tradeReturnAverageMonthly: evaluation.stats.averageMonthly,
+            tradeReturnAverageYearly: evaluation.stats.averageYearly,
+            tradeReturnTotal: evaluation.stats.total,
             tradeReturnStdDev: evaluation.stats.stdDev,
+            tradePeriodStart: evaluation.stats.periodStart,
+            tradePeriodEnd: evaluation.stats.periodEnd,
+            tradePeriodMonths: evaluation.stats.periodMonths,
+            tradePeriodYears: evaluation.stats.periodYears,
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
@@ -925,10 +1029,11 @@
         modelState.odds = trainingOdds;
         modelState.predictionsPayload = payload;
 
+        applySeedDefaultName(summary, modelType);
+
         if (globalState.activeModel === modelType) {
             updateSummaryMetrics(summary);
             renderTrades(evaluation.trades, summary.forecast);
-            applySeedDefaultName(summary);
         }
     };
 
@@ -995,14 +1100,15 @@
     };
 
     const renderActiveModelOutputs = () => {
-        const modelState = getActiveModelState();
+        const modelType = globalState.activeModel;
+        const modelState = getModelState(modelType);
         if (modelState && modelState.lastSummary) {
             updateSummaryMetrics(modelState.lastSummary);
             renderTrades(modelState.currentTrades, modelState.lastSummary.forecast);
-            applySeedDefaultName(modelState.lastSummary);
+            applySeedDefaultName(modelState.lastSummary, modelType, { force: true });
         } else {
             resetOutputs();
-            applySeedDefaultName(null);
+            applySeedDefaultName(null, modelType, { force: true });
         }
     };
 
@@ -1110,7 +1216,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜平均報酬% ${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
@@ -1199,7 +1305,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜平均報酬% ${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${label}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
@@ -1240,9 +1346,28 @@
         const trainingOdds = Number.isFinite(payload.trainingOdds)
             ? payload.trainingOdds
             : (Number.isFinite(modelState.odds) ? modelState.odds : 1);
+        const target = elements.optimizeTarget?.value || 'median';
+        const targetFieldMap = {
+            median: 'median',
+            single: 'average',
+            monthly: 'averageMonthly',
+            yearly: 'averageYearly',
+        };
+        const targetLabelMap = {
+            median: '交易報酬% 中位數',
+            single: '單次平均報酬%',
+            monthly: '月平均報酬%',
+            yearly: '年平均報酬%',
+        };
+        const targetField = targetFieldMap[target] || 'median';
+        const minTradesRaw = parseNumberInput(elements.optimizeMinTrades, 1, { min: 0, max: 10000 });
+        const minTrades = Math.max(0, Math.floor(Number.isFinite(minTradesRaw) ? minTradesRaw : 1));
+        if (elements.optimizeMinTrades) {
+            elements.optimizeMinTrades.value = String(minTrades);
+        }
         let bestThreshold = modelState.winThreshold || 0.5;
-        let bestMedian = Number.NEGATIVE_INFINITY;
-        let bestAverage = Number.NEGATIVE_INFINITY;
+        let bestValue = Number.NEGATIVE_INFINITY;
+        let bestStats = null;
         for (let percent = 50; percent <= 100; percent += 1) {
             const threshold = percent / 100;
             const evaluation = computeTradeOutcomes(payload, {
@@ -1250,22 +1375,32 @@
                 useKelly,
                 fixedFraction,
             }, trainingOdds);
-            const median = evaluation.stats.median;
-            const average = evaluation.stats.average;
-            const normalizedMedian = Number.isFinite(median) ? median : Number.NEGATIVE_INFINITY;
-            const normalizedAverage = Number.isFinite(average) ? average : Number.NEGATIVE_INFINITY;
+            const executedCount = Number.isFinite(evaluation.stats.executed) ? evaluation.stats.executed : 0;
+            if (executedCount < minTrades) {
+                continue;
+            }
+            const statValue = evaluation.stats[targetField];
+            const normalizedValue = Number.isFinite(statValue) ? statValue : Number.NEGATIVE_INFINITY;
+            const currentMedian = Number.isFinite(evaluation.stats.median) ? evaluation.stats.median : Number.NEGATIVE_INFINITY;
+            const currentAverage = Number.isFinite(evaluation.stats.average) ? evaluation.stats.average : Number.NEGATIVE_INFINITY;
+            const bestMedian = Number.isFinite(bestStats?.median) ? bestStats.median : Number.NEGATIVE_INFINITY;
+            const bestAverage = Number.isFinite(bestStats?.average) ? bestStats.average : Number.NEGATIVE_INFINITY;
             if (
-                normalizedMedian > bestMedian
-                || (normalizedMedian === bestMedian && normalizedAverage > bestAverage)
-                || (normalizedMedian === bestMedian && normalizedAverage === bestAverage && threshold < bestThreshold)
+                normalizedValue > bestValue
+                || (normalizedValue === bestValue && currentMedian > bestMedian)
+                || (normalizedValue === bestValue && currentMedian === bestMedian && currentAverage > bestAverage)
+                || (normalizedValue === bestValue && currentMedian === bestMedian && currentAverage === bestAverage && threshold < bestThreshold)
             ) {
-                bestMedian = normalizedMedian;
-                bestAverage = normalizedAverage;
+                bestValue = normalizedValue;
                 bestThreshold = threshold;
+                bestStats = { ...evaluation.stats, executed: executedCount };
             }
         }
-        if (!Number.isFinite(bestMedian) || bestMedian === Number.NEGATIVE_INFINITY) {
-            showStatus('門檻掃描後仍無符合條件的交易。已維持原門檻設定。', 'warning');
+        if (!bestStats || bestValue === Number.NEGATIVE_INFINITY) {
+            const requirementText = minTrades > 0
+                ? `（至少需 ${minTrades} 筆交易）`
+                : '';
+            showStatus(`門檻掃描後仍無符合條件的交易${requirementText}。已維持原門檻設定。`, 'warning');
             return;
         }
         elements.winThreshold.value = String(Math.round(bestThreshold * 100));
@@ -1273,10 +1408,28 @@
         parseWinThreshold();
         recomputeTradesFromState(modelType);
         const updatedSummary = getModelState(modelType)?.lastSummary;
-        const extra = updatedSummary
-            ? `｜平均報酬% ${formatPercent(updatedSummary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(updatedSummary.executedTrades) ? updatedSummary.executedTrades : 0}`
+        const targetLabel = targetLabelMap[target] || targetLabelMap.median;
+        const summaryValue = updatedSummary
+            ? (() => {
+                switch (targetField) {
+                    case 'average':
+                        return Number.isFinite(updatedSummary.tradeReturnAverageSingle)
+                            ? updatedSummary.tradeReturnAverageSingle
+                            : updatedSummary.tradeReturnAverage;
+                    case 'averageMonthly':
+                        return updatedSummary.tradeReturnAverageMonthly;
+                    case 'averageYearly':
+                        return updatedSummary.tradeReturnAverageYearly;
+                    case 'median':
+                    default:
+                        return updatedSummary.tradeReturnMedian;
+                }
+            })()
+            : bestValue;
+        const appendMetrics = updatedSummary
+            ? `｜交易報酬% 中位數 ${formatPercent(updatedSummary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(updatedSummary.tradeReturnAverageSingle) ? updatedSummary.tradeReturnAverageSingle : updatedSummary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(updatedSummary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(updatedSummary.tradeReturnAverageYearly, 2)}｜交易次數 ${Number.isFinite(updatedSummary.executedTrades) ? updatedSummary.executedTrades : 0}`
             : '';
-        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}${extra}。`, 'success');
+        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應${targetLabel} ${formatPercent(summaryValue, 2)}${appendMetrics}。`, 'success');
     };
 
     const handleSaveSeed = () => {
@@ -1292,7 +1445,7 @@
         }
         const seeds = loadStoredSeeds();
         const summary = modelState.lastSummary;
-        const defaultName = buildSeedDefaultName(summary) || '未命名種子';
+        const defaultName = buildSeedDefaultName(summary, modelType) || '未命名種子';
         const inputName = elements.seedName?.value?.trim();
         const seedName = inputName || defaultName;
         const newSeed = {
@@ -1315,6 +1468,13 @@
                 threshold: summary.threshold,
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
+                executedTrades: summary.executedTrades,
+                tradeReturnMedian: summary.tradeReturnMedian,
+                tradeReturnAverage: summary.tradeReturnAverage,
+                tradeReturnAverageSingle: summary.tradeReturnAverageSingle,
+                tradeReturnAverageMonthly: summary.tradeReturnAverageMonthly,
+                tradeReturnAverageYearly: summary.tradeReturnAverageYearly,
+                tradeReturnTotal: summary.tradeReturnTotal,
             },
             version: VERSION_TAG,
         };
@@ -1322,6 +1482,30 @@
         persistSeeds(seeds);
         refreshSeedOptions();
         showStatus(`已儲存種子「${seedName}」。`, 'success');
+        if (elements.saveSeedButton) {
+            const button = elements.saveSeedButton;
+            const baseLabel = button.dataset.originalLabel || button.textContent.trim();
+            button.dataset.originalLabel = baseLabel;
+            button.disabled = true;
+            button.classList.add('bg-emerald-500', 'text-white', 'ring-2', 'ring-emerald-400');
+            button.textContent = '已儲存種子 ✓';
+            if (typeof window !== 'undefined') {
+                if (seedSaveFeedbackTimer) {
+                    window.clearTimeout(seedSaveFeedbackTimer);
+                }
+                seedSaveFeedbackTimer = window.setTimeout(() => {
+                    button.disabled = false;
+                    button.classList.remove('bg-emerald-500', 'text-white', 'ring-2', 'ring-emerald-400');
+                    button.textContent = baseLabel;
+                    seedSaveFeedbackTimer = null;
+                }, 1800);
+            } else {
+                button.disabled = false;
+                button.classList.remove('bg-emerald-500', 'text-white', 'ring-2', 'ring-emerald-400');
+                button.textContent = baseLabel;
+                seedSaveFeedbackTimer = null;
+            }
+        }
     };
 
     const activateSeed = (seed) => {
@@ -1551,6 +1735,8 @@
         elements.fixedFraction = document.getElementById('ai-fixed-fraction');
         elements.winThreshold = document.getElementById('ai-win-threshold');
         elements.optimizeThreshold = document.getElementById('ai-optimize-threshold');
+        elements.optimizeTarget = document.getElementById('ai-optimize-target');
+        elements.optimizeMinTrades = document.getElementById('ai-optimize-min-trades');
         elements.trainAccuracy = document.getElementById('ai-train-accuracy');
         elements.trainLoss = document.getElementById('ai-train-loss');
         elements.testAccuracy = document.getElementById('ai-test-accuracy');
