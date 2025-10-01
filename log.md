@@ -787,6 +787,12 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-15 — Patch LB-AI-ANNS-REPRO-20251215B
+- **Issue recap**: ANNS 模型在重訓時會因指標標準化、切分、批次與種子不一致導致結果浮動，亦缺乏模型與標準化參數的保存機制，無法在相同資料集上完全重現測試成績。
+- **Fix**: `js/worker.js` 固定 TFJS 後端與隨機種子，將標準化僅以訓練集計算並回傳平均數/標準差，鎖定 80/20 時間切分、200 輪全批次 SGD 訓練與 0.5 閾值，同步儲存模型至 IndexedDB 與重現用 meta；新增 `ai-replay-ann` 管線以讀回模型並以既有 meta 產出同一測試集結果。`js/ai-prediction.js` 鎖定 ANN 超參數與門檻、儲存 meta 至 localStorage、建立重現橋接介面並提供 UI 鎖定提示。更新版本標記與本地快取寫入流程。
+- **Diagnostics**: 於瀏覽器端重訓 ANN 後刷新頁面，呼叫 `window.lazybacktestAIBridge.annReplay.replay()` 驗證測試正確率、混淆矩陣與預測結果與訓練時一致；檢查 localStorage `LB_ANN_META` 與 IndexedDB `anns_v1_model` 皆存在且內容符合最新訓練設定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-12 — Patch LB-AI-HYBRID-20251212A
 - **Issue recap**: 隔日 AI 模型僅支援 LSTM，預設訓練/測試比例為 2:1，無法切換 ANNS 或於 UI 調整 80/20 等比例，也缺乏背景執行緒的 ANNS 管線。
 - **Fix**: 於 `index.html` 新增模型與切分比例選項，`js/ai-prediction.js` 重構成多模型狀態管理，並整合 ANN 與 LSTM 共同的訓練流程、門檻/種子設定；`js/worker.js` 導入技術指標 ANN 資料管線、統一訓練比例預設 80/20、補上 ANN 訊息型別處理與 TensorFlow.js 4.20 載入。
