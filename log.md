@@ -1,3 +1,11 @@
+## 2025-11-21 — Patch LB-AI-ANNS-20251121A
+- **Scope**: AI 預測分頁新增 ANNS 技術指標模型，提供 Web Worker 中的 TensorFlow.js ANN 訓練與評估流程。
+- **Features**:
+  - 於 `index.html` 加入 ANNS 啟動按鈕與結果卡片，顯示準確率、混淆矩陣與凱利資金比率建議。
+  - `js/main.js` 建立共用 Worker 管理與 UI 綁定，監聽 ANN 進度／完成／錯誤訊息並串接快取資料。
+  - `js/worker.js` 匯入 tf.js、實作技術指標特徵工程、標準化、ANN 訓練與凱利估算，透過 `ANN_*` 訊息類型回傳結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:

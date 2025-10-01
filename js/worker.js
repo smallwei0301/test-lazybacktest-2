@@ -1,6 +1,7 @@
 
 importScripts('shared-lookback.js');
 importScripts('config.js');
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
@@ -19,6 +20,7 @@ importScripts('config.js');
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251121A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -9263,6 +9265,339 @@ async function runOptimization(
   return { results: results, rawDataUsed: dataFetched ? stockData : null };
 }
 
+// --- ANN 模型工具 (LB-AI-ANNS-20251121A) ---
+const ANN_MODEL_CONFIG = {
+  minSamples: 60,
+  defaultTrainRatio: 0.8,
+  defaultEpochs: 60,
+  defaultBatchSize: 32,
+};
+
+function annSma(values, period) {
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    sum += values[i];
+    if (i >= period) sum -= values[i - period];
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+function annWma(values, period) {
+  const out = new Array(values.length).fill(null);
+  const denom = (period * (period + 1)) / 2;
+  for (let i = period - 1; i < values.length; i += 1) {
+    let numerator = 0;
+    for (let k = 0; k < period; k += 1) {
+      numerator += (period - k) * values[i - k];
+    }
+    out[i] = numerator / denom;
+  }
+  return out;
+}
+
+function annEma(values, period) {
+  const out = new Array(values.length).fill(null);
+  const k = 2 / (period + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i];
+    if (v == null) {
+      out[i] = prev;
+      continue;
+    }
+    if (prev == null) {
+      out[i] = v;
+    } else {
+      out[i] = prev + k * (v - prev);
+    }
+    prev = out[i];
+  }
+  return out;
+}
+
+function annMomentum(values, period) {
+  return values.map((value, idx) => (idx >= period ? value - values[idx - period] : null));
+}
+
+function annRollingMax(values, period) {
+  const out = new Array(values.length).fill(null);
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - period) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] <= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= period - 1) out[i] = values[deque[0]];
+  }
+  return out;
+}
+
+function annRollingMin(values, period) {
+  const out = new Array(values.length).fill(null);
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - period) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] >= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= period - 1) out[i] = values[deque[0]];
+  }
+  return out;
+}
+
+function annStochasticKD(high, low, close, periodK = 14, periodD = 3) {
+  const highest = annRollingMax(high, periodK);
+  const lowest = annRollingMin(low, periodK);
+  const kValues = close.map((c, idx) => {
+    if (idx < periodK - 1) return null;
+    const denom = highest[idx] - lowest[idx];
+    if (!Number.isFinite(denom) || denom === 0) return null;
+    return ((c - lowest[idx]) / denom) * 100;
+  });
+  const dValues = annSma(kValues.map((v) => (Number.isFinite(v) ? v : 0)), periodD)
+    .map((v, idx) => (idx >= periodK - 1 ? v : null));
+  return { kValues, dValues };
+}
+
+function annRsi(close, period = 14) {
+  const out = new Array(close.length).fill(null);
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i < close.length; i += 1) {
+    const change = close[i] - close[i - 1];
+    const up = Math.max(change, 0);
+    const down = Math.max(-change, 0);
+    if (i <= period) {
+      gain += up;
+      loss += down;
+      if (i === period) {
+        const rs = (gain / period) / ((loss / period) || 1e-12);
+        out[i] = 100 - (100 / (1 + rs));
+      }
+    } else {
+      gain = ((period - 1) * gain + up) / period;
+      loss = ((period - 1) * loss + down) / period;
+      const rs = gain / (loss || 1e-12);
+      out[i] = 100 - (100 / (1 + rs));
+    }
+  }
+  return out;
+}
+
+function annMacd(close, fast = 12, slow = 26, signal = 9) {
+  const emaFast = annEma(close, fast);
+  const emaSlow = annEma(close, slow);
+  const diff = close.map((_, idx) => (
+    emaFast[idx] != null && emaSlow[idx] != null ? emaFast[idx] - emaSlow[idx] : null
+  ));
+  const signalLine = annEma(diff.map((v) => (Number.isFinite(v) ? v : 0)), signal);
+  const hist = diff.map((value, idx) => (
+    value == null || signalLine[idx] == null ? null : value - signalLine[idx]
+  ));
+  return { diff, signal: signalLine, hist };
+}
+
+function annCci(high, low, close, period = 20) {
+  const typicalPrice = close.map((c, idx) => (high[idx] + low[idx] + c) / 3);
+  const smaTp = annSma(typicalPrice, period);
+  const out = new Array(close.length).fill(null);
+  for (let i = period - 1; i < close.length; i += 1) {
+    let meanDev = 0;
+    for (let k = 0; k < period; k += 1) {
+      meanDev += Math.abs(typicalPrice[i - k] - smaTp[i]);
+    }
+    meanDev /= period;
+    out[i] = (typicalPrice[i] - smaTp[i]) / (0.015 * meanDev || 1e-12);
+  }
+  return out;
+}
+
+function annWilliamsR(high, low, close, period = 14) {
+  const highest = annRollingMax(high, period);
+  const lowest = annRollingMin(low, period);
+  return close.map((c, idx) => {
+    if (idx < period - 1 || highest[idx] == null || lowest[idx] == null) return null;
+    const denom = highest[idx] - lowest[idx] || 1e-12;
+    return ((highest[idx] - c) / denom) * 100;
+  });
+}
+
+function buildAnnFeaturesFromOHLC(rows) {
+  const close = rows.map((row) => Number(row.close));
+  const high = rows.map((row) => (Number.isFinite(row.high) ? Number(row.high) : Number(row.close)));
+  const low = rows.map((row) => (Number.isFinite(row.low) ? Number(row.low) : Number(row.close)));
+
+  const ma = annSma(close, 30);
+  const wma = annWma(close, 15);
+  const ema = annEma(close, 12);
+  const mom = annMomentum(close, 10);
+  const kd = annStochasticKD(high, low, close, 14, 3);
+  const rsi = annRsi(close, 14);
+  const macd = annMacd(close, 12, 26, 9);
+  const cci = annCci(high, low, close, 20);
+  const williams = annWilliamsR(high, low, close, 14);
+
+  const features = [];
+  const labels = [];
+  const indexMap = [];
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const vector = [
+      ma[i],
+      wma[i],
+      ema[i],
+      mom[i],
+      kd.kValues[i],
+      kd.dValues[i],
+      rsi[i],
+      macd.diff[i],
+      cci[i],
+      williams[i],
+    ];
+    if (vector.every((v) => Number.isFinite(v))) {
+      features.push(vector.map((v) => Number(v)));
+      const willRise = rows[i + 1].close > rows[i].close ? 1 : 0;
+      labels.push(willRise);
+      indexMap.push(i);
+    }
+  }
+  return { features, labels, indexMap };
+}
+
+function annStandardize(matrix) {
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    throw new Error('有效樣本不足');
+  }
+  const rowsCount = matrix.length;
+  const featureCount = matrix[0].length;
+  const mean = new Array(featureCount).fill(0);
+  const std = new Array(featureCount).fill(0);
+
+  for (let col = 0; col < featureCount; col += 1) {
+    for (let row = 0; row < rowsCount; row += 1) {
+      mean[col] += matrix[row][col];
+    }
+    mean[col] /= rowsCount;
+    for (let row = 0; row < rowsCount; row += 1) {
+      std[col] += (matrix[row][col] - mean[col]) ** 2;
+    }
+    std[col] = Math.sqrt(std[col] / Math.max(1, rowsCount - 1)) || 1;
+  }
+
+  const standardized = matrix.map((row) =>
+    row.map((value, col) => (value - mean[col]) / std[col]),
+  );
+
+  return { standardized, mean, std };
+}
+
+function annSplitTrainTest(features, labels, indexMap, ratio) {
+  const ratioSafe = Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : ANN_MODEL_CONFIG.defaultTrainRatio;
+  const total = features.length;
+  const trainCount = Math.max(1, Math.floor(total * ratioSafe));
+  const testCount = total - trainCount;
+  if (trainCount === 0 || testCount === 0) {
+    throw new Error('測試集或訓練集樣本不足');
+  }
+  return {
+    trainX: features.slice(0, trainCount),
+    trainY: labels.slice(0, trainCount),
+    testX: features.slice(trainCount),
+    testY: labels.slice(trainCount),
+    testIndex: indexMap.slice(trainCount),
+  };
+}
+
+function buildAnnModel(inputDim) {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.sgd(0.01), loss: 'meanSquaredError', metrics: ['accuracy'] });
+  return model;
+}
+
+async function trainAnnModel(trainX, trainY, testX, testY, epochs, batchSize, onProgress) {
+  if (!Array.isArray(trainX) || trainX.length === 0 || !Array.isArray(testX) || testX.length === 0) {
+    throw new Error('訓練或測試樣本不足');
+  }
+  const inputDim = trainX[0].length;
+  const trainTensorX = tf.tensor2d(trainX);
+  const trainTensorY = tf.tensor2d(trainY, [trainY.length, 1]);
+  const testTensorX = tf.tensor2d(testX);
+  const testTensorY = tf.tensor2d(testY, [testY.length, 1]);
+  const model = buildAnnModel(inputDim);
+
+  try {
+    await model.fit(trainTensorX, trainTensorY, {
+      epochs,
+      batchSize,
+      verbose: 0,
+      callbacks: {
+        onEpochEnd: (epoch) => {
+          if (typeof onProgress === 'function') {
+            onProgress((epoch + 1) / epochs);
+          }
+        },
+      },
+    });
+
+    const predictions = model.predict(testTensorX);
+    const raw = await predictions.data();
+    const predicted = Array.from(raw).map((v) => (v >= 0.5 ? 1 : 0));
+    const accuracy = predicted.filter((v, idx) => v === testY[idx]).length / testY.length;
+    let tp = 0;
+    let tn = 0;
+    let fp = 0;
+    let fn = 0;
+    for (let i = 0; i < predicted.length; i += 1) {
+      if (testY[i] === 1 && predicted[i] === 1) tp += 1;
+      else if (testY[i] === 0 && predicted[i] === 0) tn += 1;
+      else if (testY[i] === 0 && predicted[i] === 1) fp += 1;
+      else if (testY[i] === 1 && predicted[i] === 0) fn += 1;
+    }
+
+    predictions.dispose();
+
+    return {
+      accuracy,
+      confusion: { TP: tp, TN: tn, FP: fp, FN: fn },
+      predicted,
+    };
+  } finally {
+    model.dispose();
+    trainTensorX.dispose();
+    trainTensorY.dispose();
+    testTensorX.dispose();
+    testTensorY.dispose();
+  }
+}
+
+function estimateAnnKelly(rows, testIndex, predicted) {
+  if (!Array.isArray(rows) || !Array.isArray(testIndex) || !Array.isArray(predicted)) {
+    return { probability: 0.5, edge: 1, ratio: 0 };
+  }
+  const ups = [];
+  const downs = [];
+  for (let i = 0; i < testIndex.length; i += 1) {
+    const idx = testIndex[i];
+    if (idx + 1 >= rows.length) continue;
+    const change = (rows[idx + 1].close - rows[idx].close) / rows[idx].close;
+    if (predicted[i] === 1) {
+      if (change > 0) ups.push(change);
+      else downs.push(Math.abs(change));
+    }
+  }
+  const wins = ups.length;
+  const total = ups.length + downs.length;
+  const probability = total > 0 ? wins / total : 0.5;
+  const avgUp = wins > 0 ? ups.reduce((acc, cur) => acc + cur, 0) / wins : 0;
+  const avgDown = downs.length > 0 ? downs.reduce((acc, cur) => acc + cur, 0) / downs.length : 0;
+  const edge = avgDown > 0 ? avgUp / avgDown : 1;
+  const q = 1 - probability;
+  const kelly = edge > 0 ? Math.max(0, (edge * probability - q) / edge) : 0;
+  return { probability, edge, ratio: kelly };
+}
+
 // --- Worker 消息處理 ---
 self.onmessage = async function (e) {
   const {
@@ -9340,6 +9675,84 @@ self.onmessage = async function (e) {
     effectiveStartDate ||
     params?.startDate;
   try {
+    if (type === "ANN_RUN") {
+      try {
+        const rows = Array.isArray(e.data?.payload?.rows)
+          ? e.data.payload.rows
+          : [];
+        const options = (e.data?.payload && e.data.payload.options) || {};
+        if (!Array.isArray(rows) || rows.length < ANN_MODEL_CONFIG.minSamples) {
+          throw new Error(`資料不足（至少 ${ANN_MODEL_CONFIG.minSamples} 根 K 線）`);
+        }
+
+        const { features, labels, indexMap } = buildAnnFeaturesFromOHLC(rows);
+        if (!Array.isArray(features) || features.length < ANN_MODEL_CONFIG.minSamples) {
+          throw new Error('有效樣本不足');
+        }
+
+        const { standardized } = annStandardize(features);
+        const {
+          trainX,
+          trainY,
+          testX,
+          testY,
+          testIndex,
+        } = annSplitTrainTest(
+          standardized,
+          labels,
+          indexMap,
+          options.trainRatio,
+        );
+
+        const epochsRaw = Number.isFinite(options.epochs) && options.epochs > 0
+          ? Math.floor(options.epochs)
+          : ANN_MODEL_CONFIG.defaultEpochs;
+        const batchRaw = Number.isFinite(options.batchSize) && options.batchSize > 0
+          ? Math.floor(options.batchSize)
+          : ANN_MODEL_CONFIG.defaultBatchSize;
+        const epochs = Math.max(1, epochsRaw);
+        const batchSize = Math.max(1, Math.min(batchRaw, trainX.length));
+
+        const onProgress = (progress) => {
+          const safeProgress = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+          self.postMessage({
+            type: 'ANN_PROGRESS',
+            payload: { progress: safeProgress },
+          });
+        };
+
+        const metrics = await trainAnnModel(
+          trainX,
+          trainY,
+          testX,
+          testY,
+          epochs,
+          batchSize,
+          onProgress,
+        );
+
+        const kellyStats = estimateAnnKelly(rows, testIndex, metrics.predicted);
+        self.postMessage({
+          type: 'ANN_DONE',
+          payload: {
+            acc: metrics.accuracy,
+            confusion: metrics.confusion,
+            kelly: Number.isFinite(kellyStats.ratio) ? kellyStats.ratio : 0,
+            details: {
+              probability: kellyStats.probability,
+              edge: kellyStats.edge,
+            },
+          },
+        });
+      } catch (annError) {
+        self.postMessage({
+          type: 'ANN_ERROR',
+          payload: { message: annError?.message || String(annError) },
+        });
+      }
+      return;
+    }
+
     if (type === "runBacktest") {
       let dataToUse = null;
       let fetched = false;

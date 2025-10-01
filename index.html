@@ -2123,6 +2123,27 @@
                                                 </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
+                                            <div class="mt-2 flex flex-wrap items-center gap-2">
+                                                <button id="run-ann" type="button" class="px-3 py-2 rounded-md text-xs font-semibold transition-colors" style="background-color: color-mix(in srgb, var(--primary) 82%, transparent); color: var(--primary-foreground);">
+                                                    ANNS 預測明日漲跌（Worker）
+                                                </button>
+                                                <span id="ann-status" class="text-[11px]" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                            <div id="ann-result" class="mt-3 hidden p-3 border rounded" style="border-color: var(--border); background-color: var(--background);">
+                                                <div class="font-semibold text-sm" style="color: var(--foreground);">ANNS（技術指標）預測結果</div>
+                                                <div class="mt-1 text-xs" id="ann-acc" style="color: var(--muted-foreground);"></div>
+                                                <div class="mt-1 text-xs" id="ann-kelly" style="color: var(--muted-foreground);"></div>
+                                                <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs" style="color: var(--foreground);">
+                                                    <div class="p-2 border rounded" style="border-color: var(--border);">
+                                                        <div class="font-medium mb-1">混淆矩陣</div>
+                                                        <div id="ann-cm" class="space-y-0.5"></div>
+                                                    </div>
+                                                    <div class="p-2 border rounded" style="border-color: var(--border);">
+                                                        <div class="font-medium mb-1">投資建議</div>
+                                                        <div id="ann-adv" class="leading-relaxed"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="card">
