@@ -5,8 +5,39 @@ try {
   if (typeof tf === 'undefined') {
     importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
   }
+  if (typeof tf !== 'undefined') {
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/dist/tf-backend-wasm.min.js');
+  }
 } catch (error) {
   console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
+}
+
+const LB_AI_REPLAY_VERSION = 'LB-AI-REPLAY-20250930A';
+const RANDOM_SEED = 1337;
+let tfBackendReadyPromise = null;
+
+function ensureTFReady() {
+  if (typeof tf === 'undefined') {
+    throw new Error('TensorFlow.js 尚未載入，無法執行 AI 任務。');
+  }
+  if (!tfBackendReadyPromise) {
+    tfBackendReadyPromise = (async () => {
+      try {
+        if (typeof tf.setBackend === 'function') {
+          await tf.setBackend('wasm');
+        }
+      } catch (error) {
+        console.warn('[Worker][AI] 無法切換至 WASM 後端，將使用預設後端：', error);
+      }
+      if (typeof tf.ready === 'function') {
+        await tf.ready();
+      }
+      if (tf?.util?.seedrandom) {
+        tf.util.seedrandom(RANDOM_SEED);
+      }
+    })();
+  }
+  return tfBackendReadyPromise;
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -40,6 +71,25 @@ const MODEL_TYPES = {
 };
 
 const WORKER_DATA_VERSION = "v11.7";
+const ANN_FEATURE_ORDER = [
+  'SMA30',
+  'WMA15',
+  'EMA12',
+  'Momentum10',
+  'StochK14',
+  'StochD3',
+  'RSI14',
+  'MACDdiff',
+  'MACDsignal',
+  'MACDhist',
+  'CCI20',
+  'WilliamsR14',
+];
+
+function createModelStorageKey(prefix) {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `indexeddb://${prefix}_${Date.now()}_${randomSuffix}`;
+}
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
 const workerYearSupersetCache = new Map(); // Map<marketKey, Map<stockKey, Map<year, YearSupersetEntry>>>
@@ -95,14 +145,36 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
+function createSeededInitializers(seedOffset = 0) {
+  const baseSeed = RANDOM_SEED + seedOffset;
+  return {
+    kernel: tf.initializers.glorotUniform({ seed: baseSeed }),
+    recurrent: tf.initializers.orthogonal({ seed: baseSeed + 1 }),
+    bias: tf.initializers.zeros(),
+  };
+}
+
 function aiCreateModel(lookback, learningRate) {
   const model = tf.sequential();
-  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-  model.add(tf.layers.dropout({ rate: 0.2 }));
-  model.add(tf.layers.lstm({ units: 16 }));
-  model.add(tf.layers.dropout({ rate: 0.1 }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  const firstInit = createSeededInitializers(0);
+  model.add(tf.layers.lstm({
+    units: 32,
+    returnSequences: true,
+    inputShape: [lookback, 1],
+    kernelInitializer: firstInit.kernel,
+    recurrentInitializer: firstInit.recurrent,
+    biasInitializer: firstInit.bias,
+  }));
+  const secondInit = createSeededInitializers(10);
+  model.add(tf.layers.lstm({
+    units: 16,
+    kernelInitializer: secondInit.kernel,
+    recurrentInitializer: secondInit.recurrent,
+    biasInitializer: secondInit.bias,
+  }));
+  const denseInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 20 });
+  model.add(tf.layers.dense({ units: 16, activation: 'relu', kernelInitializer: denseInit, biasInitializer: tf.initializers.zeros() }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid', kernelInitializer: tf.initializers.glorotUniform({ seed: RANDOM_SEED + 30 }), biasInitializer: tf.initializers.zeros() }));
   const optimizer = tf.train.adam(learningRate);
   model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
   return model;
@@ -130,8 +202,12 @@ async function handleAITrainLSTMMessage(message) {
   }
   const payload = message?.payload || {};
   try {
+    await ensureTFReady();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (tf?.util?.seedrandom) {
+      tf.util.seedrandom(RANDOM_SEED);
     }
     const dataset = payload.dataset || {};
     if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
@@ -152,7 +228,7 @@ async function handleAITrainLSTMMessage(message) {
     }
     const epochs = Math.max(1, Math.round(Number.isFinite(hyper.epochs) ? hyper.epochs : 80));
     const learningRate = Number.isFinite(hyper.learningRate) ? hyper.learningRate : 0.005;
-    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32), boundedTrainSize));
+    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : boundedTrainSize), boundedTrainSize));
 
     const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
     const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
@@ -186,8 +262,7 @@ async function handleAITrainLSTMMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -280,7 +355,203 @@ async function handleAITrainLSTMMessage(message) {
         },
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const modelStorageKey = createModelStorageKey('lb_ai_lstm');
+      try {
+        await model.save(modelStorageKey);
+      } catch (saveError) {
+        console.warn('[Worker][AI][LSTM] 儲存模型失敗：', saveError);
+      }
+
+      const replayMeta = {
+        version: LB_AI_REPLAY_VERSION,
+        modelType: MODEL_TYPES.LSTM,
+        seed: RANDOM_SEED,
+        backend: tf.getBackend(),
+        tfjsVersion: tf?.version?.tfjs || null,
+        modelStorageKey,
+        normaliser,
+        lookback,
+        epochs,
+        batchSize,
+        learningRate,
+        trainRatio,
+        trainSize: boundedTrainSize,
+        totalSamples,
+        testSize,
+        threshold: 0.5,
+        datasetSummary: {
+          firstDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0 ? dataset.baseRows[0]?.date || null : null,
+          lastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+            ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+            : null,
+          metaDates: Array.isArray(testMeta) ? testMeta.map((entry) => entry?.tradeDate || entry?.sellDate || null) : [],
+        },
+      };
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, replayMeta, mode: 'train' });
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
+    }
+  } catch (error) {
+    aiPostError(id, error);
+  }
+}
+
+async function handleAIReplayLSTMMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  try {
+    await ensureTFReady();
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    const payload = message?.payload || {};
+    const dataset = payload.dataset || {};
+    const meta = payload.meta || {};
+    if (!meta || typeof meta.modelStorageKey !== 'string') {
+      throw new Error('找不到 LSTM 模型儲存資訊，請重新訓練後再重播。');
+    }
+    if (!meta.normaliser || !Number.isFinite(meta.normaliser.mean) || !Number.isFinite(meta.normaliser.std)) {
+      throw new Error('缺少 LSTM 標準化參數，請重新訓練模型。');
+    }
+    if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
+      throw new Error('目前資料不足以重播 LSTM 模型，請確認資料期間。');
+    }
+
+    const totalSamplesTarget = Number.isFinite(meta.totalSamples) ? meta.totalSamples : dataset.sequences.length;
+    const totalSamples = Math.min(dataset.sequences.length, Math.max(totalSamplesTarget, 2));
+    const lookback = Number.isFinite(meta.lookback) ? meta.lookback : (Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20);
+    const trainSizeRaw = Number.isFinite(meta.trainSize) ? meta.trainSize : Math.floor(totalSamples * (Number.isFinite(meta.trainRatio) ? meta.trainRatio : ANN_TRAIN_RATIO_DEFAULT));
+    const trainSize = Math.min(Math.max(trainSizeRaw, Math.max(1, lookback)), totalSamples - 1);
+    const testSize = totalSamples - trainSize;
+    if (testSize <= 0) {
+      throw new Error('測試集樣本不足，無法重播 LSTM 模型。');
+    }
+
+    const normaliser = meta.normaliser;
+    const normalizedSequences = dataset.sequences
+      .slice(0, totalSamples)
+      .map((sequence) => sequence.map((value) => (value - normaliser.mean) / (normaliser.std || 1)));
+    const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
+    const labels = Array.isArray(dataset.labels) ? dataset.labels.slice(0, totalSamples) : new Array(totalSamples).fill(0);
+
+    const xAll = tf.tensor(tensorInput);
+    const yAll = tf.tensor(labels.map((label) => [label]));
+    const tensorsToDispose = [xAll, yAll];
+    let model = null;
+    try {
+      const xTrain = xAll.slice([0, 0, 0], [trainSize, lookback, 1]);
+      const yTrain = yAll.slice([0, 0], [trainSize, 1]);
+      const xTest = xAll.slice([trainSize, 0, 0], [testSize, lookback, 1]);
+      const yTest = yAll.slice([trainSize, 0], [testSize, 1]);
+      tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
+
+      model = await tf.loadLayersModel(meta.modelStorageKey);
+      if (!model) {
+        throw new Error('載入 LSTM 模型失敗，請重新訓練。');
+      }
+
+      const trainEval = model.evaluate(xTrain, yTrain);
+      const trainEvalArray = Array.isArray(trainEval) ? trainEval : [trainEval];
+      const trainValues = [];
+      for (let i = 0; i < trainEvalArray.length; i += 1) {
+        const tensor = trainEvalArray[i];
+        const data = await tensor.data();
+        trainValues.push(data[0]);
+        tensor.dispose();
+      }
+
+      const testEval = model.evaluate(xTest, yTest);
+      const testEvalArray = Array.isArray(testEval) ? testEval : [testEval];
+      const testValues = [];
+      for (let i = 0; i < testEvalArray.length; i += 1) {
+        const tensor = testEvalArray[i];
+        const data = await tensor.data();
+        testValues.push(data[0]);
+        tensor.dispose();
+      }
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(trainSize, trainSize + testSize) : [];
+      const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(trainSize, trainSize + testSize) : [];
+      const trainingOdds = aiComputeTrainingOdds(dataset.returns, trainSize);
+
+      let nextDayForecast = null;
+      if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
+        const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
+        if (tailWindow.length === lookback) {
+          const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+          const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
+          const forecastTensor = model.predict(forecastInput);
+          const forecastArray = Array.from(await forecastTensor.data());
+          nextDayForecast = {
+            probability: forecastArray[0],
+            referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+              ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+              : null,
+          };
+          forecastTensor.dispose();
+          forecastInput.dispose();
+        }
+      }
+
+      const trainingMetrics = {
+        trainAccuracy: trainValues[1] ?? NaN,
+        trainLoss: trainValues[0] ?? NaN,
+        testAccuracy: testValues[1] ?? NaN,
+        testLoss: testValues[0] ?? NaN,
+        totalPredictions: predictionValues.length,
+      };
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: testMeta,
+        returns: testReturns,
+        trainingOdds,
+        forecast: nextDayForecast,
+        datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+          ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+          : null,
+        hyperparameters: {
+          lookback,
+          epochs: Number.isFinite(meta.epochs) ? meta.epochs : null,
+          batchSize: Number.isFinite(meta.batchSize) ? meta.batchSize : trainSize,
+          learningRate: Number.isFinite(meta.learningRate) ? meta.learningRate : null,
+          trainRatio: Number.isFinite(meta.trainRatio) ? meta.trainRatio : trainSize / totalSamples,
+        },
+      };
+
+      const replayMeta = {
+        ...meta,
+        lookback,
+        trainSize,
+        totalSamples,
+        testSize,
+        datasetSummary: {
+          ...(meta.datasetSummary || {}),
+          firstDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0 ? dataset.baseRows[0]?.date || null : meta?.datasetSummary?.firstDate || null,
+          lastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+            ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+            : meta?.datasetSummary?.lastDate || null,
+          metaDates: testMeta.map((entry) => entry?.tradeDate || entry?.sellDate || null),
+        },
+      };
+
+      const finalMessage = `已重播 LSTM 模型：測試正確率 ${(Number.isFinite(trainingMetrics.testAccuracy) ? (trainingMetrics.testAccuracy * 100).toFixed(2) : '—')}%。`;
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, replayMeta, mode: 'replay' });
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {
@@ -688,9 +959,29 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
 // Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
 function annBuildModel(inputDim, learningRate = 0.01) {
   const model = tf.sequential();
-  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  const firstInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 100 });
+  const secondInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 110 });
+  const outputInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 120 });
+  const zeroInit = tf.initializers.zeros();
+  model.add(tf.layers.dense({
+    units: 32,
+    activation: 'relu',
+    inputShape: [inputDim],
+    kernelInitializer: firstInit,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 16,
+    activation: 'relu',
+    kernelInitializer: secondInit,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 1,
+    activation: 'sigmoid',
+    kernelInitializer: outputInit,
+    biasInitializer: zeroInit,
+  }));
   const optimizer = tf.train.sgd(learningRate);
   model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
@@ -706,8 +997,12 @@ async function handleAITrainANNMessage(message) {
   const options = payload.options || {};
 
   try {
+    await ensureTFReady();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (tf?.util?.seedrandom) {
+      tf.util.seedrandom(RANDOM_SEED);
     }
     if (!Array.isArray(rows) || rows.length < 60) {
       throw new Error('資料不足（至少 60 根 K 線）');
@@ -726,7 +1021,7 @@ async function handleAITrainANNMessage(message) {
     }
 
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
-    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
+    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : split.Xtr.length));
     const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
 
@@ -742,7 +1037,7 @@ async function handleAITrainANNMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -818,9 +1113,42 @@ async function handleAITrainANNMessage(message) {
         },
       };
 
+      const modelStorageKey = createModelStorageKey('lb_ai_anns');
+      try {
+        await model.save(modelStorageKey);
+      } catch (saveError) {
+        console.warn('[Worker][AI][ANN] 儲存模型失敗：', saveError);
+      }
+
+      const replayMeta = {
+        version: LB_AI_REPLAY_VERSION,
+        modelType: MODEL_TYPES.ANNS,
+        seed: RANDOM_SEED,
+        backend: tf.getBackend(),
+        tfjsVersion: tf?.version?.tfjs || null,
+        modelStorageKey,
+        mean,
+        std,
+        featureOrder: ANN_FEATURE_ORDER,
+        epochs,
+        batchSize,
+        learningRate,
+        trainRatio,
+        splitIndex: split.trainCount,
+        totalSamples: prepared.X.length,
+        testSize: split.Xte.length,
+        threshold: 0.5,
+        datasetSummary: {
+          firstDate: Array.isArray(rows) && rows.length > 0 ? rows[0]?.date || null : null,
+          lastDate: prepared.datasetLastDate || null,
+          metaDates: Array.isArray(split.metaTe) ? split.metaTe.map((entry) => entry?.tradeDate || entry?.sellDate || null) : [],
+        },
+        forecastDate: prepared.forecastDate || null,
+      };
+
       const finalMessage = `完成：測試正確率 ${(Number.isFinite(testAccuracy) ? (testAccuracy * 100).toFixed(2) : '—')}%。`;
 
-      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage, replayMeta, mode: 'train' });
       model.dispose();
     } finally {
       tensorsToDispose.forEach((tensor) => {
@@ -828,6 +1156,156 @@ async function handleAITrainANNMessage(message) {
           tensor.dispose();
         }
       });
+    }
+  } catch (error) {
+    annPostError(id, error);
+  }
+}
+
+async function handleAIReplayANNMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  try {
+    await ensureTFReady();
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    const payload = message?.payload || {};
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const meta = payload.meta || {};
+    if (!meta || typeof meta.modelStorageKey !== 'string') {
+      throw new Error('找不到 ANN 模型儲存資訊，請重新訓練後再重播。');
+    }
+    if (!Array.isArray(meta.mean) || !Array.isArray(meta.std)) {
+      throw new Error('缺少 ANN 標準化參數，請重新訓練模型。');
+    }
+
+    const prepared = annPrepareDataset(rows);
+    if (!Array.isArray(prepared.X) || prepared.X.length === 0) {
+      throw new Error('目前資料不足以重播 ANN 模型，請確認資料期間。');
+    }
+
+    const totalSamplesTarget = Number.isFinite(meta.totalSamples) ? meta.totalSamples : prepared.X.length;
+    const totalSamples = Math.min(prepared.X.length, Math.max(totalSamplesTarget, 2));
+    const splitIndexRaw = Number.isFinite(meta.splitIndex) ? meta.splitIndex : Math.floor(totalSamples * (Number.isFinite(meta.trainRatio) ? meta.trainRatio : ANN_TRAIN_RATIO_DEFAULT));
+    const splitIndex = Math.min(Math.max(splitIndexRaw, 1), totalSamples - 1);
+    const featureCount = prepared.X[0]?.length || 0;
+    if (meta.mean.length !== featureCount || meta.std.length !== featureCount) {
+      throw new Error('ANN 特徵數量與保存的標準化參數不符，請重新訓練。');
+    }
+
+    const standardized = prepared.X
+      .slice(0, totalSamples)
+      .map((row) => row.map((value, index) => (value - meta.mean[index]) / (meta.std[index] || 1)));
+    const labels = prepared.y.slice(0, totalSamples);
+    const metaSlice = prepared.meta.slice(0, totalSamples);
+    const returnsSlice = prepared.returns.slice(0, totalSamples);
+
+    const xTrain = tf.tensor2d(standardized.slice(0, splitIndex));
+    const yTrain = tf.tensor2d(labels.slice(0, splitIndex), [splitIndex, 1]);
+    const xTest = tf.tensor2d(standardized.slice(splitIndex));
+    const yTest = tf.tensor2d(labels.slice(splitIndex), [totalSamples - splitIndex, 1]);
+
+    const tensorsToDispose = [xTrain, yTrain, xTest, yTest];
+    let model = null;
+    try {
+      model = await tf.loadLayersModel(meta.modelStorageKey);
+      if (!model) {
+        throw new Error('載入 ANN 模型失敗，請重新訓練。');
+      }
+
+      const trainEval = model.evaluate(xTrain, yTrain);
+      const trainEvalArray = Array.isArray(trainEval) ? trainEval : [trainEval];
+      const trainValues = [];
+      for (let i = 0; i < trainEvalArray.length; i += 1) {
+        const tensor = trainEvalArray[i];
+        const data = await tensor.data();
+        trainValues.push(data[0]);
+        tensor.dispose();
+      }
+
+      const testEval = model.evaluate(xTest, yTest);
+      const testEvalArray = Array.isArray(testEval) ? testEval : [testEval];
+      const testValues = [];
+      for (let i = 0; i < testEvalArray.length; i += 1) {
+        const tensor = testEvalArray[i];
+        const data = await tensor.data();
+        testValues.push(data[0]);
+        tensor.dispose();
+      }
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      const trainingOdds = aiComputeTrainingOdds(returnsSlice, splitIndex);
+
+      let forecast = null;
+      if (Array.isArray(prepared.forecastFeature) && prepared.forecastFeature.length === featureCount) {
+        const standardisedForecast = prepared.forecastFeature.map((value, index) => (value - meta.mean[index]) / (meta.std[index] || 1));
+        const forecastTensor = tf.tensor2d([standardisedForecast]);
+        const forecastOutput = model.predict(forecastTensor);
+        const forecastArray = Array.from(await forecastOutput.data());
+        forecast = {
+          probability: forecastArray[0],
+          referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
+        };
+        forecastOutput.dispose();
+        forecastTensor.dispose();
+      }
+
+      const trainingMetrics = {
+        trainAccuracy: trainValues[1] ?? NaN,
+        trainLoss: trainValues[0] ?? NaN,
+        testAccuracy: testValues[1] ?? NaN,
+        testLoss: testValues[0] ?? NaN,
+        totalPredictions: predictionValues.length,
+      };
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: metaSlice.slice(splitIndex),
+        returns: returnsSlice.slice(splitIndex),
+        trainingOdds,
+        forecast,
+        datasetLastDate: prepared.datasetLastDate,
+        hyperparameters: {
+          lookback: Number.isFinite(meta.lookback) ? meta.lookback : null,
+          epochs: Number.isFinite(meta.epochs) ? meta.epochs : null,
+          batchSize: Number.isFinite(meta.batchSize) ? meta.batchSize : splitIndex,
+          learningRate: Number.isFinite(meta.learningRate) ? meta.learningRate : null,
+          trainRatio: Number.isFinite(meta.trainRatio) ? meta.trainRatio : splitIndex / totalSamples,
+          modelType: MODEL_TYPES.ANNS,
+        },
+      };
+
+      const replayMeta = {
+        ...meta,
+        totalSamples,
+        splitIndex,
+        datasetSummary: {
+          ...(meta.datasetSummary || {}),
+          firstDate: Array.isArray(rows) && rows.length > 0 ? rows[0]?.date || null : meta?.datasetSummary?.firstDate || null,
+          lastDate: prepared.datasetLastDate || meta?.datasetSummary?.lastDate || null,
+          metaDates: metaSlice.slice(splitIndex).map((entry) => entry?.tradeDate || entry?.sellDate || null),
+        },
+        forecastDate: prepared.forecastDate || meta.forecastDate || null,
+      };
+
+      const finalMessage = `已重播 ANN 模型：測試正確率 ${(Number.isFinite(trainingMetrics.testAccuracy) ? (trainingMetrics.testAccuracy * 100).toFixed(2) : '—')}%。`;
+
+      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage, replayMeta, mode: 'replay' });
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
     }
   } catch (error) {
     annPostError(id, error);
@@ -10063,6 +10541,14 @@ self.onmessage = async function (e) {
   }
   if (type === 'ai-train-lstm') {
     await handleAITrainLSTMMessage(e.data);
+    return;
+  }
+  if (type === 'ai-replay-ann') {
+    await handleAIReplayANNMessage(e.data);
+    return;
+  }
+  if (type === 'ai-replay-lstm') {
+    await handleAIReplayLSTMMessage(e.data);
     return;
   }
   const {

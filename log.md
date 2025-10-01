@@ -1,3 +1,11 @@
+## 2025-09-30 — Patch LB-AI-REPLAY-20250930A
+- **Scope**: AI 預測種子重播與模型重現強化。
+- **Features**:
+  - Web Worker 導入固定隨機種子與 WASM 後端，LSTM/ANN 全面關閉隨機打亂並以固定初始化訓練；每次訓練後保存模型至 IndexedDB，回傳標準化參數、切分資訊與版本代碼。
+  - AI Prediction 分頁接收 Worker 回傳的 `replayMeta`，儲存種子時一併保存；載入種子會自動觸發重播流程，由 Worker 讀回模型套用原門檻與標準化參數，確保舊區間預測機率不受新資料影響。
+  - 重新整理後若存在模型快取，可直接利用種子重播；UI 會以重播結果更新交易摘要、預測表與預設種子名稱，並在資料不足時給予提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
