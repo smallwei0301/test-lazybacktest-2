@@ -12,6 +12,14 @@
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
+    const MODEL_META_STORAGE_KEYS = {
+        [MODEL_TYPES.LSTM]: 'LB_AI_LSTM_META_V1',
+        [MODEL_TYPES.ANNS]: 'LB_AI_ANN_META_V1',
+    };
+    const modelMetadata = {
+        [MODEL_TYPES.LSTM]: null,
+        [MODEL_TYPES.ANNS]: null,
+    };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const createModelState = () => ({
         lastSummary: null,
@@ -23,6 +31,7 @@
         winThreshold: 0.5,
         kellyEnabled: false,
         fixedFraction: 0.2,
+        lastMeta: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -46,6 +55,43 @@
         return globalState.models[model];
     };
     const getActiveModelState = () => getModelState(globalState.activeModel);
+
+    const persistModelMeta = (modelType, meta) => {
+        if (!meta || !MODEL_META_STORAGE_KEYS[modelType]) return;
+        modelMetadata[modelType] = meta;
+        const state = getModelState(modelType);
+        if (state) {
+            state.lastMeta = meta;
+        }
+        if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+                window.localStorage.setItem(MODEL_META_STORAGE_KEYS[modelType], JSON.stringify(meta));
+            } catch (error) {
+                console.warn('[AI Prediction] 儲存模型重現參數失敗：', error);
+            }
+        }
+    };
+
+    const loadStoredModelMeta = () => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        Object.entries(MODEL_META_STORAGE_KEYS).forEach(([modelType, storageKey]) => {
+            try {
+                const raw = window.localStorage.getItem(storageKey);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object') return;
+                modelMetadata[modelType] = parsed;
+                const state = getModelState(modelType);
+                if (state) {
+                    state.lastMeta = parsed;
+                }
+            } catch (error) {
+                console.warn('[AI Prediction] 載入模型重現參數失敗：', error);
+            }
+        });
+    };
+
+    loadStoredModelMeta();
 
     let aiWorker = null;
     let aiWorkerSequence = 0;
@@ -280,7 +326,14 @@
 
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
-        const { type, id, data, error, message } = event.data;
+        const { type, id, data, error, message, payload } = event.data;
+        if (type === 'ai-train-ann-meta' || type === 'ai-train-lstm-meta') {
+            const modelType = type === 'ai-train-ann-meta' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM;
+            if (payload && typeof payload === 'object') {
+                persistModelMeta(modelType, payload);
+            }
+            return;
+        }
         const isProgress = type === 'ai-train-lstm-progress' || type === 'ai-train-ann-progress';
         if (isProgress) {
             const pending = id ? aiWorkerRequests.get(id) : null;
@@ -840,6 +893,9 @@
         }, { modelType });
 
         const resultModelType = workerResult.modelType || modelType;
+        if (workerResult?.meta && typeof workerResult.meta === 'object') {
+            persistModelMeta(resultModelType, workerResult.meta);
+        }
         const trainingMetrics = workerResult?.trainingMetrics || {
             trainAccuracy: NaN,
             trainLoss: NaN,
@@ -868,6 +924,9 @@
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
         };
+        if (workerResult?.meta && typeof workerResult.meta === 'object') {
+            modelState.lastMeta = workerResult.meta;
+        }
 
         applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
 
@@ -897,6 +956,9 @@
             },
         }, { modelType });
 
+        if (workerResult?.meta && typeof workerResult.meta === 'object') {
+            persistModelMeta(modelType, workerResult.meta);
+        }
         const trainingMetrics = workerResult?.trainingMetrics || {
             trainAccuracy: NaN,
             trainLoss: NaN,
@@ -925,6 +987,9 @@
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
         };
+        if (workerResult?.meta && typeof workerResult.meta === 'object') {
+            modelState.lastMeta = workerResult.meta;
+        }
 
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
 

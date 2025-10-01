@@ -1,3 +1,11 @@
+## 2025-09-30 — Patch LB-AI-REPRO-20250930A
+- **Scope**: AI 模型重現性治理（ANN 與 LSTM）
+- **Highlights**:
+  - Worker 強制使用 tfjs@4.20.0 + WASM 後端、種子 1337，並為 LSTM/ANN 層初始化加上 deterministic seed，移除 shuffle 與隨機 dropout。
+  - ANN 標準化改為僅使用訓練集統計量，輸出混淆矩陣、閾值與完整 run metadata，並同步儲存 IndexedDB 模型。
+  - LSTM 訓練流程加入固定閾值與混淆矩陣，回傳/儲存 metadata；前端 `ai-prediction` 將 meta 寫入 localStorage 供後續重播。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
