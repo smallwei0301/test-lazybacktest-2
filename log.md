@@ -781,6 +781,12 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-10 — Patch LB-AI-LSTM-20250929B
+- **Issue recap**: LSTM 模型仍在主執行緒訓練，啟動 AI 預測時頁面易凍結且進度無法掌握，亦缺乏背景錯誤通知機制。
+- **Fix**: 建立 `LB-AI-LSTM-20250929B` 管線，改以 `worker.js` 執行 TensorFlow.js 訓練並透過訊息回傳進度、結果與錯誤，前端僅負責資料切片與結果渲染。
+- **Diagnostics**: 確認 Web Worker 能接收資料集、回傳訓練指標與隔日預測，UI 端在勝率門檻、凱利開關與種子載入時可即時重算交易統計。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-09 — Patch LB-AI-LSTM-20250924A
 - **Issue recap**: AI 隔日預測在啟用凱利公式時未提供建議投入比例，且交易報酬統計未過濾缺少交易日的筆數，造成評估依據不完整。
 - **Fix**: 於凱利模式下依預測勝率計算隔日投入比例並同步顯示於預測區與表格，同時僅保留具備有效交易日的交易紀錄再計算中位數、平均與標準差。

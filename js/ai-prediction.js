@@ -1,8 +1,8 @@
-/* global tf, document, window */
+/* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-LSTM-20250924A
+// Patch Tag: LB-AI-LSTM-20250929B
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-LSTM-20250924A';
+    const VERSION_TAG = 'LB-AI-LSTM-20250929B';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const state = {
         running: false,
@@ -13,6 +13,10 @@
         currentTrades: [],
         lastSeedDefault: '',
     };
+
+    let aiWorker = null;
+    let aiWorkerSequence = 0;
+    const aiWorkerRequests = new Map();
 
     const elements = {
         datasetSummary: null,
@@ -170,6 +174,111 @@
         elements.status.style.color = colorMap[type] || colorMap.info;
     };
 
+    const resolveAIWorkerUrl = () => {
+        if (typeof workerUrl === 'string' && workerUrl) {
+            return workerUrl;
+        }
+        return 'js/worker.js';
+    };
+
+    const resetAIWorker = () => {
+        if (aiWorker) {
+            try {
+                aiWorker.terminate();
+            } catch (error) {
+                console.warn('[AI Prediction] 終止 AI Worker 失敗：', error);
+            }
+        }
+        aiWorker = null;
+    };
+
+    const failPendingWorkerRequests = (error) => {
+        const reason = error instanceof Error ? error : new Error(String(error || 'AI Worker 發生未知錯誤'));
+        aiWorkerRequests.forEach(({ reject }) => {
+            try {
+                reject(reason);
+            } catch (rejectError) {
+                console.warn('[AI Prediction] 回傳 Worker 失敗原因時發生錯誤：', rejectError);
+            }
+        });
+        aiWorkerRequests.clear();
+    };
+
+    const handleAIWorkerMessage = (event) => {
+        if (!event || !event.data) return;
+        const { type, id, data, error, message } = event.data;
+        if (type === 'ai-train-lstm-progress') {
+            if (typeof message === 'string' && message) {
+                showStatus(message, 'info');
+            }
+            return;
+        }
+        if (!id || !aiWorkerRequests.has(id)) {
+            return;
+        }
+        const pending = aiWorkerRequests.get(id);
+        if (type === 'ai-train-lstm-result') {
+            aiWorkerRequests.delete(id);
+            pending.resolve(data || {});
+        } else if (type === 'ai-train-lstm-error') {
+            aiWorkerRequests.delete(id);
+            const reason = error && typeof error.message === 'string'
+                ? new Error(error.message)
+                : new Error('AI 背景訓練失敗');
+            pending.reject(reason);
+        } else {
+            aiWorkerRequests.delete(id);
+            pending.reject(new Error('AI Worker 回傳未知訊息。'));
+        }
+    };
+
+    const handleAIWorkerFailure = (event) => {
+        const reason = event instanceof Error
+            ? event
+            : new Error(event?.message || 'AI Worker 發生未預期錯誤');
+        console.error('[AI Prediction] 背景訓練錯誤：', reason);
+        failPendingWorkerRequests(reason);
+        resetAIWorker();
+    };
+
+    const ensureAIWorker = () => {
+        if (aiWorker) {
+            return aiWorker;
+        }
+        if (typeof Worker === 'undefined') {
+            throw new Error('瀏覽器不支援 Web Worker，無法於背景執行 AI 訓練。');
+        }
+        const url = resolveAIWorkerUrl();
+        try {
+            aiWorker = new Worker(url);
+            aiWorker.onmessage = handleAIWorkerMessage;
+            aiWorker.onerror = handleAIWorkerFailure;
+            aiWorker.onmessageerror = handleAIWorkerFailure;
+        } catch (error) {
+            aiWorker = null;
+            throw new Error(`AI 背景執行緒初始化失敗：${error.message}`);
+        }
+        return aiWorker;
+    };
+
+    const sendAIWorkerTrainingTask = (payload) => {
+        const workerInstance = ensureAIWorker();
+        const requestId = `ai-train-${Date.now()}-${aiWorkerSequence += 1}`;
+        return new Promise((resolve, reject) => {
+            aiWorkerRequests.set(requestId, { resolve, reject });
+            try {
+                workerInstance.postMessage({
+                    type: 'ai-train-lstm',
+                    id: requestId,
+                    payload,
+                });
+            } catch (error) {
+                aiWorkerRequests.delete(requestId);
+                reject(new Error(`無法送出 AI 訓練請求：${error.message}`));
+            }
+        });
+    };
+
     const toggleRunning = (flag) => {
         state.running = Boolean(flag);
         if (!elements.runButton) return;
@@ -274,60 +383,11 @@
         };
     };
 
-    const computeNormalisation = (sequences, trainSize) => {
-        if (!Array.isArray(sequences) || sequences.length === 0 || trainSize <= 0) {
-            return { mean: 0, std: 1 };
-        }
-        const trainSlice = sequences.slice(0, trainSize);
-        const values = trainSlice.flat();
-        if (values.length === 0) {
-            return { mean: 0, std: 1 };
-        }
-        const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-        const variance = values.reduce((acc, value) => acc + ((value - mean) ** 2), 0) / values.length;
-        const std = Math.sqrt(variance) || 1;
-        return { mean, std };
-    };
-
-    const normaliseSequences = (sequences, normaliser) => {
-        const { mean, std } = normaliser;
-        if (!Array.isArray(sequences) || sequences.length === 0) return [];
-        return sequences.map((seq) => seq.map((value) => (value - mean) / (std || 1)));
-    };
-
-    const createModel = (lookback, learningRate) => {
-        const model = tf.sequential();
-        model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-        model.add(tf.layers.dropout({ rate: 0.2 }));
-        model.add(tf.layers.lstm({ units: 16 }));
-        model.add(tf.layers.dropout({ rate: 0.1 }));
-        model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-        model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
-        const optimizer = tf.train.adam(learningRate);
-        model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
-        return model;
-    };
-
     const computeKellyFraction = (probability, odds) => {
         const sanitizedProb = Math.min(Math.max(probability, 0.001), 0.999);
         const b = Math.max(odds, 1e-6);
         const fraction = sanitizedProb - ((1 - sanitizedProb) / b);
         return Math.max(0, Math.min(fraction, 1));
-    };
-
-    const computeTrainingOdds = (returns, trainSize) => {
-        if (!Array.isArray(returns) || returns.length === 0 || trainSize <= 0) {
-            return 1;
-        }
-        const trainReturns = returns.slice(0, trainSize);
-        const wins = trainReturns.filter((value) => value > 0);
-        const losses = trainReturns.filter((value) => value < 0).map((value) => Math.abs(value));
-        const avgWin = wins.length > 0 ? wins.reduce((sum, value) => sum + value, 0) / wins.length : 0;
-        const avgLoss = losses.length > 0 ? losses.reduce((sum, value) => sum + value, 0) / losses.length : 0;
-        if (!Number.isFinite(avgWin) || avgWin <= 0 || !Number.isFinite(avgLoss) || avgLoss <= 0) {
-            return 1;
-        }
-        return Math.max(avgWin / avgLoss, 0.25);
     };
 
     const updateDatasetSummary = (rows) => {
@@ -734,10 +794,6 @@
 
     const runPrediction = async () => {
         if (state.running) return;
-        if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
-            showStatus('未載入 TensorFlow.js，請確認網路連線。', 'error');
-            return;
-        }
         toggleRunning(true);
 
         try {
@@ -751,14 +807,12 @@
             const rows = getVisibleData();
             if (!Array.isArray(rows) || rows.length === 0) {
                 showStatus('尚未取得回測資料，請先在主頁面執行回測。', 'warning');
-                toggleRunning(false);
                 return;
             }
 
             const dataset = buildDataset(rows, lookback);
             if (dataset.sequences.length < 45) {
                 showStatus(`資料樣本不足（需至少 ${Math.max(45, lookback * 3)} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
-                toggleRunning(false);
                 return;
             }
 
@@ -768,134 +822,55 @@
             const testSize = totalSamples - boundedTrainSize;
             if (boundedTrainSize <= 0 || testSize <= 0) {
                 showStatus('無法按照 2:1 分割訓練與測試集，請延長資料範圍。', 'warning');
-                toggleRunning(false);
                 return;
             }
 
-            const normaliser = computeNormalisation(dataset.sequences, boundedTrainSize);
-            const normalizedSequences = normaliseSequences(dataset.sequences, normaliser);
-            const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
-            const xAll = tf.tensor(tensorInput);
-            const yAll = tf.tensor(dataset.labels.map((label) => [label]));
-
-            const xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
-            const yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
-            const xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
-            const yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
-
+            const effectiveBatchSize = Math.min(batchSize, boundedTrainSize);
             if (batchSize > boundedTrainSize) {
-                showStatus(`批次大小 ${batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${boundedTrainSize}。`, 'warning');
+                showStatus(`批次大小 ${batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
             }
 
-            const model = createModel(lookback, learningRate);
             showStatus(`訓練中（共 ${epochs} 輪）...`, 'info');
-
-            const history = await model.fit(xTrain, yTrain, {
-                epochs,
-                batchSize: Math.min(batchSize, boundedTrainSize),
-                validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-                shuffle: true,
-                callbacks: {
-                    onEpochEnd: (epoch, logs) => {
-                        const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
-                        const accValue = logs.acc ?? logs.accuracy;
-                        const accText = Number.isFinite(accValue) ? formatPercent(accValue, 2) : '—';
-                        showStatus(`訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accText}`, 'info');
-                    },
-                },
-            });
-
-            const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
-            const finalTrainAccuracy = accuracyKey ? history.history[accuracyKey][history.history[accuracyKey].length - 1] : NaN;
-            const finalTrainLoss = history.history.loss?.[history.history.loss.length - 1] ?? NaN;
-
-            const evalOutput = model.evaluate(xTest, yTest);
-            const evalArray = Array.isArray(evalOutput) ? evalOutput : [evalOutput];
-            const evalValues = await Promise.all(
-                evalArray.map(async (tensor) => {
-                    const data = await tensor.data();
-                    tensor.dispose();
-                    return data[0];
-                })
-            );
-            const testLoss = evalValues[0] ?? NaN;
-            const testAccuracy = evalValues[1] ?? NaN;
-
-            const predictionsTensor = model.predict(xTest);
-            const predictionValues = Array.from(await predictionsTensor.data());
-            predictionsTensor.dispose();
-
-            const labels = dataset.labels.slice(boundedTrainSize);
-            let correctPredictions = 0;
-            predictionValues.forEach((value, index) => {
-                const predictedLabel = value >= 0.5 ? 1 : 0;
-                if (predictedLabel === labels[index]) {
-                    correctPredictions += 1;
-                }
-            });
-            const manualAccuracy = correctPredictions / predictionValues.length;
-
-            const trainingOdds = computeTrainingOdds(dataset.returns, boundedTrainSize);
-            state.odds = trainingOdds;
-            const testMeta = dataset.meta.slice(boundedTrainSize);
-            const testReturns = dataset.returns.slice(boundedTrainSize);
-
-            let nextDayForecast = null;
-            if (dataset.returns.length >= lookback) {
-                const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
-                if (tailWindow.length === lookback) {
-                    const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
-                    const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
-                    const forecastTensor = model.predict(forecastInput);
-                    const forecastArray = Array.from(await forecastTensor.data());
-                    nextDayForecast = {
-                        probability: forecastArray[0],
-                        referenceDate: dataset.baseRows?.[dataset.baseRows.length - 1]?.date || null,
-                    };
-                    forecastInput.dispose();
-                    forecastTensor.dispose();
-                }
-            }
-
-            const totalPredictions = predictionValues.length;
-            const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
-            const trainingMetrics = {
-                trainAccuracy: finalTrainAccuracy,
-                trainLoss: finalTrainLoss,
-                testAccuracy: resolvedTestAccuracy,
-                testLoss,
-                totalPredictions,
-            };
-
-            state.trainingMetrics = trainingMetrics;
-            state.predictionsPayload = {
-                predictions: predictionValues,
-                meta: testMeta,
-                returns: testReturns,
-                trainingOdds,
-                forecast: nextDayForecast,
-                datasetLastDate: dataset.baseRows?.[dataset.baseRows.length - 1]?.date || null,
+            const workerResult = await sendAIWorkerTrainingTask({
+                dataset,
                 hyperparameters: {
                     lookback,
                     epochs,
-                    batchSize: Math.min(batchSize, boundedTrainSize),
+                    batchSize: effectiveBatchSize,
                     learningRate,
+                    totalSamples,
+                    trainSize: boundedTrainSize,
                 },
-            };
+            });
 
+            const trainingMetrics = workerResult?.trainingMetrics || {
+                trainAccuracy: NaN,
+                trainLoss: NaN,
+                testAccuracy: NaN,
+                testLoss: NaN,
+                totalPredictions: 0,
+            };
+            const predictionsPayload = workerResult?.predictionsPayload || null;
+            if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
+                throw new Error('AI Worker 未回傳有效的預測結果。');
+            }
+
+            state.predictionsPayload = predictionsPayload;
+            state.odds = Number.isFinite(predictionsPayload.trainingOdds)
+                ? predictionsPayload.trainingOdds
+                : state.odds;
             const threshold = parseWinThreshold();
-            const fixedFractionValue = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
-            applyTradeEvaluation(state.predictionsPayload, trainingMetrics, {
+            const fixedFractionValue = sanitizeFraction(fixedFraction);
+            applyTradeEvaluation(predictionsPayload, trainingMetrics, {
                 threshold,
                 useKelly,
                 fixedFraction: fixedFractionValue,
             });
 
-            const testAccuracyText = formatPercent(resolvedTestAccuracy, 2);
-            showStatus(`完成：訓練勝率 ${formatPercent(finalTrainAccuracy, 2)}，測試正確率 ${testAccuracyText}。`, 'success');
-
-            tf.dispose([xAll, yAll, xTrain, yTrain, xTest, yTest]);
-            model.dispose();
+            const finalMessage = typeof workerResult?.finalMessage === 'string'
+                ? workerResult.finalMessage
+                : `完成：訓練勝率 ${formatPercent(trainingMetrics.trainAccuracy, 2)}，測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}。`;
+            showStatus(finalMessage, 'success');
         } catch (error) {
             console.error('[AI Prediction] 執行失敗:', error);
             showStatus(`AI 預測執行失敗：${error.message}`, 'error');
