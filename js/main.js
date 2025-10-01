@@ -778,6 +778,7 @@ function getCurrentMarketFromUI() {
 function getMarketLabel(market) {
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
+    if (market === 'INDEX') return '指數 (INDEX)';
     return '上市 (TWSE)';
 }
 

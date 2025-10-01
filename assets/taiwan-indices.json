@@ -1,0 +1,20 @@
+[
+  {
+    "symbol": "TAIEX",
+    "name": "臺灣加權股價指數",
+    "aliases": ["TAIEX", "台灣加權指數", "加權指數", "台股加權指數"],
+    "market": "INDEX",
+    "provider": "TWSE",
+    "source": "TWSE",
+    "notes": "由臺灣證券交易所編製，反映上市股票整體價格表現。"
+  },
+  {
+    "symbol": "OTC",
+    "name": "櫃買指數",
+    "aliases": ["OTC", "TPEx", "櫃買", "上櫃指數"],
+    "market": "INDEX",
+    "provider": "TPEx",
+    "source": "TPEx",
+    "notes": "由櫃買中心（TPEx）編製，反映上櫃股票整體價格表現。"
+  }
+]
