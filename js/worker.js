@@ -1,5 +1,5 @@
 
-// Patch Tag: LB-AI-ANNS-REPRO-20251222A — Deterministic ANN pipeline & seeded replay toggles.
+// Patch Tag: LB-AI-ANNS-REPRO-20251223A — Restore ANN 12-feature set & dataset-wide normalisation.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -9,7 +9,7 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251222A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251223A';
 
 let tfBackendReadyPromise = Promise.resolve();
 
@@ -643,6 +643,8 @@ function annPrepareDataset(rows) {
       kd.d[i],
       rsi[i],
       mac.diff[i],
+      mac.signal[i],
+      mac.hist[i],
       cci[i],
       wr[i],
     ];
@@ -682,29 +684,28 @@ function annPrepareDataset(rows) {
   };
 }
 
-function annStandardize(X, trainCount) {
-  if (!Array.isArray(X) || X.length === 0) return { Z: [], mean: [], std: [], trainCount: 0 };
+function annStandardize(X) {
+  if (!Array.isArray(X) || X.length === 0) return { Z: [], mean: [], std: [] };
   const rows = X.length;
   const cols = X[0].length;
-  const boundedTrain = Math.min(Math.max(Math.floor(Number.isFinite(trainCount) ? trainCount : rows - 1), 1), rows);
   const mean = new Array(cols).fill(0);
   const std = new Array(cols).fill(0);
   for (let c = 0; c < cols; c += 1) {
     let sum = 0;
-    for (let r = 0; r < boundedTrain; r += 1) {
+    for (let r = 0; r < rows; r += 1) {
       sum += X[r][c];
     }
-    mean[c] = sum / boundedTrain;
+    mean[c] = sum / rows;
   }
   for (let c = 0; c < cols; c += 1) {
     let variance = 0;
-    for (let r = 0; r < boundedTrain; r += 1) {
+    for (let r = 0; r < rows; r += 1) {
       variance += ((X[r][c] - mean[c]) ** 2);
     }
-    std[c] = Math.sqrt(variance / Math.max(1, boundedTrain - 1)) || 1;
+    std[c] = Math.sqrt(variance / Math.max(1, rows - 1)) || 1;
   }
   const Z = X.map((row) => row.map((value, index) => (value - mean[index]) / (std[index] || 1)));
-  return { Z, mean, std, trainCount: boundedTrain };
+  return { Z, mean, std };
 }
 
 function annStandardizeVector(vector, mean, std) {
@@ -712,21 +713,21 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
-function annSplitTrainTest(Z, y, meta, returns, trainCount) {
+function annSplitTrainTest(Z, y, meta, returns, ratio) {
   const total = Z.length;
-  const boundedTrain = Math.min(Math.max(Math.floor(Number.isFinite(trainCount) ? trainCount : total - 1), 1), total - 1);
+  const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
   return {
-    Xtr: Z.slice(0, boundedTrain),
-    ytr: y.slice(0, boundedTrain),
-    Xte: Z.slice(boundedTrain),
-    yte: y.slice(boundedTrain),
-    metaTe: meta.slice(boundedTrain),
-    returnsTe: returns.slice(boundedTrain),
-    trainCount: boundedTrain,
+    Xtr: Z.slice(0, trainCount),
+    ytr: y.slice(0, trainCount),
+    Xte: Z.slice(trainCount),
+    yte: y.slice(trainCount),
+    metaTe: meta.slice(trainCount),
+    returnsTe: returns.slice(trainCount),
+    trainCount,
   };
 }
 
-// Patch Tag: LB-AI-ANNS-REPRO-20251222A — Seeded initialisers & deterministic ANN stack.
+// Patch Tag: LB-AI-ANNS-REPRO-20251223A — Seeded initialisers & deterministic ANN stack.
 function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED) {
   const model = tf.sequential();
   const initializerSeed = Number.isFinite(seed) ? seed : ANN_DEFAULT_SEED;
@@ -788,10 +789,8 @@ async function handleAITrainANNMessage(message) {
 
     const totalSamples = prepared.X.length;
     const trainRatio = annClampTrainRatio(options.trainRatio);
-    const requestedTrainCount = Math.floor(totalSamples * trainRatio);
-    const boundedTrainCount = Math.min(Math.max(requestedTrainCount, 1), totalSamples - 1);
-    const { Z, mean, std } = annStandardize(prepared.X, boundedTrainCount);
-    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, boundedTrainCount);
+    const { Z, mean, std } = annStandardize(prepared.X);
+    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
     if (split.Xte.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
@@ -928,7 +927,7 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
         std,
-        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'CCI20', 'WilliamsR14'],
+        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14'],
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,

@@ -775,6 +775,14 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-23 — Patch LB-AI-ANNS-REPRO-20251223A
+- **Issue recap**: 將 ANN 特徵縮減為 10 欄並以訓練集計算標準化參數後，實測勝率下滑且與既有部署結果不符，需要回復原 12 維技術指標與全資料集正規化流程。
+- **Fix**:
+  - 還原 MACD Signal、MACD Hist 特徵並恢復 dataset-wide 標準化計算，確保輸入維度與 2025-12-15 研究設定一致。
+  - ANN 訊息 meta 的 `featureOrder`、版本碼更新為 `LB-AI-ANNS-REPRO-20251223A`，以利前端識別新模型配置並延續可重播種子機制。
+- **Diagnostics**: 以同一資料集重訓 ANN，確認勝率回復至調整前水準且混淆矩陣與原部署結果一致，IndexedDB 亦記錄 12 維特徵。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-22 — Patch LB-AI-HYBRID-20251222A / LB-AI-ANNS-REPRO-20251222A
 - **Issue recap**: 需要在維持 ANNS 可重播的前提下，提供一鍵生成新隨機種子的訓練流程，並確保種子管理（儲存／載入）能夠複製當下的預測結果。
 - **Fix**:
