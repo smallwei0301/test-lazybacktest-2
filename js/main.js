@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251119A
 
 // 全局變量
 let stockChart = null;
@@ -16,6 +17,13 @@ let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
+if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, 'cachedStockData')) {
+    Object.defineProperty(window, 'cachedStockData', {
+        configurable: true,
+        get() { return cachedStockData; },
+        set(value) { cachedStockData = value; },
+    });
+}
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
@@ -2682,10 +2690,80 @@ function initRollingTestFeature() {
     }
 }
 
+function initAnnPredictionButton() {
+    const btn = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resCard = document.getElementById('ann-result');
+    const accEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const cmEl = document.getElementById('ann-cm');
+    const advEl = document.getElementById('ann-adv');
+
+    if (!btn || !statusEl || !resCard || !accEl || !kellyEl || !cmEl || !advEl) {
+        return;
+    }
+
+    const toggleButtonState = (running) => {
+        btn.disabled = running;
+        btn.classList.toggle('opacity-60', running);
+        btn.classList.toggle('cursor-not-allowed', running);
+    };
+
+    btn.addEventListener('click', async () => {
+        if (!window || !window.LB_ANN || typeof window.LB_ANN.runANNPredictionWithCached !== 'function') {
+            statusEl.textContent = 'ANNS 模組尚未載入，請稍後再試。';
+            return;
+        }
+
+        try {
+            toggleButtonState(true);
+            statusEl.textContent = '訓練中（約 2~5 秒，端看資料長度）…';
+            resCard.classList.add('hidden');
+
+            const rows = Array.isArray(window.cachedStockData)
+                ? window.cachedStockData
+                : (typeof cachedStockData !== 'undefined' ? cachedStockData : null);
+
+            if (!Array.isArray(rows) || rows.length < 60) {
+                statusEl.textContent = '需要先執行一次回測或擴大日期區間，以建立足夠的快取資料。';
+                return;
+            }
+
+            const { acc, confusion, kelly } = await window.LB_ANN.runANNPredictionWithCached(rows);
+
+            const accValue = Number.isFinite(acc) ? acc : 0;
+            const kellyValue = Number.isFinite(kelly) ? kelly : 0;
+
+            accEl.textContent = `測試集準確率：${(accValue * 100).toFixed(2)}%`;
+            kellyEl.textContent = `凱利資金比率（示意）：${(kellyValue * 100).toFixed(2)}%`;
+
+            const matrix = confusion || { TP: 0, TN: 0, FP: 0, FN: 0 };
+            cmEl.innerHTML = `
+                <div>TP（預測漲且漲）：${Number.isFinite(matrix.TP) ? matrix.TP : 0}</div>
+                <div>TN（預測跌且跌）：${Number.isFinite(matrix.TN) ? matrix.TN : 0}</div>
+                <div>FP（預測漲實際跌）：${Number.isFinite(matrix.FP) ? matrix.FP : 0}</div>
+                <div>FN（預測跌實際漲）：${Number.isFinite(matrix.FN) ? matrix.FN : 0}</div>
+            `;
+
+            advEl.textContent = accValue > 0.5 && kellyValue > 0
+                ? `依據 ANN 預測，建議做多部位 ≈ ${(kellyValue * 100).toFixed(1)}%（請搭配策略模組與風控檢視）`
+                : '不具備顯著優勢，建議觀望或維持現有部位配置。';
+
+            resCard.classList.remove('hidden');
+            statusEl.textContent = '完成';
+        } catch (error) {
+            console.error('[ANN Prediction] 執行失敗:', error);
+            statusEl.textContent = `執行失敗：${error?.message || '未知錯誤'}`;
+        } finally {
+            toggleButtonState(false);
+        }
+    });
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
         // 初始化日期
         initDates();
@@ -2718,6 +2796,8 @@ document.addEventListener('DOMContentLoaded', function() {
             initBatchOptimizationFeature();
             initRollingTestFeature();
         }, 100);
+
+        initAnnPredictionButton();
 
         console.log('[Main] Initialization completed');
     } catch (error) {
