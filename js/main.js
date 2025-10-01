@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-ANN-TECH-20251208A
 
 // 全局變量
 let stockChart = null;
@@ -2682,6 +2683,65 @@ function initRollingTestFeature() {
     }
 }
 
+function initAnnPredictionControls() {
+    const btn = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resCard = document.getElementById('ann-result');
+    const accEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const cmEl = document.getElementById('ann-cm');
+    const advEl = document.getElementById('ann-adv');
+
+    if (!btn || !statusEl || !resCard || !accEl || !kellyEl || !cmEl || !advEl) {
+        return;
+    }
+
+    const setStatus = (message) => {
+        statusEl.textContent = message || '';
+    };
+
+    btn.addEventListener('click', async () => {
+        try {
+            if (!window.LB_ANN || typeof window.LB_ANN.runANNPredictionWithCached !== 'function') {
+                setStatus('模型尚未載入，請稍後再試。');
+                return;
+            }
+
+            setStatus('訓練中（約 2~5 秒，端看資料長度）…');
+            resCard.classList.add('hidden');
+
+            if (!Array.isArray(window.cachedStockData) || window.cachedStockData.length < 60) {
+                setStatus('需要先執行一次回測或擴大日期區間，以建立足夠的快取資料。');
+                return;
+            }
+
+            const { acc, confusion, kelly } = await window.LB_ANN.runANNPredictionWithCached(window.cachedStockData);
+
+            accEl.textContent = `測試集準確率：${(acc * 100).toFixed(2)}%`;
+            kellyEl.textContent = `凱利資金比率（示意）：${(kelly * 100).toFixed(2)}%`;
+
+            cmEl.innerHTML = [
+                `TP（預測漲且漲）：${confusion.TP}`,
+                `TN（預測跌且跌）：${confusion.TN}`,
+                `FP（預測漲實際跌）：${confusion.FP}`,
+                `FN（預測跌實際漲）：${confusion.FN}`,
+            ]
+                .map((line) => `<div>${line}</div>`)
+                .join('');
+
+            advEl.textContent = acc > 0.5 && kelly > 0
+                ? `依據 ANN 預測，建議做多部位 ≈ ${(kelly * 100).toFixed(1)}%（可再與今日建議模組比對）`
+                : '不具備優勢，建議觀望或持平。';
+
+            resCard.classList.remove('hidden');
+            setStatus('完成');
+        } catch (error) {
+            console.error('[ANN] Prediction failed', error);
+            setStatus(`執行失敗：${error?.message || '未知錯誤'}`);
+        }
+    });
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -2712,7 +2772,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        initAnnPredictionControls();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();

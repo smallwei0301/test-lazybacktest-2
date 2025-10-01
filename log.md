@@ -772,3 +772,10 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2025-12-08 — Patch LB-ANN-TECH-20251208A
+- **Feature**: 導入 TensorFlow.js 4.20.0 並新增 ANNS 技術指標模型（MA、WMA、EMA、Momentum、%K/%D、RSI、MACD、CCI、Williams %R）
+  以 80/20 切分訓練測試，配合新按鈕輸出測試集準確率、凱利比例與混淆矩陣。
+- **UI/UX**: 在回測執行卡片內新增「ANNS 預測明日漲跌」操作列與結果摘要卡，沿用指標配色與提示文字，維持響應式排版與使用者旅程一致。
+- **Diagnostics**: 本地靜態檢查確認 `window.LB_ANN` 掛載成功，`cachedStockData` 不足時顯示友善提醒並維持卡片隱藏狀態，錯誤訊息寫入 console 與狀態列。
+- **Testing**: 待前端以實際回測流程載入 60 根以上 K 線後啟動 ANN；部署前需透過瀏覽器 console 確認訓練過程無錯誤並記錄命中率。
