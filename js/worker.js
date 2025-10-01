@@ -2788,11 +2788,9 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
     options.fallbackRemote ||
     (options.adjusted
       ? 'Yahoo Finance (還原)'
-      : options.market === 'TPEX'
+      : options.market === 'US'
         ? 'FinMind (主來源)'
-        : options.market === 'US'
-          ? 'FinMind (主來源)'
-          : defaultLabel || 'TWSE (主來源)');
+        : defaultLabel || 'Fugle (主來源)');
 
   const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
   const combined = parsed.slice();
@@ -2911,8 +2909,7 @@ function tryResolveRangeFromYearSuperset({
   const dataSourceFlags = new Set([
     "Netlify 年度快取 (Worker Superset)",
   ]);
-  const defaultRemoteLabel =
-    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+  const defaultRemoteLabel = "Fugle (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     dataSourceFlags,
     defaultRemoteLabel,
@@ -3457,8 +3454,7 @@ async function tryFetchRangeFromBlob({
     : "Netlify 年度快取 (Blob 補抓)";
   dataSourceFlags.add(blobSourceLabel);
 
-  const defaultRemoteLabel =
-    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+  const defaultRemoteLabel = "Fugle (主來源)";
 
   const dataSourceLabel = summariseDataSourceFlags(dataSourceFlags, defaultRemoteLabel, {
     market: marketKey,
@@ -4373,14 +4369,14 @@ async function fetchStockData(
   const defaultRemoteLabel = isTpex
     ? adjusted
       ? "Yahoo Finance (還原)"
-      : "FinMind (主來源)"
+      : "Fugle (主來源)"
     : isUs
       ? adjusted
         ? "Yahoo Finance (還原)"
         : "FinMind (主來源)"
       : adjusted
         ? "Yahoo Finance (還原)"
-        : "TWSE (主來源)";
+        : "Fugle (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     defaultRemoteLabel,
