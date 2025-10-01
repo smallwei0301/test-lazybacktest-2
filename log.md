@@ -775,6 +775,15 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-22 — Patch LB-AI-HYBRID-20251222A / LB-AI-ANNS-REPRO-20251222A
+- **Issue recap**: 需要在維持 ANNS 可重播的前提下，提供一鍵生成新隨機種子的訓練流程，並確保種子管理（儲存／載入）能夠複製當下的預測結果。
+- **Fix**:
+  - 前端新增「新的預測」按鈕，動態產生安全隨機種子並傳遞至 Worker，狀態列會顯示 Seed 編號；同時保留原「啟動 AI 預測」按鈕以沿用既有種子重播結果。
+  - `js/ai-prediction.js` 追蹤種子於模型狀態、預測摘要與種子載入流程中，保存於 saved seed payload 以及 localStorage 的 ANN meta，以利後續重訓或重播。
+  - `js/worker.js` 支援 seed override，重新套用 `tf.util.seedrandom(seed)` 與 Glorot 初始化器，並在 meta/hyperparameters 回傳實際使用的 seed，確保 IndexedDB 模型和本地參數一致。
+- **Diagnostics**: 於同一資料集先後按「啟動 AI 預測」與「新的預測」比對混淆矩陣、勝率與種子欄位，再重按「啟動 AI 預測」確認可依最新種子重播完全一致的結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-20 — Patch LB-AI-ANNS-REPRO-20251220A
 - **Issue recap**: ANNS 管線仍存在隨機初始值、批次洗牌與後端不一致等因素，導致相同資料重跑時正確率與混淆矩陣無法 100% 重現，也缺乏標準化參數與切分邊界的保存機制。
 - **Fix**:

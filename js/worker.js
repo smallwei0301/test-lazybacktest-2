@@ -1,14 +1,15 @@
 
-// Patch Tag: LB-AI-ANNS-REPRO-20251220A — Deterministic ANN pipeline & backend lock.
+// Patch Tag: LB-AI-ANNS-REPRO-20251222A — Deterministic ANN pipeline & seeded replay toggles.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
 const TF_BACKEND_TARGET = 'wasm';
-const RANDOM_SEED = 1337;
+const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251222A';
 
 let tfBackendReadyPromise = Promise.resolve();
 
@@ -26,7 +27,7 @@ try {
       tf.wasm.setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`);
     }
     if (typeof tf?.util?.seedrandom === 'function') {
-      tf.util.seedrandom(RANDOM_SEED);
+      tf.util.seedrandom(ANN_DEFAULT_SEED);
     }
     tfBackendReadyPromise = (async () => {
       try {
@@ -725,10 +726,11 @@ function annSplitTrainTest(Z, y, meta, returns, trainCount) {
   };
 }
 
-// Patch Tag: LB-AI-ANNS-REPRO-20251220A — Seeded initialisers & deterministic ANN stack.
-function annBuildModel(inputDim, learningRate = 0.01) {
+// Patch Tag: LB-AI-ANNS-REPRO-20251222A — Seeded initialisers & deterministic ANN stack.
+function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED) {
   const model = tf.sequential();
-  const kernelInitializer = tf.initializers.glorotUniform({ seed: RANDOM_SEED });
+  const initializerSeed = Number.isFinite(seed) ? seed : ANN_DEFAULT_SEED;
+  const kernelInitializer = tf.initializers.glorotUniform({ seed: initializerSeed });
   const biasInitializer = tf.initializers.zeros();
   model.add(tf.layers.dense({
     units: 32,
@@ -762,11 +764,18 @@ async function handleAITrainANNMessage(message) {
   const payload = message?.payload || {};
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const options = payload.options || {};
+  const overrides = payload.overrides || {};
+  const overrideSeedRaw = Number.isFinite(overrides?.seed) ? overrides.seed : null;
+  const overrideSeed = Number.isFinite(overrideSeedRaw) ? Math.max(1, Math.round(overrideSeedRaw)) : null;
+  const seedToUse = Number.isFinite(overrideSeed) ? overrideSeed : ANN_DEFAULT_SEED;
 
   try {
     await tfBackendReadyPromise;
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (typeof tf?.util?.seedrandom === 'function') {
+      tf.util.seedrandom(seedToUse);
     }
     if (!Array.isArray(rows) || rows.length < 60) {
       throw new Error('資料不足（至少 60 根 K 線）');
@@ -791,7 +800,7 @@ async function handleAITrainANNMessage(message) {
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
     const batchSize = split.trainCount;
 
-    const model = annBuildModel(split.Xtr[0].length, learningRate);
+    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse);
     const xTrain = tf.tensor2d(split.Xtr);
     const yTrain = tf.tensor2d(split.ytr, [split.ytr.length, 1]);
     const xTest = tf.tensor2d(split.Xte);
@@ -899,6 +908,7 @@ async function handleAITrainANNMessage(message) {
           modelType: MODEL_TYPES.ANNS,
           splitIndex: split.trainCount,
           threshold,
+          seed: seedToUse,
         },
         predictedLabels,
       };
@@ -906,8 +916,8 @@ async function handleAITrainANNMessage(message) {
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
       const runMeta = {
         version: ANN_REPRO_VERSION,
-        patch: 'LB-AI-ANNS-REPRO-20251220A',
-        seed: RANDOM_SEED,
+        patch: ANN_REPRO_PATCH,
+        seed: seedToUse,
         backend: backendInUse,
         tfjs: TFJS_VERSION,
         trainRatio,
@@ -947,6 +957,7 @@ async function handleAITrainANNMessage(message) {
         threshold,
         modelType: MODEL_TYPES.ANNS,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
+        seed: seedToUse,
       };
 
       annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage });

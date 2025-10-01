@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-HYBRID-20251222A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20251222A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -32,6 +32,7 @@
             batchSize: 64,
             learningRate: 0.005,
             trainRatio: 0.8,
+            seed: null,
         },
     });
     const globalState = {
@@ -58,6 +59,7 @@
         datasetSummary: null,
         status: null,
         runButton: null,
+        freshRunButton: null,
         modelType: null,
         trainRatio: null,
         lookback: null,
@@ -194,6 +196,21 @@
         const num = Number(value);
         if (!Number.isFinite(num)) return 0.01;
         return Math.min(Math.max(num, 0.01), 1);
+    };
+
+    const generateRuntimeSeed = () => {
+        if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.getRandomValues === 'function') {
+            const array = new Uint32Array(1);
+            window.crypto.getRandomValues(array);
+            const seeded = array[0] >>> 0;
+            if (seeded > 0) {
+                return seeded;
+            }
+        }
+        const timeComponent = Date.now() & 0x7fffffff;
+        const randomComponent = Math.floor((Math.random() * 0x7fffffff) % 0x7fffffff);
+        const combined = (timeComponent ^ randomComponent) & 0x7fffffff;
+        return combined > 0 ? combined : (timeComponent || 1);
     };
 
     const updateTrainRatioBadge = (ratio) => {
@@ -392,10 +409,16 @@
 
     const toggleRunning = (flag) => {
         globalState.running = Boolean(flag);
-        if (!elements.runButton) return;
-        elements.runButton.disabled = globalState.running;
-        elements.runButton.classList.toggle('opacity-60', globalState.running);
-        elements.runButton.classList.toggle('cursor-not-allowed', globalState.running);
+        if (elements.runButton) {
+            elements.runButton.disabled = globalState.running;
+            elements.runButton.classList.toggle('opacity-60', globalState.running);
+            elements.runButton.classList.toggle('cursor-not-allowed', globalState.running);
+        }
+        if (elements.freshRunButton) {
+            elements.freshRunButton.disabled = globalState.running;
+            elements.freshRunButton.classList.toggle('opacity-60', globalState.running);
+            elements.freshRunButton.classList.toggle('cursor-not-allowed', globalState.running);
+        }
     };
 
     const parseNumberInput = (el, fallback, options = {}) => {
@@ -739,6 +762,7 @@
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            seed: Number.isFinite(payload?.hyperparameters?.seed) ? payload.hyperparameters.seed : null,
             forecast,
         };
 
@@ -763,6 +787,9 @@
         const batchSize = Math.round(parseNumberInput(elements.batchSize, modelState.hyperparameters.batchSize, { min: 8, max: 512 }));
         const learningRate = parseNumberInput(elements.learningRate, modelState.hyperparameters.learningRate, { min: 0.0001, max: 0.05 });
         const trainRatio = parseTrainRatio();
+        const currentSeed = Number.isFinite(modelState.hyperparameters?.seed)
+            ? modelState.hyperparameters.seed
+            : null;
 
         modelState.hyperparameters = {
             lookback,
@@ -770,6 +797,7 @@
             batchSize,
             learningRate,
             trainRatio,
+            seed: currentSeed,
         };
         modelState.winThreshold = parseWinThreshold();
         modelState.kellyEnabled = Boolean(elements.enableKelly?.checked);
@@ -901,7 +929,7 @@
         showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}`, 'success');
     };
 
-    const runAnnModel = async (modelState, rows, hyperparameters, riskOptions) => {
+    const runAnnModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
         const modelType = MODEL_TYPES.ANNS;
         const label = formatModelLabel(modelType);
         if (!Array.isArray(rows) || rows.length < 60) {
@@ -909,8 +937,12 @@
             return;
         }
 
+        const requestedSeed = Number.isFinite(runtimeOptions?.seedOverride)
+            ? Math.max(1, Math.round(runtimeOptions.seedOverride))
+            : (Number.isFinite(hyperparameters.seed) ? Math.max(1, Math.round(hyperparameters.seed)) : null);
+
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
-        const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', {
+        const taskPayload = {
             rows,
             options: {
                 epochs: hyperparameters.epochs,
@@ -919,7 +951,11 @@
                 trainRatio: hyperparameters.trainRatio,
                 lookback: hyperparameters.lookback,
             },
-        }, { modelType });
+        };
+        if (Number.isFinite(requestedSeed)) {
+            taskPayload.overrides = { seed: requestedSeed };
+        }
+        const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', taskPayload, { modelType });
 
         const trainingMetrics = workerResult?.trainingMetrics || {
             trainAccuracy: NaN,
@@ -945,6 +981,9 @@
             modelType,
             splitIndex: Number.isFinite(hyperparametersUsed?.splitIndex) ? hyperparametersUsed.splitIndex : (predictionsPayload.hyperparameters?.splitIndex ?? null),
             threshold: Number.isFinite(hyperparametersUsed?.threshold) ? hyperparametersUsed.threshold : 0.5,
+            seed: Number.isFinite(hyperparametersUsed?.seed)
+                ? hyperparametersUsed.seed
+                : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
         };
 
         predictionsPayload.hyperparameters = { ...resolvedHyper };
@@ -955,6 +994,7 @@
             batchSize: resolvedHyper.batchSize,
             learningRate: resolvedHyper.learningRate,
             trainRatio: resolvedHyper.trainRatio,
+            seed: resolvedHyper.seed,
         };
 
         modelState.winThreshold = resolvedHyper.threshold;
@@ -970,7 +1010,8 @@
         const finalMessage = typeof workerResult?.finalMessage === 'string'
             ? workerResult.finalMessage
             : `完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`;
-        showStatus(`[${label}] ${finalMessage}`, 'success');
+        const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
+        showStatus(`[${label}] ${finalMessage}${seedSuffix}`, 'success');
     };
 
     const recomputeTradesFromState = (modelType = globalState.activeModel) => {
@@ -1114,6 +1155,8 @@
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
 
         const hyper = seed.payload?.hyperparameters || {};
+        const existingHyper = modelState.hyperparameters || {};
+
         if (elements.lookback && Number.isFinite(hyper.lookback)) {
             elements.lookback.value = hyper.lookback;
         }
@@ -1131,11 +1174,12 @@
         }
 
         modelState.hyperparameters = {
-            lookback: Number.isFinite(hyper.lookback) ? hyper.lookback : modelState.hyperparameters.lookback,
-            epochs: Number.isFinite(hyper.epochs) ? hyper.epochs : modelState.hyperparameters.epochs,
-            batchSize: Number.isFinite(hyper.batchSize) ? hyper.batchSize : modelState.hyperparameters.batchSize,
-            learningRate: Number.isFinite(hyper.learningRate) ? hyper.learningRate : modelState.hyperparameters.learningRate,
-            trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : modelState.hyperparameters.trainRatio,
+            lookback: Number.isFinite(hyper.lookback) ? hyper.lookback : existingHyper.lookback,
+            epochs: Number.isFinite(hyper.epochs) ? hyper.epochs : existingHyper.epochs,
+            batchSize: Number.isFinite(hyper.batchSize) ? hyper.batchSize : existingHyper.batchSize,
+            learningRate: Number.isFinite(hyper.learningRate) ? hyper.learningRate : existingHyper.learningRate,
+            trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : existingHyper.trainRatio,
+            seed: Number.isFinite(hyper.seed) ? hyper.seed : existingHyper.seed,
         };
 
         if (elements.enableKelly && typeof seed.summary?.usingKelly === 'boolean') {
@@ -1182,7 +1226,7 @@
         activateSeed(latestSeed);
     };
 
-    const runPrediction = async () => {
+    const runPrediction = async (options = {}) => {
         if (globalState.running) return;
         toggleRunning(true);
 
@@ -1214,10 +1258,23 @@
                 return;
             }
 
+            let annRuntimeOptions = {};
+            if (normalizedModel === MODEL_TYPES.ANNS) {
+                const storedSeed = Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null;
+                if (options?.freshSeed) {
+                    const freshSeed = generateRuntimeSeed();
+                    annRuntimeOptions = {
+                        seedOverride: freshSeed,
+                    };
+                } else if (Number.isFinite(storedSeed)) {
+                    annRuntimeOptions = { seedOverride: storedSeed };
+                }
+            }
+
             if (normalizedModel === MODEL_TYPES.LSTM) {
                 await runLstmModel(modelState, rows, hyperparameters, riskOptions);
             } else {
-                await runAnnModel(modelState, rows, hyperparameters, riskOptions);
+                await runAnnModel(modelState, rows, hyperparameters, riskOptions, annRuntimeOptions);
             }
         } catch (error) {
             const activeLabel = formatModelLabel(globalState.activeModel);
@@ -1252,6 +1309,7 @@
         elements.datasetSummary = document.getElementById('ai-dataset-summary');
         elements.status = document.getElementById('ai-status');
         elements.runButton = document.getElementById('ai-run-button');
+        elements.freshRunButton = document.getElementById('ai-run-fresh-button');
         elements.modelType = document.getElementById('ai-model-type');
         elements.trainRatio = document.getElementById('ai-train-ratio');
         elements.trainRatioBadge = document.getElementById('ai-train-ratio-badge');
@@ -1282,6 +1340,12 @@
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
                 runPrediction();
+            });
+        }
+
+        if (elements.freshRunButton) {
+            elements.freshRunButton.addEventListener('click', () => {
+                runPrediction({ freshSeed: true });
             });
         }
 
