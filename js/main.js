@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251117A
 
 // 全局變量
 let stockChart = null;
@@ -16,6 +17,17 @@ let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
+if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'cachedStockData', {
+        configurable: true,
+        get() {
+            return cachedStockData;
+        },
+        set(value) {
+            cachedStockData = value;
+        },
+    });
+}
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
@@ -2718,6 +2730,94 @@ document.addEventListener('DOMContentLoaded', function() {
             initBatchOptimizationFeature();
             initRollingTestFeature();
         }, 100);
+
+        const ANN_VERSION_TAG = 'LB-AI-ANNS-20251117A';
+        const annElements = {
+            button: document.getElementById('run-ann'),
+            status: document.getElementById('ann-status'),
+            card: document.getElementById('ann-result'),
+            acc: document.getElementById('ann-acc'),
+            kelly: document.getElementById('ann-kelly'),
+            confusion: document.getElementById('ann-cm'),
+            advice: document.getElementById('ann-adv'),
+        };
+
+        if (annElements.button) {
+            const annState = { running: false };
+            const setStatus = (text) => {
+                if (annElements.status) {
+                    annElements.status.textContent = text || '';
+                }
+            };
+            const toggleButton = (disabled) => {
+                annElements.button.disabled = Boolean(disabled);
+                annElements.button.classList.toggle('opacity-60', Boolean(disabled));
+                annElements.button.classList.toggle('cursor-not-allowed', Boolean(disabled));
+            };
+            const hideCard = () => {
+                if (annElements.card) {
+                    annElements.card.classList.add('hidden');
+                }
+            };
+            const showCard = () => {
+                if (annElements.card) {
+                    annElements.card.classList.remove('hidden');
+                }
+            };
+
+            annElements.button.addEventListener('click', async () => {
+                if (annState.running) {
+                    return;
+                }
+                annState.running = true;
+                toggleButton(true);
+                hideCard();
+                setStatus('訓練中（約 2~5 秒，端看資料長度）…');
+
+                try {
+                    if (!window.LB_ANN || typeof window.LB_ANN.runANNPredictionWithCached !== 'function') {
+                        throw new Error('ANNS 模組尚未載入，請重新整理頁面');
+                    }
+
+                    const rows = Array.isArray(window.cachedStockData) ? window.cachedStockData : null;
+                    if (!rows || rows.length < 60) {
+                        setStatus('需要先執行一次回測或擴大日期區間，以建立足夠的快取資料。');
+                        return;
+                    }
+
+                    const { acc, confusion, kelly } = await window.LB_ANN.runANNPredictionWithCached(rows);
+
+                    if (annElements.acc) {
+                        annElements.acc.textContent = `測試集準確率：${(acc * 100).toFixed(2)}%`;
+                    }
+                    if (annElements.kelly) {
+                        annElements.kelly.textContent = `凱利資金比率（示意）：${(kelly * 100).toFixed(2)}%`;
+                    }
+                    if (annElements.confusion) {
+                        annElements.confusion.innerHTML = `
+        <div>TP（預測漲且漲）：${confusion.TP}</div>
+        <div>TN（預測跌且跌）：${confusion.TN}</div>
+        <div>FP（預測漲實際跌）：${confusion.FP}</div>
+        <div>FN（預測跌實際漲）：${confusion.FN}</div>
+      `;
+                    }
+                    if (annElements.advice) {
+                        annElements.advice.textContent = acc > 0.5 && kelly > 0
+                            ? `依據 ANN 預測，建議做多部位 ≈ ${(kelly * 100).toFixed(1)}%（版本 ${ANN_VERSION_TAG}）`
+                            : '不具備優勢，建議觀望或持平。';
+                    }
+
+                    showCard();
+                    setStatus('完成');
+                } catch (error) {
+                    console.error('[Main][ANN]', error);
+                    setStatus(`執行失敗：${error?.message || '未知錯誤'}`);
+                } finally {
+                    annState.running = false;
+                    toggleButton(false);
+                }
+            });
+        }
 
         console.log('[Main] Initialization completed');
     } catch (error) {
