@@ -1,12 +1,21 @@
 /* global tf, document, window */
 
-// Patch Tag: LB-AI-LSTM-20250915A
+// Patch Tag: LB-AI-LSTM-20250923A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-LSTM-20250915A';
+    const VERSION_TAG = 'LB-AI-LSTM-20250923A';
+    const SEED_STORAGE_KEY = 'lazybacktest.aiSeeds';
     const state = {
         running: false,
         lastSummary: null,
+        lastRun: null,
         odds: 1,
+        config: {
+            useKelly: false,
+            fixedFraction: 0.2,
+            threshold: 0.5,
+        },
+        seedQueue: [],
+        currentSeed: null,
     };
 
     const elements = {
@@ -29,6 +38,14 @@
         averageProfit: null,
         tradeTableBody: null,
         tradeSummary: null,
+        probabilityThreshold: null,
+        autoThresholdButton: null,
+        nextDayForecast: null,
+        seedInput: null,
+        saveSeedButton: null,
+        loadSeedButton: null,
+        seedList: null,
+        seedStatus: null,
     };
 
     const colorMap = {
@@ -59,6 +76,318 @@
     const formatNumber = (value, digits = 2) => {
         if (!Number.isFinite(value)) return '—';
         return value.toFixed(digits);
+    };
+
+    const formatPercentOrDash = (value, digits = 2) => {
+        if (!Number.isFinite(value)) return '—';
+        return formatPercent(value, digits);
+    };
+
+    const computeMedian = (values) => {
+        if (!Array.isArray(values) || values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        if (sorted.length % 2 === 0) {
+            return (sorted[mid - 1] + sorted[mid]) / 2;
+        }
+        return sorted[mid];
+    };
+
+    const evaluateTrades = (runData, config) => {
+        if (!runData) {
+            return { trades: [], summary: { executedTrades: 0, hitRate: 0, medianTradeReturn: 0, averageTradeReturn: 0, tradeStd: 0, totalPredictions: 0, executedReturns: [], lastTradeDate: null, finalCapital: Number.isFinite(runData?.initialCapital) ? runData.initialCapital : 0, cumulativeProfit: 0 } };
+        }
+
+        const {
+            predictionValues = [],
+            testReturns = [],
+            testMeta = [],
+            trainingOdds = 1,
+            initialCapital = 0,
+        } = runData;
+
+        const trades = [];
+        const executedReturns = [];
+        let capital = Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 0;
+        let cumulativeProfit = 0;
+        let executedCount = 0;
+        let wins = 0;
+
+        for (let i = 0; i < predictionValues.length; i += 1) {
+            const probability = predictionValues[i];
+            const actualReturn = testReturns[i];
+            const meta = testMeta[i] || {};
+            const hasProbability = Number.isFinite(probability);
+            const threshold = Number.isFinite(config.threshold) ? config.threshold : 0.5;
+            const shouldEnter = hasProbability && probability >= threshold;
+            const baseFraction = shouldEnter
+                ? (config.useKelly
+                    ? computeKellyFraction(probability, trainingOdds)
+                    : Math.max(0.01, Math.min(config.fixedFraction ?? 0.2, 1)))
+                : 0;
+            const fraction = Number.isFinite(baseFraction) ? Math.max(0, Math.min(baseFraction, 1)) : 0;
+            const executed = shouldEnter && Number.isFinite(actualReturn) && fraction > 0;
+
+            let tradeReturn = 0;
+            let profit = 0;
+            if (executed) {
+                tradeReturn = actualReturn * fraction;
+                const allocation = capital * fraction;
+                profit = allocation * actualReturn;
+                capital += profit;
+                cumulativeProfit += profit;
+                executedReturns.push(tradeReturn);
+                executedCount += 1;
+                if (actualReturn > 0) {
+                    wins += 1;
+                }
+            }
+
+            trades.push({
+                tradeDate: meta.sellDate || meta.buyDate || '',
+                probability,
+                actualReturn,
+                fraction,
+                tradeReturn,
+                executed,
+            });
+        }
+
+        const hitRate = executedCount > 0 ? wins / executedCount : 0;
+        const medianTradeReturn = computeMedian(executedReturns);
+        const averageTradeReturn = executedReturns.length > 0
+            ? executedReturns.reduce((sum, value) => sum + value, 0) / executedReturns.length
+            : 0;
+        let tradeStd = 0;
+        if (executedReturns.length > 1) {
+            const variance = executedReturns.reduce(
+                (acc, value) => acc + ((value - averageTradeReturn) ** 2),
+                0,
+            ) / (executedReturns.length - 1);
+            tradeStd = Math.sqrt(Math.max(variance, 0));
+        }
+
+        const lastTradeDate = trades.length > 0 ? trades[trades.length - 1].tradeDate : null;
+
+        return {
+            trades,
+            summary: {
+                executedTrades: executedCount,
+                hitRate,
+                medianTradeReturn,
+                averageTradeReturn,
+                tradeStd,
+                totalPredictions: predictionValues.length,
+                executedReturns,
+                lastTradeDate,
+                finalCapital: capital,
+                cumulativeProfit,
+            },
+        };
+    };
+
+    const loadStoredSeeds = () => {
+        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+            return [];
+        }
+        try {
+            const raw = window.localStorage.getItem(SEED_STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取種子快取：', error);
+            return [];
+        }
+    };
+
+    const persistStoredSeeds = (seeds) => {
+        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+            return;
+        }
+        try {
+            window.localStorage.setItem(SEED_STORAGE_KEY, JSON.stringify(seeds));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法寫入種子快取：', error);
+        }
+    };
+
+    const refreshSeedOptions = () => {
+        if (!elements.seedList) return;
+        const seeds = loadStoredSeeds();
+        if (seeds.length === 0) {
+            elements.seedList.innerHTML = '';
+            return;
+        }
+        const options = seeds
+            .map((seed) => {
+                const label = seed.label || `Seed ${seed.value}`;
+                return `<option value="${seed.value}" data-id="${seed.id}">${label}（${seed.value}）</option>`;
+            })
+            .join('');
+        elements.seedList.innerHTML = options;
+    };
+
+    const setSeedStatus = (message, type = 'info') => {
+        if (!elements.seedStatus) return;
+        elements.seedStatus.textContent = message;
+        const colorMapSeed = {
+            info: 'var(--muted-foreground)',
+            success: 'var(--primary)',
+            warning: 'var(--secondary)',
+            error: 'var(--destructive)',
+        };
+        elements.seedStatus.style.color = colorMapSeed[type] || colorMapSeed.info;
+    };
+
+    const parseSeedValue = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return null;
+        return Math.round(numeric);
+    };
+
+    const handleSaveSeed = () => {
+        if (!state.lastSummary || !Number.isFinite(state.currentSeed)) {
+            setSeedStatus('尚未產生可儲存的種子，請先執行一次 AI 預測。', 'warning');
+            return;
+        }
+        const seeds = loadStoredSeeds();
+        const exists = seeds.some((entry) => Number(entry.value) === Number(state.currentSeed));
+        if (exists) {
+            setSeedStatus('此種子已在列表中。', 'warning');
+            return;
+        }
+        const trainLabel = formatPercentOrDash(state.lastSummary.trainAccuracy, 2);
+        const testLabel = formatPercentOrDash(state.lastSummary.testAccuracy, 2);
+        const label = `訓練 ${trainLabel}｜測試 ${testLabel}`;
+        const entry = {
+            id: `seed-${Date.now()}`,
+            value: state.currentSeed,
+            label,
+            createdAt: new Date().toISOString(),
+        };
+        const updated = [...seeds, entry];
+        persistStoredSeeds(updated);
+        refreshSeedOptions();
+        setSeedStatus(`已儲存種子 ${state.currentSeed}（${label}）。`, 'success');
+    };
+
+    const handleLoadSeed = () => {
+        if (!elements.seedList) return;
+        const selected = Array.from(elements.seedList.selectedOptions || []);
+        if (selected.length === 0) {
+            setSeedStatus('請先選取至少一個已儲存的種子。', 'warning');
+            return;
+        }
+        const values = selected
+            .map((option) => parseSeedValue(option.value))
+            .filter((value) => Number.isFinite(value));
+        if (values.length === 0) {
+            setSeedStatus('選取的種子值無法解析。', 'error');
+            return;
+        }
+        const [first, ...rest] = values;
+        if (elements.seedInput) {
+            elements.seedInput.value = first;
+        }
+        state.seedQueue = rest;
+        state.currentSeed = first;
+        setSeedStatus(`已載入種子 ${values.join(', ')}。如選取多個，請依序執行預測。`, 'success');
+    };
+
+    const clampThreshold = (value) => {
+        if (!Number.isFinite(value)) return 0.5;
+        if (value < 0.5) return 0.5;
+        if (value > 1) return 1;
+        return value;
+    };
+
+    const readConfigFromInputs = () => {
+        const useKelly = Boolean(elements.enableKelly?.checked);
+        const fixedFraction = parseNumberInput(elements.fixedFraction, state.config.fixedFraction, { min: 0.01, max: 1 });
+        const rawThreshold = elements.probabilityThreshold ? Number(elements.probabilityThreshold.value) : state.config.threshold;
+        const threshold = clampThreshold(Number.isFinite(rawThreshold) ? rawThreshold : state.config.threshold);
+        state.config = {
+            useKelly,
+            fixedFraction,
+            threshold,
+        };
+        if (elements.probabilityThreshold) {
+            elements.probabilityThreshold.value = threshold.toFixed(2);
+        }
+        return state.config;
+    };
+
+    const recomputeTrades = () => {
+        if (!state.lastRun) return;
+        const config = readConfigFromInputs();
+        const evaluation = evaluateTrades(state.lastRun, config);
+        const summary = {
+            version: VERSION_TAG,
+            trainAccuracy: state.lastRun.trainAccuracy,
+            trainLoss: state.lastRun.trainLoss,
+            testAccuracy: state.lastRun.testAccuracy,
+            testLoss: state.lastRun.testLoss,
+            executedTrades: evaluation.summary.executedTrades,
+            totalPredictions: evaluation.summary.totalPredictions,
+            hitRate: evaluation.summary.hitRate,
+            medianTradeReturn: evaluation.summary.medianTradeReturn,
+            averageTradeReturn: evaluation.summary.averageTradeReturn,
+            tradeStd: evaluation.summary.tradeStd,
+            usingKelly: config.useKelly,
+            fixedFraction: config.fixedFraction,
+            threshold: config.threshold,
+            finalCapital: evaluation.summary.finalCapital,
+            cumulativeProfit: evaluation.summary.cumulativeProfit,
+            nextDayProbability: state.lastRun.nextDayProbability,
+            lastTradeDate: evaluation.summary.lastTradeDate || state.lastRun.lastTradeDate,
+            lastDataDate: state.lastRun.lastDataDate,
+            initialCapital: state.lastRun.initialCapital,
+            trainingOdds: state.lastRun.trainingOdds,
+            seedValue: state.currentSeed,
+            executedReturns: evaluation.summary.executedReturns,
+            trades: evaluation.trades,
+        };
+        state.lastSummary = summary;
+        renderTrades(evaluation.trades);
+        updateSummaryMetrics(summary);
+    };
+
+    const handleConfigChange = () => {
+        if (!state.lastRun) return;
+        recomputeTrades();
+    };
+
+    const autoTuneThreshold = () => {
+        if (!state.lastRun) {
+            showStatus('尚未生成預測結果，無法搜尋最佳門檻。', 'warning');
+            return;
+        }
+        const baseConfig = readConfigFromInputs();
+        let bestThreshold = baseConfig.threshold || 0.5;
+        let bestMedian = -Infinity;
+        let bestAverage = -Infinity;
+        for (let percent = 50; percent <= 100; percent += 1) {
+            const threshold = clampThreshold(percent / 100);
+            const evaluation = evaluateTrades(state.lastRun, {
+                ...baseConfig,
+                threshold,
+            });
+            const median = evaluation.summary.medianTradeReturn;
+            const average = evaluation.summary.averageTradeReturn;
+            if (median > bestMedian || (median === bestMedian && average > bestAverage)) {
+                bestMedian = median;
+                bestAverage = average;
+                bestThreshold = threshold;
+            }
+        }
+        if (elements.probabilityThreshold) {
+            elements.probabilityThreshold.value = bestThreshold.toFixed(2);
+        }
+        state.config.threshold = bestThreshold;
+        recomputeTrades();
+        showStatus(`已找到最佳門檻 ${formatPercent(bestThreshold, 0)}，交易報酬中位數 ${formatPercent(bestMedian, 2)}。`, 'success');
     };
 
     const showStatus = (message, type = 'info') => {
@@ -262,19 +591,19 @@
         const html = limited
             .map((trade) => {
                 const probabilityText = formatPercent(trade.probability, 1);
-                const returnText = formatPercent(trade.actualReturn, 2);
+                const actualReturnText = formatPercent(trade.actualReturn, 2);
                 const fractionText = formatPercent(trade.fraction, 2);
-                const profitText = formatCurrency(trade.profit);
-                const capitalText = formatCurrency(trade.capitalAfter);
+                const tradeReturnText = formatPercent(trade.tradeReturn, 2);
+                const tradeDate = trade.tradeDate || '—';
+                const rowClass = trade.executed ? '' : 'opacity-60';
+                const statusTitle = trade.executed ? '' : ' title="未達勝率門檻或設定"';
                 return `
-                    <tr>
-                        <td class="px-3 py-2 whitespace-nowrap">${trade.buyDate}</td>
-                        <td class="px-3 py-2 whitespace-nowrap">${trade.sellDate}</td>
+                    <tr class="${rowClass}"${statusTitle}>
+                        <td class="px-3 py-2 whitespace-nowrap">${tradeDate}</td>
                         <td class="px-3 py-2 text-right">${probabilityText}</td>
-                        <td class="px-3 py-2 text-right ${trade.actualReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${returnText}</td>
+                        <td class="px-3 py-2 text-right ${trade.actualReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${actualReturnText}</td>
                         <td class="px-3 py-2 text-right">${fractionText}</td>
-                        <td class="px-3 py-2 text-right ${trade.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${profitText}</td>
-                        <td class="px-3 py-2 text-right font-medium">${capitalText}</td>
+                        <td class="px-3 py-2 text-right ${trade.tradeReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${tradeReturnText}</td>
                     </tr>
                 `;
             })
@@ -284,17 +613,42 @@
 
     const updateSummaryMetrics = (summary) => {
         if (!summary) return;
-        if (elements.trainAccuracy) elements.trainAccuracy.textContent = formatPercent(summary.trainAccuracy, 2);
+        if (elements.trainAccuracy) elements.trainAccuracy.textContent = formatPercentOrDash(summary.trainAccuracy, 2);
         if (elements.trainLoss) elements.trainLoss.textContent = `Loss：${formatNumber(summary.trainLoss, 4)}`;
-        if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercent(summary.testAccuracy, 2);
+        if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercentOrDash(summary.testAccuracy, 2);
         if (elements.testLoss) elements.testLoss.textContent = `Loss：${formatNumber(summary.testLoss, 4)}`;
-        if (elements.tradeCount) elements.tradeCount.textContent = summary.executedTrades ?? '—';
+        if (elements.tradeCount) {
+            elements.tradeCount.textContent = Number.isFinite(summary.executedTrades) ? summary.executedTrades : '—';
+        }
         if (elements.hitRate) elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}`;
-        if (elements.totalReturn) elements.totalReturn.textContent = `${formatPercent(summary.totalReturn, 2)}（${formatCurrency(summary.finalCapital)}）`;
-        if (elements.averageProfit) elements.averageProfit.textContent = `平均每筆：${formatCurrency(summary.averageProfit)}`;
+        if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.medianTradeReturn, 2);
+        if (elements.averageProfit) {
+            const avgText = formatPercentOrDash(summary.averageTradeReturn, 2);
+            const stdText = formatPercentOrDash(summary.tradeStd, 2);
+            const countText = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+            elements.averageProfit.textContent = `平均報酬%：${avgText}｜交易數：${countText}｜標準差：${stdText}`;
+        }
         if (elements.tradeSummary) {
-            const strategyLabel = summary.usingKelly ? '已啟用凱利公式' : '採用固定比例';
-            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，執行 ${summary.executedTrades} 筆多單交易，${strategyLabel}。最終資金 ${formatCurrency(summary.finalCapital)}，總報酬 ${formatPercent(summary.totalReturn, 2)}。`;
+            const strategyLabel = summary.usingKelly
+                ? '凱利公式'
+                : `固定比例 ${formatPercent(summary.fixedFraction, 2)}`;
+            const thresholdText = formatPercent(summary.threshold, 0);
+            const hitRateText = formatPercent(summary.hitRate, 2);
+            const medianText = formatPercent(summary.medianTradeReturn, 2);
+            const totalPredictionsText = Number.isFinite(summary.totalPredictions) ? summary.totalPredictions : 0;
+            const executedText = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+            elements.tradeSummary.textContent = `共評估 ${totalPredictionsText} 筆測試樣本，依勝率門檻 ${thresholdText} 執行 ${executedText} 筆交易，採用${strategyLabel}。命中率 ${hitRateText}，交易報酬中位數 ${medianText}。`;
+        }
+        if (elements.nextDayForecast) {
+            if (Number.isFinite(summary.nextDayProbability)) {
+                const probabilityText = formatPercent(summary.nextDayProbability, 1);
+                const lastDateText = summary.lastDataDate || summary.lastTradeDate || '—';
+                elements.nextDayForecast.textContent = `最後資料日 ${lastDateText}，預測隔日上漲機率 ${probabilityText}。`;
+                elements.nextDayForecast.style.color = 'var(--foreground)';
+            } else {
+                elements.nextDayForecast.textContent = '尚未計算隔日預測。';
+                elements.nextDayForecast.style.color = 'var(--muted-foreground)';
+            }
         }
     };
 
@@ -311,8 +665,14 @@
             const epochs = Math.round(parseNumberInput(elements.epochs, 80, { min: 10, max: 300 }));
             const batchSize = Math.round(parseNumberInput(elements.batchSize, 64, { min: 8, max: 512 }));
             const learningRate = parseNumberInput(elements.learningRate, 0.005, { min: 0.0001, max: 0.05 });
-            const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
-            const useKelly = Boolean(elements.enableKelly?.checked);
+            const config = readConfigFromInputs();
+            const seedValue = parseSeedValue(elements.seedInput ? elements.seedInput.value : null);
+            if (Number.isFinite(seedValue)) {
+                tf.util.setRandomSeed(seedValue);
+                state.currentSeed = seedValue;
+            } else {
+                state.currentSeed = null;
+            }
 
             const rows = getVisibleData();
             if (!Array.isArray(rows) || rows.length === 0) {
@@ -391,6 +751,13 @@
             const predictionValues = Array.from(await predictionsTensor.data());
             predictionsTensor.dispose();
 
+            if (predictionValues.length === 0) {
+                showStatus('測試樣本數為 0，無法生成預測結果。', 'warning');
+                tf.dispose([xAll, yAll, xTrain, yTrain, xTest, yTest]);
+                model.dispose();
+                return;
+            }
+
             const labels = dataset.labels.slice(boundedTrainSize);
             let correctPredictions = 0;
             predictionValues.forEach((value, index) => {
@@ -405,68 +772,60 @@
             state.odds = trainingOdds;
 
             const initialCapital = resolveInitialCapital();
-            let capital = initialCapital;
-            let cumulativeProfit = 0;
-            let wins = 0;
-            let executed = 0;
-            const executedTrades = [];
             const testMeta = dataset.meta.slice(boundedTrainSize);
             const testReturns = dataset.returns.slice(boundedTrainSize);
+            const totalPredictions = predictionValues.length;
 
-            for (let i = 0; i < predictionValues.length; i += 1) {
-                const probability = predictionValues[i];
-                const predictedUp = probability >= 0.5;
-                const actualReturn = testReturns[i];
-                const meta = testMeta[i];
-                if (!predictedUp || !meta) {
-                    continue;
+            let nextDayProbability = Number.NaN;
+            if (dataset.returns.length >= lookback) {
+                const futureWindow = dataset.returns.slice(dataset.returns.length - lookback);
+                if (futureWindow.length === lookback) {
+                    const normalisedFuture = futureWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+                    const nextTensor = tf.tensor3d([normalisedFuture.map((value) => [value])]);
+                    const nextPredictionTensor = model.predict(nextTensor);
+                    const nextData = await nextPredictionTensor.data();
+                    nextDayProbability = nextData[0];
+                    nextPredictionTensor.dispose();
+                    nextTensor.dispose();
                 }
-                const fraction = useKelly
-                    ? computeKellyFraction(probability, trainingOdds)
-                    : Math.max(0.01, Math.min(fixedFraction, 1));
-                const allocation = capital * fraction;
-                const profit = allocation * actualReturn;
-                capital += profit;
-                cumulativeProfit += profit;
-                executed += 1;
-                if (actualReturn > 0) {
-                    wins += 1;
-                }
-                executedTrades.push({
-                    buyDate: meta.buyDate,
-                    sellDate: meta.sellDate,
-                    probability,
-                    actualReturn,
-                    fraction,
-                    profit,
-                    capitalAfter: capital,
-                });
             }
 
-            const totalPredictions = predictionValues.length;
-            const hitRate = executed > 0 ? wins / executed : 0;
-            const totalReturn = (capital - initialCapital) / initialCapital;
-            const averageProfit = executed > 0 ? cumulativeProfit / executed : 0;
-
-            const summary = {
+            state.lastRun = {
                 version: VERSION_TAG,
                 trainAccuracy: finalTrainAccuracy,
                 trainLoss: finalTrainLoss,
                 testAccuracy: Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy,
                 testLoss,
                 totalPredictions,
-                executedTrades: executed,
-                hitRate,
-                totalReturn,
-                averageProfit,
-                finalCapital: capital,
-                usingKelly: useKelly,
+                trainingOdds,
+                predictionValues,
+                testReturns,
+                testMeta,
+                initialCapital,
+                nextDayProbability,
+                lastTradeDate: testMeta[testMeta.length - 1]?.sellDate || null,
+                lastDataDate: dataset.baseRows[dataset.baseRows.length - 1]?.date || null,
+                seedValue: Number.isFinite(seedValue) ? seedValue : null,
             };
-            state.lastSummary = summary;
+            state.config = {
+                useKelly: config.useKelly,
+                fixedFraction: config.fixedFraction,
+                threshold: config.threshold,
+            };
 
-            updateSummaryMetrics(summary);
-            renderTrades(executedTrades);
-            showStatus(`完成：訓練勝率 ${formatPercent(finalTrainAccuracy, 2)}，測試正確率 ${formatPercent(summary.testAccuracy, 2)}。`, 'success');
+            recomputeTrades();
+
+            const resolvedTestAccuracy = state.lastSummary?.testAccuracy ?? (Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy);
+            showStatus(`完成：訓練勝率 ${formatPercent(finalTrainAccuracy, 2)}，測試正確率 ${formatPercent(resolvedTestAccuracy, 2)}。`, 'success');
+
+            if (state.seedQueue.length > 0) {
+                const nextSeed = state.seedQueue.shift();
+                if (elements.seedInput) {
+                    elements.seedInput.value = nextSeed;
+                }
+                state.currentSeed = nextSeed;
+                setSeedStatus(`已切換至下一個種子 ${nextSeed}，剩餘 ${state.seedQueue.length} 組待測。`, 'info');
+            }
 
             tf.dispose([xAll, yAll, xTrain, yTrain, xTest, yTest]);
             model.dispose();
@@ -498,6 +857,14 @@
         elements.averageProfit = document.getElementById('ai-average-profit');
         elements.tradeTableBody = document.getElementById('ai-trade-table-body');
         elements.tradeSummary = document.getElementById('ai-trade-summary');
+        elements.probabilityThreshold = document.getElementById('ai-probability-threshold');
+        elements.autoThresholdButton = document.getElementById('ai-auto-threshold');
+        elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
+        elements.seedInput = document.getElementById('ai-seed-value');
+        elements.saveSeedButton = document.getElementById('ai-save-seed');
+        elements.loadSeedButton = document.getElementById('ai-load-seed');
+        elements.seedList = document.getElementById('ai-seed-list');
+        elements.seedStatus = document.getElementById('ai-seed-status');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -505,7 +872,36 @@
             });
         }
 
+        if (elements.enableKelly) {
+            elements.enableKelly.addEventListener('change', handleConfigChange);
+        }
+        if (elements.fixedFraction) {
+            elements.fixedFraction.addEventListener('change', handleConfigChange);
+            elements.fixedFraction.addEventListener('blur', handleConfigChange);
+        }
+        if (elements.probabilityThreshold) {
+            elements.probabilityThreshold.addEventListener('change', handleConfigChange);
+            elements.probabilityThreshold.addEventListener('blur', handleConfigChange);
+        }
+        if (elements.autoThresholdButton) {
+            elements.autoThresholdButton.addEventListener('click', autoTuneThreshold);
+        }
+        if (elements.saveSeedButton) {
+            elements.saveSeedButton.addEventListener('click', handleSaveSeed);
+        }
+        if (elements.loadSeedButton) {
+            elements.loadSeedButton.addEventListener('click', handleLoadSeed);
+        }
+
         updateDatasetSummary(getVisibleData());
+        readConfigFromInputs();
+        refreshSeedOptions();
+        if (elements.seedStatus) {
+            const seeds = loadStoredSeeds();
+            if (seeds.length === 0) {
+                setSeedStatus('尚未儲存種子。', 'info');
+            }
+        }
 
         const bridge = ensureBridge();
         if (bridge) {

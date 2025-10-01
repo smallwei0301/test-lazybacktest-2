@@ -2110,6 +2110,35 @@
                                                         </label>
                                                     </div>
                                                 </label>
+                                                <label class="flex flex-col gap-2 text-xs font-medium md:col-span-2 xl:col-span-2" style="color: var(--foreground);">
+                                                    勝率門檻
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <input id="ai-probability-threshold" type="number" min="0.5" max="1" step="0.01" value="0.50" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <button id="ai-auto-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors border border-border" style="background-color: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary);">一鍵最佳報酬</button>
+                                                    </div>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可透過「一鍵最佳報酬」掃描 50%~100% 找出交易報酬中位數表現最佳的門檻。</span>
+                                                </label>
+                                                <div class="md:col-span-2 xl:col-span-2 flex flex-col gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    <span>亂數種子管理</span>
+                                                    <div class="p-3 border rounded-lg flex flex-col gap-3" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 8%, transparent);">
+                                                        <div class="grid gap-2 md:grid-cols-2">
+                                                            <label class="flex flex-col gap-1 text-xs">
+                                                                <span>目前種子（可選填）</span>
+                                                                <input id="ai-seed-value" type="number" step="1" placeholder="例如 20240923" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px]" style="color: var(--muted-foreground);">填入相同種子可重現模型初始化結果。</span>
+                                                            </label>
+                                                            <div class="flex flex-col gap-2 text-xs">
+                                                                <div class="flex flex-wrap items-center gap-2">
+                                                                    <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors" style="background-color: color-mix(in srgb, var(--secondary) 18%, transparent); color: var(--secondary-foreground);">儲存種子</button>
+                                                                    <button id="ai-load-seed" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors border border-border" style="color: var(--foreground);">載入選取種子</button>
+                                                                </div>
+                                                                <span class="text-[11px]" style="color: var(--muted-foreground);">預設名稱會自動帶入訓練勝率與測試正確率，支援多選排程。</span>
+                                                            </div>
+                                                            <select id="ai-seed-list" multiple size="5" class="md:col-span-2 w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs" style="border-color: var(--border); background-color: var(--input);"></select>
+                                                            <div id="ai-seed-status" class="md:col-span-2 text-[11px]" style="color: var(--muted-foreground);">尚未儲存種子。</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
                                                 <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
@@ -2125,13 +2154,13 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="card">
-                                        <div class="card-header flex flex-col gap-2">
-                                            <h3 class="card-title text-base">模型與交易成果</h3>
-                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、預測信心與採用凱利公式後的資金曲線摘要。</p>
-                                        </div>
-                                        <div class="card-content space-y-4">
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" id="ai-metrics-overview" style="color: var(--foreground);">
+                                        <div class="card">
+                                            <div class="card-header flex flex-col gap-2">
+                                                <h3 class="card-title text-base">模型與交易成果</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、勝率門檻下的交易統計與隔日預測概況。</p>
+                                            </div>
+                                            <div class="card-content space-y-4">
+                                                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" id="ai-metrics-overview" style="color: var(--foreground);">
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">訓練期勝率</p>
                                                     <p id="ai-train-accuracy" class="text-lg font-semibold">—</p>
@@ -2148,22 +2177,20 @@
                                                     <p id="ai-hit-rate" class="text-[11px]" style="color: var(--muted-foreground);">命中率：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
-                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬</p>
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
-                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均每筆：—</p>
+                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均報酬%：—｜交易數：0｜標準差：—</p>
                                                 </div>
                                             </div>
                                             <div class="overflow-x-auto">
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                     <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
                                                         <tr>
-                                                            <th class="px-3 py-2 text-left font-semibold">買進日</th>
-                                                            <th class="px-3 py-2 text-left font-semibold">賣出日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">交易日</th>
                                                             <th class="px-3 py-2 text-right font-semibold">預測上漲機率</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">投入比例</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">交易盈虧</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">累積資金</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">交易報酬%</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody id="ai-trade-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
@@ -2171,6 +2198,7 @@
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p id="ai-trade-summary">尚未生成交易結果。</p>
+                                                <p id="ai-next-day-forecast" class="mt-1">尚未計算隔日預測。</p>
                                             </div>
                                         </div>
                                     </div>
