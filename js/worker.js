@@ -56,6 +56,14 @@ const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+const OVERFIT_SCORE_VERSION = 'LB-OVERFIT-SCORE-20251113A';
+const DEFAULT_OVERFIT_CONFIG = {
+  blockCount: 10,
+  dsrAlpha: 0.05,
+  islandQuantile: 0.75,
+  islandMinCells: 3,
+  weights: { pbo: 0.5, dsr: 0.25, island: 0.25 },
+};
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -839,6 +847,268 @@ function differenceInDays(laterDate, earlierDate) {
   if (!(earlierDate instanceof Date) || Number.isNaN(earlierDate.getTime())) return null;
   const diff = laterDate.getTime() - earlierDate.getTime();
   return Math.floor(diff / DAY_MS);
+}
+
+function normaliseOverfitConfig(config) {
+  const source = typeof config === 'object' && config !== null ? config : {};
+  let blockCount = Number.isInteger(source.blockCount)
+    ? source.blockCount
+    : DEFAULT_OVERFIT_CONFIG.blockCount;
+  if (blockCount < 4) blockCount = 4;
+  if (blockCount % 2 !== 0) blockCount += 1;
+  const dsrAlpha = Number.isFinite(source.dsrAlpha)
+    ? Math.min(Math.max(source.dsrAlpha, 0.0005), 0.5)
+    : DEFAULT_OVERFIT_CONFIG.dsrAlpha;
+  const islandQuantile = Number.isFinite(source.islandQuantile)
+    ? Math.min(Math.max(source.islandQuantile, 0.5), 0.95)
+    : DEFAULT_OVERFIT_CONFIG.islandQuantile;
+  const islandMinCells =
+    Number.isInteger(source.islandMinCells) && source.islandMinCells > 0
+      ? source.islandMinCells
+      : DEFAULT_OVERFIT_CONFIG.islandMinCells;
+  const weightSource =
+    typeof source.weights === 'object' && source.weights !== null
+      ? source.weights
+      : {};
+  const defaultWeights =
+    typeof DEFAULT_OVERFIT_CONFIG.weights === 'object' &&
+    DEFAULT_OVERFIT_CONFIG.weights !== null
+      ? DEFAULT_OVERFIT_CONFIG.weights
+      : { pbo: 0.5, dsr: 0.25, island: 0.25 };
+  const weights = {
+    pbo:
+      Number.isFinite(weightSource.pbo) && weightSource.pbo >= 0
+        ? weightSource.pbo
+        : defaultWeights.pbo,
+    dsr:
+      Number.isFinite(weightSource.dsr) && weightSource.dsr >= 0
+        ? weightSource.dsr
+        : defaultWeights.dsr,
+    island:
+      Number.isFinite(weightSource.island) && weightSource.island >= 0
+        ? weightSource.island
+        : defaultWeights.island,
+  };
+  const sumWeights = weights.pbo + weights.dsr + weights.island;
+  if (sumWeights > 0) {
+    weights.pbo /= sumWeights;
+    weights.dsr /= sumWeights;
+    weights.island /= sumWeights;
+  } else {
+    weights.pbo = defaultWeights.pbo;
+    weights.dsr = defaultWeights.dsr;
+    weights.island = defaultWeights.island;
+  }
+  return {
+    blockCount,
+    dsrAlpha,
+    islandQuantile,
+    islandMinCells,
+    weights,
+  };
+}
+
+function computeOverfitDiagnosticsForSeries({
+  portfolioValues,
+  dates,
+  blockCount,
+  offset = 0,
+}) {
+  const diagnostics = {
+    version: OVERFIT_SCORE_VERSION,
+    blockCount: Number.isInteger(blockCount) ? blockCount : 0,
+    offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
+    totalObservations: Array.isArray(portfolioValues)
+      ? portfolioValues.length
+      : 0,
+    available: false,
+    reason: null,
+    blocks: [],
+    seriesStartDate: null,
+    seriesEndDate: null,
+    generatedAt: new Date().toISOString(),
+  };
+  if (!Array.isArray(portfolioValues) || portfolioValues.length < 2) {
+    diagnostics.reason = 'insufficient_series';
+    diagnostics.totalObservations = Array.isArray(portfolioValues)
+      ? portfolioValues.length
+      : 0;
+    return diagnostics;
+  }
+  const blockTotal = Number.isInteger(blockCount) ? blockCount : 0;
+  if (blockTotal < 2) {
+    diagnostics.reason = 'invalid_block_count';
+    diagnostics.blockCount = blockTotal;
+    return diagnostics;
+  }
+  const effectiveLength = Math.min(
+    portfolioValues.length,
+    Array.isArray(dates) ? dates.length : portfolioValues.length,
+  );
+  diagnostics.totalObservations = effectiveLength;
+  if (effectiveLength <= blockTotal) {
+    diagnostics.reason = 'insufficient_samples';
+    return diagnostics;
+  }
+  const sanitizedValues = new Array(effectiveLength);
+  const sanitizedDates = new Array(effectiveLength);
+  for (let i = 0; i < effectiveLength; i += 1) {
+    const value = portfolioValues[i];
+    sanitizedValues[i] = Number.isFinite(value) ? value : null;
+    if (Array.isArray(dates) && i < dates.length) {
+      sanitizedDates[i] = dates[i] || null;
+    } else {
+      sanitizedDates[i] = null;
+    }
+  }
+  const baseBlockSize = Math.floor(effectiveLength / blockTotal);
+  const remainder = effectiveLength % blockTotal;
+  if (baseBlockSize < 2) {
+    diagnostics.reason = 'block_too_small';
+    return diagnostics;
+  }
+  let cursor = 0;
+  let validBlocks = 0;
+  for (let blockIndex = 0; blockIndex < blockTotal; blockIndex += 1) {
+    const size = baseBlockSize + (blockIndex < remainder ? 1 : 0);
+    const start = cursor;
+    const end = Math.min(cursor + size - 1, effectiveLength - 1);
+    cursor = end + 1;
+    const block = computeOverfitBlockMetrics({
+      values: sanitizedValues,
+      dates: sanitizedDates,
+      start,
+      end,
+      blockIndex,
+      offset: diagnostics.offset,
+    });
+    diagnostics.blocks.push(block);
+    if (block.complete) {
+      validBlocks += 1;
+    }
+  }
+  if (diagnostics.blocks.length > 0) {
+    diagnostics.seriesStartDate = diagnostics.blocks[0].startDate;
+    diagnostics.seriesEndDate =
+      diagnostics.blocks[diagnostics.blocks.length - 1].endDate;
+  }
+  if (validBlocks === blockTotal) {
+    diagnostics.available = true;
+  } else {
+    diagnostics.reason = diagnostics.reason || 'insufficient_valid_blocks';
+  }
+  return diagnostics;
+}
+
+function computeOverfitBlockMetrics({
+  values,
+  dates,
+  start,
+  end,
+  blockIndex,
+  offset,
+}) {
+  const baseOffset = Number.isInteger(offset) && offset >= 0 ? offset : 0;
+  const block = {
+    index: blockIndex,
+    startIndex: baseOffset + start,
+    endIndex: baseOffset + end,
+    startDate: null,
+    endDate: null,
+    bars: end >= start ? end - start + 1 : 0,
+    validPoints: 0,
+    totalReturn: null,
+    annualizedReturn: null,
+    sharpeRatio: null,
+    sampleSize: 0,
+    durationDays: null,
+    complete: false,
+  };
+  if (!Array.isArray(values) || values.length === 0 || start > end) {
+    return block;
+  }
+  const limitEnd = Math.min(end, values.length - 1);
+  const limitStart = Math.max(0, Math.min(start, limitEnd));
+  block.startIndex = baseOffset + limitStart;
+  block.endIndex = baseOffset + limitEnd;
+  let firstValid = -1;
+  let lastValid = -1;
+  for (let i = limitStart; i <= limitEnd; i += 1) {
+    if (Number.isFinite(values[i])) {
+      block.validPoints += 1;
+      if (firstValid === -1) firstValid = i;
+      lastValid = i;
+    }
+  }
+  const startIdxForDate = firstValid !== -1 ? firstValid : limitStart;
+  const endIdxForDate = lastValid !== -1 ? lastValid : limitEnd;
+  if (Array.isArray(dates) && dates.length > 0) {
+    block.startDate =
+      startIdxForDate < dates.length ? dates[startIdxForDate] || null : null;
+    block.endDate =
+      endIdxForDate < dates.length ? dates[endIdxForDate] || null : null;
+  }
+  const startValue = firstValid !== -1 ? values[firstValid] : null;
+  const endValue = lastValid !== -1 ? values[lastValid] : null;
+  if (startValue === null || endValue === null || startValue === 0) {
+    return block;
+  }
+  const growth = endValue / startValue;
+  block.totalReturn = (growth - 1) * 100;
+  const startDateObj =
+    block.startDate && !Number.isNaN(new Date(block.startDate).getTime())
+      ? new Date(block.startDate)
+      : null;
+  const endDateObj =
+    block.endDate && !Number.isNaN(new Date(block.endDate).getTime())
+      ? new Date(block.endDate)
+      : null;
+  if (startDateObj && endDateObj) {
+    const diffDays = Math.max(differenceInDays(endDateObj, startDateObj), 0);
+    block.durationDays = diffDays;
+    const years = diffDays / 365.25;
+    if (Number.isFinite(years) && years > 0) {
+      if (growth > 0 && years >= 1 / 12) {
+        block.annualizedReturn = (Math.pow(growth, 1 / years) - 1) * 100;
+      } else {
+        block.annualizedReturn = block.totalReturn;
+      }
+    } else {
+      block.annualizedReturn = block.totalReturn;
+    }
+  } else {
+    block.annualizedReturn = block.totalReturn;
+  }
+  const returns = [];
+  for (let i = Math.max(firstValid + 1, limitStart + 1); i <= limitEnd; i += 1) {
+    const prev = values[i - 1];
+    const current = values[i];
+    if (Number.isFinite(prev) && Number.isFinite(current) && prev !== 0) {
+      returns.push(current / prev - 1);
+    }
+  }
+  block.sampleSize = returns.length;
+  if (returns.length >= 2) {
+    const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+    const variance =
+      returns.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) /
+      (returns.length - 1);
+    const std = Math.sqrt(Math.max(variance, 0));
+    if (std > 0) {
+      const dailySharpe = mean / std;
+      block.sharpeRatio = dailySharpe * Math.sqrt(252);
+    } else {
+      block.sharpeRatio = 0;
+    }
+  } else {
+    block.sharpeRatio = null;
+  }
+  if (Number.isFinite(block.annualizedReturn)) {
+    block.complete = true;
+  } else {
+    block.annualizedReturn = null;
+  }
+  return block;
 }
 
 function getPrimaryForceSource(marketKey, adjusted) {
@@ -6126,6 +6396,10 @@ function runStrategy(data, params, options = {}) {
   const n = data.length;
   const { forceFinalLiquidation = true, captureFinalState = false } =
     typeof options === "object" && options ? options : {};
+  const overfitConfig = normaliseOverfitConfig(params?.overfitConfig);
+  if (params && typeof params === "object") {
+    params.overfitConfig = overfitConfig;
+  }
   let finalEvaluation = null;
   let finalEvaluationIndex = null;
   let lastValidEvaluation = null;
@@ -6388,6 +6662,7 @@ function runStrategy(data, params, options = {}) {
   warmupSummary.firstValidVolumeGapFromWarmup =
     datasetSummary.firstValidVolumeGapFromWarmup;
 
+  const analysisStartIdx = Math.max(startIdx, Math.max(0, effectiveStartIdx));
   const portfolioVal = Array(n).fill(initialCapital);
   const strategyReturns = Array(n).fill(0);
   let peakCap = initialCapital;
@@ -6435,6 +6710,21 @@ function runStrategy(data, params, options = {}) {
   const shortPl = Array(n).fill(0);
 
   if (startIdx >= n || n < 2) {
+    const sliceStart = Math.min(
+      Math.max(analysisStartIdx, 0),
+      Math.max(portfolioVal.length, 0),
+    );
+    const portfolioSlice = portfolioVal.slice(sliceStart);
+    const dateSlice = dates.slice(sliceStart);
+    const overfitDiagnostics = computeOverfitDiagnosticsForSeries({
+      portfolioValues: portfolioSlice,
+      dates: dateSlice,
+      blockCount: overfitConfig.blockCount,
+      offset: sliceStart,
+    });
+    overfitDiagnostics.config = { ...overfitConfig };
+    overfitDiagnostics.analysisStartIndex = sliceStart;
+    overfitDiagnostics.visibleStartIndex = Math.max(0, effectiveStartIdx);
     return {
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -6481,6 +6771,8 @@ function runStrategy(data, params, options = {}) {
       sharpeHalf1: null,
       annReturnHalf2: null,
       sharpeHalf2: null,
+      portfolioValues: portfolioSlice,
+      overfitDiagnostics,
     };
   }
 
@@ -8819,6 +9111,21 @@ function runStrategy(data, params, options = {}) {
     const trimmedPositionStates = positionStatesFull.slice(visibleStartIdx);
     const trimmedEntryStageStates = sliceArray(longEntryStageStates);
     const trimmedExitStageStates = sliceArray(longExitStageStates);
+    const overfitSliceStart = Math.min(
+      Math.max(analysisStartIdx, 0),
+      Math.max(portfolioVal.length, 0),
+    );
+    const portfolioValuesForOverfit = portfolioVal.slice(overfitSliceStart);
+    const portfolioDatesForOverfit = dates.slice(overfitSliceStart);
+    const overfitDiagnostics = computeOverfitDiagnosticsForSeries({
+      portfolioValues: portfolioValuesForOverfit,
+      dates: portfolioDatesForOverfit,
+      blockCount: overfitConfig.blockCount,
+      offset: overfitSliceStart,
+    });
+    overfitDiagnostics.config = { ...overfitConfig };
+    overfitDiagnostics.analysisStartIndex = overfitSliceStart;
+    overfitDiagnostics.visibleStartIndex = visibleStartIdx;
     const datasetLastDate = dates[lastIdx] || null;
     let finalStateSnapshot = null;
     if (n > 0 && lastIdx >= 0) {
@@ -8947,6 +9254,7 @@ function runStrategy(data, params, options = {}) {
       buyHoldReturns: sliceArray(bhReturnsFull),
       strategyReturns: sliceArray(strategyReturns),
       dates: sliceArray(dates),
+      portfolioValues: portfolioValuesForOverfit,
       chartBuySignals: adjustSignals(buySigs),
         chartSellSignals: adjustSignals(sellSigs),
         chartShortSignals: adjustSignals(shortSigs),
@@ -8984,6 +9292,7 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      overfitDiagnostics,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
