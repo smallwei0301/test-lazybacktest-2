@@ -1,3 +1,10 @@
+## 2025-09-23 — Patch LB-AI-ANNS-20250923A
+- **Scope**: AI 預測 ANN 模組優化，對齊文獻訓練流程與指標欄位。
+- **Changes**:
+  - ANN 訓練改採隨機梯度下降（學習率 0.01）搭配 MSE 損失函式，與論文設定一致。
+  - MACD 輸入擴充為 Diff/Signal/Hist 三欄，並更新標準化輸入維度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
