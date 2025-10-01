@@ -781,6 +781,12 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-08 — Patch LB-AI-ANN-20260108A
+- **Issue recap**: 未載入種子直接啟動 ANNS 預測時，TensorFlow.js 在序列化權重時讀取不到 `dtype` 屬性導致背景訓練中止，UI 顯示「Cannot read properties of undefined (reading 'dtype')」。
+- **Fix**: 於 Worker 端補上訓練/測試樣本數與批次大小防呆，改以命名權重映射序列化並在缺少 dtype 時提前丟出可讀訊息，同時在回放階段檢查舊版種子規格是否遺漏 dtype。版本代碼更新為 `LB-AI-ANN-20260108A`。
+- **Diagnostics**: 本地執行 ANNS 訓練確認可正常完成、產出權重快照並更新預測列表，舊版缺漏 dtype 的種子會以提示要求重新訓練，不再拋出未捕捉錯誤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-01-05 — Patch LB-AI-ANN-20260105A
 - **Issue recap**: ANNS 擴充 MACD Signal/Hist 後，舊版種子載入時 `tf.io.decodeWeights` 取得的權重順序與現行模型不符，導致 `model.setWeights` 嘗試讀取 `undefined.dtype` 而終止。
 - **Fix**: 在 ANN 回放流程比對儲存權重規格與當前模型權重數量、Shape，若不相容即釋放資源並提示使用者重新訓練；同時更新前端版本碼以利追蹤。

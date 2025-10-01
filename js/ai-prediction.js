@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-ANN-20260105A — ANN seed replay compatibility checks for updated feature set.
+// Patch Tag: LB-AI-ANN-20260108A — Stabilise ANN training weight snapshots and replay validation.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-ANN-20260105A';
+    const VERSION_TAG = 'LB-AI-ANN-20260108A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',

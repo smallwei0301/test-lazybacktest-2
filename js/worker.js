@@ -809,13 +809,13 @@ async function handleAITrainANNMessage(message) {
     const trainRatio = annClampTrainRatio(options.trainRatio);
     const { Z, mean, std } = annStandardize(prepared.X);
     const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
-    if (split.Xte.length === 0) {
+    if (split.Xte.length === 0 || split.Xtr.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
     const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
-    const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
+    const batchSize = Math.max(1, Math.min(batchSizeRaw, split.Xtr.length));
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate);
@@ -865,11 +865,31 @@ async function handleAITrainANNMessage(message) {
 
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
 
-      const encodedWeights = await tf.io.encodeWeights(model.getWeights());
+      const rawWeights = model.getWeights();
+      if (!Array.isArray(rawWeights) || rawWeights.length === 0) {
+        throw new Error('ANN 權重生成失敗，請重新執行預測。');
+      }
+      const namedWeights = {};
+      rawWeights.forEach((tensor, index) => {
+        if (!tensor || typeof tensor.dtype !== 'string') {
+          throw new Error('ANN 權重生成失敗，請重新執行預測。');
+        }
+        const baseName = typeof tensor.name === 'string' && tensor.name ? tensor.name : `weight_${index}`;
+        const name = namedWeights[baseName] ? `${baseName}_${index}` : baseName;
+        namedWeights[name] = tensor;
+      });
+
+      const encodedWeights = await tf.io.encodeWeights(namedWeights);
       const weightSnapshot = {
         specs: Array.isArray(encodedWeights.specs) ? encodedWeights.specs : [],
         data: annArrayBufferToBase64(encodedWeights.data),
       };
+
+      rawWeights.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
 
       let forecast = null;
       if (Array.isArray(prepared.forecastFeature)) {
@@ -1028,6 +1048,13 @@ async function handleAIReplayANNMessage(message) {
     const yte = prepared.y.slice(trainCount);
     if (Xte.length === 0) {
       throw new Error('測試樣本不足，無法回放預測。');
+    }
+
+    const specsAreValid = Array.isArray(weightSnapshot.specs)
+      && weightSnapshot.specs.length > 0
+      && weightSnapshot.specs.every((spec) => spec && typeof spec.dtype === 'string');
+    if (!specsAreValid) {
+      throw new Error('儲存的 ANN 權重描述缺少 dtype 資訊，請重新訓練並更新種子。');
     }
 
     const weightBuffer = annBase64ToArrayBuffer(weightSnapshot.data);
