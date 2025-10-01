@@ -2068,14 +2068,31 @@
                                 <div class="space-y-6">
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
-                                            <h3 class="card-title text-base">LSTM 深度學習預測設定</h3>
+                                            <h3 class="card-title text-base">AI 預測模型設定</h3>
                                             <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                依據 Fischer &amp; Krauss (2018)、Sirignano &amp; Cont (2019) 與 Chen et al. (2024) 對金融時間序列的研究設計，採用長短期記憶網路（LSTM）分析收盤價方向。
-                                                資料以 2:1 的比例劃分為訓練與測試集，僅根據當前收盤價之前的資訊進行預測。
+                                                <span id="ai-model-description">預設採用 LSTM 深度學習模型分析收盤價方向，亦可切換至 ANNS（多層感知器）模型，以技術指標組合進行分類預測。</span>
                                             </p>
                                         </div>
                                         <div class="card-content space-y-6">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    預測模型
+                                                    <select id="ai-model-type" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                        <option value="lstm">LSTM 長短期記憶網路</option>
+                                                        <option value="anns">ANNS 多層感知器</option>
+                                                    </select>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">兩種模型皆支援種子儲存與勝率門檻調整，可視需求切換。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    訓練／測試切分
+                                                    <select id="ai-train-ratio" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                        <option value="0.7">70% / 30%</option>
+                                                        <option value="0.75">75% / 25%</option>
+                                                        <option value="0.8" selected>80% / 20%</option>
+                                                        <option value="0.85">85% / 15%</option>
+                                                    </select>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">80% / 20% 為推薦預設，亦可依資料量調整。</span>
+                                                </label>
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                     時間視窗（lookback，日）
                                                     <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
@@ -2112,9 +2129,10 @@
                                                 </label>
                                             </div>
                                             <div class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
-                                                <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
+                                                <div class="flex flex-wrap items-center gap-2 text-xs" style="color: var(--muted-foreground);">
                                                     <span id="ai-dataset-summary">尚未取得資料，請先完成一次主回測。</span>
-                                                    <span class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground);">訓練：測試 = 2 : 1</span>
+                                                    <span id="ai-model-badge" class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary);">模型：LSTM</span>
+                                                    <span id="ai-split-label" class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground);">訓練 80%｜測試 20%</span>
                                                 </div>
                                             </div>
                                             <div class="flex flex-wrap items-center gap-3">
@@ -2179,6 +2197,16 @@
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（交易報酬% 中位數）</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
                                                     <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均報酬%・標準差</p>
+                                                </div>
+                                            </div>
+                                            <div class="grid gap-4 md:grid-cols-2 text-xs" id="ai-extended-panels" style="color: var(--foreground);">
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border);">
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試集混淆矩陣</p>
+                                                    <div id="ai-confusion-matrix" class="mt-2 space-y-1 text-[11px] leading-relaxed" style="color: var(--muted-foreground);">尚未計算。</div>
+                                                </div>
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border);">
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">模型摘要</p>
+                                                    <div id="ai-model-insight" class="mt-2 text-[11px] leading-relaxed" style="color: var(--muted-foreground);">尚未執行 AI 預測。</div>
                                                 </div>
                                             </div>
                                             <div class="overflow-x-auto">
@@ -2278,7 +2306,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
