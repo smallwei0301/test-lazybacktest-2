@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-ANN-TECH-20250712A
 
 // 全局變量
 let stockChart = null;
@@ -20,6 +21,211 @@ const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
 window.cachedDataStore = cachedDataStore;
+const ANN_WORKER_VERSION = 'LB-ANN-TECH-20250712A';
+const annPredictionState = {
+    handlerBound: false,
+    messageHandler: null,
+    buttonBound: false,
+    ui: {
+        button: null,
+        status: null,
+        result: null,
+        accuracy: null,
+        kelly: null,
+        confusion: null,
+        advice: null,
+    },
+};
+annPredictionState.version = ANN_WORKER_VERSION;
+if (typeof window !== 'undefined') {
+    window.lazybacktestAnnVersion = ANN_WORKER_VERSION;
+}
+
+function ensureAnnWorker() {
+    if (typeof window === 'undefined' || typeof Worker === 'undefined') {
+        return null;
+    }
+    if (window.lbWorker instanceof Worker) {
+        return window.lbWorker;
+    }
+    const scriptPath = (typeof workerUrl === 'string' && workerUrl) ? workerUrl : 'js/worker.js';
+    try {
+        window.lbWorker = new Worker(scriptPath);
+        return window.lbWorker;
+    } catch (error) {
+        console.error('[ANN] 建立 worker 失敗：', error);
+        return null;
+    }
+}
+
+function resolveAnnDataset() {
+    if (typeof window !== 'undefined' && Array.isArray(window.cachedStockData) && window.cachedStockData.length > 0) {
+        return window.cachedStockData;
+    }
+    if (Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+        return cachedStockData;
+    }
+    return null;
+}
+
+function formatAnnPercent(value, digits = 2) {
+    if (!Number.isFinite(value)) return '—';
+    return `${(value * 100).toFixed(digits)}%`;
+}
+
+function createAnnMessageHandler(state) {
+    return (event) => {
+        if (!event || !event.data) return;
+        const msg = event.data;
+        if (!msg || typeof msg.type !== 'string') return;
+        const { status, result, accuracy, kelly, confusion, advice } = state.ui;
+        if (msg.type === 'ANN_PROGRESS') {
+            if (status) {
+                const progress = Number.isFinite(msg.payload?.progress)
+                    ? Math.max(0, Math.min(1, msg.payload.progress))
+                    : 0;
+                status.textContent = `訓練中… ${(progress * 100).toFixed(0)}%`;
+            }
+        } else if (msg.type === 'ANN_DONE') {
+            const payload = msg.payload || {};
+            if (accuracy) {
+                accuracy.textContent = `測試集準確率：${formatAnnPercent(payload.acc)}`;
+            }
+            if (kelly) {
+                const kellyValue = Number.isFinite(payload.kelly) ? payload.kelly : 0;
+                kelly.textContent = `凱利資金比率（估算）：${formatAnnPercent(kellyValue)}`;
+            }
+            if (confusion) {
+                const matrix = payload.confusion || {};
+                const TP = Number.isFinite(matrix.TP) ? matrix.TP : 0;
+                const TN = Number.isFinite(matrix.TN) ? matrix.TN : 0;
+                const FP = Number.isFinite(matrix.FP) ? matrix.FP : 0;
+                const FN = Number.isFinite(matrix.FN) ? matrix.FN : 0;
+                confusion.innerHTML = `
+          <div>TP（預測漲且漲）：${TP}</div>
+          <div>TN（預測跌且跌）：${TN}</div>
+          <div>FP（預測漲實際跌）：${FP}</div>
+          <div>FN（預測跌實際漲）：${FN}</div>
+        `;
+            }
+            if (advice) {
+                const acc = Number.isFinite(payload.acc) ? payload.acc : 0;
+                const kellyValue = Number.isFinite(payload.kelly) ? payload.kelly : 0;
+                advice.textContent = (acc > 0.5 && kellyValue > 0)
+                    ? `依據 ANN 預測，建議做多部位 ≈ ${(kellyValue * 100).toFixed(1)}%（可與你的建議模組比對）`
+                    : '暫不具優勢，建議觀望或降低部位。';
+            }
+            if (result) {
+                result.classList.remove('hidden');
+            }
+            if (status) {
+                status.textContent = '完成';
+            }
+        } else if (msg.type === 'ANN_ERROR') {
+            if (status) {
+                status.textContent = `執行失敗：${msg.payload?.message || '未知錯誤'}`;
+            }
+            console.error('ANN_ERROR:', msg.payload);
+        }
+    };
+}
+
+function initAnnPredictionUi() {
+    if (typeof document === 'undefined') return;
+    const button = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resultCard = document.getElementById('ann-result');
+    const accuracyEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const confusionEl = document.getElementById('ann-cm');
+    const adviceEl = document.getElementById('ann-adv');
+
+    annPredictionState.ui = {
+        button,
+        status: statusEl,
+        result: resultCard,
+        accuracy: accuracyEl,
+        kelly: kellyEl,
+        confusion: confusionEl,
+        advice: adviceEl,
+    };
+
+    if (!button) {
+        return;
+    }
+
+    const worker = ensureAnnWorker();
+    if (worker && !annPredictionState.handlerBound) {
+        annPredictionState.messageHandler = createAnnMessageHandler(annPredictionState);
+        worker.addEventListener('message', annPredictionState.messageHandler);
+        annPredictionState.handlerBound = true;
+    }
+
+    if (!annPredictionState.handlerBound && statusEl) {
+        statusEl.textContent = 'Worker 未就緒，請稍後再試。';
+    } else if (annPredictionState.handlerBound && statusEl) {
+        if (!statusEl.textContent || statusEl.textContent === 'Worker 未就緒，請稍後再試。') {
+            statusEl.textContent = '待命中';
+        }
+    }
+
+    if (!annPredictionState.buttonBound) {
+        button.addEventListener('click', () => {
+            const statusTarget = annPredictionState.ui.status;
+            const resultTarget = annPredictionState.ui.result;
+            const accuracyTarget = annPredictionState.ui.accuracy;
+            const kellyTarget = annPredictionState.ui.kelly;
+            const confusionTarget = annPredictionState.ui.confusion;
+            const adviceTarget = annPredictionState.ui.advice;
+
+            const dataset = resolveAnnDataset();
+            if (!Array.isArray(dataset) || dataset.length < 60) {
+                if (statusTarget) {
+                    statusTarget.textContent = '需要先跑一次回測或加長日期區間，至少 60 根 K 線。';
+                }
+                return;
+            }
+
+            if (!ensureAnnWorker()) {
+                if (statusTarget) {
+                    statusTarget.textContent = '瀏覽器未支援或無法建立 Worker。';
+                }
+                return;
+            }
+
+            if (resultTarget) {
+                resultTarget.classList.add('hidden');
+            }
+            if (accuracyTarget) accuracyTarget.textContent = '';
+            if (kellyTarget) kellyTarget.textContent = '';
+            if (confusionTarget) confusionTarget.innerHTML = '';
+            if (adviceTarget) adviceTarget.textContent = '';
+            if (statusTarget) statusTarget.textContent = '準備資料…';
+
+            try {
+                window.lbWorker.postMessage({
+                    type: 'ANN_RUN',
+                    payload: {
+                        rows: dataset,
+                        options: {
+                            trainRatio: 0.8,
+                            epochs: 60,
+                            batchSize: 32,
+                        },
+                    },
+                });
+                if (statusTarget) {
+                    statusTarget.textContent = '訓練中…';
+                }
+            } catch (error) {
+                if (statusTarget) {
+                    statusTarget.textContent = `送交 worker 失敗：${error.message}`;
+                }
+            }
+        });
+        annPredictionState.buttonBound = true;
+    }
+}
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
 let sortState = { key: 'annualizedReturn', direction: 'desc' };
@@ -2712,7 +2918,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        // 初始化 ANN 預測操作面板
+        initAnnPredictionUi();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
