@@ -60,6 +60,19 @@ const ensureAIBridge = () => {
     return window.lazybacktestAIBridge;
 };
 
+function syncLastFetchSettings(settings) {
+    if (settings && typeof settings === 'object') {
+        lastFetchSettings = { ...settings };
+    } else {
+        lastFetchSettings = null;
+    }
+    const bridge = ensureAIBridge();
+    if (bridge) {
+        bridge.getLastFetchSettings = () => (lastFetchSettings ? { ...lastFetchSettings } : null);
+    }
+    return lastFetchSettings;
+}
+
 function setVisibleStockData(data) {
     visibleStockData = Array.isArray(data) ? data : [];
     const bridge = ensureAIBridge();
@@ -88,6 +101,8 @@ function setVisibleStockData(data) {
 }
 
 setVisibleStockData(visibleStockData);
+
+syncLastFetchSettings(lastFetchSettings);
 
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
@@ -4686,7 +4701,7 @@ function runBacktestInternal() {
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             setVisibleStockData(extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate));
             cachedStockData = cachedEntry.data;
-            lastFetchSettings = { ...curSettings };
+            syncLastFetchSettings({ ...curSettings });
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
@@ -4839,7 +4854,7 @@ function runBacktestInternal() {
                      }, cacheEntry.data);
                     setVisibleStockData(extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate));
                     cachedStockData = mergedData;
-                     lastFetchSettings = { ...curSettings };
+                    syncLastFetchSettings({ ...curSettings });
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
@@ -4929,7 +4944,7 @@ function runBacktestInternal() {
                     }, updatedEntry.data);
                     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
                     cachedStockData = updatedEntry.data;
-                    lastFetchSettings = { ...curSettings };
+                    syncLastFetchSettings({ ...curSettings });
                     refreshPriceInspectorControls();
                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
@@ -8157,7 +8172,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     cachedDataStore.set(cacheKey, updatedEntry);
     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
     cachedStockData = updatedEntry.data;
-    lastFetchSettings = { ...curSettings };
+    syncLastFetchSettings({ ...curSettings });
     refreshPriceInspectorControls();
     updatePriceDebug(updatedEntry);
     return updatedEntry;
@@ -8753,7 +8768,7 @@ function resetSettings() {
     updateStrategyParams('shortExit');
     cachedStockData = null;
     cachedDataStore.clear();
-    lastFetchSettings = null;
+    syncLastFetchSettings(null);
     refreshPriceInspectorControls();
     clearPreviousResults();
     showSuccess("設定已重置");

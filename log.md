@@ -781,6 +781,12 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-30 — Patch LB-AI-ANN-20251230B
+- **Issue recap**: 已儲存的 ANNS 種子在隔日載入時無法判斷 UI 價格表是否已含最新交易日，導致每次皆需補抓資料或忽略表格現有資料；回放後也未集中管理權重與標準化快照，難以確保預測值重現。
+- **Fix**: 新增表格快照檢查，若已含當日交易資料則直接以表格資料與 ANN 權重回放，否則才向 API 補抓缺口天數；回放流程統一透過 `runAnnReplayWithRows` 套用儲存的權重、標準化統計與訓練窗格，確保歷史預測機率一致。
+- **Diagnostics**: 本地載入含差距的 ANN 種子時，可看到狀態列先提示使用表格或補抓資料，再次回放後隔日預測與交易表皆與儲存時相同；若資料不足或 API 無新資料，會顯示對應提示而不覆蓋原結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-22 — Patch LB-AI-SEED-20251222A
 - **Issue recap**: AI 種子載入後僅復原門檻與風險參數，交易統計、隔日預測與訓練指標需重新跑模型才會一致；預設命名仍顯示「測試勝率」，與近期文件用語不符。
 - **Fix**: 種子儲存時一併快照訓練指標、交易紀錄與隔日預測，載入時立即套用並確保同模型重算結果與儲存時一致；同步調整預設命名與說明文案為「測試期預測正確率／交易報酬率」。
