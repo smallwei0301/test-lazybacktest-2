@@ -3,7 +3,7 @@ importScripts('shared-lookback.js');
 importScripts('config.js');
 try {
   if (typeof tf === 'undefined') {
-    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js');
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
   }
 } catch (error) {
   console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
@@ -32,6 +32,7 @@ try {
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
+// Patch Tag: LB-AI-MULTI-20251205A
 
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
@@ -51,20 +52,35 @@ const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
 
-function aiPostProgress(id, message) {
+function aiPostProgress(id, message, model = 'lstm') {
   if (!id) return;
-  self.postMessage({ type: 'ai-train-lstm-progress', id, message });
+  self.postMessage({ type: 'ai-train-progress', id, message, model });
+  if (model === 'lstm') {
+    self.postMessage({ type: 'ai-train-lstm-progress', id, message });
+  } else if (model === 'anns') {
+    self.postMessage({ type: 'ai-train-anns-progress', id, message });
+  }
 }
 
-function aiPostError(id, error) {
+function aiPostError(id, error, model = 'lstm') {
   if (!id) return;
   const message = error instanceof Error ? error.message : String(error || 'AI Worker 發生未知錯誤');
-  self.postMessage({ type: 'ai-train-lstm-error', id, error: { message } });
+  self.postMessage({ type: 'ai-train-error', id, error: { message }, model });
+  if (model === 'lstm') {
+    self.postMessage({ type: 'ai-train-lstm-error', id, error: { message } });
+  } else if (model === 'anns') {
+    self.postMessage({ type: 'ai-train-anns-error', id, error: { message } });
+  }
 }
 
-function aiPostResult(id, data) {
+function aiPostResult(id, data, model = 'lstm') {
   if (!id) return;
-  self.postMessage({ type: 'ai-train-lstm-result', id, data });
+  self.postMessage({ type: 'ai-train-result', id, data, model });
+  if (model === 'lstm') {
+    self.postMessage({ type: 'ai-train-lstm-result', id, data });
+  } else if (model === 'anns') {
+    self.postMessage({ type: 'ai-train-anns-result', id, data });
+  }
 }
 
 function aiComputeNormalisation(sequences, trainSize) {
@@ -174,7 +190,7 @@ async function handleAITrainLSTMMessage(message) {
 
       model = aiCreateModel(lookback, learningRate);
 
-      aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
+      aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`, 'lstm');
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
@@ -185,7 +201,7 @@ async function handleAITrainLSTMMessage(message) {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
             const accValue = logs.acc ?? logs.accuracy;
             const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
-            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`, 'lstm');
           },
         },
       });
@@ -214,11 +230,17 @@ async function handleAITrainLSTMMessage(message) {
 
       const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
       let correctPredictions = 0;
+      const confusion = { TP: 0, TN: 0, FP: 0, FN: 0 };
       for (let i = 0; i < predictionValues.length; i += 1) {
         const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
         if (predictedLabel === testLabels[i]) {
           correctPredictions += 1;
         }
+        const actualLabel = testLabels[i];
+        if (actualLabel === 1 && predictedLabel === 1) confusion.TP += 1;
+        else if (actualLabel === 0 && predictedLabel === 0) confusion.TN += 1;
+        else if (actualLabel === 0 && predictedLabel === 1) confusion.FP += 1;
+        else if (actualLabel === 1 && predictedLabel === 0) confusion.FN += 1;
       }
       const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
       const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
@@ -252,6 +274,8 @@ async function handleAITrainLSTMMessage(message) {
         testAccuracy: resolvedTestAccuracy,
         testLoss,
         totalPredictions: predictionValues.length,
+        confusion,
+        trainRatio: totalSamples > 0 ? boundedTrainSize / totalSamples : null,
       };
 
       const predictionsPayload = {
@@ -268,10 +292,15 @@ async function handleAITrainLSTMMessage(message) {
           epochs,
           batchSize,
           learningRate,
+          trainRatio: totalSamples > 0 ? boundedTrainSize / totalSamples : undefined,
+          modelType: 'lstm',
         },
+        modelType: 'lstm',
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const finalMessage = `完成：訓練勝率 ${Number.isFinite(finalTrainAccuracy) ? (finalTrainAccuracy * 100).toFixed(2) : '—'}%，測試正確率 ${Number.isFinite(resolvedTestAccuracy) ? (resolvedTestAccuracy * 100).toFixed(2) : '—'}%。`;
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, finalMessage, modelType: 'lstm' }, 'lstm');
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {
@@ -283,7 +312,423 @@ async function handleAITrainLSTMMessage(message) {
       }
     }
   } catch (error) {
-    aiPostError(id, error);
+    aiPostError(id, error, 'lstm');
+  }
+}
+
+// --- ANN 指標計算與訓練流程 ---
+
+function annSMA(values, n) {
+  const out = Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function annWMA(values, n) {
+  const out = Array(values.length).fill(null);
+  const denom = (n * (n + 1)) / 2;
+  for (let i = n - 1; i < values.length; i += 1) {
+    let num = 0;
+    for (let k = 0; k < n; k += 1) {
+      num += (n - k) * values[i - k];
+    }
+    out[i] = num / denom;
+  }
+  return out;
+}
+
+function annEMA(values, n) {
+  const out = Array(values.length).fill(null);
+  const k = 2 / (n + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i];
+    if (prev == null) {
+      out[i] = v;
+    } else {
+      out[i] = prev + k * (v - prev);
+    }
+    prev = out[i];
+  }
+  return out;
+}
+
+function annMomentum(values, n) {
+  return values.map((value, index) => (index >= n ? value - values[index - n] : null));
+}
+
+function annHighest(values, n) {
+  const out = Array(values.length).fill(null);
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - n) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] <= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= n - 1) out[i] = values[deque[0]];
+  }
+  return out;
+}
+
+function annLowest(values, n) {
+  const out = Array(values.length).fill(null);
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - n) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] >= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= n - 1) out[i] = values[deque[0]];
+  }
+  return out;
+}
+
+function annStochasticKD(high, low, close, nK = 14, nD = 3) {
+  const highestVals = annHighest(high, nK);
+  const lowestVals = annLowest(low, nK);
+  const K = close.map((c, i) => {
+    if (i < nK - 1) return null;
+    const denom = highestVals[i] - lowestVals[i];
+    if (!Number.isFinite(denom) || denom === 0) return null;
+    return ((c - lowestVals[i]) / denom) * 100;
+  });
+  const sanitizedK = K.map((value) => (Number.isFinite(value) ? value : 0));
+  const D = annSMA(sanitizedK, nD).map((value, index) => (index >= nK - 1 ? value : null));
+  return { K, D };
+}
+
+function annRSI(close, n = 14) {
+  const out = Array(close.length).fill(null);
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i < close.length; i += 1) {
+    const change = close[i] - close[i - 1];
+    const up = Math.max(change, 0);
+    const down = Math.max(-change, 0);
+    if (i <= n) {
+      gain += up;
+      loss += down;
+      if (i === n) {
+        const rs = (gain / n) / ((loss / n) || 1e-12);
+        out[i] = 100 - (100 / (1 + rs));
+      }
+    } else {
+      gain = (gain * (n - 1) + up) / n;
+      loss = (loss * (n - 1) + down) / n;
+      const rs = gain / (loss || 1e-12);
+      out[i] = 100 - (100 / (1 + rs));
+    }
+  }
+  return out;
+}
+
+function annMACD(close, fast = 12, slow = 26, signal = 9) {
+  const emaFast = annEMA(close, fast);
+  const emaSlow = annEMA(close, slow);
+  const diff = close.map((_, i) => (emaFast[i] != null && emaSlow[i] != null ? emaFast[i] - emaSlow[i] : null));
+  const sanitizedDiff = diff.map((value) => (Number.isFinite(value) ? value : 0));
+  const signalLine = annEMA(sanitizedDiff, signal);
+  const hist = diff.map((value, index) => (value == null || signalLine[index] == null ? null : value - signalLine[index]));
+  return { diff, signal: signalLine, hist };
+}
+
+function annCCI(high, low, close, n = 20) {
+  const typicalPrice = close.map((c, i) => (high[i] + low[i] + c) / 3);
+  const smaTp = annSMA(typicalPrice, n);
+  const out = Array(close.length).fill(null);
+  for (let i = n - 1; i < close.length; i += 1) {
+    let md = 0;
+    for (let k = 0; k < n; k += 1) {
+      md += Math.abs(typicalPrice[i - k] - smaTp[i]);
+    }
+    md /= n;
+    out[i] = (typicalPrice[i] - smaTp[i]) / (0.015 * (md || 1e-12));
+  }
+  return out;
+}
+
+function annWilliamsR(high, low, close, n = 14) {
+  const highestVals = annHighest(high, n);
+  const lowestVals = annLowest(low, n);
+  return close.map((c, i) => {
+    if (i < n - 1 || highestVals[i] == null || lowestVals[i] == null) return null;
+    const denom = highestVals[i] - lowestVals[i] || 1e-12;
+    return ((highestVals[i] - c) / denom) * 100;
+  });
+}
+
+function buildAnnFeatureDataset(rows) {
+  if (!Array.isArray(rows)) {
+    return {
+      features: [],
+      labels: [],
+      returns: [],
+      meta: [],
+      idxMap: [],
+      forecastFeature: null,
+      forecastMeta: null,
+      lastDate: null,
+    };
+  }
+
+  const close = rows.map((row) => Number(row?.close ?? row?.adjustedClose ?? row?.adjClose ?? row?.rawClose ?? NaN));
+  const high = rows.map((row, index) => Number(row?.high ?? close[index] ?? NaN));
+  const low = rows.map((row, index) => Number(row?.low ?? close[index] ?? NaN));
+
+  const MA = annSMA(close, 30);
+  const WMA = annWMA(close, 15);
+  const EMA = annEMA(close, 12);
+  const MOM = annMomentum(close, 10);
+  const { K, D } = annStochasticKD(high, low, close, 14, 3);
+  const RSI = annRSI(close, 14);
+  const macd = annMACD(close, 12, 26, 9);
+  const CCI = annCCI(high, low, close, 20);
+  const WR = annWilliamsR(high, low, close, 14);
+
+  const features = [];
+  const labels = [];
+  const returns = [];
+  const meta = [];
+  const idxMap = [];
+  let forecastFeature = null;
+  let forecastMeta = null;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const feats = [MA[i], WMA[i], EMA[i], MOM[i], K[i], D[i], RSI[i], macd.diff[i], CCI[i], WR[i]];
+    if (!feats.every((value) => Number.isFinite(value))) {
+      continue;
+    }
+    if (i < rows.length - 1 && Number.isFinite(close[i]) && Number.isFinite(close[i + 1]) && close[i] > 0) {
+      const nextChange = (close[i + 1] - close[i]) / close[i];
+      features.push(feats);
+      labels.push(nextChange > 0 ? 1 : 0);
+      returns.push(nextChange);
+      meta.push({
+        buyDate: rows[i]?.date || null,
+        sellDate: rows[i + 1]?.date || null,
+        buyClose: close[i],
+        sellClose: close[i + 1],
+        actualReturn: nextChange,
+      });
+      idxMap.push(i);
+    }
+    if (i === rows.length - 1) {
+      forecastFeature = feats;
+      forecastMeta = {
+        referenceDate: rows[i]?.date || null,
+        close: close[i],
+      };
+    }
+  }
+
+  const lastDate = rows.length > 0 ? rows[rows.length - 1]?.date || null : null;
+
+  return { features, labels, returns, meta, idxMap, forecastFeature, forecastMeta, lastDate };
+}
+
+function standardizeAnnFeatures(features) {
+  if (!Array.isArray(features) || features.length === 0) {
+    return { data: [], mean: [], std: [] };
+  }
+  const rows = features.length;
+  const cols = features[0].length;
+  const mean = Array(cols).fill(0);
+  const std = Array(cols).fill(0);
+  for (let c = 0; c < cols; c += 1) {
+    for (let r = 0; r < rows; r += 1) {
+      mean[c] += features[r][c];
+    }
+    mean[c] /= rows;
+    for (let r = 0; r < rows; r += 1) {
+      std[c] += (features[r][c] - mean[c]) ** 2;
+    }
+    std[c] = Math.sqrt(std[c] / Math.max(1, rows - 1)) || 1;
+  }
+  const data = features.map((row) => row.map((value, index) => (value - mean[index]) / std[index]));
+  return { data, mean, std };
+}
+
+function splitAnnTrainTest(Z, labels, meta, returns, idxMap, ratio) {
+  const n = Z.length;
+  const rawTrain = Math.floor(n * ratio);
+  const trainCount = Math.min(Math.max(rawTrain, 1), n - 1);
+  return {
+    trainX: Z.slice(0, trainCount),
+    trainY: labels.slice(0, trainCount),
+    trainReturns: returns.slice(0, trainCount),
+    testX: Z.slice(trainCount),
+    testY: labels.slice(trainCount),
+    testMeta: meta.slice(trainCount),
+    testReturns: returns.slice(trainCount),
+    testIdx: idxMap.slice(trainCount),
+    trainCount,
+  };
+}
+
+function buildAnnModel(inputDim) {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
+  model.add(tf.layers.dropout({ rate: 0.2 }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dropout({ rate: 0.1 }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.adam(0.01), loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  return model;
+}
+
+async function handleAITrainANNMessage(message) {
+  const id = message?.id;
+  if (!id) return;
+  const payload = message?.payload || {};
+  try {
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (rows.length < 60) {
+      throw new Error('資料不足（至少 60 根 K 線）');
+    }
+    const options = payload.options || {};
+    const trainRatio = Number.isFinite(options.trainRatio) ? Math.min(Math.max(options.trainRatio, 0.6), 0.95) : 0.8;
+    const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
+    const requestedBatchSize = Math.max(8, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
+    const lookback = Math.max(5, Math.round(Number.isFinite(options.lookback) ? options.lookback : 20));
+
+    aiPostProgress(id, '準備資料…', 'anns');
+
+    const dataset = buildAnnFeatureDataset(rows);
+    if (dataset.features.length < 45) {
+      throw new Error(`有效樣本不足（需至少 45 筆，目前 ${dataset.features.length} 筆）`);
+    }
+
+    const standardized = standardizeAnnFeatures(dataset.features);
+    const splits = splitAnnTrainTest(standardized.data, dataset.labels, dataset.meta, dataset.returns, dataset.idxMap, trainRatio);
+    if (splits.trainX.length <= 0 || splits.testX.length <= 0) {
+      throw new Error('訓練/測試樣本不足，請延長資料範圍。');
+    }
+
+    const batchSize = Math.min(requestedBatchSize, splits.trainX.length);
+    const trainTensorX = tf.tensor2d(splits.trainX);
+    const trainTensorY = tf.tensor2d(splits.trainY, [splits.trainY.length, 1]);
+    const testTensorX = tf.tensor2d(splits.testX);
+    const testTensorY = tf.tensor2d(splits.testY, [splits.testY.length, 1]);
+    const tensorsToDispose = [trainTensorX, trainTensorY, testTensorX, testTensorY];
+
+    let model = null;
+    try {
+      model = buildAnnModel(splits.trainX[0].length);
+      aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`, 'anns');
+      const history = await model.fit(trainTensorX, trainTensorY, {
+        epochs,
+        batchSize,
+        validationSplit: splits.trainX.length > 40 ? 0.2 : 0.15,
+        shuffle: true,
+        callbacks: {
+          onEpochEnd: (epoch, logs) => {
+            const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
+            const accValue = logs.acc ?? logs.accuracy;
+            const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`, 'anns');
+          },
+        },
+      });
+
+      const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
+      const finalTrainAccuracy = accuracyKey
+        ? history.history[accuracyKey][history.history[accuracyKey].length - 1]
+        : NaN;
+      const finalTrainLoss = history.history.loss?.[history.history.loss.length - 1] ?? NaN;
+
+      const evalOutput = model.evaluate(testTensorX, testTensorY);
+      const evalArray = Array.isArray(evalOutput) ? evalOutput : [evalOutput];
+      const evalValues = [];
+      for (let i = 0; i < evalArray.length; i += 1) {
+        const tensor = evalArray[i];
+        const data = await tensor.data();
+        evalValues.push(data[0]);
+        tensor.dispose();
+      }
+      const testLoss = evalValues[0] ?? NaN;
+      const testAccuracy = evalValues[1] ?? NaN;
+
+      const predictionTensor = model.predict(testTensorX);
+      const predictionValues = Array.from(await predictionTensor.data());
+      predictionTensor.dispose();
+
+      const confusion = { TP: 0, TN: 0, FP: 0, FN: 0 };
+      let correct = 0;
+      for (let i = 0; i < predictionValues.length; i += 1) {
+        const predicted = predictionValues[i] >= 0.5 ? 1 : 0;
+        const actual = splits.testY[i];
+        if (predicted === actual) correct += 1;
+        if (actual === 1 && predicted === 1) confusion.TP += 1;
+        else if (actual === 0 && predicted === 0) confusion.TN += 1;
+        else if (actual === 0 && predicted === 1) confusion.FP += 1;
+        else if (actual === 1 && predicted === 0) confusion.FN += 1;
+      }
+      const manualAccuracy = predictionValues.length > 0 ? correct / predictionValues.length : 0;
+      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+
+      const trainingOdds = aiComputeTrainingOdds(dataset.returns, splits.trainCount);
+
+      let nextDayForecast = null;
+      if (Array.isArray(dataset.forecastFeature) && dataset.forecastFeature.length === standardized.mean.length) {
+        const normalizedForecast = dataset.forecastFeature.map((value, index) => (value - standardized.mean[index]) / standardized.std[index]);
+        const forecastTensor = tf.tensor2d([normalizedForecast]);
+        const forecastPrediction = model.predict(forecastTensor);
+        const forecastValues = Array.from(await forecastPrediction.data());
+        forecastPrediction.dispose();
+        forecastTensor.dispose();
+        nextDayForecast = {
+          probability: forecastValues[0],
+          referenceDate: dataset.forecastMeta?.referenceDate || dataset.lastDate,
+        };
+      }
+
+      const trainingMetrics = {
+        trainAccuracy: finalTrainAccuracy,
+        trainLoss: finalTrainLoss,
+        testAccuracy: resolvedTestAccuracy,
+        testLoss,
+        totalPredictions: predictionValues.length,
+        confusion,
+        trainRatio,
+      };
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: splits.testMeta,
+        returns: splits.testReturns,
+        trainingOdds,
+        forecast: nextDayForecast,
+        datasetLastDate: dataset.lastDate,
+        hyperparameters: {
+          epochs,
+          batchSize,
+          trainRatio,
+          lookback,
+          featureSet: 'technical-indicators',
+          modelType: 'anns',
+        },
+        modelType: 'anns',
+      };
+
+      const finalMessage = `完成：測試正確率 ${Number.isFinite(resolvedTestAccuracy) ? (resolvedTestAccuracy * 100).toFixed(2) : '—'}%，樣本 ${predictionValues.length} 筆。`;
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, finalMessage, modelType: 'anns' }, 'anns');
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
+    }
+  } catch (error) {
+    aiPostError(id, error, 'anns');
   }
 }
 
@@ -9512,6 +9957,10 @@ self.onmessage = async function (e) {
   const { type } = e.data || {};
   if (type === 'ai-train-lstm') {
     await handleAITrainLSTMMessage(e.data);
+    return;
+  }
+  if (type === 'ai-train-anns') {
+    await handleAITrainANNMessage(e.data);
     return;
   }
   const {

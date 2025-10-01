@@ -1,3 +1,11 @@
+## 2025-12-05 — Patch LB-AI-MULTI-20251205A
+- **Scope**: AI 預測分頁導入多模型選擇，新增 ANNS 技術指標模型與訓練/測試比例控制，整合混淆矩陣與模型摘要資訊。
+- **Features**:
+  - 於設定卡新增模型下拉（LSTM／ANNS）與訓練/測試比例選擇（預設 80%/20%），UI 同步更新描述、徽章與資料摘要。
+  - LSTM 與 ANNS 共用勝率門檻、凱利公式與種子儲存機制，模型輸出增列混淆矩陣、凱利建議與切分比例摘要。
+  - Worker 新增 ANNS 指標特徵工程與訓練流程，統一背景進度/結果事件格式並回傳混淆矩陣、預測機率與下一日預測。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-LSTM-20250929B
+// Patch Tag: LB-AI-MULTI-20251205A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-LSTM-20250929B';
+    const VERSION_TAG = 'LB-AI-MULTI-20251205A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const state = {
         running: false,
@@ -12,6 +12,23 @@
         trainingMetrics: null,
         currentTrades: [],
         lastSeedDefault: '',
+        modelType: 'lstm',
+        trainRatio: 0.8,
+    };
+
+    const MODEL_TYPES = {
+        LSTM: 'lstm',
+        ANNS: 'anns',
+    };
+
+    const MODEL_LABELS = {
+        lstm: 'LSTM',
+        anns: 'ANNS',
+    };
+
+    const MODEL_DESCRIPTIONS = {
+        lstm: '採用長短期記憶網路（LSTM）分析收盤價序列，強調時間相關性與上下文資訊。',
+        anns: '採用多層感知器（ANN）搭配技術指標特徵，提供快速且易擴充的漲跌分類預測。',
     };
 
     let aiWorker = null;
@@ -20,6 +37,11 @@
 
     const elements = {
         datasetSummary: null,
+        modelType: null,
+        modelDescription: null,
+        trainRatio: null,
+        modelBadge: null,
+        splitLabel: null,
         status: null,
         runButton: null,
         lookback: null,
@@ -38,6 +60,8 @@
         hitRate: null,
         totalReturn: null,
         averageProfit: null,
+        confusionMatrix: null,
+        modelInsight: null,
         tradeTableBody: null,
         tradeSummary: null,
         nextDayForecast: null,
@@ -146,16 +170,27 @@
         if (!elements.savedSeedList) return;
         const seeds = loadStoredSeeds();
         const options = seeds
-            .map((seed) => `<option value="${escapeHTML(seed.id)}">${escapeHTML(seed.name || '未命名種子')}</option>`)
+            .map((seed) => {
+                const label = MODEL_LABELS[seed?.modelType] || MODEL_LABELS.lstm;
+                const name = seed?.name || '未命名種子';
+                return `<option value="${escapeHTML(seed.id)}">[${escapeHTML(label)}] ${escapeHTML(name)}</option>`;
+            })
             .join('');
         elements.savedSeedList.innerHTML = options;
     };
 
     const buildSeedDefaultName = (summary) => {
         if (!summary) return '';
+        const label = MODEL_LABELS[summary?.modelType] || MODEL_LABELS.lstm;
         const trainText = formatPercent(summary.trainAccuracy, 1);
         const testText = formatPercent(summary.testAccuracy, 1);
-        return `訓練勝率${trainText}｜測試正確率${testText}`;
+        const trainRatioPercent = Number.isFinite(summary?.trainRatio)
+            ? Math.round(summary.trainRatio * 100)
+            : null;
+        const ratioText = Number.isFinite(trainRatioPercent)
+            ? `｜切分${trainRatioPercent}%/${100 - trainRatioPercent}%`
+            : '';
+        return `[${label}] 訓練勝率${trainText}｜測試正確率${testText}${ratioText}`;
     };
 
     const applySeedDefaultName = (summary) => {
@@ -172,6 +207,55 @@
         if (!elements.status) return;
         elements.status.textContent = message;
         elements.status.style.color = colorMap[type] || colorMap.info;
+    };
+
+    const sanitizeTrainRatio = (value) => {
+        if (!Number.isFinite(value)) return state.trainRatio || 0.8;
+        return Math.min(Math.max(value, 0.6), 0.95);
+    };
+
+    const refreshModelUI = () => {
+        const model = state.modelType || MODEL_TYPES.LSTM;
+        const label = MODEL_LABELS[model] || MODEL_LABELS.lstm;
+        if (elements.modelType && elements.modelType.value !== model) {
+            elements.modelType.value = model;
+        }
+        if (elements.modelDescription) {
+            elements.modelDescription.textContent = MODEL_DESCRIPTIONS[model] || '';
+        }
+        if (elements.modelBadge) {
+            elements.modelBadge.textContent = `模型：${label}`;
+        }
+        const trainPercent = Math.round((state.trainRatio || 0.8) * 100);
+        const testPercent = Math.max(0, 100 - trainPercent);
+        if (elements.splitLabel) {
+            elements.splitLabel.textContent = `訓練 ${trainPercent}%｜測試 ${testPercent}%`;
+        }
+    };
+
+    const setModelType = (model) => {
+        const normalized = model === MODEL_TYPES.ANNS ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM;
+        state.modelType = normalized;
+        refreshModelUI();
+        return normalized;
+    };
+
+    const setTrainRatio = (value) => {
+        const sanitized = sanitizeTrainRatio(value);
+        state.trainRatio = sanitized;
+        if (elements.trainRatio) {
+            elements.trainRatio.value = sanitized.toString();
+        }
+        refreshModelUI();
+        return sanitized;
+    };
+
+    const parseTrainRatio = () => {
+        if (!elements.trainRatio) {
+            return setTrainRatio(state.trainRatio || 0.8);
+        }
+        const raw = parseFloat(elements.trainRatio.value);
+        return setTrainRatio(Number.isFinite(raw) ? raw : state.trainRatio || 0.8);
     };
 
     const resolveAIWorkerUrl = () => {
@@ -206,10 +290,15 @@
 
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
-        const { type, id, data, error, message } = event.data;
-        if (type === 'ai-train-lstm-progress') {
+        const { type, id, data, error, message, model } = event.data;
+        const isProgressMessage = type === 'ai-train-progress'
+            || type === 'ai-train-lstm-progress'
+            || type === 'ai-train-anns-progress';
+        if (isProgressMessage) {
             if (typeof message === 'string' && message) {
-                showStatus(message, 'info');
+                const inferredModel = model || (type.includes('anns') ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
+                const label = MODEL_LABELS[inferredModel] || MODEL_LABELS.lstm;
+                showStatus(`[${label}] ${message}`, 'info');
             }
             return;
         }
@@ -217,10 +306,12 @@
             return;
         }
         const pending = aiWorkerRequests.get(id);
-        if (type === 'ai-train-lstm-result') {
+        const inferredModel = model
+            || (type && type.includes('anns') ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
+        if (type === 'ai-train-result' || type === 'ai-train-lstm-result' || type === 'ai-train-anns-result') {
             aiWorkerRequests.delete(id);
-            pending.resolve(data || {});
-        } else if (type === 'ai-train-lstm-error') {
+            pending.resolve({ ...(data || {}), modelType: inferredModel });
+        } else if (type === 'ai-train-error' || type === 'ai-train-lstm-error' || type === 'ai-train-anns-error') {
             aiWorkerRequests.delete(id);
             const reason = error && typeof error.message === 'string'
                 ? new Error(error.message)
@@ -261,16 +352,19 @@
         return aiWorker;
     };
 
-    const sendAIWorkerTrainingTask = (payload) => {
+    const sendAIWorkerTrainingTask = (payload, context = {}) => {
         const workerInstance = ensureAIWorker();
         const requestId = `ai-train-${Date.now()}-${aiWorkerSequence += 1}`;
+        const modelType = context.modelType || state.modelType || MODEL_TYPES.LSTM;
+        const messageType = modelType === MODEL_TYPES.ANNS ? 'ai-train-anns' : 'ai-train-lstm';
+        const outboundPayload = { ...payload, modelType };
         return new Promise((resolve, reject) => {
             aiWorkerRequests.set(requestId, { resolve, reject });
             try {
                 workerInstance.postMessage({
-                    type: 'ai-train-lstm',
+                    type: messageType,
                     id: requestId,
-                    payload,
+                    payload: outboundPayload,
                 });
             } catch (error) {
                 aiWorkerRequests.delete(requestId);
@@ -392,6 +486,7 @@
 
     const updateDatasetSummary = (rows) => {
         if (!elements.datasetSummary) return;
+        refreshModelUI();
         const data = Array.isArray(rows) ? rows : [];
         if (data.length === 0) {
             elements.datasetSummary.textContent = '尚未取得資料，請先完成一次主回測。';
@@ -481,6 +576,35 @@
             const stdText = formatPercent(summary.tradeReturnStdDev, 2);
             elements.averageProfit.textContent = `平均報酬%：${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數：${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}｜標準差：${stdText}`;
         }
+        if (elements.confusionMatrix) {
+            if (summary.confusion) {
+                const { TP = 0, TN = 0, FP = 0, FN = 0 } = summary.confusion;
+                elements.confusionMatrix.innerHTML = `
+                    <div>TP（預測漲且漲）：${TP}</div>
+                    <div>TN（預測跌且跌）：${TN}</div>
+                    <div>FP（預測漲實際跌）：${FP}</div>
+                    <div>FN（預測跌實際漲）：${FN}</div>
+                `;
+            } else {
+                elements.confusionMatrix.textContent = '尚未計算。';
+            }
+        }
+        if (elements.modelInsight) {
+            const modelLabel = MODEL_LABELS[summary.modelType] || MODEL_LABELS.lstm;
+            const trainPercent = Number.isFinite(summary.trainRatio)
+                ? Math.round(summary.trainRatio * 100)
+                : Math.round((state.trainRatio || 0.8) * 100);
+            const testPercent = Math.max(0, 100 - trainPercent);
+            const kellyText = Number.isFinite(summary.kellyFraction)
+                ? `凱利建議投入 ≈ ${formatPercent(summary.kellyFraction, 2)}。`
+                : '凱利建議投入尚待更多樣本。';
+            const lookbackText = Number.isFinite(summary.lookback)
+                ? `Lookback ${summary.lookback} 日。`
+                : '';
+            const lastDate = state.predictionsPayload?.datasetLastDate || '';
+            const dateText = lastDate ? `資料迄今：${lastDate}。` : '';
+            elements.modelInsight.textContent = `模型：${modelLabel}｜切分 ${trainPercent}% / ${testPercent}% 。${lookbackText} ${kellyText} ${dateText}`.trim();
+        }
         if (elements.tradeSummary) {
             const strategyLabel = summary.usingKelly
                 ? '已啟用凱利公式'
@@ -563,6 +687,11 @@
         const average = tradeReturns.length > 0 ? computeMean(tradeReturns) : NaN;
         const stdDev = tradeReturns.length > 1 ? computeStd(tradeReturns, average) : NaN;
 
+        const oddsValue = Number.isFinite(trainingOdds) ? Math.max(trainingOdds, 0.01) : 1;
+        const q = 1 - hitRate;
+        const rawKelly = oddsValue > 0 ? (oddsValue * hitRate - q) / oddsValue : 0;
+        const kelly = Math.max(0, Math.min(rawKelly, 1));
+
         return {
             trades: executedTrades,
             stats: {
@@ -571,11 +700,12 @@
                 median,
                 average,
                 stdDev,
+                kellyFraction: kelly,
             },
         };
     };
 
-    const applyTradeEvaluation = (payload, trainingMetrics, options) => {
+    const applyTradeEvaluation = (payload, trainingMetrics, options, context = {}) => {
         if (!payload) return;
         const metrics = trainingMetrics || {
             trainAccuracy: NaN,
@@ -598,6 +728,29 @@
             forecast.fraction = forecastFraction;
         }
 
+        const modelType = context.modelType || payload.modelType || state.modelType || MODEL_TYPES.LSTM;
+        const trainRatio = Number.isFinite(context.trainRatio)
+            ? context.trainRatio
+            : (Number.isFinite(payload?.hyperparameters?.trainRatio)
+                ? payload.hyperparameters.trainRatio
+                : state.trainRatio || 0.8);
+        const lookback = Number.isFinite(context.lookback)
+            ? context.lookback
+            : (Number.isFinite(payload?.hyperparameters?.lookback)
+                ? payload.hyperparameters.lookback
+                : NaN);
+
+        if (!payload.modelType) {
+            payload.modelType = modelType;
+        }
+        if (!payload.hyperparameters) {
+            payload.hyperparameters = {};
+        }
+        if (!Number.isFinite(payload.hyperparameters.trainRatio)) {
+            payload.hyperparameters.trainRatio = trainRatio;
+        }
+        payload.hyperparameters.modelType = modelType;
+
         const summary = {
             version: VERSION_TAG,
             trainAccuracy: metrics.trainAccuracy,
@@ -616,6 +769,13 @@
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
             forecast,
+            modelType,
+            trainRatio,
+            lookback,
+            kellyFraction: Number.isFinite(evaluation.stats.kellyFraction)
+                ? evaluation.stats.kellyFraction
+                : NaN,
+            confusion: metrics?.confusion || null,
         };
         state.lastSummary = summary;
         state.trainingMetrics = metrics;
@@ -629,10 +789,15 @@
         const threshold = parseWinThreshold();
         const useKelly = Boolean(elements.enableKelly?.checked);
         const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+        const hyper = state.predictionsPayload?.hyperparameters || {};
         applyTradeEvaluation(state.predictionsPayload, state.trainingMetrics, {
             threshold,
             useKelly,
             fixedFraction,
+        }, {
+            modelType: state.predictionsPayload?.modelType || state.modelType,
+            trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : state.trainRatio,
+            lookback: Number.isFinite(hyper.lookback) ? hyper.lookback : undefined,
         });
     };
 
@@ -715,6 +880,10 @@
                 fixedFraction: summary.fixedFraction,
             },
             version: VERSION_TAG,
+            modelType: state.predictionsPayload?.modelType || state.modelType,
+            trainRatio: Number.isFinite(state.predictionsPayload?.hyperparameters?.trainRatio)
+                ? state.predictionsPayload.hyperparameters.trainRatio
+                : state.trainRatio,
         };
         seeds.push(newSeed);
         persistSeeds(seeds);
@@ -732,7 +901,15 @@
             forecast: seed.payload?.forecast || null,
             datasetLastDate: seed.payload?.datasetLastDate || null,
             hyperparameters: seed.payload?.hyperparameters || null,
+            modelType: seed.modelType || seed.payload?.hyperparameters?.modelType || state.modelType,
         };
+        setModelType(state.predictionsPayload.modelType);
+        const ratioFromSeed = Number.isFinite(seed.trainRatio)
+            ? seed.trainRatio
+            : (Number.isFinite(seed.payload?.hyperparameters?.trainRatio)
+                ? seed.payload.hyperparameters.trainRatio
+                : state.trainRatio);
+        setTrainRatio(ratioFromSeed);
         const metrics = seed.trainingMetrics || {
             trainAccuracy: NaN,
             trainLoss: NaN,
@@ -797,51 +974,83 @@
         toggleRunning(true);
 
         try {
+            const selectedModel = elements.modelType ? elements.modelType.value : state.modelType;
+            const modelType = setModelType(selectedModel);
+            const trainRatio = parseTrainRatio();
             const lookback = Math.round(parseNumberInput(elements.lookback, 20, { min: 5, max: 60 }));
             const epochs = Math.round(parseNumberInput(elements.epochs, 80, { min: 10, max: 300 }));
             const batchSize = Math.round(parseNumberInput(elements.batchSize, 64, { min: 8, max: 512 }));
             const learningRate = parseNumberInput(elements.learningRate, 0.005, { min: 0.0001, max: 0.05 });
             const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
             const useKelly = Boolean(elements.enableKelly?.checked);
+            const modelLabel = MODEL_LABELS[modelType] || MODEL_LABELS.lstm;
 
             const rows = getVisibleData();
             if (!Array.isArray(rows) || rows.length === 0) {
-                showStatus('尚未取得回測資料，請先在主頁面執行回測。', 'warning');
+                showStatus(`[${modelLabel}] 尚未取得回測資料，請先在主頁面執行回測。`, 'warning');
                 return;
             }
 
-            const dataset = buildDataset(rows, lookback);
-            if (dataset.sequences.length < 45) {
-                showStatus(`資料樣本不足（需至少 ${Math.max(45, lookback * 3)} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
-                return;
-            }
+            const threshold = parseWinThreshold();
+            const fixedFractionValue = sanitizeFraction(fixedFraction);
 
-            const totalSamples = dataset.sequences.length;
-            const trainSize = Math.max(Math.floor(totalSamples * (2 / 3)), lookback);
-            const boundedTrainSize = Math.min(trainSize, totalSamples - 1);
-            const testSize = totalSamples - boundedTrainSize;
-            if (boundedTrainSize <= 0 || testSize <= 0) {
-                showStatus('無法按照 2:1 分割訓練與測試集，請延長資料範圍。', 'warning');
-                return;
-            }
+            let workerResult = null;
+            if (modelType === MODEL_TYPES.LSTM) {
+                const dataset = buildDataset(rows, lookback);
+                const minimumSamples = Math.max(45, lookback * 3);
+                if (dataset.sequences.length < minimumSamples) {
+                    showStatus(`[${modelLabel}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
+                    return;
+                }
 
-            const effectiveBatchSize = Math.min(batchSize, boundedTrainSize);
-            if (batchSize > boundedTrainSize) {
-                showStatus(`批次大小 ${batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
-            }
+                const totalSamples = dataset.sequences.length;
+                const rawTrainSize = Math.floor(totalSamples * trainRatio);
+                const boundedTrainSize = Math.min(Math.max(rawTrainSize, lookback), totalSamples - 1);
+                const testSize = totalSamples - boundedTrainSize;
+                if (boundedTrainSize <= 0 || testSize <= 0) {
+                    showStatus(`[${modelLabel}] 無法按照 ${Math.round(trainRatio * 100)}% / ${100 - Math.round(trainRatio * 100)}% 的比例切分，請延長資料範圍。`, 'warning');
+                    return;
+                }
 
-            showStatus(`訓練中（共 ${epochs} 輪）...`, 'info');
-            const workerResult = await sendAIWorkerTrainingTask({
-                dataset,
-                hyperparameters: {
-                    lookback,
-                    epochs,
-                    batchSize: effectiveBatchSize,
-                    learningRate,
-                    totalSamples,
-                    trainSize: boundedTrainSize,
-                },
-            });
+                const effectiveBatchSize = Math.min(batchSize, boundedTrainSize);
+                if (batchSize > boundedTrainSize) {
+                    showStatus(`[${modelLabel}] 批次大小 ${batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
+                }
+
+                showStatus(`[${modelLabel}] 訓練中（共 ${epochs} 輪）...`, 'info');
+                workerResult = await sendAIWorkerTrainingTask({
+                    dataset,
+                    hyperparameters: {
+                        lookback,
+                        epochs,
+                        batchSize: effectiveBatchSize,
+                        learningRate,
+                        totalSamples,
+                        trainSize: boundedTrainSize,
+                        trainRatio,
+                    },
+                }, { modelType });
+            } else {
+                if (rows.length < 60) {
+                    showStatus(`[${modelLabel}] 資料樣本不足（至少 60 根 K 線），請延長回測期間。`, 'warning');
+                    return;
+                }
+                const annTrainEstimate = Math.max(16, Math.floor((rows.length - 1) * trainRatio));
+                const effectiveBatchSize = Math.min(batchSize, annTrainEstimate);
+                if (batchSize > effectiveBatchSize) {
+                    showStatus(`[${modelLabel}] 批次大小 ${batchSize} 已調整為 ${effectiveBatchSize} 以符合訓練樣本。`, 'warning');
+                }
+                showStatus(`[${modelLabel}] 訓練中（共 ${epochs} 輪）...`, 'info');
+                workerResult = await sendAIWorkerTrainingTask({
+                    rows,
+                    options: {
+                        trainRatio,
+                        epochs,
+                        batchSize: effectiveBatchSize,
+                        lookback,
+                    },
+                }, { modelType: MODEL_TYPES.ANNS });
+            }
 
             const trainingMetrics = workerResult?.trainingMetrics || {
                 trainAccuracy: NaN,
@@ -849,28 +1058,41 @@
                 testAccuracy: NaN,
                 testLoss: NaN,
                 totalPredictions: 0,
+                confusion: null,
             };
             const predictionsPayload = workerResult?.predictionsPayload || null;
             if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
                 throw new Error('AI Worker 未回傳有效的預測結果。');
             }
 
+            predictionsPayload.modelType = modelType;
+            if (!predictionsPayload.hyperparameters) {
+                predictionsPayload.hyperparameters = {};
+            }
+            predictionsPayload.hyperparameters.trainRatio = trainRatio;
+            if (!Number.isFinite(predictionsPayload.hyperparameters.lookback)) {
+                predictionsPayload.hyperparameters.lookback = lookback;
+            }
+
             state.predictionsPayload = predictionsPayload;
             state.odds = Number.isFinite(predictionsPayload.trainingOdds)
                 ? predictionsPayload.trainingOdds
                 : state.odds;
-            const threshold = parseWinThreshold();
-            const fixedFractionValue = sanitizeFraction(fixedFraction);
+
             applyTradeEvaluation(predictionsPayload, trainingMetrics, {
                 threshold,
                 useKelly,
                 fixedFraction: fixedFractionValue,
+            }, {
+                modelType,
+                trainRatio,
+                lookback,
             });
 
             const finalMessage = typeof workerResult?.finalMessage === 'string'
                 ? workerResult.finalMessage
                 : `完成：訓練勝率 ${formatPercent(trainingMetrics.trainAccuracy, 2)}，測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}。`;
-            showStatus(finalMessage, 'success');
+            showStatus(`[${modelLabel}] ${finalMessage}`, 'success');
         } catch (error) {
             console.error('[AI Prediction] 執行失敗:', error);
             showStatus(`AI 預測執行失敗：${error.message}`, 'error');
@@ -881,6 +1103,11 @@
 
     const init = () => {
         elements.datasetSummary = document.getElementById('ai-dataset-summary');
+        elements.modelType = document.getElementById('ai-model-type');
+        elements.modelDescription = document.getElementById('ai-model-description');
+        elements.trainRatio = document.getElementById('ai-train-ratio');
+        elements.modelBadge = document.getElementById('ai-model-badge');
+        elements.splitLabel = document.getElementById('ai-split-label');
         elements.status = document.getElementById('ai-status');
         elements.runButton = document.getElementById('ai-run-button');
         elements.lookback = document.getElementById('ai-lookback');
@@ -899,6 +1126,8 @@
         elements.hitRate = document.getElementById('ai-hit-rate');
         elements.totalReturn = document.getElementById('ai-total-return');
         elements.averageProfit = document.getElementById('ai-average-profit');
+        elements.confusionMatrix = document.getElementById('ai-confusion-matrix');
+        elements.modelInsight = document.getElementById('ai-model-insight');
         elements.tradeTableBody = document.getElementById('ai-trade-table-body');
         elements.tradeSummary = document.getElementById('ai-trade-summary');
         elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
@@ -912,6 +1141,23 @@
                 runPrediction();
             });
         }
+
+        if (elements.modelType) {
+            elements.modelType.addEventListener('change', (event) => {
+                setModelType(event.target.value);
+                if (state.predictionsPayload) recomputeTradesFromState();
+            });
+        }
+
+        if (elements.trainRatio) {
+            elements.trainRatio.addEventListener('change', () => {
+                parseTrainRatio();
+                if (state.predictionsPayload) recomputeTradesFromState();
+            });
+        }
+
+        setModelType(state.modelType);
+        setTrainRatio(state.trainRatio);
 
         if (elements.enableKelly) {
             elements.enableKelly.addEventListener('change', () => {
