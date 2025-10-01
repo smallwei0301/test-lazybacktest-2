@@ -772,3 +772,9 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-10 — Patch LB-ANN-TECH-20250712A
+- **Feature**: 在 AI 預測分頁新增「ANNS 預測明日漲跌（Worker）」按鈕與結果卡，沿用現有 UI 風格呈現準確率、凱利比例與混淆矩陣，並透過 Web Worker 執行 ANN 訓練以維持主執行緒流暢度。
+- **Worker**: 於 `worker.js` 匯入 TensorFlow.js、實作技術指標特徵工程、標準化與 ANN 訓練流程，並新增 `ANN_RUN` 訊息處理，回傳進度、結果與凱利估算，同時加入版本碼 `LB-ANN-TECH-20250712A` 以便追蹤。
+- **Main Thread**: 在 `main.js` 建立共用 Worker 實例、綁定訊息監聽與按鈕事件，並導出版本資訊至 `window.lazybacktestAnnVersion` 供診斷使用。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
