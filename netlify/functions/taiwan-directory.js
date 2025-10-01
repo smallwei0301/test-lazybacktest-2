@@ -6,10 +6,11 @@ import fetch from 'node-fetch';
 
 const DIRECTORY_STORE_NAME = 'taiwan_directory_store_v1';
 const DIRECTORY_CACHE_KEY = 'directory-cache.json';
-const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
+const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-INDEX-20250930A';
 const DIRECTORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_DATASET = 'TaiwanStockInfo';
+const FINMIND_INDEX_DATASET = 'TaiwanIndexInfo';
 
 const inMemoryStores = new Map();
 
@@ -99,6 +100,28 @@ function normaliseMarketInfo(row) {
     };
 }
 
+function normaliseIndexInfo(row) {
+    const indexId = (row.index_id || row.indexId || row.index || '').toString().trim().toUpperCase();
+    const name = (row.index_name || row.name || '').toString().trim();
+    if (!indexId || !name) return null;
+    const marketRaw = (row.market || row.exchange || row.type || '').toString().toUpperCase();
+    const market = marketRaw.includes('OTC') || marketRaw.includes('TWO') || marketRaw.includes('TPEX')
+        ? 'TPEX'
+        : 'TWSE';
+    const board = market === 'TWSE' ? '上市指數' : '上櫃指數';
+    const category = (row.category || row.group || row.type || '').toString().trim() || null;
+    return {
+        stockId: indexId,
+        name,
+        market,
+        board,
+        industry: category,
+        instrumentType: 'INDEX',
+        isETF: false,
+        rawType: category,
+    };
+}
+
 async function fetchTaiwanDirectoryFromFinMind() {
     const params = new URLSearchParams({ dataset: FINMIND_DATASET });
     if (process.env.FINMIND_TOKEN) {
@@ -116,15 +139,52 @@ async function fetchTaiwanDirectoryFromFinMind() {
         throw new Error(message);
     }
     if (!Array.isArray(payload.data)) {
-        throw new Error('FinMind TaiwainStockInfo 缺少資料陣列');
+        throw new Error('FinMind TaiwanStockInfo 缺少資料陣列');
     }
-    const entries = payload.data
+    const stockEntries = payload.data
         .map((row) => normaliseMarketInfo(row))
-        .filter((entry) => entry.stockId && entry.name);
+        .filter((entry) => entry && entry.stockId && entry.name);
+
+    let indexEntries = [];
+    try {
+        const indexParams = new URLSearchParams({ dataset: FINMIND_INDEX_DATASET });
+        if (process.env.FINMIND_TOKEN) {
+            indexParams.set('token', process.env.FINMIND_TOKEN);
+        }
+        const indexUrl = `${FINMIND_ENDPOINT}?${indexParams.toString()}`;
+        const indexResponse = await fetch(indexUrl, { timeout: 15000 });
+        if (!indexResponse.ok) {
+            const text = await indexResponse.text();
+            throw new Error(`FinMind 指數回傳狀態 ${indexResponse.status} ｜ ${text.slice(0, 200)}`);
+        }
+        const indexPayload = await indexResponse.json();
+        if (indexPayload && Array.isArray(indexPayload.data)) {
+            indexEntries = indexPayload.data
+                .map((row) => normaliseIndexInfo(row))
+                .filter((entry) => entry && entry.stockId && entry.name);
+        }
+    } catch (error) {
+        console.warn('[Taiwan Directory] 讀取指數資訊失敗:', error.message || error);
+    }
+
+    const merged = new Map();
+    stockEntries.forEach((entry) => {
+        if (entry && entry.stockId) merged.set(entry.stockId, entry);
+    });
+    indexEntries.forEach((entry) => {
+        if (entry && entry.stockId) merged.set(entry.stockId, entry);
+    });
+
     return {
-        entries,
-        source: 'FinMind TaiwanStockInfo',
+        entries: Array.from(merged.values()),
+        source: indexEntries.length > 0
+            ? 'FinMind TaiwanStockInfo + TaiwanIndexInfo'
+            : 'FinMind TaiwanStockInfo',
         fetchedAt: new Date().toISOString(),
+        meta: {
+            stockCount: stockEntries.length,
+            indexCount: indexEntries.length,
+        },
     };
 }
 
