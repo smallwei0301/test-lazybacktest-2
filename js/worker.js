@@ -1,12 +1,103 @@
 
 importScripts('shared-lookback.js');
 importScripts('config.js');
+
+const AI_VERSION_TAG = 'LB-AI-REPLAY-20250225A';
+const RANDOM_SEED = 1337;
+
+let tfLoadError = null;
 try {
   if (typeof tf === 'undefined') {
     importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
   }
+  if (typeof tf !== 'undefined' && typeof tf.setBackend === 'function') {
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/dist/tf-backend-wasm.min.js');
+  }
 } catch (error) {
-  console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
+  tfLoadError = error;
+  console.warn('[Worker][AI] 無法載入 TensorFlow.js 或其後端：', error);
+}
+
+if (typeof tf !== 'undefined' && typeof tf.util?.seedrandom === 'function') {
+  tf.util.seedrandom(RANDOM_SEED);
+}
+
+const TF_READY_PROMISE = (async () => {
+  if (typeof tf === 'undefined') {
+    throw tfLoadError || new Error('TensorFlow.js 未成功載入');
+  }
+  try {
+    await tf.setBackend('wasm');
+  } catch (backendError) {
+    console.warn('[Worker][AI] 設定 TensorFlow.js WASM 後端失敗，改用預設後端：', backendError);
+  }
+  await tf.ready();
+  if (typeof tf.util?.seedrandom === 'function') {
+    tf.util.seedrandom(RANDOM_SEED);
+  }
+  return tf.getBackend();
+})();
+
+async function ensureTfReady() {
+  if (typeof tf === 'undefined') {
+    throw tfLoadError || new Error('TensorFlow.js 尚未在背景執行緒載入。');
+  }
+  try {
+    await TF_READY_PROMISE;
+  } catch (error) {
+    console.warn('[Worker][AI] 等待 TensorFlow.js 就緒時發生警告：', error);
+  }
+}
+
+function sanitizeStorageKeySegment(value) {
+  return String(value || '')
+    .replace(/[^0-9A-Za-z_-]/g, '_')
+    .slice(0, 80);
+}
+
+function buildModelStorageKey(modelType, runId) {
+  const typeSegment = sanitizeStorageKeySegment(modelType || 'model');
+  const runSegment = sanitizeStorageKeySegment(runId || Date.now());
+  return `indexeddb://lazybacktest-${typeSegment}-${runSegment}`;
+}
+
+async function persistReplayModel(model, modelType, runId) {
+  if (!model || typeof model.save !== 'function') return null;
+  await ensureTfReady();
+  const storageKey = buildModelStorageKey(modelType, runId);
+  try {
+    await model.save(storageKey);
+    return storageKey;
+  } catch (error) {
+    console.warn(`[Worker][AI] 儲存 ${modelType} 模型失敗：`, error);
+    return null;
+  }
+}
+
+async function loadReplayModel(modelKey) {
+  if (typeof tf?.loadLayersModel !== 'function') {
+    throw new Error('此環境不支援載入已儲存的模型。');
+  }
+  await ensureTfReady();
+  try {
+    return await tf.loadLayersModel(modelKey);
+  } catch (error) {
+    throw new Error(`無法載入已儲存的模型：${error.message}`);
+  }
+}
+
+function computeBinaryConfusionMatrix(expected, probabilities, threshold = 0.5) {
+  const result = { TP: 0, TN: 0, FP: 0, FN: 0 };
+  const limit = Math.min(expected.length, probabilities.length);
+  for (let i = 0; i < limit; i += 1) {
+    const label = expected[i] >= 0.5 ? 1 : 0;
+    const predicted = probabilities[i] >= threshold ? 1 : 0;
+    if (label === 1 && predicted === 1) result.TP += 1;
+    else if (label === 0 && predicted === 0) result.TN += 1;
+    else if (label === 0 && predicted === 1) result.FP += 1;
+    else if (label === 1 && predicted === 0) result.FN += 1;
+  }
+  return result;
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -33,6 +124,7 @@ try {
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
 // Patch Tag: LB-AI-ANNS-20251212A
+// Patch Tag: LB-AI-REPLAY-20250225A
 
 const MODEL_TYPES = {
   LSTM: 'lstm',
@@ -73,6 +165,17 @@ function aiPostResult(id, data) {
   self.postMessage({ type: 'ai-train-lstm-result', id, data });
 }
 
+function aiPostReplayResult(id, data) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-replay-lstm-result', id, data });
+}
+
+function aiPostReplayError(id, error) {
+  if (!id) return;
+  const message = error instanceof Error ? error.message : String(error || 'AI Worker 發生未知錯誤');
+  self.postMessage({ type: 'ai-replay-lstm-error', id, error: { message } });
+}
+
 function aiComputeNormalisation(sequences, trainSize) {
   if (!Array.isArray(sequences) || sequences.length === 0 || trainSize <= 0) {
     return { mean: 0, std: 1 };
@@ -96,13 +199,41 @@ function aiNormaliseSequences(sequences, normaliser) {
 }
 
 function aiCreateModel(lookback, learningRate) {
+  const lstmKernelInit1 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 10 });
+  const lstmRecurrentInit1 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 11 });
+  const lstmKernelInit2 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 12 });
+  const lstmRecurrentInit2 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 13 });
+  const denseKernelInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 14 });
+  const outputKernelInit = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 15 });
+  const zeroInit = tf.initializers.zeros();
+
   const model = tf.sequential();
-  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-  model.add(tf.layers.dropout({ rate: 0.2 }));
-  model.add(tf.layers.lstm({ units: 16 }));
-  model.add(tf.layers.dropout({ rate: 0.1 }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(tf.layers.lstm({
+    units: 32,
+    returnSequences: true,
+    inputShape: [lookback, 1],
+    kernelInitializer: lstmKernelInit1,
+    recurrentInitializer: lstmRecurrentInit1,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.lstm({
+    units: 16,
+    kernelInitializer: lstmKernelInit2,
+    recurrentInitializer: lstmRecurrentInit2,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 16,
+    activation: 'relu',
+    kernelInitializer: denseKernelInit,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 1,
+    activation: 'sigmoid',
+    kernelInitializer: outputKernelInit,
+    biasInitializer: zeroInit,
+  }));
   const optimizer = tf.train.adam(learningRate);
   model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
   return model;
@@ -130,6 +261,7 @@ async function handleAITrainLSTMMessage(message) {
   }
   const payload = message?.payload || {};
   try {
+    await ensureTfReady();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
@@ -168,16 +300,11 @@ async function handleAITrainLSTMMessage(message) {
 
     const tensorsToDispose = [xAll, yAll];
     let model = null;
-    let xTrain = null;
-    let yTrain = null;
-    let xTest = null;
-    let yTest = null;
-
     try {
-      xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
-      yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
-      xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
-      yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
+      const xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
+      const yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
+      const xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
+      const yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
       model = aiCreateModel(lookback, learningRate);
@@ -186,8 +313,8 @@ async function handleAITrainLSTMMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-        shuffle: true,
+        shuffle: false,
+        verbose: 0,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -220,20 +347,21 @@ async function handleAITrainLSTMMessage(message) {
       const predictionValues = Array.from(await predictionsTensor.data());
       predictionsTensor.dispose();
 
+      const threshold = 0.5;
       const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
-      let correctPredictions = 0;
-      for (let i = 0; i < predictionValues.length; i += 1) {
-        const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
-        if (predictedLabel === testLabels[i]) {
-          correctPredictions += 1;
-        }
-      }
-      const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
+      const confusion = computeBinaryConfusionMatrix(testLabels, predictionValues, threshold);
+      const manualAccuracy = predictionValues.length > 0
+        ? (confusion.TP + confusion.TN) / predictionValues.length
+        : 0;
       const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
 
       const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
-      const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
-      const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
+      const testMeta = Array.isArray(dataset.meta)
+        ? dataset.meta.slice(boundedTrainSize, boundedTrainSize + predictionValues.length)
+        : [];
+      const testReturns = Array.isArray(dataset.returns)
+        ? dataset.returns.slice(boundedTrainSize, boundedTrainSize + predictionValues.length)
+        : [];
 
       let nextDayForecast = null;
       if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
@@ -262,25 +390,58 @@ async function handleAITrainLSTMMessage(message) {
         totalPredictions: predictionValues.length,
       };
 
+      const datasetLastDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+        : null;
       const predictionsPayload = {
         predictions: predictionValues,
         meta: testMeta,
         returns: testReturns,
         trainingOdds,
         forecast: nextDayForecast,
-        datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
-          ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
-          : null,
+        datasetLastDate,
         hyperparameters: {
           lookback,
           epochs,
           batchSize,
           learningRate,
           trainRatio,
+          modelType: MODEL_TYPES.LSTM,
         },
+        threshold,
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const modelKey = await persistReplayModel(model, MODEL_TYPES.LSTM, id);
+      const tfjsVersion = typeof tf?.version_core === 'string'
+        ? tf.version_core
+        : (typeof tf?.version?.tfjs === 'string' ? tf.version.tfjs : null);
+      const datasetStartDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[0]?.date || null
+        : null;
+      const runMeta = {
+        version: AI_VERSION_TAG,
+        modelType: MODEL_TYPES.LSTM,
+        seed: RANDOM_SEED,
+        backend: tf.getBackend(),
+        tfjs: tfjsVersion,
+        runId: id,
+        modelKey,
+        normaliser,
+        lookback,
+        trainSize: boundedTrainSize,
+        testSize,
+        totalSamples,
+        trainRatio,
+        trainRatioActual: boundedTrainSize / totalSamples,
+        epochs,
+        batchSize,
+        learningRate,
+        threshold,
+        datasetStartDate,
+        datasetLastDate,
+      };
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, confusion, runMeta });
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {
@@ -296,7 +457,22 @@ async function handleAITrainLSTMMessage(message) {
   }
 }
 
+
 const ANN_TRAIN_RATIO_DEFAULT = 0.8;
+const ANN_FEATURE_ORDER = [
+  'SMA30',
+  'WMA15',
+  'EMA12',
+  'Momentum10',
+  'StochK14',
+  'StochD3',
+  'RSI14',
+  'MACDdiff',
+  'MACDsignal',
+  'MACDhist',
+  'CCI20',
+  'WilliamsR14',
+];
 
 function annPostProgress(id, message) {
   if (!id) return;
@@ -312,6 +488,17 @@ function annPostError(id, error) {
 function annPostResult(id, data) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-ann-result', id, data });
+}
+
+function annPostReplayResult(id, data) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-replay-ann-result', id, data });
+}
+
+function annPostReplayError(id, error) {
+  if (!id) return;
+  const message = error instanceof Error ? error.message : String(error || 'AI Worker 發生未知錯誤');
+  self.postMessage({ type: 'ai-replay-ann-error', id, error: { message } });
 }
 
 function annClampTrainRatio(value) {
@@ -638,29 +825,32 @@ function annPrepareDataset(rows) {
     returns,
     forecastFeature,
     forecastDate,
+    datasetStartDate: parsed.length > 0 ? parsed[0].date : null,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
+    featureOrder: ANN_FEATURE_ORDER.slice(),
   };
 }
 
-function annStandardize(X) {
+function annStandardize(X, trainCount) {
   if (!Array.isArray(X) || X.length === 0) return { Z: [], mean: [], std: [] };
   const rows = X.length;
   const cols = X[0].length;
   const mean = new Array(cols).fill(0);
   const std = new Array(cols).fill(0);
+  const effectiveTrain = Math.min(Math.max(trainCount, 1), rows - 1);
   for (let c = 0; c < cols; c += 1) {
     let sum = 0;
-    for (let r = 0; r < rows; r += 1) {
+    for (let r = 0; r < effectiveTrain; r += 1) {
       sum += X[r][c];
     }
-    mean[c] = sum / rows;
+    mean[c] = sum / Math.max(effectiveTrain, 1);
   }
   for (let c = 0; c < cols; c += 1) {
     let variance = 0;
-    for (let r = 0; r < rows; r += 1) {
+    for (let r = 0; r < effectiveTrain; r += 1) {
       variance += ((X[r][c] - mean[c]) ** 2);
     }
-    std[c] = Math.sqrt(variance / Math.max(1, rows - 1)) || 1;
+    std[c] = Math.sqrt(variance / Math.max(1, effectiveTrain - 1)) || 1;
   }
   const Z = X.map((row) => row.map((value, index) => (value - mean[index]) / (std[index] || 1)));
   return { Z, mean, std };
@@ -671,29 +861,221 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
-function annSplitTrainTest(Z, y, meta, returns, ratio) {
+function annSplitTrainTest(Z, y, meta, returns, trainCount) {
   const total = Z.length;
-  const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const effectiveTrain = Math.min(Math.max(Math.floor(trainCount), 1), total - 1);
   return {
-    Xtr: Z.slice(0, trainCount),
-    ytr: y.slice(0, trainCount),
-    Xte: Z.slice(trainCount),
-    yte: y.slice(trainCount),
-    metaTe: meta.slice(trainCount),
-    returnsTe: returns.slice(trainCount),
-    trainCount,
+    Xtr: Z.slice(0, effectiveTrain),
+    ytr: y.slice(0, effectiveTrain),
+    Xte: Z.slice(effectiveTrain),
+    yte: y.slice(effectiveTrain),
+    metaTe: meta.slice(effectiveTrain),
+    returnsTe: returns.slice(effectiveTrain),
+    trainCount: effectiveTrain,
   };
 }
 
 // Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
 function annBuildModel(inputDim, learningRate = 0.01) {
+  const denseInit1 = tf.initializers.glorotUniform({ seed: RANDOM_SEED });
+  const denseInit2 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 1 });
+  const denseInit3 = tf.initializers.glorotUniform({ seed: RANDOM_SEED + 2 });
+  const zeroInit = tf.initializers.zeros();
   const model = tf.sequential();
-  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(tf.layers.dense({
+    units: 32,
+    activation: 'relu',
+    inputShape: [inputDim],
+    kernelInitializer: denseInit1,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 16,
+    activation: 'relu',
+    kernelInitializer: denseInit2,
+    biasInitializer: zeroInit,
+  }));
+  model.add(tf.layers.dense({
+    units: 1,
+    activation: 'sigmoid',
+    kernelInitializer: denseInit3,
+    biasInitializer: zeroInit,
+  }));
   const optimizer = tf.train.sgd(learningRate);
   model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
+}
+
+
+async function handleAIReplayLSTMMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  const payload = message?.payload || {};
+  const dataset = payload.dataset || {};
+  const meta = payload.meta || {};
+  try {
+    await ensureTfReady();
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (!meta || typeof meta !== 'object') {
+      throw new Error('缺少 LSTM 模型重播所需的參數。');
+    }
+    if (!meta.modelKey) {
+      throw new Error('找不到 LSTM 模型儲存位置，請先重新訓練。');
+    }
+    const normaliser = meta.normaliser || {};
+    if (!Number.isFinite(normaliser.mean) || !Number.isFinite(normaliser.std)) {
+      throw new Error('缺少 LSTM 正規化參數，無法重播該模型。');
+    }
+    const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
+    const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
+    if (sequences.length === 0 || labels.length !== sequences.length) {
+      throw new Error('資料集與標籤數量不一致，無法重播該模型。');
+    }
+    const returns = Array.isArray(dataset.returns) ? dataset.returns : [];
+    const lookback = Number.isFinite(meta.lookback) ? meta.lookback : (Array.isArray(sequences[0]) ? sequences[0].length : 20);
+    if (lookback <= 0) {
+      throw new Error('缺少有效的 lookback 設定。');
+    }
+    const totalSamplesMeta = Number.isFinite(meta.totalSamples) ? meta.totalSamples : sequences.length;
+    const totalSamples = Math.min(sequences.length, Math.max(lookback + 1, totalSamplesMeta));
+    const trainSizeMeta = Number.isFinite(meta.trainSize) ? meta.trainSize : Math.floor(totalSamples * (meta.trainRatio || 0.8));
+    const trainSize = Math.min(Math.max(trainSizeMeta, 1), totalSamples - 1);
+    const testSizeMeta = Number.isFinite(meta.testSize) ? meta.testSize : (totalSamples - trainSize);
+    const testSize = Math.min(Math.max(testSizeMeta, 1), totalSamples - trainSize);
+
+    const truncatedSequences = sequences.slice(0, trainSize + testSize);
+    const truncatedLabels = labels.slice(0, trainSize + testSize);
+    const truncatedReturns = returns.slice(0, trainSize + testSize);
+
+    const divisor = normaliser.std || 1;
+    const normalizedSequences = truncatedSequences.map((seq) => seq.map((value) => (value - normaliser.mean) / divisor));
+    const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
+    const xAll = tf.tensor(tensorInput);
+    const yAll = tf.tensor(truncatedLabels.map((label) => [label]));
+
+    const tensorsToDispose = [xAll, yAll];
+    const model = await loadReplayModel(meta.modelKey);
+    try {
+      const xTrain = xAll.slice([0, 0, 0], [trainSize, lookback, 1]);
+      const yTrain = yAll.slice([0, 0], [trainSize, 1]);
+      const xTest = xAll.slice([trainSize, 0, 0], [testSize, lookback, 1]);
+      const yTest = yAll.slice([trainSize, 0], [testSize, 1]);
+      tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
+
+      const evalTrain = model.evaluate(xTrain, yTrain);
+      const evalTest = model.evaluate(xTest, yTest);
+      const extractMetric = async (tensorLike) => {
+        const array = Array.isArray(tensorLike) ? tensorLike : [tensorLike];
+        const values = [];
+        for (let i = 0; i < array.length; i += 1) {
+          const tensor = array[i];
+          const data = await tensor.data();
+          values.push(data[0]);
+          tensor.dispose();
+        }
+        return values;
+      };
+
+      const [trainLoss = NaN, trainAccuracy = NaN] = await extractMetric(evalTrain);
+      const [testLoss = NaN, testAccuracy = NaN] = await extractMetric(evalTest);
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      const threshold = Number.isFinite(meta.threshold) ? meta.threshold : 0.5;
+      const testLabels = truncatedLabels.slice(trainSize, trainSize + testSize);
+      const confusion = computeBinaryConfusionMatrix(testLabels, predictionValues, threshold);
+      const manualAccuracy = predictionValues.length > 0
+        ? (confusion.TP + confusion.TN) / predictionValues.length
+        : 0;
+      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+
+      const trainingOdds = aiComputeTrainingOdds(truncatedReturns, trainSize);
+      const testMeta = Array.isArray(dataset.meta)
+        ? dataset.meta.slice(trainSize, trainSize + predictionValues.length)
+        : [];
+      const testReturns = truncatedReturns.slice(trainSize, trainSize + predictionValues.length);
+
+      let nextDayForecast = null;
+      if (Array.isArray(returns) && returns.length >= lookback) {
+        const tailWindow = returns.slice(returns.length - lookback);
+        if (tailWindow.length === lookback) {
+          const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / divisor);
+          const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
+          const forecastTensor = model.predict(forecastInput);
+          const forecastArray = Array.from(await forecastTensor.data());
+          nextDayForecast = {
+            probability: forecastArray[0],
+            referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+              ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+              : null,
+          };
+          forecastTensor.dispose();
+          forecastInput.dispose();
+        }
+      }
+
+      const trainingMetrics = {
+        trainAccuracy,
+        trainLoss,
+        testAccuracy: resolvedTestAccuracy,
+        testLoss,
+        totalPredictions: predictionValues.length,
+      };
+
+      const datasetLastDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+        : null;
+      const datasetStartDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[0]?.date || null
+        : null;
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: testMeta,
+        returns: testReturns,
+        trainingOdds,
+        forecast: nextDayForecast,
+        datasetLastDate,
+        hyperparameters: {
+          lookback,
+          epochs: Number.isFinite(meta.epochs) ? meta.epochs : null,
+          batchSize: Number.isFinite(meta.batchSize) ? meta.batchSize : null,
+          learningRate: Number.isFinite(meta.learningRate) ? meta.learningRate : null,
+          trainRatio: Number.isFinite(meta.trainRatio) ? meta.trainRatio : null,
+          modelType: MODEL_TYPES.LSTM,
+        },
+        threshold,
+      };
+
+      aiPostReplayResult(id, {
+        trainingMetrics,
+        predictionsPayload,
+        confusion,
+        runMeta: {
+          ...meta,
+          datasetStartDate,
+          datasetLastDate,
+        },
+        replay: true,
+      });
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
+    }
+  } catch (error) {
+    aiPostReplayError(id, error);
+  }
 }
 
 async function handleAITrainANNMessage(message) {
@@ -706,6 +1088,7 @@ async function handleAITrainANNMessage(message) {
   const options = payload.options || {};
 
   try {
+    await ensureTfReady();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
@@ -719,16 +1102,21 @@ async function handleAITrainANNMessage(message) {
     }
 
     const trainRatio = annClampTrainRatio(options.trainRatio);
-    const { Z, mean, std } = annStandardize(prepared.X);
-    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
+    const totalSamples = prepared.X.length;
+    const requestedTrainCount = Math.floor(totalSamples * trainRatio);
+    const trainCount = Math.min(Math.max(requestedTrainCount, 1), totalSamples - 1);
+    const { Z, mean, std } = annStandardize(prepared.X, trainCount);
+    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainCount);
     if (split.Xte.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
-    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
-    const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
+    const defaultBatchSize = split.trainCount;
+    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : defaultBatchSize));
+    const batchSize = Math.min(batchSizeRaw, split.trainCount);
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
+    const threshold = 0.5;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate);
     const xTrain = tf.tensor2d(split.Xtr);
@@ -742,7 +1130,8 @@ async function handleAITrainANNMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        shuffle: true,
+        shuffle: false,
+        verbose: 0,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -793,10 +1182,16 @@ async function handleAITrainANNMessage(message) {
         }
       }
 
+      const confusion = computeBinaryConfusionMatrix(split.yte, predictionValues, threshold);
+      const manualAccuracy = predictionValues.length > 0
+        ? (confusion.TP + confusion.TN) / predictionValues.length
+        : 0;
+      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
-        testAccuracy,
+        testAccuracy: resolvedTestAccuracy,
         testLoss,
         totalPredictions: predictionValues.length,
       };
@@ -808,6 +1203,7 @@ async function handleAITrainANNMessage(message) {
         trainingOdds,
         forecast,
         datasetLastDate: prepared.datasetLastDate,
+        datasetStartDate: prepared.datasetStartDate,
         hyperparameters: {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,
@@ -816,11 +1212,40 @@ async function handleAITrainANNMessage(message) {
           trainRatio,
           modelType: MODEL_TYPES.ANNS,
         },
+        threshold,
       };
 
-      const finalMessage = `完成：測試正確率 ${(Number.isFinite(testAccuracy) ? (testAccuracy * 100).toFixed(2) : '—')}%。`;
+      const modelKey = await persistReplayModel(model, MODEL_TYPES.ANNS, id);
+      const tfjsVersion = typeof tf?.version_core === 'string'
+        ? tf.version_core
+        : (typeof tf?.version?.tfjs === 'string' ? tf.version.tfjs : null);
+      const runMeta = {
+        version: AI_VERSION_TAG,
+        modelType: MODEL_TYPES.ANNS,
+        seed: RANDOM_SEED,
+        backend: tf.getBackend(),
+        tfjs: tfjsVersion,
+        runId: id,
+        modelKey,
+        trainRatio,
+        trainRatioActual: split.trainCount / totalSamples,
+        epochs,
+        batchSize,
+        learningRate,
+        mean,
+        std,
+        splitIndex: split.trainCount,
+        testSize: split.Xte.length,
+        totalSamples,
+        threshold,
+        featureOrder: prepared.featureOrder,
+        datasetStartDate: prepared.datasetStartDate,
+        datasetLastDate: prepared.datasetLastDate,
+      };
 
-      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+      const finalMessage = `完成：測試正確率 ${(Number.isFinite(resolvedTestAccuracy) ? (resolvedTestAccuracy * 100).toFixed(2) : '—')}%。`;
+
+      annPostResult(id, { trainingMetrics, predictionsPayload, confusion, runMeta, finalMessage });
       model.dispose();
     } finally {
       tensorsToDispose.forEach((tensor) => {
@@ -830,7 +1255,164 @@ async function handleAITrainANNMessage(message) {
       });
     }
   } catch (error) {
-    annPostError(id, error);
+    aiPostReplayError(id, error);
+  }
+}
+
+async function handleAIReplayANNMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  const payload = message?.payload || {};
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const meta = payload.meta || {};
+
+  try {
+    await ensureTfReady();
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (!meta || typeof meta !== 'object') {
+      throw new Error('缺少 ANN 模型重播所需的參數。');
+    }
+    if (!meta.modelKey) {
+      throw new Error('找不到 ANN 模型儲存位置，請先重新訓練。');
+    }
+    if (!Array.isArray(meta.mean) || !Array.isArray(meta.std)) {
+      throw new Error('缺少 ANN 標準化參數，無法重播該模型。');
+    }
+    if (!Array.isArray(rows) || rows.length < 60) {
+      throw new Error('資料不足（至少 60 根 K 線）');
+    }
+
+    const prepared = annPrepareDataset(rows);
+    if (!Array.isArray(prepared.X) || prepared.X.length === 0) {
+      throw new Error('目前資料不足以重播該模型。');
+    }
+
+    const totalSamplesMeta = Number.isFinite(meta.totalSamples) ? meta.totalSamples : prepared.X.length;
+    const totalSamples = Math.min(prepared.X.length, Math.max(2, totalSamplesMeta));
+    const requestedTrainCount = Number.isFinite(meta.splitIndex) ? meta.splitIndex : Math.floor(totalSamples * (meta.trainRatio || ANN_TRAIN_RATIO_DEFAULT));
+    const trainCount = Math.min(Math.max(requestedTrainCount, 1), totalSamples - 1);
+    const testSizeMeta = Number.isFinite(meta.testSize) ? meta.testSize : (totalSamples - trainCount);
+    const testSize = Math.min(Math.max(testSizeMeta, 1), totalSamples - trainCount);
+
+    const truncatedX = prepared.X.slice(0, trainCount + testSize);
+    const truncatedY = prepared.y.slice(0, trainCount + testSize);
+    const truncatedMeta = prepared.meta.slice(0, trainCount + testSize);
+    const truncatedReturns = prepared.returns.slice(0, trainCount + testSize);
+
+    const mean = meta.mean;
+    const std = meta.std.map((value) => (value === 0 ? 1 : value));
+    const Z = truncatedX.map((row) => row.map((value, index) => (value - mean[index]) / (std[index] || 1)));
+
+    const Xtr = Z.slice(0, trainCount);
+    const ytr = truncatedY.slice(0, trainCount);
+    const Xte = Z.slice(trainCount, trainCount + testSize);
+    const yte = truncatedY.slice(trainCount, trainCount + testSize);
+    const metaTe = truncatedMeta.slice(trainCount, trainCount + testSize);
+    const returnsTe = truncatedReturns.slice(trainCount, trainCount + testSize);
+
+    const model = await loadReplayModel(meta.modelKey);
+    const tensorsToDispose = [];
+    try {
+      const xTrain = tf.tensor2d(Xtr);
+      const yTrain = tf.tensor2d(ytr, [ytr.length, 1]);
+      const xTest = tf.tensor2d(Xte);
+      const yTest = tf.tensor2d(yte, [yte.length, 1]);
+      tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
+
+      const evalTrain = model.evaluate(xTrain, yTrain);
+      const evalTest = model.evaluate(xTest, yTest);
+      const extractMetric = async (tensorLike) => {
+        const array = Array.isArray(tensorLike) ? tensorLike : [tensorLike];
+        const values = [];
+        for (let i = 0; i < array.length; i += 1) {
+          const tensor = array[i];
+          const data = await tensor.data();
+          values.push(data[0]);
+          tensor.dispose();
+        }
+        return values;
+      };
+
+      const [trainLoss = NaN, trainAccuracy = NaN] = await extractMetric(evalTrain);
+      const [testLoss = NaN, testAccuracy = NaN] = await extractMetric(evalTest);
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      const threshold = Number.isFinite(meta.threshold) ? meta.threshold : 0.5;
+      const confusion = computeBinaryConfusionMatrix(yte, predictionValues, threshold);
+      const manualAccuracy = predictionValues.length > 0
+        ? (confusion.TP + confusion.TN) / predictionValues.length
+        : 0;
+      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+
+      const trainingOdds = aiComputeTrainingOdds(truncatedReturns, trainCount);
+
+      let forecast = null;
+      if (Array.isArray(prepared.forecastFeature)) {
+        const standardisedForecast = annStandardizeVector(prepared.forecastFeature, mean, std);
+        if (Array.isArray(standardisedForecast)) {
+          const forecastTensor = tf.tensor2d([standardisedForecast]);
+          const forecastOutput = model.predict(forecastTensor);
+          const forecastArray = Array.from(await forecastOutput.data());
+          forecast = {
+            probability: forecastArray[0],
+            referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
+          };
+          forecastOutput.dispose();
+          forecastTensor.dispose();
+        }
+      }
+
+      const trainingMetrics = {
+        trainAccuracy,
+        trainLoss,
+        testAccuracy: resolvedTestAccuracy,
+        testLoss,
+        totalPredictions: predictionValues.length,
+      };
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: metaTe,
+        returns: returnsTe,
+        trainingOdds,
+        forecast,
+        datasetLastDate: meta.datasetLastDate || prepared.datasetLastDate,
+        datasetStartDate: meta.datasetStartDate || prepared.datasetStartDate,
+        hyperparameters: {
+          lookback: Number.isFinite(meta.lookback) ? meta.lookback : null,
+          epochs: Number.isFinite(meta.epochs) ? meta.epochs : null,
+          batchSize: Number.isFinite(meta.batchSize) ? meta.batchSize : null,
+          learningRate: Number.isFinite(meta.learningRate) ? meta.learningRate : null,
+          trainRatio: Number.isFinite(meta.trainRatioActual)
+            ? meta.trainRatioActual
+            : (Number.isFinite(meta.trainRatio) ? meta.trainRatio : null),
+          modelType: MODEL_TYPES.ANNS,
+        },
+        threshold,
+      };
+
+      const finalMessage = `重播完成：測試正確率 ${(Number.isFinite(resolvedTestAccuracy) ? (resolvedTestAccuracy * 100).toFixed(2) : '—')}%。`;
+
+      annPostReplayResult(id, { trainingMetrics, predictionsPayload, confusion, runMeta: meta, finalMessage, replay: true });
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
+    }
+  } catch (error) {
+    annPostReplayError(id, error);
   }
 }
 
@@ -10063,6 +10645,14 @@ self.onmessage = async function (e) {
   }
   if (type === 'ai-train-lstm') {
     await handleAITrainLSTMMessage(e.data);
+    return;
+  }
+  if (type === 'ai-replay-ann') {
+    await handleAIReplayANNMessage(e.data);
+    return;
+  }
+  if (type === 'ai-replay-lstm') {
+    await handleAIReplayLSTMMessage(e.data);
     return;
   }
   const {

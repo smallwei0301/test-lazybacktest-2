@@ -804,4 +804,9 @@
 - **Fix**: 於凱利模式下依預測勝率計算隔日投入比例並同步顯示於預測區與表格，同時僅保留具備有效交易日的交易紀錄再計算中位數、平均與標準差。
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2025-02-25 — Patch LB-AI-REPLAY-20250225A
+- **Issue recap**: AI 種子僅儲存推論結果，重新載入後無法重新計算模型，導致 ANNS/LSTM 隨機初始化與標準化流程造成回放結果與原訓練成績不一致。
+- **Fix**: 於 Worker 端鎖定 TFJS 隨機種子與 WASM 後端、調整 ANN/LSTM 訓練流程為不洗牌且儲存標準化參數與模型，並在主執行緒保存 run meta 及自動觸發 `ai-replay-*` 任務重播；UI 會在載入種子後使用原始 meta 重新產生評估指標與凱利配置。
+- **Diagnostics**: 透過 localStorage 檢視 `lazybacktest-ai-*-meta-v1` 確認保存 splitIndex/mean/std/modelKey，載入舊種子後比對重播前後測試正確率與混淆矩陣皆一致；IndexedDB 觀察 `lazybacktest-anns-*`、`lazybacktest-lstm-*` 確實寫入模型。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
