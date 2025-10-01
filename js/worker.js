@@ -1,12 +1,37 @@
 
 importScripts('shared-lookback.js');
 importScripts('config.js');
-try {
-  if (typeof tf === 'undefined') {
-    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
-  }
-} catch (error) {
-  console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
+
+// Patch Tag: LB-AI-REPRO-20251222A — Deterministic AI replay pipeline for ANN & LSTM.
+const TFJS_VERSION = '4.20.0';
+const TFJS_CORE_URL = `https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist/tf.min.js`;
+const TFJS_WASM_URL = `https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/tf-backend-wasm.min.js`;
+
+importScripts(TFJS_CORE_URL);
+importScripts(TFJS_WASM_URL);
+
+const AI_REPRO_VERSION = 'LB-AI-REPRO-20251222A';
+const RANDOM_SEED = 1337;
+const AI_CLASSIFICATION_THRESHOLD = 0.5;
+
+let tfReadyPromise = Promise.resolve();
+if (typeof tf !== 'undefined') {
+  tfReadyPromise = (async () => {
+    try {
+      await tf.setBackend('wasm');
+    } catch (error) {
+      console.warn('[Worker][AI] 無法切換至 WASM 後端：', error);
+    }
+    if (typeof tf.ready === 'function') {
+      await tf.ready();
+    }
+    if (tf?.util?.seedrandom) {
+      tf.util.seedrandom(RANDOM_SEED);
+    }
+    return true;
+  })();
+} else {
+  console.warn('[Worker][AI] TensorFlow.js 未載入，AI 功能將無法使用。');
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -38,6 +63,21 @@ const MODEL_TYPES = {
   LSTM: 'lstm',
   ANNS: 'anns',
 };
+
+const ANN_FEATURE_ORDER = [
+  'SMA30',
+  'WMA15',
+  'EMA12',
+  'Momentum10',
+  'StochK14',
+  'StochD3',
+  'RSI14',
+  'MACDdiff',
+  'MACDsignal',
+  'MACDhist',
+  'CCI20',
+  'WilliamsR14',
+];
 
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
@@ -96,13 +136,47 @@ function aiNormaliseSequences(sequences, normaliser) {
 }
 
 function aiCreateModel(lookback, learningRate) {
+  const makeGlorot = (offset = 0) => tf.initializers.glorotUniform({ seed: RANDOM_SEED + offset });
+  const makeOrthogonal = (offset = 0) => tf.initializers.orthogonal({ seed: RANDOM_SEED + 100 + offset });
+  const zeroInit = tf.initializers.zeros();
+
   const model = tf.sequential();
-  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-  model.add(tf.layers.dropout({ rate: 0.2 }));
-  model.add(tf.layers.lstm({ units: 16 }));
-  model.add(tf.layers.dropout({ rate: 0.1 }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(
+    tf.layers.lstm({
+      units: 32,
+      returnSequences: true,
+      inputShape: [lookback, 1],
+      kernelInitializer: makeGlorot(1),
+      recurrentInitializer: makeOrthogonal(1),
+      biasInitializer: zeroInit,
+    }),
+  );
+  model.add(tf.layers.dropout({ rate: 0.2, seed: RANDOM_SEED + 2 }));
+  model.add(
+    tf.layers.lstm({
+      units: 16,
+      kernelInitializer: makeGlorot(2),
+      recurrentInitializer: makeOrthogonal(2),
+      biasInitializer: zeroInit,
+    }),
+  );
+  model.add(tf.layers.dropout({ rate: 0.1, seed: RANDOM_SEED + 3 }));
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      kernelInitializer: makeGlorot(3),
+      biasInitializer: zeroInit,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 1,
+      activation: 'sigmoid',
+      kernelInitializer: makeGlorot(4),
+      biasInitializer: zeroInit,
+    }),
+  );
   const optimizer = tf.train.adam(learningRate);
   model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
   return model;
@@ -133,26 +207,35 @@ async function handleAITrainLSTMMessage(message) {
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
+    await tfReadyPromise;
     const dataset = payload.dataset || {};
+    const replayMeta = payload?.replayMeta && typeof payload.replayMeta === 'object'
+      ? payload.replayMeta
+      : null;
     if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
       throw new Error('缺少有效的訓練樣本。');
     }
     const hyper = payload.hyperparameters || {};
     const inferredLookback = Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20;
-    const lookback = Math.max(5, Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback));
+    const lookbackBase = Number.isFinite(replayMeta?.lookback) ? replayMeta.lookback : hyper.lookback;
+    const lookback = Math.max(5, Math.round(Number.isFinite(lookbackBase) ? lookbackBase : inferredLookback));
     const totalSamples = Number.isFinite(hyper.totalSamples) ? hyper.totalSamples : dataset.sequences.length;
-    const rawRatio = Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : 0.8;
-    const trainRatio = Math.min(Math.max(rawRatio, 0.6), 0.95);
+    const rawRatio = Number.isFinite(replayMeta?.trainRatio) ? replayMeta.trainRatio : hyper.trainRatio;
+    const trainRatio = Math.min(Math.max(Number.isFinite(rawRatio) ? rawRatio : 0.8, 0.6), 0.95);
     const fallbackTrainSize = Math.max(Math.floor(totalSamples * trainRatio), lookback);
-    const rawTrainSize = Number.isFinite(hyper.trainSize) ? hyper.trainSize : fallbackTrainSize;
-    const boundedTrainSize = Math.min(Math.max(Math.round(rawTrainSize), 1), totalSamples - 1);
+    const desiredTrainSize = Number.isFinite(replayMeta?.trainSize) ? replayMeta.trainSize : hyper.trainSize;
+    const rawTrainSize = Number.isFinite(desiredTrainSize) ? desiredTrainSize : fallbackTrainSize;
+    const boundedTrainSize = Math.min(Math.max(Math.round(rawTrainSize), lookback), totalSamples - 1);
     const testSize = totalSamples - boundedTrainSize;
     if (boundedTrainSize <= 0 || testSize <= 0) {
       throw new Error('訓練/測試樣本不足，請延長回測期間。');
     }
-    const epochs = Math.max(1, Math.round(Number.isFinite(hyper.epochs) ? hyper.epochs : 80));
-    const learningRate = Number.isFinite(hyper.learningRate) ? hyper.learningRate : 0.005;
-    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32), boundedTrainSize));
+    const epochsBase = Number.isFinite(replayMeta?.epochs) ? replayMeta.epochs : hyper.epochs;
+    const epochs = Math.max(1, Math.round(Number.isFinite(epochsBase) ? epochsBase : 80));
+    const learningRateBase = Number.isFinite(replayMeta?.learningRate) ? replayMeta.learningRate : hyper.learningRate;
+    const learningRate = Number.isFinite(learningRateBase) ? learningRateBase : 0.005;
+    const batchSizeBase = Number.isFinite(replayMeta?.batchSize) ? replayMeta.batchSize : hyper.batchSize;
+    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(batchSizeBase) ? batchSizeBase : 32), boundedTrainSize));
 
     const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
     const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
@@ -187,7 +270,7 @@ async function handleAITrainLSTMMessage(message) {
         epochs,
         batchSize,
         validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -221,14 +304,15 @@ async function handleAITrainLSTMMessage(message) {
       predictionsTensor.dispose();
 
       const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
+      const predictedLabels = predictionValues.map((value) => (value >= AI_CLASSIFICATION_THRESHOLD ? 1 : 0));
       let correctPredictions = 0;
-      for (let i = 0; i < predictionValues.length; i += 1) {
-        const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
-        if (predictedLabel === testLabels[i]) {
+      for (let i = 0; i < predictedLabels.length; i += 1) {
+        if (predictedLabels[i] === testLabels[i]) {
           correctPredictions += 1;
         }
       }
       const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
+      const confusion = computeConfusionMatrix(predictionValues, testLabels, AI_CLASSIFICATION_THRESHOLD);
       const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
 
       const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
@@ -264,6 +348,7 @@ async function handleAITrainLSTMMessage(message) {
 
       const predictionsPayload = {
         predictions: predictionValues,
+        predictedLabels,
         meta: testMeta,
         returns: testReturns,
         trainingOdds,
@@ -271,6 +356,9 @@ async function handleAITrainLSTMMessage(message) {
         datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
           ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
           : null,
+        threshold: AI_CLASSIFICATION_THRESHOLD,
+        confusion,
+        normaliser,
         hyperparameters: {
           lookback,
           epochs,
@@ -280,7 +368,26 @@ async function handleAITrainLSTMMessage(message) {
         },
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const runMeta = {
+        version: AI_REPRO_VERSION,
+        modelType: MODEL_TYPES.LSTM,
+        seed: RANDOM_SEED,
+        backend: typeof tf.getBackend === 'function' ? tf.getBackend() : null,
+        tfjs: tf?.version?.tfjs || TFJS_VERSION,
+        trainRatio,
+        trainSize: boundedTrainSize,
+        testSize,
+        epochs,
+        batchSize,
+        learningRate,
+        lookback,
+        threshold: AI_CLASSIFICATION_THRESHOLD,
+        normaliser,
+        datasetLastDate: predictionsPayload.datasetLastDate,
+        totalSamples,
+      };
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload, runMeta });
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {
@@ -553,8 +660,11 @@ function annWilliamsR(high, low, close, period = 14) {
   });
 }
 
-function annPrepareDataset(rows) {
-  const parsed = Array.isArray(rows)
+function annPrepareDataset(rows, options = {}) {
+  const limitLastDate = typeof options.limitLastDate === 'string' ? options.limitLastDate : null;
+  const limitRowCount = Number.isFinite(options.limitRowCount) ? Math.max(0, Math.round(options.limitRowCount)) : null;
+
+  let parsed = Array.isArray(rows)
     ? rows
         .filter((row) => row && typeof row.date === 'string')
         .map((row) => {
@@ -569,6 +679,15 @@ function annPrepareDataset(rows) {
         .filter((row) => Number.isFinite(row.close) && row.close > 0 && Number.isFinite(row.high) && Number.isFinite(row.low))
         .sort((a, b) => a.date.localeCompare(b.date))
     : [];
+
+  if (limitLastDate) {
+    parsed = parsed.filter((row) => row.date <= limitLastDate);
+  }
+  if (Number.isFinite(limitRowCount) && limitRowCount > 0 && parsed.length > limitRowCount) {
+    parsed = parsed.slice(parsed.length - limitRowCount);
+  }
+
+  const rawRowCount = parsed.length;
 
   const close = parsed.map((row) => row.close);
   const high = parsed.map((row) => row.high);
@@ -639,6 +758,7 @@ function annPrepareDataset(rows) {
     forecastFeature,
     forecastDate,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
+    rawRowCount,
   };
 }
 
@@ -671,9 +791,12 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
-function annSplitTrainTest(Z, y, meta, returns, ratio) {
+function annSplitTrainTest(Z, y, meta, returns, ratio, explicitSplitIndex = null) {
   const total = Z.length;
-  const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const defaultTrainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const trainCount = Number.isFinite(explicitSplitIndex)
+    ? Math.min(Math.max(Math.round(explicitSplitIndex), 1), total - 1)
+    : defaultTrainCount;
   return {
     Xtr: Z.slice(0, trainCount),
     ytr: y.slice(0, trainCount),
@@ -685,12 +808,57 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
   };
 }
 
+function computeConfusionMatrix(predictions, labels, threshold = AI_CLASSIFICATION_THRESHOLD) {
+  let TP = 0;
+  let TN = 0;
+  let FP = 0;
+  let FN = 0;
+  for (let i = 0; i < predictions.length; i += 1) {
+    const predicted = predictions[i] >= threshold ? 1 : 0;
+    const actual = labels[i] === 1 ? 1 : 0;
+    if (actual === 1 && predicted === 1) {
+      TP += 1;
+    } else if (actual === 0 && predicted === 0) {
+      TN += 1;
+    } else if (actual === 0 && predicted === 1) {
+      FP += 1;
+    } else if (actual === 1 && predicted === 0) {
+      FN += 1;
+    }
+  }
+  return { TP, TN, FP, FN };
+}
+
 // Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
 function annBuildModel(inputDim, learningRate = 0.01) {
+  const makeGlorot = (offset = 0) => tf.initializers.glorotUniform({ seed: RANDOM_SEED + 200 + offset });
+  const zeroInit = tf.initializers.zeros();
   const model = tf.sequential();
-  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(
+    tf.layers.dense({
+      units: 32,
+      activation: 'relu',
+      inputShape: [inputDim],
+      kernelInitializer: makeGlorot(1),
+      biasInitializer: zeroInit,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      kernelInitializer: makeGlorot(2),
+      biasInitializer: zeroInit,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 1,
+      activation: 'sigmoid',
+      kernelInitializer: makeGlorot(3),
+      biasInitializer: zeroInit,
+    }),
+  );
   const optimizer = tf.train.sgd(learningRate);
   model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
@@ -709,25 +877,36 @@ async function handleAITrainANNMessage(message) {
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
+    await tfReadyPromise;
     if (!Array.isArray(rows) || rows.length < 60) {
       throw new Error('資料不足（至少 60 根 K 線）');
     }
 
-    const prepared = annPrepareDataset(rows);
+    const replayMeta = options?.replayMeta && typeof options.replayMeta === 'object'
+      ? options.replayMeta
+      : null;
+
+    const prepared = annPrepareDataset(rows, {
+      limitLastDate: typeof replayMeta?.datasetLastDate === 'string' ? replayMeta.datasetLastDate : null,
+      limitRowCount: Number.isFinite(replayMeta?.rawRowCount) ? replayMeta.rawRowCount : null,
+      enforceFeatureOrder: ANN_FEATURE_ORDER,
+    });
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
       throw new Error('有效樣本不足，請延長資料範圍。');
     }
 
-    const trainRatio = annClampTrainRatio(options.trainRatio);
+    const trainRatio = annClampTrainRatio(Number.isFinite(replayMeta?.trainRatio) ? replayMeta.trainRatio : options.trainRatio);
     const { Z, mean, std } = annStandardize(prepared.X);
-    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
+    const splitIndexOverride = Number.isFinite(replayMeta?.splitIndex) ? replayMeta.splitIndex : null;
+    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio, splitIndexOverride);
     if (split.Xte.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
-    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
-    const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
+    const defaultBatchSize = split.trainCount;
+    const requestedBatchSize = Number.isFinite(options.batchSize) ? Math.round(options.batchSize) : defaultBatchSize;
+    const batchSize = Math.min(Math.max(requestedBatchSize, 1), split.Xtr.length);
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate);
@@ -742,7 +921,7 @@ async function handleAITrainANNMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
@@ -776,6 +955,8 @@ async function handleAITrainANNMessage(message) {
       predictionsTensor.dispose();
 
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
+      const predictedLabels = predictionValues.map((value) => (value >= AI_CLASSIFICATION_THRESHOLD ? 1 : 0));
+      const confusion = computeConfusionMatrix(predictionValues, split.yte, AI_CLASSIFICATION_THRESHOLD);
 
       let forecast = null;
       if (Array.isArray(prepared.forecastFeature)) {
@@ -803,11 +984,15 @@ async function handleAITrainANNMessage(message) {
 
       const predictionsPayload = {
         predictions: predictionValues,
+        predictedLabels,
         meta: split.metaTe,
         returns: split.returnsTe,
         trainingOdds,
         forecast,
         datasetLastDate: prepared.datasetLastDate,
+        threshold: AI_CLASSIFICATION_THRESHOLD,
+        confusion,
+        featureOrder: ANN_FEATURE_ORDER,
         hyperparameters: {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,
@@ -820,7 +1005,27 @@ async function handleAITrainANNMessage(message) {
 
       const finalMessage = `完成：測試正確率 ${(Number.isFinite(testAccuracy) ? (testAccuracy * 100).toFixed(2) : '—')}%。`;
 
-      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+      const runMeta = {
+        version: AI_REPRO_VERSION,
+        modelType: MODEL_TYPES.ANNS,
+        seed: RANDOM_SEED,
+        backend: typeof tf.getBackend === 'function' ? tf.getBackend() : null,
+        tfjs: tf?.version?.tfjs || TFJS_VERSION,
+        trainRatio,
+        epochs,
+        batchSize,
+        learningRate,
+        splitIndex: split.trainCount,
+        threshold: AI_CLASSIFICATION_THRESHOLD,
+        mean,
+        std,
+        featureOrder: ANN_FEATURE_ORDER,
+        datasetLastDate: prepared.datasetLastDate,
+        rawRowCount: prepared.rawRowCount,
+        sampleCount: prepared.X.length,
+      };
+
+      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage, runMeta });
       model.dispose();
     } finally {
       tensorsToDispose.forEach((tensor) => {
