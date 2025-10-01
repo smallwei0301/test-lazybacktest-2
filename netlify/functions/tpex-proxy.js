@@ -1,9 +1,10 @@
-// netlify/functions/tpex-proxy.js (v11.1 - segmented FinMind fetch + request diagnostics)
+// netlify/functions/tpex-proxy.js (v11.2 - Fugle primary with segmented FinMind fallback)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TPEX-PROXY-20241216A
 // Patch Tag: LB-TPEX-PROXY-20250320A
+// Patch Tag: LB-FUGLE-SOURCE-20250625A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -19,6 +20,8 @@ const FINMIND_RETRY_ATTEMPTS = 3;
 const FINMIND_RETRY_BASE_DELAY_MS = 350;
 const FINMIND_SEGMENT_COOLDOWN_MS = 160;
 const FINMIND_SPLITTABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 520, 522, 524, 598]);
+const FUGLE_CANDLES_ENDPOINT = 'https://api.fugle.tw/marketdata/v1.0/stock/candles';
+const FUGLE_SOURCE_LABEL = 'Fugle 市場資料';
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -282,6 +285,133 @@ function buildMonthCacheKey(stockNo, monthKey, adjusted) {
 
 function safeRound(value) {
     return Number.isFinite(value) ? Number(value.toFixed(4)) : null;
+}
+
+function getFugleApiKey() {
+    const apiKey = process.env.FUGLE_API_KEY;
+    return apiKey ? apiKey.trim() : '';
+}
+
+function toUnixSecondsFromISO(isoDate, options = {}) {
+    if (!isoDate) return null;
+    const suffix = options.endOfDay ? 'T23:59:59.999+08:00' : 'T00:00:00.000+08:00';
+    const date = new Date(`${isoDate}${suffix}`);
+    if (Number.isNaN(date.getTime())) return null;
+    return Math.floor(date.getTime() / 1000);
+}
+
+function normaliseFugleNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+async function fetchFugleDailyCandles(stockNo, startISO, endISO) {
+    const apiKey = getFugleApiKey();
+    if (!apiKey) {
+        throw new Error('尚未設定 FUGLE_API_KEY，無法使用 Fugle 主來源');
+    }
+
+    const from = toUnixSecondsFromISO(startISO);
+    const to = toUnixSecondsFromISO(endISO, { endOfDay: true });
+    if (!from || !to) {
+        throw new Error('Fugle 日期區間無效');
+    }
+
+    const url = new URL(FUGLE_CANDLES_ENDPOINT);
+    url.searchParams.set('symbol', stockNo);
+    url.searchParams.set('resolution', 'D');
+    url.searchParams.set('from', String(from));
+    url.searchParams.set('to', String(to));
+
+    console.log('[TPEX Proxy v11.2] 呼叫 Fugle Candles', {
+        stockNo,
+        startISO,
+        endISO,
+        from,
+        to,
+        url: url.toString(),
+    });
+
+    const response = await fetch(url.toString(), {
+        headers: { 'X-API-KEY': apiKey, Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Fugle HTTP ${response.status} ｜ ${text.slice(0, 120)}`);
+    }
+
+    const payload = await response.json();
+    const data = payload?.data || {};
+    const candles = data?.candles || {};
+    const times = Array.isArray(candles.t)
+        ? candles.t
+        : Array.isArray(candles.time)
+            ? candles.time
+            : [];
+    if (!Array.isArray(times) || times.length === 0) {
+        throw new Error('Fugle 無可用的日線資料');
+    }
+
+    const opens = Array.isArray(candles.o) ? candles.o : Array.isArray(candles.open) ? candles.open : [];
+    const highs = Array.isArray(candles.h) ? candles.h : Array.isArray(candles.high) ? candles.high : [];
+    const lows = Array.isArray(candles.l) ? candles.l : Array.isArray(candles.low) ? candles.low : [];
+    const closes = Array.isArray(candles.c) ? candles.c : Array.isArray(candles.close) ? candles.close : [];
+    const volumes = Array.isArray(candles.v) ? candles.v : Array.isArray(candles.volume) ? candles.volume : [];
+
+    const name = (data?.info?.name || data?.info?.symbolName || data?.info?.symbol || '').toString().trim() || stockNo;
+    const rows = [];
+    let prevClose = null;
+    for (let i = 0; i < times.length; i += 1) {
+        const ts = Number(times[i]);
+        if (!Number.isFinite(ts)) continue;
+        const timestampMs = ts > 1e12 ? ts : ts * 1000;
+        const iso = new Date(timestampMs).toISOString().split('T')[0];
+        if (!iso || iso < startISO || iso > endISO) continue;
+        const rocDate = isoToRoc(iso);
+        if (!rocDate) continue;
+
+        const open = safeRound(normaliseFugleNumber(opens[i]));
+        const high = safeRound(normaliseFugleNumber(highs[i]));
+        const low = safeRound(normaliseFugleNumber(lows[i]));
+        const close = safeRound(normaliseFugleNumber(closes[i]));
+        const volumeRaw = normaliseFugleNumber(volumes[i]);
+        const volume = Number.isFinite(volumeRaw) ? Math.round(volumeRaw) : 0;
+        const change = Number.isFinite(close) && Number.isFinite(prevClose)
+            ? safeRound(close - prevClose)
+            : safeRound(normaliseFugleNumber(candles.ch?.[i] ?? candles.change?.[i] ?? 0)) || 0;
+        prevClose = Number.isFinite(close) ? close : prevClose;
+
+        rows.push([
+            rocDate,
+            stockNo,
+            name,
+            open,
+            high,
+            low,
+            close,
+            change,
+            volume,
+        ]);
+    }
+
+    rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+    if (rows.length === 0) {
+        throw new Error('Fugle 無回傳有效筆數');
+    }
+
+    return { stockName: name, aaData: rows };
+}
+
+async function persistFugleEntries(store, cacheKey, stockNo, startISO, endISO) {
+    const result = await fetchFugleDailyCandles(stockNo, startISO, endISO);
+    const payload = {
+        stockName: result.stockName,
+        aaData: result.aaData,
+        dataSource: FUGLE_SOURCE_LABEL,
+    };
+    await writeCache(store, cacheKey, payload);
+    return payload;
 }
 
 async function readCache(store, cacheKey) {
@@ -763,7 +893,7 @@ function summariseSources(flags, adjusted) {
         const isProxy = item.type === 'Proxy 快取';
         return !isLocal && (!item.type || isProxy) && !isBlob;
     });
-    const fallbackLabel = adjusted ? 'Yahoo Finance (還原)' : 'FinMind (主來源)';
+    const fallbackLabel = adjusted ? 'Yahoo Finance (還原)' : 'Fugle (主來源)';
     const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
     const combined = parsed.slice();
     if (!hasRemote && fallbackDescriptor) {
@@ -780,8 +910,8 @@ function validateForceSource(adjusted, forceSource) {
         if (normalized === 'yahoo') return normalized;
         throw new Error('還原模式目前僅支援 Yahoo Finance 測試來源');
     }
-    if (normalized === 'finmind' || normalized === 'yahoo') return normalized;
-    throw new Error('原始模式僅支援 FinMind 或 Yahoo 測試來源');
+    if (normalized === 'fugle' || normalized === 'finmind' || normalized === 'yahoo') return normalized;
+    throw new Error('原始模式僅支援 Fugle、FinMind 或 Yahoo 測試來源');
 }
 
 export default async (req) => {
@@ -799,7 +929,7 @@ export default async (req) => {
         const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
         const forceSourceParam = params.get('forceSource');
 
-        console.log('[TPEX Proxy v11.1] 入口參數', {
+        console.log('[TPEX Proxy v11.2] 入口參數', {
             stockNo,
             month: monthParam || null,
             start: startParam || legacyDate || null,
@@ -826,7 +956,7 @@ export default async (req) => {
         }
 
         const months = ensureMonthList(startDate, endDate);
-        console.log('[TPEX Proxy v11.1] 月份分段', {
+        console.log('[TPEX Proxy v11.2] 月份分段', {
             stockNo,
             segmentCount: months.length,
             startISO: formatISODateFromDate(startDate),
@@ -853,6 +983,7 @@ export default async (req) => {
         let yahooLabel = '';
         let finmindHydrated = false;
         let finmindLabel = '';
+        let fugleHydrated = false;
 
         for (const month of months) {
             const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
@@ -863,7 +994,21 @@ export default async (req) => {
 
             let payload = null;
             if (forcedSource) {
-                if (forcedSource === 'finmind') {
+                if (forcedSource === 'fugle') {
+                    try {
+                        const startISO = formatISODateFromDate(rangeStart);
+                        const endISO = formatISODateFromDate(rangeEnd);
+                        await persistFugleEntries(store, cacheKey, stockNo, startISO, endISO);
+                        payload = await readCache(store, cacheKey);
+                        if (payload) {
+                            sourceFlags.add('Fugle (強制)');
+                        }
+                        fugleHydrated = true;
+                    } catch (error) {
+                        console.error('[TPEX Proxy v11.2] 強制 Fugle 失敗:', error);
+                        return new Response(JSON.stringify({ error: `Fugle 來源取得失敗: ${error.message}` }), { status: 502 });
+                    }
+                } else if (forcedSource === 'finmind') {
                     try {
                         finmindLabel = await hydrateFinMindDaily(
                             store,
@@ -876,7 +1021,7 @@ export default async (req) => {
                         if (payload) sourceFlags.add(finmindLabel);
                         finmindHydrated = true;
                     } catch (error) {
-                        console.error('[TPEX Proxy v10.2] 強制 FinMind 失敗:', error);
+                        console.error('[TPEX Proxy v11.2] 強制 FinMind 失敗:', error);
                         return new Response(JSON.stringify({ error: `FinMind 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 } else if (forcedSource === 'yahoo') {
@@ -891,14 +1036,28 @@ export default async (req) => {
                         if (payload) sourceFlags.add(yahooLabel);
                         yahooHydrated = true;
                     } catch (error) {
-                        console.error('[TPEX Proxy v10.2] 強制 Yahoo 失敗:', error);
+                        console.error('[TPEX Proxy v11.2] 強制 Yahoo 失敗:', error);
                         return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 }
             } else {
                 payload = await readCache(store, cacheKey);
                 if (!payload) {
-                    if (adjusted) {
+                    if (!adjusted) {
+                        try {
+                            const startISO = formatISODateFromDate(rangeStart);
+                            const endISO = formatISODateFromDate(rangeEnd);
+                            await persistFugleEntries(store, cacheKey, stockNo, startISO, endISO);
+                            payload = await readCache(store, cacheKey);
+                            if (payload) {
+                                sourceFlags.add(FUGLE_SOURCE_LABEL);
+                                fugleHydrated = true;
+                            }
+                        } catch (error) {
+                            console.warn(`[TPEX Proxy v11.2] Fugle 主來源失敗 (${month}):`, error?.message || error);
+                        }
+                    }
+                    if (!payload && adjusted) {
                         if (!yahooHydrated) {
                             try {
                                 yahooLabel = await persistYahooEntries(
@@ -909,7 +1068,7 @@ export default async (req) => {
                                 );
                                 yahooHydrated = true;
                             } catch (error) {
-                                console.error('[TPEX Proxy v10.2] Yahoo 還原來源失敗:', error);
+                                console.error('[TPEX Proxy v11.2] Yahoo 還原來源失敗:', error);
                                 return new Response(
                                     JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${error.message}` }),
                                     { status: 502 },
@@ -921,7 +1080,7 @@ export default async (req) => {
                             if (payload.dataSource) sourceFlags.add(payload.dataSource);
                             else if (yahooLabel) sourceFlags.add(yahooLabel);
                         }
-                    } else {
+                    } else if (!payload) {
                         if (!finmindHydrated) {
                             try {
                                 finmindLabel = await hydrateFinMindDaily(
@@ -932,7 +1091,7 @@ export default async (req) => {
                                     endDate.toISOString().split('T')[0],
                                 );
                             } catch (error) {
-                                console.warn('[TPEX Proxy v10.2] FinMind 主來源失敗:', error.message);
+                                console.warn('[TPEX Proxy v11.2] FinMind 主來源失敗:', error.message);
                                 try {
                                 yahooLabel = await persistYahooEntries(
                                     store,
@@ -941,7 +1100,7 @@ export default async (req) => {
                                     false,
                                 );
                                 } catch (yahooError) {
-                                    console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
+                                    console.error('[TPEX Proxy v11.2] Yahoo 備援失敗:', yahooError);
                                     return new Response(
                                         JSON.stringify({ error: `Yahoo 備援來源取得失敗: ${yahooError.message}` }),
                                         { status: 502 },
