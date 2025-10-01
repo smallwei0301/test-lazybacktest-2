@@ -1,12 +1,16 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-REPLAY-20250225A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-REPLAY-20250225A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
         ANNS: 'anns',
+    };
+    const RUN_META_STORAGE_KEYS = {
+        [MODEL_TYPES.LSTM]: 'lazybacktest-ai-lstm-meta-v1',
+        [MODEL_TYPES.ANNS]: 'lazybacktest-ai-anns-meta-v1',
     };
     const MODEL_LABELS = {
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
@@ -23,6 +27,8 @@
         winThreshold: 0.5,
         kellyEnabled: false,
         fixedFraction: 0.2,
+        runMeta: null,
+        confusion: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -125,6 +131,34 @@
             window.localStorage.setItem(SEED_STORAGE_KEY, JSON.stringify(seeds));
         } catch (error) {
             console.warn('[AI Prediction] 無法儲存本地種子：', error);
+        }
+    };
+
+    const persistRunMeta = (modelType, meta) => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        const key = RUN_META_STORAGE_KEYS[modelType];
+        if (!key) return;
+        try {
+            if (meta) {
+                window.localStorage.setItem(key, JSON.stringify(meta));
+            } else {
+                window.localStorage.removeItem(key);
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存模型重播參數：', error);
+        }
+    };
+
+    const loadRunMetaFromStorage = (modelType) => {
+        if (typeof window === 'undefined' || !window.localStorage) return null;
+        const key = RUN_META_STORAGE_KEYS[modelType];
+        if (!key) return null;
+        try {
+            const raw = window.localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : null;
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取模型重播參數：', error);
+            return null;
         }
     };
 
@@ -296,18 +330,34 @@
             return;
         }
         const pending = aiWorkerRequests.get(id);
-        const modelType = pending.modelType || (pending.taskType === 'ai-train-ann' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
-        if (type === 'ai-train-lstm-result' || type === 'ai-train-ann-result') {
+        const fallbackModel = pending.taskType === 'ai-train-ann' || pending.taskType === 'ai-replay-ann'
+            ? MODEL_TYPES.ANNS
+            : MODEL_TYPES.LSTM;
+        const modelType = pending.modelType || fallbackModel;
+        const successTypes = new Set([
+            'ai-train-lstm-result',
+            'ai-train-ann-result',
+            'ai-replay-lstm-result',
+            'ai-replay-ann-result',
+        ]);
+        const errorTypes = new Set([
+            'ai-train-lstm-error',
+            'ai-train-ann-error',
+            'ai-replay-lstm-error',
+            'ai-replay-ann-error',
+        ]);
+        if (successTypes.has(type)) {
             aiWorkerRequests.delete(id);
             const payload = data || {};
             payload.modelType = modelType;
             payload.taskType = pending.taskType;
             pending.resolve(payload);
-        } else if (type === 'ai-train-lstm-error' || type === 'ai-train-ann-error') {
+        } else if (errorTypes.has(type)) {
             aiWorkerRequests.delete(id);
+            const baseMessage = type.includes('replay') ? 'AI 模型重播失敗' : 'AI 背景訓練失敗';
             const reason = error && typeof error.message === 'string'
                 ? new Error(error.message)
-                : new Error('AI 背景訓練失敗');
+                : new Error(baseMessage);
             reason.modelType = modelType;
             pending.reject(reason);
         } else {
@@ -347,10 +397,12 @@
         return aiWorker;
     };
 
-    const sendAIWorkerTrainingTask = (taskType, payload, metadata = {}) => {
+    const sendAIWorkerTask = (taskType, payload, metadata = {}) => {
         const workerInstance = ensureAIWorker();
-        const requestId = `ai-train-${Date.now()}-${aiWorkerSequence += 1}`;
-        const modelType = metadata.modelType || (taskType === 'ai-train-ann' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
+        const requestId = `${taskType}-${Date.now()}-${aiWorkerSequence += 1}`;
+        const modelType = metadata.modelType || (taskType === 'ai-train-ann' || taskType === 'ai-replay-ann'
+            ? MODEL_TYPES.ANNS
+            : MODEL_TYPES.LSTM);
         return new Promise((resolve, reject) => {
             aiWorkerRequests.set(requestId, { resolve, reject, modelType, taskType });
             try {
@@ -826,7 +878,7 @@
         }
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
-        const workerResult = await sendAIWorkerTrainingTask('ai-train-lstm', {
+        const workerResult = await sendAIWorkerTask('ai-train-lstm', {
             dataset,
             hyperparameters: {
                 lookback: hyperparameters.lookback,
@@ -850,6 +902,12 @@
         const predictionsPayload = workerResult?.predictionsPayload || null;
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
+        }
+
+        modelState.runMeta = workerResult.runMeta || null;
+        modelState.confusion = workerResult.confusion || null;
+        if (workerResult.runMeta) {
+            persistRunMeta(modelType, workerResult.runMeta);
         }
 
         predictionsPayload.hyperparameters = {
@@ -886,7 +944,7 @@
         }
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
-        const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', {
+        const workerResult = await sendAIWorkerTask('ai-train-ann', {
             rows,
             options: {
                 epochs: hyperparameters.epochs,
@@ -907,6 +965,12 @@
         const predictionsPayload = workerResult?.predictionsPayload || null;
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
+        }
+
+        modelState.runMeta = workerResult.runMeta || null;
+        modelState.confusion = workerResult.confusion || null;
+        if (workerResult.runMeta) {
+            persistRunMeta(modelType, workerResult.runMeta);
         }
 
         predictionsPayload.hyperparameters = {
@@ -932,6 +996,115 @@
             ? workerResult.finalMessage
             : `完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`;
         showStatus(`[${label}] ${finalMessage}`, 'success');
+    };
+
+    const ingestWorkerReplay = (modelType, workerResult, fallbackMeta) => {
+        const modelState = getModelState(modelType);
+        if (!modelState) {
+            throw new Error('找不到模型狀態。');
+        }
+        const predictionsPayload = workerResult?.predictionsPayload || null;
+        if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
+            throw new Error('AI Worker 未回傳有效的重播結果。');
+        }
+        const trainingMetrics = workerResult?.trainingMetrics || {
+            trainAccuracy: NaN,
+            trainLoss: NaN,
+            testAccuracy: NaN,
+            testLoss: NaN,
+            totalPredictions: Array.isArray(predictionsPayload.predictions)
+                ? predictionsPayload.predictions.length
+                : 0,
+        };
+
+        modelState.predictionsPayload = predictionsPayload;
+        modelState.trainingMetrics = trainingMetrics;
+        modelState.odds = Number.isFinite(predictionsPayload.trainingOdds)
+            ? predictionsPayload.trainingOdds
+            : modelState.odds;
+
+        const hyper = predictionsPayload.hyperparameters || {};
+        modelState.hyperparameters = {
+            lookback: Number.isFinite(hyper.lookback) ? hyper.lookback : modelState.hyperparameters.lookback,
+            epochs: Number.isFinite(hyper.epochs) ? hyper.epochs : modelState.hyperparameters.epochs,
+            batchSize: Number.isFinite(hyper.batchSize) ? hyper.batchSize : modelState.hyperparameters.batchSize,
+            learningRate: Number.isFinite(hyper.learningRate) ? hyper.learningRate : modelState.hyperparameters.learningRate,
+            trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : modelState.hyperparameters.trainRatio,
+        };
+
+        modelState.runMeta = workerResult?.runMeta || fallbackMeta || modelState.runMeta || null;
+        modelState.confusion = workerResult?.confusion || null;
+        if (modelState.runMeta) {
+            persistRunMeta(modelType, modelState.runMeta);
+        }
+
+        if (modelType === globalState.activeModel) {
+            recomputeTradesFromState(modelType);
+        } else {
+            const threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
+            applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, {
+                threshold,
+                useKelly: Boolean(modelState.kellyEnabled),
+                fixedFraction: sanitizeFraction(modelState.fixedFraction),
+            });
+        }
+
+        return workerResult?.finalMessage || null;
+    };
+
+    const replayModelFromSeed = async (seed) => {
+        if (!seed) return false;
+        const modelType = seed.modelType || globalState.activeModel;
+        const label = formatModelLabel(modelType);
+        const modelState = getModelState(modelType);
+        if (!modelState) {
+            showStatus(`[${label}] 找不到模型狀態，無法重播。`, 'error');
+            return false;
+        }
+        const baseMeta = seed.runMeta || loadRunMetaFromStorage(modelType);
+        if (!baseMeta) {
+            showStatus(`[${label}] 缺少重播所需參數，已維持種子原始結果。`, 'warning');
+            return false;
+        }
+        const rows = getVisibleData();
+        if (!Array.isArray(rows) || rows.length === 0) {
+            showStatus(`[${label}] 找不到可用資料，已維持種子原始結果。`, 'warning');
+            return false;
+        }
+        try {
+            if (modelType === MODEL_TYPES.ANNS) {
+                if (rows.length < 60) {
+                    showStatus(`[${label}] 資料不足以重播該種子（至少 60 根 K 線）。`, 'warning');
+                    return false;
+                }
+                showStatus(`[${label}] 正在重播種子績效...`, 'info');
+                const workerResult = await sendAIWorkerTask('ai-replay-ann', { rows, meta: baseMeta }, { modelType });
+                const finalMessage = ingestWorkerReplay(modelType, workerResult, baseMeta);
+                showStatus(`[${label}] ${finalMessage || '重播完成。'}`, 'success');
+                return true;
+            }
+
+            const lookback = Number.isFinite(baseMeta.lookback)
+                ? baseMeta.lookback
+                : modelState.hyperparameters.lookback;
+            const dataset = buildDataset(rows, lookback);
+            const requiredSamples = Number.isFinite(baseMeta.totalSamples)
+                ? baseMeta.totalSamples
+                : lookback * 3;
+            if (!Array.isArray(dataset.sequences) || dataset.sequences.length < requiredSamples) {
+                showStatus(`[${label}] 目前資料僅 ${dataset.sequences.length} 筆，低於重播所需 ${requiredSamples} 筆。`, 'warning');
+                return false;
+            }
+            showStatus(`[${label}] 正在重播種子績效...`, 'info');
+            const workerResult = await sendAIWorkerTask('ai-replay-lstm', { dataset, meta: baseMeta }, { modelType });
+            const finalMessage = ingestWorkerReplay(modelType, workerResult, baseMeta);
+            showStatus(`[${label}] ${finalMessage || '重播完成。'}`, 'success');
+            return true;
+        } catch (error) {
+            console.error('[AI Prediction] 重播模型失敗：', error);
+            showStatus(`[${label}] 重播失敗：${error.message}`, 'error');
+            return false;
+        }
     };
 
     const recomputeTradesFromState = (modelType = globalState.activeModel) => {
@@ -1041,6 +1214,7 @@
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
             },
+            runMeta: modelState.runMeta || null,
             version: VERSION_TAG,
         };
         seeds.push(newSeed);
@@ -1049,9 +1223,14 @@
         showStatus(`已儲存種子「${seedName}」。`, 'success');
     };
 
-    const activateSeed = (seed) => {
+    const activateSeed = async (seed) => {
         if (!seed) return;
-        const modelType = globalState.activeModel;
+        const modelType = seed.modelType || globalState.activeModel;
+        if (globalState.activeModel !== modelType) {
+            globalState.activeModel = modelType;
+            applyModelSettingsToUI(getActiveModelState());
+            refreshSeedOptions();
+        }
         const modelState = getModelState(modelType);
         modelState.predictionsPayload = {
             predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
@@ -1073,6 +1252,14 @@
         };
         modelState.trainingMetrics = metrics;
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
+        if (seed.runMeta) {
+            modelState.runMeta = seed.runMeta;
+            persistRunMeta(modelType, seed.runMeta);
+        } else {
+            const storedMeta = loadRunMetaFromStorage(modelType);
+            modelState.runMeta = storedMeta || modelState.runMeta || null;
+        }
+        modelState.confusion = null;
 
         const hyper = seed.payload?.hyperparameters || {};
         if (elements.lookback && Number.isFinite(hyper.lookback)) {
@@ -1121,9 +1308,11 @@
         parseWinThreshold();
         recomputeTradesFromState(modelType);
         showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
+
+        await replayModelFromSeed(seed);
     };
 
-    const handleLoadSeed = () => {
+    const handleLoadSeed = async () => {
         if (!elements.savedSeedList) return;
         const seeds = loadStoredSeeds();
         const selectedIds = Array.from(elements.savedSeedList.selectedOptions || []).map((option) => option.value);
@@ -1140,7 +1329,12 @@
             return;
         }
         const latestSeed = selectedSeeds[selectedSeeds.length - 1];
-        activateSeed(latestSeed);
+        try {
+            await activateSeed(latestSeed);
+        } catch (error) {
+            console.error('[AI Prediction] 載入種子失敗：', error);
+            showStatus(`載入種子失敗：${error.message}`, 'error');
+        }
     };
 
     const runPrediction = async () => {
@@ -1297,7 +1491,7 @@
 
         if (elements.loadSeedButton) {
             elements.loadSeedButton.addEventListener('click', () => {
-                handleLoadSeed();
+                void handleLoadSeed();
             });
         }
 
