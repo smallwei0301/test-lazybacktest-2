@@ -2117,6 +2117,32 @@
                                                     <span class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground);">訓練：測試 = 2 : 1</span>
                                                 </div>
                                             </div>
+                                            <div class="grid gap-4 md:grid-cols-2 items-start">
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    勝率門檻（%）
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <input id="ai-winrate-threshold" type="number" min="50" max="100" step="1" value="60" class="w-full md:w-auto flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <button id="ai-best-threshold" type="button" class="px-3 py-2 rounded-md text-xs font-semibold border transition-colors" style="border-color: var(--border); color: var(--primary);">一鍵最佳報酬</button>
+                                                    </div>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">僅在預測上漲機率高於門檻時進場，按 50%~100% 掃描可求得交易報酬%中位數最佳化。</span>
+                                                </label>
+                                                <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                    <div class="text-xs font-medium" style="color: var(--foreground);">隨機種子管理</div>
+                                                    <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                                                        <label class="flex items-center gap-2 text-xs" style="color: var(--foreground);">
+                                                            <span class="min-w-[72px]">目前種子</span>
+                                                            <input id="ai-seed-value" type="number" min="1" step="1" value="202409" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        </label>
+                                                        <div class="flex gap-2 justify-end">
+                                                            <button id="ai-save-seed" type="button" class="px-3 py-2 rounded-md text-xs font-semibold border" style="border-color: var(--border); color: var(--primary);">儲存種子</button>
+                                                            <button id="ai-load-seed" type="button" class="px-3 py-2 rounded-md text-xs font-semibold border" style="border-color: var(--border); color: var(--foreground);">載入種子</button>
+                                                        </div>
+                                                    </div>
+                                                    <input id="ai-seed-name" type="text" placeholder="儲存名稱（預設為訓練/測試勝率）" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <select id="ai-saved-seeds" multiple class="h-24 px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
+                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">可多選種子批次載入，儲存時預設名稱為訓練期勝率與測試正確率。</span>
+                                                </div>
+                                            </div>
                                             <div class="flex flex-wrap items-center gap-3">
                                                 <button id="ai-run-button" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors" style="background-color: var(--primary); color: var(--primary-foreground);">
                                                     <i data-lucide="cpu" class="lucide-sm"></i>啟動 AI 預測
@@ -2125,12 +2151,12 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="card">
-                                        <div class="card-header flex flex-col gap-2">
-                                            <h3 class="card-title text-base">模型與交易成果</h3>
-                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、預測信心與採用凱利公式後的資金曲線摘要。</p>
-                                        </div>
-                                        <div class="card-content space-y-4">
+                                        <div class="card">
+                                            <div class="card-header flex flex-col gap-2">
+                                                <h3 class="card-title text-base">模型與交易成果</h3>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、預測信心與勝率門檻過濾後的交易報酬統計。</p>
+                                            </div>
+                                            <div class="card-content space-y-4">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" id="ai-metrics-overview" style="color: var(--foreground);">
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">訓練期勝率</p>
@@ -2157,13 +2183,12 @@
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                     <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
                                                         <tr>
-                                                            <th class="px-3 py-2 text-left font-semibold">買進日</th>
-                                                            <th class="px-3 py-2 text-left font-semibold">賣出日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">交易日</th>
                                                             <th class="px-3 py-2 text-right font-semibold">預測上漲機率</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">投入比例</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">交易報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">交易盈虧</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">累積資金</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody id="ai-trade-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>

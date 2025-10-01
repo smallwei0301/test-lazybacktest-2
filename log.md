@@ -1,3 +1,11 @@
+## 2025-09-22 — Patch LB-AI-PREDICT-20250922A
+- **Scope**: AI 預測分頁互動與資金控管升級，新增勝率門檻最佳化與隨機種子管理工具。
+- **Enhancements**:
+  - 凱利公式可於回測後即時切換，重新計算交易紀錄與統計，勝率門檻支援 50%~100% 掃描取得最佳交易報酬%中位數。
+  - 交易表格改為顯示「交易日」「交易報酬%」，同步更新策略摘要為中位數、平均報酬%與標準差。
+  - 新增勝率門檻輸入、一鍵最佳報酬按鈕，以及本地種子儲存／多選載入功能，預設名稱為訓練期勝率＋測試正確率。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:
