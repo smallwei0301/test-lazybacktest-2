@@ -1,3 +1,11 @@
+## 2025-11-17 — Patch LB-AI-ANNS-20251117A
+- **Scope**: 新增 AI 預測分頁的 ANNS 技術指標模型與相關 UI，強化多模型切換體驗。
+- **Features**:
+  - 引入 TensorFlow.js 4.20.0 並建立 `anns-model.js`，以 MA、WMA、EMA、Momentum、KD、RSI、MACD、CCI、Williams %R 十項指標訓練三層 ANN。
+  - 於 AI 預測卡新增「ANNS 預測明日漲跌」按鈕與成果卡，顯示準確率、凱利比例、混淆矩陣與建議文字。
+  - Main thread 釋出 `window.cachedStockData` Proxy，並整合事件綁定與版本章提示，確保快取資料可被前端模型即時引用。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['anns-model.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:
