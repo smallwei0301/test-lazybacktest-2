@@ -1,8 +1,9 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251227B — Threshold objectives & seed labelling uplift.
+// Patch Tag: LB-AI-TRADE-RULE-20251228A — Dual entry rules & 100% default allocation.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251227B';
+    const VERSION_TAG = 'LB-AI-TRADE-RULE-20251228A';
+    const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -13,6 +14,23 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const TRADE_RULE_OPTIONS = [
+        {
+            value: 'close-trigger',
+            label: '收盤價掛單',
+            description: '買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。',
+        },
+        {
+            value: 'open-entry',
+            label: '開盤價買入',
+            description: '買入邏輯：隔日預測上漲時即以隔日開盤價買入，並於隔日收盤價出場。',
+        },
+    ];
+    const DEFAULT_TRADE_RULE = TRADE_RULE_OPTIONS[0].value;
+    const TRADE_RULE_MAP = TRADE_RULE_OPTIONS.reduce((acc, option) => {
+        acc[option.value] = option;
+        return acc;
+    }, {});
     const ANN_META_MESSAGE = 'ANN_META';
     const ANN_META_STORAGE_KEY = 'LB_ANN_META';
     const LSTM_META_MESSAGE = 'LSTM_META';
@@ -26,7 +44,7 @@
         lastSeedDefault: '',
         winThreshold: 0.5,
         kellyEnabled: false,
-        fixedFraction: 0.2,
+        fixedFraction: DEFAULT_FIXED_FRACTION,
         lastRunMeta: null,
         hyperparameters: {
             lookback: 20,
@@ -36,6 +54,7 @@
             trainRatio: 0.8,
             seed: null,
         },
+        tradeRule: DEFAULT_TRADE_RULE,
     });
     const globalState = {
         running: false,
@@ -52,6 +71,10 @@
         return globalState.models[model];
     };
     const getActiveModelState = () => getModelState(globalState.activeModel);
+    const getTradeRuleForModel = (model = globalState.activeModel) => {
+        const state = getModelState(model);
+        return normalizeTradeRule(state?.tradeRule);
+    };
 
     let aiWorker = null;
     let aiWorkerSequence = 0;
@@ -91,6 +114,7 @@
         savedSeedList: null,
         loadSeedButton: null,
         deleteSeedButton: null,
+        tradeRuleSelect: null,
         tradeRules: null,
     };
 
@@ -100,8 +124,50 @@
         warning: 'var(--secondary)',
         error: 'var(--destructive)',
     };
-    const TRADE_RULE_TEXT = '買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。';
+    const FRACTION_MIN_PERCENT = 1;
+    const FRACTION_MAX_PERCENT = 100;
     const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const normalizeTradeRule = (rule) => (TRADE_RULE_MAP[rule] ? rule : DEFAULT_TRADE_RULE);
+    const getTradeRuleConfig = (rule) => TRADE_RULE_MAP[normalizeTradeRule(rule)];
+    const getTradeRuleDescription = (rule) => getTradeRuleConfig(rule).description;
+    const updateTradeRuleDescription = (rule) => {
+        if (!elements.tradeRules) return;
+        elements.tradeRules.textContent = getTradeRuleDescription(rule);
+    };
+
+    const convertFractionToPercent = (fraction) => {
+        const sanitized = sanitizeFraction(Number.isFinite(fraction) ? fraction : DEFAULT_FIXED_FRACTION);
+        const percent = sanitized * 100;
+        if (!Number.isFinite(percent)) {
+            return FRACTION_MIN_PERCENT;
+        }
+        return Math.min(Math.max(percent, FRACTION_MIN_PERCENT), FRACTION_MAX_PERCENT);
+    };
+
+    const syncFractionInputDisplay = (fraction) => {
+        if (!elements.fixedFraction) return;
+        const percent = convertFractionToPercent(fraction);
+        const display = Number(percent.toFixed(2));
+        elements.fixedFraction.value = Number.isFinite(display)
+            ? String(display)
+            : String(convertFractionToPercent(DEFAULT_FIXED_FRACTION));
+    };
+
+    const readFractionFromInput = (fallbackFraction = DEFAULT_FIXED_FRACTION) => {
+        if (!elements.fixedFraction) return sanitizeFraction(fallbackFraction);
+        const fallbackPercent = convertFractionToPercent(fallbackFraction);
+        const percentValue = parseNumberInput(elements.fixedFraction, fallbackPercent, {
+            min: FRACTION_MIN_PERCENT,
+            max: FRACTION_MAX_PERCENT,
+        });
+        const normalized = sanitizeFraction(percentValue / 100);
+        const display = Number(percentValue.toFixed(2));
+        elements.fixedFraction.value = Number.isFinite(display)
+            ? String(display)
+            : String(fallbackPercent);
+        return normalized;
+    };
 
     let seedSaveFeedbackTimer = null;
 
@@ -253,7 +319,7 @@
 
     const sanitizeFraction = (value) => {
         const num = Number(value);
-        if (!Number.isFinite(num)) return 0.01;
+        if (!Number.isFinite(num)) return DEFAULT_FIXED_FRACTION;
         return Math.min(Math.max(num, 0.01), 1);
     };
 
@@ -603,13 +669,19 @@
             const entryTrigger = prev.close;
             const nextOpen = Number.isFinite(curr.open) ? curr.open : entryTrigger;
             const entryEligible = Number.isFinite(nextLow) && nextLow < entryTrigger;
-            const buyPrice = entryEligible
+            const closeEntryBuyPrice = entryEligible
                 ? (Number.isFinite(nextOpen) && nextOpen < entryTrigger ? nextOpen : entryTrigger)
                 : entryTrigger;
             const sellPrice = curr.close;
-            const actualReturn = entryEligible && Number.isFinite(buyPrice) && buyPrice > 0
-                ? (sellPrice - buyPrice) / buyPrice
+            const closeEntryReturn = entryEligible && Number.isFinite(closeEntryBuyPrice) && closeEntryBuyPrice > 0
+                ? (sellPrice - closeEntryBuyPrice) / closeEntryBuyPrice
                 : 0;
+            const openEntryBuyPrice = Number.isFinite(nextOpen) && nextOpen > 0 ? nextOpen : entryTrigger;
+            const openEntryEligible = Number.isFinite(openEntryBuyPrice) && openEntryBuyPrice > 0 && Number.isFinite(sellPrice);
+            const openEntryReturn = openEntryEligible
+                ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
+                : 0;
+            const actualReturn = closeEntryReturn;
             priceChanges.push(rawChange);
             tradeReturns.push(actualReturn);
             meta.push({
@@ -618,11 +690,18 @@
                 tradeDate: curr.date,
                 buyClose: prev.close,
                 sellClose: curr.close,
-                buyPrice,
+                buyPrice: closeEntryBuyPrice,
                 sellPrice,
                 nextOpen,
                 nextLow,
                 entryEligible,
+                closeEntryEligible: entryEligible,
+                closeEntryBuyPrice,
+                closeEntryReturn,
+                openEntryEligible,
+                openEntryBuyPrice,
+                openEntrySellPrice: sellPrice,
+                openEntryReturn,
                 actualReturn,
                 buyTrigger: entryTrigger,
             });
@@ -753,12 +832,22 @@
         if (elements.tradeSummary) elements.tradeSummary.textContent = '尚未生成交易結果。';
         if (elements.nextDayForecast) elements.nextDayForecast.textContent = '尚未計算隔日預測。';
         if (elements.tradeTableBody) elements.tradeTableBody.innerHTML = '';
-        if (elements.tradeRules) elements.tradeRules.textContent = TRADE_RULE_TEXT;
+        const rule = getTradeRuleForModel();
+        if (elements.tradeRuleSelect) {
+            elements.tradeRuleSelect.value = rule;
+        }
+        updateTradeRuleDescription(rule);
     };
 
     const updateSummaryMetrics = (summary) => {
         if (!summary) return;
-        if (elements.tradeRules) elements.tradeRules.textContent = TRADE_RULE_TEXT;
+        updateTradeRuleDescription(summary.tradeRule || getTradeRuleForModel());
+        if (elements.tradeRuleSelect && summary.tradeRule) {
+            elements.tradeRuleSelect.value = normalizeTradeRule(summary.tradeRule);
+        }
+        if (elements.fixedFraction) {
+            syncFractionInputDisplay(summary.fixedFraction);
+        }
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = formatPercent(summary.trainAccuracy, 2);
         if (elements.trainLoss) elements.trainLoss.textContent = `Loss：${formatNumber(summary.trainLoss, 4)}`;
         if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercent(summary.testAccuracy, 2);
@@ -827,6 +916,7 @@
         const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
         const useKelly = Boolean(options.useKelly);
         const fixedFraction = sanitizeFraction(options.fixedFraction);
+        const tradeRule = normalizeTradeRule(options.tradeRule);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -853,31 +943,80 @@
             if (probability < threshold) {
                 continue;
             }
-            const prevClose = Number(metaItem.buyClose);
-            const nextLow = Number(metaItem.nextLow);
-            let entryEligible = typeof metaItem.entryEligible === 'boolean' ? metaItem.entryEligible : null;
-            if (entryEligible === null) {
-                if (Number.isFinite(nextLow) && Number.isFinite(prevClose)) {
-                    entryEligible = nextLow < prevClose;
-                } else {
-                    entryEligible = true;
+            const baseSellPrice = Number.isFinite(metaItem.sellPrice)
+                ? metaItem.sellPrice
+                : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
+            let resolvedBuyPrice = NaN;
+            let resolvedSellPrice = baseSellPrice;
+            let entryEligible;
+            let actualReturn;
+
+            if (tradeRule === 'open-entry') {
+                const openEligible = typeof metaItem.openEntryEligible === 'boolean'
+                    ? metaItem.openEntryEligible
+                    : null;
+                resolvedBuyPrice = Number(metaItem.openEntryBuyPrice);
+                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
+                    const nextOpen = Number(metaItem.nextOpen);
+                    if (Number.isFinite(nextOpen) && nextOpen > 0) {
+                        resolvedBuyPrice = nextOpen;
+                    } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                        resolvedBuyPrice = metaItem.buyPrice;
+                    }
                 }
+                if (!Number.isFinite(resolvedSellPrice)) {
+                    const openSell = Number(metaItem.openEntrySellPrice);
+                    if (Number.isFinite(openSell)) {
+                        resolvedSellPrice = openSell;
+                    }
+                }
+                actualReturn = Number(metaItem.openEntryReturn);
+                entryEligible = typeof openEligible === 'boolean'
+                    ? openEligible
+                    : (Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0 && Number.isFinite(resolvedSellPrice));
+            } else {
+                const prevClose = Number(metaItem.buyClose);
+                const nextLow = Number(metaItem.nextLow);
+                const closeEligible = typeof metaItem.closeEntryEligible === 'boolean'
+                    ? metaItem.closeEntryEligible
+                    : (typeof metaItem.entryEligible === 'boolean' ? metaItem.entryEligible : null);
+                if (closeEligible === null) {
+                    entryEligible = Number.isFinite(nextLow) && Number.isFinite(prevClose)
+                        ? nextLow < prevClose
+                        : true;
+                } else {
+                    entryEligible = closeEligible;
+                }
+                resolvedBuyPrice = Number(metaItem.closeEntryBuyPrice);
+                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
+                    if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                        resolvedBuyPrice = metaItem.buyPrice;
+                    } else if (Number.isFinite(prevClose)) {
+                        const nextOpen = Number(metaItem.nextOpen);
+                        if (Number.isFinite(nextOpen) && nextOpen < prevClose) {
+                            resolvedBuyPrice = nextOpen;
+                        } else {
+                            resolvedBuyPrice = prevClose;
+                        }
+                    }
+                }
+                actualReturn = Number(returns[i]);
+                if (!Number.isFinite(actualReturn)) {
+                    actualReturn = Number(metaItem.closeEntryReturn);
+                }
+                if (!Number.isFinite(actualReturn)) {
+                    actualReturn = Number(metaItem.actualReturn);
+                }
+            }
+
+            if (typeof entryEligible !== 'boolean') {
+                entryEligible = true;
             }
             if (!entryEligible) {
                 continue;
             }
-            const resolvedBuyPrice = Number.isFinite(metaItem.buyPrice)
-                ? metaItem.buyPrice
-                : (Number.isFinite(prevClose) ? prevClose : NaN);
-            const resolvedSellPrice = Number.isFinite(metaItem.sellPrice)
-                ? metaItem.sellPrice
-                : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
             if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0 || !Number.isFinite(resolvedSellPrice)) {
                 continue;
-            }
-            let actualReturn = Number(returns[i]);
-            if (!Number.isFinite(actualReturn)) {
-                actualReturn = Number(metaItem.actualReturn);
             }
             if (!Number.isFinite(actualReturn)) {
                 actualReturn = (resolvedSellPrice - resolvedBuyPrice) / resolvedBuyPrice;
@@ -912,6 +1051,7 @@
                 tradeReturn,
                 buyPrice: resolvedBuyPrice,
                 sellPrice: resolvedSellPrice,
+                tradeRule,
             });
             tradeReturns.push(tradeReturn);
         }
@@ -968,6 +1108,7 @@
                 periodMonths,
                 periodYears,
             },
+            rule: tradeRule,
         };
     };
 
@@ -983,15 +1124,26 @@
         };
         const fallbackOdds = Number.isFinite(modelState.odds) ? modelState.odds : 1;
         const trainingOdds = Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : fallbackOdds;
-        const evaluation = computeTradeOutcomes(payload, options, trainingOdds);
+        const selectedRule = normalizeTradeRule(options.tradeRule);
+        const sanitizedFixedFraction = sanitizeFraction(options.fixedFraction);
+        const evaluation = computeTradeOutcomes(payload, {
+            ...options,
+            tradeRule: selectedRule,
+            fixedFraction: sanitizedFixedFraction,
+        }, trainingOdds);
+        const evaluationRule = normalizeTradeRule(evaluation.rule || selectedRule);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
         if (forecast) {
             const forecastFraction = options.useKelly
                 ? computeKellyFraction(forecast.probability, trainingOdds)
-                : sanitizeFraction(options.fixedFraction);
+                : sanitizedFixedFraction;
             forecast.fraction = forecastFraction;
+            forecast.tradeRule = evaluationRule;
+            if (evaluationRule === 'open-entry') {
+                forecast.buyPrice = Number.isFinite(forecast.buyPrice) ? NaN : forecast.buyPrice;
+            }
         }
 
         const summary = {
@@ -1017,23 +1169,29 @@
             tradePeriodMonths: evaluation.stats.periodMonths,
             tradePeriodYears: evaluation.stats.periodYears,
             usingKelly: Boolean(options.useKelly),
-            fixedFraction: sanitizeFraction(options.fixedFraction),
+            fixedFraction: sanitizedFixedFraction,
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
             seed: Number.isFinite(payload?.hyperparameters?.seed) ? payload.hyperparameters.seed : null,
             forecast,
+            tradeRule: evaluationRule,
         };
 
         modelState.trainingMetrics = metrics;
         modelState.lastSummary = summary;
         modelState.currentTrades = evaluation.trades;
         modelState.odds = trainingOdds;
+        payload.tradeRule = evaluationRule;
         modelState.predictionsPayload = payload;
+        modelState.tradeRule = evaluationRule;
 
         applySeedDefaultName(summary, modelType);
 
         if (globalState.activeModel === modelType) {
             updateSummaryMetrics(summary);
             renderTrades(evaluation.trades, summary.forecast);
+            if (elements.tradeRuleSelect) {
+                elements.tradeRuleSelect.value = evaluationRule;
+            }
         }
     };
 
@@ -1059,7 +1217,8 @@
         };
         modelState.winThreshold = parseWinThreshold();
         modelState.kellyEnabled = Boolean(elements.enableKelly?.checked);
-        modelState.fixedFraction = sanitizeFraction(parseNumberInput(elements.fixedFraction, modelState.fixedFraction, { min: 0.01, max: 1 }));
+        modelState.fixedFraction = readFractionFromInput(modelState.fixedFraction);
+        modelState.tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -1089,12 +1248,17 @@
             elements.enableKelly.checked = Boolean(modelState.kellyEnabled);
         }
         if (elements.fixedFraction) {
-            elements.fixedFraction.value = sanitizeFraction(modelState.fixedFraction || 0.2);
+            syncFractionInputDisplay(modelState.fixedFraction ?? DEFAULT_FIXED_FRACTION);
         }
         if (elements.winThreshold) {
             const thresholdPercent = Math.round(((Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5) * 100));
             elements.winThreshold.value = String(thresholdPercent);
         }
+        if (elements.tradeRuleSelect) {
+            const rule = getTradeRuleForModel(globalState.activeModel);
+            elements.tradeRuleSelect.value = rule;
+        }
+        updateTradeRuleDescription(getTradeRuleForModel(globalState.activeModel));
         parseTrainRatio();
         parseWinThreshold();
     };
@@ -1317,19 +1481,27 @@
         let threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
         let useKelly = Boolean(modelState.kellyEnabled);
         let fixedFraction = sanitizeFraction(modelState.fixedFraction);
+        let tradeRule = getTradeRuleForModel(modelType);
 
         if (modelType === globalState.activeModel) {
             threshold = parseWinThreshold();
             useKelly = Boolean(elements.enableKelly?.checked);
-            fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+            fixedFraction = readFractionFromInput(modelState.fixedFraction);
+            tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
             modelState.kellyEnabled = useKelly;
-            modelState.fixedFraction = sanitizeFraction(fixedFraction);
+            modelState.fixedFraction = fixedFraction;
+            modelState.tradeRule = tradeRule;
+            updateTradeRuleDescription(tradeRule);
+            if (elements.tradeRuleSelect) {
+                elements.tradeRuleSelect.value = tradeRule;
+            }
         }
 
         applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, {
             threshold,
             useKelly,
             fixedFraction,
+            tradeRule,
         });
     };
 
@@ -1341,7 +1513,14 @@
             return;
         }
         const useKelly = Boolean(elements.enableKelly?.checked);
-        const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+        const fixedFraction = readFractionFromInput(modelState.fixedFraction);
+        const tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
+        modelState.fixedFraction = fixedFraction;
+        modelState.tradeRule = tradeRule;
+        updateTradeRuleDescription(tradeRule);
+        if (elements.tradeRuleSelect) {
+            elements.tradeRuleSelect.value = tradeRule;
+        }
         const payload = modelState.predictionsPayload;
         const trainingOdds = Number.isFinite(payload.trainingOdds)
             ? payload.trainingOdds
@@ -1374,6 +1553,7 @@
                 threshold,
                 useKelly,
                 fixedFraction,
+                tradeRule,
             }, trainingOdds);
             const executedCount = Number.isFinite(evaluation.stats.executed) ? evaluation.stats.executed : 0;
             if (executedCount < minTrades) {
@@ -1475,6 +1655,7 @@
                 tradeReturnAverageMonthly: summary.tradeReturnAverageMonthly,
                 tradeReturnAverageYearly: summary.tradeReturnAverageYearly,
                 tradeReturnTotal: summary.tradeReturnTotal,
+                tradeRule: summary.tradeRule,
             },
             version: VERSION_TAG,
         };
@@ -1565,20 +1746,29 @@
         if (elements.enableKelly && typeof seed.summary?.usingKelly === 'boolean') {
             elements.enableKelly.checked = seed.summary.usingKelly;
         }
-        if (elements.fixedFraction && Number.isFinite(seed.summary?.fixedFraction)) {
-            elements.fixedFraction.value = seed.summary.fixedFraction;
+        const summaryFraction = Number.isFinite(seed.summary?.fixedFraction)
+            ? sanitizeFraction(seed.summary.fixedFraction)
+            : null;
+        if (summaryFraction !== null) {
+            modelState.fixedFraction = summaryFraction;
+            syncFractionInputDisplay(summaryFraction);
+        } else {
+            syncFractionInputDisplay(modelState.fixedFraction);
         }
         if (elements.winThreshold && Number.isFinite(seed.summary?.threshold)) {
             elements.winThreshold.value = String(Math.round(seed.summary.threshold * 100));
         }
 
         modelState.kellyEnabled = Boolean(seed.summary?.usingKelly);
-        modelState.fixedFraction = Number.isFinite(seed.summary?.fixedFraction)
-            ? sanitizeFraction(seed.summary.fixedFraction)
-            : modelState.fixedFraction;
         modelState.winThreshold = Number.isFinite(seed.summary?.threshold)
             ? seed.summary.threshold
             : modelState.winThreshold;
+        const summaryRule = normalizeTradeRule(seed.summary?.tradeRule);
+        modelState.tradeRule = summaryRule;
+        if (elements.tradeRuleSelect) {
+            elements.tradeRuleSelect.value = summaryRule;
+        }
+        updateTradeRuleDescription(summaryRule);
 
         parseTrainRatio();
         parseWinThreshold();
@@ -1651,6 +1841,7 @@
                 threshold: Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5,
                 useKelly: Boolean(modelState.kellyEnabled),
                 fixedFraction: sanitizeFraction(modelState.fixedFraction),
+                tradeRule: getTradeRuleForModel(normalizedModel),
             };
 
             const rows = getVisibleData();
@@ -1753,6 +1944,7 @@
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
         elements.loadSeedButton = document.getElementById('ai-load-seed');
         elements.deleteSeedButton = document.getElementById('ai-delete-seed');
+        elements.tradeRuleSelect = document.getElementById('ai-trade-rule');
         elements.tradeRules = document.getElementById('ai-trade-rules');
 
         if (elements.runButton) {
@@ -1791,6 +1983,18 @@
                 recomputeTradesFromState();
             });
             elements.fixedFraction.addEventListener('blur', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.tradeRuleSelect) {
+            elements.tradeRuleSelect.addEventListener('change', () => {
+                const rule = normalizeTradeRule(elements.tradeRuleSelect.value);
+                const modelState = getActiveModelState();
+                if (modelState) {
+                    modelState.tradeRule = rule;
+                }
+                updateTradeRuleDescription(rule);
                 recomputeTradesFromState();
             });
         }
@@ -1834,9 +2038,7 @@
 
         updateDatasetSummary(getVisibleData());
 
-        if (elements.tradeRules) {
-            elements.tradeRules.textContent = TRADE_RULE_TEXT;
-        }
+        updateTradeRuleDescription(getTradeRuleForModel());
 
         const bridge = ensureBridge();
         if (bridge) {

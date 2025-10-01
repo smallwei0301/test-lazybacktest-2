@@ -836,13 +836,19 @@ function annPrepareDataset(rows) {
     const nextLow = Number.isFinite(next.low) ? next.low : entryTrigger;
     const nextOpen = Number.isFinite(next.open) ? next.open : entryTrigger;
     const entryEligible = Number.isFinite(nextLow) && nextLow < entryTrigger;
-    const buyPrice = entryEligible
+    const closeEntryBuyPrice = entryEligible
       ? (Number.isFinite(nextOpen) && nextOpen < entryTrigger ? nextOpen : entryTrigger)
       : entryTrigger;
     const sellPrice = next.close;
-    const actualReturn = entryEligible && Number.isFinite(buyPrice) && buyPrice > 0
-      ? (sellPrice - buyPrice) / buyPrice
+    const closeEntryReturn = entryEligible && Number.isFinite(closeEntryBuyPrice) && closeEntryBuyPrice > 0
+      ? (sellPrice - closeEntryBuyPrice) / closeEntryBuyPrice
       : 0;
+    const openEntryBuyPrice = Number.isFinite(nextOpen) && nextOpen > 0 ? nextOpen : entryTrigger;
+    const openEntryEligible = Number.isFinite(openEntryBuyPrice) && openEntryBuyPrice > 0 && Number.isFinite(sellPrice);
+    const openEntryReturn = openEntryEligible
+      ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
+      : 0;
+    const actualReturn = closeEntryReturn;
     X.push(features.map(Number));
     y.push(next.close > current.close ? 1 : 0);
     meta.push({
@@ -851,11 +857,18 @@ function annPrepareDataset(rows) {
       tradeDate: next.date,
       buyClose: current.close,
       sellClose: next.close,
-      buyPrice,
+      buyPrice: closeEntryBuyPrice,
       sellPrice,
       nextOpen,
       nextLow,
       entryEligible,
+      closeEntryEligible: entryEligible,
+      closeEntryBuyPrice,
+      closeEntryReturn,
+      openEntryEligible,
+      openEntryBuyPrice,
+      openEntrySellPrice: sellPrice,
+      openEntryReturn,
       actualReturn,
       buyTrigger: entryTrigger,
     });

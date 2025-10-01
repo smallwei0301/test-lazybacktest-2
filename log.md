@@ -1,3 +1,11 @@
+## 2025-12-28 — Patch LB-AI-TRADE-RULE-20251228A
+- **Scope**: AI 預測交易邏輯與資金配置體驗同步調整。
+- **Updates**:
+  - 新增「收盤價掛單／開盤價買入」雙買入規則選項，交易表與摘要會依使用者切換即時重算並顯示對應買入邏輯。
+  - 固定投入比例改以百分比輸入，預設 100% 且與凱利公式切換同步更新種子、最佳化與摘要資訊。
+  - Worker 回傳交易 meta 含近收盤與隔日開盤進場收益，確保種子重播與前端最佳化能重建相同交易結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
