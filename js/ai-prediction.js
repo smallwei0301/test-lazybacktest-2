@@ -9,6 +9,32 @@
         odds: 1,
     };
 
+    const TFJS_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+    let tfLoadingPromise = null;
+
+    const ensureTfjsLoaded = async () => {
+        if (typeof tf !== 'undefined' && typeof tf.tensor === 'function') {
+            return;
+        }
+        if (!tfLoadingPromise) {
+            tfLoadingPromise = new Promise((resolve, reject) => {
+                try {
+                    const script = document.createElement('script');
+                    script.src = TFJS_SCRIPT_URL;
+                    script.async = true;
+                    script.onload = () => resolve();
+                    script.onerror = () => reject(new Error('TensorFlow.js 載入失敗，請稍後再試。'));
+                    document.head.appendChild(script);
+                } catch (err) {
+                    reject(err);
+                }
+            }).finally(() => {
+                tfLoadingPromise = null;
+            });
+        }
+        await tfLoadingPromise;
+    };
+
     const elements = {
         datasetSummary: null,
         status: null,
@@ -300,6 +326,12 @@
 
     const runPrediction = async () => {
         if (state.running) return;
+        try {
+            await ensureTfjsLoaded();
+        } catch (loadError) {
+            showStatus(loadError?.message || 'TensorFlow.js 載入失敗。', 'error');
+            return;
+        }
         if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
             showStatus('未載入 TensorFlow.js，請確認網路連線。', 'error');
             return;
