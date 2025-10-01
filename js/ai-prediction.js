@@ -1,8 +1,8 @@
 /* global tf, document, window */
 
-// Patch Tag: LB-AI-LSTM-20250922A
+// Patch Tag: LB-AI-LSTM-20250924A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-LSTM-20250922A';
+    const VERSION_TAG = 'LB-AI-LSTM-20250924A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const state = {
         running: false,
@@ -361,7 +361,7 @@
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
                         <td class="px-3 py-2 text-right">—</td>
-                        <td class="px-3 py-2 text-right">—</td>
+                        <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                         <td class="px-3 py-2 text-right">—</td>
                     </tr>
                 `
@@ -396,7 +396,7 @@
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
                     <td class="px-3 py-2 text-right">—</td>
-                    <td class="px-3 py-2 text-right">—</td>
+                    <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
                     <td class="px-3 py-2 text-right">—</td>
                 </tr>
             `);
@@ -441,7 +441,10 @@
                         ? '符合當前勝率門檻，可列入隔日進場條件評估。'
                         : '未達當前勝率門檻，建議僅作為觀察參考。')
                     : '';
-                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}`;
+                const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
+                    ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
+                    : '';
+                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
         applySeedDefaultName(summary);
@@ -469,6 +472,14 @@
             if (probability < threshold) {
                 continue;
             }
+            const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
+                ? metaItem.sellDate
+                : (typeof metaItem.tradeDate === 'string' && metaItem.tradeDate
+                    ? metaItem.tradeDate
+                    : (typeof metaItem.date === 'string' && metaItem.date ? metaItem.date : null));
+            if (!tradeDate) {
+                continue;
+            }
             const fraction = useKelly
                 ? computeKellyFraction(probability, trainingOdds)
                 : fixedFraction;
@@ -477,7 +488,7 @@
                 wins += 1;
             }
             executedTrades.push({
-                tradeDate: metaItem.sellDate,
+                tradeDate,
                 probability,
                 actualReturn,
                 fraction,
@@ -517,6 +528,16 @@
             ? payload.trainingOdds
             : (Number.isFinite(state.odds) ? state.odds : 1);
         const evaluation = computeTradeOutcomes(payload, options, trainingOdds);
+        const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
+            ? { ...payload.forecast }
+            : null;
+        if (forecast) {
+            const forecastFraction = options.useKelly
+                ? computeKellyFraction(forecast.probability, trainingOdds)
+                : sanitizeFraction(options.fixedFraction);
+            forecast.fraction = forecastFraction;
+        }
+
         const summary = {
             version: VERSION_TAG,
             trainAccuracy: metrics.trainAccuracy,
@@ -534,13 +555,13 @@
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
-            forecast: payload.forecast || null,
+            forecast,
         };
         state.lastSummary = summary;
         state.trainingMetrics = metrics;
         state.currentTrades = evaluation.trades;
         updateSummaryMetrics(summary);
-        renderTrades(evaluation.trades, payload.forecast);
+        renderTrades(evaluation.trades, summary.forecast);
     };
 
     const recomputeTradesFromState = () => {
