@@ -846,15 +846,16 @@ function getPrimaryForceSource(marketKey, adjusted) {
     if (marketKey === "US") return null;
     return "yahoo";
   }
-  if (marketKey === "TPEX" || marketKey === "US") return "finmind";
-  if (marketKey === "TWSE") return "twse";
+  if (marketKey === "US") return "finmind";
+  if (marketKey === "TPEX" || marketKey === "TWSE") return "fugle";
   return null;
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
   if (adjusted) return null;
-  if (marketKey === "TPEX" || marketKey === "US") return null;
-  return "finmind";
+  if (marketKey === "TWSE") return "twse";
+  if (marketKey === "TPEX") return "finmind";
+  return null;
 }
 
 function getMarketKey(marketType) {
@@ -2789,10 +2790,10 @@ function summariseDataSourceFlags(flags, defaultLabel, options = {}) {
     (options.adjusted
       ? 'Yahoo Finance (還原)'
       : options.market === 'TPEX'
-        ? 'FinMind (主來源)'
+        ? 'Fugle (主來源)'
         : options.market === 'US'
           ? 'FinMind (主來源)'
-          : defaultLabel || 'TWSE (主來源)');
+          : defaultLabel || 'Fugle (主來源)');
 
   const fallbackDescriptor = parseSourceLabelDescriptor(fallbackLabel);
   const combined = parsed.slice();
@@ -2912,7 +2913,7 @@ function tryResolveRangeFromYearSuperset({
     "Netlify 年度快取 (Worker Superset)",
   ]);
   const defaultRemoteLabel =
-    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+    marketKey === "TPEX" ? "Fugle (主來源)" : "Fugle (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     dataSourceFlags,
     defaultRemoteLabel,
@@ -3458,7 +3459,7 @@ async function tryFetchRangeFromBlob({
   dataSourceFlags.add(blobSourceLabel);
 
   const defaultRemoteLabel =
-    marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
+    marketKey === "TPEX" ? "Fugle (主來源)" : "Fugle (主來源)";
 
   const dataSourceLabel = summariseDataSourceFlags(dataSourceFlags, defaultRemoteLabel, {
     market: marketKey,
@@ -4373,14 +4374,14 @@ async function fetchStockData(
   const defaultRemoteLabel = isTpex
     ? adjusted
       ? "Yahoo Finance (還原)"
-      : "FinMind (主來源)"
+      : "Fugle (主來源)"
     : isUs
       ? adjusted
         ? "Yahoo Finance (還原)"
         : "FinMind (主來源)"
       : adjusted
         ? "Yahoo Finance (還原)"
-        : "TWSE (主來源)";
+        : "Fugle (主來源)";
   const dataSourceLabel = summariseDataSourceFlags(
     sourceFlags,
     defaultRemoteLabel,

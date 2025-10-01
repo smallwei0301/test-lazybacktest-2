@@ -1,3 +1,18 @@
+## 2025-12-18 — Patch LB-UI-LABEL-20251218A
+- **Scope**: 基本設定表單提示與部署文件同步指數支援。
+- **Updates**:
+  - `index.html` 基本設定卡片標籤改為「台灣/美國股票或指數代碼」，呼應 Fugle 主來源與指數查詢功能。
+  - `README.md` 補充 Fugle Token 為 TWSE/TPEX 主來源需求，並記錄台股清單現已內建台灣加權、櫃買指數等代碼。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-11-25 — Patch LB-DATASOURCE-FUGLE-20251125A
+- **Scope**: TWSE/TPEX 資料來源與台股指數查詢。
+- **Features**:
+  - TWSE 與 TPEX 代理全面改以 Fugle API 為主來源，落回官方來源與 FinMind 作為備援，並支援 `FUGLE_API_TOKEN` 設定。
+  - 前端資料來源測試、診斷提示與 Worker 快取順序更新為 Fugle 優先，TWSE/FinMind 為後援，訊息同步揭露 Token 需求。
+  - 台股官方清單及名稱查詢加入台灣加權指數與櫃買指數，輸入指數時自動顯示名稱並套用零手續費預設。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/main.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
