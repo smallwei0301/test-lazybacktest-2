@@ -1,8 +1,9 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-SEEDREPLAY-20251230A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-SEEDREPLAY-20251230A';
+    const SEED_SNAPSHOT_VERSION = 'LB-AI-SEEDREPLAY-20251230A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -23,6 +24,7 @@
         winThreshold: 0.5,
         kellyEnabled: false,
         fixedFraction: 0.2,
+        datasetSnapshot: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -415,6 +417,112 @@
         return null;
     };
 
+    const sanitizeSnapshotNumber = (value) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const createLstmSnapshot = (dataset) => {
+        if (!dataset || !Array.isArray(dataset.baseRows)) return null;
+        const rows = dataset.baseRows
+            .map((row) => {
+                const date = typeof row?.date === 'string' ? row.date : null;
+                const close = sanitizeSnapshotNumber(row?.close);
+                if (!date || close === null || close <= 0) return null;
+                return { date, close };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.date.localeCompare(b.date));
+        if (rows.length === 0) return null;
+        return {
+            version: SEED_SNAPSHOT_VERSION,
+            modelType: MODEL_TYPES.LSTM,
+            rows,
+            datasetLastDate: rows[rows.length - 1].date,
+        };
+    };
+
+    const createAnnSnapshot = (rows) => {
+        if (!Array.isArray(rows)) return null;
+        const normalized = rows
+            .filter((row) => row && typeof row.date === 'string')
+            .map((row) => {
+                const close = resolveCloseValue(row);
+                const high = sanitizeSnapshotNumber(row?.high);
+                const low = sanitizeSnapshotNumber(row?.low);
+                if (!Number.isFinite(close) || close <= 0) return null;
+                const resolvedHigh = Number.isFinite(high) && high > 0 ? high : close;
+                const resolvedLow = Number.isFinite(low) && low > 0 ? low : close;
+                return {
+                    date: row.date,
+                    close,
+                    high: resolvedHigh,
+                    low: resolvedLow,
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.date.localeCompare(b.date));
+        if (normalized.length === 0) return null;
+        return {
+            version: SEED_SNAPSHOT_VERSION,
+            modelType: MODEL_TYPES.ANNS,
+            rows: normalized,
+            datasetLastDate: normalized[normalized.length - 1].date,
+        };
+    };
+
+    const normalizeSeedSnapshot = (snapshot, fallbackModelType) => {
+        if (!snapshot || typeof snapshot !== 'object') return null;
+        const snapshotModel = Object.values(MODEL_TYPES).includes(snapshot.modelType)
+            ? snapshot.modelType
+            : fallbackModelType;
+        const rawRows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+        const sanitizedRows = rawRows
+            .map((row) => {
+                if (!row || typeof row !== 'object') return null;
+                const date = typeof row.date === 'string' ? row.date : null;
+                if (!date) return null;
+                const close = sanitizeSnapshotNumber(row.close);
+                if (close === null || close <= 0) return null;
+                if (snapshotModel === MODEL_TYPES.ANNS) {
+                    const high = sanitizeSnapshotNumber(row.high);
+                    const low = sanitizeSnapshotNumber(row.low);
+                    const resolvedHigh = Number.isFinite(high) && high > 0 ? high : close;
+                    const resolvedLow = Number.isFinite(low) && low > 0 ? low : close;
+                    return { date, close, high: resolvedHigh, low: resolvedLow };
+                }
+                return { date, close };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.date.localeCompare(b.date));
+        if (sanitizedRows.length === 0) return null;
+        return {
+            version: typeof snapshot.version === 'string' ? snapshot.version : SEED_SNAPSHOT_VERSION,
+            modelType: snapshotModel,
+            rows: sanitizedRows,
+            datasetLastDate: typeof snapshot.datasetLastDate === 'string'
+                ? snapshot.datasetLastDate
+                : sanitizedRows[sanitizedRows.length - 1].date,
+        };
+    };
+
+    const snapshotToSummaryRows = (snapshot) => {
+        if (!snapshot || !Array.isArray(snapshot.rows)) return [];
+        return snapshot.rows
+            .map((row) => {
+                if (!row || typeof row.date !== 'string') return null;
+                const close = sanitizeSnapshotNumber(row.close);
+                if (close === null || close <= 0) return null;
+                return { date: row.date, close };
+            })
+            .filter(Boolean);
+    };
+
+    const hasLockedSnapshot = () => {
+        const activeState = getActiveModelState();
+        return Boolean(activeState?.datasetSnapshot && Array.isArray(activeState.datasetSnapshot.rows) && activeState.datasetSnapshot.rows.length > 0);
+    };
+
     const buildDataset = (rows, lookback) => {
         if (!Array.isArray(rows)) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
@@ -494,6 +602,13 @@
         const firstDate = sorted[0].date;
         const lastDate = sorted[sorted.length - 1].date;
         elements.datasetSummary.textContent = `可用資料 ${sorted.length} 筆，區間 ${firstDate} ~ ${lastDate}。`;
+    };
+
+    const applyDatasetSnapshotSummary = (snapshot) => {
+        const summaryRows = snapshotToSummaryRows(snapshot);
+        if (summaryRows.length === 0) return false;
+        updateDatasetSummary(summaryRows);
+        return true;
     };
 
     const renderTrades = (records, forecast) => {
@@ -698,6 +813,17 @@
             forecast.fraction = forecastFraction;
         }
 
+        const normalizedSnapshot = normalizeSeedSnapshot(payload.datasetSnapshot, modelType);
+        if (normalizedSnapshot) {
+            modelState.datasetSnapshot = normalizedSnapshot;
+            payload.datasetSnapshot = normalizedSnapshot;
+        } else {
+            modelState.datasetSnapshot = null;
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'datasetSnapshot')) {
+                payload.datasetSnapshot = null;
+            }
+        }
+
         const summary = {
             version: VERSION_TAG,
             trainAccuracy: metrics.trainAccuracy,
@@ -728,6 +854,39 @@
             updateSummaryMetrics(summary);
             renderTrades(evaluation.trades, summary.forecast);
             applySeedDefaultName(summary);
+            if (modelState.datasetSnapshot) {
+                applyDatasetSnapshotSummary(modelState.datasetSnapshot);
+            }
+        }
+    };
+
+    const replaySeedPredictionFromSeed = async (modelType, seed) => {
+        const modelState = getModelState(modelType);
+        if (!modelState || !modelState.predictionsPayload || !modelState.trainingMetrics) {
+            return;
+        }
+        const riskOptions = {
+            threshold: Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5,
+            useKelly: Boolean(modelState.kellyEnabled),
+            fixedFraction: sanitizeFraction(modelState.fixedFraction),
+        };
+        if (modelType === globalState.activeModel && modelState.datasetSnapshot) {
+            applyDatasetSnapshotSummary(modelState.datasetSnapshot);
+        }
+        toggleRunning(true);
+        try {
+            await Promise.resolve();
+            applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, riskOptions);
+            const label = formatModelLabel(modelType);
+            const seedName = seed?.name || '未命名種子';
+            showStatus(`[${label}] 已依種子「${seedName}」重播預測並同步交易結果。`, 'success');
+        } catch (error) {
+            console.error('[AI Prediction] 種子重播失敗:', error);
+            const label = formatModelLabel(modelType);
+            const message = error instanceof Error ? error.message : String(error || '未知錯誤');
+            showStatus(`[${label}] 種子重播失敗：${message}`, 'error');
+        } finally {
+            toggleRunning(false);
         }
     };
 
@@ -805,6 +964,7 @@
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
         const dataset = buildDataset(rows, hyperparameters.lookback);
+        const datasetSnapshot = createLstmSnapshot(dataset);
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
         if (dataset.sequences.length < minimumSamples) {
             showStatus(`[${label}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
@@ -869,6 +1029,12 @@
             trainRatio: hyperparameters.trainRatio,
         };
 
+        if (datasetSnapshot) {
+            predictionsPayload.datasetSnapshot = datasetSnapshot;
+        } else {
+            predictionsPayload.datasetSnapshot = null;
+        }
+
         applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
 
         const finalMessage = typeof workerResult?.finalMessage === 'string'
@@ -884,6 +1050,8 @@
             showStatus(`[${label}] 資料不足（至少 60 根 K 線），請先延長回測期間。`, 'warning');
             return;
         }
+
+        const datasetSnapshot = createAnnSnapshot(rows);
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', {
@@ -926,6 +1094,12 @@
             trainRatio: hyperparameters.trainRatio,
         };
 
+        if (datasetSnapshot) {
+            predictionsPayload.datasetSnapshot = datasetSnapshot;
+        } else {
+            predictionsPayload.datasetSnapshot = null;
+        }
+
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
 
         const finalMessage = typeof workerResult?.finalMessage === 'string'
@@ -937,6 +1111,10 @@
     const recomputeTradesFromState = (modelType = globalState.activeModel) => {
         const modelState = getModelState(modelType);
         if (!modelState || !modelState.predictionsPayload || !modelState.trainingMetrics) return;
+
+        if (modelType === globalState.activeModel && modelState.datasetSnapshot) {
+            applyDatasetSnapshotSummary(modelState.datasetSnapshot);
+        }
 
         let threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
         let useKelly = Boolean(modelState.kellyEnabled);
@@ -1034,6 +1212,7 @@
                 forecast: modelState.predictionsPayload.forecast,
                 datasetLastDate: modelState.predictionsPayload.datasetLastDate,
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
+                datasetSnapshot: modelState.datasetSnapshot || modelState.predictionsPayload.datasetSnapshot || null,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -1053,6 +1232,7 @@
         if (!seed) return;
         const modelType = globalState.activeModel;
         const modelState = getModelState(modelType);
+        const normalizedSnapshot = normalizeSeedSnapshot(seed.payload?.datasetSnapshot, modelType);
         modelState.predictionsPayload = {
             predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
             meta: Array.isArray(seed.payload?.meta) ? seed.payload.meta : [],
@@ -1061,6 +1241,7 @@
             forecast: seed.payload?.forecast || null,
             datasetLastDate: seed.payload?.datasetLastDate || null,
             hyperparameters: seed.payload?.hyperparameters || null,
+            datasetSnapshot: normalizedSnapshot || null,
         };
         const metrics = seed.trainingMetrics || {
             trainAccuracy: NaN,
@@ -1117,10 +1298,16 @@
             ? seed.summary.threshold
             : modelState.winThreshold;
 
+        modelState.datasetSnapshot = normalizedSnapshot || null;
+        if (modelType === globalState.activeModel && modelState.datasetSnapshot) {
+            applyDatasetSnapshotSummary(modelState.datasetSnapshot);
+        }
+
         parseTrainRatio();
         parseWinThreshold();
-        recomputeTradesFromState(modelType);
-        showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
+
+        showStatus(`已載入種子：${seed.name || '未命名種子'}，已啟動重播流程。`, 'info');
+        void replaySeedPredictionFromSeed(modelType, seed);
     };
 
     const handleLoadSeed = () => {
@@ -1305,7 +1492,9 @@
         renderActiveModelOutputs();
         refreshSeedOptions();
 
-        updateDatasetSummary(getVisibleData());
+        if (!hasLockedSnapshot()) {
+            updateDatasetSummary(getVisibleData());
+        }
 
         const bridge = ensureBridge();
         if (bridge) {
@@ -1320,13 +1509,15 @@
                         console.warn('[AI Prediction] 前一個資料更新處理失敗:', error);
                     }
                 }
-                updateDatasetSummary(data);
+                if (!hasLockedSnapshot()) {
+                    updateDatasetSummary(data);
+                }
             };
             bridge.versionTag = VERSION_TAG;
         }
 
         window.addEventListener('lazybacktest:visible-data-changed', (event) => {
-            if (event && typeof event.detail === 'object') {
+            if (event && typeof event.detail === 'object' && !hasLockedSnapshot()) {
                 updateDatasetSummary(getVisibleData());
             }
         });

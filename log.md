@@ -1,3 +1,11 @@
+## 2025-12-30 — Patch LB-AI-SEEDREPLAY-20251230A
+- **Scope**: 強化 AI 種子載入體驗，確保載入後自動重播預測並鎖定原始資料集。
+- **Fixes & Enhancements**:
+  - 儲存種子時一併序列化訓練資料快照，載入時自動還原至相同資料範圍。
+  - 載入種子後自動觸發預測重播，並在 UI 顯示快照期間與一致的交易成績。
+  - 鎖定種子快照期間，避免後續回測新增資料時覆寫既有預測結果或勝率計算。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
