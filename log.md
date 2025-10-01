@@ -1,3 +1,11 @@
+## 2025-09-30 — Patch LB-AI-HYBRID-20250930A
+- **Scope**: AI 預測雙模型化與資料切分控制。
+- **Features**:
+  - 在 AI 預測設定卡片加入模型選擇、訓練比例下拉、隨機種子儲存與預測門檻調整，並同步更新狀態顯示與按鈕標籤。
+  - 重構 `ai-prediction.js` 建立 LSTM/ANNS 共用流程、Kelly 及交易摘要計算，並以 Worker 執行 ANNS 訓練。
+  - 擴充 `worker.js` 導入技術指標特徵工程、標準化與 ANN 訓練回傳，提供訓練/測試評估與機率序列。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:
