@@ -1,3 +1,11 @@
+## 2025-12-20 — Patch LB-AI-ANNS-REPRO-20251220A
+- **Scope**: ANNS 模型重現性治理，鎖定隨機性、特徵標準化流程與模型／超參數保存。
+- **Features**:
+  - Worker 端固定 TFJS 4.20.0 + WASM 後端並設置種子 1337，密封 ANN 初始化、批次、閾值與不洗牌的訓練流程，同步輸出混淆矩陣與門檻後測試正確率。
+  - 僅以訓練資料計算標準化 mean/std，保存至 IndexedDB 與 `ANN_META` 訊息，包含特徵順序、切分邊界、超參數與測試區間資訊。
+  - 前端接收 `ANN_META` 後寫入 localStorage，保留最新 run meta 供重播或快照紀錄，並同步橋接物件供其他模組使用。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

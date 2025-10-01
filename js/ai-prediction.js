@@ -4,6 +4,7 @@
 (function registerLazybacktestAIPrediction() {
     const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
+    const ANN_META_STORAGE_KEY = 'lazybacktest-ann-meta-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
         ANNS: 'anns',
@@ -30,6 +31,7 @@
             learningRate: 0.005,
             trainRatio: 0.8,
         },
+        lastRunMeta: null,
     });
     const globalState = {
         running: false,
@@ -127,6 +129,43 @@
             console.warn('[AI Prediction] 無法儲存本地種子：', error);
         }
     };
+
+    const persistAnnMeta = (meta) => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+            if (!meta) {
+                window.localStorage.removeItem(ANN_META_STORAGE_KEY);
+            } else {
+                window.localStorage.setItem(ANN_META_STORAGE_KEY, JSON.stringify(meta));
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存 ANN 重現參數：', error);
+        }
+    };
+
+    const loadStoredAnnMeta = () => {
+        if (typeof window === 'undefined' || !window.localStorage) return null;
+        try {
+            const raw = window.localStorage.getItem(ANN_META_STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                return parsed;
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取 ANN 重現參數：', error);
+        }
+        return null;
+    };
+
+    const initialAnnMeta = loadStoredAnnMeta();
+    if (initialAnnMeta) {
+        globalState.models[MODEL_TYPES.ANNS].lastRunMeta = initialAnnMeta;
+        const bridge = ensureBridge();
+        if (bridge) {
+            bridge.annLastMeta = initialAnnMeta;
+        }
+    }
 
     const escapeHTML = (value) => {
         if (typeof value !== 'string') return '';
@@ -280,7 +319,21 @@
 
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
-        const { type, id, data, error, message } = event.data;
+        const { type, id, data, error, message, payload: metaPayload } = event.data;
+        if (type === 'ANN_META') {
+            const meta = metaPayload && typeof metaPayload === 'object' ? metaPayload : null;
+            if (meta) {
+                const annState = getModelState(MODEL_TYPES.ANNS);
+                annState.lastRunMeta = meta;
+                persistAnnMeta(meta);
+                const bridge = ensureBridge();
+                if (bridge) {
+                    bridge.annLastMeta = meta;
+                }
+                console.info('[AI Prediction] 已接收 ANN 重現參數。', meta);
+            }
+            return;
+        }
         const isProgress = type === 'ai-train-lstm-progress' || type === 'ai-train-ann-progress';
         if (isProgress) {
             const pending = id ? aiWorkerRequests.get(id) : null;
