@@ -751,6 +751,12 @@
 - **Diagnostics**: 於本地重新載入執行卡確認容器僅包含 `<img>` 並維持透明背景，網路攔截測試時會顯示 `⌛` fallback 並記錄在 console，確保使用者仍感知進度。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-20 — Patch LB-AI-UX-20251220A
+- **Issue recap**: ANNS 仍非預設模型，隔日預測顯示僅呈現最後資料日期，種子管理缺乏刪除功能，資金控管設定與勝率門檻分散且進階超參數無法收合，使用者難以快速完成常見操作。
+- **Fix**: 將 AI 模型預設切換為 ANNS，新增可折疊的訓練/測試切分與超參數面板並保留指引文字，調整資金控管卡片至勝率門檻卡片下方，同時為種子列表補上刪除按鈕與新版預設命名。Worker 與前端同步改寫隔日預測邏輯，固定顯示資料最後一日之下一個交易日（跳過週末）。
+- **Diagnostics**: 手動切換模型確認預設為 ANNS，展開/收起進階設定確認內容正確；儲存後可刪除種子並重新整理列表，隔日預測在週五資料下正確標示週一日期且狀態列說明基準日與預測日。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-27 — Patch LB-PROGRESS-MASCOT-20251127A
 - **Issue recap**: Tenor v2 API 偶發失敗時進度吉祥物立即落入沙漏 fallback，無法持續顯示 Hachiware 動畫且缺乏自動重試與備援來源。
 - **Fix**: 擴增 `initLoadingMascotSanitiser`，先以 Tenor v2 重試三次、再回退至舊版 API，並預載多組 GIF 直接連結或必要時重新掛載官方嵌入，同時保持透明背景與禁用分享連結。

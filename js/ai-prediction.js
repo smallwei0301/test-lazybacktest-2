@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212B
+// Patch Tag: LB-AI-UX-20251220A — Default to ANNS, enriched seed management, next-trading-day forecast label.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212B';
+    const VERSION_TAG = 'LB-AI-UX-20251220A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -12,6 +12,7 @@
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
+    const DEFAULT_MODEL = MODEL_TYPES.ANNS;
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const createModelState = () => ({
         lastSummary: null,
@@ -33,17 +34,15 @@
     });
     const globalState = {
         running: false,
-        activeModel: MODEL_TYPES.LSTM,
+        activeModel: DEFAULT_MODEL,
         models: {
             [MODEL_TYPES.LSTM]: createModelState(),
             [MODEL_TYPES.ANNS]: createModelState(),
         },
     };
     const getModelState = (model) => {
-        if (!model || !globalState.models[model]) {
-            return globalState.models[MODEL_TYPES.LSTM];
-        }
-        return globalState.models[model];
+        const resolved = model && globalState.models[model] ? model : DEFAULT_MODEL;
+        return globalState.models[resolved];
     };
     const getActiveModelState = () => getModelState(globalState.activeModel);
 
@@ -81,6 +80,7 @@
         saveSeedButton: null,
         savedSeedList: null,
         loadSeedButton: null,
+        deleteSeedButton: null,
     };
 
     const colorMap = {
@@ -109,7 +109,7 @@
                     if (!seed || typeof seed !== 'object') return null;
                     const normalizedModel = Object.values(MODEL_TYPES).includes(seed.modelType)
                         ? seed.modelType
-                        : MODEL_TYPES.LSTM;
+                        : DEFAULT_MODEL;
                     return { ...seed, modelType: normalizedModel };
                 })
                 .filter(Boolean);
@@ -170,6 +170,26 @@
         if (!Number.isFinite(base)) return NaN;
         const variance = values.reduce((acc, value) => acc + ((value - base) ** 2), 0) / values.length;
         return Math.sqrt(Math.max(variance, 0));
+    };
+
+    const computeNextTradingDate = (dateText) => {
+        if (typeof dateText !== 'string' || !dateText) return null;
+        const parts = dateText.split('-');
+        if (parts.length !== 3) return null;
+        const [yearText, monthText, dayText] = parts;
+        const year = Number.parseInt(yearText, 10);
+        const month = Number.parseInt(monthText, 10);
+        const day = Number.parseInt(dayText, 10);
+        if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (Number.isNaN(date.getTime())) return null;
+        do {
+            date.setUTCDate(date.getUTCDate() + 1);
+        } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+        const nextYear = date.getUTCFullYear();
+        const nextMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const nextDay = String(date.getUTCDate()).padStart(2, '0');
+        return `${nextYear}-${nextMonth}-${nextDay}`;
     };
 
     const sanitizeFraction = (value) => {
@@ -505,7 +525,7 @@
             elements.tradeTableBody.innerHTML = forecast && Number.isFinite(forecast.probability)
                 ? `
                     <tr class="bg-muted/30">
-                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.displayDate || forecast.referenceDate || '最近收盤')}
                             <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
@@ -540,9 +560,10 @@
         });
 
         if (forecast && Number.isFinite(forecast.probability)) {
+            const forecastDateLabel = forecast.displayDate || forecast.referenceDate || '最近收盤';
             htmlParts.push(`
                 <tr class="bg-muted/30">
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecastDateLabel)}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
                     <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
@@ -598,7 +619,14 @@
             if (!forecast || !Number.isFinite(forecast.probability)) {
                 elements.nextDayForecast.textContent = '尚未計算隔日預測。';
             } else {
-                const baseLabel = forecast.referenceDate ? `以 ${forecast.referenceDate} 收盤為基準` : '以最近一次收盤為基準';
+                const basisDate = forecast.basisDate || summary.datasetLastDate || null;
+                const forecastDate = forecast.displayDate || forecast.referenceDate || null;
+                const baseIntro = basisDate
+                    ? `以 ${basisDate} 收盤為基準，`
+                    : '以最近一次收盤為基準，';
+                const probabilityText = forecastDate
+                    ? `預估 ${forecastDate} 隔日上漲機率為 ${formatPercent(forecast.probability, 1)}`
+                    : `隔日上漲機率為 ${formatPercent(forecast.probability, 1)}`;
                 const meetsThreshold = Number.isFinite(threshold)
                     ? (forecast.probability >= threshold
                         ? '符合當前勝率門檻，可列入隔日進場條件評估。'
@@ -607,7 +635,7 @@
                 const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
                     ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
                     : '';
-                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
+                elements.nextDayForecast.textContent = `${baseIntro}${probabilityText}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
     };
@@ -698,6 +726,32 @@
                 ? computeKellyFraction(forecast.probability, trainingOdds)
                 : sanitizeFraction(options.fixedFraction);
             forecast.fraction = forecastFraction;
+            const datasetLastDate = typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null;
+            const existingBasis = typeof forecast.basisDate === 'string' ? forecast.basisDate : null;
+            const basisDate = existingBasis || datasetLastDate || null;
+            const hadBasis = Boolean(existingBasis);
+            if (!hadBasis && basisDate) {
+                forecast.basisDate = basisDate;
+            }
+            const sourceForNext = basisDate || (typeof forecast.referenceDate === 'string' ? forecast.referenceDate : null);
+            const nextDate = sourceForNext ? computeNextTradingDate(sourceForNext) : null;
+            if (nextDate) {
+                forecast.displayDate = nextDate;
+                if (!hadBasis && forecast.referenceDate === basisDate) {
+                    forecast.referenceDate = nextDate;
+                }
+            } else if (typeof forecast.referenceDate === 'string') {
+                const derivedNext = computeNextTradingDate(forecast.referenceDate);
+                if (derivedNext) {
+                    forecast.displayDate = derivedNext;
+                    forecast.referenceDate = derivedNext;
+                } else {
+                    forecast.displayDate = forecast.referenceDate;
+                }
+            }
+            if (!forecast.displayDate && typeof forecast.referenceDate === 'string') {
+                forecast.displayDate = forecast.referenceDate;
+            }
         }
 
         const summary = {
@@ -717,6 +771,7 @@
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            datasetLastDate: typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null,
             forecast,
         };
 
@@ -1155,6 +1210,33 @@
         activateSeed(latestSeed);
     };
 
+    const handleDeleteSeeds = () => {
+        if (!elements.savedSeedList) return;
+        const seeds = loadStoredSeeds();
+        if (seeds.length === 0) {
+            showStatus('目前沒有儲存的種子可供刪除。', 'warning');
+            return;
+        }
+        const selectedIds = Array.from(elements.savedSeedList.selectedOptions || []).map((option) => option.value);
+        if (selectedIds.length === 0) {
+            showStatus('請先選擇要刪除的種子。', 'warning');
+            return;
+        }
+        const remaining = seeds.filter((seed) => !selectedIds.includes(seed.id));
+        const deletedCount = seeds.length - remaining.length;
+        if (deletedCount <= 0) {
+            showStatus('找不到選取的種子資料，已重新整理列表。', 'error');
+            refreshSeedOptions();
+            return;
+        }
+        persistSeeds(remaining);
+        refreshSeedOptions();
+        if (elements.savedSeedList) {
+            elements.savedSeedList.selectedIndex = -1;
+        }
+        showStatus(`已刪除 ${deletedCount} 筆種子。`, 'success');
+    };
+
     const runPrediction = async () => {
         if (globalState.running) return;
         toggleRunning(true);
@@ -1163,7 +1245,7 @@
             const selectedModel = elements.modelType ? elements.modelType.value : globalState.activeModel;
             const normalizedModel = Object.values(MODEL_TYPES).includes(selectedModel)
                 ? selectedModel
-                : MODEL_TYPES.LSTM;
+                : DEFAULT_MODEL;
 
             if (globalState.activeModel !== normalizedModel) {
                 captureActiveModelSettings();
@@ -1204,7 +1286,7 @@
     const handleModelChange = () => {
         if (!elements.modelType) return;
         const selected = elements.modelType.value;
-        const normalized = Object.values(MODEL_TYPES).includes(selected) ? selected : MODEL_TYPES.LSTM;
+        const normalized = Object.values(MODEL_TYPES).includes(selected) ? selected : DEFAULT_MODEL;
         if (globalState.activeModel === normalized) {
             applyModelSettingsToUI(getActiveModelState());
             renderActiveModelOutputs();
@@ -1251,6 +1333,7 @@
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
         elements.loadSeedButton = document.getElementById('ai-load-seed');
+        elements.deleteSeedButton = document.getElementById('ai-delete-seed');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -1310,6 +1393,12 @@
         if (elements.loadSeedButton) {
             elements.loadSeedButton.addEventListener('click', () => {
                 handleLoadSeed();
+            });
+        }
+
+        if (elements.deleteSeedButton) {
+            elements.deleteSeedButton.addEventListener('click', () => {
+                handleDeleteSeeds();
             });
         }
 

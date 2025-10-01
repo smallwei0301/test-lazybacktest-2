@@ -57,6 +57,27 @@ const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
 
+// Patch Tag: LB-AI-UX-20251220A — Align forecast labeling with next trading day expectations.
+function computeNextTradingDate(dateText) {
+  if (typeof dateText !== 'string' || !dateText) return null;
+  const parts = dateText.split('-');
+  if (parts.length !== 3) return null;
+  const [yearText, monthText, dayText] = parts;
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const day = Number.parseInt(dayText, 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  do {
+    date.setUTCDate(date.getUTCDate() + 1);
+  } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  const nextYear = date.getUTCFullYear();
+  const nextMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(date.getUTCDate()).padStart(2, '0');
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
 function aiPostProgress(id, message) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-lstm-progress', id, message });
@@ -235,6 +256,9 @@ async function handleAITrainLSTMMessage(message) {
       const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
       const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
 
+      const datasetLastDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+        : null;
       let nextDayForecast = null;
       if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
         const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
@@ -243,11 +267,11 @@ async function handleAITrainLSTMMessage(message) {
           const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
           const forecastTensor = model.predict(forecastInput);
           const forecastArray = Array.from(await forecastTensor.data());
+          const referenceDate = datasetLastDate ? computeNextTradingDate(datasetLastDate) || datasetLastDate : null;
           nextDayForecast = {
             probability: forecastArray[0],
-            referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
-              ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
-              : null,
+            referenceDate,
+            basisDate: datasetLastDate,
           };
           forecastTensor.dispose();
           forecastInput.dispose();
@@ -268,9 +292,7 @@ async function handleAITrainLSTMMessage(message) {
         returns: testReturns,
         trainingOdds,
         forecast: nextDayForecast,
-        datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
-          ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
-          : null,
+        datasetLastDate,
         hyperparameters: {
           lookback,
           epochs,
@@ -590,6 +612,7 @@ function annPrepareDataset(rows) {
   const returns = [];
   let forecastFeature = null;
   let forecastDate = null;
+  let forecastBasisDate = null;
 
   for (let i = 0; i < parsed.length; i += 1) {
     const features = [
@@ -607,8 +630,11 @@ function annPrepareDataset(rows) {
       wr[i],
     ];
     if (features.every((value) => Number.isFinite(value))) {
+      const candidateBasis = parsed[i].date;
+      const candidateReference = candidateBasis ? computeNextTradingDate(candidateBasis) || candidateBasis : null;
       forecastFeature = features.map(Number);
-      forecastDate = parsed[i].date;
+      forecastBasisDate = candidateBasis;
+      forecastDate = candidateReference;
     }
     if (i >= parsed.length - 1) {
       continue;
@@ -638,6 +664,7 @@ function annPrepareDataset(rows) {
     returns,
     forecastFeature,
     forecastDate,
+    forecastBasisDate,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
   };
 }
@@ -784,9 +811,15 @@ async function handleAITrainANNMessage(message) {
           const forecastTensor = tf.tensor2d([standardisedForecast]);
           const forecastOutput = model.predict(forecastTensor);
           const forecastArray = Array.from(await forecastOutput.data());
+          const basisDate = prepared.forecastBasisDate || prepared.datasetLastDate || null;
+          const referenceDate = prepared.forecastDate
+            || (basisDate ? computeNextTradingDate(basisDate) || basisDate : null)
+            || prepared.datasetLastDate
+            || null;
           forecast = {
             probability: forecastArray[0],
-            referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
+            referenceDate,
+            basisDate,
           };
           forecastOutput.dispose();
           forecastTensor.dispose();
