@@ -1,12 +1,17 @@
 /* global tf, document, window */
 
-// Patch Tag: LB-AI-LSTM-20250915A
+// Patch Tag: LB-AI-LSTM-20250922A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-LSTM-20250915A';
+    const VERSION_TAG = 'LB-AI-LSTM-20250922A';
+    const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const state = {
         running: false,
         lastSummary: null,
         odds: 1,
+        predictionsPayload: null,
+        trainingMetrics: null,
+        currentTrades: [],
+        lastSeedDefault: '',
     };
 
     const elements = {
@@ -19,6 +24,8 @@
         learningRate: null,
         enableKelly: null,
         fixedFraction: null,
+        winThreshold: null,
+        optimizeThreshold: null,
         trainAccuracy: null,
         trainLoss: null,
         testAccuracy: null,
@@ -29,6 +36,11 @@
         averageProfit: null,
         tradeTableBody: null,
         tradeSummary: null,
+        nextDayForecast: null,
+        seedName: null,
+        saveSeedButton: null,
+        savedSeedList: null,
+        loadSeedButton: null,
     };
 
     const colorMap = {
@@ -46,19 +58,110 @@
         return window.lazybacktestAIBridge;
     };
 
+    const loadStoredSeeds = () => {
+        if (typeof window === 'undefined' || !window.localStorage) return [];
+        try {
+            const raw = window.localStorage.getItem(SEED_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取本地種子：', error);
+            return [];
+        }
+    };
+
+    const persistSeeds = (seeds) => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+            window.localStorage.setItem(SEED_STORAGE_KEY, JSON.stringify(seeds));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存本地種子：', error);
+        }
+    };
+
+    const escapeHTML = (value) => {
+        if (typeof value !== 'string') return '';
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
+
     const formatPercent = (value, digits = 2) => {
         if (!Number.isFinite(value)) return '—';
         return `${(value * 100).toFixed(digits)}%`;
     };
 
-    const formatCurrency = (value) => {
-        if (!Number.isFinite(value)) return '—';
-        return `${Math.round(value).toLocaleString('zh-TW')}元`;
-    };
-
     const formatNumber = (value, digits = 2) => {
         if (!Number.isFinite(value)) return '—';
         return value.toFixed(digits);
+    };
+
+    const computeMedian = (values) => {
+        if (!Array.isArray(values) || values.length === 0) return NaN;
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        if (sorted.length % 2 === 0) {
+            return (sorted[mid - 1] + sorted[mid]) / 2;
+        }
+        return sorted[mid];
+    };
+
+    const computeMean = (values) => {
+        if (!Array.isArray(values) || values.length === 0) return NaN;
+        const sum = values.reduce((acc, value) => acc + value, 0);
+        return sum / values.length;
+    };
+
+    const computeStd = (values, mean) => {
+        if (!Array.isArray(values) || values.length === 0) return NaN;
+        const base = Number.isFinite(mean) ? mean : computeMean(values);
+        if (!Number.isFinite(base)) return NaN;
+        const variance = values.reduce((acc, value) => acc + ((value - base) ** 2), 0) / values.length;
+        return Math.sqrt(Math.max(variance, 0));
+    };
+
+    const sanitizeFraction = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 0.01;
+        return Math.min(Math.max(num, 0.01), 1);
+    };
+
+    const parseWinThreshold = () => {
+        if (!elements.winThreshold) return 0.5;
+        const percent = Math.round(parseNumberInput(elements.winThreshold, 60, { min: 50, max: 100 }));
+        elements.winThreshold.value = String(percent);
+        const threshold = percent / 100;
+        state.winThreshold = threshold;
+        return threshold;
+    };
+
+    const refreshSeedOptions = () => {
+        if (!elements.savedSeedList) return;
+        const seeds = loadStoredSeeds();
+        const options = seeds
+            .map((seed) => `<option value="${escapeHTML(seed.id)}">${escapeHTML(seed.name || '未命名種子')}</option>`)
+            .join('');
+        elements.savedSeedList.innerHTML = options;
+    };
+
+    const buildSeedDefaultName = (summary) => {
+        if (!summary) return '';
+        const trainText = formatPercent(summary.trainAccuracy, 1);
+        const testText = formatPercent(summary.testAccuracy, 1);
+        return `訓練勝率${trainText}｜測試正確率${testText}`;
+    };
+
+    const applySeedDefaultName = (summary) => {
+        if (!elements.seedName) return;
+        const defaultName = buildSeedDefaultName(summary);
+        elements.seedName.dataset.defaultName = defaultName;
+        if (!elements.seedName.value || elements.seedName.value === state.lastSeedDefault) {
+            elements.seedName.value = defaultName;
+        }
+        state.lastSeedDefault = defaultName;
     };
 
     const showStatus = (message, type = 'info') => {
@@ -84,11 +187,6 @@
         if (Number.isFinite(min) && value < min) return min;
         if (Number.isFinite(max) && value > max) return max;
         return value;
-    };
-
-    const resolveInitialCapital = () => {
-        const input = document.getElementById('initialCapital');
-        return parseNumberInput(input, 100000, { min: 1000 });
     };
 
     const getVisibleData = () => {
@@ -251,35 +349,60 @@
         elements.datasetSummary.textContent = `可用資料 ${sorted.length} 筆，區間 ${firstDate} ~ ${lastDate}。`;
     };
 
-    const renderTrades = (records) => {
+    const renderTrades = (records, forecast) => {
         if (!elements.tradeTableBody) return;
         const rows = Array.isArray(records) ? records : [];
         if (rows.length === 0) {
-            elements.tradeTableBody.innerHTML = '';
+            elements.tradeTableBody.innerHTML = forecast && Number.isFinite(forecast.probability)
+                ? `
+                    <tr class="bg-muted/30">
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}
+                            <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
+                        </td>
+                        <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                        <td class="px-3 py-2 text-right">—</td>
+                        <td class="px-3 py-2 text-right">—</td>
+                        <td class="px-3 py-2 text-right">—</td>
+                    </tr>
+                `
+                : '';
             return;
         }
-        const limited = rows.slice(0, 200);
-        const html = limited
-            .map((trade) => {
-                const probabilityText = formatPercent(trade.probability, 1);
-                const returnText = formatPercent(trade.actualReturn, 2);
-                const fractionText = formatPercent(trade.fraction, 2);
-                const profitText = formatCurrency(trade.profit);
-                const capitalText = formatCurrency(trade.capitalAfter);
-                return `
-                    <tr>
-                        <td class="px-3 py-2 whitespace-nowrap">${trade.buyDate}</td>
-                        <td class="px-3 py-2 whitespace-nowrap">${trade.sellDate}</td>
-                        <td class="px-3 py-2 text-right">${probabilityText}</td>
-                        <td class="px-3 py-2 text-right ${trade.actualReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${returnText}</td>
-                        <td class="px-3 py-2 text-right">${fractionText}</td>
-                        <td class="px-3 py-2 text-right ${trade.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${profitText}</td>
-                        <td class="px-3 py-2 text-right font-medium">${capitalText}</td>
-                    </tr>
-                `;
-            })
-            .join('');
-        elements.tradeTableBody.innerHTML = html;
+        const limited = rows.slice(-200);
+        const htmlParts = limited.map((trade) => {
+            const probabilityText = formatPercent(trade.probability, 1);
+            const actualReturnText = formatPercent(trade.actualReturn, 2);
+            const fractionText = formatPercent(trade.fraction, 2);
+            const tradeReturnText = formatPercent(trade.tradeReturn, 2);
+            const actualClass = Number.isFinite(trade.actualReturn) && trade.actualReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
+            const tradeReturnClass = Number.isFinite(trade.tradeReturn) && trade.tradeReturn < 0 ? 'text-rose-600' : 'text-emerald-600';
+            const badge = trade.isForecast
+                ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>`
+                : '';
+            return `
+                <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.tradeDate || '—')}${badge}</td>
+                    <td class="px-3 py-2 text-right">${probabilityText}</td>
+                    <td class="px-3 py-2 text-right ${actualClass}">${actualReturnText}</td>
+                    <td class="px-3 py-2 text-right">${fractionText}</td>
+                    <td class="px-3 py-2 text-right ${tradeReturnClass}">${tradeReturnText}</td>
+                </tr>
+            `;
+        });
+
+        if (forecast && Number.isFinite(forecast.probability)) {
+            htmlParts.push(`
+                <tr class="bg-muted/30">
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
+                    <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                    <td class="px-3 py-2 text-right">—</td>
+                    <td class="px-3 py-2 text-right">—</td>
+                    <td class="px-3 py-2 text-right">—</td>
+                </tr>
+            `);
+        }
+
+        elements.tradeTableBody.innerHTML = htmlParts.join('');
     };
 
     const updateSummaryMetrics = (summary) => {
@@ -288,14 +411,304 @@
         if (elements.trainLoss) elements.trainLoss.textContent = `Loss：${formatNumber(summary.trainLoss, 4)}`;
         if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercent(summary.testAccuracy, 2);
         if (elements.testLoss) elements.testLoss.textContent = `Loss：${formatNumber(summary.testLoss, 4)}`;
-        if (elements.tradeCount) elements.tradeCount.textContent = summary.executedTrades ?? '—';
-        if (elements.hitRate) elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}`;
-        if (elements.totalReturn) elements.totalReturn.textContent = `${formatPercent(summary.totalReturn, 2)}（${formatCurrency(summary.finalCapital)}）`;
-        if (elements.averageProfit) elements.averageProfit.textContent = `平均每筆：${formatCurrency(summary.averageProfit)}`;
-        if (elements.tradeSummary) {
-            const strategyLabel = summary.usingKelly ? '已啟用凱利公式' : '採用固定比例';
-            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，執行 ${summary.executedTrades} 筆多單交易，${strategyLabel}。最終資金 ${formatCurrency(summary.finalCapital)}，總報酬 ${formatPercent(summary.totalReturn, 2)}。`;
+        if (elements.tradeCount) elements.tradeCount.textContent = Number.isFinite(summary.executedTrades) ? summary.executedTrades : '—';
+        if (elements.hitRate) {
+            const thresholdPercent = Number.isFinite(summary.threshold) ? `${Math.round(summary.threshold * 100)}%` : '—';
+            elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}｜勝率門檻：${thresholdPercent}`;
         }
+        if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.tradeReturnMedian, 2);
+        if (elements.averageProfit) {
+            const stdText = formatPercent(summary.tradeReturnStdDev, 2);
+            elements.averageProfit.textContent = `平均報酬%：${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數：${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}｜標準差：${stdText}`;
+        }
+        if (elements.tradeSummary) {
+            const strategyLabel = summary.usingKelly
+                ? '已啟用凱利公式'
+                : `固定投入 ${formatPercent(summary.fixedFraction, 2)}`;
+            const medianText = formatPercent(summary.tradeReturnMedian, 2);
+            const averageText = formatPercent(summary.tradeReturnAverage, 2);
+            elements.tradeSummary.textContent = `共評估 ${summary.totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${summary.executedTrades} 筆交易，${strategyLabel}。交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}。`;
+        }
+        if (elements.nextDayForecast) {
+            const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
+            const forecast = summary.forecast;
+            if (!forecast || !Number.isFinite(forecast.probability)) {
+                elements.nextDayForecast.textContent = '尚未計算隔日預測。';
+            } else {
+                const baseLabel = forecast.referenceDate ? `以 ${forecast.referenceDate} 收盤為基準` : '以最近一次收盤為基準';
+                const meetsThreshold = Number.isFinite(threshold)
+                    ? (forecast.probability >= threshold
+                        ? '符合當前勝率門檻，可列入隔日進場條件評估。'
+                        : '未達當前勝率門檻，建議僅作為觀察參考。')
+                    : '';
+                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}`;
+            }
+        }
+        applySeedDefaultName(summary);
+    };
+
+    const computeTradeOutcomes = (payload, options, trainingOdds) => {
+        const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
+        const meta = Array.isArray(payload?.meta) ? payload.meta : [];
+        const returns = Array.isArray(payload?.returns) ? payload.returns : [];
+        const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
+        const useKelly = Boolean(options.useKelly);
+        const fixedFraction = sanitizeFraction(options.fixedFraction);
+
+        const executedTrades = [];
+        const tradeReturns = [];
+        let wins = 0;
+
+        for (let i = 0; i < predictions.length; i += 1) {
+            const probability = Number(predictions[i]);
+            const metaItem = meta[i];
+            const actualReturn = returns[i];
+            if (!Number.isFinite(probability) || !metaItem || !Number.isFinite(actualReturn)) {
+                continue;
+            }
+            if (probability < threshold) {
+                continue;
+            }
+            const fraction = useKelly
+                ? computeKellyFraction(probability, trainingOdds)
+                : fixedFraction;
+            const tradeReturn = actualReturn * fraction;
+            if (actualReturn > 0) {
+                wins += 1;
+            }
+            executedTrades.push({
+                tradeDate: metaItem.sellDate,
+                probability,
+                actualReturn,
+                fraction,
+                tradeReturn,
+            });
+            tradeReturns.push(tradeReturn);
+        }
+
+        const executed = executedTrades.length;
+        const hitRate = executed > 0 ? wins / executed : 0;
+        const median = tradeReturns.length > 0 ? computeMedian(tradeReturns) : NaN;
+        const average = tradeReturns.length > 0 ? computeMean(tradeReturns) : NaN;
+        const stdDev = tradeReturns.length > 1 ? computeStd(tradeReturns, average) : NaN;
+
+        return {
+            trades: executedTrades,
+            stats: {
+                executed,
+                hitRate,
+                median,
+                average,
+                stdDev,
+            },
+        };
+    };
+
+    const applyTradeEvaluation = (payload, trainingMetrics, options) => {
+        if (!payload) return;
+        const metrics = trainingMetrics || {
+            trainAccuracy: NaN,
+            trainLoss: NaN,
+            testAccuracy: NaN,
+            testLoss: NaN,
+            totalPredictions: Array.isArray(payload?.predictions) ? payload.predictions.length : 0,
+        };
+        const trainingOdds = Number.isFinite(payload.trainingOdds)
+            ? payload.trainingOdds
+            : (Number.isFinite(state.odds) ? state.odds : 1);
+        const evaluation = computeTradeOutcomes(payload, options, trainingOdds);
+        const summary = {
+            version: VERSION_TAG,
+            trainAccuracy: metrics.trainAccuracy,
+            trainLoss: metrics.trainLoss,
+            testAccuracy: metrics.testAccuracy,
+            testLoss: metrics.testLoss,
+            totalPredictions: Number.isFinite(metrics.totalPredictions)
+                ? metrics.totalPredictions
+                : (Array.isArray(payload.predictions) ? payload.predictions.length : 0),
+            executedTrades: evaluation.stats.executed,
+            hitRate: evaluation.stats.hitRate,
+            tradeReturnMedian: evaluation.stats.median,
+            tradeReturnAverage: evaluation.stats.average,
+            tradeReturnStdDev: evaluation.stats.stdDev,
+            usingKelly: Boolean(options.useKelly),
+            fixedFraction: sanitizeFraction(options.fixedFraction),
+            threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            forecast: payload.forecast || null,
+        };
+        state.lastSummary = summary;
+        state.trainingMetrics = metrics;
+        state.currentTrades = evaluation.trades;
+        updateSummaryMetrics(summary);
+        renderTrades(evaluation.trades, payload.forecast);
+    };
+
+    const recomputeTradesFromState = () => {
+        if (!state.predictionsPayload || !state.trainingMetrics) return;
+        const threshold = parseWinThreshold();
+        const useKelly = Boolean(elements.enableKelly?.checked);
+        const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+        applyTradeEvaluation(state.predictionsPayload, state.trainingMetrics, {
+            threshold,
+            useKelly,
+            fixedFraction,
+        });
+    };
+
+    const optimiseWinThreshold = () => {
+        if (!state.predictionsPayload || !state.trainingMetrics) {
+            showStatus('請先完成一次 AI 預測或載入已儲存的種子。', 'warning');
+            return;
+        }
+        const useKelly = Boolean(elements.enableKelly?.checked);
+        const fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+        const payload = state.predictionsPayload;
+        const trainingOdds = Number.isFinite(payload.trainingOdds)
+            ? payload.trainingOdds
+            : (Number.isFinite(state.odds) ? state.odds : 1);
+        let bestThreshold = 0.5;
+        let bestMedian = Number.NEGATIVE_INFINITY;
+        let bestAverage = Number.NEGATIVE_INFINITY;
+        for (let percent = 50; percent <= 100; percent += 1) {
+            const threshold = percent / 100;
+            const evaluation = computeTradeOutcomes(payload, {
+                threshold,
+                useKelly,
+                fixedFraction,
+            }, trainingOdds);
+            const median = evaluation.stats.median;
+            const average = evaluation.stats.average;
+            const normalizedMedian = Number.isFinite(median) ? median : Number.NEGATIVE_INFINITY;
+            const normalizedAverage = Number.isFinite(average) ? average : Number.NEGATIVE_INFINITY;
+            if (
+                normalizedMedian > bestMedian
+                || (normalizedMedian === bestMedian && normalizedAverage > bestAverage)
+                || (normalizedMedian === bestMedian && normalizedAverage === bestAverage && threshold < bestThreshold)
+            ) {
+                bestMedian = normalizedMedian;
+                bestAverage = normalizedAverage;
+                bestThreshold = threshold;
+            }
+        }
+        if (!Number.isFinite(bestMedian) || bestMedian === Number.NEGATIVE_INFINITY) {
+            showStatus('門檻掃描後仍無符合條件的交易。已維持原門檻設定。', 'warning');
+            return;
+        }
+        elements.winThreshold.value = String(Math.round(bestThreshold * 100));
+        state.winThreshold = bestThreshold;
+        recomputeTradesFromState();
+        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}。`, 'success');
+    };
+
+    const handleSaveSeed = () => {
+        if (!state.predictionsPayload || !state.trainingMetrics || !state.lastSummary) {
+            showStatus('請先執行 AI 預測，再儲存種子。', 'warning');
+            return;
+        }
+        if (typeof window === 'undefined' || !window.localStorage) {
+            showStatus('此環境不支援本地儲存功能。', 'error');
+            return;
+        }
+        const seeds = loadStoredSeeds();
+        const summary = state.lastSummary;
+        const defaultName = buildSeedDefaultName(summary) || '未命名種子';
+        const inputName = elements.seedName?.value?.trim();
+        const seedName = inputName || defaultName;
+        const newSeed = {
+            id: `seed-${Date.now()}`,
+            name: seedName,
+            createdAt: Date.now(),
+            payload: {
+                predictions: state.predictionsPayload.predictions,
+                meta: state.predictionsPayload.meta,
+                returns: state.predictionsPayload.returns,
+                trainingOdds: state.predictionsPayload.trainingOdds,
+                forecast: state.predictionsPayload.forecast,
+                datasetLastDate: state.predictionsPayload.datasetLastDate,
+                hyperparameters: state.predictionsPayload.hyperparameters,
+            },
+            trainingMetrics: state.trainingMetrics,
+            summary: {
+                threshold: summary.threshold,
+                usingKelly: summary.usingKelly,
+                fixedFraction: summary.fixedFraction,
+            },
+            version: VERSION_TAG,
+        };
+        seeds.push(newSeed);
+        persistSeeds(seeds);
+        refreshSeedOptions();
+        showStatus(`已儲存種子「${seedName}」。`, 'success');
+    };
+
+    const activateSeed = (seed) => {
+        if (!seed) return;
+        state.predictionsPayload = {
+            predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
+            meta: Array.isArray(seed.payload?.meta) ? seed.payload.meta : [],
+            returns: Array.isArray(seed.payload?.returns) ? seed.payload.returns : [],
+            trainingOdds: seed.payload?.trainingOdds,
+            forecast: seed.payload?.forecast || null,
+            datasetLastDate: seed.payload?.datasetLastDate || null,
+            hyperparameters: seed.payload?.hyperparameters || null,
+        };
+        const metrics = seed.trainingMetrics || {
+            trainAccuracy: NaN,
+            trainLoss: NaN,
+            testAccuracy: NaN,
+            testLoss: NaN,
+            totalPredictions: Array.isArray(state.predictionsPayload.predictions)
+                ? state.predictionsPayload.predictions.length
+                : 0,
+        };
+        state.trainingMetrics = metrics;
+        state.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : state.odds;
+
+        if (elements.lookback && Number.isFinite(seed.payload?.hyperparameters?.lookback)) {
+            elements.lookback.value = seed.payload.hyperparameters.lookback;
+        }
+        if (elements.epochs && Number.isFinite(seed.payload?.hyperparameters?.epochs)) {
+            elements.epochs.value = seed.payload.hyperparameters.epochs;
+        }
+        if (elements.batchSize && Number.isFinite(seed.payload?.hyperparameters?.batchSize)) {
+            elements.batchSize.value = seed.payload.hyperparameters.batchSize;
+        }
+        if (elements.learningRate && Number.isFinite(seed.payload?.hyperparameters?.learningRate)) {
+            elements.learningRate.value = seed.payload.hyperparameters.learningRate;
+        }
+
+        if (elements.enableKelly && typeof seed.summary?.usingKelly === 'boolean') {
+            elements.enableKelly.checked = seed.summary.usingKelly;
+        }
+        if (elements.fixedFraction && Number.isFinite(seed.summary?.fixedFraction)) {
+            elements.fixedFraction.value = seed.summary.fixedFraction;
+        }
+        if (elements.winThreshold && Number.isFinite(seed.summary?.threshold)) {
+            elements.winThreshold.value = String(Math.round(seed.summary.threshold * 100));
+        }
+
+        recomputeTradesFromState();
+    };
+
+    const handleLoadSeed = () => {
+        if (!elements.savedSeedList) return;
+        const seeds = loadStoredSeeds();
+        const selectedIds = Array.from(elements.savedSeedList.selectedOptions || []).map((option) => option.value);
+        if (selectedIds.length === 0) {
+            showStatus('請先選擇至少一個已儲存的種子。', 'warning');
+            return;
+        }
+        const selectedSeeds = selectedIds
+            .map((id) => seeds.find((seed) => seed.id === id))
+            .filter((seed) => Boolean(seed));
+        if (selectedSeeds.length === 0) {
+            showStatus('找不到選取的種子資料，請重新整理列表。', 'error');
+            refreshSeedOptions();
+            return;
+        }
+        const latestSeed = selectedSeeds[selectedSeeds.length - 1];
+        activateSeed(latestSeed);
+        showStatus(`已載入種子：${selectedSeeds.map((seed) => seed.name).join('、')}。`, 'success');
     };
 
     const runPrediction = async () => {
@@ -403,70 +816,62 @@
 
             const trainingOdds = computeTrainingOdds(dataset.returns, boundedTrainSize);
             state.odds = trainingOdds;
-
-            const initialCapital = resolveInitialCapital();
-            let capital = initialCapital;
-            let cumulativeProfit = 0;
-            let wins = 0;
-            let executed = 0;
-            const executedTrades = [];
             const testMeta = dataset.meta.slice(boundedTrainSize);
             const testReturns = dataset.returns.slice(boundedTrainSize);
 
-            for (let i = 0; i < predictionValues.length; i += 1) {
-                const probability = predictionValues[i];
-                const predictedUp = probability >= 0.5;
-                const actualReturn = testReturns[i];
-                const meta = testMeta[i];
-                if (!predictedUp || !meta) {
-                    continue;
+            let nextDayForecast = null;
+            if (dataset.returns.length >= lookback) {
+                const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
+                if (tailWindow.length === lookback) {
+                    const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+                    const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
+                    const forecastTensor = model.predict(forecastInput);
+                    const forecastArray = Array.from(await forecastTensor.data());
+                    nextDayForecast = {
+                        probability: forecastArray[0],
+                        referenceDate: dataset.baseRows?.[dataset.baseRows.length - 1]?.date || null,
+                    };
+                    forecastInput.dispose();
+                    forecastTensor.dispose();
                 }
-                const fraction = useKelly
-                    ? computeKellyFraction(probability, trainingOdds)
-                    : Math.max(0.01, Math.min(fixedFraction, 1));
-                const allocation = capital * fraction;
-                const profit = allocation * actualReturn;
-                capital += profit;
-                cumulativeProfit += profit;
-                executed += 1;
-                if (actualReturn > 0) {
-                    wins += 1;
-                }
-                executedTrades.push({
-                    buyDate: meta.buyDate,
-                    sellDate: meta.sellDate,
-                    probability,
-                    actualReturn,
-                    fraction,
-                    profit,
-                    capitalAfter: capital,
-                });
             }
 
             const totalPredictions = predictionValues.length;
-            const hitRate = executed > 0 ? wins / executed : 0;
-            const totalReturn = (capital - initialCapital) / initialCapital;
-            const averageProfit = executed > 0 ? cumulativeProfit / executed : 0;
-
-            const summary = {
-                version: VERSION_TAG,
+            const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+            const trainingMetrics = {
                 trainAccuracy: finalTrainAccuracy,
                 trainLoss: finalTrainLoss,
-                testAccuracy: Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy,
+                testAccuracy: resolvedTestAccuracy,
                 testLoss,
                 totalPredictions,
-                executedTrades: executed,
-                hitRate,
-                totalReturn,
-                averageProfit,
-                finalCapital: capital,
-                usingKelly: useKelly,
             };
-            state.lastSummary = summary;
 
-            updateSummaryMetrics(summary);
-            renderTrades(executedTrades);
-            showStatus(`完成：訓練勝率 ${formatPercent(finalTrainAccuracy, 2)}，測試正確率 ${formatPercent(summary.testAccuracy, 2)}。`, 'success');
+            state.trainingMetrics = trainingMetrics;
+            state.predictionsPayload = {
+                predictions: predictionValues,
+                meta: testMeta,
+                returns: testReturns,
+                trainingOdds,
+                forecast: nextDayForecast,
+                datasetLastDate: dataset.baseRows?.[dataset.baseRows.length - 1]?.date || null,
+                hyperparameters: {
+                    lookback,
+                    epochs,
+                    batchSize: Math.min(batchSize, boundedTrainSize),
+                    learningRate,
+                },
+            };
+
+            const threshold = parseWinThreshold();
+            const fixedFractionValue = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
+            applyTradeEvaluation(state.predictionsPayload, trainingMetrics, {
+                threshold,
+                useKelly,
+                fixedFraction: fixedFractionValue,
+            });
+
+            const testAccuracyText = formatPercent(resolvedTestAccuracy, 2);
+            showStatus(`完成：訓練勝率 ${formatPercent(finalTrainAccuracy, 2)}，測試正確率 ${testAccuracyText}。`, 'success');
 
             tf.dispose([xAll, yAll, xTrain, yTrain, xTest, yTest]);
             model.dispose();
@@ -488,6 +893,8 @@
         elements.learningRate = document.getElementById('ai-learning-rate');
         elements.enableKelly = document.getElementById('ai-enable-kelly');
         elements.fixedFraction = document.getElementById('ai-fixed-fraction');
+        elements.winThreshold = document.getElementById('ai-win-threshold');
+        elements.optimizeThreshold = document.getElementById('ai-optimize-threshold');
         elements.trainAccuracy = document.getElementById('ai-train-accuracy');
         elements.trainLoss = document.getElementById('ai-train-loss');
         elements.testAccuracy = document.getElementById('ai-test-accuracy');
@@ -498,12 +905,62 @@
         elements.averageProfit = document.getElementById('ai-average-profit');
         elements.tradeTableBody = document.getElementById('ai-trade-table-body');
         elements.tradeSummary = document.getElementById('ai-trade-summary');
+        elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
+        elements.seedName = document.getElementById('ai-seed-name');
+        elements.saveSeedButton = document.getElementById('ai-save-seed');
+        elements.savedSeedList = document.getElementById('ai-saved-seeds');
+        elements.loadSeedButton = document.getElementById('ai-load-seed');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
                 runPrediction();
             });
         }
+
+        if (elements.enableKelly) {
+            elements.enableKelly.addEventListener('change', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.fixedFraction) {
+            elements.fixedFraction.addEventListener('change', () => {
+                recomputeTradesFromState();
+            });
+            elements.fixedFraction.addEventListener('blur', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.winThreshold) {
+            elements.winThreshold.addEventListener('change', () => {
+                recomputeTradesFromState();
+            });
+            elements.winThreshold.addEventListener('blur', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.optimizeThreshold) {
+            elements.optimizeThreshold.addEventListener('click', () => {
+                optimiseWinThreshold();
+            });
+        }
+
+        if (elements.saveSeedButton) {
+            elements.saveSeedButton.addEventListener('click', () => {
+                handleSaveSeed();
+            });
+        }
+
+        if (elements.loadSeedButton) {
+            elements.loadSeedButton.addEventListener('click', () => {
+                handleLoadSeed();
+            });
+        }
+
+        refreshSeedOptions();
+        parseWinThreshold();
 
         updateDatasetSummary(getVisibleData());
 

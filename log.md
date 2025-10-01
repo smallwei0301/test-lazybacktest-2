@@ -1,3 +1,12 @@
+## 2025-09-22 — Patch LB-AI-LSTM-20250922A
+- **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
+- **Features**:
+  - 勝率門檻可獨立於訓練後重算交易結果並提供 50%~100% 自動掃描最佳化。
+  - 凱利公式與固定投入比例可即時切換，交易報酬統計改採中位數／平均報酬%／標準差，表格同步改為交易報酬%。
+  - 新增隔日預測摘要，表格保留最後一筆測試資料並附上隔日機率。
+  - 建立本地種子儲存／載入與多選支援，預設名稱依訓練勝率與測試正確率生成。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:
