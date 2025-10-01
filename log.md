@@ -775,6 +775,18 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-16 — Patch LB-AI-HYBRID-20251212B
+- **Issue recap**: 勝率門檻掃描完成後僅提示交易報酬% 中位數，缺乏平均報酬與交易次數資訊；AI 種子預設名稱仍沿用訓練/測試正確率，與目前交易重點不符。
+- **Fix**: 最佳化結果訊息改為同步呈現中位數、平均報酬% 與交易次數，協助使用者快速掌握門檻效果；種子預設名稱改寫為測試勝率、交易報酬中位數、平均報酬與交易次數，確保儲存時即標示核心績效。版本碼更新為 `LB-AI-HYBRID-20251212B`。
+- **Diagnostics**: 執行最佳化確認狀態列顯示新增指標，儲存種子時預設名稱自動帶入最新勝率與報酬統計，重載後仍維持新格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-15 — Patch LB-AI-ANNS-20251215A
+- **Issue recap**: ANNS 模型仍採 Adam + binaryCrossentropy，且輸入僅含 MACD Diff，與 Chen et al. (2024) 研究設定不符。
+- **Fix**: 將 `annBuildModel` 調整為 SGD（學習率 0.01）搭配 MSE，並把資料特徵擴充至 Diff/Signal/Hist 共 12 欄，同步更新標準化與預測輸入。
+- **Diagnostics**: 透過背景訓練流程確認 ANN 任務可正常輸出進度、測試評估與隔日預測，未發現特徵長度錯配或 Shape 錯誤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-07 — Patch LB-PROGRESS-MASCOT-20251207A
 - **Issue recap**: 實際回測時吉祥物仍顯示成 SVG 或沙漏，追查為 Tenor 貼圖 ID 與 fallback 清單未對應到使用者指定的 Hachiware 動畫，導致 Sanitiser 成功後仍回填錯誤素材。
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。

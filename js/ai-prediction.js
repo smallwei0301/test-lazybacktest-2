@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-HYBRID-20251212B
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20251212B';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -226,9 +226,11 @@
 
     const buildSeedDefaultName = (summary) => {
         if (!summary) return '';
-        const trainText = formatPercent(summary.trainAccuracy, 1);
-        const testText = formatPercent(summary.testAccuracy, 1);
-        return `訓練勝率${trainText}｜測試正確率${testText}`;
+        const hitRateText = formatPercent(summary.hitRate, 1);
+        const medianText = formatPercent(summary.tradeReturnMedian, 1);
+        const averageText = formatPercent(summary.tradeReturnAverage, 1);
+        const executedTrades = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+        return `測試勝率${hitRateText}｜交易報酬中位數${medianText}｜平均報酬${averageText}｜交易次數${executedTrades}`;
     };
 
     const applySeedDefaultName = (summary) => {
@@ -973,6 +975,9 @@
         let bestThreshold = modelState.winThreshold || 0.5;
         let bestMedian = Number.NEGATIVE_INFINITY;
         let bestAverage = Number.NEGATIVE_INFINITY;
+        let bestMedianValue = NaN;
+        let bestAverageValue = NaN;
+        let bestExecuted = 0;
         for (let percent = 50; percent <= 100; percent += 1) {
             const threshold = percent / 100;
             const evaluation = computeTradeOutcomes(payload, {
@@ -982,6 +987,7 @@
             }, trainingOdds);
             const median = evaluation.stats.median;
             const average = evaluation.stats.average;
+            const executed = evaluation.stats.executed;
             const normalizedMedian = Number.isFinite(median) ? median : Number.NEGATIVE_INFINITY;
             const normalizedAverage = Number.isFinite(average) ? average : Number.NEGATIVE_INFINITY;
             if (
@@ -991,6 +997,9 @@
             ) {
                 bestMedian = normalizedMedian;
                 bestAverage = normalizedAverage;
+                bestMedianValue = Number.isFinite(median) ? median : NaN;
+                bestAverageValue = Number.isFinite(average) ? average : NaN;
+                bestExecuted = Number.isFinite(executed) ? executed : 0;
                 bestThreshold = threshold;
             }
         }
@@ -1002,7 +1011,10 @@
         modelState.winThreshold = bestThreshold;
         parseWinThreshold();
         recomputeTradesFromState(modelType);
-        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}。`, 'success');
+        const medianText = formatPercent(bestMedianValue, 2);
+        const averageText = formatPercent(bestAverageValue, 2);
+        const executedText = Number.isFinite(bestExecuted) ? bestExecuted : 0;
+        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}，共執行 ${executedText} 筆交易。`, 'success');
     };
 
     const handleSaveSeed = () => {
