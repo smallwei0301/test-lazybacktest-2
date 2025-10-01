@@ -775,6 +775,14 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-26 — Patch LB-AI-LSTM-REPRO-20251226A / LB-AI-HYBRID-20251226A
+- **Issue recap**: LSTM 仍採用 Dropout、Adam shuffle 與未鎖定種子的初始化，導致同一資料集重訓時勝率與混淆矩陣無法完全重現，也缺乏標準化參數與模型版本的保存。前端「新的預測」僅支援 ANN，無法針對 LSTM 重新產生隨機種子。
+- **Fix**:
+  - `js/worker.js` 移除 Dropout、統一以 `seedrandom` 產生的 Glorot/Orthogonal 初始化器建立 LSTM，訓練採固定批次且禁止 shuffle，並回傳 TP/TN/FP/FN、實際切分索引與標準化 mean/std；完成後會將模型存入 `indexeddb://lstm_v1_model`，同步以 `LSTM_META` 訊息送出版本、後端與種子等重播資訊。
+  - `js/ai-prediction.js` 為 LSTM 加入與 ANN 相同的種子管理流程，按下「新的預測」會解鎖新的隨機種子並傳遞至 Worker，狀態列顯示 Seed 編號，並將 LSTM 執行 meta 寫入 `localStorage` 以利之後重播；同時統一以 Worker 回傳的閾值重算交易統計。
+- **Diagnostics**: 對同一資料集連續啟動「啟動 AI 預測」取得固定種子結果，再按「新的預測」產生新 seed，確認測試勝率、混淆矩陣與交易摘要完全一致；重複啟動舊種子可 100% 重現前一次結果，IndexedDB 可見最新 `lstm_v1_model` 條目。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
 - **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
 - **Fix**:

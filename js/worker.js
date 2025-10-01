@@ -10,6 +10,12 @@ const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
 const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251224B';
+const LSTM_DEFAULT_SEED = 7331;
+const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
+const LSTM_META_MESSAGE = 'LSTM_META';
+const LSTM_REPRO_VERSION = 'lstm_v1';
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20251226A';
+const LSTM_THRESHOLD = 0.5;
 
 let tfBackendReadyPromise = Promise.resolve();
 
@@ -136,14 +142,49 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
-function aiCreateModel(lookback, learningRate) {
+function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED) {
+  const baseSeed = Number.isFinite(seed) ? Math.max(1, Math.round(seed)) : LSTM_DEFAULT_SEED;
+  const buildKernelInitializer = (offset = 0) =>
+    tf.initializers.glorotUniform({ seed: baseSeed + offset });
+  const buildRecurrentInitializer = (offset = 0) =>
+    tf.initializers.orthogonal({ seed: baseSeed + 100 + offset });
+  const biasInitializer = tf.initializers.zeros();
+
   const model = tf.sequential();
-  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-  model.add(tf.layers.dropout({ rate: 0.2 }));
-  model.add(tf.layers.lstm({ units: 16 }));
-  model.add(tf.layers.dropout({ rate: 0.1 }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(
+    tf.layers.lstm({
+      units: 32,
+      returnSequences: true,
+      inputShape: [lookback, 1],
+      kernelInitializer: buildKernelInitializer(1),
+      recurrentInitializer: buildRecurrentInitializer(1),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.lstm({
+      units: 16,
+      kernelInitializer: buildKernelInitializer(2),
+      recurrentInitializer: buildRecurrentInitializer(2),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      kernelInitializer: buildKernelInitializer(3),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 1,
+      activation: 'sigmoid',
+      kernelInitializer: buildKernelInitializer(4),
+      biasInitializer,
+    }),
+  );
   const optimizer = tf.train.adam(learningRate);
   model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
   return model;
@@ -170,19 +211,40 @@ async function handleAITrainLSTMMessage(message) {
     return;
   }
   const payload = message?.payload || {};
+  const overrides = payload.overrides || {};
+  const hyper = payload.hyperparameters || {};
+  const overrideSeed = Number.isFinite(overrides?.seed)
+    ? Math.max(1, Math.round(overrides.seed))
+    : null;
+  const hyperSeed = Number.isFinite(hyper?.seed)
+    ? Math.max(1, Math.round(hyper.seed))
+    : null;
+  const seedToUse = overrideSeed || hyperSeed || LSTM_DEFAULT_SEED;
+
   try {
     await tfBackendReadyPromise;
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
+    if (typeof tf?.util?.seedrandom === 'function') {
+      tf.util.seedrandom(seedToUse);
+    }
+
     const dataset = payload.dataset || {};
     if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
       throw new Error('缺少有效的訓練樣本。');
     }
-    const hyper = payload.hyperparameters || {};
-    const inferredLookback = Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20;
-    const lookback = Math.max(5, Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback));
-    const totalSamples = Number.isFinite(hyper.totalSamples) ? hyper.totalSamples : dataset.sequences.length;
+
+    const inferredLookback = Array.isArray(dataset.sequences[0])
+      ? dataset.sequences[0].length
+      : 20;
+    const lookback = Math.max(
+      5,
+      Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback),
+    );
+    const totalSamples = Number.isFinite(hyper.totalSamples)
+      ? hyper.totalSamples
+      : dataset.sequences.length;
     const rawRatio = Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : 0.8;
     const trainRatio = Math.min(Math.max(rawRatio, 0.6), 0.95);
     const fallbackTrainSize = Math.max(Math.floor(totalSamples * trainRatio), lookback);
@@ -192,9 +254,14 @@ async function handleAITrainLSTMMessage(message) {
     if (boundedTrainSize <= 0 || testSize <= 0) {
       throw new Error('訓練/測試樣本不足，請延長回測期間。');
     }
+
     const epochs = Math.max(1, Math.round(Number.isFinite(hyper.epochs) ? hyper.epochs : 80));
     const learningRate = Number.isFinite(hyper.learningRate) ? hyper.learningRate : 0.005;
-    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32), boundedTrainSize));
+    const rawBatchSize = Math.max(
+      1,
+      Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32),
+    );
+    const batchSize = Math.min(rawBatchSize, boundedTrainSize);
 
     const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
     const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
@@ -222,25 +289,30 @@ async function handleAITrainLSTMMessage(message) {
       yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
-      model = aiCreateModel(lookback, learningRate);
+      model = aiCreateModel(lookback, learningRate, seedToUse);
 
       aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
             const accValue = logs.acc ?? logs.accuracy;
-            const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
-            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+            const accPercent = Number.isFinite(accValue)
+              ? `${(accValue * 100).toFixed(2)}%`
+              : '—';
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
       });
 
-      const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
+      const accuracyKey = history.history.acc
+        ? 'acc'
+        : history.history.accuracy
+          ? 'accuracy'
+          : null;
       const finalTrainAccuracy = accuracyKey
         ? history.history[accuracyKey][history.history[accuracyKey].length - 1]
         : NaN;
@@ -263,25 +335,41 @@ async function handleAITrainLSTMMessage(message) {
       predictionsTensor.dispose();
 
       const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
+      let TP = 0;
+      let TN = 0;
+      let FP = 0;
+      let FN = 0;
       let correctPredictions = 0;
       for (let i = 0; i < predictionValues.length; i += 1) {
-        const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
-        if (predictedLabel === testLabels[i]) {
+        const predictedLabel = predictionValues[i] >= LSTM_THRESHOLD ? 1 : 0;
+        const actual = testLabels[i];
+        if (predictedLabel === actual) {
           correctPredictions += 1;
         }
+        if (actual === 1 && predictedLabel === 1) TP += 1;
+        else if (actual === 0 && predictedLabel === 0) TN += 1;
+        else if (actual === 0 && predictedLabel === 1) FP += 1;
+        else if (actual === 1 && predictedLabel === 0) FN += 1;
       }
-      const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
+      const manualAccuracy = predictionValues.length > 0
+        ? correctPredictions / predictionValues.length
+        : NaN;
       const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+      const confusion = { TP, TN, FP, FN };
 
       const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
       const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
-      const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
+      const testReturns = Array.isArray(dataset.returns)
+        ? dataset.returns.slice(boundedTrainSize)
+        : [];
 
       let nextDayForecast = null;
       if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
         const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
         if (tailWindow.length === lookback) {
-          const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+          const normalizedTail = tailWindow.map(
+            (value) => (value - normaliser.mean) / (normaliser.std || 1),
+          );
           const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
           const forecastTensor = model.predict(forecastInput);
           const forecastArray = Array.from(await forecastTensor.data());
@@ -302,6 +390,7 @@ async function handleAITrainLSTMMessage(message) {
         }
       }
 
+      const trainRatioUsed = boundedTrainSize / totalSamples;
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
@@ -327,11 +416,70 @@ async function handleAITrainLSTMMessage(message) {
           epochs,
           batchSize,
           learningRate,
-          trainRatio,
+          trainRatio: trainRatioUsed,
+          splitIndex: boundedTrainSize,
+          threshold: LSTM_THRESHOLD,
+          seed: seedToUse,
         },
+        predictedLabels: predictionValues.map((value) => (value >= LSTM_THRESHOLD ? 1 : 0)),
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
+      const runMeta = {
+        version: LSTM_REPRO_VERSION,
+        patch: LSTM_REPRO_PATCH,
+        seed: seedToUse,
+        backend: backendInUse,
+        tfjs: TFJS_VERSION,
+        lookback,
+        epochs,
+        batchSize,
+        trainRatio: trainRatioUsed,
+        splitIndex: boundedTrainSize,
+        threshold: LSTM_THRESHOLD,
+        mean: normaliser.mean,
+        std: normaliser.std,
+        totalSamples,
+        trainSamples: boundedTrainSize,
+        testSamples: testSize,
+      };
+      workerLastMeta = runMeta;
+
+      try {
+        self.postMessage({ type: LSTM_META_MESSAGE, payload: runMeta });
+      } catch (metaError) {
+        console.warn('[Worker][AI] 回傳 LSTM 執行資訊失敗：', metaError);
+      }
+
+      try {
+        await model.save(`indexeddb://${LSTM_MODEL_STORAGE_KEY}`);
+      } catch (saveError) {
+        console.warn('[Worker][AI] 無法保存 LSTM 模型：', saveError);
+      }
+
+      const finalMessage = `完成：測試正確率 ${(Number.isFinite(resolvedTestAccuracy)
+        ? (resolvedTestAccuracy * 100).toFixed(2)
+        : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+
+      const hyperparametersUsed = {
+        lookback,
+        epochs,
+        batchSize,
+        learningRate,
+        trainRatio: trainRatioUsed,
+        splitIndex: boundedTrainSize,
+        threshold: LSTM_THRESHOLD,
+        seed: seedToUse,
+        modelType: MODEL_TYPES.LSTM,
+      };
+
+      aiPostResult(id, {
+        trainingMetrics,
+        predictionsPayload,
+        confusion,
+        hyperparametersUsed,
+        finalMessage,
+      });
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {

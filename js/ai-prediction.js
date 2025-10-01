@@ -2,7 +2,7 @@
 
 // Patch Tag: LB-AI-HYBRID-20251224A — Trade execution pricing & UI uplift.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251224A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20251226A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -15,6 +15,8 @@
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const ANN_META_MESSAGE = 'ANN_META';
     const ANN_META_STORAGE_KEY = 'LB_ANN_META';
+    const LSTM_META_MESSAGE = 'LSTM_META';
+    const LSTM_META_STORAGE_KEY = 'LB_LSTM_META';
     const createModelState = () => ({
         lastSummary: null,
         odds: 1,
@@ -182,6 +184,21 @@
             window.localStorage.setItem(ANN_META_STORAGE_KEY, JSON.stringify(payload));
         } catch (error) {
             console.warn('[AI Prediction] 無法儲存 ANN 執行資訊：', error);
+        }
+    };
+
+    const persistLstmMeta = (meta) => {
+        if (!meta || typeof meta !== 'object') return;
+        const modelState = globalState.models[MODEL_TYPES.LSTM];
+        if (modelState) {
+            modelState.lastRunMeta = { ...meta };
+        }
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+            const payload = { ...meta, savedAt: new Date().toISOString() };
+            window.localStorage.setItem(LSTM_META_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存 LSTM 執行資訊：', error);
         }
     };
 
@@ -379,6 +396,12 @@
         if (type === ANN_META_MESSAGE) {
             if (payload && typeof payload === 'object') {
                 persistAnnMeta(payload);
+            }
+            return;
+        }
+        if (type === LSTM_META_MESSAGE) {
+            if (payload && typeof payload === 'object') {
+                persistLstmMeta(payload);
             }
             return;
         }
@@ -983,7 +1006,7 @@
         }
     };
 
-    const runLstmModel = async (modelState, rows, hyperparameters, riskOptions) => {
+    const runLstmModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
         const dataset = buildDataset(rows, hyperparameters.lookback);
@@ -1007,8 +1030,12 @@
             showStatus(`[${label}] 批次大小 ${hyperparameters.batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
         }
 
+        const requestedSeed = Number.isFinite(runtimeOptions?.seedOverride)
+            ? Math.max(1, Math.round(runtimeOptions.seedOverride))
+            : (Number.isFinite(hyperparameters.seed) ? Math.max(1, Math.round(hyperparameters.seed)) : null);
+
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
-        const workerResult = await sendAIWorkerTrainingTask('ai-train-lstm', {
+        const workerPayload = {
             dataset,
             hyperparameters: {
                 lookback: hyperparameters.lookback,
@@ -1018,8 +1045,13 @@
                 totalSamples,
                 trainSize: boundedTrainSize,
                 trainRatio: hyperparameters.trainRatio,
+                seed: Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null),
             },
-        }, { modelType });
+        };
+        if (Number.isFinite(requestedSeed)) {
+            workerPayload.overrides = { seed: requestedSeed };
+        }
+        const workerResult = await sendAIWorkerTrainingTask('ai-train-lstm', workerPayload, { modelType });
 
         const resultModelType = workerResult.modelType || modelType;
         const trainingMetrics = workerResult?.trainingMetrics || {
@@ -1030,37 +1062,57 @@
             totalPredictions: 0,
         };
         const predictionsPayload = workerResult?.predictionsPayload || null;
+        const hyperparametersUsed = workerResult?.hyperparametersUsed && typeof workerResult.hyperparametersUsed === 'object'
+            ? workerResult.hyperparametersUsed
+            : null;
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
-        predictionsPayload.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+        const resolvedHyper = {
+            lookback: Number.isFinite(hyperparametersUsed?.lookback) ? hyperparametersUsed.lookback : hyperparameters.lookback,
+            epochs: Number.isFinite(hyperparametersUsed?.epochs) ? hyperparametersUsed.epochs : hyperparameters.epochs,
+            batchSize: Number.isFinite(hyperparametersUsed?.batchSize) ? hyperparametersUsed.batchSize : effectiveBatchSize,
+            learningRate: Number.isFinite(hyperparametersUsed?.learningRate) ? hyperparametersUsed.learningRate : hyperparameters.learningRate,
+            trainRatio: Number.isFinite(hyperparametersUsed?.trainRatio) ? hyperparametersUsed.trainRatio : hyperparameters.trainRatio,
             modelType: resultModelType,
+            splitIndex: Number.isFinite(hyperparametersUsed?.splitIndex) ? hyperparametersUsed.splitIndex : (predictionsPayload.hyperparameters?.splitIndex ?? boundedTrainSize),
+            threshold: Number.isFinite(hyperparametersUsed?.threshold) ? hyperparametersUsed.threshold : (predictionsPayload.hyperparameters?.threshold ?? 0.5),
+            seed: Number.isFinite(hyperparametersUsed?.seed)
+                ? hyperparametersUsed.seed
+                : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
         };
+
+        predictionsPayload.hyperparameters = { ...resolvedHyper };
 
         modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            lookback: resolvedHyper.lookback,
+            epochs: resolvedHyper.epochs,
+            batchSize: resolvedHyper.batchSize,
+            learningRate: resolvedHyper.learningRate,
+            trainRatio: resolvedHyper.trainRatio,
+            seed: resolvedHyper.seed,
         };
 
-        applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
+        modelState.winThreshold = resolvedHyper.threshold;
+
+        const evaluationOptions = { ...riskOptions, threshold: resolvedHyper.threshold };
+
+        applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, evaluationOptions);
+
+        if (workerResult?.confusion && modelState?.lastSummary) {
+            modelState.lastSummary.confusion = { ...workerResult.confusion };
+        }
 
         const finalMessage = typeof workerResult?.finalMessage === 'string'
             ? workerResult.finalMessage
             : `完成：訓練勝率 ${formatPercent(trainingMetrics.trainAccuracy, 2)}，測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}。`;
+        const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
             ? `｜平均報酬% ${formatPercent(summary.tradeReturnAverage, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
-        showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${appended}`, 'success');
+        showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
 
     const runAnnModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
@@ -1424,6 +1476,7 @@
             }
 
             let annRuntimeOptions = {};
+            let lstmRuntimeOptions = {};
             if (normalizedModel === MODEL_TYPES.ANNS) {
                 const storedSeed = Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null;
                 if (options?.freshSeed) {
@@ -1437,7 +1490,19 @@
             }
 
             if (normalizedModel === MODEL_TYPES.LSTM) {
-                await runLstmModel(modelState, rows, hyperparameters, riskOptions);
+                const storedSeed = Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null;
+                if (options?.freshSeed) {
+                    const freshSeed = generateRuntimeSeed();
+                    lstmRuntimeOptions = {
+                        seedOverride: freshSeed,
+                    };
+                } else if (Number.isFinite(storedSeed)) {
+                    lstmRuntimeOptions = { seedOverride: storedSeed };
+                }
+            }
+
+            if (normalizedModel === MODEL_TYPES.LSTM) {
+                await runLstmModel(modelState, rows, hyperparameters, riskOptions, lstmRuntimeOptions);
             } else {
                 await runAnnModel(modelState, rows, hyperparameters, riskOptions, annRuntimeOptions);
             }
