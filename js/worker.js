@@ -1,6 +1,13 @@
 
 importScripts('shared-lookback.js');
 importScripts('config.js');
+try {
+  if (typeof tf === 'undefined') {
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js');
+  }
+} catch (error) {
+  console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
+}
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
@@ -24,6 +31,7 @@ importScripts('config.js');
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
+// Patch Tag: LB-AI-LSTM-20250929B
 
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
@@ -42,6 +50,242 @@ const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+
+function aiPostProgress(id, message) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-train-lstm-progress', id, message });
+}
+
+function aiPostError(id, error) {
+  if (!id) return;
+  const message = error instanceof Error ? error.message : String(error || 'AI Worker 發生未知錯誤');
+  self.postMessage({ type: 'ai-train-lstm-error', id, error: { message } });
+}
+
+function aiPostResult(id, data) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-train-lstm-result', id, data });
+}
+
+function aiComputeNormalisation(sequences, trainSize) {
+  if (!Array.isArray(sequences) || sequences.length === 0 || trainSize <= 0) {
+    return { mean: 0, std: 1 };
+  }
+  const trainSlice = sequences.slice(0, trainSize);
+  const values = trainSlice.flat();
+  if (values.length === 0) {
+    return { mean: 0, std: 1 };
+  }
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((acc, value) => acc + ((value - mean) ** 2), 0) / values.length;
+  const std = Math.sqrt(variance) || 1;
+  return { mean, std };
+}
+
+function aiNormaliseSequences(sequences, normaliser) {
+  const { mean, std } = normaliser;
+  if (!Array.isArray(sequences) || sequences.length === 0) return [];
+  const divisor = std || 1;
+  return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
+}
+
+function aiCreateModel(lookback, learningRate) {
+  const model = tf.sequential();
+  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
+  model.add(tf.layers.dropout({ rate: 0.2 }));
+  model.add(tf.layers.lstm({ units: 16 }));
+  model.add(tf.layers.dropout({ rate: 0.1 }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  const optimizer = tf.train.adam(learningRate);
+  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  return model;
+}
+
+function aiComputeTrainingOdds(returns, trainSize) {
+  if (!Array.isArray(returns) || returns.length === 0 || trainSize <= 0) {
+    return 1;
+  }
+  const trainReturns = returns.slice(0, trainSize);
+  const wins = trainReturns.filter((value) => value > 0);
+  const losses = trainReturns.filter((value) => value < 0).map((value) => Math.abs(value));
+  const avgWin = wins.length > 0 ? wins.reduce((sum, value) => sum + value, 0) / wins.length : 0;
+  const avgLoss = losses.length > 0 ? losses.reduce((sum, value) => sum + value, 0) / losses.length : 0;
+  if (!Number.isFinite(avgWin) || avgWin <= 0 || !Number.isFinite(avgLoss) || avgLoss <= 0) {
+    return 1;
+  }
+  return Math.max(avgWin / avgLoss, 0.25);
+}
+
+async function handleAITrainLSTMMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  const payload = message?.payload || {};
+  try {
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    const dataset = payload.dataset || {};
+    if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
+      throw new Error('缺少有效的訓練樣本。');
+    }
+    const hyper = payload.hyperparameters || {};
+    const inferredLookback = Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20;
+    const lookback = Math.max(5, Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback));
+    const totalSamples = Number.isFinite(hyper.totalSamples) ? hyper.totalSamples : dataset.sequences.length;
+    const fallbackTrainSize = Math.max(Math.floor(totalSamples * (2 / 3)), lookback);
+    const rawTrainSize = Number.isFinite(hyper.trainSize) ? hyper.trainSize : fallbackTrainSize;
+    const boundedTrainSize = Math.min(Math.max(Math.round(rawTrainSize), 1), totalSamples - 1);
+    const testSize = totalSamples - boundedTrainSize;
+    if (boundedTrainSize <= 0 || testSize <= 0) {
+      throw new Error('訓練/測試樣本不足，請延長回測期間。');
+    }
+    const epochs = Math.max(1, Math.round(Number.isFinite(hyper.epochs) ? hyper.epochs : 80));
+    const learningRate = Number.isFinite(hyper.learningRate) ? hyper.learningRate : 0.005;
+    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32), boundedTrainSize));
+
+    const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
+    const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
+    if (labels.length !== sequences.length) {
+      throw new Error('樣本與標籤數量不一致，無法訓練模型。');
+    }
+
+    const normaliser = aiComputeNormalisation(sequences, boundedTrainSize);
+    const normalizedSequences = aiNormaliseSequences(sequences, normaliser);
+    const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
+    const xAll = tf.tensor(tensorInput);
+    const yAll = tf.tensor(labels.map((label) => [label]));
+
+    const tensorsToDispose = [xAll, yAll];
+    let model = null;
+    let xTrain = null;
+    let yTrain = null;
+    let xTest = null;
+    let yTest = null;
+
+    try {
+      xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
+      yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
+      xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
+      yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
+      tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
+
+      model = aiCreateModel(lookback, learningRate);
+
+      aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
+      const history = await model.fit(xTrain, yTrain, {
+        epochs,
+        batchSize,
+        validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
+        shuffle: true,
+        callbacks: {
+          onEpochEnd: (epoch, logs) => {
+            const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
+            const accValue = logs.acc ?? logs.accuracy;
+            const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+          },
+        },
+      });
+
+      const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
+      const finalTrainAccuracy = accuracyKey
+        ? history.history[accuracyKey][history.history[accuracyKey].length - 1]
+        : NaN;
+      const finalTrainLoss = history.history.loss?.[history.history.loss.length - 1] ?? NaN;
+
+      const evalOutput = model.evaluate(xTest, yTest);
+      const evalArray = Array.isArray(evalOutput) ? evalOutput : [evalOutput];
+      const evalValues = [];
+      for (let i = 0; i < evalArray.length; i += 1) {
+        const tensor = evalArray[i];
+        const data = await tensor.data();
+        evalValues.push(data[0]);
+        tensor.dispose();
+      }
+      const testLoss = evalValues[0] ?? NaN;
+      const testAccuracy = evalValues[1] ?? NaN;
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
+      let correctPredictions = 0;
+      for (let i = 0; i < predictionValues.length; i += 1) {
+        const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
+        if (predictedLabel === testLabels[i]) {
+          correctPredictions += 1;
+        }
+      }
+      const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
+      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+
+      const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
+      const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
+      const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
+
+      let nextDayForecast = null;
+      if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
+        const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
+        if (tailWindow.length === lookback) {
+          const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+          const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
+          const forecastTensor = model.predict(forecastInput);
+          const forecastArray = Array.from(await forecastTensor.data());
+          nextDayForecast = {
+            probability: forecastArray[0],
+            referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+              ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+              : null,
+          };
+          forecastTensor.dispose();
+          forecastInput.dispose();
+        }
+      }
+
+      const trainingMetrics = {
+        trainAccuracy: finalTrainAccuracy,
+        trainLoss: finalTrainLoss,
+        testAccuracy: resolvedTestAccuracy,
+        testLoss,
+        totalPredictions: predictionValues.length,
+      };
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: testMeta,
+        returns: testReturns,
+        trainingOdds,
+        forecast: nextDayForecast,
+        datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+          ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+          : null,
+        hyperparameters: {
+          lookback,
+          epochs,
+          batchSize,
+          learningRate,
+        },
+      };
+
+      aiPostResult(id, { trainingMetrics, predictionsPayload });
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+      if (model && typeof model.dispose === 'function') {
+        model.dispose();
+      }
+    }
+  } catch (error) {
+    aiPostError(id, error);
+  }
+}
 
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
@@ -9265,8 +9509,12 @@ async function runOptimization(
 
 // --- Worker 消息處理 ---
 self.onmessage = async function (e) {
+  const { type } = e.data || {};
+  if (type === 'ai-train-lstm') {
+    await handleAITrainLSTMMessage(e.data);
+    return;
+  }
   const {
-    type,
     params,
     useCachedData,
     cachedData,

@@ -1,3 +1,12 @@
+## 2025-09-22 — Patch LB-AI-LSTM-20250922A
+- **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
+- **Features**:
+  - 勝率門檻可獨立於訓練後重算交易結果並提供 50%~100% 自動掃描最佳化。
+  - 凱利公式與固定投入比例可即時切換，交易報酬統計改採中位數／平均報酬%／標準差，表格同步改為交易報酬%。
+  - 新增隔日預測摘要，表格保留最後一筆測試資料並附上隔日機率。
+  - 建立本地種子儲存／載入與多選支援，預設名稱依訓練勝率與測試正確率生成。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:
@@ -771,4 +780,16 @@
 - **Fix**: 將 `#loadingGif` 的 Tenor Post ID 更新為 `1718069610368761676`，同步清除 SVG fallback，僅保留使用者提供的 Hachiware GIF 來源，並將 Sanitiser 版本碼提升為 `LB-PROGRESS-MASCOT-20251205B` 以確保快取重新套用。
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-AI-LSTM-20250929B
+- **Issue recap**: LSTM 模型仍在主執行緒訓練，啟動 AI 預測時頁面易凍結且進度無法掌握，亦缺乏背景錯誤通知機制。
+- **Fix**: 建立 `LB-AI-LSTM-20250929B` 管線，改以 `worker.js` 執行 TensorFlow.js 訓練並透過訊息回傳進度、結果與錯誤，前端僅負責資料切片與結果渲染。
+- **Diagnostics**: 確認 Web Worker 能接收資料集、回傳訓練指標與隔日預測，UI 端在勝率門檻、凱利開關與種子載入時可即時重算交易統計。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-09 — Patch LB-AI-LSTM-20250924A
+- **Issue recap**: AI 隔日預測在啟用凱利公式時未提供建議投入比例，且交易報酬統計未過濾缺少交易日的筆數，造成評估依據不完整。
+- **Fix**: 於凱利模式下依預測勝率計算隔日投入比例並同步顯示於預測區與表格，同時僅保留具備有效交易日的交易紀錄再計算中位數、平均與標準差。
+- **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
