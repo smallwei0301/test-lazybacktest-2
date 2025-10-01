@@ -9263,8 +9263,767 @@ async function runOptimization(
   return { results: results, rawDataUsed: dataFetched ? stockData : null };
 }
 
+// Patch Tag: LB-AI-DUAL-20250922A
+const AI_MODEL_TYPES = { LSTM: 'lstm', ANNS: 'anns' };
+const AI_WORKER_VERSION = 'LB-AI-DUAL-20250922A';
+let aiTfReady = false;
+
+function ensureAiTfReady() {
+  if (aiTfReady) return;
+  try {
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+    aiTfReady = true;
+  } catch (error) {
+    console.error('[AI Worker] 載入 TensorFlow.js 失敗:', error);
+    throw error;
+  }
+}
+
+function createSeededRandom(seed) {
+  let state = (Math.abs(Math.floor(seed)) || 0x6d2b79f5) >>> 0;
+  return () => {
+    state = Math.imul(state ^ (state >>> 15), state | 1);
+    state ^= state + Math.imul(state ^ (state >>> 7), state | 61);
+    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function applyTfSeed(seed) {
+  if (typeof tf === 'undefined' || !tf || !Number.isFinite(seed)) return null;
+  const normalized = Math.floor(seed);
+  if (tf.util && typeof tf.util.seedrandom === 'function') {
+    tf.util.seedrandom(String(normalized));
+  }
+  return normalized;
+}
+
+function resolveCloseValue(row) {
+  if (!row || typeof row !== 'object') return null;
+  const candidates = [row.close, row.adjustedClose, row.adjClose, row.rawClose, row.baseClose];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function sortRowsByDate(rows) {
+  return rows
+    .filter((row) => row && typeof row.date === 'string')
+    .map((row) => ({
+      ...row,
+      close: resolveCloseValue(row),
+    }))
+    .filter((row) => Number.isFinite(row.close) && row.close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function buildLstmDataset(rows, lookback) {
+  const sorted = sortRowsByDate(rows);
+  if (sorted.length <= lookback + 2) {
+    return { sequences: [], labels: [], meta: [], returns: [], baseRows: sorted };
+  }
+
+  const returns = [];
+  const meta = [];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    if (!Number.isFinite(prev.close) || prev.close <= 0) continue;
+    const change = (curr.close - prev.close) / prev.close;
+    returns.push(change);
+    meta.push({
+      buyDate: prev.date,
+      sellDate: curr.date,
+      buyClose: prev.close,
+      sellClose: curr.close,
+      actualReturn: change,
+    });
+  }
+
+  const sequences = [];
+  const labels = [];
+  const targetReturns = [];
+  for (let i = lookback; i < returns.length; i += 1) {
+    const feature = returns.slice(i - lookback, i);
+    if (feature.length !== lookback) continue;
+    sequences.push(feature);
+    labels.push(returns[i] > 0 ? 1 : 0);
+    targetReturns.push(returns[i]);
+  }
+
+  const metaAligned = meta.slice(lookback);
+  return {
+    sequences,
+    labels,
+    meta: metaAligned,
+    returns: targetReturns,
+    baseRows: sorted,
+  };
+}
+
+function computeNormalisation(sequences, trainSize) {
+  if (!Array.isArray(sequences) || sequences.length === 0 || trainSize <= 0) {
+    return { mean: 0, std: 1 };
+  }
+  const trainSlice = sequences.slice(0, trainSize);
+  const values = trainSlice.flat();
+  if (values.length === 0) {
+    return { mean: 0, std: 1 };
+  }
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((acc, value) => acc + ((value - mean) ** 2), 0) / values.length;
+  const std = Math.sqrt(variance) || 1;
+  return { mean, std };
+}
+
+function normaliseSequences(sequences, normaliser) {
+  const { mean, std } = normaliser || { mean: 0, std: 1 };
+  if (!Array.isArray(sequences) || sequences.length === 0) return [];
+  return sequences.map((seq) => seq.map((value) => (value - mean) / (std || 1)));
+}
+
+function computeTrainTestSizes(totalSamples, ratio, minTrain = 1) {
+  const clampedRatio = Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0.6), 0.9) : 0.8;
+  let trainSize = Math.floor(totalSamples * clampedRatio);
+  if (trainSize < minTrain) trainSize = minTrain;
+  if (trainSize >= totalSamples) trainSize = totalSamples - 1;
+  const testSize = totalSamples - trainSize;
+  return { trainSize, testSize, ratio: clampedRatio };
+}
+
+function computeTrainingOdds(returns, trainSize) {
+  if (!Array.isArray(returns) || returns.length === 0 || trainSize <= 0) {
+    return 1;
+  }
+  const trainReturns = returns.slice(0, trainSize);
+  const wins = trainReturns.filter((value) => value > 0);
+  const losses = trainReturns.filter((value) => value < 0).map((value) => Math.abs(value));
+  const avgWin = wins.length > 0 ? wins.reduce((sum, value) => sum + value, 0) / wins.length : 0;
+  const avgLoss = losses.length > 0 ? losses.reduce((sum, value) => sum + value, 0) / losses.length : 0;
+  if (!Number.isFinite(avgWin) || avgWin <= 0 || !Number.isFinite(avgLoss) || avgLoss <= 0) {
+    return 1;
+  }
+  return Math.max(avgWin / avgLoss, 0.25);
+}
+
+function computeKellyFraction(probability, odds) {
+  const sanitizedProb = Math.min(Math.max(probability, 0.001), 0.999);
+  const b = Math.max(odds, 1e-6);
+  const fraction = sanitizedProb - ((1 - sanitizedProb) / b);
+  return Math.max(0, Math.min(fraction, 1));
+}
+
+function computeConfusionMatrix(actual, predicted) {
+  let TP = 0; let TN = 0; let FP = 0; let FN = 0;
+  for (let i = 0; i < actual.length; i += 1) {
+    const truth = actual[i];
+    const guess = predicted[i];
+    if (truth === 1 && guess === 1) TP += 1;
+    else if (truth === 0 && guess === 0) TN += 1;
+    else if (truth === 0 && guess === 1) FP += 1;
+    else if (truth === 1 && guess === 0) FN += 1;
+  }
+  return { TP, TN, FP, FN };
+}
+
+function buildLstmModel(lookback, learningRate, seed) {
+  const model = tf.sequential();
+  const baseSeed = Number.isFinite(seed) ? seed : null;
+  const lcg = baseSeed !== null ? createSeededRandom(baseSeed) : null;
+  const nextSeed = () => (lcg ? Math.floor(lcg() * 1e9) : undefined);
+  model.add(tf.layers.lstm({
+    units: 32,
+    returnSequences: true,
+    inputShape: [lookback, 1],
+    kernelInitializer: baseSeed !== null ? tf.initializers.glorotUniform({ seed: nextSeed() }) : undefined,
+    recurrentInitializer: baseSeed !== null ? tf.initializers.orthogonal({ seed: nextSeed() }) : undefined,
+    biasInitializer: tf.initializers.zeros(),
+  }));
+  model.add(tf.layers.dropout({ rate: 0.2 }));
+  model.add(tf.layers.lstm({
+    units: 16,
+    kernelInitializer: baseSeed !== null ? tf.initializers.glorotUniform({ seed: nextSeed() }) : undefined,
+    recurrentInitializer: baseSeed !== null ? tf.initializers.orthogonal({ seed: nextSeed() }) : undefined,
+    biasInitializer: tf.initializers.zeros(),
+  }));
+  model.add(tf.layers.dropout({ rate: 0.1 }));
+  model.add(tf.layers.dense({
+    units: 16,
+    activation: 'relu',
+    kernelInitializer: baseSeed !== null ? tf.initializers.glorotUniform({ seed: nextSeed() }) : undefined,
+  }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  const optimizer = tf.train.adam(learningRate);
+  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  return model;
+}
+
+function generateTradeSummary(probabilities, labels, meta, returns, options) {
+  const threshold = options.threshold ?? 0.5;
+  const useKelly = Boolean(options.useKelly);
+  const fixedFraction = Math.max(0.01, Math.min(options.fixedFraction ?? 0.2, 1));
+  const trainingOdds = options.trainingOdds ?? 1;
+  const initialCapital = Number.isFinite(options.initialCapital) ? options.initialCapital : 100000;
+
+  let capital = initialCapital;
+  let cumulativeProfit = 0;
+  let wins = 0;
+  let executed = 0;
+  const executedTrades = [];
+
+  for (let i = 0; i < probabilities.length; i += 1) {
+    const probability = probabilities[i];
+    const actualReturn = returns[i];
+    const metaRow = meta[i];
+    if (probability >= threshold && metaRow) {
+      const fraction = useKelly
+        ? computeKellyFraction(probability, trainingOdds)
+        : Math.max(0.01, Math.min(fixedFraction, 1));
+      const allocation = capital * fraction;
+      const profit = allocation * actualReturn;
+      capital += profit;
+      cumulativeProfit += profit;
+      executed += 1;
+      if (actualReturn > 0) wins += 1;
+      executedTrades.push({
+        buyDate: metaRow.buyDate,
+        sellDate: metaRow.sellDate,
+        probability,
+        actualReturn,
+        fraction,
+        profit,
+        capitalAfter: capital,
+      });
+    }
+  }
+
+  const totalReturn = executed > 0 ? (capital - initialCapital) / initialCapital : 0;
+  const hitRate = executed > 0 ? wins / executed : 0;
+  const averageProfit = executed > 0 ? cumulativeProfit / executed : 0;
+  return {
+    executedTrades,
+    totalReturn,
+    hitRate,
+    averageProfit,
+    finalCapital: capital,
+    executed,
+    wins,
+  };
+}
+
+function computeKellyInfo(probabilities, returns, threshold, trainingOdds) {
+  let wins = 0;
+  let losses = 0;
+  for (let i = 0; i < probabilities.length; i += 1) {
+    if (probabilities[i] >= threshold) {
+      if (returns[i] > 0) wins += 1;
+      else losses += 1;
+    }
+  }
+  const total = wins + losses;
+  const winProbability = total > 0 ? wins / total : 0.5;
+  const fraction = computeKellyFraction(winProbability, trainingOdds);
+  return { fraction, odds: trainingOdds, winProbability };
+}
+
+function buildAnnFeatureSet(rows) {
+  const sorted = sortRowsByDate(rows);
+  const high = sorted.map((row) => Number.isFinite(row.high) ? row.high : row.close);
+  const low = sorted.map((row) => Number.isFinite(row.low) ? row.low : row.close);
+  const close = sorted.map((row) => row.close);
+
+  const sma = (values, n) => {
+    const out = Array(values.length).fill(null);
+    let sum = 0;
+    for (let i = 0; i < values.length; i += 1) {
+      sum += values[i];
+      if (i >= n) sum -= values[i - n];
+      if (i >= n - 1) out[i] = sum / n;
+    }
+    return out;
+  };
+
+  const wma = (values, n) => {
+    const out = Array(values.length).fill(null);
+    const denom = (n * (n + 1)) / 2;
+    for (let i = n - 1; i < values.length; i += 1) {
+      let num = 0;
+      for (let k = 0; k < n; k += 1) num += (n - k) * values[i - k];
+      out[i] = num / denom;
+    }
+    return out;
+  };
+
+  const ema = (values, n) => {
+    const out = Array(values.length).fill(null);
+    const k = 2 / (n + 1);
+    let prev = null;
+    for (let i = 0; i < values.length; i += 1) {
+      const v = values[i];
+      if (v == null) {
+        out[i] = prev;
+        continue;
+      }
+      if (prev == null) out[i] = v;
+      else out[i] = prev + k * (v - prev);
+      prev = out[i];
+    }
+    return out;
+  };
+
+  const momentum = (values, n) => values.map((v, i) => (i >= n ? v - values[i - n] : null));
+
+  const highest = (values, n) => {
+    const out = Array(values.length).fill(null);
+    const dq = [];
+    for (let i = 0; i < values.length; i += 1) {
+      while (dq.length && dq[0] <= i - n) dq.shift();
+      while (dq.length && values[dq[dq.length - 1]] <= values[i]) dq.pop();
+      dq.push(i);
+      if (i >= n - 1) out[i] = values[dq[0]];
+    }
+    return out;
+  };
+
+  const lowest = (values, n) => {
+    const out = Array(values.length).fill(null);
+    const dq = [];
+    for (let i = 0; i < values.length; i += 1) {
+      while (dq.length && dq[0] <= i - n) dq.shift();
+      while (dq.length && values[dq[dq.length - 1]] >= values[i]) dq.pop();
+      dq.push(i);
+      if (i >= n - 1) out[i] = values[dq[0]];
+    }
+    return out;
+  };
+
+  const stochasticKD = (highArr, lowArr, closeArr, nK = 14, nD = 3) => {
+    const hh = highest(highArr, nK);
+    const ll = lowest(lowArr, nK);
+    const K = closeArr.map((c, i) => {
+      if (i < nK - 1) return null;
+      const denom = hh[i] - ll[i];
+      if (!Number.isFinite(denom) || denom === 0) return null;
+      return ((c - ll[i]) / denom) * 100;
+    });
+    const D = sma(K.map((v) => (v ?? 0)), nD).map((v, i) => (i >= nK - 1 ? v : null));
+    return { K, D };
+  };
+
+  const rsi = (closeArr, n = 14) => {
+    const out = Array(closeArr.length).fill(null);
+    let gain = 0; let loss = 0;
+    for (let i = 1; i < closeArr.length; i += 1) {
+      const change = closeArr[i] - closeArr[i - 1];
+      const up = Math.max(change, 0);
+      const dn = Math.max(-change, 0);
+      if (i <= n) {
+        gain += up;
+        loss += dn;
+        if (i === n) {
+          const rs = (gain / n) / ((loss / n) || 1e-12);
+          out[i] = 100 - (100 / (1 + rs));
+        }
+      } else {
+        gain = (gain * (n - 1) + up) / n;
+        loss = (loss * (n - 1) + dn) / n;
+        const rs = gain / (loss || 1e-12);
+        out[i] = 100 - (100 / (1 + rs));
+      }
+    }
+    return out;
+  };
+
+  const macd = (closeArr, fast = 12, slow = 26, sig = 9) => {
+    const emaFast = ema(closeArr, fast);
+    const emaSlow = ema(closeArr, slow);
+    const diff = closeArr.map((_, i) => (emaFast[i] != null && emaSlow[i] != null ? emaFast[i] - emaSlow[i] : null));
+    const signal = ema(diff.map((v) => v ?? 0), sig);
+    const hist = diff.map((v, i) => (v == null || signal[i] == null ? null : v - signal[i]));
+    return { diff, signal, hist };
+  };
+
+  const cci = (highArr, lowArr, closeArr, n = 20) => {
+    const tp = closeArr.map((c, i) => (highArr[i] + lowArr[i] + c) / 3);
+    const smaTp = sma(tp, n);
+    const out = Array(closeArr.length).fill(null);
+    for (let i = n - 1; i < closeArr.length; i += 1) {
+      let md = 0;
+      for (let k = 0; k < n; k += 1) md += Math.abs(tp[i - k] - smaTp[i]);
+      md /= n;
+      out[i] = (tp[i] - smaTp[i]) / (0.015 * md || 1e-12);
+    }
+    return out;
+  };
+
+  const williamsR = (highArr, lowArr, closeArr, n = 14) => {
+    const hh = highest(highArr, n);
+    const ll = lowest(lowArr, n);
+    return closeArr.map((c, i) => {
+      if (i < n - 1 || hh[i] == null || ll[i] == null) return null;
+      const denom = (hh[i] - ll[i] || 1e-12);
+      return ((hh[i] - c) / denom) * 100;
+    });
+  };
+
+  const MA = sma(close, 30);
+  const WMA = wma(close, 15);
+  const EMA = ema(close, 12);
+  const MOM = momentum(close, 10);
+  const { K, D } = stochasticKD(high, low, close, 14, 3);
+  const RSI = rsi(close, 14);
+  const mac = macd(close, 12, 26, 9);
+  const CCI = cci(high, low, close, 20);
+  const WR = williamsR(high, low, close, 14);
+
+  const features = [];
+  const labels = [];
+  const meta = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const feat = [MA[i], WMA[i], EMA[i], MOM[i], K[i], D[i], RSI[i], mac.diff[i], CCI[i], WR[i]];
+    if (feat.every((v) => Number.isFinite(v))) {
+      features.push(feat.map(Number));
+      const rise = sorted[i + 1].close > sorted[i].close ? 1 : 0;
+      labels.push(rise);
+      meta.push({
+        buyDate: sorted[i].date,
+        sellDate: sorted[i + 1].date,
+        buyClose: sorted[i].close,
+        sellClose: sorted[i + 1].close,
+        actualReturn: (sorted[i + 1].close - sorted[i].close) / sorted[i].close,
+      });
+    }
+  }
+
+  return { features, labels, meta };
+}
+
+function standardiseFeatures(matrix, trainSize) {
+  const rows = Array.isArray(matrix) ? matrix : [];
+  if (rows.length === 0) return { Z: [], mean: [], std: [] };
+  const p = rows[0].length;
+  const mean = Array(p).fill(0);
+  const std = Array(p).fill(0);
+  const size = Math.max(Math.min(trainSize, rows.length), 1);
+  for (let col = 0; col < p; col += 1) {
+    for (let r = 0; r < size; r += 1) mean[col] += rows[r][col];
+    mean[col] /= size;
+    for (let r = 0; r < size; r += 1) std[col] += (rows[r][col] - mean[col]) ** 2;
+    std[col] = Math.sqrt(std[col] / Math.max(1, size - 1)) || 1;
+  }
+  const Z = rows.map((row) => row.map((v, i) => (v - mean[i]) / std[i]));
+  return { Z, mean, std };
+}
+
+function buildAnnModel(inputDim, seed) {
+  const model = tf.sequential();
+  const baseSeed = Number.isFinite(seed) ? seed : null;
+  const lcg = baseSeed !== null ? createSeededRandom(baseSeed) : null;
+  const nextSeed = () => (lcg ? Math.floor(lcg() * 1e9) : undefined);
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim], kernelInitializer: baseSeed !== null ? tf.initializers.glorotUniform({ seed: nextSeed() }) : undefined }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu', kernelInitializer: baseSeed !== null ? tf.initializers.glorotUniform({ seed: nextSeed() }) : undefined }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.sgd(0.01), loss: 'meanSquaredError', metrics: ['accuracy'] });
+  return model;
+}
+
+async function runLstmPrediction(rows, options, progress) {
+  const lookback = Math.round(options.lookback || 20);
+  const dataset = buildLstmDataset(rows, lookback);
+  if (dataset.sequences.length < Math.max(lookback * 3, 45)) {
+    throw new Error(`資料樣本不足（需至少 ${Math.max(45, lookback * 3)} 筆有效樣本，目前 ${dataset.sequences.length} 筆）`);
+  }
+
+  const totalSamples = dataset.sequences.length;
+  const { trainSize, testSize, ratio } = computeTrainTestSizes(totalSamples, options.trainRatio, lookback);
+  if (trainSize <= 0 || testSize <= 0) {
+    throw new Error('無法按照設定比例分割訓練與測試集，請延長資料範圍。');
+  }
+
+  const normaliser = computeNormalisation(dataset.sequences, trainSize);
+  const normalizedSequences = normaliseSequences(dataset.sequences, normaliser);
+  const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
+  const xAll = tf.tensor(tensorInput);
+  const yAll = tf.tensor(dataset.labels.map((label) => [label]));
+
+  const xTrain = xAll.slice([0, 0, 0], [trainSize, lookback, 1]);
+  const yTrain = yAll.slice([0, 0], [trainSize, 1]);
+  const xTest = xAll.slice([trainSize, 0, 0], [testSize, lookback, 1]);
+  const yTest = yAll.slice([trainSize, 0], [testSize, 1]);
+
+  if (progress) progress(0.05, '資料準備');
+
+  const seed = Number.isFinite(options.seed) ? options.seed : null;
+  if (seed !== null) applyTfSeed(seed);
+
+  const model = buildLstmModel(lookback, options.learningRate || 0.005, seed);
+  const epochs = Math.max(10, Math.round(options.epochs || 80));
+  const batchSize = Math.max(8, Math.min(Math.round(options.batchSize || 64), trainSize));
+
+  await model.fit(xTrain, yTrain, {
+    epochs,
+    batchSize,
+    validationSplit: Math.min(0.2, Math.max(0.1, trainSize > 50 ? 0.2 : 0.1)),
+    shuffle: true,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        if (progress) progress((epoch + 1) / epochs, `Loss ${logs.loss?.toFixed(4) ?? '—'}｜Acc ${logs.acc?.toFixed(2) ?? logs.accuracy?.toFixed(2) ?? '—'}`);
+      },
+    },
+  });
+
+  const history = model.history || {};
+  const accKey = history.history?.acc ? 'acc' : (history.history?.accuracy ? 'accuracy' : null);
+  const finalTrainAccuracy = accKey ? history.history[accKey][history.history[accKey].length - 1] : NaN;
+  const finalTrainLoss = history.history?.loss ? history.history.loss[history.history.loss.length - 1] : NaN;
+
+  const evalOutput = model.evaluate(xTest, yTest);
+  const evalArray = Array.isArray(evalOutput) ? evalOutput : [evalOutput];
+  const evalValues = await Promise.all(
+    evalArray.map(async (tensor) => {
+      const data = await tensor.data();
+      tensor.dispose();
+      return data[0];
+    })
+  );
+  const testLoss = evalValues[0] ?? NaN;
+  const testAccuracy = evalValues[1] ?? NaN;
+
+  const predictionsTensor = model.predict(xTest);
+  const predictionValues = Array.from(await predictionsTensor.data());
+  predictionsTensor.dispose();
+
+  const labels = dataset.labels.slice(trainSize);
+  const manualPredictedLabels = predictionValues.map((value) => (value >= (options.threshold ?? 0.5) ? 1 : 0));
+  const manualAccuracy = manualPredictedLabels.filter((v, i) => v === labels[i]).length / labels.length;
+
+  const trainingOdds = computeTrainingOdds(dataset.returns, trainSize);
+  const tradeSummary = generateTradeSummary(
+    predictionValues,
+    labels,
+    dataset.meta.slice(trainSize),
+    dataset.returns.slice(trainSize),
+    {
+      threshold: options.threshold ?? 0.5,
+      useKelly: Boolean(options.useKelly),
+      fixedFraction: options.fixedFraction ?? 0.2,
+      trainingOdds,
+      initialCapital: options.initialCapital,
+    }
+  );
+
+  const kellyInfo = computeKellyInfo(
+    predictionValues,
+    dataset.returns.slice(trainSize),
+    options.threshold ?? 0.5,
+    trainingOdds
+  );
+
+  const summary = {
+    version: AI_WORKER_VERSION,
+    trainAccuracy: finalTrainAccuracy,
+    trainLoss: finalTrainLoss,
+    testAccuracy: Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy,
+    testLoss,
+    totalPredictions: predictionValues.length,
+    executedTrades: tradeSummary.executed,
+    hitRate: tradeSummary.hitRate,
+    totalReturn: tradeSummary.totalReturn,
+    averageProfit: tradeSummary.averageProfit,
+    finalCapital: tradeSummary.finalCapital,
+    usingKelly: Boolean(options.useKelly),
+    threshold: options.threshold ?? 0.5,
+  };
+
+  const confusion = computeConfusionMatrix(labels, manualPredictedLabels);
+
+  tf.dispose([xAll, yAll, xTrain, yTrain, xTest, yTest]);
+  model.dispose();
+
+  return {
+    modelType: AI_MODEL_TYPES.LSTM,
+    summary,
+    trades: tradeSummary.executedTrades,
+    confusion,
+    kelly: kellyInfo,
+    meta: {
+      totalSamples,
+      trainSize,
+      testSize,
+      lookback,
+      ratio,
+    },
+  };
+}
+
+async function runAnnPrediction(rows, options, progress) {
+  const dataset = buildAnnFeatureSet(rows);
+  const totalSamples = dataset.features.length;
+  if (totalSamples < 60) {
+    throw new Error('有效樣本不足（至少 60 筆）。');
+  }
+
+  const { trainSize, testSize, ratio } = computeTrainTestSizes(totalSamples, options.trainRatio, 40);
+  if (trainSize <= 0 || testSize <= 0) {
+    throw new Error('無法按照設定比例分割訓練與測試集，請延長資料範圍。');
+  }
+
+  const { Z } = standardiseFeatures(dataset.features, trainSize);
+  const Xtr = Z.slice(0, trainSize);
+  const Xte = Z.slice(trainSize);
+  const ytr = dataset.labels.slice(0, trainSize);
+  const yte = dataset.labels.slice(trainSize);
+  const metaTest = dataset.meta.slice(trainSize);
+
+  if (progress) progress(0.05, '資料準備');
+  const seed = Number.isFinite(options.seed) ? options.seed : null;
+  if (seed !== null) applyTfSeed(seed);
+
+  const tx = tf.tensor2d(Xtr);
+  const ty = tf.tensor2d(ytr, [ytr.length, 1]);
+  const vx = tf.tensor2d(Xte);
+  const vy = tf.tensor2d(yte, [yte.length, 1]);
+
+  const model = buildAnnModel(Xtr[0].length, seed);
+  const epochs = Math.max(20, Math.round(options.epochs || 60));
+  const batchSize = Math.max(16, Math.min(Math.round(options.batchSize || 32), trainSize));
+
+  await model.fit(tx, ty, {
+    epochs,
+    batchSize,
+    shuffle: true,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        if (progress) progress((epoch + 1) / epochs, `Loss ${logs.loss?.toFixed(4) ?? '—'}｜Acc ${logs.acc?.toFixed(2) ?? logs.accuracy?.toFixed(2) ?? '—'}`);
+      },
+    },
+  });
+
+  const history = model.history || {};
+  const accKey = history.history?.acc ? 'acc' : (history.history?.accuracy ? 'accuracy' : null);
+  const finalTrainAccuracy = accKey ? history.history[accKey][history.history[accKey].length - 1] : NaN;
+  const finalTrainLoss = history.history?.loss ? history.history.loss[history.history.loss.length - 1] : NaN;
+
+  const preds = model.predict(vx);
+  const probabilities = Array.from(await preds.data());
+  preds.dispose();
+
+  const predictedLabels = probabilities.map((value) => (value >= (options.threshold ?? 0.5) ? 1 : 0));
+  const manualAccuracy = predictedLabels.filter((v, i) => v === yte[i]).length / yte.length;
+
+  const trainingOdds = computeTrainingOdds(dataset.meta.map((m) => m.actualReturn), trainSize);
+
+  const tradeSummary = generateTradeSummary(
+    probabilities,
+    yte,
+    metaTest,
+    metaTest.map((m) => m.actualReturn),
+    {
+      threshold: options.threshold ?? 0.5,
+      useKelly: Boolean(options.useKelly),
+      fixedFraction: options.fixedFraction ?? 0.2,
+      trainingOdds,
+      initialCapital: options.initialCapital,
+    }
+  );
+
+  const kellyInfo = computeKellyInfo(
+    probabilities,
+    metaTest.map((m) => m.actualReturn),
+    options.threshold ?? 0.5,
+    trainingOdds
+  );
+
+  const confusion = computeConfusionMatrix(yte, predictedLabels);
+
+  tx.dispose();
+  ty.dispose();
+  vx.dispose();
+  vy.dispose();
+  model.dispose();
+
+  const summary = {
+    version: AI_WORKER_VERSION,
+    trainAccuracy: finalTrainAccuracy,
+    trainLoss: finalTrainLoss,
+    testAccuracy: manualAccuracy,
+    testLoss: NaN,
+    totalPredictions: probabilities.length,
+    executedTrades: tradeSummary.executed,
+    hitRate: tradeSummary.hitRate,
+    totalReturn: tradeSummary.totalReturn,
+    averageProfit: tradeSummary.averageProfit,
+    finalCapital: tradeSummary.finalCapital,
+    usingKelly: Boolean(options.useKelly),
+    threshold: options.threshold ?? 0.5,
+  };
+
+  return {
+    modelType: AI_MODEL_TYPES.ANNS,
+    summary,
+    trades: tradeSummary.executedTrades,
+    confusion,
+    kelly: kellyInfo,
+    meta: {
+      totalSamples,
+      trainSize,
+      testSize,
+      ratio,
+    },
+  };
+}
+
+async function handleAiPredictMessage(message) {
+  const payload = message?.payload || {};
+  const options = payload.options || {};
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  if (rows.length < 60) {
+    self.postMessage({
+      type: 'AI_ERROR',
+      payload: { message: '資料不足（至少 60 筆）', modelType: options.modelType },
+    });
+    return;
+  }
+
+  try {
+    ensureAiTfReady();
+    const modelType = options.modelType === AI_MODEL_TYPES.ANNS ? AI_MODEL_TYPES.ANNS : AI_MODEL_TYPES.LSTM;
+    const progress = (value, stage) => {
+      self.postMessage({
+        type: 'AI_PROGRESS',
+        payload: { progress: Math.max(0, Math.min(value, 1)), stage, modelType },
+      });
+    };
+
+    let result;
+    if (modelType === AI_MODEL_TYPES.ANNS) {
+      result = await runAnnPrediction(rows, options, progress);
+    } else {
+      result = await runLstmPrediction(rows, options, progress);
+    }
+
+    result.summary.initialCapital = options.initialCapital;
+    self.postMessage({ type: 'AI_DONE', payload: result });
+  } catch (error) {
+    console.error('[AI Worker] 執行 AI 模型失敗:', error);
+    self.postMessage({
+      type: 'AI_ERROR',
+      payload: { message: error?.message || String(error), modelType: options.modelType },
+    });
+  }
+}
+
 // --- Worker 消息處理 ---
 self.onmessage = async function (e) {
+  const incomingType = e.data?.type;
+  if (incomingType === 'AI_PREDICT') {
+    await handleAiPredictMessage(e.data);
+    return;
+  }
+
   const {
     type,
     params,
