@@ -1,3 +1,11 @@
+## 2025-11-20 — Patch LB-AI-HYBRID-20251120A
+- **Scope**: AI 預測分頁加入 LSTM／ANNS 雙模型切換、訓練測試比例下拉與種子相容更新。
+- **Features**:
+  - 新增模型選單、訓練/測試切分下拉與動態描述，切換模型時同步重置結果並支援本地種子依模型分類。
+  - LSTM 背景訓練改採自訂比例（預設 80/20），回傳超參數包含模型別與切分比例，前端同步儲存種子資訊。
+  - 新增 ANNS 技術指標特徵模型於 Worker 端完成指標計算、標準化、訓練與預測，回傳與 LSTM 相同的交易評估欄位。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

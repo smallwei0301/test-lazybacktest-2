@@ -32,6 +32,7 @@ try {
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
+// Patch Tag: LB-AI-HYBRID-20251120A
 
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
@@ -65,6 +66,22 @@ function aiPostError(id, error) {
 function aiPostResult(id, data) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-lstm-result', id, data });
+}
+
+function annPostProgress(id, message) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-train-anns-progress', id, message });
+}
+
+function annPostError(id, error) {
+  if (!id) return;
+  const message = error instanceof Error ? error.message : String(error || 'ANN 模型發生未知錯誤');
+  self.postMessage({ type: 'ai-train-anns-error', id, error: { message } });
+}
+
+function annPostResult(id, data) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-train-anns-result', id, data });
 }
 
 function aiComputeNormalisation(sequences, trainSize) {
@@ -123,6 +140,8 @@ async function handleAITrainLSTMMessage(message) {
     return;
   }
   const payload = message?.payload || {};
+  let model = null;
+  const tensorsToDispose = [];
   try {
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
@@ -135,7 +154,10 @@ async function handleAITrainLSTMMessage(message) {
     const inferredLookback = Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20;
     const lookback = Math.max(5, Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback));
     const totalSamples = Number.isFinite(hyper.totalSamples) ? hyper.totalSamples : dataset.sequences.length;
-    const fallbackTrainSize = Math.max(Math.floor(totalSamples * (2 / 3)), lookback);
+    const ratio = Number.isFinite(hyper.trainRatio)
+      ? Math.min(Math.max(hyper.trainRatio, 0.6), 0.95)
+      : 0.8;
+    const fallbackTrainSize = Math.max(Math.floor(totalSamples * ratio), lookback);
     const rawTrainSize = Number.isFinite(hyper.trainSize) ? hyper.trainSize : fallbackTrainSize;
     const boundedTrainSize = Math.min(Math.max(Math.round(rawTrainSize), 1), totalSamples - 1);
     const testSize = totalSamples - boundedTrainSize;
@@ -268,6 +290,8 @@ async function handleAITrainLSTMMessage(message) {
           epochs,
           batchSize,
           learningRate,
+          trainRatio: ratio,
+          model: typeof hyper.modelType === 'string' ? hyper.modelType : 'lstm',
         },
       };
 
@@ -287,6 +311,543 @@ async function handleAITrainLSTMMessage(message) {
   }
 }
 
+function annResolveClose(row) {
+  const candidates = [
+    row?.close,
+    row?.adjustedClose,
+    row?.adjClose,
+    row?.rawClose,
+    row?.baseClose,
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function annSma(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  let sum = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    sum += values[i];
+    if (i >= period) {
+      sum -= values[i - period];
+    }
+    if (i >= period - 1) {
+      result[i] = sum / period;
+    }
+  }
+  return result;
+}
+
+function annWma(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  const denom = (period * (period + 1)) / 2;
+  for (let i = period - 1; i < values.length; i += 1) {
+    let num = 0;
+    for (let k = 0; k < period; k += 1) {
+      num += (period - k) * values[i - k];
+    }
+    result[i] = num / denom;
+  }
+  return result;
+}
+
+function annEma(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  const k = 2 / (period + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (!Number.isFinite(value)) {
+      result[i] = prev;
+      continue;
+    }
+    if (prev == null) {
+      prev = value;
+      result[i] = value;
+    } else {
+      prev = prev + k * (value - prev);
+      result[i] = prev;
+    }
+  }
+  return result;
+}
+
+function annMomentum(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  for (let i = period; i < values.length; i += 1) {
+    result[i] = values[i] - values[i - period];
+  }
+  return result;
+}
+
+function annHighest(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - period) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] <= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= period - 1) {
+      result[i] = values[deque[0]];
+    }
+  }
+  return result;
+}
+
+function annLowest(values, period) {
+  const result = Array(values.length).fill(null);
+  if (!Array.isArray(values) || values.length === 0 || period <= 0) return result;
+  const deque = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (deque.length && deque[0] <= i - period) deque.shift();
+    while (deque.length && values[deque[deque.length - 1]] >= values[i]) deque.pop();
+    deque.push(i);
+    if (i >= period - 1) {
+      result[i] = values[deque[0]];
+    }
+  }
+  return result;
+}
+
+function annStochasticKD(high, low, close, kPeriod = 14, dPeriod = 3) {
+  const highestValues = annHighest(high, kPeriod);
+  const lowestValues = annLowest(low, kPeriod);
+  const K = close.map((price, index) => {
+    if (index < kPeriod - 1) return null;
+    const maxHigh = highestValues[index];
+    const minLow = lowestValues[index];
+    const denom = maxHigh - minLow;
+    if (!Number.isFinite(denom) || denom === 0) return null;
+    return ((price - minLow) / denom) * 100;
+  });
+  const smoothed = annSma(K.map((value) => (Number.isFinite(value) ? value : 0)), dPeriod);
+  const D = smoothed.map((value, index) => (index >= kPeriod - 1 ? value : null));
+  return { K, D };
+}
+
+function annRsi(close, period = 14) {
+  const result = Array(close.length).fill(null);
+  if (!Array.isArray(close) || close.length === 0 || period <= 0) return result;
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i < close.length; i += 1) {
+    const change = close[i] - close[i - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? -change : 0;
+    if (i <= period) {
+      avgGain += gain;
+      avgLoss += loss;
+      if (i === period) {
+        avgGain /= period;
+        avgLoss /= period;
+        const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
+        result[i] = 100 - (100 / (1 + rs));
+      }
+    } else {
+      avgGain = ((avgGain * (period - 1)) + gain) / period;
+      avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+      const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
+      result[i] = 100 - (100 / (1 + rs));
+    }
+  }
+  return result;
+}
+
+function annMacd(close, fast = 12, slow = 26, signal = 9) {
+  const emaFast = annEma(close, fast);
+  const emaSlow = annEma(close, slow);
+  const diff = close.map((_, index) => {
+    const fastValue = emaFast[index];
+    const slowValue = emaSlow[index];
+    if (!Number.isFinite(fastValue) || !Number.isFinite(slowValue)) return null;
+    return fastValue - slowValue;
+  });
+  const signalLine = annEma(diff.map((value) => (Number.isFinite(value) ? value : 0)), signal);
+  const hist = diff.map((value, index) => {
+    if (!Number.isFinite(value) || !Number.isFinite(signalLine[index])) return null;
+    return value - signalLine[index];
+  });
+  return { diff, signal: signalLine, hist };
+}
+
+function annCci(high, low, close, period = 20) {
+  const typicalPrice = close.map((price, index) => (high[index] + low[index] + price) / 3);
+  const smaTp = annSma(typicalPrice, period);
+  const result = Array(close.length).fill(null);
+  for (let i = period - 1; i < close.length; i += 1) {
+    let meanDeviation = 0;
+    for (let k = 0; k < period; k += 1) {
+      meanDeviation += Math.abs(typicalPrice[i - k] - smaTp[i]);
+    }
+    meanDeviation /= period;
+    const denom = 0.015 * (meanDeviation || 1e-12);
+    result[i] = (typicalPrice[i] - smaTp[i]) / denom;
+  }
+  return result;
+}
+
+function annWilliamsR(high, low, close, period = 14) {
+  const highestValues = annHighest(high, period);
+  const lowestValues = annLowest(low, period);
+  return close.map((price, index) => {
+    if (index < period - 1) return null;
+    const maxHigh = highestValues[index];
+    const minLow = lowestValues[index];
+    const denom = maxHigh - minLow;
+    if (!Number.isFinite(denom) || denom === 0) return null;
+    return ((maxHigh - price) / denom) * 100;
+  });
+}
+
+function annBuildFeatureDataset(rows, lookback) {
+  const normalizedLookback = Number.isFinite(lookback) ? Math.max(5, Math.round(lookback)) : 20;
+  const sorted = Array.isArray(rows)
+    ? rows
+        .filter((row) => row && typeof row.date === 'string')
+        .map((row) => {
+          const close = annResolveClose(row);
+          if (!Number.isFinite(close) || close <= 0) return null;
+          const high = Number.isFinite(row?.high) && row.high > 0 ? Number(row.high) : close;
+          const low = Number.isFinite(row?.low) && row.low > 0 ? Number(row.low) : close;
+          return {
+            date: row.date,
+            close,
+            high,
+            low,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.date.localeCompare(b.date))
+    : [];
+
+  if (sorted.length < 2) {
+    return {
+      features: [],
+      labels: [],
+      meta: [],
+      returns: [],
+      forecastFeature: null,
+      forecastDate: null,
+      lastDate: sorted.length > 0 ? sorted[sorted.length - 1].date : null,
+    };
+  }
+
+  const close = sorted.map((row) => row.close);
+  const high = sorted.map((row) => row.high);
+  const low = sorted.map((row) => row.low);
+
+  const sma30 = annSma(close, Math.max(10, Math.min(60, normalizedLookback + 10)));
+  const wma15 = annWma(close, Math.max(8, Math.min(40, Math.round(normalizedLookback * 0.75))));
+  const ema12 = annEma(close, Math.max(6, Math.min(40, normalizedLookback)));
+  const momentum10 = annMomentum(close, Math.max(5, Math.min(30, Math.round(normalizedLookback * 0.5))));
+  const { K, D } = annStochasticKD(high, low, close, Math.max(10, Math.min(30, normalizedLookback)), 3);
+  const rsi14 = annRsi(close, Math.max(10, Math.min(30, normalizedLookback)));
+  const mac = annMacd(close, 12, 26, 9);
+  const cci20 = annCci(high, low, close, Math.max(15, Math.min(40, normalizedLookback + 5)));
+  const wr14 = annWilliamsR(high, low, close, Math.max(10, Math.min(30, normalizedLookback)));
+
+  const features = [];
+  const labels = [];
+  const returns = [];
+  const meta = [];
+
+  const buildVector = (index) => [
+    sma30[index],
+    wma15[index],
+    ema12[index],
+    momentum10[index],
+    K[index],
+    D[index],
+    rsi14[index],
+    mac.diff[index],
+    cci20[index],
+    wr14[index],
+  ];
+
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const vector = buildVector(i);
+    if (!vector.every((value) => Number.isFinite(value))) {
+      continue;
+    }
+    const nextReturn = (sorted[i + 1].close - sorted[i].close) / sorted[i].close;
+    features.push(vector.map((value) => Number(value)));
+    labels.push(nextReturn > 0 ? 1 : 0);
+    returns.push(nextReturn);
+    meta.push({
+      buyDate: sorted[i].date,
+      sellDate: sorted[i + 1].date,
+      buyClose: sorted[i].close,
+      sellClose: sorted[i + 1].close,
+      actualReturn: nextReturn,
+    });
+  }
+
+  const lastIndex = sorted.length - 1;
+  let forecastFeature = null;
+  let forecastDate = null;
+  if (lastIndex >= 0) {
+    const vector = buildVector(lastIndex);
+    if (vector.every((value) => Number.isFinite(value))) {
+      forecastFeature = vector.map((value) => Number(value));
+      forecastDate = sorted[lastIndex].date;
+    }
+  }
+
+  return {
+    features,
+    labels,
+    meta,
+    returns,
+    forecastFeature,
+    forecastDate,
+    lastDate: sorted[sorted.length - 1]?.date || null,
+  };
+}
+
+function annComputeStandardisation(features, trainCount) {
+  if (!Array.isArray(features) || features.length === 0) {
+    return { mean: [], std: [] };
+  }
+  const dimension = Array.isArray(features[0]) ? features[0].length : 0;
+  const count = Math.min(Math.max(Math.round(trainCount), 1), features.length);
+  const mean = Array(dimension).fill(0);
+  const std = Array(dimension).fill(0);
+  for (let i = 0; i < count; i += 1) {
+    const row = features[i];
+    for (let j = 0; j < dimension; j += 1) {
+      mean[j] += row[j];
+    }
+  }
+  for (let j = 0; j < dimension; j += 1) {
+    mean[j] /= count;
+  }
+  for (let i = 0; i < count; i += 1) {
+    const row = features[i];
+    for (let j = 0; j < dimension; j += 1) {
+      const diff = row[j] - mean[j];
+      std[j] += diff * diff;
+    }
+  }
+  for (let j = 0; j < dimension; j += 1) {
+    std[j] = Math.sqrt(std[j] / Math.max(1, count - 1)) || 1;
+  }
+  return { mean, std };
+}
+
+function annApplyStandardisation(features, mean, std) {
+  if (!Array.isArray(features) || features.length === 0) {
+    return [];
+  }
+  return features.map((row) => row.map((value, index) => {
+    const divisor = std[index] || 1;
+    return (value - (mean[index] || 0)) / divisor;
+  }));
+}
+
+function annCreateModel(inputDim, learningRate) {
+  const lr = Number.isFinite(learningRate) ? learningRate : 0.01;
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
+  model.add(tf.layers.dropout({ rate: 0.2 }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.sgd(lr), loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  return model;
+}
+
+async function handleAITrainANNSMessage(message) {
+  const id = message?.id;
+  if (!id) return;
+  const payload = message?.payload || {};
+  const rows = payload.rows;
+  const options = payload.options || {};
+  try {
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (!Array.isArray(rows) || rows.length < 2) {
+      throw new Error('資料不足，請先取得足夠的歷史 K 線資料。');
+    }
+
+    const lookback = Math.max(5, Math.round(Number.isFinite(options.lookback) ? options.lookback : 20));
+    const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
+    const requestedBatchSize = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
+    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
+    const trainRatio = Number.isFinite(options.trainRatio)
+      ? Math.min(Math.max(options.trainRatio, 0.6), 0.95)
+      : 0.8;
+
+    const dataset = annBuildFeatureDataset(rows, lookback);
+    if (!Array.isArray(dataset.features) || dataset.features.length < 30) {
+      throw new Error('有效樣本不足，請延長回測期間或確認資料品質。');
+    }
+
+    const totalSamples = dataset.features.length;
+    const trainCount = Math.min(Math.max(Math.floor(totalSamples * trainRatio), 1), totalSamples - 1);
+    const testCount = totalSamples - trainCount;
+    if (trainCount <= 0 || testCount <= 0) {
+      throw new Error('訓練或測試樣本不足，請調整資料區間或切分比例。');
+    }
+
+    const normaliser = annComputeStandardisation(dataset.features, trainCount);
+    const standardized = annApplyStandardisation(dataset.features, normaliser.mean, normaliser.std);
+
+    const trainX = standardized.slice(0, trainCount);
+    const testX = standardized.slice(trainCount);
+    const trainY = dataset.labels.slice(0, trainCount);
+    const testY = dataset.labels.slice(trainCount);
+    const testMeta = dataset.meta.slice(trainCount);
+    const testReturns = dataset.returns.slice(trainCount);
+
+    if (testX.length === 0 || testY.length === 0) {
+      throw new Error('測試樣本不足，請延長資料區間。');
+    }
+
+    const trainTensorX = tf.tensor2d(trainX);
+    const trainTensorY = tf.tensor2d(trainY, [trainY.length, 1]);
+    const testTensorX = tf.tensor2d(testX);
+    const testTensorY = tf.tensor2d(testY, [testY.length, 1]);
+    tensorsToDispose.push(trainTensorX, trainTensorY, testTensorX, testTensorY);
+
+    const effectiveBatchSize = Math.min(requestedBatchSize, trainCount);
+    model = annCreateModel(trainX[0].length, learningRate);
+
+    annPostProgress(id, `ANNS 訓練中（共 ${epochs} 輪）…`);
+    const history = await model.fit(trainTensorX, trainTensorY, {
+      epochs,
+      batchSize: effectiveBatchSize,
+      shuffle: true,
+      callbacks: {
+        onEpochEnd: (epoch, logs) => {
+          const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
+          const accValue = logs.acc ?? logs.accuracy;
+          const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
+          annPostProgress(id, `ANNS 訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+        },
+      },
+    });
+
+    const historyAccKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
+    const trainAccuracyFromHistory = historyAccKey
+      ? history.history[historyAccKey][history.history[historyAccKey].length - 1]
+      : NaN;
+    const trainLossFromHistory = history.history.loss?.[history.history.loss.length - 1] ?? NaN;
+
+    const evalTrain = model.evaluate(trainTensorX, trainTensorY);
+    const evalTrainArray = Array.isArray(evalTrain) ? evalTrain : [evalTrain];
+    const evalTrainValues = [];
+    for (let i = 0; i < evalTrainArray.length; i += 1) {
+      const tensor = evalTrainArray[i];
+      const data = await tensor.data();
+      evalTrainValues.push(data[0]);
+      tensor.dispose();
+    }
+    let trainLoss = Number.isFinite(trainLossFromHistory) ? trainLossFromHistory : evalTrainValues[0] ?? NaN;
+    let trainAccuracy = Number.isFinite(trainAccuracyFromHistory) ? trainAccuracyFromHistory : evalTrainValues[1] ?? NaN;
+
+    const evalTest = model.evaluate(testTensorX, testTensorY);
+    const evalTestArray = Array.isArray(evalTest) ? evalTest : [evalTest];
+    const evalTestValues = [];
+    for (let i = 0; i < evalTestArray.length; i += 1) {
+      const tensor = evalTestArray[i];
+      const data = await tensor.data();
+      evalTestValues.push(data[0]);
+      tensor.dispose();
+    }
+    let testLoss = evalTestValues[0] ?? NaN;
+    let testAccuracy = evalTestValues[1] ?? NaN;
+
+    const trainPredTensor = model.predict(trainTensorX);
+    const trainPredValues = Array.from(await trainPredTensor.data());
+    trainPredTensor.dispose();
+    const manualTrainAccuracy = trainY.length
+      ? trainPredValues.filter((value, index) => (value >= 0.5 ? 1 : 0) === trainY[index]).length / trainY.length
+      : 0;
+    if (!Number.isFinite(trainAccuracy)) {
+      trainAccuracy = manualTrainAccuracy;
+    }
+
+    const predictionsTensor = model.predict(testTensorX);
+    const predictionValues = Array.from(await predictionsTensor.data());
+    predictionsTensor.dispose();
+    const manualTestAccuracy = testY.length
+      ? predictionValues.filter((value, index) => (value >= 0.5 ? 1 : 0) === testY[index]).length / testY.length
+      : 0;
+    if (!Number.isFinite(testAccuracy)) {
+      testAccuracy = manualTestAccuracy;
+    }
+
+    let forecast = null;
+    if (Array.isArray(dataset.forecastFeature) && dataset.forecastFeature.length > 0) {
+      const forecastVector = dataset.forecastFeature.map((value, index) => {
+        const divisor = normaliser.std[index] || 1;
+        return (value - (normaliser.mean[index] || 0)) / divisor;
+      });
+      const forecastTensor = tf.tensor2d([forecastVector]);
+      tensorsToDispose.push(forecastTensor);
+      const forecastOutput = model.predict(forecastTensor);
+      const forecastArray = Array.from(await forecastOutput.data());
+      forecastOutput.dispose();
+      forecast = {
+        probability: forecastArray[0],
+        referenceDate: dataset.forecastDate || dataset.lastDate || null,
+      };
+    }
+
+    const trainingOdds = aiComputeTrainingOdds(dataset.returns, trainCount);
+
+    const trainingMetrics = {
+      trainAccuracy,
+      trainLoss,
+      testAccuracy,
+      testLoss,
+      totalPredictions: predictionValues.length,
+    };
+
+    const predictionsPayload = {
+      predictions: predictionValues,
+      meta: testMeta,
+      returns: testReturns,
+      trainingOdds,
+      forecast,
+      datasetLastDate: dataset.lastDate || null,
+      hyperparameters: {
+        epochs,
+        batchSize: effectiveBatchSize,
+        learningRate,
+        trainRatio,
+        lookback,
+        model: 'anns',
+      },
+    };
+
+    const formatPct = (value) => (Number.isFinite(value) ? (value * 100).toFixed(2) : '—');
+    const finalMessage = `ANNS 完成：訓練勝率 ${formatPct(trainAccuracy)}%，測試正確率 ${formatPct(testAccuracy)}%。`;
+
+    annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+  } catch (error) {
+    annPostError(id, error);
+  } finally {
+    tensorsToDispose.forEach((tensor) => {
+      if (tensor && typeof tensor.dispose === 'function') {
+        tensor.dispose();
+      }
+    });
+    if (model && typeof model.dispose === 'function') {
+      model.dispose();
+    }
+  }
+}
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
   if (!(earlierDate instanceof Date) || Number.isNaN(earlierDate.getTime())) return null;
@@ -9512,6 +10073,10 @@ self.onmessage = async function (e) {
   const { type } = e.data || {};
   if (type === 'ai-train-lstm') {
     await handleAITrainLSTMMessage(e.data);
+    return;
+  }
+  if (type === 'ai-train-anns') {
+    await handleAITrainANNSMessage(e.data);
     return;
   }
   const {
