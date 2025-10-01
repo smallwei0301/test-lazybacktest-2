@@ -1,3 +1,10 @@
+## 2025-06-25 — Patch LB-FUGLE-SOURCE-20250625A
+- **Scope**: Fugle 主來源整合與台灣指數查詢。
+  - TWSE/TPEX 代理加入 Fugle API，改為預設主來源並保留 TWSE／FinMind 備援，更新 Worker 強制來源排序。
+  - 前端資料來源測試器新增 Fugle 選項，調整文案與市場標籤，股票欄位改為支援指數代碼。
+  - 台股清單整合 Fugle 指數清單，查詢邏輯新增 INDEX 市場並快取指數名稱。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

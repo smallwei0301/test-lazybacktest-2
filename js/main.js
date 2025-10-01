@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-FUGLE-SOURCE-20250625A
 
 // 全局變量
 let stockChart = null;
@@ -778,6 +779,7 @@ function getCurrentMarketFromUI() {
 function getMarketLabel(market) {
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
+    if (market === 'INDEX') return '指數';
     return '上市 (TWSE)';
 }
 
@@ -876,12 +878,14 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
     }
     if (market === 'TPEX') {
         return [
-            { id: 'finmind', label: 'FinMind 主來源', description: '預設資料來源' },
+            { id: 'fugle', label: 'Fugle 主來源', description: '預設資料來源' },
+            { id: 'finmind', label: 'FinMind 備援', description: 'Fugle 失效時啟用' },
             { id: 'yahoo', label: 'Yahoo 備援', description: 'FinMind 失效時啟用' },
         ];
     }
     return [
-        { id: 'twse', label: 'TWSE 主來源', description: '預設資料來源' },
+        { id: 'fugle', label: 'Fugle 主來源', description: '預設資料來源' },
+        { id: 'twse', label: 'TWSE 備援', description: 'Fugle 失效時啟用' },
         { id: 'finmind', label: 'FinMind 備援', description: 'TWSE 失效時啟用' },
     ];
 }

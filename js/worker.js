@@ -26,6 +26,7 @@ try {
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-FUGLE-SOURCE-20250625A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -846,15 +847,17 @@ function getPrimaryForceSource(marketKey, adjusted) {
     if (marketKey === "US") return null;
     return "yahoo";
   }
-  if (marketKey === "TPEX" || marketKey === "US") return "finmind";
-  if (marketKey === "TWSE") return "twse";
+  if (marketKey === "US") return "finmind";
+  if (marketKey === "TWSE" || marketKey === "TPEX") return "fugle";
   return null;
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
   if (adjusted) return null;
-  if (marketKey === "TPEX" || marketKey === "US") return null;
-  return "finmind";
+  if (marketKey === "TWSE") return "twse";
+  if (marketKey === "TPEX") return "finmind";
+  if (marketKey === "US") return null;
+  return null;
 }
 
 function getMarketKey(marketType) {

@@ -1,15 +1,17 @@
 // netlify/functions/taiwan-directory.js (v1.0 - Taiwan directory cache)
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-TW-DIRECTORY-INDEX-20250625A
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
 const DIRECTORY_STORE_NAME = 'taiwan_directory_store_v1';
 const DIRECTORY_CACHE_KEY = 'directory-cache.json';
-const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
+const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250625A';
 const DIRECTORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_DATASET = 'TaiwanStockInfo';
+const FUGLE_SYMBOLS_ENDPOINT = 'https://api.fugle.tw/marketdata/v1.0/meta/symbols';
 
 const inMemoryStores = new Map();
 
@@ -99,6 +101,58 @@ function normaliseMarketInfo(row) {
     };
 }
 
+function getFugleApiKey() {
+    const apiKey = process.env.FUGLE_API_KEY;
+    return apiKey ? apiKey.trim() : '';
+}
+
+function normaliseFugleIndexEntry(row) {
+    if (!row || typeof row !== 'object') return null;
+    const symbol = (row.symbol || row.symbolId || row.code || row.id || '').toString().trim().toUpperCase();
+    const name = (row.name || row.symbolName || row.fullName || '').toString().trim();
+    if (!symbol || !name) return null;
+    const marketCategory = (row.market || row.category || row.type || '').toString().trim() || null;
+    return {
+        stockId: symbol,
+        name,
+        market: 'INDEX',
+        board: '指數',
+        industry: null,
+        instrumentType: '指數',
+        rawType: marketCategory,
+        marketCategory,
+        infoSource: 'Fugle 指數清單',
+    };
+}
+
+async function fetchFugleIndexDirectory() {
+    const apiKey = getFugleApiKey();
+    if (!apiKey) {
+        throw new Error('尚未設定 FUGLE_API_KEY');
+    }
+    const url = new URL(FUGLE_SYMBOLS_ENDPOINT);
+    url.searchParams.set('type', 'INDEX');
+    url.searchParams.set('market', 'TWSE');
+    const response = await fetch(url.toString(), {
+        headers: { 'X-API-KEY': apiKey, Accept: 'application/json' },
+        timeout: 15000,
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Fugle 指數清單 HTTP ${response.status} ｜ ${text.slice(0, 120)}`);
+    }
+    const payload = await response.json();
+    const records = Array.isArray(payload?.data) ? payload.data : [];
+    const entries = records
+        .map((row) => normaliseFugleIndexEntry(row))
+        .filter((entry) => entry && entry.stockId && entry.name);
+    return {
+        entries,
+        source: 'Fugle 指數清單',
+        fetchedAt: new Date().toISOString(),
+    };
+}
+
 async function fetchTaiwanDirectoryFromFinMind() {
     const params = new URLSearchParams({ dataset: FINMIND_DATASET });
     if (process.env.FINMIND_TOKEN) {
@@ -182,9 +236,26 @@ export const handler = async (event) => {
     } else {
         try {
             const fresh = await fetchTaiwanDirectoryFromFinMind();
+            const baseEntries = Array.isArray(fresh.entries) ? fresh.entries.slice() : [];
+            const entryMap = new Map(baseEntries.map((entry) => [entry.stockId, entry]));
+            const sourceParts = [fresh.source || 'FinMind TaiwanStockInfo'];
+            try {
+                const fugleDirectory = await fetchFugleIndexDirectory();
+                if (Array.isArray(fugleDirectory.entries) && fugleDirectory.entries.length > 0) {
+                    for (const entry of fugleDirectory.entries) {
+                        if (!entry || !entry.stockId || !entry.name) continue;
+                        entryMap.set(entry.stockId, entry);
+                    }
+                    sourceParts.push(fugleDirectory.source || 'Fugle 指數清單');
+                }
+            } catch (fugleError) {
+                console.warn('[Taiwan Directory] 無法載入 Fugle 指數清單:', fugleError);
+            }
             cached = {
                 timestamp: Date.now(),
                 ...fresh,
+                entries: Array.from(entryMap.values()),
+                source: sourceParts.join(' + '),
             };
             await writeCache(store, DIRECTORY_CACHE_KEY, cached);
             cacheStore = isMemoryStore ? 'memory' : 'blob';
