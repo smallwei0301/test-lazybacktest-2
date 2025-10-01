@@ -1,3 +1,35 @@
+## 2025-11-21 — Patch LB-AI-ANNS-20251121B
+- **Scope**: 將 ANN 模型版本號更新至 20251121B，補齊 Worker 端版本常數並在 TensorFlow.js 未載入時回傳明確錯誤。
+- **Details**:
+  - 前端 `ai-prediction.js` 與 Worker `worker.js` 對齊最新版本代碼，方便日後追蹤部署批次。
+  - 新增 UI Patch Tag，方便辨識 AI 模型卡片的改版節點。
+  - Worker 在未載入 tfjs 時即回傳錯誤，避免 `ReferenceError` 導致 Worker 終止並讓使用者無法得知原因。
+- **Testing**: `node - <<'NODE'
+const fs=require('fs');
+const vm=require('vm');
+['js/backtest.js','js/main.js','js/worker.js','js/ai-prediction.js'].forEach((file)=>{
+  const code=fs.readFileSync(file,'utf8');
+  new vm.Script(code,{filename:file});
+});
+console.log('scripts compile');
+NODE`
+
+## 2025-11-20 — Patch LB-AI-MULTIMODEL-20251120A
+- **Scope**: AI 分頁升級為多模型架構，新增 ANNS 技術指標模型、資料切分控制與種子管理。
+- **Features**:
+  - 重新設計 AI 設定卡，加入 LSTM／ANNS 切換、訓練比例下拉、預測門檻、隨機種子儲存與亂數產生，並更新結果卡顯示混淆矩陣與凱利建議。
+  - LSTM 模型支援自訂訓練／測試比例與預測門檻，執行後會回傳混淆矩陣、凱利推估與交易紀錄摘要。
+  - Worker 端導入 ANN 管線（技術指標特徵、標準化、Dense 模型訓練、凱利估算），以 `AI_ANN_*` 訊息回傳進度與完整績效指標。
+- **Testing**: `node - <<'NODE'
+const fs=require('fs');
+const vm=require('vm');
+['js/backtest.js','js/main.js','js/worker.js','js/ai-prediction.js'].forEach((file)=>{
+  const code=fs.readFileSync(file,'utf8');
+  new vm.Script(code,{filename:file});
+});
+console.log('scripts compile');
+NODE`
+
 ## 2025-09-15 — Patch LB-AI-LSTM-20250915A
 - **Scope**: 新增「AI 預測」分頁與 LSTM 深度學習模組，整合凱利公式資金管理與快取資料串接。
 - **Features**:

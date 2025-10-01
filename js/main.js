@@ -16,6 +16,21 @@ let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
+
+if (typeof window !== 'undefined') {
+    const existingDescriptor = Object.getOwnPropertyDescriptor(window, 'cachedStockData');
+    if (!existingDescriptor || existingDescriptor.configurable) {
+        Object.defineProperty(window, 'cachedStockData', {
+            configurable: true,
+            get() {
+                return cachedStockData;
+            },
+            set(value) {
+                cachedStockData = Array.isArray(value) ? value : null;
+            },
+        });
+    }
+}
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
