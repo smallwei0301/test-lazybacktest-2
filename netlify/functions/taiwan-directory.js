@@ -11,7 +11,59 @@ const DIRECTORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_DATASET = 'TaiwanStockInfo';
 
+const TAIWAN_INDEX_DEFINITIONS = [
+    {
+        codes: ['TAIEX', 'TSE01'],
+        name: '台灣加權指數',
+        market: 'TWSE',
+        board: '指數',
+        instrumentType: '指數',
+        marketCategory: '加權股價指數',
+    },
+    {
+        codes: ['OTC', 'TPEX', 'TPEXINDEX', 'TPEXID'],
+        name: '櫃買指數',
+        market: 'TPEX',
+        board: '指數',
+        instrumentType: '指數',
+        marketCategory: '櫃買指數',
+    },
+];
+
 const inMemoryStores = new Map();
+
+function appendTaiwanIndexEntries(entries) {
+    const map = new Map();
+    if (Array.isArray(entries)) {
+        entries.forEach((entry) => {
+            if (!entry) return;
+            const stockId = (entry.stockId || entry.stock_id || '').toString().trim().toUpperCase();
+            if (!stockId) return;
+            map.set(stockId, { ...entry, stockId });
+        });
+    }
+    TAIWAN_INDEX_DEFINITIONS.forEach((definition) => {
+        const codes = Array.isArray(definition.codes) ? definition.codes : [definition.code || definition.stockId];
+        codes
+            .filter(Boolean)
+            .map((code) => code.toString().trim().toUpperCase())
+            .forEach((code) => {
+                if (!code || map.has(code)) return;
+                map.set(code, {
+                    stockId: code,
+                    name: definition.name,
+                    market: definition.market,
+                    board: definition.board || '指數',
+                    industry: null,
+                    instrumentType: definition.instrumentType || '指數',
+                    isETF: false,
+                    marketCategory: definition.marketCategory || '指數',
+                    rawType: 'INDEX',
+                });
+            });
+    });
+    return Array.from(map.values());
+}
 
 function createMemoryStore() {
     const memory = new Map();
@@ -118,9 +170,10 @@ async function fetchTaiwanDirectoryFromFinMind() {
     if (!Array.isArray(payload.data)) {
         throw new Error('FinMind TaiwainStockInfo 缺少資料陣列');
     }
-    const entries = payload.data
+    const baseEntries = payload.data
         .map((row) => normaliseMarketInfo(row))
-        .filter((entry) => entry.stockId && entry.name);
+        .filter((entry) => entry && entry.stockId && entry.name);
+    const entries = appendTaiwanIndexEntries(baseEntries);
     return {
         entries,
         source: 'FinMind TaiwanStockInfo',
@@ -134,7 +187,7 @@ function filterEntriesById(entries, stockId) {
 }
 
 function buildResponseBody(basePayload, options = {}) {
-    const entries = Array.isArray(basePayload.entries) ? basePayload.entries : [];
+    const entries = Array.isArray(basePayload.entries) ? appendTaiwanIndexEntries(basePayload.entries) : [];
     const filteredEntries = filterEntriesById(entries, options.stockId);
     const data = Object.fromEntries(filteredEntries.map((entry) => [entry.stockId, entry]));
 

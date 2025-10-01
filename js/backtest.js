@@ -8802,7 +8802,7 @@ function setDefaultFees(stockNo) {
 
     const stockCode = typeof stockNo === 'string' ? stockNo.trim().toUpperCase() : '';
     const isETF = stockCode.startsWith('00');
-    const isTAIEX = stockCode === 'TAIEX';
+    const isTaiwanIndexCode = isTaiwanIndex(stockCode);
     const isUSMarket = currentMarket === 'US';
 
     if (isUSMarket) {
@@ -8819,7 +8819,7 @@ function setDefaultFees(stockNo) {
     const etfSellFeeRate = 0.1;
     const etfTaxRate = 0.1;
 
-    if (isTAIEX) {
+    if (isTaiwanIndexCode) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
         console.log(`[Fees] 指數預設費率 for ${stockCode}`);
@@ -9041,6 +9041,46 @@ const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單
 const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
+const TAIWAN_INDEX_DEFINITIONS = [
+    {
+        codes: ['TAIEX', 'TSE01'],
+        name: '台灣加權指數',
+        market: 'TWSE',
+        board: '指數',
+        instrumentType: '指數',
+        marketCategory: '加權股價指數',
+    },
+    {
+        codes: ['OTC', 'TPEX', 'TPEx', 'TPEXINDEX', 'TPEXID'],
+        name: '櫃買指數',
+        market: 'TPEX',
+        board: '指數',
+        instrumentType: '指數',
+        marketCategory: '櫃買指數',
+    },
+];
+
+const TAIWAN_INDEX_REGISTRY = (() => {
+    const map = new Map();
+    TAIWAN_INDEX_DEFINITIONS.forEach((definition) => {
+        const codes = Array.isArray(definition.codes) ? definition.codes : [definition.code || definition.stockId];
+        codes
+            .filter(Boolean)
+            .map((code) => code.toString().trim().toUpperCase())
+            .forEach((code) => {
+                if (!code || map.has(code)) return;
+                map.set(code, {
+                    code,
+                    name: definition.name,
+                    market: definition.market,
+                    board: definition.board || '指數',
+                    instrumentType: definition.instrumentType || '指數',
+                    marketCategory: definition.marketCategory || '指數',
+                });
+            });
+    });
+    return map;
+})();
 const persistentTaiwanNameCache = loadPersistentTaiwanNameCache();
 const persistentUSNameCache = loadPersistentUSNameCache();
 const taiwanDirectoryState = {
@@ -9060,6 +9100,33 @@ hydrateUSNameCache();
 preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
     console.warn('[Taiwan Directory] 本地清單預載失敗:', error);
 });
+
+function getTaiwanIndexMeta(symbol) {
+    const normalized = (symbol || '').toString().trim().toUpperCase();
+    if (!normalized) return null;
+    return TAIWAN_INDEX_REGISTRY.get(normalized) || null;
+}
+
+function isTaiwanIndex(symbol) {
+    return Boolean(getTaiwanIndexMeta(symbol));
+}
+
+function ensureIndexEntriesInMap(map) {
+    if (!(map instanceof Map)) return;
+    TAIWAN_INDEX_REGISTRY.forEach((meta, code) => {
+        if (map.has(code)) return;
+        map.set(code, {
+            stockId: code,
+            name: meta.name,
+            market: meta.market,
+            board: meta.board,
+            instrumentType: meta.instrumentType,
+            marketCategory: meta.marketCategory,
+        });
+    });
+}
+
+ensureIndexEntriesInMap(taiwanDirectoryState.entries);
 
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-NAME-CACHE-20250614A
@@ -9460,6 +9527,8 @@ function applyTaiwanDirectoryPayload(payload, options = {}) {
         }
     }
 
+    ensureIndexEntriesInMap(map);
+
     if (map.size === 0) return false;
 
     taiwanDirectoryState.entries = map;
@@ -9616,6 +9685,24 @@ function resolveCachedStockNameInfo(stockCode, preferredMarket) {
             },
         };
     }
+    const indexMeta = getTaiwanIndexMeta(normalized);
+    if (indexMeta) {
+        return {
+            market: indexMeta.market || preferredMarket || null,
+            info: {
+                name: indexMeta.name,
+                board: indexMeta.board,
+                instrumentType: indexMeta.instrumentType,
+                marketCategory: indexMeta.marketCategory,
+                market: indexMeta.market || preferredMarket || null,
+                sourceLabel: 'Lazybacktest 指數清單',
+                matchStrategy: 'taiwan-index-registry',
+                directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: normalized,
+                infoSource: 'Taiwan Index Registry',
+            },
+        };
+    }
     return null;
 }
 
@@ -9677,6 +9764,7 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const startsWithFourDigits = leadingDigits >= MIN_STOCK_LOOKUP_LENGTH;
     const restrictToTaiwan = shouldRestrictToTaiwanMarkets(normalizedCode);
     const preferred = normalizeMarketValue(preferredMarket || '');
+    const indexMeta = getTaiwanIndexMeta(normalizedCode);
     const baseOrder = [];
     if (restrictToTaiwan || startsWithFourDigits) {
         baseOrder.push('TWSE', 'TPEX');
@@ -9694,6 +9782,9 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
         seen.add(normalized);
         order.push(normalized);
     };
+    if (indexMeta?.market) {
+        push(indexMeta.market);
+    }
     push(preferred);
     baseOrder.forEach(push);
     return order;
@@ -9826,8 +9917,10 @@ function initializeMarketSwitch() {
         }
         manualOverrideCodeSnapshot = stockCode;
         hideStockName();
-        if (stockCode === 'TAIEX') {
-            showStockName('台灣加權指數', 'success');
+        const indexMeta = getTaiwanIndexMeta(stockCode);
+        if (indexMeta) {
+            const display = formatStockNameDisplay(indexMeta) || null;
+            showStockName(display?.text || indexMeta.name, 'success');
             return;
         }
         if (stockCode) {
