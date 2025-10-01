@@ -12,6 +12,11 @@
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
+    const AI_REPRO_VERSION = 'LB-AI-DETERMINISM-20250930A';
+    const META_STORAGE_KEYS = {
+        [MODEL_TYPES.LSTM]: 'LB_AI_LSTM_META',
+        [MODEL_TYPES.ANNS]: 'LB_AI_ANN_META',
+    };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const createModelState = () => ({
         lastSummary: null,
@@ -19,6 +24,7 @@
         predictionsPayload: null,
         trainingMetrics: null,
         currentTrades: [],
+        runMeta: null,
         lastSeedDefault: '',
         winThreshold: 0.5,
         kellyEnabled: false,
@@ -116,6 +122,25 @@
         } catch (error) {
             console.warn('[AI Prediction] 無法讀取本地種子：', error);
             return [];
+        }
+    };
+
+    const persistRunMeta = (modelType, runMeta) => {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        const storageKey = META_STORAGE_KEYS[modelType];
+        if (!storageKey) return;
+        try {
+            if (runMeta) {
+                const payload = {
+                    ...runMeta,
+                    version: runMeta.version || AI_REPRO_VERSION,
+                };
+                window.localStorage.setItem(storageKey, JSON.stringify(payload));
+            } else {
+                window.localStorage.removeItem(storageKey);
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 無法保存模型重現資訊：', error);
         }
     };
 
@@ -820,9 +845,9 @@
             return;
         }
 
-        const effectiveBatchSize = Math.min(hyperparameters.batchSize, boundedTrainSize);
-        if (hyperparameters.batchSize > boundedTrainSize) {
-            showStatus(`[${label}] 批次大小 ${hyperparameters.batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
+        const effectiveBatchSize = boundedTrainSize;
+        if (hyperparameters.batchSize !== boundedTrainSize) {
+            console.info(`[AI Prediction] ${label} 批次大小已鎖定為 ${boundedTrainSize} 以確保重現性（原輸入 ${hyperparameters.batchSize}）。`);
         }
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
@@ -852,10 +877,20 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
+        if (workerResult?.runMeta) {
+            modelState.runMeta = { ...workerResult.runMeta };
+            persistRunMeta(resultModelType, modelState.runMeta);
+        } else {
+            modelState.runMeta = null;
+            persistRunMeta(resultModelType, null);
+        }
+
+        const resolvedBatchSize = workerResult?.runMeta?.batchSize ?? effectiveBatchSize;
+
         predictionsPayload.hyperparameters = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
+            batchSize: resolvedBatchSize,
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
             modelType: resultModelType,
@@ -864,7 +899,7 @@
         modelState.hyperparameters = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
+            batchSize: resolvedBatchSize,
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
         };
@@ -909,10 +944,23 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
+        if (workerResult?.runMeta) {
+            modelState.runMeta = { ...workerResult.runMeta };
+            persistRunMeta(modelType, modelState.runMeta);
+        } else {
+            modelState.runMeta = null;
+            persistRunMeta(modelType, null);
+        }
+
+        const resolvedBatchSize = workerResult?.runMeta?.batchSize ?? hyperparameters.batchSize;
+        if (Number.isFinite(hyperparameters.batchSize) && hyperparameters.batchSize !== resolvedBatchSize) {
+            console.info(`[AI Prediction] ${label} 批次大小已鎖定為 ${resolvedBatchSize} 以確保重現性（原輸入 ${hyperparameters.batchSize}）。`);
+        }
+
         predictionsPayload.hyperparameters = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
+            batchSize: resolvedBatchSize,
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
             modelType,
@@ -921,7 +969,7 @@
         modelState.hyperparameters = {
             lookback: hyperparameters.lookback,
             epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
+            batchSize: resolvedBatchSize,
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
         };
