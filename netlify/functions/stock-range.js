@@ -1,5 +1,6 @@
 // netlify/functions/stock-range.js (v3.0 - yearly blob cache)
 // Patch Tag: LB-CACHE-TIER-20250720A
+// Patch Tag: LB-DATAPIPE-FUGLE-20250930A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -7,6 +8,9 @@ const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const YEAR_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const YEAR_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+const FUGLE_CANDLES_ENDPOINT = 'https://api.fugle.tw/marketdata/v1.0/stock/candles';
+const FUGLE_SOURCE_LABEL = 'Fugle (主來源)';
 
 const inFlightTwseMonthCache = new Map();
 
@@ -69,6 +73,130 @@ function safeParseInt(value) {
     return Number.isFinite(num) ? num : null;
 }
 
+function getFugleToken() {
+    const token = process.env.FUGLE_API_TOKEN;
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
+function hasFugleToken() {
+    return Boolean(getFugleToken());
+}
+
+function normaliseFugleDate(payload) {
+    if (!payload) return null;
+    if (typeof payload.date === 'string') {
+        const date = payload.date.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+    }
+    if (typeof payload.time === 'string') {
+        const time = payload.time.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(time)) return time.slice(0, 10);
+    }
+    if (typeof payload.date === 'number') {
+        const candidate = String(payload.date);
+        if (/^\d{8}$/.test(candidate)) {
+            const year = candidate.slice(0, 4);
+            const month = candidate.slice(4, 6);
+            const day = candidate.slice(6);
+            return `${year}-${month}-${day}`;
+        }
+    }
+    return null;
+}
+
+function normaliseFugleNumber(value) {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+async function fetchFugleDaily(stockNo, startISO, endISO) {
+    const token = getFugleToken();
+    if (!token) {
+        throw new Error('未設定 FUGLE_API_TOKEN');
+    }
+
+    const url = new URL(FUGLE_CANDLES_ENDPOINT);
+    url.searchParams.set('symbol', stockNo);
+    if (startISO) url.searchParams.set('from', startISO);
+    if (endISO) url.searchParams.set('to', endISO);
+    url.searchParams.set('resolution', 'D');
+
+    console.log(`[Stock Range] 嘗試 Fugle: ${url.toString()}`);
+    const response = await fetch(url.toString(), {
+        headers: {
+            Accept: 'application/json',
+            'X-API-KEY': token,
+        },
+    });
+    const rawText = await response.text();
+    if (!response.ok) {
+        const reason = rawText ? rawText.slice(0, 200) : `HTTP ${response.status}`;
+        throw new Error(`Fugle HTTP ${response.status} ｜ ${reason}`);
+    }
+
+    let payload = null;
+    try {
+        payload = rawText ? JSON.parse(rawText) : null;
+    } catch (error) {
+        throw new Error(`Fugle 回應非 JSON ｜ ${error.message}`);
+    }
+
+    const candles = Array.isArray(payload?.data?.candles) ? payload.data.candles : [];
+    if (candles.length === 0) {
+        throw new Error('Fugle 回應缺少日線資料');
+    }
+
+    const stockName = (payload?.data?.info?.name || payload?.data?.symbol || stockNo).toString();
+    const rows = [];
+    let prevClose = null;
+    candles.forEach((item) => {
+        const isoDate = normaliseFugleDate(item);
+        if (!isoDate) return;
+        const rocYear = new Date(isoDate).getFullYear() - 1911;
+        if (!Number.isFinite(rocYear)) return;
+        const rocDate = `${rocYear}/${String(new Date(isoDate).getMonth() + 1).padStart(2, '0')}/${String(new Date(isoDate).getDate()).padStart(2, '0')}`;
+
+        const openValue = normaliseFugleNumber(item.open ?? item.Open);
+        const highValue = normaliseFugleNumber(item.high ?? item.High);
+        const lowValue = normaliseFugleNumber(item.low ?? item.Low);
+        const closeValue = normaliseFugleNumber(item.close ?? item.Close);
+        const finalClose = closeValue ?? openValue ?? highValue ?? lowValue;
+        if (finalClose === null) return;
+        const finalOpen = openValue ?? finalClose;
+        const finalHigh = highValue ?? Math.max(finalOpen, finalClose);
+        const finalLow = lowValue ?? Math.min(finalOpen, finalClose);
+        const changeRaw = normaliseFugleNumber(item.change ?? item.Change ?? item.priceChange);
+        const changeValue = Number.isFinite(changeRaw)
+            ? changeRaw
+            : prevClose !== null
+                ? finalClose - prevClose
+                : 0;
+        const volumeValue = normaliseFugleNumber(item.volume ?? item.Volume ?? item.tradeVolume) || 0;
+
+        prevClose = finalClose;
+        rows.push([
+            rocDate,
+            stockNo,
+            stockName,
+            safeParseFloat(finalOpen),
+            safeParseFloat(finalHigh),
+            safeParseFloat(finalLow),
+            safeParseFloat(finalClose),
+            safeParseFloat(changeValue),
+            Math.round(volumeValue),
+        ]);
+    });
+
+    if (rows.length === 0) {
+        throw new Error('Fugle 無回傳有效日線資料');
+    }
+
+    return { stockName, aaData: rows };
+}
+
 async function fetchTwseMonth({ store, stockNo, monthKey }) {
     const cacheKey = `${stockNo}_${monthKey}`;
     if (inFlightTwseMonthCache.has(cacheKey)) {
@@ -90,6 +218,32 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
         } catch (error) {
             if (!isQuotaError(error)) {
                 console.warn(`[TWSE Range] Cache read miss for ${cacheKey}:`, error);
+            }
+        }
+
+        if (hasFugleToken()) {
+            try {
+                const year = Number(monthKey.slice(0, 4));
+                const month = Number(monthKey.slice(4, 6)) - 1;
+                const startISO = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+                const endISO = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+                const fugleData = await fetchFugleDaily(stockNo, startISO, endISO);
+                const payload = {
+                    stockName: fugleData.stockName || stockNo,
+                    iTotalRecords: fugleData.aaData.length,
+                    aaData: fugleData.aaData,
+                    dataSource: FUGLE_SOURCE_LABEL,
+                };
+                try {
+                    await store.setJSON(cacheKey, { timestamp: Date.now(), data: payload });
+                } catch (persistError) {
+                    if (!isQuotaError(persistError)) {
+                        console.warn('[TWSE Range] 無法寫入 Fugle 月快取:', persistError);
+                    }
+                }
+                return payload;
+            } catch (error) {
+                console.warn(`[TWSE Range] Fugle 月資料失敗 (${monthKey}):`, error.message);
             }
         }
 
@@ -146,18 +300,22 @@ async function composeTwseRange(stockNo, startDate, endDate) {
     const store = getStore('twse_cache_store');
     const months = buildMonthKeyList(startDate, endDate);
     const merged = [];
+    const sourceFlags = new Set();
     let stockName = stockNo;
 
     for (const monthKey of months) {
         const monthData = await fetchTwseMonth({ store, stockNo, monthKey });
         if (monthData.stockName) stockName = monthData.stockName;
+        if (monthData.dataSource) sourceFlags.add(monthData.dataSource);
         if (Array.isArray(monthData.aaData)) merged.push(...monthData.aaData);
     }
+
+    const sourceLabel = sourceFlags.size > 0 ? Array.from(sourceFlags).join(' + ') : 'TWSE (range)';
 
     return {
         stockName,
         aaData: merged,
-        dataSource: 'TWSE (range)',
+        dataSource: sourceLabel,
         monthCount: months.length,
     };
 }
@@ -252,6 +410,29 @@ async function composeTpexRange(stockNo) {
     } catch (error) {
         if (!isQuotaError(error)) {
             console.warn(`[TPEX Range] Cache read miss for ${symbol}:`, error);
+        }
+    }
+
+    if (hasFugleToken()) {
+        try {
+            const now = new Date();
+            const start = new Date(now);
+            start.setFullYear(start.getFullYear() - 20);
+            const startISO = start.toISOString().slice(0, 10);
+            const endISO = now.toISOString().slice(0, 10);
+            const fugleData = await fetchFugleDaily(stockNo, startISO, endISO);
+            const payload = {
+                stockName: fugleData.stockName || stockNo,
+                iTotalRecords: fugleData.aaData.length,
+                aaData: fugleData.aaData,
+                dataSource: FUGLE_SOURCE_LABEL,
+            };
+            try { await store.setJSON(symbol, { timestamp: Date.now(), data: payload }); } catch (error) {
+                if (!isQuotaError(error)) console.warn('[TPEX Range] 無法寫入 Fugle 快取:', error);
+            }
+            return payload;
+        } catch (error) {
+            console.warn('[TPEX Range] Fugle fetch failed, fallback to Yahoo/FinMind:', error.message);
         }
     }
 

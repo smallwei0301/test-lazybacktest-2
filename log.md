@@ -1,3 +1,11 @@
+## 2025-09-30 — Patch LB-DATAPIPE-FUGLE-20250930A / LB-INDEX-SEARCH-20250930A
+- **Scope**: 台股行情來源升級、指數代碼支援。
+- **Features**:
+  - 將上市/上櫃主來源改為 Fugle API，背景代理、年區間快取與 Worker 皆先嘗試 Fugle，再視情況回退 TWSE 或 FinMind。
+  - 資料來源測試、診斷訊息、提示文案同步改為展示 Fugle 主來源與新的備援順序。
+  - 台股清單新增 FinMind 指數資訊，前端查詢可取得台股主要指數名稱並標註 `INDEX` 類型，表單標籤更新為「股票或指數」。
+- **Testing**: 待 Netlify 實機確認 Fugle/FinMind Token 設定後再行驗證。
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
