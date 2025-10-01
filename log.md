@@ -1,3 +1,11 @@
+## 2025-07-03 — Patch LB-AI-REPLAY-20250703A
+- **Scope**: AI 種子重播與模型重現性治理。
+- **Highlights**:
+  - Worker 鎖定 TFJS 4.20.0 WASM 後端與固定亂數種子，ANN/LSTM 訓練改為不洗牌的固定初始化並儲存模型至 IndexedDB，回傳標準化參數、切分邊界與混淆矩陣。
+  - 新增 `ai-replay-model` 通訊，讀回種子時以原始 mean/std、trainSize 與 threshold 重算測試集與隔日預測，確保新增資料不改變既有預測。
+  - 前端自動於載入種子後觸發重播，更新 UI、交易統計與本地種子存檔，並保留混淆矩陣/threshold 資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/ai-prediction.js'].forEach((f)=>{const code=fs.readFileSync(f,'utf8');new vm.Script(code,{filename:f});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
