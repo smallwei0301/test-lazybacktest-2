@@ -1,3 +1,11 @@
+## 2025-07-03 — Patch LB-FUGLE-INDEX-20250703A
+- **Scope**: 台股 Fugle 主來源導入與指數查詢支援。
+- **Features**:
+  - TWSE/TPEX 代理改以 Fugle 為主來源，失敗時依序回落 TWSE/FinMind/Yahoo，並在快取摘要與測試卡片揭露來源標籤。
+  - 新增 `index-proxy` 函式，FinMind 為主來源、Fugle 為備援，支援 `forceSource` 測試、欄位正規化與 Token 等級錯誤訊息。
+  - 台股清單整併 Fugle 指數代號，前端市場下拉新增「指數」並更新資料測試器文案、來源按鈕與名稱查詢流程。
+- **Testing**: `node --check js/backtest.js && node --check js/main.js && node --check netlify/functions/twse-proxy.js && node --check netlify/functions/tpex-proxy.js && node --check netlify/functions/index-proxy.js && node --check netlify/functions/taiwan-directory.js`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

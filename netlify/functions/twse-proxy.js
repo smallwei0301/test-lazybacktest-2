@@ -1,8 +1,9 @@
-// netlify/functions/twse-proxy.js (v10.6 - TWSE primary with FinMind adaptive retries + request logs)
+// netlify/functions/twse-proxy.js (v11.0 - Fugle primary with TWSE/FinMind fallbacks + adaptive retries)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TWSE-PROXY-20250320A
+// Patch Tag: LB-FUGLE-PRIMARY-20250702A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -11,6 +12,10 @@ const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
+const FUGLE_CANDLES_URL = 'https://api.fugle.tw/marketdata/v1.0/stock/candles';
+const FUGLE_TIMEOUT_MS = 15000;
+const FUGLE_PRIMARY_LABEL = 'Fugle (主來源)';
+const FUGLE_FORCED_LABEL = 'Fugle (強制)';
 
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
@@ -34,7 +39,7 @@ function obtainStore(name) {
     } catch (error) {
         if (error?.name === 'MissingBlobsEnvironmentError') {
             if (!inMemoryBlobStores.has(name)) {
-                console.warn('[TWSE Proxy v10.4] Netlify Blobs 未配置，使用記憶體快取模擬。');
+                console.warn('[TWSE Proxy v11.0] Netlify Blobs 未配置，使用記憶體快取模擬。');
                 inMemoryBlobStores.set(name, createMemoryBlobStore());
             }
             return inMemoryBlobStores.get(name);
@@ -157,9 +162,9 @@ async function readCache(store, cacheKey) {
         }
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TWSE Proxy v10.2] Blobs 流量受限，改用記憶體快取。');
+            console.warn('[TWSE Proxy v11.0] Blobs 流量受限，改用記憶體快取。');
         } else {
-            console.error('[TWSE Proxy v10.2] 讀取 Blobs 時發生錯誤:', error);
+            console.error('[TWSE Proxy v11.0] 讀取 Blobs 時發生錯誤:', error);
         }
     }
     return null;
@@ -172,10 +177,220 @@ async function writeCache(store, cacheKey, payload) {
         await store.setJSON(cacheKey, record);
     } catch (error) {
         if (isQuotaError(error)) {
-            console.warn('[TWSE Proxy v10.2] Blobs 流量受限，僅寫入記憶體快取。');
+            console.warn('[TWSE Proxy v11.0] Blobs 流量受限，僅寫入記憶體快取。');
         } else {
-            console.error('[TWSE Proxy v10.2] 寫入 Blobs 失敗:', error);
+            console.error('[TWSE Proxy v11.0] 寫入 Blobs 失敗:', error);
         }
+    }
+}
+
+function resolveFugleLabel(options = {}) {
+    if (options.force) return FUGLE_FORCED_LABEL;
+    if (typeof options.label === 'string' && options.label.trim()) {
+        return options.label.trim();
+    }
+    return FUGLE_PRIMARY_LABEL;
+}
+
+function extractFugleDate(value) {
+    if (!value) return null;
+    if (typeof value === 'string') return value.slice(0, 10);
+    if (typeof value === 'number') {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    }
+    return null;
+}
+
+async function requestFugleCandles(stockNo, startISO, endISO, options = {}) {
+    const token = process.env.FUGLE_API_TOKEN;
+    if (!token) {
+        const error = new Error('未設定 Fugle API Token');
+        error.code = 'FUGLE_TOKEN_MISSING';
+        throw error;
+    }
+    if (!stockNo) {
+        throw new Error('缺少股票代號');
+    }
+
+    const url = new URL(FUGLE_CANDLES_URL);
+    url.searchParams.set('symbol', stockNo);
+    if (startISO) url.searchParams.set('from', startISO);
+    if (endISO) url.searchParams.set('to', endISO);
+    url.searchParams.set('resolution', 'D');
+    if (options.market) {
+        url.searchParams.set('market', options.market);
+    }
+    url.searchParams.set('apiToken', token);
+
+    console.log('[TWSE Proxy v11.0] 呼叫 Fugle:', {
+        symbol: stockNo,
+        from: startISO,
+        to: endISO,
+        market: options.market || 'default',
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FUGLE_TIMEOUT_MS);
+    let rawText = '';
+    try {
+        const response = await fetch(url.toString(), { signal: controller.signal });
+        rawText = await response.text();
+        let payload = null;
+        try {
+            payload = rawText ? JSON.parse(rawText) : null;
+        } catch (parseError) {
+            console.warn('[TWSE Proxy v11.0] Fugle 回傳非 JSON 內容，保留原始訊息供診斷。', parseError);
+        }
+
+        if (!response.ok) {
+            const message =
+                payload?.error?.message ||
+                payload?.message ||
+                payload?.msg ||
+                `Fugle HTTP ${response.status}`;
+            throw new Error(message);
+        }
+
+        if (!payload || !payload.data) {
+            throw new Error('Fugle 回應缺少資料');
+        }
+
+        const candles = Array.isArray(payload.data.candles) ? payload.data.candles : [];
+        const info = payload.data.info || {};
+        return { candles, info };
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('Fugle 請求逾時');
+        }
+        if (rawText) {
+            error.message = `${error.message || 'Fugle 來源錯誤'} ｜ ${rawText.slice(0, 120)}`;
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function persistFugleEntries(store, stockNo, startDate, endDate, options = {}) {
+    const startISO = formatISODateFromDate(startDate);
+    const endISO = formatISODateFromDate(endDate);
+    const label = resolveFugleLabel(options);
+
+    const { candles, info } = await requestFugleCandles(stockNo, startISO, endISO, options);
+    const monthlyBuckets = new Map();
+    const sortedCandles = candles
+        .map((item) => ({
+            ...item,
+            date: extractFugleDate(item.date || item.Date || item.time || item.timestamp),
+        }))
+        .filter((item) => item.date && (!startISO || item.date >= startISO) && (!endISO || item.date <= endISO))
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+    let resolvedName = (info.name || info.symbolName || info.symbol || '').toString().trim();
+    let prevClose = null;
+    let totalRows = 0;
+
+    for (const candle of sortedCandles) {
+        const isoDate = candle.date;
+        const rocDate = isoToRoc(isoDate);
+        if (!rocDate) continue;
+
+        const openVal = Number(candle.open ?? candle.Open ?? candle.openPrice);
+        const highVal = Number(candle.high ?? candle.High ?? candle.highPrice);
+        const lowVal = Number(candle.low ?? candle.Low ?? candle.lowPrice);
+        const closeVal = Number(candle.close ?? candle.Close ?? candle.closePrice);
+        const volumeVal = Number(
+            candle.volume ??
+                candle.Volume ??
+                candle.Trading_Volume ??
+                candle.trading_volume ??
+                candle.volumeTrade ??
+                candle.turnoverVolume ??
+                0,
+        );
+        const changeVal = Number(candle.change ?? candle.Change ?? candle.changePrice ?? candle.price_change ?? NaN);
+
+        const finalClose = Number.isFinite(closeVal) ? safeRound(closeVal) : null;
+        const finalOpen = Number.isFinite(openVal) ? safeRound(openVal) : finalClose;
+        const finalHigh = Number.isFinite(highVal)
+            ? safeRound(highVal)
+            : Math.max(finalOpen ?? 0, finalClose ?? finalOpen ?? 0);
+        const finalLow = Number.isFinite(lowVal)
+            ? safeRound(lowVal)
+            : Math.min(finalOpen ?? 0, finalClose ?? finalOpen ?? 0);
+
+        let resolvedChange = Number.isFinite(changeVal) ? safeRound(changeVal) : null;
+        if (!Number.isFinite(resolvedChange) && prevClose !== null && finalClose !== null) {
+            resolvedChange = safeRound(finalClose - prevClose);
+        }
+        if (finalClose !== null) {
+            prevClose = finalClose;
+        }
+
+        const volume = Number.isFinite(volumeVal) ? Math.round(volumeVal) : 0;
+        const monthKey = isoDate.slice(0, 7).replace('-', '');
+        if (!monthlyBuckets.has(monthKey)) {
+            monthlyBuckets.set(monthKey, []);
+        }
+        monthlyBuckets.get(monthKey).push([
+            rocDate,
+            stockNo,
+            resolvedName || stockNo,
+            finalOpen,
+            finalHigh,
+            finalLow,
+            finalClose,
+            resolvedChange ?? 0,
+            volume,
+        ]);
+        totalRows += 1;
+    }
+
+    const stockName = resolvedName || stockNo;
+    if (monthlyBuckets.size === 0) {
+        const baseISO = startISO || endISO || formatISODateFromDate(new Date());
+        const monthKey = baseISO ? baseISO.slice(0, 7).replace('-', '') : `${new Date().getFullYear()}${pad2(new Date().getMonth() + 1)}`;
+        await writeCache(store, buildMonthCacheKey(stockNo, monthKey, false), {
+            stockName,
+            aaData: [],
+            dataSource: label,
+        });
+    } else {
+        for (const [monthKey, rows] of monthlyBuckets.entries()) {
+            rows.sort((a, b) => new Date(rocToISO(a[0])) - new Date(rocToISO(b[0])));
+            await writeCache(store, buildMonthCacheKey(stockNo, monthKey, false), {
+                stockName,
+                aaData: rows,
+                dataSource: label,
+            });
+        }
+    }
+
+    return { label, stockName, rowCount: totalRows };
+}
+
+function inferCacheSourceBase(payload, fallbackLabel) {
+    const dataSource = (payload?.dataSource || '').toString();
+    if (/Fugle/i.test(dataSource)) return 'Fugle';
+    if (/Yahoo/i.test(dataSource)) return 'Yahoo Finance';
+    if (/FinMind/i.test(dataSource)) return 'FinMind';
+    if (/TWSE/i.test(dataSource)) return 'TWSE';
+    if (/TPEX/i.test(dataSource)) return 'TPEX';
+    if (/Proxy/i.test(dataSource)) return 'Proxy';
+    if (fallbackLabel && /Fugle/i.test(fallbackLabel)) return 'Fugle';
+    if (fallbackLabel && /TWSE/i.test(fallbackLabel)) return 'TWSE';
+    return fallbackLabel || '';
+}
+
+function appendCacheSourceLabels(sourceFlags, payload, fallbackLabel) {
+    if (!payload || !payload.source) return;
+    const base = inferCacheSourceBase(payload, fallbackLabel);
+    if (!base) return;
+    if (payload.source === 'blob') {
+        sourceFlags.add(`${base} (快取)`);
+    } else if (payload.source === 'memory') {
+        sourceFlags.add(`${base} (記憶體快取)`);
     }
 }
 
@@ -212,7 +427,7 @@ function parseTWSEPayload(raw, stockNo) {
 
 async function fetchTwseMonth(stockNo, monthKey) {
     const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${monthKey}01&stockNo=${stockNo}`;
-    console.log(`[TWSE Proxy v10.2] 下載 ${stockNo} 的 ${monthKey} 月資料`);
+    console.log(`[TWSE Proxy v11.0] 下載 ${stockNo} 的 ${monthKey} 月資料`);
     const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!response.ok) {
         throw new Error(`TWSE HTTP ${response.status}`);
@@ -250,14 +465,14 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
             if (endISO) url.searchParams.set('end_date', endISO);
         }
 
-        console.log(`[TWSE Proxy v10.5] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo}`);
+        console.log(`[TWSE Proxy v11.0] 呼叫 FinMind${omitRange ? ' (不帶日期)' : ''}: ${dataset} ${stockNo}`);
         const response = await fetch(url.toString());
         const rawText = await response.text();
         let payload = null;
         try {
             payload = rawText ? JSON.parse(rawText) : null;
         } catch (parseError) {
-            console.warn('[TWSE Proxy v10.5] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
+            console.warn('[TWSE Proxy v11.0] FinMind 回傳非 JSON 內容，保留原始訊息以供除錯。', parseError);
         }
 
         const responseStatus = response.status;
@@ -271,7 +486,7 @@ async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDa
 
         const combinedMessage = payloadMessage || `FinMind HTTP ${responseStatus}`;
         if (!omitRange && (responseStatus === 400 || payloadStatus === 400)) {
-            console.warn(`[TWSE Proxy v10.5] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`);
+            console.warn(`[TWSE Proxy v11.0] FinMind 回應 400，嘗試移除日期參數後重試。原因: ${combinedMessage}`);
             return requestFinMind(true);
         }
 
@@ -363,7 +578,7 @@ function buildYahooPeriodRange(startDate, endDate) {
 
 async function fetchYahooDaily(stockNo, startDate, endDate) {
     const symbol = `${stockNo}.TW`;
-    console.log(`[TWSE Proxy v10.2] 嘗試 Yahoo Finance: ${symbol}`);
+    console.log(`[TWSE Proxy v11.0] 嘗試 Yahoo Finance: ${symbol}`);
     const { period1, period2 } = buildYahooPeriodRange(startDate, endDate);
     const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
     url.searchParams.set('interval', '1d');
@@ -589,7 +804,7 @@ function summariseSources(flags) {
         const isProxy = item.type === 'Proxy 快取';
         return !isLocal && (!item.type || isProxy) && !isBlob;
     });
-    const fallbackDescriptor = parseSourceLabelDescriptor('TWSE (主來源)');
+    const fallbackDescriptor = parseSourceLabelDescriptor(FUGLE_PRIMARY_LABEL);
     const combined = parsed.slice();
     if (!hasRemote && fallbackDescriptor) {
         combined.push(fallbackDescriptor);
@@ -605,8 +820,8 @@ function validateForceSource(adjusted, forceSource) {
         if (normalized === 'yahoo') return normalized;
         throw new Error('還原模式目前僅支援 Yahoo Finance 測試來源');
     }
-    if (normalized === 'twse' || normalized === 'finmind') return normalized;
-    throw new Error('原始模式僅支援 TWSE 或 FinMind 測試來源');
+    if (normalized === 'fugle' || normalized === 'twse' || normalized === 'finmind') return normalized;
+    throw new Error('原始模式僅支援 Fugle、TWSE 或 FinMind 測試來源');
 }
 
 export default async (req) => {
@@ -624,7 +839,7 @@ export default async (req) => {
         const adjusted = params.get('adjusted') === '1' || params.get('adjusted') === 'true';
         const forceSourceParam = params.get('forceSource');
 
-        console.log('[TWSE Proxy v10.6] 入口參數', {
+        console.log('[TWSE Proxy v11.0] 入口參數', {
             stockNo,
             month: monthParam || null,
             start: startParam || legacyDate || null,
@@ -652,7 +867,7 @@ export default async (req) => {
         }
 
         const months = ensureMonthList(startDate, endDate);
-        console.log('[TWSE Proxy v10.6] 月份分段', {
+        console.log('[TWSE Proxy v11.0] 月份分段', {
             stockNo,
             segmentCount: months.length,
             startISO: formatISODateFromDate(startDate),
@@ -679,6 +894,9 @@ export default async (req) => {
         let yahooLabel = '';
         let finmindHydrated = false;
         let finmindLabel = '';
+        let fugleHydrated = false;
+        let fugleLabel = FUGLE_PRIMARY_LABEL;
+        let fugleStockName = '';
 
         for (const month of months) {
             const cacheKey = buildMonthCacheKey(stockNo, month, adjusted);
@@ -694,9 +912,12 @@ export default async (req) => {
                         const fresh = await fetchTwseMonth(stockNo, month);
                         await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE (強制)' });
                         payload = await readCache(store, cacheKey);
-                        sourceFlags.add('TWSE (強制)');
+                        if (payload) {
+                            sourceFlags.add('TWSE (強制)');
+                            appendCacheSourceLabels(sourceFlags, payload, 'TWSE (主來源)');
+                        }
                     } catch (error) {
-                        console.error('[TWSE Proxy v10.2] 強制 TWSE 失敗:', error);
+                        console.error('[TWSE Proxy v11.0] 強制 TWSE 失敗:', error);
                         return new Response(JSON.stringify({ error: `TWSE 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 } else if (forcedSource === 'finmind') {
@@ -709,11 +930,35 @@ export default async (req) => {
                             endDate.toISOString().split('T')[0],
                         );
                         payload = await readCache(store, cacheKey);
-                        if (payload) sourceFlags.add(finmindLabel);
+                        if (payload) {
+                            sourceFlags.add(finmindLabel);
+                            appendCacheSourceLabels(sourceFlags, payload, finmindLabel);
+                        }
                         finmindHydrated = true;
                     } catch (error) {
-                        console.error('[TWSE Proxy v10.2] 強制 FinMind 失敗:', error);
+                        console.error('[TWSE Proxy v11.0] 強制 FinMind 失敗:', error);
                         return new Response(JSON.stringify({ error: `FinMind 來源取得失敗: ${error.message}` }), { status: 502 });
+                    }
+                } else if (forcedSource === 'fugle') {
+                    try {
+                        const result = await persistFugleEntries(
+                            store,
+                            stockNo,
+                            startDate,
+                            endDate,
+                            { market: 'TWSE', force: true }
+                        );
+                        fugleHydrated = true;
+                        fugleLabel = result.label || FUGLE_PRIMARY_LABEL;
+                        if (result.stockName) fugleStockName = result.stockName;
+                        payload = await readCache(store, cacheKey);
+                        if (payload) {
+                            sourceFlags.add(fugleLabel);
+                            appendCacheSourceLabels(sourceFlags, payload, fugleLabel);
+                        }
+                    } catch (error) {
+                        console.error('[TWSE Proxy v11.0] 強制 Fugle 失敗:', error);
+                        return new Response(JSON.stringify({ error: `Fugle 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 } else if (forcedSource === 'yahoo') {
                     try {
@@ -724,10 +969,13 @@ export default async (req) => {
                             true,
                         );
                         payload = await readCache(store, cacheKey);
-                        if (payload) sourceFlags.add(yahooLabel);
+                        if (payload) {
+                            sourceFlags.add(yahooLabel);
+                            appendCacheSourceLabels(sourceFlags, payload, yahooLabel);
+                        }
                         yahooHydrated = true;
                     } catch (error) {
-                        console.error('[TWSE Proxy v10.2] 強制 Yahoo 失敗:', error);
+                        console.error('[TWSE Proxy v11.0] 強制 Yahoo 失敗:', error);
                         return new Response(JSON.stringify({ error: `Yahoo 來源取得失敗: ${error.message}` }), { status: 502 });
                     }
                 }
@@ -745,7 +993,7 @@ export default async (req) => {
                                 );
                                 yahooHydrated = true;
                             } catch (error) {
-                                console.error('[TWSE Proxy v10.2] Yahoo 還原來源失敗:', error);
+                                console.error('[TWSE Proxy v11.0] Yahoo 還原來源失敗:', error);
                                 return new Response(
                                     JSON.stringify({ error: `Yahoo 還原來源取得失敗: ${error.message}` }),
                                     { status: 502 },
@@ -756,43 +1004,77 @@ export default async (req) => {
                         if (payload) {
                             if (payload.dataSource) sourceFlags.add(payload.dataSource);
                             else if (yahooLabel) sourceFlags.add(yahooLabel);
+                            appendCacheSourceLabels(sourceFlags, payload, yahooLabel);
                         }
                     } else {
-                        try {
-                            const fresh = await fetchTwseMonth(stockNo, month);
-                            await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE' });
-                            payload = await readCache(store, cacheKey);
-                            sourceFlags.add('TWSE');
-                        } catch (error) {
-                            console.warn(`[TWSE Proxy v10.2] TWSE 主來源失敗 (${month}):`, error.message);
-                            if (!finmindHydrated) {
-                                try {
-                                    finmindLabel = await hydrateFinMindDaily(
-                                        store,
-                                        stockNo,
-                                        false,
-                                        startDate.toISOString().split('T')[0],
-                                        endDate.toISOString().split('T')[0],
-                                    );
-                                } catch (finmindError) {
-                                    console.error('[TWSE Proxy v10.2] FinMind 備援失敗:', finmindError);
-                                    return new Response(
-                                        JSON.stringify({ error: `FinMind 備援來源取得失敗: ${finmindError.message}` }),
-                                        { status: 502 },
-                                    );
-                                }
-                                finmindHydrated = true;
+                        if (!fugleHydrated) {
+                            try {
+                                const result = await persistFugleEntries(
+                                    store,
+                                    stockNo,
+                                    startDate,
+                                    endDate,
+                                    { market: 'TWSE' },
+                                );
+                                fugleLabel = result.label || FUGLE_PRIMARY_LABEL;
+                                if (result.stockName) fugleStockName = result.stockName;
+                            } catch (error) {
+                                console.warn(`[TWSE Proxy v11.0] Fugle 主來源失敗 (${month}):`, error.message);
+                            } finally {
+                                fugleHydrated = true;
                             }
+                        }
+                        if (!payload) {
                             payload = await readCache(store, cacheKey);
-                            if (payload && finmindLabel) sourceFlags.add(finmindLabel);
+                        }
+                        if (payload) {
+                            if (payload.dataSource) {
+                                sourceFlags.add(payload.dataSource);
+                                appendCacheSourceLabels(sourceFlags, payload, payload.dataSource);
+                            } else {
+                                sourceFlags.add(fugleLabel);
+                                appendCacheSourceLabels(sourceFlags, payload, fugleLabel);
+                            }
+                        }
+                        if (!payload) {
+                            try {
+                                const fresh = await fetchTwseMonth(stockNo, month);
+                                await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE' });
+                                payload = await readCache(store, cacheKey);
+                                if (payload) {
+                                    sourceFlags.add('TWSE');
+                                    appendCacheSourceLabels(sourceFlags, payload, 'TWSE (主來源)');
+                                }
+                            } catch (error) {
+                                console.warn(`[TWSE Proxy v11.0] TWSE 主來源失敗 (${month}):`, error.message);
+                                if (!finmindHydrated) {
+                                    try {
+                                        finmindLabel = await hydrateFinMindDaily(
+                                            store,
+                                            stockNo,
+                                            false,
+                                            startDate.toISOString().split('T')[0],
+                                            endDate.toISOString().split('T')[0],
+                                        );
+                                    } catch (finmindError) {
+                                        console.error('[TWSE Proxy v11.0] FinMind 備援失敗:', finmindError);
+                                        return new Response(
+                                            JSON.stringify({ error: `FinMind 備援來源取得失敗: ${finmindError.message}` }),
+                                            { status: 502 },
+                                        );
+                                    }
+                                    finmindHydrated = true;
+                                }
+                                payload = await readCache(store, cacheKey);
+                                if (payload && finmindLabel) {
+                                    sourceFlags.add(finmindLabel);
+                                    appendCacheSourceLabels(sourceFlags, payload, finmindLabel);
+                                }
+                            }
                         }
                     }
                 } else {
-                    if (payload.source === 'blob') {
-                        sourceFlags.add('TWSE (快取)');
-                    } else if (payload.source === 'memory') {
-                        sourceFlags.add('TWSE (記憶體快取)');
-                    }
+                    appendCacheSourceLabels(sourceFlags, payload, payload.dataSource || fugleLabel);
                     if (payload.dataSource) {
                         sourceFlags.add(payload.dataSource);
                     }
@@ -821,8 +1103,9 @@ export default async (req) => {
         });
 
         const aaData = Array.from(uniqueMap.values());
+        const resolvedStockName = stockName || fugleStockName || stockNo;
         const body = {
-            stockName: stockName || stockNo,
+            stockName: resolvedStockName,
             iTotalRecords: aaData.length,
             aaData,
             dataSource: summariseSources(sourceFlags),
@@ -832,7 +1115,7 @@ export default async (req) => {
             headers: { 'Content-Type': 'application/json' },
         });
     } catch (error) {
-        console.error('[TWSE Proxy v10.2] 發生未預期錯誤:', error);
+        console.error('[TWSE Proxy v11.0] 發生未預期錯誤:', error);
         return new Response(JSON.stringify({ error: error.message || 'TWSE Proxy error' }), { status: 500 });
     }
 };

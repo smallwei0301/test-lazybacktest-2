@@ -8804,6 +8804,17 @@ function setDefaultFees(stockNo) {
     const isETF = stockCode.startsWith('00');
     const isTAIEX = stockCode === 'TAIEX';
     const isUSMarket = currentMarket === 'US';
+    let isIndex = currentMarket === 'INDEX';
+    if (!isIndex) {
+        try {
+            const entry = getTaiwanDirectoryEntry(stockCode);
+            if (entry && (entry.instrumentType === 'INDEX' || entry.market === 'INDEX')) {
+                isIndex = true;
+            }
+        } catch (error) {
+            console.warn('[Fees] 無法取得台股清單判斷指數類型:', error);
+        }
+    }
 
     if (isUSMarket) {
         buyFeeInput.value = '0.0000';
@@ -8819,7 +8830,7 @@ function setDefaultFees(stockNo) {
     const etfSellFeeRate = 0.1;
     const etfTaxRate = 0.1;
 
-    if (isTAIEX) {
+    if (isTAIEX || isIndex) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
         console.log(`[Fees] 指數預設費率 for ${stockCode}`);
@@ -9066,6 +9077,7 @@ preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
 const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
+    INDEX: { label: '指數', fetchName: fetchStockNameFromIndex },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
 };
 
@@ -9323,7 +9335,7 @@ function shouldRestrictToTaiwanMarkets(symbol) {
 
 function isTaiwanMarket(market) {
     const normalized = normalizeMarketValue(market || '');
-    return normalized === 'TWSE' || normalized === 'TPEX';
+    return normalized === 'TWSE' || normalized === 'TPEX' || normalized === 'INDEX';
 }
 
 function isStockNameCacheEntryFresh(entry, ttlMs) {
@@ -9679,11 +9691,11 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const preferred = normalizeMarketValue(preferredMarket || '');
     const baseOrder = [];
     if (restrictToTaiwan || startsWithFourDigits) {
-        baseOrder.push('TWSE', 'TPEX');
+        baseOrder.push('TWSE', 'TPEX', 'INDEX');
     } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
-        baseOrder.push('US', 'TWSE', 'TPEX');
+        baseOrder.push('INDEX', 'TWSE', 'TPEX', 'US');
     } else {
-        baseOrder.push('TWSE', 'TPEX', 'US');
+        baseOrder.push('TWSE', 'TPEX', 'INDEX', 'US');
     }
     const order = [];
     const seen = new Set();
@@ -10064,6 +10076,54 @@ async function fetchStockNameFromTPEX(stockCode) {
         console.error(`[TPEX Name] 查詢股票名稱失敗:`, error);
         return null;
     }
+}
+
+async function fetchStockNameFromIndex(stockCode) {
+    try {
+        await ensureTaiwanDirectoryReady();
+        const directoryEntry = getTaiwanDirectoryEntry(stockCode);
+        if (directoryEntry) {
+            return {
+                name: directoryEntry.name,
+                board: '指數',
+                source: directoryEntry.source || taiwanDirectoryState.source || '台股官方清單',
+                instrumentType: 'INDEX',
+                market: 'INDEX',
+                matchStrategy: 'taiwan-directory',
+                directoryVersion: taiwanDirectoryState.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: directoryEntry.stockId,
+            };
+        }
+    } catch (error) {
+        console.warn('[Index Name] 載入台股清單失敗:', error);
+    }
+
+    try {
+        const now = new Date();
+        const endISO = now.toISOString().split('T')[0];
+        const startObj = new Date(now);
+        startObj.setDate(startObj.getDate() - 10);
+        const startISO = startObj.toISOString().split('T')[0];
+        const url = `/api/index/?stockNo=${encodeURIComponent(stockCode)}&start=${startISO}&end=${endISO}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.warn(`[Index Name] API 回傳狀態碼 ${response.status}`);
+            return null;
+        }
+        const data = await response.json();
+        if (data && !data.error && data.stockName) {
+            return {
+                name: data.stockName,
+                board: '指數',
+                source: data.dataSource || 'FinMind 指數資料',
+                instrumentType: 'INDEX',
+                market: 'INDEX',
+            };
+        }
+    } catch (error) {
+        console.error('[Index Name] 查詢指數名稱失敗:', error);
+    }
+    return null;
 }
 
 async function fetchStockNameFromUS(stockCode) {
