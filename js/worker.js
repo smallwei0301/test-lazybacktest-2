@@ -299,15 +299,17 @@ function getPrimaryForceSource(marketKey, adjusted) {
     if (marketKey === "US") return null;
     return "yahoo";
   }
-  if (marketKey === "TPEX" || marketKey === "US") return "finmind";
-  if (marketKey === "TWSE") return "twse";
+  if (marketKey === "US") return "finmind";
+  if (marketKey === "TPEX") return "fugle";
+  if (marketKey === "TWSE" || marketKey === "INDEX") return "fugle";
   return null;
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
   if (adjusted) return null;
-  if (marketKey === "TPEX" || marketKey === "US") return null;
-  return "finmind";
+  if (marketKey === "US") return null;
+  if (marketKey === "TPEX" || marketKey === "TWSE" || marketKey === "INDEX") return "finmind";
+  return null;
 }
 
 function getMarketKey(marketType) {

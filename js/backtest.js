@@ -3478,14 +3478,14 @@ function normalizeMarketKeyForCache(market) {
 function getDatasetCacheTTLMs(market) {
     const normalized = normalizeMarketKeyForCache(market);
     if (normalized === 'US') return US_DATA_CACHE_TTL_MS;
-    if (normalized === 'TPEX' || normalized === 'TWSE') return TW_DATA_CACHE_TTL_MS;
+    if (normalized === 'TPEX' || normalized === 'TWSE' || normalized === 'INDEX') return TW_DATA_CACHE_TTL_MS;
     return DEFAULT_DATA_CACHE_TTL_MS;
 }
 
 function getYearStorageTtlMs(market) {
     const normalized = normalizeMarketKeyForCache(market);
     if (normalized === 'US') return YEAR_STORAGE_US_TTL_MS;
-    if (normalized === 'TPEX' || normalized === 'TWSE') return YEAR_STORAGE_TW_TTL_MS;
+    if (normalized === 'TPEX' || normalized === 'TWSE' || normalized === 'INDEX') return YEAR_STORAGE_TW_TTL_MS;
     return YEAR_STORAGE_DEFAULT_TTL_MS;
 }
 
@@ -9066,6 +9066,7 @@ preloadTaiwanDirectory({ skipNetwork: true }).catch((error) => {
 const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
+    INDEX: { label: '指數', fetchName: fetchIndexNameFromDirectory },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
 };
 
@@ -9323,7 +9324,7 @@ function shouldRestrictToTaiwanMarkets(symbol) {
 
 function isTaiwanMarket(market) {
     const normalized = normalizeMarketValue(market || '');
-    return normalized === 'TWSE' || normalized === 'TPEX';
+    return normalized === 'TWSE' || normalized === 'TPEX' || normalized === 'INDEX';
 }
 
 function isStockNameCacheEntryFresh(entry, ttlMs) {
@@ -9589,8 +9590,8 @@ function resolveCachedStockNameInfo(stockCode, preferredMarket) {
     const normalized = (stockCode || '').trim().toUpperCase();
     if (!normalized) return null;
     const candidateMarkets = preferredMarket
-        ? [normalizeMarketValue(preferredMarket), 'TWSE', 'TPEX', 'US']
-        : ['TWSE', 'TPEX', 'US'];
+        ? [normalizeMarketValue(preferredMarket), 'TWSE', 'TPEX', 'INDEX', 'US']
+        : ['TWSE', 'TPEX', 'INDEX', 'US'];
     const cacheHit = findStockNameCacheEntry(normalized, candidateMarkets.filter(Boolean));
     if (cacheHit && cacheHit.info) {
         return {
@@ -9662,6 +9663,7 @@ function deriveNameSourceLabel(market) {
     if (normalized === 'US') return 'FinMind USStockInfo';
     if (normalized === 'TPEX') return 'TPEX 公開資訊';
     if (normalized === 'TWSE') return 'TWSE 日成交資訊';
+    if (normalized === 'INDEX') return '台股指數清單';
     return '';
 }
 
@@ -9679,11 +9681,11 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const preferred = normalizeMarketValue(preferredMarket || '');
     const baseOrder = [];
     if (restrictToTaiwan || startsWithFourDigits) {
-        baseOrder.push('TWSE', 'TPEX');
+        baseOrder.push('TWSE', 'TPEX', 'INDEX');
     } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
-        baseOrder.push('US', 'TWSE', 'TPEX');
+        baseOrder.push('INDEX', 'US', 'TWSE', 'TPEX');
     } else {
-        baseOrder.push('TWSE', 'TPEX', 'US');
+        baseOrder.push('TWSE', 'TPEX', 'INDEX', 'US');
     }
     const order = [];
     const seen = new Set();
@@ -9906,7 +9908,7 @@ async function fetchStockName(stockCode, options = {}) {
         const searchOrder = allowAutoSwitch
             ? resolveStockNameSearchOrder(normalizedCode, currentMarket)
             : restrictToTaiwan
-                ? ['TWSE', 'TPEX']
+                ? ['TWSE', 'TPEX', 'INDEX']
                 : [currentMarket];
 
         const cacheHit = findStockNameCacheEntry(normalizedCode, searchOrder);
@@ -9960,6 +9962,30 @@ async function fetchStockName(stockCode, options = {}) {
     }
 }
 // 從 TWSE 取得股票名稱
+async function fetchIndexNameFromDirectory(stockCode) {
+    try {
+        const normalized = (stockCode || '').trim().toUpperCase();
+        if (!normalized) return null;
+        const state = await ensureTaiwanDirectoryReady();
+        const directoryEntry = getTaiwanDirectoryEntry(normalized);
+        if (directoryEntry && directoryEntry.instrumentType === 'INDEX') {
+            return {
+                name: directoryEntry.name,
+                market: 'INDEX',
+                board: directoryEntry.board || '指數',
+                instrumentType: 'INDEX',
+                matchStrategy: 'taiwan-directory',
+                directoryVersion: state?.version || TAIWAN_DIRECTORY_VERSION,
+                resolvedSymbol: directoryEntry.stockId,
+                source: state?.source || 'Taiwan Directory',
+            };
+        }
+    } catch (error) {
+        console.warn('[Index Name] 查詢指數名稱失敗:', error);
+    }
+    return null;
+}
+
 async function fetchStockNameFromTWSE(stockCode) {
     try {
         await ensureTaiwanDirectoryReady();
