@@ -30,6 +30,7 @@
             learningRate: 0.005,
             trainRatio: 0.8,
         },
+        replayMeta: null,
     });
     const globalState = {
         running: false,
@@ -297,13 +298,24 @@
         }
         const pending = aiWorkerRequests.get(id);
         const modelType = pending.modelType || (pending.taskType === 'ai-train-ann' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
-        if (type === 'ai-train-lstm-result' || type === 'ai-train-ann-result') {
+        const isResult = type === 'ai-train-lstm-result'
+            || type === 'ai-train-ann-result'
+            || type === 'ai-replay-lstm-result'
+            || type === 'ai-replay-ann-result';
+        const isError = type === 'ai-train-lstm-error'
+            || type === 'ai-train-ann-error'
+            || type === 'ai-replay-lstm-error'
+            || type === 'ai-replay-ann-error';
+        if (isResult) {
             aiWorkerRequests.delete(id);
             const payload = data || {};
             payload.modelType = modelType;
             payload.taskType = pending.taskType;
+            if (!payload.mode) {
+                payload.mode = pending.taskType && pending.taskType.startsWith('ai-replay') ? 'replay' : 'train';
+            }
             pending.resolve(payload);
-        } else if (type === 'ai-train-lstm-error' || type === 'ai-train-ann-error') {
+        } else if (isError) {
             aiWorkerRequests.delete(id);
             const reason = error && typeof error.message === 'string'
                 ? new Error(error.message)
@@ -731,6 +743,33 @@
         }
     };
 
+    const buildRiskOptions = (modelType, modelState, syncFromUI = false) => {
+        const state = modelState || getModelState(modelType);
+        if (!state) {
+            return {
+                threshold: 0.5,
+                useKelly: false,
+                fixedFraction: 0.2,
+            };
+        }
+        let threshold = Number.isFinite(state.winThreshold) ? state.winThreshold : 0.5;
+        let useKelly = Boolean(state.kellyEnabled);
+        let fixedFraction = sanitizeFraction(state.fixedFraction);
+        if (syncFromUI && modelType === globalState.activeModel) {
+            threshold = parseWinThreshold();
+            useKelly = Boolean(elements.enableKelly?.checked);
+            fixedFraction = parseNumberInput(elements.fixedFraction, fixedFraction, { min: 0.01, max: 1 });
+            state.kellyEnabled = useKelly;
+            state.fixedFraction = sanitizeFraction(fixedFraction);
+            state.winThreshold = threshold;
+        }
+        return {
+            threshold,
+            useKelly,
+            fixedFraction: sanitizeFraction(fixedFraction),
+        };
+    };
+
     const captureActiveModelSettings = () => {
         const modelState = getActiveModelState();
         if (!modelState) return;
@@ -789,6 +828,46 @@
         parseWinThreshold();
     };
 
+    const handleWorkerCompletion = (modelType, workerResult, riskOptions, label) => {
+        const modelState = getModelState(modelType);
+        if (!modelState) return;
+        const trainingMetrics = workerResult?.trainingMetrics || {
+            trainAccuracy: NaN,
+            trainLoss: NaN,
+            testAccuracy: NaN,
+            testLoss: NaN,
+            totalPredictions: 0,
+        };
+        const predictionsPayload = workerResult?.predictionsPayload || null;
+        if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
+            throw new Error('AI Worker 未回傳有效的預測結果。');
+        }
+        const hyper = predictionsPayload.hyperparameters || {};
+        modelState.hyperparameters = {
+            lookback: Number.isFinite(hyper.lookback) ? hyper.lookback : modelState.hyperparameters.lookback,
+            epochs: Number.isFinite(hyper.epochs) ? hyper.epochs : modelState.hyperparameters.epochs,
+            batchSize: Number.isFinite(hyper.batchSize) ? hyper.batchSize : modelState.hyperparameters.batchSize,
+            learningRate: Number.isFinite(hyper.learningRate) ? hyper.learningRate : modelState.hyperparameters.learningRate,
+            trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : modelState.hyperparameters.trainRatio,
+        };
+        if (modelType === globalState.activeModel) {
+            applyModelSettingsToUI(modelState);
+        }
+        modelState.predictionsPayload = predictionsPayload;
+        modelState.trainingMetrics = trainingMetrics;
+        if (workerResult?.replayMeta) {
+            modelState.replayMeta = workerResult.replayMeta;
+        }
+        applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
+        const defaultMessage = workerResult?.mode === 'replay'
+            ? `重播完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`
+            : `完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`;
+        const finalMessage = typeof workerResult?.finalMessage === 'string'
+            ? workerResult.finalMessage
+            : defaultMessage;
+        showStatus(`[${label}] ${finalMessage}`, 'success');
+    };
+
     const renderActiveModelOutputs = () => {
         const modelState = getActiveModelState();
         if (modelState && modelState.lastSummary) {
@@ -838,43 +917,7 @@
                 trainRatio: hyperparameters.trainRatio,
             },
         }, { modelType });
-
-        const resultModelType = workerResult.modelType || modelType;
-        const trainingMetrics = workerResult?.trainingMetrics || {
-            trainAccuracy: NaN,
-            trainLoss: NaN,
-            testAccuracy: NaN,
-            testLoss: NaN,
-            totalPredictions: 0,
-        };
-        const predictionsPayload = workerResult?.predictionsPayload || null;
-        if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
-            throw new Error('AI Worker 未回傳有效的預測結果。');
-        }
-
-        predictionsPayload.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-            modelType: resultModelType,
-        };
-
-        modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: effectiveBatchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-        };
-
-        applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
-
-        const finalMessage = typeof workerResult?.finalMessage === 'string'
-            ? workerResult.finalMessage
-            : `完成：訓練勝率 ${formatPercent(trainingMetrics.trainAccuracy, 2)}，測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}。`;
-        showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}`, 'success');
+        handleWorkerCompletion(workerResult.modelType || modelType, workerResult, riskOptions, label);
     };
 
     const runAnnModel = async (modelState, rows, hyperparameters, riskOptions) => {
@@ -896,65 +939,46 @@
                 lookback: hyperparameters.lookback,
             },
         }, { modelType });
+        handleWorkerCompletion(modelType, workerResult, riskOptions, label);
+    };
 
-        const trainingMetrics = workerResult?.trainingMetrics || {
-            trainAccuracy: NaN,
-            trainLoss: NaN,
-            testAccuracy: NaN,
-            testLoss: NaN,
-            totalPredictions: 0,
-        };
-        const predictionsPayload = workerResult?.predictionsPayload || null;
-        if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
-            throw new Error('AI Worker 未回傳有效的預測結果。');
+    const runLstmReplay = async (modelState, dataset, meta, riskOptions) => {
+        const modelType = MODEL_TYPES.LSTM;
+        const label = formatModelLabel(modelType);
+        if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
+            throw new Error('目前資料不足以重播 LSTM 模型，請延長回測期間。');
         }
+        if (Number.isFinite(meta.totalSamples) && dataset.sequences.length < meta.totalSamples) {
+            throw new Error(`目前僅有 ${dataset.sequences.length} 筆樣本，少於重播所需的 ${meta.totalSamples} 筆。`);
+        }
+        showStatus(`[${label}] 正在載入已儲存模型並重播預測...`, 'info');
+        const workerResult = await sendAIWorkerTrainingTask('ai-replay-lstm', {
+            dataset,
+            meta,
+        }, { modelType });
+        handleWorkerCompletion(modelType, workerResult, riskOptions, label);
+    };
 
-        predictionsPayload.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-            modelType,
-        };
-
-        modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
-        };
-
-        applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
-
-        const finalMessage = typeof workerResult?.finalMessage === 'string'
-            ? workerResult.finalMessage
-            : `完成：測試正確率 ${formatPercent(trainingMetrics.testAccuracy, 2)}，混淆矩陣已同步更新。`;
-        showStatus(`[${label}] ${finalMessage}`, 'success');
+    const runAnnReplay = async (modelState, rows, meta, riskOptions) => {
+        const modelType = MODEL_TYPES.ANNS;
+        const label = formatModelLabel(modelType);
+        if (!Array.isArray(rows) || rows.length < 2) {
+            throw new Error('目前資料不足以重播 ANN 模型，請延長回測期間。');
+        }
+        showStatus(`[${label}] 正在載入已儲存模型並重播預測...`, 'info');
+        const workerResult = await sendAIWorkerTrainingTask('ai-replay-ann', {
+            rows,
+            meta,
+        }, { modelType });
+        handleWorkerCompletion(modelType, workerResult, riskOptions, label);
     };
 
     const recomputeTradesFromState = (modelType = globalState.activeModel) => {
         const modelState = getModelState(modelType);
         if (!modelState || !modelState.predictionsPayload || !modelState.trainingMetrics) return;
 
-        let threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
-        let useKelly = Boolean(modelState.kellyEnabled);
-        let fixedFraction = sanitizeFraction(modelState.fixedFraction);
-
-        if (modelType === globalState.activeModel) {
-            threshold = parseWinThreshold();
-            useKelly = Boolean(elements.enableKelly?.checked);
-            fixedFraction = parseNumberInput(elements.fixedFraction, 0.2, { min: 0.01, max: 1 });
-            modelState.kellyEnabled = useKelly;
-            modelState.fixedFraction = sanitizeFraction(fixedFraction);
-        }
-
-        applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, {
-            threshold,
-            useKelly,
-            fixedFraction,
-        });
+        const riskOptions = buildRiskOptions(modelType, modelState, modelType === globalState.activeModel);
+        applyTradeEvaluation(modelType, modelState.predictionsPayload, modelState.trainingMetrics, riskOptions);
     };
 
     const optimiseWinThreshold = () => {
@@ -1041,6 +1065,7 @@
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
             },
+            replayMeta: modelState.replayMeta || null,
             version: VERSION_TAG,
         };
         seeds.push(newSeed);
@@ -1072,6 +1097,7 @@
                 : 0,
         };
         modelState.trainingMetrics = metrics;
+        modelState.replayMeta = seed.replayMeta || seed.payload?.replayMeta || modelState.replayMeta;
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
 
         const hyper = seed.payload?.hyperparameters || {};
@@ -1121,6 +1147,9 @@
         parseWinThreshold();
         recomputeTradesFromState(modelType);
         showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
+        setTimeout(() => {
+            triggerSeedReplay(seed);
+        }, 0);
     };
 
     const handleLoadSeed = () => {
@@ -1163,11 +1192,7 @@
             captureActiveModelSettings();
 
             const hyperparameters = { ...modelState.hyperparameters };
-            const riskOptions = {
-                threshold: Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5,
-                useKelly: Boolean(modelState.kellyEnabled),
-                fixedFraction: sanitizeFraction(modelState.fixedFraction),
-            };
+            const riskOptions = buildRiskOptions(normalizedModel, modelState, true);
 
             const rows = getVisibleData();
             if (!Array.isArray(rows) || rows.length === 0) {
@@ -1189,6 +1214,52 @@
             toggleRunning(false);
         }
     };
+
+    const triggerSeedReplay = async (seed) => {
+        if (!seed) return;
+        if (globalState.running) {
+            showStatus('AI 背景仍在運作中，請稍候。', 'warning');
+            return;
+        }
+        const modelType = seed.modelType && Object.values(MODEL_TYPES).includes(seed.modelType)
+            ? seed.modelType
+            : globalState.activeModel;
+        const label = formatModelLabel(modelType);
+        const rows = getVisibleData();
+        if (!Array.isArray(rows) || rows.length === 0) {
+            showStatus(`[${label}] 尚未取得回測資料，請先在主頁面執行回測。`, 'warning');
+            return;
+        }
+        const modelState = getModelState(modelType);
+        const replayMeta = seed.replayMeta || seed.payload?.replayMeta || modelState?.replayMeta || null;
+        if (!replayMeta) {
+            showStatus(`[${label}] 缺少模型重播資訊，請先重新訓練並儲存種子。`, 'warning');
+            return;
+        }
+        const riskOptions = buildRiskOptions(modelType, modelState, modelType === globalState.activeModel);
+        if (modelState) {
+            modelState.replayMeta = replayMeta;
+        }
+        toggleRunning(true);
+        try {
+            if (modelType === MODEL_TYPES.LSTM) {
+                const lookback = Number.isFinite(replayMeta.lookback)
+                    ? replayMeta.lookback
+                    : modelState?.hyperparameters?.lookback || 20;
+                const dataset = buildDataset(rows, lookback);
+                await runLstmReplay(modelState, dataset, replayMeta, riskOptions);
+            } else {
+                await runAnnReplay(modelState, rows, replayMeta, riskOptions);
+            }
+        } catch (error) {
+            console.error('[AI Prediction] 模型重播失敗:', error);
+            const message = error instanceof Error ? error.message : String(error || '未知錯誤');
+            showStatus(`[${label}] 模型重播失敗：${message}`, 'error');
+        } finally {
+            toggleRunning(false);
+        }
+    };
+
     const handleModelChange = () => {
         if (!elements.modelType) return;
         const selected = elements.modelType.value;
