@@ -2,7 +2,7 @@
 
 // Patch Tag: LB-AI-HYBRID-20251212A
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-REPRO-20251222A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -23,6 +23,8 @@
         winThreshold: 0.5,
         kellyEnabled: false,
         fixedFraction: 0.2,
+        runMeta: null,
+        pendingReplayMeta: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -415,11 +417,14 @@
         return null;
     };
 
-    const buildDataset = (rows, lookback) => {
+    const buildDataset = (rows, lookback, options = {}) => {
+        const replayMeta = options && typeof options.replayMeta === 'object' ? options.replayMeta : null;
+        const limitLastDate = typeof replayMeta?.datasetLastDate === 'string' ? replayMeta.datasetLastDate : null;
+        const limitRowCount = Number.isFinite(replayMeta?.rawRowCount) ? Math.max(0, Math.round(replayMeta.rawRowCount)) : null;
         if (!Array.isArray(rows)) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
         }
-        const sorted = rows
+        let sorted = rows
             .filter((row) => row && typeof row.date === 'string')
             .map((row) => ({
                 date: row.date,
@@ -427,6 +432,13 @@
             }))
             .filter((row) => Number.isFinite(row.close) && row.close > 0)
             .sort((a, b) => a.date.localeCompare(b.date));
+
+        if (limitLastDate) {
+            sorted = sorted.filter((row) => row.date <= limitLastDate);
+        }
+        if (Number.isFinite(limitRowCount) && limitRowCount > 0 && sorted.length > limitRowCount) {
+            sorted = sorted.slice(sorted.length - limitRowCount);
+        }
 
         if (sorted.length <= lookback + 2) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: sorted };
@@ -449,9 +461,9 @@
             });
         }
 
-        const sequences = [];
-        const labels = [];
-        const targetReturns = [];
+        let sequences = [];
+        let labels = [];
+        let targetReturns = [];
         for (let i = lookback; i < returns.length; i += 1) {
             const feature = returns.slice(i - lookback, i);
             if (feature.length !== lookback) continue;
@@ -460,13 +472,27 @@
             targetReturns.push(returns[i]);
         }
 
-        const metaAligned = meta.slice(lookback);
+        let metaAligned = meta.slice(lookback);
+
+        if (replayMeta && Number.isFinite(replayMeta.datasetLength) && replayMeta.datasetLength > 0) {
+            const targetCount = Math.max(0, Math.round(replayMeta.datasetLength));
+            if (sequences.length > targetCount) {
+                const offset = sequences.length - targetCount;
+                sequences = sequences.slice(offset);
+                labels = labels.slice(offset);
+                targetReturns = targetReturns.slice(offset);
+                metaAligned = metaAligned.slice(offset);
+            }
+        }
+
         return {
             sequences,
             labels,
             meta: metaAligned,
             returns: targetReturns,
             baseRows: sorted,
+            rawRowCount: sorted.length,
+            datasetLength: sequences.length,
         };
     };
 
@@ -804,7 +830,10 @@
     const runLstmModel = async (modelState, rows, hyperparameters, riskOptions) => {
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
-        const dataset = buildDataset(rows, hyperparameters.lookback);
+        const replayMeta = modelState && typeof modelState.pendingReplayMeta === 'object'
+            ? modelState.pendingReplayMeta
+            : null;
+        const dataset = buildDataset(rows, hyperparameters.lookback, { replayMeta });
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
         if (dataset.sequences.length < minimumSamples) {
             showStatus(`[${label}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
@@ -812,17 +841,23 @@
         }
 
         const totalSamples = dataset.sequences.length;
-        const rawTrainSize = Math.max(Math.floor(totalSamples * hyperparameters.trainRatio), hyperparameters.lookback);
-        const boundedTrainSize = Math.min(Math.max(rawTrainSize, hyperparameters.lookback), totalSamples - 1);
+        const trainRatioSource = Number.isFinite(replayMeta?.trainRatio) ? replayMeta.trainRatio : hyperparameters.trainRatio;
+        const boundedTrainRatio = Math.min(Math.max(Number.isFinite(trainRatioSource) ? trainRatioSource : 0.8, 0.6), 0.95);
+        const fallbackTrainSize = Math.max(Math.floor(totalSamples * boundedTrainRatio), hyperparameters.lookback);
+        const desiredTrainSize = Number.isFinite(replayMeta?.trainSize) ? replayMeta.trainSize : fallbackTrainSize;
+        const boundedTrainSize = Math.min(Math.max(Math.round(desiredTrainSize), hyperparameters.lookback), totalSamples - 1);
         const testSize = totalSamples - boundedTrainSize;
         if (boundedTrainSize <= 0 || testSize <= 0) {
-            showStatus(`[${label}] 無法依照 ${Math.round(hyperparameters.trainRatio * 100)}% / ${100 - Math.round(hyperparameters.trainRatio * 100)}% 分割訓練與測試集，請延長資料範圍。`, 'warning');
+            const ratioPercent = Math.round((Number.isFinite(trainRatioSource) ? trainRatioSource : boundedTrainRatio) * 100);
+            showStatus(`[${label}] 無法依照 ${ratioPercent}% / ${100 - ratioPercent}% 分割訓練與測試集，請延長資料範圍。`, 'warning');
             return;
         }
 
-        const effectiveBatchSize = Math.min(hyperparameters.batchSize, boundedTrainSize);
-        if (hyperparameters.batchSize > boundedTrainSize) {
-            showStatus(`[${label}] 批次大小 ${hyperparameters.batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
+        const batchSizeSource = Number.isFinite(replayMeta?.batchSize) ? replayMeta.batchSize : hyperparameters.batchSize;
+        const fallbackBatchSize = Math.max(1, Math.round(Number.isFinite(batchSizeSource) ? batchSizeSource : boundedTrainSize));
+        const effectiveBatchSize = Math.min(fallbackBatchSize, boundedTrainSize);
+        if (batchSizeSource > boundedTrainSize) {
+            showStatus(`[${label}] 批次大小 ${batchSizeSource} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
         }
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
@@ -835,8 +870,9 @@
                 learningRate: hyperparameters.learningRate,
                 totalSamples,
                 trainSize: boundedTrainSize,
-                trainRatio: hyperparameters.trainRatio,
+                trainRatio: boundedTrainRatio,
             },
+            replayMeta,
         }, { modelType });
 
         const resultModelType = workerResult.modelType || modelType;
@@ -857,7 +893,7 @@
             epochs: hyperparameters.epochs,
             batchSize: effectiveBatchSize,
             learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            trainRatio: boundedTrainRatio,
             modelType: resultModelType,
         };
 
@@ -866,8 +902,11 @@
             epochs: hyperparameters.epochs,
             batchSize: effectiveBatchSize,
             learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            trainRatio: boundedTrainRatio,
         };
+
+        modelState.runMeta = workerResult?.runMeta ? { ...workerResult.runMeta } : null;
+        modelState.pendingReplayMeta = null;
 
         applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, riskOptions);
 
@@ -885,6 +924,10 @@
             return;
         }
 
+        const replayMeta = modelState && typeof modelState.pendingReplayMeta === 'object'
+            ? modelState.pendingReplayMeta
+            : null;
+
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const workerResult = await sendAIWorkerTrainingTask('ai-train-ann', {
             rows,
@@ -894,6 +937,7 @@
                 learningRate: hyperparameters.learningRate,
                 trainRatio: hyperparameters.trainRatio,
                 lookback: hyperparameters.lookback,
+                replayMeta,
             },
         }, { modelType });
 
@@ -925,6 +969,9 @@
             learningRate: hyperparameters.learningRate,
             trainRatio: hyperparameters.trainRatio,
         };
+
+        modelState.runMeta = workerResult?.runMeta ? { ...workerResult.runMeta } : null;
+        modelState.pendingReplayMeta = null;
 
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
 
@@ -1034,6 +1081,7 @@
                 forecast: modelState.predictionsPayload.forecast,
                 datasetLastDate: modelState.predictionsPayload.datasetLastDate,
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
+                runMeta: modelState.runMeta ? { ...modelState.runMeta } : null,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -1099,6 +1147,9 @@
             trainRatio: Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : modelState.hyperparameters.trainRatio,
         };
 
+        modelState.runMeta = seed.payload?.runMeta ? { ...seed.payload.runMeta } : null;
+        modelState.pendingReplayMeta = seed.payload?.runMeta ? { ...seed.payload.runMeta } : null;
+
         if (elements.enableKelly && typeof seed.summary?.usingKelly === 'boolean') {
             elements.enableKelly.checked = seed.summary.usingKelly;
         }
@@ -1141,6 +1192,19 @@
         }
         const latestSeed = selectedSeeds[selectedSeeds.length - 1];
         activateSeed(latestSeed);
+        if (typeof queueMicrotask === 'function') {
+            queueMicrotask(() => {
+                if (!globalState.running) {
+                    runPrediction();
+                }
+            });
+        } else {
+            setTimeout(() => {
+                if (!globalState.running) {
+                    runPrediction();
+                }
+            }, 0);
+        }
     };
 
     const runPrediction = async () => {
