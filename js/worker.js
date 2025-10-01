@@ -2,6 +2,14 @@
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
+try {
+  if (typeof tf === 'undefined') {
+    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+  }
+} catch (err) {
+  console.error('[Worker] 載入 TensorFlow.js 失敗：', err);
+}
+
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
 // Patch Tag: LB-DATAPIPE-20241007A
 // Patch Tag: LB-ADJ-PIPE-20241020A
@@ -19,6 +27,7 @@ importScripts('config.js');
 // Patch Tag: LB-TODAY-SUGGESTION-FINALSTATE-RECOVER-20250911A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251215A
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
@@ -42,6 +51,307 @@ const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+
+function pickNumericValue(row, keys, fallback = null) {
+  if (!row || !keys) return fallback;
+  for (let i = 0; i < keys.length; i += 1) {
+    const value = Number(row[keys[i]]);
+    if (Number.isFinite(value)) return value;
+  }
+  return fallback;
+}
+
+function sma(values, n) {
+  const out = Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function wma(values, n) {
+  const out = Array(values.length).fill(null);
+  const denom = (n * (n + 1)) / 2;
+  for (let i = n - 1; i < values.length; i += 1) {
+    let num = 0;
+    for (let k = 0; k < n; k += 1) num += (n - k) * values[i - k];
+    out[i] = num / denom;
+  }
+  return out;
+}
+
+function ema(values, n) {
+  const out = Array(values.length).fill(null);
+  const k = 2 / (n + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i];
+    if (!Number.isFinite(v)) {
+      out[i] = prev;
+      continue;
+    }
+    if (prev == null) out[i] = v;
+    else out[i] = prev + k * (v - prev);
+    prev = out[i];
+  }
+  return out;
+}
+
+function momentum(values, n) {
+  return values.map((v, i) => (i >= n ? v - values[i - n] : null));
+}
+
+function highest(values, n) {
+  const out = Array(values.length).fill(null);
+  const dq = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (dq.length && dq[0] <= i - n) dq.shift();
+    while (dq.length && values[dq[dq.length - 1]] <= values[i]) dq.pop();
+    dq.push(i);
+    if (i >= n - 1) out[i] = values[dq[0]];
+  }
+  return out;
+}
+
+function lowest(values, n) {
+  const out = Array(values.length).fill(null);
+  const dq = [];
+  for (let i = 0; i < values.length; i += 1) {
+    while (dq.length && dq[0] <= i - n) dq.shift();
+    while (dq.length && values[dq[dq.length - 1]] >= values[i]) dq.pop();
+    dq.push(i);
+    if (i >= n - 1) out[i] = values[dq[0]];
+  }
+  return out;
+}
+
+function stochasticKD(high, low, close, nK = 14, nD = 3) {
+  const hh = highest(high, nK);
+  const ll = lowest(low, nK);
+  const K = close.map((c, i) => {
+    if (i < nK - 1) return null;
+    const denom = hh[i] - ll[i];
+    if (!Number.isFinite(denom) || denom === 0) return null;
+    return ((c - ll[i]) / denom) * 100;
+  });
+  const D = sma(K.map((v) => (Number.isFinite(v) ? v : 0)), nD).map((v, i) => (i >= nK - 1 ? v : null));
+  return { K, D };
+}
+
+function rsi(close, n = 14) {
+  const out = Array(close.length).fill(null);
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i < close.length; i += 1) {
+    const change = close[i] - close[i - 1];
+    const up = Math.max(change, 0);
+    const dn = Math.max(-change, 0);
+    if (i <= n) {
+      gain += up;
+      loss += dn;
+      if (i === n) {
+        const rs = (gain / n) / ((loss / n) || 1e-12);
+        out[i] = 100 - (100 / (1 + rs));
+      }
+    } else {
+      gain = (gain * (n - 1) + up) / n;
+      loss = (loss * (n - 1) + dn) / n;
+      const rs = gain / (loss || 1e-12);
+      out[i] = 100 - (100 / (1 + rs));
+    }
+  }
+  return out;
+}
+
+function macd(close, fast = 12, slow = 26, sig = 9) {
+  const emaFast = ema(close, fast);
+  const emaSlow = ema(close, slow);
+  const diff = close.map((_, i) => (
+    Number.isFinite(emaFast[i]) && Number.isFinite(emaSlow[i])
+      ? emaFast[i] - emaSlow[i]
+      : null
+  ));
+  const signal = ema(diff.map((v) => (Number.isFinite(v) ? v : 0)), sig);
+  const hist = diff.map((v, i) => (Number.isFinite(v) && Number.isFinite(signal[i]) ? v - signal[i] : null));
+  return { diff, signal, hist };
+}
+
+function cci(high, low, close, n = 20) {
+  const tp = close.map((c, i) => (high[i] + low[i] + c) / 3);
+  const smaTp = sma(tp, n);
+  const out = Array(close.length).fill(null);
+  for (let i = n - 1; i < close.length; i += 1) {
+    let md = 0;
+    for (let k = 0; k < n; k += 1) md += Math.abs(tp[i - k] - smaTp[i]);
+    md /= n;
+    out[i] = (tp[i] - smaTp[i]) / (0.015 * md || 1e-12);
+  }
+  return out;
+}
+
+function williamsR(high, low, close, n = 14) {
+  const hh = highest(high, n);
+  const ll = lowest(low, n);
+  return close.map((c, i) => {
+    if (i < n - 1 || !Number.isFinite(hh[i]) || !Number.isFinite(ll[i])) return null;
+    const denom = (hh[i] - ll[i]) || 1e-12;
+    return ((hh[i] - c) / denom) * 100;
+  });
+}
+
+function buildFeaturesFromOHLC(rows) {
+  const close = rows.map((r) => pickNumericValue(r, ['close', 'adjustedClose', 'adjClose', 'rawClose', 'baseClose'], null));
+  const high = rows.map((r, idx) => pickNumericValue(r, ['high', 'adjustedHigh', 'adjHigh', 'rawHigh'], close[idx] ?? null));
+  const low = rows.map((r, idx) => pickNumericValue(r, ['low', 'adjustedLow', 'adjLow', 'rawLow'], close[idx] ?? null));
+
+  const MA = sma(close, 30);
+  const WMA = wma(close, 15);
+  const EMA = ema(close, 12);
+  const MOM = momentum(close, 10);
+  const { K, D } = stochasticKD(high, low, close, 14, 3);
+  const RSIv = rsi(close, 14);
+  const mac = macd(close, 12, 26, 9);
+  const CCIv = cci(high, low, close, 20);
+  const WR = williamsR(high, low, close, 14);
+
+  const X = [];
+  const y = [];
+  const idxMap = [];
+
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const feats = [MA[i], WMA[i], EMA[i], MOM[i], K[i], D[i], RSIv[i], mac.diff[i], CCIv[i], WR[i]];
+    if (feats.every((v) => Number.isFinite(v))) {
+      X.push(feats.map(Number));
+      const rise = pickNumericValue(rows[i + 1], ['close', 'adjustedClose', 'adjClose', 'rawClose', 'baseClose'], null)
+        > pickNumericValue(rows[i], ['close', 'adjustedClose', 'adjClose', 'rawClose', 'baseClose'], null)
+        ? 1
+        : 0;
+      y.push(rise);
+      idxMap.push(i);
+    }
+  }
+
+  return { X, y, idxMap };
+}
+
+function standardize(X) {
+  if (!Array.isArray(X) || X.length === 0) {
+    return { Z: [], mean: [], std: [] };
+  }
+  const n = X.length;
+  const p = X[0].length;
+  const mean = Array(p).fill(0);
+  const std = Array(p).fill(0);
+  for (let i = 0; i < p; i += 1) {
+    for (let r = 0; r < n; r += 1) mean[i] += X[r][i];
+    mean[i] /= n;
+    for (let r = 0; r < n; r += 1) std[i] += (X[r][i] - mean[i]) ** 2;
+    std[i] = Math.sqrt(std[i] / Math.max(1, n - 1)) || 1;
+  }
+  const Z = X.map((row) => row.map((v, i) => (v - mean[i]) / std[i]));
+  return { Z, mean, std };
+}
+
+function splitTrainTest(Z, y, idxMap, ratio = 0.8) {
+  const n = Z.length;
+  if (n < 2) {
+    return {
+      Xtr: [],
+      ytr: [],
+      idxTr: [],
+      Xte: [],
+      yte: [],
+      idxTe: [],
+    };
+  }
+  const clampRatio = Number.isFinite(ratio) ? Math.min(Math.max(ratio, 0.1), 0.9) : 0.8;
+  const splitIndex = Math.min(n - 1, Math.max(1, Math.floor(n * clampRatio)));
+  return {
+    Xtr: Z.slice(0, splitIndex),
+    ytr: y.slice(0, splitIndex),
+    idxTr: idxMap.slice(0, splitIndex),
+    Xte: Z.slice(splitIndex),
+    yte: y.slice(splitIndex),
+    idxTe: idxMap.slice(splitIndex),
+  };
+}
+
+function buildAnn(inputDim) {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
+  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.compile({ optimizer: tf.train.sgd(0.01), loss: 'meanSquaredError', metrics: ['accuracy'] });
+  return model;
+}
+
+async function trainAndEval(Xtr, ytr, Xte, yte, onProgress, epochs = 60, batchSize = 32) {
+  const trainX = tf.tensor2d(Xtr);
+  const trainY = tf.tensor2d(ytr, [ytr.length, 1]);
+  const valX = tf.tensor2d(Xte);
+  const model = buildAnn(Xtr[0].length);
+
+  await model.fit(trainX, trainY, {
+    epochs,
+    batchSize,
+    verbose: 0,
+    callbacks: {
+      onEpochEnd: (epoch) => {
+        if (typeof onProgress === 'function') {
+          onProgress((epoch + 1) / epochs);
+        }
+      },
+    },
+  });
+
+  const preds = model.predict(valX);
+  const predArray = Array.from(await preds.data()).map((v) => (v >= 0.5 ? 1 : 0));
+  const acc = predArray.filter((v, i) => v === yte[i]).length / yte.length;
+
+  let TP = 0;
+  let TN = 0;
+  let FP = 0;
+  let FN = 0;
+  for (let i = 0; i < predArray.length; i += 1) {
+    if (yte[i] === 1 && predArray[i] === 1) TP += 1;
+    else if (yte[i] === 0 && predArray[i] === 0) TN += 1;
+    else if (yte[i] === 0 && predArray[i] === 1) FP += 1;
+    else if (yte[i] === 1 && predArray[i] === 0) FN += 1;
+  }
+
+  tf.dispose([trainX, trainY, valX, preds]);
+  model.dispose();
+
+  return { acc, confusion: { TP, TN, FP, FN }, predLabels: predArray };
+}
+
+function estimateKelly(rows, idxTe, predLabels) {
+  const ups = [];
+  const dns = [];
+  for (let i = 0; i < idxTe.length; i += 1) {
+    const idx = idxTe[i];
+    if (!Number.isInteger(idx)) continue;
+    const baseClose = pickNumericValue(rows[idx], ['close', 'adjustedClose', 'adjClose', 'rawClose', 'baseClose'], null);
+    const nextClose = pickNumericValue(rows[idx + 1], ['close', 'adjustedClose', 'adjClose', 'rawClose', 'baseClose'], null);
+    if (!Number.isFinite(baseClose) || !Number.isFinite(nextClose) || baseClose === 0) continue;
+    const ret = (nextClose - baseClose) / baseClose;
+    if (predLabels[i] === 1) {
+      if (ret > 0) ups.push(ret);
+      else dns.push(Math.abs(ret));
+    }
+  }
+  const total = ups.length + dns.length;
+  const p = total > 0 ? ups.length / total : 0.5;
+  const avgUp = ups.length > 0 ? ups.reduce((a, b) => a + b, 0) / ups.length : 0;
+  const avgDn = dns.length > 0 ? dns.reduce((a, b) => a + b, 0) / dns.length : 0;
+  const b = avgDn > 0 ? (avgUp / avgDn) : 1;
+  const q = 1 - p;
+  const k = Math.max(0, (b * p - q) / (b || 1));
+  return { p, b, k };
+}
 
 function differenceInDays(laterDate, earlierDate) {
   if (!(laterDate instanceof Date) || Number.isNaN(laterDate.getTime())) return null;
@@ -9340,6 +9650,56 @@ self.onmessage = async function (e) {
     effectiveStartDate ||
     params?.startDate;
   try {
+    if (type === 'ANN_RUN') {
+      if (typeof tf === 'undefined') {
+        throw new Error('TensorFlow.js 尚未載入，無法訓練 ANN。');
+      }
+      const annPayload = e.data?.payload || {};
+      const rows = Array.isArray(annPayload.rows) ? annPayload.rows : [];
+      const options = annPayload.options || {};
+      if (!Array.isArray(rows) || rows.length < 60) {
+        throw new Error('資料不足（至少 60 根 K 線）');
+      }
+      const { X, y, idxMap } = buildFeaturesFromOHLC(rows);
+      if (!Array.isArray(X) || X.length < 60) {
+        throw new Error('有效樣本不足，請增加資料區間。');
+      }
+      const { Z } = standardize(X);
+      const split = splitTrainTest(Z, y, idxMap, options.trainRatio || 0.8);
+      if (split.Xtr.length === 0 || split.ytr.length === 0) {
+        throw new Error('訓練樣本不足，請確認資料筆數。');
+      }
+      if (split.Xte.length === 0 || split.yte.length === 0) {
+        throw new Error('測試樣本不足，請增加歷史資料。');
+      }
+      const epochs = Number.isFinite(options.epochs) ? Math.max(1, Math.floor(options.epochs)) : 60;
+      const batchSize = Number.isFinite(options.batchSize) ? Math.max(4, Math.floor(options.batchSize)) : 32;
+
+      self.postMessage({ type: 'ANN_PROGRESS', payload: { progress: 0 } });
+      const { acc, confusion, predLabels } = await trainAndEval(
+        split.Xtr,
+        split.ytr,
+        split.Xte,
+        split.yte,
+        (progress) => {
+          self.postMessage({ type: 'ANN_PROGRESS', payload: { progress } });
+        },
+        epochs,
+        batchSize,
+      );
+      const kellyInfo = estimateKelly(rows, split.idxTe, predLabels);
+      self.postMessage({
+        type: 'ANN_DONE',
+        payload: {
+          acc,
+          confusion,
+          kelly: Number.isFinite(kellyInfo?.k) ? kellyInfo.k : 0,
+          details: { p: kellyInfo?.p ?? null, b: kellyInfo?.b ?? null },
+        },
+      });
+      return;
+    }
+
     if (type === "runBacktest") {
       let dataToUse = null;
       let fetched = false;
@@ -10255,6 +10615,11 @@ self.onmessage = async function (e) {
       self.postMessage({
         type: "suggestionError",
         data: { message: `計算建議時發生錯誤: ${error.message || "未知錯誤"}` },
+      });
+    } else if (type === 'ANN_RUN') {
+      self.postMessage({
+        type: 'ANN_ERROR',
+        payload: { message: error?.message || '未知錯誤' },
       });
     } else {
       self.postMessage({
