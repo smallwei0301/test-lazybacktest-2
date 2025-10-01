@@ -2068,14 +2068,22 @@
                                 <div class="space-y-6">
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
-                                            <h3 class="card-title text-base">LSTM 深度學習預測設定</h3>
-                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                依據 Fischer &amp; Krauss (2018)、Sirignano &amp; Cont (2019) 與 Chen et al. (2024) 對金融時間序列的研究設計，採用長短期記憶網路（LSTM）分析收盤價方向。
-                                                資料以 2:1 的比例劃分為訓練與測試集，僅根據當前收盤價之前的資訊進行預測。
+                                            <h3 class="card-title text-base">AI 預測模型設定</h3>
+                                            <p id="ai-model-description" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                依據 Fischer &amp; Krauss (2018)、Sirignano &amp; Cont (2019) 與 Chen et al. (2024) 的時間序列研究設計，預設採用長短期記憶網路（LSTM）分析收盤價方向，亦可切換為多層感知器（ANNS）搭配技術指標特徵進行預測。
+                                                資料預設以 8:2 的比例劃分為訓練與測試集，僅根據可觀察資訊推估隔日走勢。
                                             </p>
                                         </div>
                                         <div class="card-content space-y-6">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    預測模型
+                                                    <select id="ai-model" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                        <option value="lstm">LSTM 長短期記憶網路</option>
+                                                        <option value="anns">ANNS 技術指標多層感知器</option>
+                                                    </select>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">兩種模型皆支援種子儲存、勝率門檻與凱利公式設定。</span>
+                                                </label>
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                     時間視窗（lookback，日）
                                                     <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
@@ -2090,6 +2098,16 @@
                                                     批次大小（batch size）
                                                     <input id="ai-batch-size" type="number" min="8" max="256" step="8" value="64" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">批次需小於訓練樣本數，以保留梯度穩定性。</span>
+                                                </label>
+                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    訓練／測試切分
+                                                    <select id="ai-train-ratio" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                        <option value="0.7">70% / 30%</option>
+                                                        <option value="0.75">75% / 25%</option>
+                                                        <option value="0.8" selected>80% / 20%</option>
+                                                        <option value="0.85">85% / 15%</option>
+                                                    </select>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">訓練樣本不足時可降低比例，確保測試集仍保留樣本。</span>
                                                 </label>
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                     學習率
@@ -2114,7 +2132,7 @@
                                             <div class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
                                                 <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
                                                     <span id="ai-dataset-summary">尚未取得資料，請先完成一次主回測。</span>
-                                                    <span class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground);">訓練：測試 = 2 : 1</span>
+                                                    <span id="ai-train-ratio-badge" class="px-2 py-1 rounded" style="background-color: color-mix(in srgb, var(--secondary) 16%, transparent); color: var(--secondary-foreground);">訓練：測試 ≈ 80% : 20%</span>
                                                 </div>
                                             </div>
                                             <div class="flex flex-wrap items-center gap-3">
@@ -2278,7 +2296,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
     <script src="js/main.js"></script>
