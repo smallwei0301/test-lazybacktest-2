@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-AI-ANNS-20251121A
 
 // 全局變量
 let stockChart = null;
@@ -20,6 +21,15 @@ const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
 window.cachedDataStore = cachedDataStore;
+if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, 'cachedStockData')) {
+    Object.defineProperty(window, 'cachedStockData', {
+        configurable: true,
+        get: () => cachedStockData,
+        set: (value) => {
+            cachedStockData = value;
+        },
+    });
+}
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
 let sortState = { key: 'annualizedReturn', direction: 'desc' };
@@ -2682,10 +2692,142 @@ function initRollingTestFeature() {
     }
 }
 
+const annUIState = {
+    initialized: false,
+    workerBound: false,
+};
+
+function ensureAnnWorker() {
+    if (typeof window === 'undefined') return null;
+    if (window.lbWorker && typeof window.lbWorker.postMessage === 'function') {
+        return window.lbWorker;
+    }
+    if (typeof Worker === 'undefined') {
+        console.error('[Main] 當前環境不支援 Web Worker，無法啟用 ANN 模型。');
+        return null;
+    }
+    const url = typeof workerUrl === 'string' && workerUrl ? workerUrl : 'js/worker.js';
+    try {
+        window.lbWorker = new Worker(url);
+        return window.lbWorker;
+    } catch (err) {
+        console.error('建立 worker 失敗：', err);
+        return null;
+    }
+}
+
+function initAnnPredictionUI() {
+    if (annUIState.initialized || typeof document === 'undefined') {
+        return;
+    }
+    const btn = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resCard = document.getElementById('ann-result');
+    const accEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const cmEl = document.getElementById('ann-cm');
+    const advEl = document.getElementById('ann-adv');
+    if (!btn || !statusEl || !resCard || !accEl || !kellyEl || !cmEl || !advEl) {
+        return;
+    }
+
+    const worker = ensureAnnWorker();
+    if (!worker) {
+        statusEl.textContent = '無法建立 ANN Worker，請檢查瀏覽器支援。';
+        return;
+    }
+
+    if (!annUIState.workerBound) {
+        worker.addEventListener('message', (e) => {
+            const msg = e.data || {};
+            if (msg.type === 'ANN_PROGRESS') {
+                const progress = Number.isFinite(msg?.payload?.progress)
+                    ? Math.max(0, Math.min(1, msg.payload.progress))
+                    : 0;
+                statusEl.textContent = `訓練中… ${(progress * 100).toFixed(0)}%`;
+            } else if (msg.type === 'ANN_DONE') {
+                const { acc, confusion = {}, kelly } = msg.payload || {};
+                const accValue = Number.isFinite(acc) ? acc : 0;
+                const kellyValue = Number.isFinite(kelly) ? kelly : 0;
+                accEl.textContent = `測試集準確率：${(accValue * 100).toFixed(2)}%`;
+                if (Number.isFinite(kelly)) {
+                    kellyEl.textContent = `凱利資金比率（估算）：${(kellyValue * 100).toFixed(2)}%`;
+                } else {
+                    kellyEl.textContent = '凱利資金比率（估算）：—';
+                }
+                const tp = confusion.TP ?? 0;
+                const tn = confusion.TN ?? 0;
+                const fp = confusion.FP ?? 0;
+                const fn = confusion.FN ?? 0;
+                cmEl.innerHTML = `
+                    <div>TP（預測漲且漲）：${tp}</div>
+                    <div>TN（預測跌且跌）：${tn}</div>
+                    <div>FP（預測漲實際跌）：${fp}</div>
+                    <div>FN（預測跌實際漲）：${fn}</div>
+                `;
+                if (accValue > 0.5 && Number.isFinite(kellyValue) && kellyValue > 0) {
+                    advEl.textContent = `依據 ANN 預測，建議做多部位 ≈ ${(kellyValue * 100).toFixed(1)}%（可與你的建議模組比對）`;
+                } else {
+                    advEl.textContent = '暫不具優勢，建議觀望或降低部位。';
+                }
+                resCard.classList.remove('hidden');
+                statusEl.textContent = '完成';
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else if (msg.type === 'ANN_ERROR') {
+                const message = msg?.payload?.message || '未知錯誤';
+                statusEl.textContent = `執行失敗：${message}`;
+                console.error('ANN_ERROR:', msg.payload);
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        });
+        annUIState.workerBound = true;
+    }
+
+    btn.addEventListener('click', () => {
+        try {
+            const rows = typeof window !== 'undefined' ? window.cachedStockData : cachedStockData;
+            if (!Array.isArray(rows) || rows.length < 60) {
+                statusEl.textContent = '需要先跑一次回測或加長日期區間，至少 60 根 K 線。';
+                return;
+            }
+            resCard.classList.add('hidden');
+            accEl.textContent = '';
+            kellyEl.textContent = '';
+            cmEl.innerHTML = '';
+            advEl.textContent = '';
+            statusEl.textContent = '準備資料…';
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            worker.postMessage({
+                type: 'ANN_RUN',
+                payload: {
+                    rows,
+                    options: {
+                        trainRatio: 0.8,
+                        epochs: 60,
+                        batchSize: 32,
+                    },
+                },
+            });
+
+            statusEl.textContent = '訓練中…';
+        } catch (err) {
+            statusEl.textContent = `送交 worker 失敗：${err.message}`;
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    });
+
+    annUIState.initialized = true;
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
         // 初始化日期
         initDates();
@@ -2718,6 +2860,8 @@ document.addEventListener('DOMContentLoaded', function() {
             initBatchOptimizationFeature();
             initRollingTestFeature();
         }, 100);
+
+        initAnnPredictionUI();
 
         console.log('[Main] Initialization completed');
     } catch (error) {
