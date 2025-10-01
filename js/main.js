@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-ANNS-20251118A
 
 // 全局變量
 let stockChart = null;
@@ -20,6 +21,16 @@ const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
 window.cachedDataStore = cachedDataStore;
+
+Object.defineProperty(window, 'cachedStockData', {
+    get() {
+        return cachedStockData;
+    },
+    set(value) {
+        cachedStockData = value;
+    },
+    configurable: true,
+});
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
 let sortState = { key: 'annualizedReturn', direction: 'desc' };
@@ -2681,6 +2692,80 @@ function initRollingTestFeature() {
         initHandler();
     }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('run-ann');
+    const statusEl = document.getElementById('ann-status');
+    const resCard = document.getElementById('ann-result');
+    const accEl = document.getElementById('ann-acc');
+    const kellyEl = document.getElementById('ann-kelly');
+    const cmEl = document.getElementById('ann-cm');
+    const advEl = document.getElementById('ann-adv');
+
+    if (!btn) {
+        return;
+    }
+
+    btn.addEventListener('click', async () => {
+        try {
+            if (statusEl) {
+                statusEl.textContent = '訓練中（約 2~5 秒，視資料長度而定）…';
+            }
+            if (resCard) {
+                resCard.classList.add('hidden');
+            }
+
+            const dataRows = Array.isArray(window.cachedStockData) ? window.cachedStockData : null;
+            if (!dataRows || dataRows.length < 60) {
+                if (statusEl) {
+                    statusEl.textContent = '需要先執行回測或擴大日期區間，以建立足夠的快取資料。';
+                }
+                return;
+            }
+
+            if (!window.LB_ANN || typeof window.LB_ANN.runANNPredictionWithCached !== 'function') {
+                if (statusEl) {
+                    statusEl.textContent = 'ANNS 模型尚未載入，請重新整理頁面後再試。';
+                }
+                return;
+            }
+
+            const { acc, confusion, kelly } = await window.LB_ANN.runANNPredictionWithCached(dataRows);
+
+            if (accEl) {
+                accEl.textContent = `測試集準確率：${(acc * 100).toFixed(2)}%`;
+            }
+            if (kellyEl) {
+                kellyEl.textContent = `凱利資金比率（示意）：${(kelly * 100).toFixed(2)}%`;
+            }
+            if (cmEl) {
+                cmEl.innerHTML = [
+                    `TP（預測漲且漲）：${confusion.TP}`,
+                    `TN（預測跌且跌）：${confusion.TN}`,
+                    `FP（預測漲實際跌）：${confusion.FP}`,
+                    `FN（預測跌實際漲）：${confusion.FN}`,
+                ].map((text) => `<div>${text}</div>`).join('');
+            }
+            if (advEl) {
+                advEl.textContent = acc > 0.5 && kelly > 0
+                    ? `依據 ANN 預測，建議做多部位 ≈ ${(kelly * 100).toFixed(1)}%（可再與今日建議模組比對）`
+                    : '不具備優勢，建議觀望或持平。';
+            }
+
+            if (resCard) {
+                resCard.classList.remove('hidden');
+            }
+            if (statusEl) {
+                statusEl.textContent = '完成';
+            }
+        } catch (err) {
+            console.error(err);
+            if (statusEl) {
+                statusEl.textContent = `執行失敗：${err?.message || '未知錯誤'}`;
+            }
+        }
+    });
+});
 
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
