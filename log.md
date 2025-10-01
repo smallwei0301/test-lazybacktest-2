@@ -751,6 +751,12 @@
 - **Diagnostics**: 於本地重新載入執行卡確認容器僅包含 `<img>` 並維持透明背景，網路攔截測試時會顯示 `⌛` fallback 並記錄在 console，確保使用者仍感知進度。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-20 — Patch LB-AI-UX-20251220A
+- **Issue recap**: ANNS 仍非預設模型，隔日預測顯示僅呈現最後資料日期，種子管理缺乏刪除功能，資金控管設定與勝率門檻分散且進階超參數無法收合，使用者難以快速完成常見操作。
+- **Fix**: 將 AI 模型預設切換為 ANNS，新增可折疊的訓練/測試切分與超參數面板並保留指引文字，調整資金控管卡片至勝率門檻卡片下方，同時為種子列表補上刪除按鈕與新版預設命名。Worker 與前端同步改寫隔日預測邏輯，固定顯示資料最後一日之下一個交易日（跳過週末）。
+- **Diagnostics**: 手動切換模型確認預設為 ANNS，展開/收起進階設定確認內容正確；儲存後可刪除種子並重新整理列表，隔日預測在週五資料下正確標示週一日期且狀態列說明基準日與預測日。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-27 — Patch LB-PROGRESS-MASCOT-20251127A
 - **Issue recap**: Tenor v2 API 偶發失敗時進度吉祥物立即落入沙漏 fallback，無法持續顯示 Hachiware 動畫且缺乏自動重試與備援來源。
 - **Fix**: 擴增 `initLoadingMascotSanitiser`，先以 Tenor v2 重試三次、再回退至舊版 API，並預載多組 GIF 直接連結或必要時重新掛載官方嵌入，同時保持透明背景與禁用分享連結。
@@ -774,6 +780,42 @@
 - **Fix**: 新增 `assets/mascot/hachiware-dance-fallback.svg` 作為本地可離線的 Chiikawa/Hachiware 動畫，並將 Sanitiser 更新為版本碼 `LB-PROGRESS-MASCOT-20251205A`：先載入本地 SVG，若 Tenor API 403 即停止重試並回退；同時標記 `data-lb-mascot-source` 以利診斷。
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-08 — Patch LB-AI-ANN-20260108A
+- **Issue recap**: 未載入種子直接啟動 ANNS 預測時，TensorFlow.js 在序列化權重時讀取不到 `dtype` 屬性導致背景訓練中止，UI 顯示「Cannot read properties of undefined (reading 'dtype')」。
+- **Fix**: 於 Worker 端補上訓練/測試樣本數與批次大小防呆，改以命名權重映射序列化並在缺少 dtype 時提前丟出可讀訊息，同時在回放階段檢查舊版種子規格是否遺漏 dtype。版本代碼更新為 `LB-AI-ANN-20260108A`。
+- **Diagnostics**: 本地執行 ANNS 訓練確認可正常完成、產出權重快照並更新預測列表，舊版缺漏 dtype 的種子會以提示要求重新訓練，不再拋出未捕捉錯誤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-05 — Patch LB-AI-ANN-20260105A
+- **Issue recap**: ANNS 擴充 MACD Signal/Hist 後，舊版種子載入時 `tf.io.decodeWeights` 取得的權重順序與現行模型不符，導致 `model.setWeights` 嘗試讀取 `undefined.dtype` 而終止。
+- **Fix**: 在 ANN 回放流程比對儲存權重規格與當前模型權重數量、Shape，若不相容即釋放資源並提示使用者重新訓練；同時更新前端版本碼以利追蹤。
+- **Diagnostics**: 以舊版種子測試確認改為顯示「權重不相容」提示且不再丟出例外，新訓練的種子則可順利回放並重現預測。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-30 — Patch LB-AI-ANN-20251230B
+- **Issue recap**: 已儲存的 ANNS 種子在隔日載入時無法判斷 UI 價格表是否已含最新交易日，導致每次皆需補抓資料或忽略表格現有資料；回放後也未集中管理權重與標準化快照，難以確保預測值重現。
+- **Fix**: 新增表格快照檢查，若已含當日交易資料則直接以表格資料與 ANN 權重回放，否則才向 API 補抓缺口天數；回放流程統一透過 `runAnnReplayWithRows` 套用儲存的權重、標準化統計與訓練窗格，確保歷史預測機率一致。
+- **Diagnostics**: 本地載入含差距的 ANN 種子時，可看到狀態列先提示使用表格或補抓資料，再次回放後隔日預測與交易表皆與儲存時相同；若資料不足或 API 無新資料，會顯示對應提示而不覆蓋原結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-22 — Patch LB-AI-SEED-20251222A
+- **Issue recap**: AI 種子載入後僅復原門檻與風險參數，交易統計、隔日預測與訓練指標需重新跑模型才會一致；預設命名仍顯示「測試勝率」，與近期文件用語不符。
+- **Fix**: 種子儲存時一併快照訓練指標、交易紀錄與隔日預測，載入時立即套用並確保同模型重算結果與儲存時一致；同步調整預設命名與說明文案為「測試期預測正確率／交易報酬率」。
+- **Diagnostics**: 本地載入既有種子可即時還原交易表與勝率摘要，再次調整門檻時與儲存當下的結果保持一致；名稱預設值與 placeholder 文字更新為新版術語。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-16 — Patch LB-AI-HYBRID-20251212B
+- **Issue recap**: 勝率門檻掃描完成後僅提示交易報酬% 中位數，缺乏平均報酬與交易次數資訊；AI 種子預設名稱仍沿用訓練/測試正確率，與目前交易重點不符。
+- **Fix**: 最佳化結果訊息改為同步呈現中位數、平均報酬% 與交易次數，協助使用者快速掌握門檻效果；種子預設名稱改寫為測試勝率、交易報酬中位數、平均報酬與交易次數，確保儲存時即標示核心績效。版本碼更新為 `LB-AI-HYBRID-20251212B`。
+- **Diagnostics**: 執行最佳化確認狀態列顯示新增指標，儲存種子時預設名稱自動帶入最新勝率與報酬統計，重載後仍維持新格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-15 — Patch LB-AI-ANNS-20251215A
+- **Issue recap**: ANNS 模型仍採 Adam + binaryCrossentropy，且輸入僅含 MACD Diff，與 Chen et al. (2024) 研究設定不符。
+- **Fix**: 將 `annBuildModel` 調整為 SGD（學習率 0.01）搭配 MSE，並把資料特徵擴充至 Diff/Signal/Hist 共 12 欄，同步更新標準化與預測輸入。
+- **Diagnostics**: 透過背景訓練流程確認 ANN 任務可正常輸出進度、測試評估與隔日預測，未發現特徵長度錯配或 Shape 錯誤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2025-12-07 — Patch LB-PROGRESS-MASCOT-20251207A
 - **Issue recap**: 實際回測時吉祥物仍顯示成 SVG 或沙漏，追查為 Tenor 貼圖 ID 與 fallback 清單未對應到使用者指定的 Hachiware 動畫，導致 Sanitiser 成功後仍回填錯誤素材。

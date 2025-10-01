@@ -57,6 +57,27 @@ const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
 
+// Patch Tag: LB-AI-UX-20251220A — Align forecast labeling with next trading day expectations.
+function computeNextTradingDate(dateText) {
+  if (typeof dateText !== 'string' || !dateText) return null;
+  const parts = dateText.split('-');
+  if (parts.length !== 3) return null;
+  const [yearText, monthText, dayText] = parts;
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const day = Number.parseInt(dayText, 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  do {
+    date.setUTCDate(date.getUTCDate() + 1);
+  } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  const nextYear = date.getUTCFullYear();
+  const nextMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(date.getUTCDate()).padStart(2, '0');
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
 function aiPostProgress(id, message) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-lstm-progress', id, message });
@@ -235,6 +256,9 @@ async function handleAITrainLSTMMessage(message) {
       const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
       const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
 
+      const datasetLastDate = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+        ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
+        : null;
       let nextDayForecast = null;
       if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
         const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
@@ -243,11 +267,11 @@ async function handleAITrainLSTMMessage(message) {
           const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
           const forecastTensor = model.predict(forecastInput);
           const forecastArray = Array.from(await forecastTensor.data());
+          const referenceDate = datasetLastDate ? computeNextTradingDate(datasetLastDate) || datasetLastDate : null;
           nextDayForecast = {
             probability: forecastArray[0],
-            referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
-              ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
-              : null,
+            referenceDate,
+            basisDate: datasetLastDate,
           };
           forecastTensor.dispose();
           forecastInput.dispose();
@@ -268,9 +292,7 @@ async function handleAITrainLSTMMessage(message) {
         returns: testReturns,
         trainingOdds,
         forecast: nextDayForecast,
-        datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
-          ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
-          : null,
+        datasetLastDate,
         hyperparameters: {
           lookback,
           epochs,
@@ -312,6 +334,17 @@ function annPostError(id, error) {
 function annPostResult(id, data) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-ann-result', id, data });
+}
+
+function annPostReplayResult(id, data) {
+  if (!id) return;
+  self.postMessage({ type: 'ai-replay-ann-result', id, data });
+}
+
+function annPostReplayError(id, error) {
+  if (!id) return;
+  const message = error instanceof Error ? error.message : String(error || 'AI Worker 回放失敗');
+  self.postMessage({ type: 'ai-replay-ann-error', id, error: { message } });
 }
 
 function annClampTrainRatio(value) {
@@ -590,6 +623,7 @@ function annPrepareDataset(rows) {
   const returns = [];
   let forecastFeature = null;
   let forecastDate = null;
+  let forecastBasisDate = null;
 
   for (let i = 0; i < parsed.length; i += 1) {
     const features = [
@@ -601,12 +635,17 @@ function annPrepareDataset(rows) {
       kd.d[i],
       rsi[i],
       mac.diff[i],
+      mac.signal[i],
+      mac.hist[i],
       cci[i],
       wr[i],
     ];
     if (features.every((value) => Number.isFinite(value))) {
+      const candidateBasis = parsed[i].date;
+      const candidateReference = candidateBasis ? computeNextTradingDate(candidateBasis) || candidateBasis : null;
       forecastFeature = features.map(Number);
-      forecastDate = parsed[i].date;
+      forecastBasisDate = candidateBasis;
+      forecastDate = candidateReference;
     }
     if (i >= parsed.length - 1) {
       continue;
@@ -636,7 +675,14 @@ function annPrepareDataset(rows) {
     returns,
     forecastFeature,
     forecastDate,
+    forecastBasisDate,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
+    datasetRows: parsed.map((item) => ({
+      date: item.date,
+      close: item.close,
+      high: item.high,
+      low: item.low,
+    })),
   };
 }
 
@@ -669,6 +715,14 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
+function annStandardizeWithStats(X, mean, std) {
+  if (!Array.isArray(X) || X.length === 0) return [];
+  if (!Array.isArray(mean) || !Array.isArray(std)) return [];
+  const cols = Array.isArray(X[0]) ? X[0].length : 0;
+  if (mean.length !== cols || std.length !== cols) return [];
+  return X.map((row) => row.map((value, index) => (value - mean[index]) / (std[index] || 1)));
+}
+
 function annSplitTrainTest(Z, y, meta, returns, ratio) {
   const total = Z.length;
   const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
@@ -683,13 +737,50 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
   };
 }
 
-function annBuildModel(inputDim, learningRate = 0.005) {
+function annArrayBufferToBase64(buffer) {
+  if (!(buffer instanceof ArrayBuffer)) return '';
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let result = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    result += String.fromCharCode.apply(null, chunk);
+  }
+  if (typeof btoa === 'function') {
+    return btoa(result);
+  }
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(result, 'binary').toString('base64');
+  }
+  return '';
+}
+
+function annBase64ToArrayBuffer(base64) {
+  if (typeof base64 !== 'string' || !base64) return null;
+  let binary = '';
+  if (typeof atob === 'function') {
+    binary = atob(base64);
+  } else if (typeof Buffer !== 'undefined') {
+    const buf = Buffer.from(base64, 'base64');
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  }
+  if (!binary) return null;
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
+function annBuildModel(inputDim, learningRate = 0.01) {
   const model = tf.sequential();
   model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
   model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
   model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
-  const optimizer = tf.train.adam(learningRate);
-  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  const optimizer = tf.train.sgd(learningRate);
+  model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
 }
 
@@ -718,14 +809,14 @@ async function handleAITrainANNMessage(message) {
     const trainRatio = annClampTrainRatio(options.trainRatio);
     const { Z, mean, std } = annStandardize(prepared.X);
     const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
-    if (split.Xte.length === 0) {
+    if (split.Xte.length === 0 || split.Xtr.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
     const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
-    const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
-    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.005;
+    const batchSize = Math.max(1, Math.min(batchSizeRaw, split.Xtr.length));
+    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate);
     const xTrain = tf.tensor2d(split.Xtr);
@@ -774,6 +865,32 @@ async function handleAITrainANNMessage(message) {
 
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
 
+      const rawWeights = model.getWeights();
+      if (!Array.isArray(rawWeights) || rawWeights.length === 0) {
+        throw new Error('ANN 權重生成失敗，請重新執行預測。');
+      }
+      const namedWeights = {};
+      rawWeights.forEach((tensor, index) => {
+        if (!tensor || typeof tensor.dtype !== 'string') {
+          throw new Error('ANN 權重生成失敗，請重新執行預測。');
+        }
+        const baseName = typeof tensor.name === 'string' && tensor.name ? tensor.name : `weight_${index}`;
+        const name = namedWeights[baseName] ? `${baseName}_${index}` : baseName;
+        namedWeights[name] = tensor;
+      });
+
+      const encodedWeights = await tf.io.encodeWeights(namedWeights);
+      const weightSnapshot = {
+        specs: Array.isArray(encodedWeights.specs) ? encodedWeights.specs : [],
+        data: annArrayBufferToBase64(encodedWeights.data),
+      };
+
+      rawWeights.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+
       let forecast = null;
       if (Array.isArray(prepared.forecastFeature)) {
         const standardisedForecast = annStandardizeVector(prepared.forecastFeature, mean, std);
@@ -781,9 +898,15 @@ async function handleAITrainANNMessage(message) {
           const forecastTensor = tf.tensor2d([standardisedForecast]);
           const forecastOutput = model.predict(forecastTensor);
           const forecastArray = Array.from(await forecastOutput.data());
+          const basisDate = prepared.forecastBasisDate || prepared.datasetLastDate || null;
+          const referenceDate = prepared.forecastDate
+            || (basisDate ? computeNextTradingDate(basisDate) || basisDate : null)
+            || prepared.datasetLastDate
+            || null;
           forecast = {
             probability: forecastArray[0],
-            referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
+            referenceDate,
+            basisDate,
           };
           forecastOutput.dispose();
           forecastTensor.dispose();
@@ -805,6 +928,16 @@ async function handleAITrainANNMessage(message) {
         trainingOdds,
         forecast,
         datasetLastDate: prepared.datasetLastDate,
+        datasetRows: Array.isArray(prepared.datasetRows) ? prepared.datasetRows : [],
+        standardization: {
+          mean: Array.isArray(mean) ? mean : [],
+          std: Array.isArray(std) ? std : [],
+        },
+        trainWindow: {
+          trainCount: split.trainCount,
+          totalCount: Z.length,
+        },
+        weightSnapshot,
         hyperparameters: {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,
@@ -828,6 +961,263 @@ async function handleAITrainANNMessage(message) {
     }
   } catch (error) {
     annPostError(id, error);
+  }
+}
+
+async function handleAIReplayANNMessage(message) {
+  const id = message?.id;
+  if (!id) {
+    return;
+  }
+  const payload = message?.payload || {};
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const baseSnapshot = payload.baseSnapshot && typeof payload.baseSnapshot === 'object'
+    ? payload.baseSnapshot
+    : {};
+  const weightSnapshot = payload.weightSnapshot || baseSnapshot.weightSnapshot || null;
+  const standardization = payload.standardization || baseSnapshot.standardization || null;
+  const trainWindow = payload.trainWindow || baseSnapshot.trainWindow || null;
+  const hyperparameters = payload.hyperparameters || baseSnapshot.hyperparameters || {};
+  const baseTrainingMetrics = payload.trainingMetrics || baseSnapshot.trainingMetrics || null;
+  const providedTrainingOdds = Number.isFinite(payload.trainingOdds)
+    ? payload.trainingOdds
+    : Number.isFinite(baseSnapshot.trainingOdds)
+      ? baseSnapshot.trainingOdds
+      : NaN;
+
+  try {
+    if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
+      throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (!Array.isArray(rows) || rows.length < 60) {
+      throw new Error('資料不足（至少 60 根 K 線）');
+    }
+    if (!weightSnapshot || typeof weightSnapshot.data !== 'string' || !Array.isArray(weightSnapshot.specs)) {
+      throw new Error('缺少模型權重快照，無法回放預測。');
+    }
+
+    const prepared = annPrepareDataset(rows);
+    if (!Array.isArray(prepared.X) || prepared.X.length === 0) {
+      throw new Error('資料不足以重建特徵，請延長資料範圍。');
+    }
+
+    const featureLength = Array.isArray(prepared.X[0]) ? prepared.X[0].length : 0;
+    const candidateMean = Array.isArray(standardization?.mean)
+      ? standardization.mean.map((value) => Number(value))
+      : null;
+    const candidateStd = Array.isArray(standardization?.std)
+      ? standardization.std.map((value) => Number(value))
+      : null;
+    const hasStoredStats = Array.isArray(candidateMean)
+      && Array.isArray(candidateStd)
+      && candidateMean.length === featureLength
+      && candidateStd.length === featureLength
+      && candidateStd.every((value) => Number.isFinite(value));
+
+    let mean;
+    let std;
+    let Z;
+    if (hasStoredStats) {
+      mean = candidateMean.map((value) => Number.isFinite(value) ? value : 0);
+      std = candidateStd.map((value) => (Number.isFinite(value) && Math.abs(value) > 1e-12 ? value : 1));
+      Z = annStandardizeWithStats(prepared.X, mean, std);
+    } else {
+      const stats = annStandardize(prepared.X);
+      mean = stats.mean;
+      std = stats.std;
+      Z = stats.Z;
+    }
+
+    if (!Array.isArray(Z) || Z.length === 0) {
+      throw new Error('標準化資料集為空，無法回放預測。');
+    }
+
+    const totalCount = Z.length;
+    const ratioCandidate = Number.isFinite(hyperparameters.trainRatio)
+      ? hyperparameters.trainRatio
+      : Number.isFinite(payload.trainRatio)
+        ? payload.trainRatio
+        : ANN_TRAIN_RATIO_DEFAULT;
+    const ratio = annClampTrainRatio(ratioCandidate);
+    let trainCount = Number.isFinite(trainWindow?.trainCount)
+      ? Math.round(trainWindow.trainCount)
+      : Math.floor(totalCount * ratio);
+    trainCount = Math.min(Math.max(trainCount, 1), totalCount - 1);
+
+    const Xte = Z.slice(trainCount);
+    const yte = prepared.y.slice(trainCount);
+    if (Xte.length === 0) {
+      throw new Error('測試樣本不足，無法回放預測。');
+    }
+
+    const specsAreValid = Array.isArray(weightSnapshot.specs)
+      && weightSnapshot.specs.length > 0
+      && weightSnapshot.specs.every((spec) => spec && typeof spec.dtype === 'string');
+    if (!specsAreValid) {
+      throw new Error('儲存的 ANN 權重描述缺少 dtype 資訊，請重新訓練並更新種子。');
+    }
+
+    const weightBuffer = annBase64ToArrayBuffer(weightSnapshot.data);
+    if (!(weightBuffer instanceof ArrayBuffer)) {
+      throw new Error('無法解析模型權重資料。');
+    }
+
+    // Patch Tag: LB-AI-ANN-20260105A — Guard ANN replay from incompatible weight specs post-architecture updates.
+    const model = annBuildModel(
+      Xte[0].length,
+      Number.isFinite(hyperparameters.learningRate) ? hyperparameters.learningRate : 0.01,
+    );
+    const weightMap = await tf.io.decodeWeights(weightBuffer, weightSnapshot.specs);
+    const referenceWeights = model.getWeights();
+    const expectedCount = referenceWeights.length;
+
+    let orderedWeights = [];
+    const missingSpecs = [];
+    if (Array.isArray(weightSnapshot.specs) && weightSnapshot.specs.length > 0) {
+      orderedWeights = weightSnapshot.specs.map((spec) => {
+        const tensor = weightMap[spec.name];
+        if (!tensor) {
+          missingSpecs.push(spec.name);
+        }
+        return tensor;
+      });
+    } else {
+      orderedWeights = Object.values(weightMap);
+    }
+
+    let shapeMismatch = false;
+    if (orderedWeights.length === expectedCount) {
+      for (let i = 0; i < expectedCount; i += 1) {
+        const expectedShape = Array.isArray(referenceWeights[i]?.shape) ? referenceWeights[i].shape : [];
+        const candidate = orderedWeights[i];
+        const candidateShape = Array.isArray(candidate?.shape) ? candidate.shape : [];
+        if (
+          !candidate
+          || expectedShape.length !== candidateShape.length
+          || expectedShape.some((dim, index) => candidateShape[index] !== dim)
+        ) {
+          shapeMismatch = true;
+          break;
+        }
+      }
+    }
+    referenceWeights.forEach((tensor) => {
+      if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+    });
+
+    if (missingSpecs.length > 0 || orderedWeights.length !== expectedCount || shapeMismatch) {
+      Object.values(weightMap).forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+      });
+      throw new Error('儲存的 ANN 權重與目前的模型結構不相容，請重新訓練並更新種子。');
+    }
+
+    try {
+      model.setWeights(orderedWeights);
+    } catch (setError) {
+      Object.values(weightMap).forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+      });
+      const reason = setError instanceof Error ? setError.message : String(setError || '未知原因');
+      throw new Error(`載入 ANN 權重失敗：${reason}`);
+    }
+
+    Object.values(weightMap).forEach((tensor) => {
+      if (tensor && typeof tensor.dispose === 'function') tensor.dispose();
+    });
+
+    const xTest = tf.tensor2d(Xte);
+    const yTest = tf.tensor2d(yte, [yte.length, 1]);
+    const tensorsToDispose = [xTest, yTest];
+    try {
+      const evalOutput = model.evaluate(xTest, yTest);
+      const evalArray = Array.isArray(evalOutput) ? evalOutput : [evalOutput];
+      const evalValues = [];
+      for (let i = 0; i < evalArray.length; i += 1) {
+        const tensor = evalArray[i];
+        const data = await tensor.data();
+        evalValues.push(data[0]);
+        tensor.dispose();
+      }
+      const testLoss = evalValues[0] ?? NaN;
+      const testAccuracy = evalValues[1] ?? NaN;
+
+      const predictionsTensor = model.predict(xTest);
+      const predictionValues = Array.from(await predictionsTensor.data());
+      predictionsTensor.dispose();
+
+      let forecast = null;
+      if (Array.isArray(prepared.forecastFeature)) {
+        const standardisedForecast = annStandardizeVector(prepared.forecastFeature, mean, std);
+        if (Array.isArray(standardisedForecast)) {
+          const forecastTensor = tf.tensor2d([standardisedForecast]);
+          const forecastOutput = model.predict(forecastTensor);
+          const forecastArray = Array.from(await forecastOutput.data());
+          const basisDate = prepared.forecastBasisDate || prepared.datasetLastDate || null;
+          const referenceDate = prepared.forecastDate
+            || (basisDate ? computeNextTradingDate(basisDate) || basisDate : null)
+            || prepared.datasetLastDate
+            || null;
+          forecast = {
+            probability: forecastArray[0],
+            referenceDate,
+            basisDate,
+          };
+          forecastOutput.dispose();
+          forecastTensor.dispose();
+        }
+      }
+
+      const trainingOdds = Number.isFinite(providedTrainingOdds)
+        ? providedTrainingOdds
+        : aiComputeTrainingOdds(prepared.returns, trainCount);
+
+      const predictionsPayload = {
+        predictions: predictionValues,
+        meta: prepared.meta.slice(trainCount),
+        returns: prepared.returns.slice(trainCount),
+        trainingOdds,
+        forecast,
+        datasetLastDate: prepared.datasetLastDate,
+        datasetRows: Array.isArray(prepared.datasetRows) ? prepared.datasetRows : [],
+        standardization: {
+          mean,
+          std,
+        },
+        trainWindow: {
+          trainCount,
+          totalCount,
+        },
+        weightSnapshot,
+        hyperparameters: hyperparameters ? { ...hyperparameters } : null,
+      };
+
+      const trainingMetrics = baseTrainingMetrics
+        ? { ...baseTrainingMetrics, totalPredictions: predictionValues.length }
+        : {
+            trainAccuracy: NaN,
+            trainLoss: NaN,
+            testAccuracy,
+            testLoss,
+            totalPredictions: predictionValues.length,
+          };
+      trainingMetrics.testAccuracy = testAccuracy;
+      trainingMetrics.testLoss = testLoss;
+      trainingMetrics.totalPredictions = predictionValues.length;
+
+      const finalMessage = `回放完成：測試正確率 ${(Number.isFinite(testAccuracy) ? (testAccuracy * 100).toFixed(2) : '—')}%。`;
+
+      annPostReplayResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+      model.dispose();
+    } finally {
+      tensorsToDispose.forEach((tensor) => {
+        if (tensor && typeof tensor.dispose === 'function') {
+          tensor.dispose();
+        }
+      });
+    }
+  } catch (error) {
+    annPostReplayError(id, error);
   }
 }
 
@@ -10056,6 +10446,10 @@ self.onmessage = async function (e) {
   const { type } = e.data || {};
   if (type === 'ai-train-ann') {
     await handleAITrainANNMessage(e.data);
+    return;
+  }
+  if (type === 'ai-replay-ann') {
+    await handleAIReplayANNMessage(e.data);
     return;
   }
   if (type === 'ai-train-lstm') {

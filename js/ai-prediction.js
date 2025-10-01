@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-HYBRID-20251212A
+// Patch Tag: LB-AI-ANN-20260108A — Stabilise ANN training weight snapshots and replay validation.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20251212A';
+    const VERSION_TAG = 'LB-AI-ANN-20260108A';
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
         LSTM: 'lstm',
@@ -12,6 +12,7 @@
         [MODEL_TYPES.LSTM]: 'LSTM 長短期記憶網路',
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
+    const DEFAULT_MODEL = MODEL_TYPES.ANNS;
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
     const createModelState = () => ({
         lastSummary: null,
@@ -33,17 +34,15 @@
     });
     const globalState = {
         running: false,
-        activeModel: MODEL_TYPES.LSTM,
+        activeModel: DEFAULT_MODEL,
         models: {
             [MODEL_TYPES.LSTM]: createModelState(),
             [MODEL_TYPES.ANNS]: createModelState(),
         },
     };
     const getModelState = (model) => {
-        if (!model || !globalState.models[model]) {
-            return globalState.models[MODEL_TYPES.LSTM];
-        }
-        return globalState.models[model];
+        const resolved = model && globalState.models[model] ? model : DEFAULT_MODEL;
+        return globalState.models[resolved];
     };
     const getActiveModelState = () => getModelState(globalState.activeModel);
 
@@ -81,6 +80,7 @@
         saveSeedButton: null,
         savedSeedList: null,
         loadSeedButton: null,
+        deleteSeedButton: null,
     };
 
     const colorMap = {
@@ -109,8 +109,92 @@
                     if (!seed || typeof seed !== 'object') return null;
                     const normalizedModel = Object.values(MODEL_TYPES).includes(seed.modelType)
                         ? seed.modelType
-                        : MODEL_TYPES.LSTM;
-                    return { ...seed, modelType: normalizedModel };
+                        : DEFAULT_MODEL;
+                    const normalizedSummary = seed.summary && typeof seed.summary === 'object'
+                        ? {
+                            threshold: Number.isFinite(seed.summary.threshold) ? seed.summary.threshold : 0.5,
+                            usingKelly: Boolean(seed.summary.usingKelly),
+                            fixedFraction: Number.isFinite(seed.summary.fixedFraction)
+                                ? sanitizeFraction(seed.summary.fixedFraction)
+                                : sanitizeFraction(0.2),
+                        }
+                        : {
+                            threshold: 0.5,
+                            usingKelly: false,
+                            fixedFraction: sanitizeFraction(0.2),
+                        };
+                    const normalizedPayload = seed.payload && typeof seed.payload === 'object'
+                        ? {
+                            predictions: Array.isArray(seed.payload.predictions) ? seed.payload.predictions : [],
+                            meta: Array.isArray(seed.payload.meta) ? seed.payload.meta : [],
+                            returns: Array.isArray(seed.payload.returns) ? seed.payload.returns : [],
+                            trainingOdds: Number.isFinite(seed.payload.trainingOdds) ? seed.payload.trainingOdds : NaN,
+                            forecast: normalizeSeedForecast(seed.payload.forecast),
+                            datasetLastDate: typeof seed.payload.datasetLastDate === 'string'
+                                ? seed.payload.datasetLastDate
+                                : null,
+                            hyperparameters: seed.payload.hyperparameters || null,
+                            datasetRows: normalizeAnnDatasetRows(seed.payload.datasetRows),
+                            standardization: seed.payload.standardization && typeof seed.payload.standardization === 'object'
+                                ? {
+                                    mean: Array.isArray(seed.payload.standardization.mean)
+                                        ? seed.payload.standardization.mean
+                                            .map((value) => Number(value))
+                                            .filter((value) => Number.isFinite(value))
+                                        : [],
+                                    std: Array.isArray(seed.payload.standardization.std)
+                                        ? seed.payload.standardization.std
+                                            .map((value) => Number(value))
+                                            .filter((value) => Number.isFinite(value))
+                                        : [],
+                                }
+                                : { mean: [], std: [] },
+                            trainWindow: seed.payload.trainWindow && typeof seed.payload.trainWindow === 'object'
+                                ? {
+                                    trainCount: Number.isFinite(seed.payload.trainWindow.trainCount)
+                                        ? Math.max(1, Math.floor(seed.payload.trainWindow.trainCount))
+                                        : null,
+                                    totalCount: Number.isFinite(seed.payload.trainWindow.totalCount)
+                                        ? Math.max(0, Math.floor(seed.payload.trainWindow.totalCount))
+                                        : null,
+                                }
+                                : { trainCount: null, totalCount: null },
+                            weightSnapshot: seed.payload.weightSnapshot && typeof seed.payload.weightSnapshot === 'object'
+                                && typeof seed.payload.weightSnapshot.data === 'string'
+                                ? {
+                                    data: seed.payload.weightSnapshot.data,
+                                    specs: Array.isArray(seed.payload.weightSnapshot.specs)
+                                        ? seed.payload.weightSnapshot.specs
+                                        : [],
+                                }
+                                : null,
+                        }
+                        : {
+                            predictions: [],
+                            meta: [],
+                            returns: [],
+                            trainingOdds: NaN,
+                            forecast: null,
+                            datasetLastDate: null,
+                            hyperparameters: null,
+                            datasetRows: [],
+                            standardization: { mean: [], std: [] },
+                            trainWindow: { trainCount: null, totalCount: null },
+                            weightSnapshot: null,
+                        };
+                    const evaluation = seed.evaluation && typeof seed.evaluation === 'object'
+                        ? {
+                            summary: normalizeSeedSummary(seed.evaluation.summary),
+                            trades: normalizeSeedTrades(seed.evaluation.trades),
+                        }
+                        : { summary: null, trades: [] };
+                    return {
+                        ...seed,
+                        modelType: normalizedModel,
+                        summary: normalizedSummary,
+                        payload: normalizedPayload,
+                        evaluation,
+                    };
                 })
                 .filter(Boolean);
         } catch (error) {
@@ -148,6 +232,323 @@
         return value.toFixed(digits);
     };
 
+    const getTaipeiTodayIso = () => {
+        try {
+            const formatter = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Taipei',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+            });
+            return formatter.format(new Date());
+        } catch (error) {
+            const now = new Date();
+            const offset = now.getTimezoneOffset();
+            const taipeiOffsetMinutes = -480;
+            const diffMs = (taipeiOffsetMinutes - offset) * 60 * 1000;
+            const taipeiTime = new Date(now.getTime() + diffMs);
+            const year = taipeiTime.getUTCFullYear();
+            const month = String(taipeiTime.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(taipeiTime.getUTCDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+    };
+
+    const formatRocDateToIso = (value) => {
+        if (typeof value !== 'string' || !value) return null;
+        const trimmed = value.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+        const rocMatch = trimmed.match(/^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/);
+        if (!rocMatch) return null;
+        const [, rocYearStr, monthStr, dayStr] = rocMatch;
+        const year = Number.parseInt(rocYearStr, 10) + 1911;
+        const month = String(Number.parseInt(monthStr, 10)).padStart(2, '0');
+        const day = String(Number.parseInt(dayStr, 10)).padStart(2, '0');
+        if (!Number.isFinite(year)) return null;
+        return `${year}-${month}-${day}`;
+    };
+
+    const parseNumericText = (value) => {
+        if (value === null || value === undefined) return NaN;
+        const text = typeof value === 'string' ? value.replace(/,/g, '') : String(value);
+        const num = Number(text);
+        return Number.isFinite(num) ? num : NaN;
+    };
+
+    const getLastFetchSettings = () => {
+        const bridge = ensureBridge();
+        if (!bridge || typeof bridge.getLastFetchSettings !== 'function') return null;
+        try {
+            const settings = bridge.getLastFetchSettings();
+            if (!settings || typeof settings !== 'object') return null;
+            return { ...settings };
+        } catch (error) {
+            console.warn('[AI Prediction] 讀取最近抓取設定失敗：', error);
+            return null;
+        }
+    };
+
+    const resolveAnnContext = () => {
+        const settings = getLastFetchSettings();
+        if (!settings) return null;
+        const stockNo = typeof settings.stockNo === 'string' && settings.stockNo ? settings.stockNo : null;
+        const market = typeof settings.market === 'string' && settings.market ? settings.market.toUpperCase() : null;
+        if (!stockNo || !market) return null;
+        return {
+            stockNo,
+            market,
+            adjusted: Boolean(settings.adjustedPrice),
+            startDate: typeof settings.dataStartDate === 'string' ? settings.dataStartDate : null,
+        };
+    };
+
+    const normalizeAnnDatasetRows = (rows) => {
+        if (!Array.isArray(rows)) return [];
+        return rows
+            .map((row) => {
+                if (!row || typeof row !== 'object') return null;
+                const date = typeof row.date === 'string' ? row.date : null;
+                const close = Number(row.close);
+                const high = Number(row.high);
+                const low = Number(row.low);
+                if (!date || !Number.isFinite(close) || !Number.isFinite(high) || !Number.isFinite(low)) return null;
+                return { date, close, high, low };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.date.localeCompare(b.date));
+    };
+
+    const mergeAnnDatasetRows = (baseRows, newRows) => {
+        const merged = new Map();
+        normalizeAnnDatasetRows(baseRows).forEach((row) => {
+            merged.set(row.date, row);
+        });
+        normalizeAnnDatasetRows(newRows).forEach((row) => {
+            merged.set(row.date, row);
+        });
+        return Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date));
+    };
+
+    const getLastDateFromRows = (rows) => {
+        const normalised = normalizeAnnDatasetRows(rows);
+        if (normalised.length === 0) return null;
+        return normalised[normalised.length - 1].date;
+    };
+
+    const createAnnReplayBaseSnapshot = (payload, modelState) => ({
+        weightSnapshot: payload.weightSnapshot,
+        standardization: payload.standardization,
+        trainWindow: payload.trainWindow,
+        hyperparameters: payload.hyperparameters,
+        trainingMetrics: modelState.trainingMetrics,
+        trainingOdds: Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : modelState.odds,
+    });
+
+    const runAnnReplayWithRows = async ({
+        rows,
+        payload,
+        modelState,
+        baseSnapshot,
+        previousPredictions,
+        successMessage,
+    }) => {
+        if (!Array.isArray(rows) || rows.length < 60) {
+            throw new Error('資料不足，請延長資料範圍後再回放 ANN 種子。');
+        }
+        const workerResult = await sendAIWorkerTrainingTask('ai-replay-ann', {
+            rows,
+            baseSnapshot,
+            hyperparameters: payload.hyperparameters,
+            trainingMetrics: modelState.trainingMetrics,
+            trainingOdds: Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : modelState.odds,
+        }, { modelType: MODEL_TYPES.ANNS });
+        const predictionsPayload = workerResult?.predictionsPayload;
+        if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
+            throw new Error('AI Worker 未回傳有效的回放結果。');
+        }
+        if (!predictionsPayload.weightSnapshot && payload.weightSnapshot) {
+            predictionsPayload.weightSnapshot = payload.weightSnapshot;
+        }
+        if (!predictionsPayload.standardization) {
+            predictionsPayload.standardization = payload.standardization;
+        }
+        if (!predictionsPayload.trainWindow) {
+            predictionsPayload.trainWindow = payload.trainWindow;
+        }
+        if (!Number.isFinite(predictionsPayload.trainingOdds) && Number.isFinite(payload.trainingOdds)) {
+            predictionsPayload.trainingOdds = payload.trainingOdds;
+        }
+        predictionsPayload.hyperparameters = payload.hyperparameters ? { ...payload.hyperparameters } : null;
+        predictionsPayload.datasetRows = normalizeAnnDatasetRows(rows);
+        const metrics = workerResult?.trainingMetrics || modelState.trainingMetrics;
+        if (metrics && typeof metrics === 'object') {
+            modelState.trainingMetrics = metrics;
+        }
+        if (Array.isArray(previousPredictions) && previousPredictions.length > 0) {
+            const mismatchIndex = previousPredictions.findIndex((value, index) => {
+                const replayValue = predictionsPayload.predictions[index];
+                if (!Number.isFinite(value) || !Number.isFinite(replayValue)) return false;
+                return Math.abs(value - replayValue) > 1e-4;
+            });
+            if (mismatchIndex >= 0) {
+                console.warn('[AI Prediction] ANN 回放結果與儲存種子略有差異，索引：', mismatchIndex);
+            }
+        }
+        modelState.predictionsPayload = predictionsPayload;
+        applyTradeEvaluation(MODEL_TYPES.ANNS, predictionsPayload, metrics, {
+            threshold: modelState.winThreshold,
+            useKelly: modelState.kellyEnabled,
+            fixedFraction: modelState.fixedFraction,
+        });
+        if (successMessage) {
+            showStatus(successMessage, 'success');
+        }
+    };
+
+    const convertAaDataRowToDataset = (item) => {
+        if (!Array.isArray(item)) return null;
+        const iso = formatRocDateToIso(item[0]);
+        if (!iso) return null;
+        const open = parseNumericText(item[3]);
+        const high = parseNumericText(item[4]);
+        const low = parseNumericText(item[5]);
+        const close = parseNumericText(item[6]);
+        if (!Number.isFinite(close) || !Number.isFinite(high) || !Number.isFinite(low)) return null;
+        return {
+            date: iso,
+            open,
+            high,
+            low,
+            close,
+        };
+    };
+
+    const fetchAnnGapRows = async (context, startDate, endDate, lastKnownRow) => {
+        if (!context || !context.stockNo || !context.market) return [];
+        if (!startDate || !endDate || startDate >= endDate) return [];
+        const params = new URLSearchParams({
+            stockNo: context.stockNo,
+            marketType: context.market,
+            startDate,
+            endDate,
+        });
+        const url = `/.netlify/functions/stock-range?${params.toString()}`;
+        try {
+            const response = await fetch(url, { headers: { Accept: 'application/json' } });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            const aaData = Array.isArray(payload?.aaData) ? payload.aaData : [];
+            if (aaData.length === 0) return [];
+            const converted = aaData.map(convertAaDataRowToDataset).filter(Boolean);
+            if (converted.length === 0) return [];
+            let scale = 1;
+            if (context.adjusted && lastKnownRow && typeof lastKnownRow.date === 'string') {
+                const overlap = converted.find((row) => row.date === lastKnownRow.date);
+                if (overlap && Number.isFinite(overlap.close) && overlap.close > 0 && Number.isFinite(lastKnownRow.close)) {
+                    scale = lastKnownRow.close / overlap.close;
+                }
+            }
+            const scaled = converted.map((row) => ({
+                date: row.date,
+                close: Number.isFinite(row.close) ? row.close * scale : NaN,
+                high: Number.isFinite(row.high) ? row.high * scale : NaN,
+                low: Number.isFinite(row.low) ? row.low * scale : NaN,
+            }));
+            return normalizeAnnDatasetRows(scaled).filter((row) => row.date > startDate);
+        } catch (error) {
+            console.warn('[AI Prediction] 補抓 ANN 差距資料失敗：', error);
+            return [];
+        }
+    };
+
+    const cloneSeedValue = (value) => {
+        if (value === null || typeof value !== 'object') return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                // 瀏覽器若不支援 structuredClone，改用 JSON 備援。
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法複製種子快照：', error);
+            return value;
+        }
+    };
+
+    const normalizeSeedForecast = (forecast) => {
+        if (!forecast || typeof forecast !== 'object') return null;
+        const normalized = {};
+        const probability = Number(forecast.probability);
+        if (Number.isFinite(probability)) {
+            normalized.probability = Math.min(Math.max(probability, 0), 1);
+        }
+        const fractionValue = Number(forecast.fraction);
+        if (Number.isFinite(fractionValue)) {
+            normalized.fraction = Math.min(Math.max(fractionValue, 0), 1);
+        }
+        if (typeof forecast.basisDate === 'string' && forecast.basisDate) {
+            normalized.basisDate = forecast.basisDate;
+        }
+        if (typeof forecast.referenceDate === 'string' && forecast.referenceDate) {
+            normalized.referenceDate = forecast.referenceDate;
+        }
+        if (typeof forecast.displayDate === 'string' && forecast.displayDate) {
+            normalized.displayDate = forecast.displayDate;
+        }
+        return Object.keys(normalized).length > 0 ? normalized : null;
+    };
+
+    const normalizeSeedSummary = (summary) => {
+        if (!summary || typeof summary !== 'object') return null;
+        const normalized = {
+            version: typeof summary.version === 'string' ? summary.version : VERSION_TAG,
+            trainAccuracy: Number.isFinite(summary.trainAccuracy) ? summary.trainAccuracy : NaN,
+            trainLoss: Number.isFinite(summary.trainLoss) ? summary.trainLoss : NaN,
+            testAccuracy: Number.isFinite(summary.testAccuracy) ? summary.testAccuracy : NaN,
+            testLoss: Number.isFinite(summary.testLoss) ? summary.testLoss : NaN,
+            totalPredictions: Number.isFinite(summary.totalPredictions) ? summary.totalPredictions : 0,
+            executedTrades: Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0,
+            hitRate: Number.isFinite(summary.hitRate) ? Math.min(Math.max(summary.hitRate, 0), 1) : NaN,
+            tradeReturnMedian: Number.isFinite(summary.tradeReturnMedian) ? summary.tradeReturnMedian : NaN,
+            tradeReturnAverage: Number.isFinite(summary.tradeReturnAverage) ? summary.tradeReturnAverage : NaN,
+            tradeReturnStdDev: Number.isFinite(summary.tradeReturnStdDev) ? summary.tradeReturnStdDev : NaN,
+            usingKelly: Boolean(summary.usingKelly),
+            fixedFraction: Number.isFinite(summary.fixedFraction)
+                ? sanitizeFraction(summary.fixedFraction)
+                : sanitizeFraction(0.2),
+            threshold: Number.isFinite(summary.threshold) ? summary.threshold : 0.5,
+            datasetLastDate: typeof summary.datasetLastDate === 'string' ? summary.datasetLastDate : null,
+            forecast: normalizeSeedForecast(summary.forecast),
+        };
+        return normalized;
+    };
+
+    const normalizeSeedTrades = (trades) => {
+        if (!Array.isArray(trades)) return [];
+        return trades
+            .map((trade) => {
+                if (!trade || typeof trade !== 'object') return null;
+                const probability = Number(trade.probability);
+                const actualReturn = Number(trade.actualReturn);
+                const fraction = Number(trade.fraction);
+                const tradeReturn = Number(trade.tradeReturn);
+                return {
+                    tradeDate: typeof trade.tradeDate === 'string' ? trade.tradeDate : null,
+                    probability: Number.isFinite(probability) ? Math.min(Math.max(probability, 0), 1) : NaN,
+                    actualReturn: Number.isFinite(actualReturn) ? actualReturn : NaN,
+                    fraction: Number.isFinite(fraction) ? Math.min(Math.max(fraction, 0), 1) : NaN,
+                    tradeReturn: Number.isFinite(tradeReturn) ? tradeReturn : NaN,
+                    isForecast: Boolean(trade.isForecast),
+                };
+            })
+            .filter(Boolean);
+    };
+
     const computeMedian = (values) => {
         if (!Array.isArray(values) || values.length === 0) return NaN;
         const sorted = [...values].sort((a, b) => a - b);
@@ -170,6 +571,26 @@
         if (!Number.isFinite(base)) return NaN;
         const variance = values.reduce((acc, value) => acc + ((value - base) ** 2), 0) / values.length;
         return Math.sqrt(Math.max(variance, 0));
+    };
+
+    const computeNextTradingDate = (dateText) => {
+        if (typeof dateText !== 'string' || !dateText) return null;
+        const parts = dateText.split('-');
+        if (parts.length !== 3) return null;
+        const [yearText, monthText, dayText] = parts;
+        const year = Number.parseInt(yearText, 10);
+        const month = Number.parseInt(monthText, 10);
+        const day = Number.parseInt(dayText, 10);
+        if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return null;
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (Number.isNaN(date.getTime())) return null;
+        do {
+            date.setUTCDate(date.getUTCDate() + 1);
+        } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+        const nextYear = date.getUTCFullYear();
+        const nextMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const nextDay = String(date.getUTCDate()).padStart(2, '0');
+        return `${nextYear}-${nextMonth}-${nextDay}`;
     };
 
     const sanitizeFraction = (value) => {
@@ -226,9 +647,11 @@
 
     const buildSeedDefaultName = (summary) => {
         if (!summary) return '';
-        const trainText = formatPercent(summary.trainAccuracy, 1);
-        const testText = formatPercent(summary.testAccuracy, 1);
-        return `訓練勝率${trainText}｜測試正確率${testText}`;
+        const hitRateText = formatPercent(summary.hitRate, 1);
+        const medianText = formatPercent(summary.tradeReturnMedian, 1);
+        const averageText = formatPercent(summary.tradeReturnAverage, 1);
+        const executedTrades = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+        return `測試期預測正確率${hitRateText}｜交易報酬率中位數${medianText}｜平均報酬率${averageText}｜交易次數${executedTrades}`;
     };
 
     const applySeedDefaultName = (summary) => {
@@ -281,10 +704,14 @@
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
         const { type, id, data, error, message } = event.data;
-        const isProgress = type === 'ai-train-lstm-progress' || type === 'ai-train-ann-progress';
+        const isProgress = type === 'ai-train-lstm-progress'
+            || type === 'ai-train-ann-progress'
+            || type === 'ai-replay-ann-progress';
         if (isProgress) {
             const pending = id ? aiWorkerRequests.get(id) : null;
-            const fallbackModel = type === 'ai-train-ann-progress' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM;
+            const fallbackModel = (type === 'ai-train-ann-progress' || type === 'ai-replay-ann-progress')
+                ? MODEL_TYPES.ANNS
+                : MODEL_TYPES.LSTM;
             const modelType = pending?.modelType || fallbackModel;
             const label = MODEL_LABELS[modelType] || 'AI 模型';
             if (typeof message === 'string' && message) {
@@ -296,14 +723,17 @@
             return;
         }
         const pending = aiWorkerRequests.get(id);
-        const modelType = pending.modelType || (pending.taskType === 'ai-train-ann' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
-        if (type === 'ai-train-lstm-result' || type === 'ai-train-ann-result') {
+        const inferredModel = pending.taskType === 'ai-train-ann' || pending.taskType === 'ai-replay-ann'
+            ? MODEL_TYPES.ANNS
+            : MODEL_TYPES.LSTM;
+        const modelType = pending.modelType || inferredModel;
+        if (type === 'ai-train-lstm-result' || type === 'ai-train-ann-result' || type === 'ai-replay-ann-result') {
             aiWorkerRequests.delete(id);
             const payload = data || {};
             payload.modelType = modelType;
             payload.taskType = pending.taskType;
             pending.resolve(payload);
-        } else if (type === 'ai-train-lstm-error' || type === 'ai-train-ann-error') {
+        } else if (type === 'ai-train-lstm-error' || type === 'ai-train-ann-error' || type === 'ai-replay-ann-error') {
             aiWorkerRequests.delete(id);
             const reason = error && typeof error.message === 'string'
                 ? new Error(error.message)
@@ -350,7 +780,11 @@
     const sendAIWorkerTrainingTask = (taskType, payload, metadata = {}) => {
         const workerInstance = ensureAIWorker();
         const requestId = `ai-train-${Date.now()}-${aiWorkerSequence += 1}`;
-        const modelType = metadata.modelType || (taskType === 'ai-train-ann' ? MODEL_TYPES.ANNS : MODEL_TYPES.LSTM);
+        let inferredModelType = MODEL_TYPES.LSTM;
+        if (taskType === 'ai-train-ann' || taskType === 'ai-replay-ann') {
+            inferredModelType = MODEL_TYPES.ANNS;
+        }
+        const modelType = metadata.modelType || inferredModelType;
         return new Promise((resolve, reject) => {
             aiWorkerRequests.set(requestId, { resolve, reject, modelType, taskType });
             try {
@@ -503,7 +937,7 @@
             elements.tradeTableBody.innerHTML = forecast && Number.isFinite(forecast.probability)
                 ? `
                     <tr class="bg-muted/30">
-                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.displayDate || forecast.referenceDate || '最近收盤')}
                             <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
@@ -538,9 +972,10 @@
         });
 
         if (forecast && Number.isFinite(forecast.probability)) {
+            const forecastDateLabel = forecast.displayDate || forecast.referenceDate || '最近收盤';
             htmlParts.push(`
                 <tr class="bg-muted/30">
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.referenceDate || '最近收盤')}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecastDateLabel)}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
                     <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.fraction, 2)}</td>
@@ -596,7 +1031,14 @@
             if (!forecast || !Number.isFinite(forecast.probability)) {
                 elements.nextDayForecast.textContent = '尚未計算隔日預測。';
             } else {
-                const baseLabel = forecast.referenceDate ? `以 ${forecast.referenceDate} 收盤為基準` : '以最近一次收盤為基準';
+                const basisDate = forecast.basisDate || summary.datasetLastDate || null;
+                const forecastDate = forecast.displayDate || forecast.referenceDate || null;
+                const baseIntro = basisDate
+                    ? `以 ${basisDate} 收盤為基準，`
+                    : '以最近一次收盤為基準，';
+                const probabilityText = forecastDate
+                    ? `預估 ${forecastDate} 隔日上漲機率為 ${formatPercent(forecast.probability, 1)}`
+                    : `隔日上漲機率為 ${formatPercent(forecast.probability, 1)}`;
                 const meetsThreshold = Number.isFinite(threshold)
                     ? (forecast.probability >= threshold
                         ? '符合當前勝率門檻，可列入隔日進場條件評估。'
@@ -605,7 +1047,7 @@
                 const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
                     ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
                     : '';
-                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
+                elements.nextDayForecast.textContent = `${baseIntro}${probabilityText}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
     };
@@ -696,6 +1138,32 @@
                 ? computeKellyFraction(forecast.probability, trainingOdds)
                 : sanitizeFraction(options.fixedFraction);
             forecast.fraction = forecastFraction;
+            const datasetLastDate = typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null;
+            const existingBasis = typeof forecast.basisDate === 'string' ? forecast.basisDate : null;
+            const basisDate = existingBasis || datasetLastDate || null;
+            const hadBasis = Boolean(existingBasis);
+            if (!hadBasis && basisDate) {
+                forecast.basisDate = basisDate;
+            }
+            const sourceForNext = basisDate || (typeof forecast.referenceDate === 'string' ? forecast.referenceDate : null);
+            const nextDate = sourceForNext ? computeNextTradingDate(sourceForNext) : null;
+            if (nextDate) {
+                forecast.displayDate = nextDate;
+                if (!hadBasis && forecast.referenceDate === basisDate) {
+                    forecast.referenceDate = nextDate;
+                }
+            } else if (typeof forecast.referenceDate === 'string') {
+                const derivedNext = computeNextTradingDate(forecast.referenceDate);
+                if (derivedNext) {
+                    forecast.displayDate = derivedNext;
+                    forecast.referenceDate = derivedNext;
+                } else {
+                    forecast.displayDate = forecast.referenceDate;
+                }
+            }
+            if (!forecast.displayDate && typeof forecast.referenceDate === 'string') {
+                forecast.displayDate = forecast.referenceDate;
+            }
         }
 
         const summary = {
@@ -715,6 +1183,7 @@
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizeFraction(options.fixedFraction),
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            datasetLastDate: typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null,
             forecast,
         };
 
@@ -973,6 +1442,9 @@
         let bestThreshold = modelState.winThreshold || 0.5;
         let bestMedian = Number.NEGATIVE_INFINITY;
         let bestAverage = Number.NEGATIVE_INFINITY;
+        let bestMedianValue = NaN;
+        let bestAverageValue = NaN;
+        let bestExecuted = 0;
         for (let percent = 50; percent <= 100; percent += 1) {
             const threshold = percent / 100;
             const evaluation = computeTradeOutcomes(payload, {
@@ -982,6 +1454,7 @@
             }, trainingOdds);
             const median = evaluation.stats.median;
             const average = evaluation.stats.average;
+            const executed = evaluation.stats.executed;
             const normalizedMedian = Number.isFinite(median) ? median : Number.NEGATIVE_INFINITY;
             const normalizedAverage = Number.isFinite(average) ? average : Number.NEGATIVE_INFINITY;
             if (
@@ -991,6 +1464,9 @@
             ) {
                 bestMedian = normalizedMedian;
                 bestAverage = normalizedAverage;
+                bestMedianValue = Number.isFinite(median) ? median : NaN;
+                bestAverageValue = Number.isFinite(average) ? average : NaN;
+                bestExecuted = Number.isFinite(executed) ? executed : 0;
                 bestThreshold = threshold;
             }
         }
@@ -1002,7 +1478,99 @@
         modelState.winThreshold = bestThreshold;
         parseWinThreshold();
         recomputeTradesFromState(modelType);
-        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${formatPercent(bestMedian, 2)}。`, 'success');
+        const medianText = formatPercent(bestMedianValue, 2);
+        const averageText = formatPercent(bestAverageValue, 2);
+        const executedText = Number.isFinite(bestExecuted) ? bestExecuted : 0;
+        showStatus(`最佳化完成：勝率門檻 ${Math.round(bestThreshold * 100)}% 對應交易報酬% 中位數 ${medianText}，平均報酬% ${averageText}，共執行 ${executedText} 筆交易。`, 'success');
+    };
+
+    const maybeRefreshAnnSeed = async (seed) => {
+        const modelType = MODEL_TYPES.ANNS;
+        const modelState = getModelState(modelType);
+        if (!modelState || !modelState.predictionsPayload) return;
+        if (modelState.refreshingReplay) return;
+        const payload = modelState.predictionsPayload;
+        if (!payload.weightSnapshot || typeof payload.weightSnapshot.data !== 'string') {
+            return;
+        }
+        const storedRows = normalizeAnnDatasetRows(payload.datasetRows);
+        const lastStoredDate = getLastDateFromRows(storedRows) || payload.datasetLastDate;
+        if (!lastStoredDate) {
+            return;
+        }
+        const todayIso = getTaipeiTodayIso();
+        const visibleRaw = getVisibleData();
+        const visibleRows = Array.isArray(visibleRaw)
+            ? visibleRaw.map((row) => ({
+                date: typeof row?.date === 'string' ? row.date : null,
+                close: resolveCloseValue(row),
+                high: Number(row?.high),
+                low: Number(row?.low),
+            }))
+            : [];
+        const tableRows = normalizeAnnDatasetRows(visibleRows);
+        const tableLastDate = getLastDateFromRows(tableRows);
+        const baseSnapshot = createAnnReplayBaseSnapshot(payload, modelState);
+        const previousPredictions = Array.isArray(payload.predictions) ? [...payload.predictions] : [];
+        const mergedWithTable = tableRows.length > 0 ? mergeAnnDatasetRows(storedRows, tableRows) : storedRows;
+        const shouldReplayFromTable = Boolean(todayIso)
+            && Boolean(tableLastDate)
+            && tableLastDate === todayIso
+            && tableLastDate > lastStoredDate
+            && Array.isArray(mergedWithTable)
+            && mergedWithTable.length >= storedRows.length;
+        if (shouldReplayFromTable) {
+            modelState.refreshingReplay = true;
+            try {
+                showStatus('[ANNS 技術指標感知器] 已偵測表格含最新交易資料，正在對齊預測結果...', 'info');
+                await runAnnReplayWithRows({
+                    rows: mergedWithTable,
+                    payload,
+                    modelState,
+                    baseSnapshot,
+                    previousPredictions,
+                    successMessage: '[ANNS 技術指標感知器] 已使用現有表格資料更新隔日預測。',
+                });
+            } catch (error) {
+                console.error('[AI Prediction] ANN 表格回放失敗：', error);
+                showStatus(`ANN 表格回放失敗：${error.message || error}`, 'warning');
+            } finally {
+                delete modelState.refreshingReplay;
+            }
+            return;
+        }
+        if (!todayIso || lastStoredDate >= todayIso) {
+            return;
+        }
+        const context = resolveAnnContext();
+        if (!context) {
+            showStatus('無法辨識最新資料來源，請先重新執行回測後再載入種子。', 'warning');
+            return;
+        }
+        modelState.refreshingReplay = true;
+        try {
+            showStatus('[ANNS 技術指標感知器] 偵測到資料缺口，正在補抓最新交易日...', 'info');
+            const lastRow = storedRows.find((row) => row.date === lastStoredDate) || null;
+            const gapRows = await fetchAnnGapRows(context, lastStoredDate, todayIso, lastRow);
+            if (!Array.isArray(gapRows) || gapRows.length === 0) {
+                showStatus('尚未取得新的交易資料，已維持原預測結果。', 'info');
+                return;
+            }
+            const mergedRows = mergeAnnDatasetRows(storedRows, gapRows);
+            await runAnnReplayWithRows({
+                rows: mergedRows,
+                payload,
+                modelState,
+                baseSnapshot,
+                previousPredictions,
+                successMessage: '[ANNS 技術指標感知器] 已補齊最新資料並更新隔日預測。',
+            });
+        } catch (error) {
+            console.error('[AI Prediction] ANN 種子回放失敗：', error);
+            showStatus(`ANN 種子回放失敗：${error.message || error}`, 'warning');
+        } finally {
+            delete modelState.refreshingReplay;
+        }
     };
 
     const handleSaveSeed = () => {
@@ -1021,25 +1589,63 @@
         const defaultName = buildSeedDefaultName(summary) || '未命名種子';
         const inputName = elements.seedName?.value?.trim();
         const seedName = inputName || defaultName;
+        const payloadSource = modelState.predictionsPayload || {};
+        const payloadSnapshot = {
+            predictions: Array.isArray(payloadSource.predictions) ? cloneSeedValue(payloadSource.predictions) : [],
+            meta: Array.isArray(payloadSource.meta) ? cloneSeedValue(payloadSource.meta) : [],
+            returns: Array.isArray(payloadSource.returns) ? cloneSeedValue(payloadSource.returns) : [],
+            trainingOdds: payloadSource.trainingOdds,
+            forecast: cloneSeedValue(payloadSource.forecast),
+            datasetLastDate: payloadSource.datasetLastDate,
+            hyperparameters: payloadSource.hyperparameters ? { ...payloadSource.hyperparameters } : null,
+            datasetRows: Array.isArray(payloadSource.datasetRows) ? cloneSeedValue(payloadSource.datasetRows) : [],
+            standardization: payloadSource.standardization && typeof payloadSource.standardization === 'object'
+                ? {
+                    mean: Array.isArray(payloadSource.standardization.mean)
+                        ? cloneSeedValue(payloadSource.standardization.mean)
+                        : [],
+                    std: Array.isArray(payloadSource.standardization.std)
+                        ? cloneSeedValue(payloadSource.standardization.std)
+                        : [],
+                }
+                : { mean: [], std: [] },
+            trainWindow: payloadSource.trainWindow && typeof payloadSource.trainWindow === 'object'
+                ? {
+                    trainCount: payloadSource.trainWindow.trainCount,
+                    totalCount: payloadSource.trainWindow.totalCount,
+                }
+                : { trainCount: null, totalCount: null },
+            weightSnapshot: payloadSource.weightSnapshot && typeof payloadSource.weightSnapshot === 'object'
+                ? {
+                    data: payloadSource.weightSnapshot.data,
+                    specs: Array.isArray(payloadSource.weightSnapshot.specs)
+                        ? cloneSeedValue(payloadSource.weightSnapshot.specs)
+                        : [],
+                }
+                : null,
+        };
+        const summarySnapshot = summary ? cloneSeedValue(summary) : null;
+        const tradesSnapshot = Array.isArray(modelState.currentTrades)
+            ? cloneSeedValue(modelState.currentTrades)
+            : [];
+        const trainingMetricsSnapshot = modelState.trainingMetrics
+            ? cloneSeedValue(modelState.trainingMetrics)
+            : null;
         const newSeed = {
             id: `seed-${Date.now()}`,
             name: seedName,
             createdAt: Date.now(),
             modelType,
-            payload: {
-                predictions: Array.isArray(modelState.predictionsPayload.predictions) ? modelState.predictionsPayload.predictions : [],
-                meta: Array.isArray(modelState.predictionsPayload.meta) ? modelState.predictionsPayload.meta : [],
-                returns: Array.isArray(modelState.predictionsPayload.returns) ? modelState.predictionsPayload.returns : [],
-                trainingOdds: modelState.predictionsPayload.trainingOdds,
-                forecast: modelState.predictionsPayload.forecast,
-                datasetLastDate: modelState.predictionsPayload.datasetLastDate,
-                hyperparameters: modelState.predictionsPayload.hyperparameters,
-            },
-            trainingMetrics: modelState.trainingMetrics,
+            payload: payloadSnapshot,
+            trainingMetrics: trainingMetricsSnapshot,
             summary: {
                 threshold: summary.threshold,
                 usingKelly: summary.usingKelly,
                 fixedFraction: summary.fixedFraction,
+            },
+            evaluation: {
+                summary: summarySnapshot,
+                trades: tradesSnapshot,
             },
             version: VERSION_TAG,
         };
@@ -1053,26 +1659,75 @@
         if (!seed) return;
         const modelType = globalState.activeModel;
         const modelState = getModelState(modelType);
+        const payload = seed.payload || {};
         modelState.predictionsPayload = {
-            predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
-            meta: Array.isArray(seed.payload?.meta) ? seed.payload.meta : [],
-            returns: Array.isArray(seed.payload?.returns) ? seed.payload.returns : [],
-            trainingOdds: seed.payload?.trainingOdds,
-            forecast: seed.payload?.forecast || null,
-            datasetLastDate: seed.payload?.datasetLastDate || null,
-            hyperparameters: seed.payload?.hyperparameters || null,
+            predictions: Array.isArray(payload.predictions) ? cloneSeedValue(payload.predictions) : [],
+            meta: Array.isArray(payload.meta) ? cloneSeedValue(payload.meta) : [],
+            returns: Array.isArray(payload.returns) ? cloneSeedValue(payload.returns) : [],
+            trainingOdds: Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : NaN,
+            forecast: cloneSeedValue(payload.forecast),
+            datasetLastDate: typeof payload.datasetLastDate === 'string' ? payload.datasetLastDate : null,
+            hyperparameters: payload.hyperparameters ? { ...payload.hyperparameters } : null,
+            datasetRows: Array.isArray(payload.datasetRows) ? cloneSeedValue(payload.datasetRows) : [],
+            standardization: payload.standardization && typeof payload.standardization === 'object'
+                ? {
+                    mean: Array.isArray(payload.standardization.mean)
+                        ? cloneSeedValue(payload.standardization.mean)
+                        : [],
+                    std: Array.isArray(payload.standardization.std)
+                        ? cloneSeedValue(payload.standardization.std)
+                        : [],
+                }
+                : { mean: [], std: [] },
+            trainWindow: payload.trainWindow && typeof payload.trainWindow === 'object'
+                ? {
+                    trainCount: Number.isFinite(payload.trainWindow.trainCount)
+                        ? payload.trainWindow.trainCount
+                        : null,
+                    totalCount: Number.isFinite(payload.trainWindow.totalCount)
+                        ? payload.trainWindow.totalCount
+                        : null,
+                }
+                : { trainCount: null, totalCount: null },
+            weightSnapshot: payload.weightSnapshot && typeof payload.weightSnapshot === 'object'
+                ? {
+                    data: payload.weightSnapshot.data,
+                    specs: Array.isArray(payload.weightSnapshot.specs)
+                        ? cloneSeedValue(payload.weightSnapshot.specs)
+                        : [],
+                }
+                : null,
         };
-        const metrics = seed.trainingMetrics || {
-            trainAccuracy: NaN,
-            trainLoss: NaN,
-            testAccuracy: NaN,
-            testLoss: NaN,
-            totalPredictions: Array.isArray(modelState.predictionsPayload.predictions)
-                ? modelState.predictionsPayload.predictions.length
-                : 0,
+        const metricsSource = seed.trainingMetrics || {};
+        const metrics = {
+            trainAccuracy: Number.isFinite(metricsSource.trainAccuracy) ? metricsSource.trainAccuracy : NaN,
+            trainLoss: Number.isFinite(metricsSource.trainLoss) ? metricsSource.trainLoss : NaN,
+            testAccuracy: Number.isFinite(metricsSource.testAccuracy) ? metricsSource.testAccuracy : NaN,
+            testLoss: Number.isFinite(metricsSource.testLoss) ? metricsSource.testLoss : NaN,
+            totalPredictions: Number.isFinite(metricsSource.totalPredictions)
+                ? metricsSource.totalPredictions
+                : (Array.isArray(modelState.predictionsPayload.predictions)
+                    ? modelState.predictionsPayload.predictions.length
+                    : 0),
         };
         modelState.trainingMetrics = metrics;
-        modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
+        const restoredOdds = Number.isFinite(modelState.predictionsPayload.trainingOdds)
+            ? modelState.predictionsPayload.trainingOdds
+            : (Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : NaN);
+        if (Number.isFinite(restoredOdds)) {
+            modelState.odds = restoredOdds;
+        }
+
+        const evaluationSummary = seed.evaluation?.summary ? cloneSeedValue(seed.evaluation.summary) : null;
+        const evaluationTrades = Array.isArray(seed.evaluation?.trades)
+            ? cloneSeedValue(seed.evaluation.trades)
+            : [];
+        modelState.lastSummary = evaluationSummary;
+        modelState.currentTrades = Array.isArray(evaluationTrades) ? evaluationTrades : [];
+
+        if (globalState.activeModel === modelType) {
+            renderActiveModelOutputs();
+        }
 
         const hyper = seed.payload?.hyperparameters || {};
         if (elements.lookback && Number.isFinite(hyper.lookback)) {
@@ -1121,6 +1776,12 @@
         parseWinThreshold();
         recomputeTradesFromState(modelType);
         showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
+        if (modelType === MODEL_TYPES.ANNS) {
+            maybeRefreshAnnSeed(seed).catch((error) => {
+                console.error('[AI Prediction] ANN 種子回放錯誤：', error);
+                showStatus(`ANN 種子回放錯誤：${error.message || error}`, 'warning');
+            });
+        }
     };
 
     const handleLoadSeed = () => {
@@ -1143,6 +1804,33 @@
         activateSeed(latestSeed);
     };
 
+    const handleDeleteSeeds = () => {
+        if (!elements.savedSeedList) return;
+        const seeds = loadStoredSeeds();
+        if (seeds.length === 0) {
+            showStatus('目前沒有儲存的種子可供刪除。', 'warning');
+            return;
+        }
+        const selectedIds = Array.from(elements.savedSeedList.selectedOptions || []).map((option) => option.value);
+        if (selectedIds.length === 0) {
+            showStatus('請先選擇要刪除的種子。', 'warning');
+            return;
+        }
+        const remaining = seeds.filter((seed) => !selectedIds.includes(seed.id));
+        const deletedCount = seeds.length - remaining.length;
+        if (deletedCount <= 0) {
+            showStatus('找不到選取的種子資料，已重新整理列表。', 'error');
+            refreshSeedOptions();
+            return;
+        }
+        persistSeeds(remaining);
+        refreshSeedOptions();
+        if (elements.savedSeedList) {
+            elements.savedSeedList.selectedIndex = -1;
+        }
+        showStatus(`已刪除 ${deletedCount} 筆種子。`, 'success');
+    };
+
     const runPrediction = async () => {
         if (globalState.running) return;
         toggleRunning(true);
@@ -1151,7 +1839,7 @@
             const selectedModel = elements.modelType ? elements.modelType.value : globalState.activeModel;
             const normalizedModel = Object.values(MODEL_TYPES).includes(selectedModel)
                 ? selectedModel
-                : MODEL_TYPES.LSTM;
+                : DEFAULT_MODEL;
 
             if (globalState.activeModel !== normalizedModel) {
                 captureActiveModelSettings();
@@ -1192,7 +1880,7 @@
     const handleModelChange = () => {
         if (!elements.modelType) return;
         const selected = elements.modelType.value;
-        const normalized = Object.values(MODEL_TYPES).includes(selected) ? selected : MODEL_TYPES.LSTM;
+        const normalized = Object.values(MODEL_TYPES).includes(selected) ? selected : DEFAULT_MODEL;
         if (globalState.activeModel === normalized) {
             applyModelSettingsToUI(getActiveModelState());
             renderActiveModelOutputs();
@@ -1239,6 +1927,7 @@
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
         elements.loadSeedButton = document.getElementById('ai-load-seed');
+        elements.deleteSeedButton = document.getElementById('ai-delete-seed');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -1298,6 +1987,12 @@
         if (elements.loadSeedButton) {
             elements.loadSeedButton.addEventListener('click', () => {
                 handleLoadSeed();
+            });
+        }
+
+        if (elements.deleteSeedButton) {
+            elements.deleteSeedButton.addEventListener('click', () => {
+                handleDeleteSeeds();
             });
         }
 

@@ -2080,57 +2080,57 @@
                                                     模型類型
                                                     <select id="ai-model-type" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
                                                         <option value="lstm">LSTM 長短期記憶網路</option>
-                                                        <option value="anns">ANNS 技術指標感知器</option>
+                                                        <option value="anns" selected>ANNS 技術指標感知器</option>
                                                     </select>
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">切換後會載入該模型最近的參數與成果。</span>
                                                 </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練 / 測試切分
-                                                    <select id="ai-train-ratio" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
-                                                        <option value="0.8">80% 訓練｜20% 測試（預設）</option>
-                                                        <option value="0.75">75% 訓練｜25% 測試</option>
-                                                        <option value="0.7">70% 訓練｜30% 測試</option>
-                                                        <option value="0.85">85% 訓練｜15% 測試</option>
-                                                    </select>
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">兩種模型皆使用相同切分比例，並可於訓練時調整。</span>
-                                                </label>
                                             </div>
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    時間視窗（lookback，日）
-                                                    <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議 10~30 日，可捕捉月內趨勢。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練輪數（epochs）
-                                                    <input id="ai-epochs" type="number" min="10" max="200" step="10" value="80" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">增加輪數可提高擬合度，但須留意過擬合。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    批次大小（batch size）
-                                                    <input id="ai-batch-size" type="number" min="8" max="256" step="8" value="64" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">批次需小於訓練樣本數，以保留梯度穩定性。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    學習率
-                                                    <input id="ai-learning-rate" type="number" min="0.0001" max="0.05" step="0.0001" value="0.005" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">根據金融序列噪音，建議 0.001~0.01。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-2 text-xs font-medium md:col-span-2 xl:col-span-2" style="color: var(--foreground);">
-                                                    資金控管
-                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
-                                                        <label class="inline-flex items-center gap-2 text-xs">
-                                                            <input id="ai-enable-kelly" type="checkbox" class="rounded border-border text-primary focus:ring-primary" />
-                                                            <span>啟用凱利公式估算投入比例（預設根據訓練期勝率與平均盈虧比）</span>
-                                                        </label>
-                                                        <label class="flex items-center gap-2 text-xs">
-                                                            <span class="min-w-[120px]">固定投入比例</span>
-                                                            <input id="ai-fixed-fraction" type="number" min="0.01" max="1" step="0.01" value="0.2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
-                                                        </label>
-                                                    </div>
-                                                </label>
-                                            </div>
+                                            <details id="ai-hyperparameter-panel" class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
+                                                <summary class="flex flex-col gap-1 text-xs font-semibold cursor-pointer" style="color: var(--foreground);">
+                                                    <span>訓練 / 測試切分與超參數</span>
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預設收合，展開以調整切分比例與進階參數。</span>
+                                                </summary>
+                                                <div class="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                        訓練 / 測試切分
+                                                        <select id="ai-train-ratio" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                            <option value="0.8">80% 訓練｜20% 測試（預設）</option>
+                                                            <option value="0.75">75% 訓練｜25% 測試</option>
+                                                            <option value="0.7">70% 訓練｜30% 測試</option>
+                                                            <option value="0.85">85% 訓練｜15% 測試</option>
+                                                        </select>
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">兩種模型皆使用相同切分比例，並可於訓練時調整。</span>
+                                                    </label>
+                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                        時間視窗（lookback，日）
+                                                        <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議 10~30 日，可捕捉月內趨勢。</span>
+                                                    </label>
+                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                        訓練輪數（epochs）
+                                                        <input id="ai-epochs" type="number" min="10" max="200" step="10" value="80" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">增加輪數可提高擬合度，但須留意過擬合。</span>
+                                                    </label>
+                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                        批次大小（batch size）
+                                                        <input id="ai-batch-size" type="number" min="8" max="256" step="8" value="64" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">批次需小於訓練樣本數，以保留梯度穩定性。</span>
+                                                    </label>
+                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                        學習率
+                                                        <input id="ai-learning-rate" type="number" min="0.0001" max="0.05" step="0.0001" value="0.005" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">根據金融序列噪音，建議 0.001~0.01。</span>
+                                                    </label>
+                                                </div>
+                                                <div class="mt-3 space-y-1 text-[11px]" style="color: var(--muted-foreground);">
+                                                    <p>80% 訓練｜20% 測試（預設）。</p>
+                                                    <p>兩種模型皆使用相同切分比例，並可於訓練時調整。</p>
+                                                    <p>時間視窗（lookback，日）建議 10~30 日，可捕捉月內趨勢。</p>
+                                                    <p>訓練輪數（epochs）80，增加輪數可提高擬合度，但須留意過擬合。</p>
+                                                    <p>批次大小（batch size）64，批次需小於訓練樣本數，以保留梯度穩定性。</p>
+                                                    <p>學習率 0.005，根據金融序列噪音，建議 0.001~0.01。</p>
+                                                </div>
+                                            </details>
                                             <div class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
                                                 <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
                                                     <span id="ai-dataset-summary">尚未取得資料，請先完成一次主回測。</span>
@@ -2143,22 +2143,36 @@
                                                 </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
-                                            <div class="grid gap-4 md:grid-cols-2">
-                                                <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
-                                                    <div class="flex items-center justify-between">
-                                                        <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
-                                                        <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
-                                                            <i data-lucide="gauge" class="lucide-xs"></i>一鍵最佳報酬
-                                                        </button>
+                                            <div class="grid gap-4 xl:grid-cols-2">
+                                                <div class="flex flex-col gap-4">
+                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
+                                                        <div class="flex items-center justify-between">
+                                                            <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
+                                                            <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
+                                                                <i data-lucide="gauge" class="lucide-xs"></i>一鍵最佳報酬
+                                                            </button>
+                                                        </div>
+                                                        <div class="flex items-center gap-2">
+                                                            <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                        </div>
                                                     </div>
-                                                    <div class="flex items-center gap-2">
-                                                        <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                        <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                        <span class="text-xs font-medium" style="color: var(--foreground);">資金控管</span>
+                                                        <label class="inline-flex items-center gap-2 text-xs">
+                                                            <input id="ai-enable-kelly" type="checkbox" class="rounded border-border text-primary focus:ring-primary" />
+                                                            <span>啟用凱利公式估算投入比例（預設根據訓練期勝率與平均盈虧比）</span>
+                                                        </label>
+                                                        <label class="flex items-center gap-2 text-xs">
+                                                            <span class="min-w-[120px]">固定投入比例</span>
+                                                            <input id="ai-fixed-fraction" type="number" min="0.01" max="1" step="0.01" value="0.2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
+                                                        </label>
                                                     </div>
                                                 </div>
                                                 <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
                                                     <span class="text-xs font-medium" style="color: var(--foreground);">種子管理</span>
-                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="訓練勝率XX.X%｜測試正確率YY.Y%" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="測試期預測正確率XX.X%｜交易報酬率中位數YY.Y%｜平均報酬率ZZ.Z%｜交易次數N" style="border-color: var(--border); background-color: var(--input);" />
                                                     <div class="flex flex-wrap gap-2">
                                                         <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors" style="background-color: var(--secondary); color: var(--secondary-foreground);">
                                                             <i data-lucide="save" class="lucide-xs"></i>儲存種子
@@ -2166,9 +2180,12 @@
                                                         <button id="ai-load-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); color: var(--foreground);">
                                                             <i data-lucide="download" class="lucide-xs"></i>載入選取種子
                                                         </button>
+                                                        <button id="ai-delete-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); color: var(--destructive);">
+                                                            <i data-lucide="trash-2" class="lucide-xs"></i>刪除選取種子
+                                                        </button>
                                                     </div>
                                                     <select id="ai-saved-seeds" multiple size="5" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
-                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱依訓練勝率與測試正確率生成，可同時選擇多個種子載入，快速比對不同訓練結果。</span>
+                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱會帶入測試期預測正確率、交易報酬率中位數、平均報酬率與交易次數，可多選載入比較策略成果，刪除僅影響本機儲存。</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -2176,7 +2193,7 @@
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
                                             <h3 class="card-title text-base">模型與交易成果</h3>
-                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試勝率、勝率門檻調整後的交易統計，以及隔日預測的即時摘要。</p>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">展示訓練與測試期預測正確率、勝率門檻調整後的交易統計，以及隔日預測的即時摘要。</p>
                                         </div>
                                         <div class="card-content space-y-4">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4 text-xs" id="ai-metrics-overview" style="color: var(--foreground);">
