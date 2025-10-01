@@ -601,6 +601,8 @@ function annPrepareDataset(rows) {
       kd.d[i],
       rsi[i],
       mac.diff[i],
+      mac.signal[i],
+      mac.hist[i],
       cci[i],
       wr[i],
     ];
@@ -683,13 +685,13 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
   };
 }
 
-function annBuildModel(inputDim, learningRate = 0.005) {
+function annBuildModel(inputDim) {
   const model = tf.sequential();
   model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
   model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
   model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
-  const optimizer = tf.train.adam(learningRate);
-  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  const optimizer = tf.train.sgd(0.01);
+  model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
   return model;
 }
 
@@ -725,9 +727,8 @@ async function handleAITrainANNMessage(message) {
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
     const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
     const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
-    const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.005;
-
-    const model = annBuildModel(split.Xtr[0].length, learningRate);
+    const optimizerLearningRate = 0.01;
+    const model = annBuildModel(split.Xtr[0].length);
     const xTrain = tf.tensor2d(split.Xtr);
     const yTrain = tf.tensor2d(split.ytr, [split.ytr.length, 1]);
     const xTest = tf.tensor2d(split.Xte);
@@ -809,7 +810,7 @@ async function handleAITrainANNMessage(message) {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,
           batchSize,
-          learningRate,
+          learningRate: optimizerLearningRate,
           trainRatio,
           modelType: MODEL_TYPES.ANNS,
         },

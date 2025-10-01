@@ -1,3 +1,8 @@
+## 2025-12-18 — Patch LB-AI-ANN-20251218A
+- **Issue recap**: ANNS 管線仍採用 Adam + Binary Crossentropy 損失，與參考文獻使用的 SGD + MSE 設定不符，且僅輸入 MACD Diff，缺少 Signal 與 Histogram 三軸資訊。
+- **Fix**: 將 `annBuildModel` 更新為固定使用 `tf.train.sgd(0.01)` 與 `meanSquaredError`，並將 ANN 特徵欄位擴充至 MACD Diff/Signal/Hist 共十二項，同步調整標準化流程與超參數回報。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
