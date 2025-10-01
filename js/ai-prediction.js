@@ -13,6 +13,8 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const ANN_META_MESSAGE = 'ANN_META';
+    const ANN_META_STORAGE_KEY = 'LB_ANN_META';
     const createModelState = () => ({
         lastSummary: null,
         odds: 1,
@@ -23,6 +25,7 @@
         winThreshold: 0.5,
         kellyEnabled: false,
         fixedFraction: 0.2,
+        lastRunMeta: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -125,6 +128,21 @@
             window.localStorage.setItem(SEED_STORAGE_KEY, JSON.stringify(seeds));
         } catch (error) {
             console.warn('[AI Prediction] 無法儲存本地種子：', error);
+        }
+    };
+
+    const persistAnnMeta = (meta) => {
+        if (!meta || typeof meta !== 'object') return;
+        const modelState = globalState.models[MODEL_TYPES.ANNS];
+        if (modelState) {
+            modelState.lastRunMeta = { ...meta };
+        }
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+            const payload = { ...meta, savedAt: new Date().toISOString() };
+            window.localStorage.setItem(ANN_META_STORAGE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('[AI Prediction] 無法儲存 ANN 執行資訊：', error);
         }
     };
 
@@ -280,7 +298,13 @@
 
     const handleAIWorkerMessage = (event) => {
         if (!event || !event.data) return;
-        const { type, id, data, error, message } = event.data;
+        const { type, id, data, error, message, payload } = event.data;
+        if (type === ANN_META_MESSAGE) {
+            if (payload && typeof payload === 'object') {
+                persistAnnMeta(payload);
+            }
+            return;
+        }
         const isProgress = type === 'ai-train-lstm-progress' || type === 'ai-train-ann-progress';
         if (isProgress) {
             const pending = id ? aiWorkerRequests.get(id) : null;
@@ -905,28 +929,43 @@
             totalPredictions: 0,
         };
         const predictionsPayload = workerResult?.predictionsPayload || null;
+        const hyperparametersUsed = workerResult?.hyperparametersUsed && typeof workerResult.hyperparametersUsed === 'object'
+            ? workerResult.hyperparametersUsed
+            : null;
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
-        predictionsPayload.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+        const resolvedHyper = {
+            lookback: Number.isFinite(hyperparametersUsed?.lookback) ? hyperparametersUsed.lookback : hyperparameters.lookback,
+            epochs: Number.isFinite(hyperparametersUsed?.epochs) ? hyperparametersUsed.epochs : hyperparameters.epochs,
+            batchSize: Number.isFinite(hyperparametersUsed?.batchSize) ? hyperparametersUsed.batchSize : hyperparameters.batchSize,
+            learningRate: Number.isFinite(hyperparametersUsed?.learningRate) ? hyperparametersUsed.learningRate : hyperparameters.learningRate,
+            trainRatio: Number.isFinite(hyperparametersUsed?.trainRatio) ? hyperparametersUsed.trainRatio : hyperparameters.trainRatio,
             modelType,
+            splitIndex: Number.isFinite(hyperparametersUsed?.splitIndex) ? hyperparametersUsed.splitIndex : (predictionsPayload.hyperparameters?.splitIndex ?? null),
+            threshold: Number.isFinite(hyperparametersUsed?.threshold) ? hyperparametersUsed.threshold : 0.5,
         };
+
+        predictionsPayload.hyperparameters = { ...resolvedHyper };
 
         modelState.hyperparameters = {
-            lookback: hyperparameters.lookback,
-            epochs: hyperparameters.epochs,
-            batchSize: hyperparameters.batchSize,
-            learningRate: hyperparameters.learningRate,
-            trainRatio: hyperparameters.trainRatio,
+            lookback: resolvedHyper.lookback,
+            epochs: resolvedHyper.epochs,
+            batchSize: resolvedHyper.batchSize,
+            learningRate: resolvedHyper.learningRate,
+            trainRatio: resolvedHyper.trainRatio,
         };
 
-        applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, riskOptions);
+        modelState.winThreshold = resolvedHyper.threshold;
+
+        const evaluationOptions = { ...riskOptions, threshold: resolvedHyper.threshold };
+
+        applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, evaluationOptions);
+
+        if (workerResult?.confusion && modelState?.lastSummary) {
+            modelState.lastSummary.confusion = { ...workerResult.confusion };
+        }
 
         const finalMessage = typeof workerResult?.finalMessage === 'string'
             ? workerResult.finalMessage

@@ -775,6 +775,15 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-20 — Patch LB-AI-ANNS-REPRO-20251220A
+- **Issue recap**: ANNS 管線仍存在隨機初始值、批次洗牌與後端不一致等因素，導致相同資料重跑時正確率與混淆矩陣無法 100% 重現，也缺乏標準化參數與切分邊界的保存機制。
+- **Fix**:
+  - 鎖定 TensorFlow.js 4.20.0 WASM 後端並套用 `seedrandom(1337)` 的 Glorot 初始器，ANN 採全批次 SGD（epochs=200、threshold=0.5）且禁止 shuffle；技術指標回到 10 維（SMA30~WilliamsR14）。
+  - 標準化僅使用訓練集均值／標準差，保留切分索引與混淆矩陣結果；每次訓練會儲存模型至 `indexeddb://anns_v1_model` 並透過 `ANN_META` 訊息回傳 mean/std、featureOrder、seed、backend 等重現資訊。
+  - 前端接收 `ANN_META` 後寫入 `localStorage`，訓練成果統一使用 worker 回傳的超參數與閾值，並在狀態列顯示 TP/TN/FP/FN 以利比對。
+- **Diagnostics**: 於同一資料集連續重訓多次，確認測試正確率與混淆矩陣完全一致，localStorage 亦更新最新 mean/std 與切分邊界以供重播。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-15 — Patch LB-AI-ANNS-20251215A
 - **Issue recap**: ANNS 模型仍採 Adam + binaryCrossentropy，且輸入僅含 MACD Diff，與 Chen et al. (2024) 研究設定不符。
 - **Fix**: 將 `annBuildModel` 調整為 SGD（學習率 0.01）搭配 MSE，並把資料特徵擴充至 Diff/Signal/Hist 共 12 欄，同步更新標準化與預測輸入。
