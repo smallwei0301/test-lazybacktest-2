@@ -1,3 +1,12 @@
+## 2025-07-05 — Patch LB-FUGLE-PRIMARY-20250705A
+- **Scope**: 將台股上市、上櫃資料管線改以 Fugle 為主來源並支援指數代碼查詢。
+- **Highlights**:
+  - TWSE/TPEX Netlify 函式新增 Fugle API 解析，保留 TWSE/FinMind/Yahoo 備援並更新資料來源摘要。
+  - Worker 強制來源順序改為優先 Fugle，前端資料來源測試器新增 Fugle 按鈕與說明。
+  - 台股清單快取併入 FinMind 指數資訊，名稱查詢支援台股指數並於 UI 加入指數市場選項。
+  - README 更新 Netlify 環境變數指引，新增 `FUGLE_API_TOKEN` 與指數查詢行為說明。
+- **Testing**: 待瀏覽器回測驗證（本地無前端環境）。
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:

@@ -778,6 +778,7 @@ function getCurrentMarketFromUI() {
 function getMarketLabel(market) {
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
+    if (market === 'INDEX') return '台股指數';
     return '上市 (TWSE)';
 }
 
@@ -876,13 +877,15 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
     }
     if (market === 'TPEX') {
         return [
-            { id: 'finmind', label: 'FinMind 主來源', description: '預設資料來源' },
+            { id: 'fugle', label: 'Fugle 主來源', description: '預設資料來源' },
+            { id: 'finmind', label: 'FinMind 備援', description: 'Fugle 失效時啟用' },
             { id: 'yahoo', label: 'Yahoo 備援', description: 'FinMind 失效時啟用' },
         ];
     }
     return [
-        { id: 'twse', label: 'TWSE 主來源', description: '預設資料來源' },
-        { id: 'finmind', label: 'FinMind 備援', description: 'TWSE 失效時啟用' },
+        { id: 'fugle', label: 'Fugle 主來源', description: '預設資料來源' },
+        { id: 'twse', label: 'TWSE 官網', description: 'Fugle 失效時啟用' },
+        { id: 'finmind', label: 'FinMind 備援', description: '官網失效時啟用' },
     ];
 }
 
@@ -1489,9 +1492,9 @@ function refreshDataSourceTester() {
     } else if (market === 'US') {
         messageLines.push('FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。');
     } else if (market === 'TPEX') {
-        messageLines.push('FinMind 為主來源，上櫃備援由 Yahoo 提供。建議主備來源都測試一次。');
+        messageLines.push('Fugle 為主來源，上櫃備援依序為 FinMind 與 Yahoo。建議主備來源都測試一次。');
     } else {
-        messageLines.push('TWSE 為主來源，FinMind 為備援來源。建議主備來源都測試一次。');
+        messageLines.push('Fugle 為主來源，TWSE 官網與 FinMind 為備援來源。建議主備來源都測試一次。');
     }
 
     if (!missingInputs && (market === 'TWSE' || market === 'TPEX')) {
