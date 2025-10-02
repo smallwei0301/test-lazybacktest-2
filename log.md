@@ -881,6 +881,12 @@
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-31 — Patch LB-AI-VOL-QUARTILE-20251231A / LB-AI-ANNS-REPRO-20251231A / LB-AI-LSTM-REPRO-20251231A
+- **Issue recap**: 三分類波動門檻採用固定參數，導致 ANN 與 LSTM 在不同資料期間無法自動對齊「大漲／大跌」定義，亦未在前端保存訓練集對應的量化邊界，重播時容易出現分類落差。
+- **Fix**: `worker.js` 於 ANN、LSTM 訓練前以訓練集相鄰收盤報酬計算 25/75 百分位數，重建三分類標籤並隨模型中繼資料回傳；`js/ai-prediction.js` 先行以訓練集波動度重算資料集標籤、同步更新種子與門檻說明，確保 UI、重播與門檻最佳化共用同一組 quantile。
+- **Diagnostics**: 以固定種子多次訓練 ANN/LSTM，檢查 `ANN_META` 與 `LSTM_META` 皆帶回 `lowerQuantile`／`upperQuantile`，並比對 UI 顯示與 Worker 回傳之 `volatilityThresholds` 一致，驗證再訓練與載入種子時分類結果維持不變。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-CLASS-MODE-20251230B / LB-AI-LSTM-CLASS-20251230A
 - **Issue recap**: 使用者需於 ANN 與 LSTM 間切換原本二分類與新三分類預測，但前端僅支援多分類說明，LSTM 亦缺少二分類資料集與機率輸出，導致波段持有策略無法在 LSTM 下重現舊的漲跌邏輯。
 - **Fix**:

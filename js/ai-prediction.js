@@ -3,8 +3,9 @@
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Triple entry rules & deterministic evaluation.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Volatility-tier strategy & multi-class forecasts.
 // Patch Tag: LB-AI-CLASS-MODE-20251230B — Classification mode toggle & binary-compatible pipelines.
+// Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-CLASS-MODE-20251230B';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20251231A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -385,15 +386,124 @@
         return Math.min(Math.max(num, 0.01), 1);
     };
 
+    const computeQuantileValue = (values, percentile) => {
+        if (!Array.isArray(values) || values.length === 0) return NaN;
+        const sorted = [...values].sort((a, b) => a - b);
+        const clamped = Math.min(Math.max(percentile, 0), 1);
+        if (sorted.length === 1 || clamped === 0) return sorted[0];
+        if (clamped === 1) return sorted[sorted.length - 1];
+        const position = (sorted.length - 1) * clamped;
+        const lowerIndex = Math.floor(position);
+        const upperIndex = Math.min(lowerIndex + 1, sorted.length - 1);
+        const weight = position - lowerIndex;
+        const lowerValue = sorted[lowerIndex];
+        const upperValue = sorted[upperIndex];
+        if (!Number.isFinite(lowerValue)) return upperValue;
+        if (!Number.isFinite(upperValue)) return lowerValue;
+        return lowerValue + ((upperValue - lowerValue) * weight);
+    };
+
     const sanitizeVolatilityThresholds = (input = {}) => {
+        const fallbackSurge = DEFAULT_VOLATILITY_THRESHOLDS.surge;
+        const fallbackDrop = DEFAULT_VOLATILITY_THRESHOLDS.drop;
         const rawSurge = Number(input?.surge);
         const rawDrop = Number(input?.drop);
-        const surge = Number.isFinite(rawSurge) && rawSurge > 0 ? Math.min(rawSurge, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.surge;
-        const drop = Number.isFinite(rawDrop) && rawDrop > 0 ? Math.min(rawDrop, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.drop;
+        const rawLower = Number(input?.lowerQuantile);
+        const rawUpper = Number(input?.upperQuantile);
+
+        let surge = Number.isFinite(rawSurge) && Math.abs(rawSurge) > 0 ? Math.abs(rawSurge) : NaN;
+        let drop = Number.isFinite(rawDrop) && Math.abs(rawDrop) > 0 ? Math.abs(rawDrop) : NaN;
+
+        if (!(surge > 0) && Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+            surge = Math.abs(rawUpper);
+        }
+        if (!(drop > 0) && Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+            drop = Math.abs(rawLower);
+        }
+
+        if (!(surge > 0)) {
+            surge = fallbackSurge;
+        }
+        if (!(drop > 0)) {
+            drop = fallbackDrop;
+        }
+
+        surge = Math.min(Math.max(surge, 0.0001), 0.5);
+        drop = Math.min(Math.max(drop, 0.0001), 0.5);
+
+        let lowerQuantile;
+        if (Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+            lowerQuantile = rawLower > 0 ? -Math.abs(rawLower) : Math.max(rawLower, -0.5);
+        } else {
+            lowerQuantile = -drop;
+        }
+
+        let upperQuantile;
+        if (Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+            upperQuantile = rawUpper < 0 ? Math.abs(rawUpper) : Math.min(rawUpper, 0.5);
+        } else {
+            upperQuantile = surge;
+        }
+
+        upperQuantile = Math.min(Math.max(upperQuantile, 0.0001), 0.5);
+        lowerQuantile = Math.max(Math.min(lowerQuantile, -0.0001), -0.5);
+
         return {
             surge,
             drop,
+            lowerQuantile,
+            upperQuantile,
         };
+    };
+
+    const deriveVolatilityThresholdsFromReturns = (values, fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
+        const fallbackSanitized = sanitizeVolatilityThresholds(fallback);
+        if (!Array.isArray(values) || values.length === 0) {
+            return fallbackSanitized;
+        }
+        const filtered = values.filter((value) => Number.isFinite(value));
+        if (filtered.length === 0) {
+            return fallbackSanitized;
+        }
+        const lower = computeQuantileValue(filtered, 0.25);
+        const upper = computeQuantileValue(filtered, 0.75);
+        const dropMagnitude = Number.isFinite(lower) && lower < 0
+            ? Math.min(Math.abs(lower), 0.5)
+            : fallbackSanitized.drop;
+        const surgeMagnitude = Number.isFinite(upper) && upper > 0
+            ? Math.min(Math.abs(upper), 0.5)
+            : fallbackSanitized.surge;
+        const lowerQuantile = Number.isFinite(lower) && lower < 0 ? lower : -dropMagnitude;
+        const upperQuantile = Number.isFinite(upper) && upper > 0 ? upper : surgeMagnitude;
+        return sanitizeVolatilityThresholds({
+            surge: surgeMagnitude,
+            drop: dropMagnitude,
+            lowerQuantile,
+            upperQuantile,
+        });
+    };
+
+    const classifySwingReturn = (value, thresholds) => {
+        if (!Number.isFinite(value)) return 1;
+        const upper = Number.isFinite(thresholds?.upperQuantile) ? thresholds.upperQuantile : thresholds?.surge;
+        const lower = Number.isFinite(thresholds?.lowerQuantile)
+            ? thresholds.lowerQuantile
+            : (Number.isFinite(thresholds?.drop) ? -thresholds.drop : -DEFAULT_VOLATILITY_THRESHOLDS.drop);
+        if (Number.isFinite(upper) && value >= upper) {
+            return 2;
+        }
+        if (Number.isFinite(lower) && value <= lower) {
+            return 0;
+        }
+        const fallbackSurge = Number.isFinite(thresholds?.surge) ? thresholds.surge : DEFAULT_VOLATILITY_THRESHOLDS.surge;
+        const fallbackDrop = Number.isFinite(thresholds?.drop) ? thresholds.drop : DEFAULT_VOLATILITY_THRESHOLDS.drop;
+        if (Number.isFinite(fallbackSurge) && value >= fallbackSurge) {
+            return 2;
+        }
+        if (Number.isFinite(fallbackDrop) && value <= -fallbackDrop) {
+            return 0;
+        }
+        return 1;
     };
 
     const volatilityToPercent = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => ({
@@ -844,7 +954,7 @@
     const buildDataset = (rows, lookback, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS, classificationOverride = CLASSIFICATION_MODES.MULTICLASS) => {
         const classificationMode = normalizeClassificationMode(classificationOverride);
         if (!Array.isArray(rows)) {
-            return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
+            return { sequences: [], labels: [], meta: [], returns: [], swingTargets: [], baseRows: [] };
         }
         const volatilityThresholds = sanitizeVolatilityThresholds(volatilityOverrides);
         const sorted = rows
@@ -862,7 +972,15 @@
             .sort((a, b) => a.date.localeCompare(b.date));
 
         if (sorted.length <= lookback + 2) {
-            return { sequences: [], labels: [], meta: [], returns: [], baseRows: sorted, lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null };
+            return {
+                sequences: [],
+                labels: [],
+                meta: [],
+                returns: [],
+                swingTargets: [],
+                baseRows: sorted,
+                lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
+            };
         }
 
         const priceChanges = [];
@@ -890,20 +1008,6 @@
                 ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
                 : 0;
             const actualReturn = closeEntryReturn;
-            let classLabel;
-            if (classificationMode === CLASSIFICATION_MODES.BINARY) {
-                classLabel = Number(actualReturn > 0);
-            } else if (Number.isFinite(rawChange)) {
-                if (rawChange >= volatilityThresholds.surge) {
-                    classLabel = 2;
-                } else if (rawChange <= -volatilityThresholds.drop) {
-                    classLabel = 0;
-                } else {
-                    classLabel = 1;
-                }
-            } else {
-                classLabel = 1;
-            }
             priceChanges.push(rawChange);
             tradeReturns.push(actualReturn);
             meta.push({
@@ -927,23 +1031,20 @@
                 actualReturn,
                 buyTrigger: entryTrigger,
                 swingReturn: rawChange,
-                classLabel,
+                classLabel: classificationMode === CLASSIFICATION_MODES.BINARY ? Number(actualReturn > 0) : 1,
             });
         }
 
         const sequences = [];
         const labels = [];
         const targetReturns = [];
+        const swingTargets = [];
         for (let i = lookback; i < priceChanges.length; i += 1) {
             const feature = priceChanges.slice(i - lookback, i);
             if (feature.length !== lookback) continue;
             sequences.push(feature);
-            const metaItem = meta[i];
-            if (metaItem && Number.isInteger(metaItem.classLabel)) {
-                labels.push(metaItem.classLabel);
-            } else {
-                labels.push(priceChanges[i] > 0 ? 1 : 0);
-            }
+            labels.push(1);
+            swingTargets.push(priceChanges[i]);
             targetReturns.push(tradeReturns[i]);
         }
 
@@ -953,6 +1054,7 @@
             labels,
             meta: metaAligned,
             returns: targetReturns,
+            swingTargets,
             baseRows: sorted,
             lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
             volatilityThresholds,
@@ -1693,7 +1795,7 @@
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
         const classificationMode = normalizeClassificationMode(modelState.classification);
-        const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
+        let resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
         const dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility, classificationMode);
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
@@ -1715,6 +1817,46 @@
         if (hyperparameters.batchSize > boundedTrainSize) {
             showStatus(`[${label}] 批次大小 ${hyperparameters.batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
         }
+
+        const sampleCount = dataset.sequences.length;
+        const datasetLabels = new Array(sampleCount);
+        let recalibratedVolatility = resolvedVolatility;
+        if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+            for (let i = 0; i < sampleCount; i += 1) {
+                const metaItem = dataset.meta[i] || {};
+                const actualReturn = Number.isFinite(metaItem?.actualReturn)
+                    ? metaItem.actualReturn
+                    : dataset.returns[i];
+                const label = Number(actualReturn > 0);
+                datasetLabels[i] = label;
+                if (metaItem) {
+                    metaItem.classLabel = label;
+                }
+            }
+        } else {
+            const swingTargets = Array.isArray(dataset.swingTargets)
+                ? dataset.swingTargets
+                : dataset.meta.map((item) => Number(item?.swingReturn));
+            const trainingSwings = swingTargets
+                .slice(0, boundedTrainSize)
+                .filter((value) => Number.isFinite(value));
+            recalibratedVolatility = deriveVolatilityThresholdsFromReturns(trainingSwings, resolvedVolatility);
+            for (let i = 0; i < sampleCount; i += 1) {
+                const metaItem = dataset.meta[i] || {};
+                const swingValue = Number.isFinite(swingTargets[i])
+                    ? swingTargets[i]
+                    : Number(metaItem?.swingReturn);
+                const label = classifySwingReturn(swingValue, recalibratedVolatility);
+                datasetLabels[i] = label;
+                if (metaItem) {
+                    metaItem.classLabel = label;
+                }
+            }
+        }
+        dataset.labels = datasetLabels;
+        dataset.volatilityThresholds = recalibratedVolatility;
+        resolvedVolatility = recalibratedVolatility;
+        modelState.volatilityThresholds = resolvedVolatility;
 
         const requestedSeed = Number.isFinite(runtimeOptions?.seedOverride)
             ? Math.max(1, Math.round(runtimeOptions.seedOverride))
@@ -1858,6 +2000,10 @@
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
+
+        const workerVolatility = sanitizeVolatilityThresholds(predictionsPayload?.volatilityThresholds || resolvedVolatility);
+        resolvedVolatility = workerVolatility;
+        modelState.volatilityThresholds = resolvedVolatility;
 
         const resolvedHyper = {
             lookback: Number.isFinite(hyperparametersUsed?.lookback) ? hyperparametersUsed.lookback : hyperparameters.lookback,

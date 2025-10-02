@@ -3,6 +3,7 @@
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
 // Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
+// Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -12,12 +13,12 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251224B';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20251231A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
 const LSTM_REPRO_VERSION = 'lstm_v1';
-const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20251230A';
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20251231A';
 const LSTM_THRESHOLD = 0.5;
 const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
 const CLASSIFICATION_MODES = {
@@ -30,11 +31,129 @@ function normalizeClassificationMode(mode) {
 }
 
 function sanitizeVolatilityThresholds(input = {}) {
+  const fallbackSurge = DEFAULT_VOLATILITY_THRESHOLDS.surge;
+  const fallbackDrop = DEFAULT_VOLATILITY_THRESHOLDS.drop;
   const rawSurge = Number(input?.surge);
   const rawDrop = Number(input?.drop);
-  const surge = Number.isFinite(rawSurge) && rawSurge > 0 ? Math.min(rawSurge, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.surge;
-  const drop = Number.isFinite(rawDrop) && rawDrop > 0 ? Math.min(rawDrop, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.drop;
-  return { surge, drop };
+  const rawLower = Number(input?.lowerQuantile);
+  const rawUpper = Number(input?.upperQuantile);
+
+  let surge = Number.isFinite(rawSurge) && Math.abs(rawSurge) > 0 ? Math.abs(rawSurge) : NaN;
+  let drop = Number.isFinite(rawDrop) && Math.abs(rawDrop) > 0 ? Math.abs(rawDrop) : NaN;
+
+  if (!(surge > 0) && Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+    surge = Math.abs(rawUpper);
+  }
+  if (!(drop > 0) && Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+    drop = Math.abs(rawLower);
+  }
+
+  if (!(surge > 0)) {
+    surge = fallbackSurge;
+  }
+  if (!(drop > 0)) {
+    drop = fallbackDrop;
+  }
+
+  surge = Math.min(Math.max(surge, 0.0001), 0.5);
+  drop = Math.min(Math.max(drop, 0.0001), 0.5);
+
+  let lowerQuantile;
+  if (Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+    lowerQuantile = rawLower > 0 ? -Math.abs(rawLower) : Math.max(rawLower, -0.5);
+  } else {
+    lowerQuantile = -drop;
+  }
+
+  let upperQuantile;
+  if (Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+    upperQuantile = rawUpper < 0 ? Math.abs(rawUpper) : Math.min(rawUpper, 0.5);
+  } else {
+    upperQuantile = surge;
+  }
+
+  upperQuantile = Math.min(Math.max(upperQuantile, 0.0001), 0.5);
+  lowerQuantile = Math.max(Math.min(lowerQuantile, -0.0001), -0.5);
+
+  return {
+    surge,
+    drop,
+    lowerQuantile,
+    upperQuantile,
+  };
+}
+
+function computeQuantileValue(sortedValues, percentile) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) return NaN;
+  const clampedPercentile = Math.min(Math.max(percentile, 0), 1);
+  if (sortedValues.length === 1 || clampedPercentile === 0) {
+    return sortedValues[0];
+  }
+  if (clampedPercentile === 1) {
+    return sortedValues[sortedValues.length - 1];
+  }
+  const position = (sortedValues.length - 1) * clampedPercentile;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.min(lowerIndex + 1, sortedValues.length - 1);
+  const weight = position - lowerIndex;
+  const lowerValue = sortedValues[lowerIndex];
+  const upperValue = sortedValues[upperIndex];
+  if (!Number.isFinite(lowerValue)) return upperValue;
+  if (!Number.isFinite(upperValue)) return lowerValue;
+  return lowerValue + ((upperValue - lowerValue) * weight);
+}
+
+function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATILITY_THRESHOLDS) {
+  const fallbackSanitized = sanitizeVolatilityThresholds(fallback);
+  if (!Array.isArray(values) || values.length === 0) {
+    return fallbackSanitized;
+  }
+  const filtered = values.filter((value) => Number.isFinite(value));
+  if (filtered.length === 0) {
+    return fallbackSanitized;
+  }
+  const sorted = filtered.sort((a, b) => a - b);
+  const lower = computeQuantileValue(sorted, 0.25);
+  const upper = computeQuantileValue(sorted, 0.75);
+  const dropMagnitude = Number.isFinite(lower) && lower < 0
+    ? Math.min(Math.abs(lower), 0.5)
+    : fallbackSanitized.drop;
+  const surgeMagnitude = Number.isFinite(upper) && upper > 0
+    ? Math.min(Math.abs(upper), 0.5)
+    : fallbackSanitized.surge;
+  const lowerQuantile = Number.isFinite(lower) && lower < 0 ? lower : -dropMagnitude;
+  const upperQuantile = Number.isFinite(upper) && upper > 0 ? upper : surgeMagnitude;
+  return sanitizeVolatilityThresholds({
+    surge: surgeMagnitude,
+    drop: dropMagnitude,
+    lowerQuantile,
+    upperQuantile,
+  });
+}
+
+function classifySwingReturn(swingValue, thresholds) {
+  if (!Number.isFinite(swingValue)) {
+    return 1;
+  }
+  const upper = Number.isFinite(thresholds?.upperQuantile) ? thresholds.upperQuantile : thresholds?.surge;
+  const lower = Number.isFinite(thresholds?.lowerQuantile)
+    ? thresholds.lowerQuantile
+    : (Number.isFinite(thresholds?.drop) ? -thresholds.drop : -DEFAULT_VOLATILITY_THRESHOLDS.drop);
+  if (Number.isFinite(upper) && swingValue >= upper) {
+    return 2;
+  }
+  if (Number.isFinite(lower) && swingValue <= lower) {
+    return 0;
+  }
+  const fallbackSurge = Number.isFinite(thresholds?.surge) ? thresholds.surge : DEFAULT_VOLATILITY_THRESHOLDS.surge;
+  const fallbackDrop = Number.isFinite(thresholds?.drop) ? thresholds.drop : DEFAULT_VOLATILITY_THRESHOLDS.drop;
+  if (Number.isFinite(fallbackSurge) && swingValue >= fallbackSurge) {
+    return 2;
+  }
+  if (Number.isFinite(fallbackDrop) && swingValue <= -fallbackDrop) {
+    return 0;
+  }
+  return 1;
 }
 
 function clampProbability(value) {
@@ -1079,9 +1198,12 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
-function annSplitTrainTest(Z, y, meta, returns, ratio) {
+function annSplitTrainTest(Z, y, meta, returns, ratio, forcedTrainCount = null) {
   const total = Z.length;
-  const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const computedTrainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const trainCount = Number.isFinite(forcedTrainCount)
+    ? Math.min(Math.max(Math.round(forcedTrainCount), 1), total - 1)
+    : computedTrainCount;
   return {
     Xtr: Z.slice(0, trainCount),
     ytr: y.slice(0, trainCount),
@@ -1163,15 +1285,46 @@ async function handleAITrainANNMessage(message) {
     const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode);
     const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
-    const volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
       throw new Error('有效樣本不足，請延長資料範圍。');
     }
 
     const totalSamples = prepared.X.length;
     const trainRatio = annClampTrainRatio(options.trainRatio);
+    const rawTrainCount = Math.min(Math.max(Math.floor(totalSamples * trainRatio), 1), totalSamples - 1);
+    let volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
+    const labels = new Array(totalSamples);
+    if (isBinary) {
+      for (let i = 0; i < totalSamples; i += 1) {
+        const metaItem = prepared.meta[i] || {};
+        const positive = Number(metaItem?.closeEntryReturn ?? prepared.returns[i]) > 0;
+        const label = positive ? 1 : 0;
+        labels[i] = label;
+        if (metaItem) {
+          metaItem.classLabel = label;
+        }
+      }
+    } else {
+      const trainingSwings = prepared.meta
+        .slice(0, rawTrainCount)
+        .map((item) => Number(item?.swingReturn))
+        .filter((value) => Number.isFinite(value));
+      volatilityThresholds = deriveVolatilityThresholdsFromReturns(trainingSwings, volatilityThresholds);
+      for (let i = 0; i < totalSamples; i += 1) {
+        const metaItem = prepared.meta[i] || {};
+        const swingValue = Number(metaItem?.swingReturn);
+        const label = classifySwingReturn(swingValue, volatilityThresholds);
+        labels[i] = label;
+        if (metaItem) {
+          metaItem.classLabel = label;
+        }
+      }
+    }
+    prepared.y = labels;
+    prepared.volatilityThresholds = volatilityThresholds;
+
     const { Z, mean, std } = annStandardize(prepared.X);
-    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
+    const split = annSplitTrainTest(Z, labels, prepared.meta, prepared.returns, trainRatio, rawTrainCount);
     if (split.Xte.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
