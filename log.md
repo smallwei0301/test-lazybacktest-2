@@ -1,3 +1,11 @@
+## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
+- **Scope**: 波動分級策略與多分類 AI 預測強化。
+- **Updates**:
+  - ANN 與 LSTM 改為三分類 softmax，依自訂大漲/大跌門檻產生標籤並回傳完整機率向量與分類結果。
+  - 前端新增「波動分級持有」策略，可在大漲進場、小幅波動續抱、偵測大跌出場，交易表同步顯示分類與買賣價。
+  - 勝率摘要、種子預設名稱與最佳化流程納入月/年平均報酬與波動門檻，確保重播與 UI 資訊一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE'`
+
 ## 2025-12-29 — Patch LB-AI-TRADE-RULE-20251229A
 - **Scope**: AI 買入規則擴充與交易評估一致性。
 - **Updates**:

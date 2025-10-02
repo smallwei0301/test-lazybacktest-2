@@ -1,8 +1,9 @@
 /* global document, window, workerUrl */
 
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Triple entry rules & deterministic evaluation.
+// Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Volatility-tier strategy & multi-class forecasts.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-TRADE-RULE-20251229A';
+    const VERSION_TAG = 'LB-AI-TRADE-VOLATILITY-20251230A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -14,6 +15,9 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
+    const VOLATILITY_CLASS_LABELS = ['大跌', '小幅波動', '大漲'];
+
     const TRADE_RULE_OPTIONS = [
         {
             value: 'close-trigger',
@@ -29,6 +33,11 @@
             value: 'open-entry',
             label: '開盤價買入',
             description: '買入邏輯：隔日預測上漲時即以隔日開盤價買入，並於隔日收盤價出場。',
+        },
+        {
+            value: 'volatility-tier',
+            label: '波動分級持有',
+            description: '買賣邏輯：模型依「大漲／小幅波動／大跌」三類判斷；當預測落在大漲區間且機率達門檻時於當日收盤價進場，之後小幅波動僅持有，遇到預測大跌且機率達門檻時於當日收盤前出場。',
         },
     ];
     const DEFAULT_TRADE_RULE = TRADE_RULE_OPTIONS[0].value;
@@ -60,6 +69,7 @@
             seed: null,
         },
         tradeRule: DEFAULT_TRADE_RULE,
+        volatilityThresholds: { ...DEFAULT_VOLATILITY_THRESHOLDS },
     });
     const globalState = {
         running: false,
@@ -121,6 +131,8 @@
         deleteSeedButton: null,
         tradeRuleSelect: null,
         tradeRules: null,
+        volatilitySurge: null,
+        volatilityDrop: null,
     };
 
     const colorMap = {
@@ -138,7 +150,14 @@
     const getTradeRuleDescription = (rule) => getTradeRuleConfig(rule).description;
     const updateTradeRuleDescription = (rule) => {
         if (!elements.tradeRules) return;
-        elements.tradeRules.textContent = getTradeRuleDescription(rule);
+        const normalized = normalizeTradeRule(rule);
+        let description = getTradeRuleDescription(normalized);
+        if (normalized === 'volatility-tier') {
+            const state = getModelState(globalState.activeModel);
+            const thresholds = sanitizeVolatilityThresholds(state?.volatilityThresholds);
+            description = `${description}（${formatVolatilityDescription(thresholds)}）`;
+        }
+        elements.tradeRules.textContent = description;
     };
 
     const convertFractionToPercent = (fraction) => {
@@ -326,6 +345,122 @@
         const num = Number(value);
         if (!Number.isFinite(num)) return DEFAULT_FIXED_FRACTION;
         return Math.min(Math.max(num, 0.01), 1);
+    };
+
+    const sanitizeVolatilityThresholds = (input = {}) => {
+        const rawSurge = Number(input?.surge);
+        const rawDrop = Number(input?.drop);
+        const surge = Number.isFinite(rawSurge) && rawSurge > 0 ? Math.min(rawSurge, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.surge;
+        const drop = Number.isFinite(rawDrop) && rawDrop > 0 ? Math.min(rawDrop, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.drop;
+        return {
+            surge,
+            drop,
+        };
+    };
+
+    const volatilityToPercent = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => ({
+        surge: Number(((thresholds?.surge ?? DEFAULT_VOLATILITY_THRESHOLDS.surge) * 100).toFixed(2)),
+        drop: Number(((thresholds?.drop ?? DEFAULT_VOLATILITY_THRESHOLDS.drop) * 100).toFixed(2)),
+    });
+
+    const formatVolatilityDescription = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => {
+        const percent = volatilityToPercent(thresholds);
+        return `大漲≧${percent.surge.toFixed(2)}%｜大跌≧${percent.drop.toFixed(2)}%`;
+    };
+
+    const normalizeProbabilities = (values) => {
+        const probs = values.map((value) => {
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 0;
+            if (num < 0) return 0;
+            if (num > 1) return 1;
+            return num;
+        });
+        const sum = probs.reduce((acc, value) => acc + value, 0);
+        if (sum <= 0) {
+            return [1 / 3, 1 / 3, 1 / 3];
+        }
+        return probs.map((value) => value / sum);
+    };
+
+    const parsePredictionEntry = (value) => {
+        if (Array.isArray(value)) {
+            const base = value.length >= 3
+                ? [value[0], value[1], value[2]]
+                : [value[0], value[1] ?? 0, value[2] ?? value[0]];
+            const probabilities = normalizeProbabilities(base);
+            const classIndex = probabilities.indexOf(Math.max(...probabilities));
+            return {
+                probabilities,
+                pDown: probabilities[0],
+                pFlat: probabilities[1],
+                pUp: probabilities[2],
+                classIndex,
+            };
+        }
+        if (value && typeof value === 'object') {
+            if (Array.isArray(value.probabilities)) {
+                return parsePredictionEntry(value.probabilities);
+            }
+            if (Array.isArray(value.probs)) {
+                return parsePredictionEntry(value.probs);
+            }
+            if (typeof value.pUp === 'number' || typeof value.up === 'number') {
+                const upValue = Number(value.pUp ?? value.up);
+                const downValue = Number(value.pDown ?? value.down ?? (1 - upValue));
+                const flatValue = Number(value.pFlat ?? value.flat ?? (1 - upValue - downValue));
+                return parsePredictionEntry([downValue, flatValue, upValue]);
+            }
+        }
+        const probability = Number(value);
+        if (!Number.isFinite(probability)) {
+            return {
+                probabilities: [1 / 3, 1 / 3, 1 / 3],
+                pDown: 1 / 3,
+                pFlat: 1 / 3,
+                pUp: 1 / 3,
+                classIndex: 1,
+            };
+        }
+        const pUp = Math.min(Math.max(probability, 0), 1);
+        const remaining = 1 - pUp;
+        const pDown = remaining / 2;
+        const probabilities = normalizeProbabilities([pDown, remaining - pDown, pUp]);
+        const classIndex = probabilities.indexOf(Math.max(...probabilities));
+        return {
+            probabilities,
+            pDown: probabilities[0],
+            pFlat: probabilities[1],
+            pUp: probabilities[2],
+            classIndex,
+        };
+    };
+
+    const formatVolatilityClassLabel = (index) => VOLATILITY_CLASS_LABELS[index] || VOLATILITY_CLASS_LABELS[1];
+
+    const readVolatilityThresholdsFromInputs = (fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
+        const base = sanitizeVolatilityThresholds(fallback);
+        const basePercent = volatilityToPercent(base);
+        let surgePercent = basePercent.surge;
+        let dropPercent = basePercent.drop;
+        if (elements.volatilitySurge) {
+            const value = Number(elements.volatilitySurge.value);
+            if (Number.isFinite(value) && value > 0) {
+                surgePercent = Math.min(Math.max(value, 0.1), 50);
+            }
+            elements.volatilitySurge.value = surgePercent.toFixed(2);
+        }
+        if (elements.volatilityDrop) {
+            const value = Number(elements.volatilityDrop.value);
+            if (Number.isFinite(value) && value > 0) {
+                dropPercent = Math.min(Math.max(value, 0.1), 50);
+            }
+            elements.volatilityDrop.value = dropPercent.toFixed(2);
+        }
+        return sanitizeVolatilityThresholds({
+            surge: surgePercent / 100,
+            drop: dropPercent / 100,
+        });
     };
 
     const annotateForecast = (forecast, payload) => {
@@ -640,10 +775,11 @@
         return null;
     };
 
-    const buildDataset = (rows, lookback) => {
+    const buildDataset = (rows, lookback, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS) => {
         if (!Array.isArray(rows)) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
         }
+        const volatilityThresholds = sanitizeVolatilityThresholds(volatilityOverrides);
         const sorted = rows
             .filter((row) => row && typeof row.date === 'string')
             .map((row) => {
@@ -687,6 +823,14 @@
                 ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
                 : 0;
             const actualReturn = closeEntryReturn;
+            let classLabel = 1;
+            if (Number.isFinite(rawChange)) {
+                if (rawChange >= volatilityThresholds.surge) {
+                    classLabel = 2;
+                } else if (rawChange <= -volatilityThresholds.drop) {
+                    classLabel = 0;
+                }
+            }
             priceChanges.push(rawChange);
             tradeReturns.push(actualReturn);
             meta.push({
@@ -709,6 +853,8 @@
                 openEntryReturn,
                 actualReturn,
                 buyTrigger: entryTrigger,
+                swingReturn: rawChange,
+                classLabel,
             });
         }
 
@@ -719,7 +865,12 @@
             const feature = priceChanges.slice(i - lookback, i);
             if (feature.length !== lookback) continue;
             sequences.push(feature);
-            labels.push(priceChanges[i] > 0 ? 1 : 0);
+            const metaItem = meta[i];
+            if (metaItem && Number.isInteger(metaItem.classLabel)) {
+                labels.push(metaItem.classLabel);
+            } else {
+                labels.push(priceChanges[i] > 0 ? 1 : 0);
+            }
             targetReturns.push(tradeReturns[i]);
         }
 
@@ -731,6 +882,7 @@
             returns: targetReturns,
             baseRows: sorted,
             lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
+            volatilityThresholds,
         };
     };
 
@@ -770,7 +922,7 @@
                         <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤')}
                             <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
                         </td>
-                        <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                        <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}${forecast.classLabel ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(forecast.classLabel)}</div>` : ''}</td>
                         <td class="px-3 py-2 text-right">${formatPrice(forecast.buyPrice)}</td>
                         <td class="px-3 py-2 text-right">—</td>
                         <td class="px-3 py-2 text-right">—</td>
@@ -784,6 +936,9 @@
         const limited = rows.slice(-200);
         const htmlParts = limited.map((trade) => {
             const probabilityText = formatPercent(trade.probability, 1);
+            const probabilityDetail = trade.predictedClassLabel
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(trade.predictedClassLabel)}</div>`
+                : '';
             const actualReturnText = formatPercent(trade.actualReturn, 2);
             const fractionText = formatPercent(trade.fraction, 2);
             const tradeReturnText = formatPercent(trade.tradeReturn, 2);
@@ -797,7 +952,7 @@
             return `
                 <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.tradeDate || '—')}${badge}</td>
-                    <td class="px-3 py-2 text-right">${probabilityText}</td>
+                    <td class="px-3 py-2 text-right">${probabilityText}${probabilityDetail}</td>
                     <td class="px-3 py-2 text-right">${buyPriceText}</td>
                     <td class="px-3 py-2 text-right">${sellPriceText}</td>
                     <td class="px-3 py-2 text-right ${actualClass}">${actualReturnText}</td>
@@ -809,10 +964,13 @@
 
         if (forecast && Number.isFinite(forecast.probability)) {
             const tradeDateLabel = forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤';
+            const forecastDetail = forecast.classLabel
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(forecast.classLabel)}</div>`
+                : '';
             htmlParts.push(`
                 <tr class="bg-muted/30">
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(tradeDateLabel)}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
-                    <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}</td>
+                    <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}${forecastDetail}</td>
                     <td class="px-3 py-2 text-right">${formatPrice(forecast.buyPrice)}</td>
                     <td class="px-3 py-2 text-right">—</td>
                     <td class="px-3 py-2 text-right">—</td>
@@ -909,7 +1067,8 @@
                 const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
                     ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
                     : '';
-                elements.nextDayForecast.textContent = `${baseLabel} 的隔日上漲機率為 ${formatPercent(forecast.probability, 1)}；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
+                const classLabel = forecast.classLabel || formatVolatilityClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1));
+                elements.nextDayForecast.textContent = `${baseLabel} 的隔日大漲機率為 ${formatPercent(forecast.probability, 1)}（預測分類：${classLabel}）；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
     };
@@ -922,6 +1081,7 @@
         const useKelly = Boolean(options.useKelly);
         const fixedFraction = sanitizeFraction(options.fixedFraction);
         const tradeRule = normalizeTradeRule(options.tradeRule);
+        const volatilityThresholds = sanitizeVolatilityThresholds(options.volatilityThresholds || payload?.volatilityThresholds || DEFAULT_VOLATILITY_THRESHOLDS);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -939,156 +1099,257 @@
             return Number.isFinite(fallback) ? fallback : NaN;
         };
 
-        for (let i = 0; i < predictions.length; i += 1) {
-            const probability = Number(predictions[i]);
-            const metaItem = meta[i];
-            if (!Number.isFinite(probability) || !metaItem) {
-                continue;
-            }
-            if (probability < threshold) {
-                continue;
-            }
-            const baseSellPrice = Number.isFinite(metaItem.sellPrice)
-                ? metaItem.sellPrice
-                : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
-            let resolvedBuyPrice = NaN;
-            let resolvedSellPrice = baseSellPrice;
-            let entryEligible;
-            let actualReturn;
+        if (tradeRule === 'volatility-tier') {
+            let position = null;
+            for (let i = 0; i < predictions.length; i += 1) {
+                const metaItem = meta[i] || {};
+                const parsed = parsePredictionEntry(predictions[i]);
+                const classIndex = parsed.classIndex;
+                const entryProbability = parsed.pUp;
+                const exitProbability = parsed.pDown;
+                const dayClose = Number(metaItem.buyClose);
+                const nextClose = Number(metaItem.sellClose);
+                const exitDateCandidate = metaItem.sellDate || metaItem.tradeDate || metaItem.buyDate || null;
+                const entryDateCandidate = metaItem.buyDate || metaItem.tradeDate || metaItem.sellDate || exitDateCandidate;
 
-            if (tradeRule === 'open-entry') {
-                const openEligible = typeof metaItem.openEntryEligible === 'boolean'
-                    ? metaItem.openEntryEligible
-                    : null;
-                resolvedBuyPrice = Number(metaItem.openEntryBuyPrice);
-                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
-                    const nextOpen = Number(metaItem.nextOpen);
-                    if (Number.isFinite(nextOpen) && nextOpen > 0) {
-                        resolvedBuyPrice = nextOpen;
-                    } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
-                        resolvedBuyPrice = metaItem.buyPrice;
-                    }
+                if (position && Number.isFinite(dayClose) && dayClose > 0) {
+                    position.lastPrice = dayClose;
                 }
-                if (!Number.isFinite(resolvedSellPrice)) {
-                    const openSell = Number(metaItem.openEntrySellPrice);
-                    if (Number.isFinite(openSell)) {
-                        resolvedSellPrice = openSell;
+
+                if (!position && classIndex === 2 && entryProbability >= threshold) {
+                    let entryPrice = Number(metaItem.closeSameDayBuyPrice);
+                    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+                        entryPrice = Number(metaItem.buyClose);
                     }
+                    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+                        continue;
+                    }
+                    position = {
+                        entryIndex: i,
+                        entryDate: entryDateCandidate,
+                        entryPrice,
+                        entryProbability,
+                        entryClassIndex: classIndex,
+                        holdDays: 0,
+                        lastPrice: Number.isFinite(nextClose) && nextClose > 0
+                            ? nextClose
+                            : (Number.isFinite(dayClose) && dayClose > 0 ? dayClose : entryPrice),
+                    };
+                    continue;
                 }
-                actualReturn = Number(metaItem.openEntryReturn);
-                entryEligible = typeof openEligible === 'boolean'
-                    ? openEligible
-                    : (Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0 && Number.isFinite(resolvedSellPrice));
-            } else if (tradeRule === 'close-entry') {
-                const prevClose = Number(metaItem.buyClose);
-                const sameDayEligible = typeof metaItem.closeSameDayEligible === 'boolean'
-                    ? metaItem.closeSameDayEligible
-                    : null;
-                if (typeof sameDayEligible === 'boolean') {
-                    entryEligible = sameDayEligible;
+
+                if (!position) {
+                    continue;
+                }
+
+                const exitSignal = classIndex === 0 && exitProbability >= threshold;
+                const isLastSample = i === predictions.length - 1;
+                if (exitSignal || isLastSample) {
+                    let exitPrice = position.lastPrice;
+                    let exitDate = exitDateCandidate || entryDateCandidate;
+                    if (exitSignal) {
+                        if (Number.isFinite(dayClose) && dayClose > 0) {
+                            exitPrice = dayClose;
+                        }
+                        exitDate = entryDateCandidate || exitDateCandidate;
+                    } else if (Number.isFinite(nextClose) && nextClose > 0) {
+                        exitPrice = nextClose;
+                    }
+
+                    if (Number.isFinite(exitPrice) && exitPrice > 0 && Number.isFinite(position.entryPrice) && position.entryPrice > 0) {
+                        const grossReturn = (exitPrice - position.entryPrice) / position.entryPrice;
+                        const fraction = useKelly
+                            ? computeKellyFraction(position.entryProbability, trainingOdds)
+                            : fixedFraction;
+                        const tradeReturn = grossReturn * fraction;
+                        if (grossReturn > 0) {
+                            wins += 1;
+                        }
+                        const tradeTimestamp = parseDateToUTC(exitDate);
+                        if (Number.isFinite(tradeTimestamp)) {
+                            executedDateValues.push(tradeTimestamp);
+                        }
+                        executedTrades.push({
+                            tradeDate: exitDate,
+                            probability: position.entryProbability,
+                            actualReturn: grossReturn,
+                            fraction,
+                            tradeReturn,
+                            buyPrice: position.entryPrice,
+                            sellPrice: exitPrice,
+                            tradeRule,
+                            predictedClass: position.entryClassIndex,
+                            predictedClassLabel: formatVolatilityClassLabel(position.entryClassIndex),
+                            exitClass: classIndex,
+                            holdDays: position.holdDays + 1,
+                            probabilities: parsed.probabilities,
+                        });
+                        tradeReturns.push(tradeReturn);
+                    }
+                    position = null;
                 } else {
-                    entryEligible = Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice);
-                }
-                resolvedBuyPrice = Number(metaItem.closeSameDayBuyPrice);
-                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
-                    if (Number.isFinite(prevClose) && prevClose > 0) {
-                        resolvedBuyPrice = prevClose;
-                    } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
-                        resolvedBuyPrice = metaItem.buyPrice;
+                    position.holdDays += 1;
+                    if (Number.isFinite(nextClose) && nextClose > 0) {
+                        position.lastPrice = nextClose;
                     }
                 }
-                if (!Number.isFinite(resolvedSellPrice)) {
-                    const sameDaySell = Number(metaItem.closeSameDaySellPrice);
-                    if (Number.isFinite(sameDaySell)) {
-                        resolvedSellPrice = sameDaySell;
-                    }
+            }
+        } else {
+            for (let i = 0; i < predictions.length; i += 1) {
+                const parsed = parsePredictionEntry(predictions[i]);
+                const probability = parsed.pUp;
+                const metaItem = meta[i];
+                if (!Number.isFinite(probability) || !metaItem) {
+                    continue;
                 }
-                actualReturn = Number(metaItem.closeSameDayReturn);
-                if (!Number.isFinite(actualReturn)) {
-                    if (Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice)) {
-                        actualReturn = (resolvedSellPrice - prevClose) / prevClose;
-                    }
+                if (probability < threshold) {
+                    continue;
                 }
-            } else {
-                const prevClose = Number(metaItem.buyClose);
-                const nextLow = Number(metaItem.nextLow);
-                const closeEligible = typeof metaItem.closeEntryEligible === 'boolean'
-                    ? metaItem.closeEntryEligible
-                    : (typeof metaItem.entryEligible === 'boolean' ? metaItem.entryEligible : null);
-                if (closeEligible === null) {
-                    entryEligible = Number.isFinite(nextLow) && Number.isFinite(prevClose)
-                        ? nextLow < prevClose
-                        : true;
-                } else {
-                    entryEligible = closeEligible;
-                }
-                resolvedBuyPrice = Number(metaItem.closeEntryBuyPrice);
-                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
-                    if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
-                        resolvedBuyPrice = metaItem.buyPrice;
-                    } else if (Number.isFinite(prevClose)) {
+                const baseSellPrice = Number.isFinite(metaItem.sellPrice)
+                    ? metaItem.sellPrice
+                    : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
+                let resolvedBuyPrice = NaN;
+                let resolvedSellPrice = baseSellPrice;
+                let entryEligible;
+                let actualReturn;
+
+                if (tradeRule === 'open-entry') {
+                    const openEligible = typeof metaItem.openEntryEligible === 'boolean'
+                        ? metaItem.openEntryEligible
+                        : null;
+                    resolvedBuyPrice = Number(metaItem.openEntryBuyPrice);
+                    if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
                         const nextOpen = Number(metaItem.nextOpen);
-                        if (Number.isFinite(nextOpen) && nextOpen < prevClose) {
+                        if (Number.isFinite(nextOpen) && nextOpen > 0) {
                             resolvedBuyPrice = nextOpen;
-                        } else {
-                            resolvedBuyPrice = prevClose;
+                        } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                            resolvedBuyPrice = metaItem.buyPrice;
                         }
                     }
+                    if (!Number.isFinite(resolvedSellPrice)) {
+                        const openSell = Number(metaItem.openEntrySellPrice);
+                        if (Number.isFinite(openSell)) {
+                            resolvedSellPrice = openSell;
+                        }
+                    }
+                    actualReturn = Number(metaItem.openEntryReturn);
+                    entryEligible = typeof openEligible === 'boolean'
+                        ? openEligible
+                        : (Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0 && Number.isFinite(resolvedSellPrice));
+                } else if (tradeRule === 'close-entry') {
+                    const prevClose = Number(metaItem.buyClose);
+                    const sameDayEligible = typeof metaItem.closeSameDayEligible === 'boolean'
+                        ? metaItem.closeSameDayEligible
+                        : null;
+                    if (typeof sameDayEligible === 'boolean') {
+                        entryEligible = sameDayEligible;
+                    } else {
+                        entryEligible = Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice);
+                    }
+                    resolvedBuyPrice = Number(metaItem.closeSameDayBuyPrice);
+                    if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
+                        if (Number.isFinite(prevClose) && prevClose > 0) {
+                            resolvedBuyPrice = prevClose;
+                        } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                            resolvedBuyPrice = metaItem.buyPrice;
+                        }
+                    }
+                    if (!Number.isFinite(resolvedSellPrice)) {
+                        const sameDaySell = Number(metaItem.closeSameDaySellPrice);
+                        if (Number.isFinite(sameDaySell)) {
+                            resolvedSellPrice = sameDaySell;
+                        }
+                    }
+                    actualReturn = Number(metaItem.closeSameDayReturn);
+                    if (!Number.isFinite(actualReturn)) {
+                        if (Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice)) {
+                            actualReturn = (resolvedSellPrice - prevClose) / prevClose;
+                        }
+                    }
+                } else {
+                    const prevClose = Number(metaItem.buyClose);
+                    const nextLow = Number(metaItem.nextLow);
+                    const closeEligible = typeof metaItem.closeEntryEligible === 'boolean'
+                        ? metaItem.closeEntryEligible
+                        : (typeof metaItem.entryEligible === 'boolean' ? metaItem.entryEligible : null);
+                    if (closeEligible === null) {
+                        entryEligible = Number.isFinite(nextLow) && Number.isFinite(prevClose)
+                            ? nextLow < prevClose
+                            : true;
+                    } else {
+                        entryEligible = closeEligible;
+                    }
+                    resolvedBuyPrice = Number(metaItem.closeEntryBuyPrice);
+                    if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
+                        if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                            resolvedBuyPrice = metaItem.buyPrice;
+                        } else if (Number.isFinite(prevClose)) {
+                            const nextOpen = Number(metaItem.nextOpen);
+                            if (Number.isFinite(nextOpen) && nextOpen < prevClose) {
+                                resolvedBuyPrice = nextOpen;
+                            } else {
+                                resolvedBuyPrice = prevClose;
+                            }
+                        }
+                    }
+                    actualReturn = Number(returns[i]);
+                    if (!Number.isFinite(actualReturn)) {
+                        actualReturn = Number(metaItem.closeEntryReturn);
+                    }
+                    if (!Number.isFinite(actualReturn)) {
+                        actualReturn = Number(metaItem.actualReturn);
+                    }
                 }
-                actualReturn = Number(returns[i]);
-                if (!Number.isFinite(actualReturn)) {
-                    actualReturn = Number(metaItem.closeEntryReturn);
-                }
-                if (!Number.isFinite(actualReturn)) {
-                    actualReturn = Number(metaItem.actualReturn);
-                }
-            }
 
-            if (typeof entryEligible !== 'boolean') {
-                entryEligible = true;
+                if (typeof entryEligible !== 'boolean') {
+                    entryEligible = true;
+                }
+                if (!entryEligible) {
+                    continue;
+                }
+                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0 || !Number.isFinite(resolvedSellPrice)) {
+                    continue;
+                }
+                if (!Number.isFinite(actualReturn)) {
+                    actualReturn = (resolvedSellPrice - resolvedBuyPrice) / resolvedBuyPrice;
+                }
+                if (!Number.isFinite(actualReturn)) {
+                    continue;
+                }
+                const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
+                    ? metaItem.sellDate
+                    : (typeof metaItem.tradeDate === 'string' && metaItem.tradeDate
+                        ? metaItem.tradeDate
+                        : (typeof metaItem.date === 'string' && metaItem.date ? metaItem.date : null));
+                if (!tradeDate) {
+                    continue;
+                }
+                const fraction = useKelly
+                    ? computeKellyFraction(probability, trainingOdds)
+                    : fixedFraction;
+                const tradeReturn = actualReturn * fraction;
+                if (actualReturn > 0) {
+                    wins += 1;
+                }
+                const tradeTimestamp = parseDateToUTC(tradeDate);
+                if (Number.isFinite(tradeTimestamp)) {
+                    executedDateValues.push(tradeTimestamp);
+                }
+                executedTrades.push({
+                    tradeDate,
+                    probability,
+                    actualReturn,
+                    fraction,
+                    tradeReturn,
+                    buyPrice: resolvedBuyPrice,
+                    sellPrice: resolvedSellPrice,
+                    tradeRule,
+                    predictedClass: parsed.classIndex,
+                    predictedClassLabel: formatVolatilityClassLabel(parsed.classIndex),
+                    probabilities: parsed.probabilities,
+                });
+                tradeReturns.push(tradeReturn);
             }
-            if (!entryEligible) {
-                continue;
-            }
-            if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0 || !Number.isFinite(resolvedSellPrice)) {
-                continue;
-            }
-            if (!Number.isFinite(actualReturn)) {
-                actualReturn = (resolvedSellPrice - resolvedBuyPrice) / resolvedBuyPrice;
-            }
-            if (!Number.isFinite(actualReturn)) {
-                continue;
-            }
-            const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
-                ? metaItem.sellDate
-                : (typeof metaItem.tradeDate === 'string' && metaItem.tradeDate
-                    ? metaItem.tradeDate
-                    : (typeof metaItem.date === 'string' && metaItem.date ? metaItem.date : null));
-            if (!tradeDate) {
-                continue;
-            }
-            const fraction = useKelly
-                ? computeKellyFraction(probability, trainingOdds)
-                : fixedFraction;
-            const tradeReturn = actualReturn * fraction;
-            if (actualReturn > 0) {
-                wins += 1;
-            }
-            const tradeTimestamp = parseDateToUTC(tradeDate);
-            if (Number.isFinite(tradeTimestamp)) {
-                executedDateValues.push(tradeTimestamp);
-            }
-            executedTrades.push({
-                tradeDate,
-                probability,
-                actualReturn,
-                fraction,
-                tradeReturn,
-                buyPrice: resolvedBuyPrice,
-                sellPrice: resolvedSellPrice,
-                tradeRule,
-            });
-            tradeReturns.push(tradeReturn);
         }
 
         const executed = executedTrades.length;
@@ -1144,6 +1405,7 @@
                 periodYears,
             },
             rule: tradeRule,
+            volatilityThresholds,
         };
     };
 
@@ -1161,16 +1423,20 @@
         const trainingOdds = Number.isFinite(payload.trainingOdds) ? payload.trainingOdds : fallbackOdds;
         const selectedRule = normalizeTradeRule(options.tradeRule);
         const sanitizedFixedFraction = sanitizeFraction(options.fixedFraction);
+        const resolvedVolatility = sanitizeVolatilityThresholds(options.volatilityThresholds || modelState.volatilityThresholds);
+        modelState.volatilityThresholds = resolvedVolatility;
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
             tradeRule: selectedRule,
             fixedFraction: sanitizedFixedFraction,
+            volatilityThresholds: resolvedVolatility,
         }, trainingOdds);
         const evaluationRule = normalizeTradeRule(evaluation.rule || selectedRule);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
         if (forecast) {
+            forecast.classLabel = formatVolatilityClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1));
             const forecastFraction = options.useKelly
                 ? computeKellyFraction(forecast.probability, trainingOdds)
                 : sanitizedFixedFraction;
@@ -1209,6 +1475,7 @@
             seed: Number.isFinite(payload?.hyperparameters?.seed) ? payload.hyperparameters.seed : null,
             forecast,
             tradeRule: evaluationRule,
+            volatilityThresholds: resolvedVolatility,
         };
 
         modelState.trainingMetrics = metrics;
@@ -1216,6 +1483,7 @@
         modelState.currentTrades = evaluation.trades;
         modelState.odds = trainingOdds;
         payload.tradeRule = evaluationRule;
+        payload.volatilityThresholds = resolvedVolatility;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
 
@@ -1254,6 +1522,7 @@
         modelState.kellyEnabled = Boolean(elements.enableKelly?.checked);
         modelState.fixedFraction = readFractionFromInput(modelState.fixedFraction);
         modelState.tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
+        modelState.volatilityThresholds = readVolatilityThresholdsFromInputs(modelState.volatilityThresholds);
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -1293,6 +1562,14 @@
             const rule = getTradeRuleForModel(globalState.activeModel);
             elements.tradeRuleSelect.value = rule;
         }
+        const thresholds = sanitizeVolatilityThresholds(modelState.volatilityThresholds);
+        const percent = volatilityToPercent(thresholds);
+        if (elements.volatilitySurge) {
+            elements.volatilitySurge.value = percent.surge.toFixed(2);
+        }
+        if (elements.volatilityDrop) {
+            elements.volatilityDrop.value = percent.drop.toFixed(2);
+        }
         updateTradeRuleDescription(getTradeRuleForModel(globalState.activeModel));
         parseTrainRatio();
         parseWinThreshold();
@@ -1314,7 +1591,9 @@
     const runLstmModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
-        const dataset = buildDataset(rows, hyperparameters.lookback);
+        const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
+        modelState.volatilityThresholds = resolvedVolatility;
+        const dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility);
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
         if (dataset.sequences.length < minimumSamples) {
             showStatus(`[${label}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
@@ -1351,6 +1630,7 @@
                 trainSize: boundedTrainSize,
                 trainRatio: hyperparameters.trainRatio,
                 seed: Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null),
+                volatility: resolvedVolatility,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -1388,7 +1668,8 @@
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
         };
 
-        predictionsPayload.hyperparameters = { ...resolvedHyper };
+        predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
+        predictionsPayload.volatilityThresholds = resolvedVolatility;
 
         modelState.hyperparameters = {
             lookback: resolvedHyper.lookback,
@@ -1401,7 +1682,11 @@
 
         modelState.winThreshold = resolvedHyper.threshold;
 
-        const evaluationOptions = { ...riskOptions, threshold: resolvedHyper.threshold };
+        const evaluationOptions = {
+            ...riskOptions,
+            threshold: resolvedHyper.threshold,
+            volatilityThresholds: resolvedVolatility,
+        };
 
         applyTradeEvaluation(resultModelType, predictionsPayload, trainingMetrics, evaluationOptions);
 
@@ -1432,6 +1717,9 @@
             ? Math.max(1, Math.round(runtimeOptions.seedOverride))
             : (Number.isFinite(hyperparameters.seed) ? Math.max(1, Math.round(hyperparameters.seed)) : null);
 
+        const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
+        modelState.volatilityThresholds = resolvedVolatility;
+
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const taskPayload = {
             rows,
@@ -1441,6 +1729,7 @@
                 learningRate: hyperparameters.learningRate,
                 trainRatio: hyperparameters.trainRatio,
                 lookback: hyperparameters.lookback,
+                volatility: resolvedVolatility,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -1477,7 +1766,8 @@
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
         };
 
-        predictionsPayload.hyperparameters = { ...resolvedHyper };
+        predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
+        predictionsPayload.volatilityThresholds = resolvedVolatility;
 
         modelState.hyperparameters = {
             lookback: resolvedHyper.lookback,
@@ -1490,7 +1780,11 @@
 
         modelState.winThreshold = resolvedHyper.threshold;
 
-        const evaluationOptions = { ...riskOptions, threshold: resolvedHyper.threshold };
+        const evaluationOptions = {
+            ...riskOptions,
+            threshold: resolvedHyper.threshold,
+            volatilityThresholds: resolvedVolatility,
+        };
 
         applyTradeEvaluation(modelType, predictionsPayload, trainingMetrics, evaluationOptions);
 
@@ -1523,6 +1817,7 @@
             useKelly = Boolean(elements.enableKelly?.checked);
             fixedFraction = readFractionFromInput(modelState.fixedFraction);
             tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
+            modelState.volatilityThresholds = readVolatilityThresholdsFromInputs(modelState.volatilityThresholds);
             modelState.kellyEnabled = useKelly;
             modelState.fixedFraction = fixedFraction;
             modelState.tradeRule = tradeRule;
@@ -1537,6 +1832,7 @@
             useKelly,
             fixedFraction,
             tradeRule,
+            volatilityThresholds: modelState.volatilityThresholds,
         });
     };
 
@@ -1589,6 +1885,7 @@
                 useKelly,
                 fixedFraction,
                 tradeRule,
+                volatilityThresholds: modelState.volatilityThresholds,
             }, trainingOdds);
             const executedCount = Number.isFinite(evaluation.stats.executed) ? evaluation.stats.executed : 0;
             if (executedCount < minTrades) {
@@ -1677,6 +1974,7 @@
                 datasetLastDate: modelState.predictionsPayload.datasetLastDate,
                 lastClose: modelState.predictionsPayload.lastClose,
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
+                volatilityThresholds: modelState.volatilityThresholds,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -1691,6 +1989,7 @@
                 tradeReturnAverageYearly: summary.tradeReturnAverageYearly,
                 tradeReturnTotal: summary.tradeReturnTotal,
                 tradeRule: summary.tradeRule,
+                volatilityThresholds: summary.volatilityThresholds,
             },
             version: VERSION_TAG,
         };
@@ -1737,6 +2036,7 @@
             datasetLastDate: seed.payload?.datasetLastDate || null,
             lastClose: Number.isFinite(seed.payload?.lastClose) ? seed.payload.lastClose : null,
             hyperparameters: seed.payload?.hyperparameters || null,
+            volatilityThresholds: sanitizeVolatilityThresholds(seed.payload?.volatilityThresholds || seed.summary?.volatilityThresholds || modelState.volatilityThresholds),
         };
         const metrics = seed.trainingMetrics || {
             trainAccuracy: NaN,
@@ -1749,6 +2049,7 @@
         };
         modelState.trainingMetrics = metrics;
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
+        modelState.volatilityThresholds = sanitizeVolatilityThresholds(seed.summary?.volatilityThresholds || modelState.predictionsPayload.volatilityThresholds || modelState.volatilityThresholds);
 
         const hyper = seed.payload?.hyperparameters || {};
         const existingHyper = modelState.hyperparameters || {};
@@ -1877,6 +2178,7 @@
                 useKelly: Boolean(modelState.kellyEnabled),
                 fixedFraction: sanitizeFraction(modelState.fixedFraction),
                 tradeRule: getTradeRuleForModel(normalizedModel),
+                volatilityThresholds: sanitizeVolatilityThresholds(modelState.volatilityThresholds),
             };
 
             const rows = getVisibleData();
@@ -1981,6 +2283,8 @@
         elements.deleteSeedButton = document.getElementById('ai-delete-seed');
         elements.tradeRuleSelect = document.getElementById('ai-trade-rule');
         elements.tradeRules = document.getElementById('ai-trade-rules');
+        elements.volatilitySurge = document.getElementById('ai-volatility-surge');
+        elements.volatilityDrop = document.getElementById('ai-volatility-drop');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -2033,6 +2337,22 @@
                 recomputeTradesFromState();
             });
         }
+
+        const bindVolatilityInput = (elKey, updater) => {
+            const el = elements[elKey];
+            if (!el) return;
+            el.addEventListener('change', updater);
+            el.addEventListener('blur', updater);
+        };
+
+        bindVolatilityInput('volatilitySurge', () => {
+            captureActiveModelSettings();
+            recomputeTradesFromState();
+        });
+        bindVolatilityInput('volatilityDrop', () => {
+            captureActiveModelSettings();
+            recomputeTradesFromState();
+        });
 
         if (elements.winThreshold) {
             elements.winThreshold.addEventListener('change', () => {
