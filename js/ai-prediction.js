@@ -1,8 +1,8 @@
 /* global document, window, workerUrl */
 
-// Patch Tag: LB-AI-TRADE-RULE-20251228A — Dual entry rules & 100% default allocation.
+// Patch Tag: LB-AI-TRADE-RULE-20251229A — Triple entry rules & deterministic evaluation.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-TRADE-RULE-20251228A';
+    const VERSION_TAG = 'LB-AI-TRADE-RULE-20251229A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -19,6 +19,11 @@
             value: 'close-trigger',
             label: '收盤價掛單',
             description: '買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。',
+        },
+        {
+            value: 'close-entry',
+            label: '收盤價買入',
+            description: '買入邏輯：預測上漲時即以當日收盤價買入，並於隔日收盤價出場。',
         },
         {
             value: 'open-entry',
@@ -974,6 +979,36 @@
                 entryEligible = typeof openEligible === 'boolean'
                     ? openEligible
                     : (Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0 && Number.isFinite(resolvedSellPrice));
+            } else if (tradeRule === 'close-entry') {
+                const prevClose = Number(metaItem.buyClose);
+                const sameDayEligible = typeof metaItem.closeSameDayEligible === 'boolean'
+                    ? metaItem.closeSameDayEligible
+                    : null;
+                if (typeof sameDayEligible === 'boolean') {
+                    entryEligible = sameDayEligible;
+                } else {
+                    entryEligible = Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice);
+                }
+                resolvedBuyPrice = Number(metaItem.closeSameDayBuyPrice);
+                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0) {
+                    if (Number.isFinite(prevClose) && prevClose > 0) {
+                        resolvedBuyPrice = prevClose;
+                    } else if (Number.isFinite(metaItem.buyPrice) && metaItem.buyPrice > 0) {
+                        resolvedBuyPrice = metaItem.buyPrice;
+                    }
+                }
+                if (!Number.isFinite(resolvedSellPrice)) {
+                    const sameDaySell = Number(metaItem.closeSameDaySellPrice);
+                    if (Number.isFinite(sameDaySell)) {
+                        resolvedSellPrice = sameDaySell;
+                    }
+                }
+                actualReturn = Number(metaItem.closeSameDayReturn);
+                if (!Number.isFinite(actualReturn)) {
+                    if (Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice)) {
+                        actualReturn = (resolvedSellPrice - prevClose) / prevClose;
+                    }
+                }
             } else {
                 const prevClose = Number(metaItem.buyClose);
                 const nextLow = Number(metaItem.nextLow);

@@ -1,5 +1,6 @@
 
 // Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
+// Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -843,6 +844,12 @@ function annPrepareDataset(rows) {
     const closeEntryReturn = entryEligible && Number.isFinite(closeEntryBuyPrice) && closeEntryBuyPrice > 0
       ? (sellPrice - closeEntryBuyPrice) / closeEntryBuyPrice
       : 0;
+    const closeSameDayBuyPrice = Number.isFinite(current.close) && current.close > 0 ? current.close : NaN;
+    const closeSameDayEligible = Number.isFinite(closeSameDayBuyPrice) && closeSameDayBuyPrice > 0
+      && Number.isFinite(sellPrice) && sellPrice > 0;
+    const closeSameDayReturn = closeSameDayEligible
+      ? (sellPrice - closeSameDayBuyPrice) / closeSameDayBuyPrice
+      : 0;
     const openEntryBuyPrice = Number.isFinite(nextOpen) && nextOpen > 0 ? nextOpen : entryTrigger;
     const openEntryEligible = Number.isFinite(openEntryBuyPrice) && openEntryBuyPrice > 0 && Number.isFinite(sellPrice);
     const openEntryReturn = openEntryEligible
@@ -871,6 +878,10 @@ function annPrepareDataset(rows) {
       openEntryReturn,
       actualReturn,
       buyTrigger: entryTrigger,
+      closeSameDayEligible,
+      closeSameDayBuyPrice,
+      closeSameDaySellPrice: sellPrice,
+      closeSameDayReturn,
     });
     returns.push(actualReturn);
   }

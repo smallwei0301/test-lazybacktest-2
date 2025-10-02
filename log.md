@@ -1,3 +1,11 @@
+## 2025-12-29 — Patch LB-AI-TRADE-RULE-20251229A
+- **Scope**: AI 買入規則擴充與交易評估一致性。
+- **Updates**:
+  - 新增「收盤價買入」選項，預測上漲時即以當日收盤價買進、隔日收盤價賣出，並在 UI 切換時同步重算交易表與摘要。
+  - `js/worker.js` 回傳收盤買入的買／賣價與報酬欄位，確保 ANN 重播與種子儲存可復現該策略。
+  - `js/ai-prediction.js` 擴充交易評估邏輯，將三種買入規則統一納入凱利與固定投入計算。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-28 — Patch LB-AI-TRADE-RULE-20251228A
 - **Scope**: AI 預測交易邏輯與資金配置體驗同步調整。
 - **Updates**:
