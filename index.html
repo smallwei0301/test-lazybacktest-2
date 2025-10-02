@@ -2182,6 +2182,14 @@
                                                             <input id="ai-fixed-fraction" type="number" min="1" max="100" step="1" value="100" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                             <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
                                                         </label>
+                                                        <label class="flex flex-col gap-1 text-xs">
+                                                            <span class="font-medium" style="color: var(--foreground);">預測分類模式</span>
+                                                            <select id="ai-classification-mode" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="binary">二分類（漲跌）</option>
+                                                                <option value="multiclass">三分類（波動分級）</option>
+                                                            </select>
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依大漲／大跌門檻分級，僅在三分類時可調整下方門檻。</span>
+                                                        </label>
                                                         <div class="flex flex-col gap-1 text-xs">
                                                             <span class="font-medium" style="color: var(--foreground);">AI 買入規則</span>
                                                             <select id="ai-trade-rule" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
@@ -2255,8 +2263,9 @@
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                     <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
                                                         <tr>
-                                                            <th class="px-3 py-2 text-left font-semibold">交易日</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">預測大漲機率／分類</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">買入日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">賣出日</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">預測機率／分類</th>
                                                             <th class="px-3 py-2 text-right font-semibold">買入價格</th>
                                                             <th class="px-3 py-2 text-right font-semibold">賣出價格</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>

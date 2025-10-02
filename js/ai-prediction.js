@@ -2,8 +2,9 @@
 
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Triple entry rules & deterministic evaluation.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Volatility-tier strategy & multi-class forecasts.
+// Patch Tag: LB-AI-CLASS-MODE-20251230B — Classification mode toggle & binary-compatible pipelines.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-TRADE-VOLATILITY-20251230A';
+    const VERSION_TAG = 'LB-AI-CLASS-MODE-20251230B';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -15,6 +16,13 @@
         [MODEL_TYPES.ANNS]: 'ANNS 技術指標感知器',
     };
     const formatModelLabel = (modelType) => MODEL_LABELS[modelType] || 'AI 模型';
+    const CLASSIFICATION_MODES = {
+        BINARY: 'binary',
+        MULTICLASS: 'multiclass',
+    };
+    const normalizeClassificationMode = (mode) => (mode === CLASSIFICATION_MODES.BINARY
+        ? CLASSIFICATION_MODES.BINARY
+        : CLASSIFICATION_MODES.MULTICLASS);
     const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
     const VOLATILITY_CLASS_LABELS = ['大跌', '小幅波動', '大漲'];
 
@@ -69,6 +77,7 @@
             seed: null,
         },
         tradeRule: DEFAULT_TRADE_RULE,
+        classification: CLASSIFICATION_MODES.MULTICLASS,
         volatilityThresholds: { ...DEFAULT_VOLATILITY_THRESHOLDS },
     });
     const globalState = {
@@ -101,6 +110,7 @@
         runButton: null,
         freshRunButton: null,
         modelType: null,
+        classificationMode: null,
         trainRatio: null,
         lookback: null,
         epochs: null,
@@ -154,10 +164,38 @@
         let description = getTradeRuleDescription(normalized);
         if (normalized === 'volatility-tier') {
             const state = getModelState(globalState.activeModel);
-            const thresholds = sanitizeVolatilityThresholds(state?.volatilityThresholds);
-            description = `${description}（${formatVolatilityDescription(thresholds)}）`;
+            const classificationMode = state?.classification || CLASSIFICATION_MODES.MULTICLASS;
+            if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+                description = '買賣邏輯：模型採二分類判斷，當預測隔日上漲且機率達門檻時於當日收盤進場，之後持有至預測隔日下跌且機率達門檻時於當日收盤出場。';
+            } else {
+                const thresholds = sanitizeVolatilityThresholds(state?.volatilityThresholds);
+                description = `${description}（${formatVolatilityDescription(thresholds)}）`;
+            }
         }
         elements.tradeRules.textContent = description;
+    };
+
+    const updateClassificationUIState = (mode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const classificationMode = normalizeClassificationMode(mode);
+        const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
+        const surgeLabel = elements.volatilitySurge ? elements.volatilitySurge.closest('label') : null;
+        const dropLabel = elements.volatilityDrop ? elements.volatilityDrop.closest('label') : null;
+        if (elements.volatilitySurge) {
+            elements.volatilitySurge.disabled = isBinary;
+        }
+        if (elements.volatilityDrop) {
+            elements.volatilityDrop.disabled = isBinary;
+        }
+        [surgeLabel, dropLabel].forEach((label) => {
+            if (label && label.classList) {
+                if (isBinary) {
+                    label.classList.add('opacity-60');
+                } else {
+                    label.classList.remove('opacity-60');
+                }
+            }
+        });
+        updateTradeRuleDescription(getTradeRuleForModel());
     };
 
     const convertFractionToPercent = (fraction) => {
@@ -383,12 +421,29 @@
         return probs.map((value) => value / sum);
     };
 
-    const parsePredictionEntry = (value) => {
+    const parsePredictionEntry = (value, mode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const classificationMode = normalizeClassificationMode(mode);
+        const clampProbability = (num, fallback = 0) => {
+            const parsed = Number(num);
+            if (!Number.isFinite(parsed)) return fallback;
+            if (parsed < 0) return 0;
+            if (parsed > 1) return 1;
+            return parsed;
+        };
         if (Array.isArray(value)) {
-            const base = value.length >= 3
-                ? [value[0], value[1], value[2]]
-                : [value[0], value[1] ?? 0, value[2] ?? value[0]];
-            const probabilities = normalizeProbabilities(base);
+            let probabilities;
+            if (value.length >= 3) {
+                probabilities = normalizeProbabilities([value[0], value[1], value[2]]);
+            } else if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+                const pUp = clampProbability(value[value.length - 1], 0.5);
+                const pDown = clampProbability(value[0], 1 - pUp);
+                probabilities = normalizeProbabilities([pDown, 0, pUp]);
+            } else if (value.length === 2) {
+                probabilities = normalizeProbabilities([value[0], value[1], 1 - (Number(value[0]) + Number(value[1]))]);
+            } else {
+                const base = clampProbability(value[0], 1 / 3);
+                probabilities = normalizeProbabilities([base, base, base]);
+            }
             const classIndex = probabilities.indexOf(Math.max(...probabilities));
             return {
                 probabilities,
@@ -400,43 +455,48 @@
         }
         if (value && typeof value === 'object') {
             if (Array.isArray(value.probabilities)) {
-                return parsePredictionEntry(value.probabilities);
+                return parsePredictionEntry(value.probabilities, classificationMode);
             }
             if (Array.isArray(value.probs)) {
-                return parsePredictionEntry(value.probs);
+                return parsePredictionEntry(value.probs, classificationMode);
             }
             if (typeof value.pUp === 'number' || typeof value.up === 'number') {
                 const upValue = Number(value.pUp ?? value.up);
                 const downValue = Number(value.pDown ?? value.down ?? (1 - upValue));
                 const flatValue = Number(value.pFlat ?? value.flat ?? (1 - upValue - downValue));
-                return parsePredictionEntry([downValue, flatValue, upValue]);
+                return parsePredictionEntry([downValue, flatValue, upValue], classificationMode);
             }
         }
-        const probability = Number(value);
-        if (!Number.isFinite(probability)) {
+        const fallback = classificationMode === CLASSIFICATION_MODES.BINARY ? 0.5 : (1 / 3);
+        const probability = clampProbability(value, fallback);
+        if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+            const pUp = probability;
+            const pDown = 1 - pUp;
+            const probabilities = normalizeProbabilities([pDown, 0, pUp]);
             return {
-                probabilities: [1 / 3, 1 / 3, 1 / 3],
-                pDown: 1 / 3,
-                pFlat: 1 / 3,
-                pUp: 1 / 3,
-                classIndex: 1,
+                probabilities,
+                pDown: probabilities[0],
+                pFlat: probabilities[1],
+                pUp: probabilities[2],
+                classIndex: probabilities[2] >= probabilities[0] ? 2 : 0,
             };
         }
-        const pUp = Math.min(Math.max(probability, 0), 1);
-        const remaining = 1 - pUp;
-        const pDown = remaining / 2;
-        const probabilities = normalizeProbabilities([pDown, remaining - pDown, pUp]);
-        const classIndex = probabilities.indexOf(Math.max(...probabilities));
         return {
-            probabilities,
-            pDown: probabilities[0],
-            pFlat: probabilities[1],
-            pUp: probabilities[2],
-            classIndex,
+            probabilities: [1 / 3, 1 / 3, 1 / 3],
+            pDown: 1 / 3,
+            pFlat: 1 / 3,
+            pUp: 1 / 3,
+            classIndex: 1,
         };
     };
 
-    const formatVolatilityClassLabel = (index) => VOLATILITY_CLASS_LABELS[index] || VOLATILITY_CLASS_LABELS[1];
+    const formatClassLabel = (index, mode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const classificationMode = normalizeClassificationMode(mode);
+        if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+            return index === 2 ? '預測上漲' : '預測下跌';
+        }
+        return VOLATILITY_CLASS_LABELS[index] || VOLATILITY_CLASS_LABELS[1];
+    };
 
     const readVolatilityThresholdsFromInputs = (fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
         const base = sanitizeVolatilityThresholds(fallback);
@@ -480,6 +540,12 @@
         }
         if (referenceDate && !annotated.referenceDate) {
             annotated.referenceDate = referenceDate;
+        }
+        if (referenceDate && !annotated.buyDate) {
+            annotated.buyDate = referenceDate;
+        }
+        if (annotated.tradeDate && !annotated.sellDate) {
+            annotated.sellDate = annotated.tradeDate;
         }
         return annotated;
     };
@@ -775,7 +841,8 @@
         return null;
     };
 
-    const buildDataset = (rows, lookback, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS) => {
+    const buildDataset = (rows, lookback, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS, classificationOverride = CLASSIFICATION_MODES.MULTICLASS) => {
+        const classificationMode = normalizeClassificationMode(classificationOverride);
         if (!Array.isArray(rows)) {
             return { sequences: [], labels: [], meta: [], returns: [], baseRows: [] };
         }
@@ -823,13 +890,19 @@
                 ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
                 : 0;
             const actualReturn = closeEntryReturn;
-            let classLabel = 1;
-            if (Number.isFinite(rawChange)) {
+            let classLabel;
+            if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+                classLabel = Number(actualReturn > 0);
+            } else if (Number.isFinite(rawChange)) {
                 if (rawChange >= volatilityThresholds.surge) {
                     classLabel = 2;
                 } else if (rawChange <= -volatilityThresholds.drop) {
                     classLabel = 0;
+                } else {
+                    classLabel = 1;
                 }
+            } else {
+                classLabel = 1;
             }
             priceChanges.push(rawChange);
             tradeReturns.push(actualReturn);
@@ -883,6 +956,7 @@
             baseRows: sorted,
             lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
             volatilityThresholds,
+            classificationMode,
         };
     };
 
@@ -919,7 +993,8 @@
             elements.tradeTableBody.innerHTML = forecast && Number.isFinite(forecast.probability)
                 ? `
                     <tr class="bg-muted/30">
-                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤')}
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.buyDate || forecast.referenceDate || '最近收盤')}</td>
+                        <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '—')}
                             <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>
                         </td>
                         <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}${forecast.classLabel ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(forecast.classLabel)}</div>` : ''}</td>
@@ -951,7 +1026,8 @@
                 : '';
             return `
                 <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.tradeDate || '—')}${badge}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.buyDate || '—')}</td>
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.sellDate || trade.tradeDate || '—')}${badge}</td>
                     <td class="px-3 py-2 text-right">${probabilityText}${probabilityDetail}</td>
                     <td class="px-3 py-2 text-right">${buyPriceText}</td>
                     <td class="px-3 py-2 text-right">${sellPriceText}</td>
@@ -969,6 +1045,7 @@
                 : '';
             htmlParts.push(`
                 <tr class="bg-muted/30">
+                    <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.buyDate || forecast.referenceDate || '最近收盤')}</td>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(tradeDateLabel)}<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span></td>
                     <td class="px-3 py-2 text-right">${formatPercent(forecast.probability, 1)}${forecastDetail}</td>
                     <td class="px-3 py-2 text-right">${formatPrice(forecast.buyPrice)}</td>
@@ -1004,6 +1081,7 @@
 
     const updateSummaryMetrics = (summary) => {
         if (!summary) return;
+        const activeClassification = normalizeClassificationMode(summary.classificationMode || getActiveModelState()?.classification);
         updateTradeRuleDescription(summary.tradeRule || getTradeRuleForModel());
         if (elements.tradeRuleSelect && summary.tradeRule) {
             elements.tradeRuleSelect.value = normalizeTradeRule(summary.tradeRule);
@@ -1067,7 +1145,7 @@
                 const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
                     ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
                     : '';
-                const classLabel = forecast.classLabel || formatVolatilityClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1));
+                const classLabel = forecast.classLabel || formatClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1), activeClassification);
                 elements.nextDayForecast.textContent = `${baseLabel} 的隔日大漲機率為 ${formatPercent(forecast.probability, 1)}（預測分類：${classLabel}）；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
@@ -1082,6 +1160,7 @@
         const fixedFraction = sanitizeFraction(options.fixedFraction);
         const tradeRule = normalizeTradeRule(options.tradeRule);
         const volatilityThresholds = sanitizeVolatilityThresholds(options.volatilityThresholds || payload?.volatilityThresholds || DEFAULT_VOLATILITY_THRESHOLDS);
+        const classificationMode = normalizeClassificationMode(payload?.classificationMode || payload?.hyperparameters?.classificationMode);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -1103,7 +1182,7 @@
             let position = null;
             for (let i = 0; i < predictions.length; i += 1) {
                 const metaItem = meta[i] || {};
-                const parsed = parsePredictionEntry(predictions[i]);
+                const parsed = parsePredictionEntry(predictions[i], classificationMode);
                 const classIndex = parsed.classIndex;
                 const entryProbability = parsed.pUp;
                 const exitProbability = parsed.pDown;
@@ -1116,7 +1195,8 @@
                     position.lastPrice = dayClose;
                 }
 
-                if (!position && classIndex === 2 && entryProbability >= threshold) {
+                const allowEntry = classIndex === 2 && entryProbability >= threshold;
+                if (!position && allowEntry) {
                     let entryPrice = Number(metaItem.closeSameDayBuyPrice);
                     if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
                         entryPrice = Number(metaItem.buyClose);
@@ -1127,6 +1207,7 @@
                     position = {
                         entryIndex: i,
                         entryDate: entryDateCandidate,
+                        entrySellDateCandidate: exitDateCandidate,
                         entryPrice,
                         entryProbability,
                         entryClassIndex: classIndex,
@@ -1170,6 +1251,8 @@
                             executedDateValues.push(tradeTimestamp);
                         }
                         executedTrades.push({
+                            buyDate: position.entryDate,
+                            sellDate: exitDate,
                             tradeDate: exitDate,
                             probability: position.entryProbability,
                             actualReturn: grossReturn,
@@ -1179,10 +1262,11 @@
                             sellPrice: exitPrice,
                             tradeRule,
                             predictedClass: position.entryClassIndex,
-                            predictedClassLabel: formatVolatilityClassLabel(position.entryClassIndex),
+                            predictedClassLabel: formatClassLabel(position.entryClassIndex, classificationMode),
                             exitClass: classIndex,
                             holdDays: position.holdDays + 1,
                             probabilities: parsed.probabilities,
+                            classificationMode,
                         });
                         tradeReturns.push(tradeReturn);
                     }
@@ -1196,7 +1280,7 @@
             }
         } else {
             for (let i = 0; i < predictions.length; i += 1) {
-                const parsed = parsePredictionEntry(predictions[i]);
+                const parsed = parsePredictionEntry(predictions[i], classificationMode);
                 const probability = parsed.pUp;
                 const metaItem = meta[i];
                 if (!Number.isFinite(probability) || !metaItem) {
@@ -1212,6 +1296,8 @@
                 let resolvedSellPrice = baseSellPrice;
                 let entryEligible;
                 let actualReturn;
+                const buyDate = metaItem.buyDate || metaItem.tradeDate || null;
+                const sellDate = metaItem.sellDate || metaItem.tradeDate || null;
 
                 if (tradeRule === 'open-entry') {
                     const openEligible = typeof metaItem.openEntryEligible === 'boolean'
@@ -1336,6 +1422,8 @@
                     executedDateValues.push(tradeTimestamp);
                 }
                 executedTrades.push({
+                    buyDate,
+                    sellDate: tradeDate,
                     tradeDate,
                     probability,
                     actualReturn,
@@ -1345,8 +1433,9 @@
                     sellPrice: resolvedSellPrice,
                     tradeRule,
                     predictedClass: parsed.classIndex,
-                    predictedClassLabel: formatVolatilityClassLabel(parsed.classIndex),
+                    predictedClassLabel: formatClassLabel(parsed.classIndex, classificationMode),
                     probabilities: parsed.probabilities,
+                    classificationMode,
                 });
                 tradeReturns.push(tradeReturn);
             }
@@ -1425,6 +1514,8 @@
         const sanitizedFixedFraction = sanitizeFraction(options.fixedFraction);
         const resolvedVolatility = sanitizeVolatilityThresholds(options.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
+        const classificationMode = normalizeClassificationMode(payload?.classificationMode || modelState.classification);
+        payload.classificationMode = classificationMode;
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
             tradeRule: selectedRule,
@@ -1436,7 +1527,8 @@
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
         if (forecast) {
-            forecast.classLabel = formatVolatilityClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1));
+            forecast.classificationMode = classificationMode;
+            forecast.classLabel = formatClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1), classificationMode);
             const forecastFraction = options.useKelly
                 ? computeKellyFraction(forecast.probability, trainingOdds)
                 : sanitizedFixedFraction;
@@ -1476,6 +1568,7 @@
             forecast,
             tradeRule: evaluationRule,
             volatilityThresholds: resolvedVolatility,
+            classificationMode,
         };
 
         modelState.trainingMetrics = metrics;
@@ -1486,6 +1579,7 @@
         payload.volatilityThresholds = resolvedVolatility;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
+        modelState.classification = classificationMode;
 
         applySeedDefaultName(summary, modelType);
 
@@ -1523,6 +1617,9 @@
         modelState.fixedFraction = readFractionFromInput(modelState.fixedFraction);
         modelState.tradeRule = normalizeTradeRule(elements.tradeRuleSelect?.value);
         modelState.volatilityThresholds = readVolatilityThresholdsFromInputs(modelState.volatilityThresholds);
+        if (elements.classificationMode) {
+            modelState.classification = normalizeClassificationMode(elements.classificationMode.value);
+        }
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -1531,6 +1628,10 @@
             elements.modelType.value = globalState.activeModel;
         }
         const hyper = modelState.hyperparameters || {};
+        const classificationMode = normalizeClassificationMode(modelState.classification);
+        if (elements.classificationMode) {
+            elements.classificationMode.value = classificationMode;
+        }
         if (elements.lookback) {
             elements.lookback.value = Number.isFinite(hyper.lookback) ? hyper.lookback : 20;
         }
@@ -1570,7 +1671,7 @@
         if (elements.volatilityDrop) {
             elements.volatilityDrop.value = percent.drop.toFixed(2);
         }
-        updateTradeRuleDescription(getTradeRuleForModel(globalState.activeModel));
+        updateClassificationUIState(classificationMode);
         parseTrainRatio();
         parseWinThreshold();
     };
@@ -1591,9 +1692,10 @@
     const runLstmModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
         const modelType = MODEL_TYPES.LSTM;
         const label = formatModelLabel(modelType);
+        const classificationMode = normalizeClassificationMode(modelState.classification);
         const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
-        const dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility);
+        const dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility, classificationMode);
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
         if (dataset.sequences.length < minimumSamples) {
             showStatus(`[${label}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
@@ -1631,6 +1733,7 @@
                 trainRatio: hyperparameters.trainRatio,
                 seed: Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null),
                 volatility: resolvedVolatility,
+                classificationMode,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -1666,10 +1769,12 @@
             seed: Number.isFinite(hyperparametersUsed?.seed)
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
+            classificationMode,
         };
 
         predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
         predictionsPayload.volatilityThresholds = resolvedVolatility;
+        predictionsPayload.classificationMode = classificationMode;
 
         modelState.hyperparameters = {
             lookback: resolvedHyper.lookback,
@@ -1719,6 +1824,7 @@
 
         const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
+        const classificationMode = normalizeClassificationMode(modelState.classification);
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const taskPayload = {
@@ -1730,6 +1836,7 @@
                 trainRatio: hyperparameters.trainRatio,
                 lookback: hyperparameters.lookback,
                 volatility: resolvedVolatility,
+                classificationMode,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -1764,10 +1871,12 @@
             seed: Number.isFinite(hyperparametersUsed?.seed)
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
+            classificationMode,
         };
 
         predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
         predictionsPayload.volatilityThresholds = resolvedVolatility;
+        predictionsPayload.classificationMode = classificationMode;
 
         modelState.hyperparameters = {
             lookback: resolvedHyper.lookback,
@@ -1975,6 +2084,7 @@
                 lastClose: modelState.predictionsPayload.lastClose,
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
                 volatilityThresholds: modelState.volatilityThresholds,
+                classificationMode: modelState.classification,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -1990,6 +2100,7 @@
                 tradeReturnTotal: summary.tradeReturnTotal,
                 tradeRule: summary.tradeRule,
                 volatilityThresholds: summary.volatilityThresholds,
+                classificationMode: summary.classificationMode,
             },
             version: VERSION_TAG,
         };
@@ -2037,7 +2148,9 @@
             lastClose: Number.isFinite(seed.payload?.lastClose) ? seed.payload.lastClose : null,
             hyperparameters: seed.payload?.hyperparameters || null,
             volatilityThresholds: sanitizeVolatilityThresholds(seed.payload?.volatilityThresholds || seed.summary?.volatilityThresholds || modelState.volatilityThresholds),
+            classificationMode: normalizeClassificationMode(seed.payload?.classificationMode || seed.summary?.classificationMode || modelState.classification),
         };
+        modelState.classification = modelState.predictionsPayload.classificationMode;
         const metrics = seed.trainingMetrics || {
             trainAccuracy: NaN,
             trainLoss: NaN,
@@ -2050,6 +2163,7 @@
         modelState.trainingMetrics = metrics;
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
         modelState.volatilityThresholds = sanitizeVolatilityThresholds(seed.summary?.volatilityThresholds || modelState.predictionsPayload.volatilityThresholds || modelState.volatilityThresholds);
+        updateClassificationUIState(modelState.classification);
 
         const hyper = seed.payload?.hyperparameters || {};
         const existingHyper = modelState.hyperparameters || {};
@@ -2281,6 +2395,7 @@
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
         elements.loadSeedButton = document.getElementById('ai-load-seed');
         elements.deleteSeedButton = document.getElementById('ai-delete-seed');
+        elements.classificationMode = document.getElementById('ai-classification-mode');
         elements.tradeRuleSelect = document.getElementById('ai-trade-rule');
         elements.tradeRules = document.getElementById('ai-trade-rules');
         elements.volatilitySurge = document.getElementById('ai-volatility-surge');
@@ -2322,6 +2437,19 @@
                 recomputeTradesFromState();
             });
             elements.fixedFraction.addEventListener('blur', () => {
+                recomputeTradesFromState();
+            });
+        }
+
+        if (elements.classificationMode) {
+            elements.classificationMode.addEventListener('change', () => {
+                const mode = normalizeClassificationMode(elements.classificationMode.value);
+                const modelState = getActiveModelState();
+                if (modelState) {
+                    modelState.classification = mode;
+                }
+                updateClassificationUIState(mode);
+                captureActiveModelSettings();
                 recomputeTradesFromState();
             });
         }

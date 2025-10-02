@@ -881,3 +881,11 @@
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-30 — Patch LB-AI-CLASS-MODE-20251230B / LB-AI-LSTM-CLASS-20251230A
+- **Issue recap**: 使用者需於 ANN 與 LSTM 間切換原本二分類與新三分類預測，但前端僅支援多分類說明，LSTM 亦缺少二分類資料集與機率輸出，導致波段持有策略無法在 LSTM 下重現舊的漲跌邏輯。
+- **Fix**:
+  - `js/ai-prediction.js` 建立預測分類模式下拉、同步將訓練結果與種子流程寫入 `classificationMode`，並在二分類波段持有時採「預測隔日下跌即收盤出場」邏輯。
+  - `js/worker.js` 將 LSTM 訓練／預測改為依 `classificationMode` 動態建立 Sigmoid 或 Softmax 輸出，正規化預測／隔日機率並回傳 `[pDown,pFlat,pUp]`，同時在 Meta 與超參數中保存分類模式。
+- **Diagnostics**: 本地以相同資料集分別執行二分類與三分類，檢查交易表的買入日／賣出日、波段持有出場點與平均報酬，確認 LSTM 與 ANN 皆依選取的分類模式輸出一致結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

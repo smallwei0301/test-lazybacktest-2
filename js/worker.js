@@ -2,6 +2,7 @@
 // Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
+// Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -16,9 +17,17 @@ const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
 const LSTM_REPRO_VERSION = 'lstm_v1';
-const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20251226A';
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20251230A';
 const LSTM_THRESHOLD = 0.5;
 const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
+const CLASSIFICATION_MODES = {
+  BINARY: 'binary',
+  MULTICLASS: 'multiclass',
+};
+
+function normalizeClassificationMode(mode) {
+  return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
+}
 
 function sanitizeVolatilityThresholds(input = {}) {
   const rawSurge = Number(input?.surge);
@@ -26,6 +35,13 @@ function sanitizeVolatilityThresholds(input = {}) {
   const surge = Number.isFinite(rawSurge) && rawSurge > 0 ? Math.min(rawSurge, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.surge;
   const drop = Number.isFinite(rawDrop) && rawDrop > 0 ? Math.min(rawDrop, 0.5) : DEFAULT_VOLATILITY_THRESHOLDS.drop;
   return { surge, drop };
+}
+
+function clampProbability(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }
 
 let tfBackendReadyPromise = Promise.resolve();
@@ -153,13 +169,15 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
-function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED) {
+function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.BINARY) {
   const baseSeed = Number.isFinite(seed) ? Math.max(1, Math.round(seed)) : LSTM_DEFAULT_SEED;
   const buildKernelInitializer = (offset = 0) =>
     tf.initializers.glorotUniform({ seed: baseSeed + offset });
   const buildRecurrentInitializer = (offset = 0) =>
     tf.initializers.orthogonal({ seed: baseSeed + 100 + offset });
   const biasInitializer = tf.initializers.zeros();
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
 
   const model = tf.sequential();
   model.add(
@@ -190,14 +208,15 @@ function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED) {
   );
   model.add(
     tf.layers.dense({
-      units: 1,
-      activation: 'sigmoid',
+      units: isBinary ? 1 : 3,
+      activation: isBinary ? 'sigmoid' : 'softmax',
       kernelInitializer: buildKernelInitializer(4),
       biasInitializer,
     }),
   );
   const optimizer = tf.train.adam(learningRate);
-  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
 }
 
@@ -247,6 +266,8 @@ async function handleAITrainLSTMMessage(message) {
     }
 
     const volatilityThresholds = sanitizeVolatilityThresholds(dataset.volatilityThresholds);
+    const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
+    const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
 
     const inferredLookback = Array.isArray(dataset.sequences[0])
       ? dataset.sequences[0].length
@@ -278,7 +299,12 @@ async function handleAITrainLSTMMessage(message) {
 
     const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
     const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
-    const labelIndices = labels.map((label) => (Number.isInteger(label) ? Math.max(0, Math.min(2, label)) : 0));
+    const labelIndices = labels.map((label) => {
+      if (isBinary) {
+        return label > 0 ? 1 : 0;
+      }
+      return Number.isInteger(label) ? Math.max(0, Math.min(2, label)) : 0;
+    });
     if (labels.length !== sequences.length) {
       throw new Error('樣本與標籤數量不一致，無法訓練模型。');
     }
@@ -287,11 +313,13 @@ async function handleAITrainLSTMMessage(message) {
     const normalizedSequences = aiNormaliseSequences(sequences, normaliser);
     const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
     const xAll = tf.tensor(tensorInput);
-    const yAll = tf.tensor2d(labelIndices.map((index) => {
-      const arr = [0, 0, 0];
-      arr[index] = 1;
-      return arr;
-    }));
+    const yAll = isBinary
+      ? tf.tensor2d(labelIndices.map((value) => [value]), [labelIndices.length, 1])
+      : tf.tensor2d(labelIndices.map((index) => {
+        const arr = [0, 0, 0];
+        arr[index] = 1;
+        return arr;
+      }));
 
     const tensorsToDispose = [xAll, yAll];
     let model = null;
@@ -302,12 +330,17 @@ async function handleAITrainLSTMMessage(message) {
 
     try {
       xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
-      yTrain = yAll.slice([0, 0], [boundedTrainSize, 3]);
       xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
-      yTest = yAll.slice([boundedTrainSize, 0], [testSize, 3]);
+      if (isBinary) {
+        yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
+        yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
+      } else {
+        yTrain = yAll.slice([0, 0], [boundedTrainSize, 3]);
+        yTest = yAll.slice([boundedTrainSize, 0], [testSize, 3]);
+      }
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
-      model = aiCreateModel(lookback, learningRate, seedToUse);
+      model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode);
 
       aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
       const history = await model.fit(xTrain, yTrain, {
@@ -349,8 +382,26 @@ async function handleAITrainLSTMMessage(message) {
       const testAccuracy = evalValues[1] ?? NaN;
 
       const predictionsTensor = model.predict(xTest);
-      const predictionArray = await predictionsTensor.array();
+      const rawPredictions = await predictionsTensor.array();
       predictionsTensor.dispose();
+
+      const predictionArray = rawPredictions.map((row) => {
+        if (isBinary) {
+          const rawValue = Array.isArray(row) ? row[0] : row;
+          const probUp = clampProbability(Number(rawValue));
+          const probDown = clampProbability(1 - probUp);
+          return [probDown, 0, probUp];
+        }
+        const source = Array.isArray(row) ? row : [Number(row) || 0];
+        const pDown = clampProbability(source[0]);
+        const pFlat = clampProbability(source[1]);
+        const pUp = clampProbability(source[2]);
+        const sum = pDown + pFlat + pUp;
+        if (sum > 0) {
+          return [pDown / sum, pFlat / sum, pUp / sum];
+        }
+        return [0, 0, 0];
+      });
 
       const testLabels = labelIndices.slice(boundedTrainSize, boundedTrainSize + predictionArray.length);
       let TP = 0;
@@ -358,8 +409,12 @@ async function handleAITrainLSTMMessage(message) {
       let FP = 0;
       let FN = 0;
       let correctPredictions = 0;
+      const threshold = LSTM_THRESHOLD;
       const predictedLabels = predictionArray.map((row) => {
-        if (!Array.isArray(row) || row.length === 0) return 0;
+        if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
+        if (isBinary) {
+          return row[2] >= threshold ? 1 : 0;
+        }
         let maxIndex = 0;
         let maxValue = row[0];
         for (let idx = 1; idx < row.length; idx += 1) {
@@ -372,14 +427,21 @@ async function handleAITrainLSTMMessage(message) {
       });
       for (let i = 0; i < predictedLabels.length; i += 1) {
         const predictedLabel = predictedLabels[i];
-        const actual = testLabels[i];
-        if (predictedLabel === actual) {
+        const actual = isBinary ? (testLabels[i] > 0 ? 1 : 0) : testLabels[i];
+        if (predictedLabel === (isBinary ? actual : actual)) {
           correctPredictions += 1;
         }
-        if (actual === 2 && predictedLabel === 2) TP += 1;
-        else if (actual !== 2 && predictedLabel !== 2) TN += 1;
-        else if (actual !== 2 && predictedLabel === 2) FP += 1;
-        else if (actual === 2 && predictedLabel !== 2) FN += 1;
+        if (isBinary) {
+          if (actual === 1 && predictedLabel === 1) TP += 1;
+          else if (actual === 0 && predictedLabel === 0) TN += 1;
+          else if (actual === 0 && predictedLabel === 1) FP += 1;
+          else if (actual === 1 && predictedLabel === 0) FN += 1;
+        } else {
+          if (actual === 2 && predictedLabel === 2) TP += 1;
+          else if (actual !== 2 && predictedLabel !== 2) TN += 1;
+          else if (actual !== 2 && predictedLabel === 2) FP += 1;
+          else if (actual === 2 && predictedLabel !== 2) FN += 1;
+        }
       }
       const manualAccuracy = predictedLabels.length > 0
         ? correctPredictions / predictedLabels.length
@@ -403,19 +465,31 @@ async function handleAITrainLSTMMessage(message) {
           const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
           const forecastTensor = model.predict(forecastInput);
           const forecastArray = await forecastTensor.array();
-          const forecastProbs = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : [];
+          let forecastRow = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : forecastArray?.[0];
+          let forecastProbs;
+          if (isBinary) {
+            const rawValue = Array.isArray(forecastRow) ? forecastRow[0] : forecastRow;
+            const probUp = clampProbability(Number(rawValue));
+            const probDown = clampProbability(1 - probUp);
+            forecastProbs = [probDown, 0, probUp];
+          } else {
+            const pDown = clampProbability(Array.isArray(forecastRow) ? forecastRow[0] : Number(forecastRow) || 0);
+            const pFlat = clampProbability(Array.isArray(forecastRow) ? forecastRow[1] : 0);
+            const pUp = clampProbability(Array.isArray(forecastRow) ? forecastRow[2] : 0);
+            const sum = pDown + pFlat + pUp;
+            forecastProbs = sum > 0 ? [pDown / sum, pFlat / sum, pUp / sum] : [0, 0, 0];
+          }
           let forecastClass = 0;
-          let forecastProb = 0;
-          if (forecastProbs.length > 0) {
-            forecastProb = forecastProbs[2] ?? 0;
-            let maxValue = forecastProbs[0];
-            forecastClass = 0;
-            for (let idx = 1; idx < forecastProbs.length; idx += 1) {
-              if (forecastProbs[idx] > maxValue) {
-                maxValue = forecastProbs[idx];
-                forecastClass = idx;
-              }
+          let forecastProb = forecastProbs[2] ?? 0;
+          let maxValue = forecastProbs[0];
+          for (let idx = 1; idx < forecastProbs.length; idx += 1) {
+            if (forecastProbs[idx] > maxValue) {
+              maxValue = forecastProbs[idx];
+              forecastClass = idx;
             }
+          }
+          if (isBinary) {
+            forecastClass = forecastProb >= LSTM_THRESHOLD ? 2 : 0;
           }
           nextDayForecast = {
             probability: forecastProb,
@@ -424,6 +498,7 @@ async function handleAITrainLSTMMessage(message) {
               : null,
             probabilities: forecastProbs,
             predictedClass: forecastClass,
+            classificationMode,
           };
           const lastClose = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
             ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close)
@@ -467,9 +542,11 @@ async function handleAITrainLSTMMessage(message) {
           threshold: LSTM_THRESHOLD,
           volatility: volatilityThresholds,
           seed: seedToUse,
+          classificationMode,
         },
         predictedLabels,
         volatilityThresholds,
+        classificationMode,
       };
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
@@ -491,6 +568,7 @@ async function handleAITrainLSTMMessage(message) {
         trainSamples: boundedTrainSize,
         testSamples: testSize,
         volatility: volatilityThresholds,
+        classificationMode,
       };
       workerLastMeta = runMeta;
 
@@ -521,6 +599,7 @@ async function handleAITrainLSTMMessage(message) {
         volatility: volatilityThresholds,
         seed: seedToUse,
         modelType: MODEL_TYPES.LSTM,
+        classificationMode,
       };
 
       aiPostResult(id, {
@@ -816,7 +895,8 @@ function annWilliamsR(high, low, close, period = 14) {
   });
 }
 
-function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS) {
+function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS, classificationOverride = CLASSIFICATION_MODES.MULTICLASS) {
+  const classificationMode = normalizeClassificationMode(classificationOverride);
   const parsed = Array.isArray(rows)
     ? rows
         .filter((row) => row && typeof row.date === 'string')
@@ -898,13 +978,19 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     const swingReturn = Number.isFinite(next.close) && Number.isFinite(current.close) && current.close > 0
       ? (next.close - current.close) / current.close
       : NaN;
-    let classLabel = 1;
-    if (Number.isFinite(swingReturn)) {
+    let classLabel;
+    if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+      classLabel = Number(closeEntryReturn > 0);
+    } else if (Number.isFinite(swingReturn)) {
       if (swingReturn >= volatilityThresholds.surge) {
         classLabel = 2;
       } else if (swingReturn <= -volatilityThresholds.drop) {
         classLabel = 0;
+      } else {
+        classLabel = 1;
       }
+    } else {
+      classLabel = 1;
     }
     const closeSameDayBuyPrice = Number.isFinite(current.close) && current.close > 0 ? current.close : NaN;
     const closeSameDayEligible = Number.isFinite(closeSameDayBuyPrice) && closeSameDayBuyPrice > 0
@@ -960,6 +1046,7 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
     datasetLastClose: parsed.length > 0 ? parsed[parsed.length - 1].close : null,
     volatilityThresholds,
+    classificationMode,
   };
 }
 
@@ -1016,11 +1103,13 @@ function annOneHot(labels, numClasses = 3) {
 }
 
 // Patch Tag: LB-AI-ANNS-REPRO-20251223A — Seeded initialisers & deterministic ANN stack.
-function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED) {
+function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.MULTICLASS) {
   const model = tf.sequential();
   const initializerSeed = Number.isFinite(seed) ? seed : ANN_DEFAULT_SEED;
   const kernelInitializer = tf.initializers.glorotUniform({ seed: initializerSeed });
   const biasInitializer = tf.initializers.zeros();
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
   model.add(tf.layers.dense({
     units: 32,
     activation: 'relu',
@@ -1035,13 +1124,14 @@ function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED) {
     biasInitializer,
   }));
   model.add(tf.layers.dense({
-    units: 3,
-    activation: 'softmax',
+    units: isBinary ? 1 : 3,
+    activation: isBinary ? 'sigmoid' : 'softmax',
     kernelInitializer,
     biasInitializer,
   }));
   const optimizer = tf.train.sgd(learningRate);
-  model.compile({ optimizer, loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
 }
 
@@ -1070,7 +1160,9 @@ async function handleAITrainANNMessage(message) {
       throw new Error('資料不足（至少 60 根 K 線）');
     }
 
-    const prepared = annPrepareDataset(rows, options.volatility);
+    const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode);
+    const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
+    const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     const volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
       throw new Error('有效樣本不足，請延長資料範圍。');
@@ -1089,13 +1181,24 @@ async function handleAITrainANNMessage(message) {
     const batchSize = split.trainCount;
     const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
 
-    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse);
+    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
     const xTrain = tf.tensor2d(split.Xtr);
-    const yTrainArray = annOneHot(split.ytr, 3);
-    const yTestArray = annOneHot(split.yte, 3);
-    const yTrain = tf.tensor2d(yTrainArray, [yTrainArray.length, 3]);
-    const xTest = tf.tensor2d(split.Xte);
-    const yTest = tf.tensor2d(yTestArray, [yTestArray.length, 3]);
+    let yTrain;
+    let xTest;
+    let yTest;
+    if (isBinary) {
+      const yTrainValues = split.ytr.map((label) => (label > 0 ? 1 : 0));
+      const yTestValues = split.yte.map((label) => (label > 0 ? 1 : 0));
+      yTrain = tf.tensor2d(yTrainValues.map((value) => [value]), [yTrainValues.length, 1]);
+      xTest = tf.tensor2d(split.Xte);
+      yTest = tf.tensor2d(yTestValues.map((value) => [value]), [yTestValues.length, 1]);
+    } else {
+      const yTrainArray = annOneHot(split.ytr, 3);
+      const yTestArray = annOneHot(split.yte, 3);
+      yTrain = tf.tensor2d(yTrainArray, [yTrainArray.length, 3]);
+      xTest = tf.tensor2d(split.Xte);
+      yTest = tf.tensor2d(yTestArray, [yTestArray.length, 3]);
+    }
 
     const tensorsToDispose = [xTrain, yTrain, xTest, yTest];
     try {
@@ -1132,11 +1235,23 @@ async function handleAITrainANNMessage(message) {
       const testLoss = evalValues[0] ?? NaN;
 
       const predictionsTensor = model.predict(xTest);
-      const predictionArray = await predictionsTensor.array();
+      const rawPredictions = await predictionsTensor.array();
       predictionsTensor.dispose();
 
+      const predictionArray = isBinary
+        ? rawPredictions.map((row) => {
+          const rawValue = Array.isArray(row) ? row[0] : row;
+          const probUp = Math.min(Math.max(Number(rawValue) || 0, 0), 1);
+          const probDown = 1 - probUp;
+          return [probDown, 0, probUp];
+        })
+        : rawPredictions.map((row) => (Array.isArray(row) ? row : [Number(row) || 0]));
+
       const predictedLabels = predictionArray.map((row) => {
-        if (!Array.isArray(row) || row.length === 0) return 0;
+        if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
+        if (isBinary) {
+          return row[2] >= threshold ? 1 : 0;
+        }
         let maxIndex = 0;
         let maxValue = row[0];
         for (let idx = 1; idx < row.length; idx += 1) {
@@ -1147,7 +1262,7 @@ async function handleAITrainANNMessage(message) {
         }
         return maxIndex;
       });
-      const actualLabels = split.yte;
+      const actualLabels = split.yte.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
       let TP = 0;
       let TN = 0;
       let FP = 0;
@@ -1159,7 +1274,12 @@ async function handleAITrainANNMessage(message) {
         if (predicted === actual) {
           correct += 1;
         }
-        if (actual === 2 && predicted === 2) TP += 1;
+        if (isBinary) {
+          if (actual === 1 && predicted === 1) TP += 1;
+          else if (actual === 0 && predicted === 0) TN += 1;
+          else if (actual === 0 && predicted === 1) FP += 1;
+          else if (actual === 1 && predicted === 0) FN += 1;
+        } else if (actual === 2 && predicted === 2) TP += 1;
         else if (actual !== 2 && predicted !== 2) TN += 1;
         else if (actual !== 2 && predicted === 2) FP += 1;
         else if (actual === 2 && predicted !== 2) FN += 1;
@@ -1176,11 +1296,19 @@ async function handleAITrainANNMessage(message) {
           const forecastTensor = tf.tensor2d([standardisedForecast]);
           const forecastOutput = model.predict(forecastTensor);
           const forecastArray = await forecastOutput.array();
-          const forecastProbs = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : [];
+          const baseForecast = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : [];
+          let forecastProbs;
+          if (isBinary) {
+            const rawValue = Array.isArray(baseForecast) ? baseForecast[0] : baseForecast;
+            const probUp = Math.min(Math.max(Number(rawValue) || 0, 0), 1);
+            const probDown = 1 - probUp;
+            forecastProbs = [probDown, 0, probUp];
+          } else {
+            forecastProbs = baseForecast;
+          }
           let forecastClass = 0;
-          let forecastProb = 0;
-          if (forecastProbs.length > 0) {
-            forecastProb = forecastProbs[2] ?? 0;
+          let forecastProb = isBinary ? forecastProbs[2] : 0;
+          if (forecastProbs.length > 0 && !isBinary) {
             let maxValue = forecastProbs[0];
             forecastClass = 0;
             for (let idx = 1; idx < forecastProbs.length; idx += 1) {
@@ -1189,6 +1317,9 @@ async function handleAITrainANNMessage(message) {
                 forecastClass = idx;
               }
             }
+            forecastProb = forecastProbs[2] ?? 0;
+          } else if (isBinary) {
+            forecastClass = forecastProbs[2] >= threshold ? 2 : 0;
           }
           forecast = {
             probability: forecastProb,
@@ -1231,9 +1362,11 @@ async function handleAITrainANNMessage(message) {
           threshold,
           volatility: volatilityThresholds,
           seed: seedToUse,
+          classificationMode,
         },
         predictedLabels,
         volatilityThresholds,
+        classificationMode,
       };
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
@@ -1256,6 +1389,7 @@ async function handleAITrainANNMessage(message) {
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
+        classificationMode,
       };
       workerLastMeta = runMeta;
       try {
@@ -1283,6 +1417,7 @@ async function handleAITrainANNMessage(message) {
         modelType: MODEL_TYPES.ANNS,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         seed: seedToUse,
+        classificationMode,
       };
 
       annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage });
