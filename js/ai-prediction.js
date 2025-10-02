@@ -4,8 +4,9 @@
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Volatility-tier strategy & multi-class forecasts.
 // Patch Tag: LB-AI-CLASS-MODE-20251230B — Classification mode toggle & binary-compatible pipelines.
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260102A — Lock volatility UI to quartile-derived thresholds & fix ANN seed override.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20251231A';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260102A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -46,7 +47,7 @@
         {
             value: 'volatility-tier',
             label: '波動分級持有',
-            description: '買賣邏輯：模型依「大漲／小幅波動／大跌」三類判斷；當預測落在大漲區間且機率達門檻時於當日收盤價進場，之後小幅波動僅持有，遇到預測大跌且機率達門檻時於當日收盤前出場。',
+            description: '買賣邏輯：模型依「大漲／小幅波動／大跌」三類判斷；當預測落在大漲區間且機率達門檻時於當日收盤價進場，之後小幅波動僅持有，遇到預測大跌且機率達門檻時於當日收盤前出場（門檻固定為訓練集隔日收盤漲跌幅的 25%／75% 分位數）。',
         },
     ];
     const DEFAULT_TRADE_RULE = TRADE_RULE_OPTIONS[0].value;
@@ -176,24 +177,19 @@
         elements.tradeRules.textContent = description;
     };
 
-    const updateClassificationUIState = (mode = CLASSIFICATION_MODES.MULTICLASS) => {
-        const classificationMode = normalizeClassificationMode(mode);
-        const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
+    const updateClassificationUIState = (_mode = CLASSIFICATION_MODES.MULTICLASS) => {
         const surgeLabel = elements.volatilitySurge ? elements.volatilitySurge.closest('label') : null;
         const dropLabel = elements.volatilityDrop ? elements.volatilityDrop.closest('label') : null;
-        if (elements.volatilitySurge) {
-            elements.volatilitySurge.disabled = isBinary;
-        }
-        if (elements.volatilityDrop) {
-            elements.volatilityDrop.disabled = isBinary;
-        }
+        [elements.volatilitySurge, elements.volatilityDrop].forEach((input) => {
+            if (!input) return;
+            input.disabled = true;
+            input.setAttribute('aria-disabled', 'true');
+            input.setAttribute('title', '門檻由訓練集 25%／75% 分位數自動決定');
+            input.classList.add('cursor-not-allowed');
+        });
         [surgeLabel, dropLabel].forEach((label) => {
             if (label && label.classList) {
-                if (isBinary) {
-                    label.classList.add('opacity-60');
-                } else {
-                    label.classList.remove('opacity-60');
-                }
+                label.classList.add('opacity-60');
             }
         });
         updateTradeRuleDescription(getTradeRuleForModel());
@@ -609,28 +605,15 @@
     };
 
     const readVolatilityThresholdsFromInputs = (fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
-        const base = sanitizeVolatilityThresholds(fallback);
-        const basePercent = volatilityToPercent(base);
-        let surgePercent = basePercent.surge;
-        let dropPercent = basePercent.drop;
+        const sanitized = sanitizeVolatilityThresholds(fallback);
+        const percent = volatilityToPercent(sanitized);
         if (elements.volatilitySurge) {
-            const value = Number(elements.volatilitySurge.value);
-            if (Number.isFinite(value) && value > 0) {
-                surgePercent = Math.min(Math.max(value, 0.1), 50);
-            }
-            elements.volatilitySurge.value = surgePercent.toFixed(2);
+            elements.volatilitySurge.value = percent.surge.toFixed(2);
         }
         if (elements.volatilityDrop) {
-            const value = Number(elements.volatilityDrop.value);
-            if (Number.isFinite(value) && value > 0) {
-                dropPercent = Math.min(Math.max(value, 0.1), 50);
-            }
-            elements.volatilityDrop.value = dropPercent.toFixed(2);
+            elements.volatilityDrop.value = percent.drop.toFixed(2);
         }
-        return sanitizeVolatilityThresholds({
-            surge: surgePercent / 100,
-            drop: dropPercent / 100,
-        });
+        return sanitized;
     };
 
     const annotateForecast = (forecast, payload) => {
@@ -1964,7 +1947,7 @@
             ? Math.max(1, Math.round(runtimeOptions.seedOverride))
             : (Number.isFinite(hyperparameters.seed) ? Math.max(1, Math.round(hyperparameters.seed)) : null);
 
-        const resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
+        let resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
         const classificationMode = normalizeClassificationMode(modelState.classification);
 

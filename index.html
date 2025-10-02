@@ -2188,7 +2188,7 @@
                                                                 <option value="binary">二分類（漲跌）</option>
                                                                 <option value="multiclass">三分類（波動分級）</option>
                                                             </select>
-                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依大漲／大跌門檻分級，僅在三分類時可調整下方門檻。</span>
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依訓練集隔日收盤漲跌幅的 25%／75% 分位自動決定門檻，下方數值僅供檢視。</span>
                                                         </label>
                                                         <div class="flex flex-col gap-1 text-xs">
                                                             <span class="font-medium" style="color: var(--foreground);">AI 買入規則</span>
@@ -2200,15 +2200,15 @@
                                                             </select>
                                                             <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">切換買入條件後，交易表與統計會依相同預測結果重新計算。</span>
                                                             <div class="grid gap-2 md:grid-cols-2 mt-2">
-                                                                <label class="flex flex-col gap-1">
-                                                                    <span style="color: var(--muted-foreground);">大漲定義（%）</span>
-                                                                    <input id="ai-volatility-surge" type="number" min="0.1" max="50" step="0.1" value="3.00" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">隔日收盤漲幅達此值以上視為大漲。</span>
+                                                                <label class="flex flex-col gap-1 opacity-60">
+                                                                    <span style="color: var(--muted-foreground);">大漲定義（%｜訓練集 75% 分位）</span>
+                                                                    <input id="ai-volatility-surge" type="number" min="0.1" max="50" step="0.1" value="3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集隔日收盤漲跌幅第 75 百分位推導。</span>
                                                                 </label>
-                                                                <label class="flex flex-col gap-1">
-                                                                    <span style="color: var(--muted-foreground);">大跌定義（%）</span>
-                                                                    <input id="ai-volatility-drop" type="number" min="0.1" max="50" step="0.1" value="3.00" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">隔日收盤跌幅達此值以上視為大跌。</span>
+                                                                <label class="flex flex-col gap-1 opacity-60">
+                                                                    <span style="color: var(--muted-foreground);">大跌定義（%｜訓練集 25% 分位）</span>
+                                                                    <input id="ai-volatility-drop" type="number" min="0.1" max="50" step="0.1" value="3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集隔日收盤漲跌幅第 25 百分位推導。</span>
                                                                 </label>
                                                             </div>
                                                         </div>

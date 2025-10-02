@@ -895,3 +895,12 @@
 - **Diagnostics**: 本地以相同資料集分別執行二分類與三分類，檢查交易表的買入日／賣出日、波段持有出場點與平均報酬，確認 LSTM 與 ANN 皆依選取的分類模式輸出一致結果。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-02 — Patch LB-AI-VOL-QUARTILE-20260102A
+- **Issue recap**: ANNS 執行「新的預測」時，因重新指派 `resolvedVolatility` 造成 `Assignment to constant variable` 錯誤；同時 UI 仍允許手動調整大漲/大跌門檻，與訓練集 25%／75% 分位自動推導的策略不一致。
+- **Fix**:
+  - 將 ANN 前端訓練流程的 `resolvedVolatility` 改為可覆寫的 `let`，確保載入 Worker 回傳門檻時不會觸發常數重新指派錯誤。
+  - 鎖定 AI 波動門檻輸入為唯讀，改以訓練集 25%／75% 收盤漲跌分位自動更新，並在 UI/提示文字中明確標示為檢視用途。
+  - 更新波動分級策略描述與版本碼，確保種子、狀態列與交易摘要共用同一組 quartile 門檻。
+- **Diagnostics**: 本地透過 ANN「新的預測」與舊種子載入重播，確認不再出現常數指派錯誤，波動門檻欄位僅顯示最新 quartile 值且不可編輯。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
