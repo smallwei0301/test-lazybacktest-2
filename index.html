@@ -2166,7 +2166,7 @@
                                                                 </div>
                                                             </div>
                                                             <div class="flex items-center gap-2">
-                                                                <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <input id="ai-win-threshold" type="number" min="0" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                                 <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
                                                             </div>
                                                         </div>
@@ -2210,6 +2210,12 @@
                                                                     <input id="ai-volatility-drop" type="number" min="-50" max="0" step="0.1" value="-3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
                                                                     <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集中跌幅的前 25% 四分位跌幅推導，保持負號顯示。</span>
                                                                 </label>
+                                                            </div>
+                                                            <div id="ai-volatility-diagnostics" class="flex flex-col gap-1 mt-2 p-3 border rounded-md text-[11px]" style="border-color: color-mix(in srgb, var(--primary) 35%, transparent); background-color: color-mix(in srgb, var(--primary) 6%, transparent); color: var(--muted-foreground);">
+                                                                <span class="text-xs font-medium" style="color: var(--foreground);">訓練集波動統計</span>
+                                                                <span id="ai-volatility-sample-summary">尚未計算，請完成一次 AI 預測。</span>
+                                                                <span id="ai-volatility-surge-summary"></span>
+                                                                <span id="ai-volatility-drop-summary"></span>
                                                             </div>
                                                         </div>
                                                     </div>

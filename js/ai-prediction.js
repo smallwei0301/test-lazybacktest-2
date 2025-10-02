@@ -7,8 +7,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260102A — Lock volatility UI to quartile-derived thresholds & fix ANN seed override.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260108A';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260111A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -73,6 +74,7 @@
         kellyEnabled: false,
         fixedFraction: DEFAULT_FIXED_FRACTION,
         lastRunMeta: null,
+        volatilityDiagnostics: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -150,6 +152,10 @@
         tradeRules: null,
         volatilitySurge: null,
         volatilityDrop: null,
+        volatilityDiagnostics: null,
+        volatilitySampleSummary: null,
+        volatilitySurgeSummary: null,
+        volatilityDropSummary: null,
     };
 
     const colorMap = {
@@ -198,6 +204,8 @@
             }
         });
         updateTradeRuleDescription(getTradeRuleForModel());
+        const diagnostics = getModelState(globalState.activeModel)?.volatilityDiagnostics;
+        updateVolatilityDiagnosticsDisplay(diagnostics, _mode);
     };
 
     const convertFractionToPercent = (fraction) => {
@@ -457,7 +465,7 @@
         };
     };
 
-    const deriveVolatilityThresholdsFromReturns = (values, fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
+    const deriveVolatilityThresholdsFromReturns = (values, fallback = DEFAULT_VOLATILITY_THRESHOLDS, diagnosticsRef = null) => {
         const fallbackSanitized = sanitizeVolatilityThresholds(fallback);
         if (!Array.isArray(values) || values.length === 0) {
             return fallbackSanitized;
@@ -469,29 +477,83 @@
 
         const positives = filtered.filter((value) => value > 0).sort((a, b) => a - b);
         const negatives = filtered.filter((value) => value < 0).sort((a, b) => a - b);
+        const combined = filtered.slice().sort((a, b) => a - b);
+
         const positiveQuartile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
         const negativeQuartile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
+        const fallbackUpper = combined.length > 0 ? computeQuantileValue(combined, 0.75) : NaN;
+        const fallbackLower = combined.length > 0 ? computeQuantileValue(combined, 0.25) : NaN;
 
-        const surgeCandidate = Number.isFinite(positiveQuartile) && positiveQuartile > 0
-            ? Math.min(Math.abs(positiveQuartile), 0.5)
-            : fallbackSanitized.surge;
-        const dropCandidate = Number.isFinite(negativeQuartile) && negativeQuartile < 0
-            ? Math.min(Math.abs(negativeQuartile), 0.5)
-            : fallbackSanitized.drop;
+        const usedPositiveFallback = !(Number.isFinite(positiveQuartile) && positiveQuartile > 0);
+        const usedNegativeFallback = !(Number.isFinite(negativeQuartile) && negativeQuartile < 0);
 
-        const upperQuantile = Number.isFinite(positiveQuartile) && positiveQuartile > 0
-            ? Math.min(positiveQuartile, 0.5)
-            : surgeCandidate;
-        const lowerQuantile = Number.isFinite(negativeQuartile) && negativeQuartile < 0
-            ? Math.max(negativeQuartile, -0.5)
-            : -dropCandidate;
+        const surgeCandidate = usedPositiveFallback
+            ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : fallbackSanitized.surge)
+            : positiveQuartile;
+        const dropCandidate = usedNegativeFallback
+            ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? Math.abs(fallbackLower) : fallbackSanitized.drop)
+            : Math.abs(negativeQuartile);
 
-        return sanitizeVolatilityThresholds({
+        const upperQuantile = usedPositiveFallback
+            ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : surgeCandidate)
+            : positiveQuartile;
+        const lowerQuantile = usedNegativeFallback
+            ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? fallbackLower : -dropCandidate)
+            : negativeQuartile;
+
+        const sanitized = sanitizeVolatilityThresholds({
             surge: surgeCandidate,
             drop: dropCandidate,
             lowerQuantile,
             upperQuantile,
         });
+        if (diagnosticsRef && typeof diagnosticsRef === 'object') {
+            const positiveThreshold = Number.isFinite(sanitized.upperQuantile)
+                ? sanitized.upperQuantile
+                : (Number.isFinite(sanitized.surge) ? sanitized.surge : NaN);
+            const negativeThreshold = Number.isFinite(sanitized.lowerQuantile)
+                ? sanitized.lowerQuantile
+                : (Number.isFinite(sanitized.drop) ? -sanitized.drop : NaN);
+            const positiveExceedCount = Number.isFinite(positiveThreshold)
+                ? positives.filter((value) => value >= positiveThreshold).length
+                : 0;
+            const negativeExceedCount = Number.isFinite(negativeThreshold)
+                ? negatives.filter((value) => value <= negativeThreshold).length
+                : 0;
+            let midbandCount = Number.isFinite(positiveThreshold) || Number.isFinite(negativeThreshold)
+                ? filtered.length - positiveExceedCount - negativeExceedCount
+                : filtered.length;
+            if (!Number.isFinite(midbandCount) || midbandCount < 0) {
+                midbandCount = Math.max(filtered.length - positiveExceedCount - negativeExceedCount, 0);
+            }
+            const positiveExceedShare = positives.length > 0 ? (positiveExceedCount / positives.length) : NaN;
+            const negativeExceedShare = negatives.length > 0 ? (negativeExceedCount / negatives.length) : NaN;
+            const totalPositiveShare = filtered.length > 0 ? positiveExceedCount / filtered.length : 0;
+            const totalNegativeShare = filtered.length > 0 ? negativeExceedCount / filtered.length : 0;
+            diagnosticsRef.totalSamples = filtered.length;
+            if (!Number.isFinite(diagnosticsRef.expectedTrainSamples)) {
+                diagnosticsRef.expectedTrainSamples = filtered.length;
+            }
+            diagnosticsRef.positiveSamples = positives.length;
+            diagnosticsRef.negativeSamples = negatives.length;
+            diagnosticsRef.positiveQuartile = Number.isFinite(positiveQuartile) ? positiveQuartile : null;
+            diagnosticsRef.negativeQuartile = Number.isFinite(negativeQuartile) ? negativeQuartile : null;
+            diagnosticsRef.fallbackUpperQuartile = Number.isFinite(fallbackUpper) ? fallbackUpper : null;
+            diagnosticsRef.fallbackLowerQuartile = Number.isFinite(fallbackLower) ? fallbackLower : null;
+            diagnosticsRef.positiveThreshold = Number.isFinite(positiveThreshold) ? positiveThreshold : null;
+            diagnosticsRef.negativeThreshold = Number.isFinite(negativeThreshold) ? negativeThreshold : null;
+            diagnosticsRef.positiveExceedCount = positiveExceedCount;
+            diagnosticsRef.negativeExceedCount = negativeExceedCount;
+            diagnosticsRef.positiveExceedShare = Number.isFinite(positiveExceedShare) ? positiveExceedShare : null;
+            diagnosticsRef.negativeExceedShare = Number.isFinite(negativeExceedShare) ? negativeExceedShare : null;
+            diagnosticsRef.totalPositiveShare = Number.isFinite(totalPositiveShare) ? totalPositiveShare : null;
+            diagnosticsRef.totalNegativeShare = Number.isFinite(totalNegativeShare) ? totalNegativeShare : null;
+            diagnosticsRef.midbandCount = midbandCount;
+            diagnosticsRef.usedPositiveFallback = usedPositiveFallback;
+            diagnosticsRef.usedNegativeFallback = usedNegativeFallback;
+        }
+
+        return sanitized;
     };
 
     const classifySwingReturn = (value, thresholds) => {
@@ -537,6 +599,103 @@
     const formatVolatilityDescription = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => {
         const percent = volatilityToPercent(thresholds);
         return `大漲≧${percent.surge.toFixed(2)}%｜大跌≦${percent.drop.toFixed(2)}%`;
+    };
+
+    const updateVolatilityDiagnosticsDisplay = (diagnostics, classificationMode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const container = elements.volatilityDiagnostics;
+        const sampleEl = elements.volatilitySampleSummary;
+        const surgeEl = elements.volatilitySurgeSummary;
+        const dropEl = elements.volatilityDropSummary;
+        if (!container || !sampleEl || !surgeEl || !dropEl) {
+            return;
+        }
+        const normalizedMode = normalizeClassificationMode(classificationMode);
+        const hasDiagnostics = diagnostics && typeof diagnostics === 'object';
+        if (!hasDiagnostics || normalizedMode !== CLASSIFICATION_MODES.MULTICLASS) {
+            container.classList.add('opacity-60');
+            sampleEl.textContent = normalizedMode === CLASSIFICATION_MODES.MULTICLASS
+                ? '尚未計算，請完成一次 AI 預測。'
+                : '目前為二分類模式，僅顯示勝率門檻。';
+            surgeEl.textContent = '';
+            dropEl.textContent = '';
+            return;
+        }
+
+        container.classList.remove('opacity-60');
+        const totalSamples = Number.isFinite(diagnostics.totalSamples) ? diagnostics.totalSamples : 0;
+        const expectedSamples = Number.isFinite(diagnostics.expectedTrainSamples)
+            ? diagnostics.expectedTrainSamples
+            : totalSamples;
+        const positiveSamples = Number.isFinite(diagnostics.positiveSamples) ? diagnostics.positiveSamples : 0;
+        const negativeSamples = Number.isFinite(diagnostics.negativeSamples) ? diagnostics.negativeSamples : 0;
+        const positiveExceed = Number.isFinite(diagnostics.positiveExceedCount) ? diagnostics.positiveExceedCount : 0;
+        const negativeExceed = Number.isFinite(diagnostics.negativeExceedCount) ? diagnostics.negativeExceedCount : 0;
+        let midband = Number.isFinite(diagnostics.midbandCount)
+            ? diagnostics.midbandCount
+            : (totalSamples - positiveExceed - negativeExceed);
+        if (!Number.isFinite(midband) || midband < 0) {
+            midband = Math.max(totalSamples - positiveExceed - negativeExceed, 0);
+        }
+        const positiveQuartile = Number.isFinite(diagnostics.positiveQuartile)
+            ? diagnostics.positiveQuartile
+            : (Number.isFinite(diagnostics.positiveThreshold) ? diagnostics.positiveThreshold : NaN);
+        const negativeQuartile = Number.isFinite(diagnostics.negativeQuartile)
+            ? diagnostics.negativeQuartile
+            : (Number.isFinite(diagnostics.negativeThreshold) ? diagnostics.negativeThreshold : NaN);
+        const fallbackUpper = Number.isFinite(diagnostics.fallbackUpperQuartile)
+            ? diagnostics.fallbackUpperQuartile
+            : (Number.isFinite(diagnostics.positiveThreshold) ? diagnostics.positiveThreshold : NaN);
+        const fallbackLower = Number.isFinite(diagnostics.fallbackLowerQuartile)
+            ? diagnostics.fallbackLowerQuartile
+            : (Number.isFinite(diagnostics.negativeThreshold) ? diagnostics.negativeThreshold : NaN);
+        const positiveShare = Number.isFinite(diagnostics.positiveExceedShare)
+            ? diagnostics.positiveExceedShare
+            : (positiveSamples > 0 ? positiveExceed / positiveSamples : NaN);
+        const negativeShare = Number.isFinite(diagnostics.negativeExceedShare)
+            ? diagnostics.negativeExceedShare
+            : (negativeSamples > 0 ? negativeExceed / negativeSamples : NaN);
+        const totalPositiveShare = Number.isFinite(diagnostics.totalPositiveShare)
+            ? diagnostics.totalPositiveShare
+            : (totalSamples > 0 ? positiveExceed / totalSamples : NaN);
+        const totalNegativeShare = Number.isFinite(diagnostics.totalNegativeShare)
+            ? diagnostics.totalNegativeShare
+            : (totalSamples > 0 ? negativeExceed / totalSamples : NaN);
+
+        const summaryParts = [`訓練集隔日收盤漲跌幅 ${expectedSamples} 天`];
+        if (expectedSamples !== totalSamples) {
+            summaryParts.push(`有效樣本 ${totalSamples} 天`);
+        }
+        const compositionParts = [];
+        if (positiveSamples > 0) compositionParts.push(`上漲 ${positiveSamples} 天`);
+        if (negativeSamples > 0) compositionParts.push(`下跌 ${negativeSamples} 天`);
+        if (midband > 0) compositionParts.push(`小波動 ${midband} 天`);
+        sampleEl.textContent = compositionParts.length > 0
+            ? `${summaryParts.join('｜')}（${compositionParts.join('｜')}）`
+            : summaryParts.join('｜');
+
+        const positiveCountText = positiveSamples > 0 ? `${positiveExceed}/${positiveSamples}` : `${positiveExceed}/—`;
+        const positiveShareText = Number.isFinite(positiveShare) ? formatPercent(positiveShare, 1) : '—';
+        const positiveTotalShareText = Number.isFinite(totalPositiveShare) ? formatPercent(totalPositiveShare, 1) : '—';
+        const positiveSourceText = diagnostics.usedPositiveFallback
+            ? (Number.isFinite(diagnostics.fallbackUpperQuartile)
+                ? `｜上漲樣本不足，改用整體漲跌 75% 四分位 ${formatPercent(fallbackUpper, 2)}`
+                : '｜上漲樣本不足，改用預設門檻')
+            : '｜依上漲樣本計算';
+        surgeEl.textContent = Number.isFinite(positiveQuartile)
+            ? `上漲樣本前 25% 四分位 ≈ ${formatPercent(positiveQuartile, 2)}（達門檻 ${positiveCountText} 天，約 ${positiveShareText}｜占訓練集 ${positiveTotalShareText}）${positiveSourceText}`
+            : `上漲樣本不足以計算四分位數${diagnostics.usedPositiveFallback ? '，已改用預設門檻。' : '。'}`;
+
+        const negativeCountText = negativeSamples > 0 ? `${negativeExceed}/${negativeSamples}` : `${negativeExceed}/—`;
+        const negativeShareText = Number.isFinite(negativeShare) ? formatPercent(negativeShare, 1) : '—';
+        const negativeTotalShareText = Number.isFinite(totalNegativeShare) ? formatPercent(totalNegativeShare, 1) : '—';
+        const negativeSourceText = diagnostics.usedNegativeFallback
+            ? (Number.isFinite(diagnostics.fallbackLowerQuartile)
+                ? `｜下跌樣本不足，改用整體跌幅 25% 四分位 ${formatPercent(fallbackLower, 2)}`
+                : '｜下跌樣本不足，改用預設門檻')
+            : '｜依下跌樣本計算';
+        dropEl.textContent = Number.isFinite(negativeQuartile)
+            ? `下跌樣本前 25% 四分位 ≈ ${formatPercent(negativeQuartile, 2)}（達門檻 ${negativeCountText} 天，約 ${negativeShareText}｜占訓練集 ${negativeTotalShareText}）${negativeSourceText}`
+            : `下跌樣本不足以計算四分位數${diagnostics.usedNegativeFallback ? '，已改用預設門檻。' : '。'}`;
     };
 
     const normalizeProbabilities = (values) => {
@@ -712,7 +871,7 @@
 
     const parseWinThreshold = () => {
         if (!elements.winThreshold) return 0.5;
-        const percent = Math.round(parseNumberInput(elements.winThreshold, 60, { min: 50, max: 100 }));
+        const percent = Math.round(parseNumberInput(elements.winThreshold, 60, { min: 0, max: 100 }));
         elements.winThreshold.value = String(percent);
         const threshold = percent / 100;
         const modelState = getActiveModelState();
@@ -1212,6 +1371,10 @@
 
     const resetOutputs = () => {
         globalState.showAllPredictions = false;
+        const activeState = getActiveModelState();
+        if (activeState) {
+            activeState.volatilityDiagnostics = null;
+        }
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = '—';
         if (elements.trainLoss) elements.trainLoss.textContent = 'Loss：—';
         if (elements.testAccuracy) elements.testAccuracy.textContent = '—';
@@ -1234,6 +1397,7 @@
             elements.tradeRuleSelect.value = rule;
         }
         updateTradeRuleDescription(rule);
+        updateVolatilityDiagnosticsDisplay(null, getActiveModelState()?.classification);
     };
 
     const updateSummaryMetrics = (summary) => {
@@ -1306,6 +1470,7 @@
                 elements.nextDayForecast.textContent = `${baseLabel} 的隔日大漲機率為 ${formatPercent(forecast.probability, 1)}（預測分類：${classLabel}）；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
+        updateVolatilityDiagnosticsDisplay(summary.volatilityDiagnostics, activeClassification);
     };
 
     const computeTradeOutcomes = (payload, options, trainingOdds) => {
@@ -1751,6 +1916,9 @@
         const classificationMode = normalizeClassificationMode(payload?.classificationMode || modelState.classification);
         const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
         payload.classificationMode = classificationMode;
+        const diagnostics = payload?.volatilityDiagnostics && typeof payload.volatilityDiagnostics === 'object'
+            ? { ...payload.volatilityDiagnostics }
+            : null;
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
             tradeRule: selectedRule,
@@ -1805,6 +1973,7 @@
             tradeRule: evaluationRule,
             volatilityThresholds: resolvedVolatility,
             classificationMode,
+            volatilityDiagnostics: diagnostics,
         };
 
         modelState.trainingMetrics = metrics;
@@ -1812,9 +1981,11 @@
         modelState.currentTrades = evaluation.trades;
         modelState.allPredictionRows = allRecords;
         modelState.odds = trainingOdds;
+        modelState.volatilityDiagnostics = diagnostics;
         payload.tradeRule = evaluationRule;
         payload.volatilityThresholds = resolvedVolatility;
         payload.allRecords = allRecords;
+        payload.volatilityDiagnostics = diagnostics;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
@@ -1916,6 +2087,7 @@
         if (elements.volatilityDrop) {
             elements.volatilityDrop.value = percent.drop.toFixed(2);
         }
+        updateVolatilityDiagnosticsDisplay(modelState.volatilityDiagnostics, classificationMode);
         updateClassificationUIState(classificationMode);
         parseTrainRatio();
         parseWinThreshold();
@@ -1973,6 +2145,7 @@
         const sampleCount = dataset.sequences.length;
         const datasetLabels = new Array(sampleCount);
         let recalibratedVolatility = resolvedVolatility;
+        let volatilityDiagnostics = null;
         if (classificationMode === CLASSIFICATION_MODES.BINARY) {
             for (let i = 0; i < sampleCount; i += 1) {
                 const metaItem = dataset.meta[i] || {};
@@ -1992,7 +2165,10 @@
             const trainingSwings = swingTargets
                 .slice(0, boundedTrainSize)
                 .filter((value) => Number.isFinite(value));
-            recalibratedVolatility = deriveVolatilityThresholdsFromReturns(trainingSwings, resolvedVolatility);
+            const diagnosticsPayload = {};
+            recalibratedVolatility = deriveVolatilityThresholdsFromReturns(trainingSwings, resolvedVolatility, diagnosticsPayload);
+            diagnosticsPayload.expectedTrainSamples = trainingSwings.length;
+            volatilityDiagnostics = diagnosticsPayload;
             for (let i = 0; i < sampleCount; i += 1) {
                 const metaItem = dataset.meta[i] || {};
                 const swingValue = Number.isFinite(swingTargets[i])
@@ -2007,8 +2183,10 @@
         }
         dataset.labels = datasetLabels;
         dataset.volatilityThresholds = recalibratedVolatility;
+        dataset.volatilityDiagnostics = volatilityDiagnostics;
         resolvedVolatility = recalibratedVolatility;
         modelState.volatilityThresholds = resolvedVolatility;
+        modelState.volatilityDiagnostics = volatilityDiagnostics;
 
         const requestedSeed = Number.isFinite(runtimeOptions?.seedOverride)
             ? Math.max(1, Math.round(runtimeOptions.seedOverride))
@@ -2069,6 +2247,9 @@
         predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
         predictionsPayload.volatilityThresholds = resolvedVolatility;
         predictionsPayload.classificationMode = classificationMode;
+        if (!predictionsPayload.volatilityDiagnostics && volatilityDiagnostics) {
+            predictionsPayload.volatilityDiagnostics = { ...volatilityDiagnostics };
+        }
 
         modelState.hyperparameters = {
             lookback: resolvedHyper.lookback,
@@ -2383,6 +2564,7 @@
                 hyperparameters: modelState.predictionsPayload.hyperparameters,
                 volatilityThresholds: modelState.volatilityThresholds,
                 classificationMode: modelState.classification,
+                volatilityDiagnostics: modelState.volatilityDiagnostics,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -2399,6 +2581,7 @@
                 tradeRule: summary.tradeRule,
                 volatilityThresholds: summary.volatilityThresholds,
                 classificationMode: summary.classificationMode,
+                volatilityDiagnostics: summary.volatilityDiagnostics,
             },
             version: VERSION_TAG,
         };
@@ -2448,6 +2631,15 @@
             volatilityThresholds: sanitizeVolatilityThresholds(seed.payload?.volatilityThresholds || seed.summary?.volatilityThresholds || modelState.volatilityThresholds),
             classificationMode: normalizeClassificationMode(seed.payload?.classificationMode || seed.summary?.classificationMode || modelState.classification),
         };
+        const seedDiagnostics = (seed.payload?.volatilityDiagnostics && typeof seed.payload.volatilityDiagnostics === 'object')
+            ? seed.payload.volatilityDiagnostics
+            : (seed.summary?.volatilityDiagnostics && typeof seed.summary.volatilityDiagnostics === 'object'
+                ? seed.summary.volatilityDiagnostics
+                : null);
+        modelState.volatilityDiagnostics = seedDiagnostics ? { ...seedDiagnostics } : null;
+        if (modelState.volatilityDiagnostics) {
+            modelState.predictionsPayload.volatilityDiagnostics = { ...modelState.volatilityDiagnostics };
+        }
         modelState.classification = modelState.predictionsPayload.classificationMode;
         const metrics = seed.trainingMetrics || {
             trainAccuracy: NaN,
@@ -2699,6 +2891,10 @@
         elements.tradeRules = document.getElementById('ai-trade-rules');
         elements.volatilitySurge = document.getElementById('ai-volatility-surge');
         elements.volatilityDrop = document.getElementById('ai-volatility-drop');
+        elements.volatilityDiagnostics = document.getElementById('ai-volatility-diagnostics');
+        elements.volatilitySampleSummary = document.getElementById('ai-volatility-sample-summary');
+        elements.volatilitySurgeSummary = document.getElementById('ai-volatility-surge-summary');
+        elements.volatilityDropSummary = document.getElementById('ai-volatility-drop-summary');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {

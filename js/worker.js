@@ -5,6 +5,8 @@
 // Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile separation for volatility tiers.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Volatility quartile diagnostics for reproducibility.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260111A — Quartile fallback indicators and share diagnostics for AI volatility tiers.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -104,7 +106,7 @@ function computeQuantileValue(sortedValues, percentile) {
   return lowerValue + ((upperValue - lowerValue) * weight);
 }
 
-function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATILITY_THRESHOLDS) {
+function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATILITY_THRESHOLDS, diagnosticsRef = null) {
   const fallbackSanitized = sanitizeVolatilityThresholds(fallback);
   if (!Array.isArray(values) || values.length === 0) {
     return fallbackSanitized;
@@ -123,26 +125,76 @@ function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATI
   const fallbackUpper = combined.length > 0 ? computeQuantileValue(combined, 0.75) : NaN;
   const fallbackLower = combined.length > 0 ? computeQuantileValue(combined, 0.25) : NaN;
 
-  const surgeCandidate = Number.isFinite(positiveQuantile) && positiveQuantile > 0
-    ? positiveQuantile
-    : (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : fallbackSanitized.surge);
-  const dropCandidate = Number.isFinite(negativeQuantile) && negativeQuantile < 0
-    ? Math.abs(negativeQuantile)
-    : (Number.isFinite(fallbackLower) && fallbackLower < 0 ? Math.abs(fallbackLower) : fallbackSanitized.drop);
+  const usedPositiveFallback = !(Number.isFinite(positiveQuantile) && positiveQuantile > 0);
+  const usedNegativeFallback = !(Number.isFinite(negativeQuantile) && negativeQuantile < 0);
 
-  const upperQuantile = Number.isFinite(positiveQuantile) && positiveQuantile > 0
-    ? positiveQuantile
-    : (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : surgeCandidate);
-  const lowerQuantile = Number.isFinite(negativeQuantile) && negativeQuantile < 0
-    ? negativeQuantile
-    : (Number.isFinite(fallbackLower) && fallbackLower < 0 ? fallbackLower : -dropCandidate);
+  const surgeCandidate = usedPositiveFallback
+    ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : fallbackSanitized.surge)
+    : positiveQuantile;
+  const dropCandidate = usedNegativeFallback
+    ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? Math.abs(fallbackLower) : fallbackSanitized.drop)
+    : Math.abs(negativeQuantile);
 
-  return sanitizeVolatilityThresholds({
+  const upperQuantile = usedPositiveFallback
+    ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : surgeCandidate)
+    : positiveQuantile;
+  const lowerQuantile = usedNegativeFallback
+    ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? fallbackLower : -dropCandidate)
+    : negativeQuantile;
+
+  const sanitized = sanitizeVolatilityThresholds({
     surge: surgeCandidate,
     drop: dropCandidate,
     lowerQuantile,
     upperQuantile,
   });
+  if (diagnosticsRef && typeof diagnosticsRef === 'object') {
+    const positiveThreshold = Number.isFinite(sanitized.upperQuantile)
+      ? sanitized.upperQuantile
+      : (Number.isFinite(sanitized.surge) ? sanitized.surge : NaN);
+    const negativeThreshold = Number.isFinite(sanitized.lowerQuantile)
+      ? sanitized.lowerQuantile
+      : (Number.isFinite(sanitized.drop) ? -sanitized.drop : NaN);
+    const positiveExceedCount = Number.isFinite(positiveThreshold)
+      ? positives.filter((value) => value >= positiveThreshold).length
+      : 0;
+    const negativeExceedCount = Number.isFinite(negativeThreshold)
+      ? negatives.filter((value) => value <= negativeThreshold).length
+      : 0;
+    let midbandCount = Number.isFinite(positiveThreshold) || Number.isFinite(negativeThreshold)
+      ? filtered.length - positiveExceedCount - negativeExceedCount
+      : filtered.length;
+    if (!Number.isFinite(midbandCount) || midbandCount < 0) {
+      midbandCount = Math.max(filtered.length - positiveExceedCount - negativeExceedCount, 0);
+    }
+    diagnosticsRef.totalSamples = filtered.length;
+    if (!Number.isFinite(diagnosticsRef.expectedTrainSamples)) {
+      diagnosticsRef.expectedTrainSamples = filtered.length;
+    }
+    diagnosticsRef.positiveSamples = positives.length;
+    diagnosticsRef.negativeSamples = negatives.length;
+    diagnosticsRef.positiveQuartile = Number.isFinite(positiveQuantile) ? positiveQuantile : null;
+    diagnosticsRef.negativeQuartile = Number.isFinite(negativeQuantile) ? negativeQuantile : null;
+    diagnosticsRef.fallbackUpperQuartile = Number.isFinite(fallbackUpper) ? fallbackUpper : null;
+    diagnosticsRef.fallbackLowerQuartile = Number.isFinite(fallbackLower) ? fallbackLower : null;
+    diagnosticsRef.positiveThreshold = Number.isFinite(positiveThreshold) ? positiveThreshold : null;
+    diagnosticsRef.negativeThreshold = Number.isFinite(negativeThreshold) ? negativeThreshold : null;
+    diagnosticsRef.positiveExceedCount = positiveExceedCount;
+    diagnosticsRef.negativeExceedCount = negativeExceedCount;
+    const positiveExceedShare = positives.length > 0 ? (positiveExceedCount / positives.length) : NaN;
+    const negativeExceedShare = negatives.length > 0 ? (negativeExceedCount / negatives.length) : NaN;
+    const totalPositiveShare = filtered.length > 0 ? (positiveExceedCount / filtered.length) : NaN;
+    const totalNegativeShare = filtered.length > 0 ? (negativeExceedCount / filtered.length) : NaN;
+    diagnosticsRef.positiveExceedShare = Number.isFinite(positiveExceedShare) ? positiveExceedShare : null;
+    diagnosticsRef.negativeExceedShare = Number.isFinite(negativeExceedShare) ? negativeExceedShare : null;
+    diagnosticsRef.totalPositiveShare = Number.isFinite(totalPositiveShare) ? totalPositiveShare : null;
+    diagnosticsRef.totalNegativeShare = Number.isFinite(totalNegativeShare) ? totalNegativeShare : null;
+    diagnosticsRef.midbandCount = midbandCount;
+    diagnosticsRef.usedPositiveFallback = usedPositiveFallback;
+    diagnosticsRef.usedNegativeFallback = usedNegativeFallback;
+  }
+
+  return sanitized;
 }
 
 function classifySwingReturn(swingValue, thresholds) {
@@ -399,6 +451,10 @@ async function handleAITrainLSTMMessage(message) {
     }
 
     const volatilityThresholds = sanitizeVolatilityThresholds(dataset.volatilityThresholds);
+    let volatilityDiagnostics = dataset.volatilityDiagnostics
+      && typeof dataset.volatilityDiagnostics === 'object'
+        ? { ...dataset.volatilityDiagnostics }
+        : null;
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
 
@@ -653,6 +709,10 @@ async function handleAITrainLSTMMessage(message) {
         totalPredictions: predictionArray.length,
       };
 
+      if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
+        volatilityDiagnostics.expectedTrainSamples = boundedTrainSize;
+      }
+
       const predictionsPayload = {
         predictions: predictionArray,
         meta: testMeta,
@@ -680,6 +740,7 @@ async function handleAITrainLSTMMessage(message) {
         predictedLabels,
         volatilityThresholds,
         classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
@@ -702,6 +763,7 @@ async function handleAITrainLSTMMessage(message) {
         testSamples: testSize,
         volatility: volatilityThresholds,
         classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
       workerLastMeta = runMeta;
 
@@ -1307,6 +1369,10 @@ async function handleAITrainANNMessage(message) {
     const trainRatio = annClampTrainRatio(options.trainRatio);
     const rawTrainCount = Math.min(Math.max(Math.floor(totalSamples * trainRatio), 1), totalSamples - 1);
     let volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
+    let volatilityDiagnostics = prepared.volatilityDiagnostics
+      && typeof prepared.volatilityDiagnostics === 'object'
+        ? { ...prepared.volatilityDiagnostics }
+        : null;
     const labels = new Array(totalSamples);
     if (isBinary) {
       for (let i = 0; i < totalSamples; i += 1) {
@@ -1323,7 +1389,10 @@ async function handleAITrainANNMessage(message) {
         .slice(0, rawTrainCount)
         .map((item) => Number(item?.swingReturn))
         .filter((value) => Number.isFinite(value));
-      volatilityThresholds = deriveVolatilityThresholdsFromReturns(trainingSwings, volatilityThresholds);
+      const diagnosticsPayload = {};
+      volatilityThresholds = deriveVolatilityThresholdsFromReturns(trainingSwings, volatilityThresholds, diagnosticsPayload);
+      diagnosticsPayload.expectedTrainSamples = trainingSwings.length;
+      volatilityDiagnostics = diagnosticsPayload;
       for (let i = 0; i < totalSamples; i += 1) {
         const metaItem = prepared.meta[i] || {};
         const swingValue = Number(metaItem?.swingReturn);
@@ -1336,6 +1405,7 @@ async function handleAITrainANNMessage(message) {
     }
     prepared.y = labels;
     prepared.volatilityThresholds = volatilityThresholds;
+    prepared.volatilityDiagnostics = volatilityDiagnostics;
 
     const { Z, mean, std } = annStandardize(prepared.X);
     const split = annSplitTrainTest(Z, labels, prepared.meta, prepared.returns, trainRatio, rawTrainCount);
@@ -1534,6 +1604,7 @@ async function handleAITrainANNMessage(message) {
         predictedLabels,
         volatilityThresholds,
         classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
@@ -1557,6 +1628,7 @@ async function handleAITrainANNMessage(message) {
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
         classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
       workerLastMeta = runMeta;
       try {
