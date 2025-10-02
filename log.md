@@ -14,6 +14,12 @@
   - `js/ai-prediction.js` 擴充交易評估邏輯，將三種買入規則統一納入凱利與固定投入計算。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-08 — Patch LB-AI-VOL-QUARTILE-20260108A
+- **Issue recap**: 三分類模式下的大跌門檻以正值呈現，與「正漲幅／負跌幅」定義不符，且前端 quartile 仍採整體 25%/75% 分位，使得上下限無法對應訓練集的正負極端樣本。
+- **Fix**: `js/ai-prediction.js` 將漲跌幅重新拆分為正報酬與負報酬列表，各自取前 25% 四分位；同時保留負號顯示大跌門檻並更新門檻說明與版本碼，讓交易摘要、種子預設名稱與 UI 提示一致。
+- **Diagnostics**: 以同一訓練集重訓 ANN/LSTM，確認狀態列與表格顯示的大跌門檻為負值，且與 Worker 回傳的 `lowerQuantile` 一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-28 — Patch LB-AI-TRADE-RULE-20251228A
 - **Scope**: AI 預測交易邏輯與資金配置體驗同步調整。
 - **Updates**:

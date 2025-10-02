@@ -6,8 +6,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260102A — Lock volatility UI to quartile-derived thresholds & fix ANN seed override.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260105A';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260108A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -465,19 +466,29 @@
         if (filtered.length === 0) {
             return fallbackSanitized;
         }
-        const lower = computeQuantileValue(filtered, 0.25);
-        const upper = computeQuantileValue(filtered, 0.75);
-        const dropMagnitude = Number.isFinite(lower) && lower < 0
-            ? Math.min(Math.abs(lower), 0.5)
-            : fallbackSanitized.drop;
-        const surgeMagnitude = Number.isFinite(upper) && upper > 0
-            ? Math.min(Math.abs(upper), 0.5)
+
+        const positives = filtered.filter((value) => value > 0).sort((a, b) => a - b);
+        const negatives = filtered.filter((value) => value < 0).sort((a, b) => a - b);
+        const positiveQuartile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
+        const negativeQuartile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
+
+        const surgeCandidate = Number.isFinite(positiveQuartile) && positiveQuartile > 0
+            ? Math.min(Math.abs(positiveQuartile), 0.5)
             : fallbackSanitized.surge;
-        const lowerQuantile = Number.isFinite(lower) && lower < 0 ? lower : -dropMagnitude;
-        const upperQuantile = Number.isFinite(upper) && upper > 0 ? upper : surgeMagnitude;
+        const dropCandidate = Number.isFinite(negativeQuartile) && negativeQuartile < 0
+            ? Math.min(Math.abs(negativeQuartile), 0.5)
+            : fallbackSanitized.drop;
+
+        const upperQuantile = Number.isFinite(positiveQuartile) && positiveQuartile > 0
+            ? Math.min(positiveQuartile, 0.5)
+            : surgeCandidate;
+        const lowerQuantile = Number.isFinite(negativeQuartile) && negativeQuartile < 0
+            ? Math.max(negativeQuartile, -0.5)
+            : -dropCandidate;
+
         return sanitizeVolatilityThresholds({
-            surge: surgeMagnitude,
-            drop: dropMagnitude,
+            surge: surgeCandidate,
+            drop: dropCandidate,
             lowerQuantile,
             upperQuantile,
         });
@@ -506,14 +517,26 @@
         return 1;
     };
 
-    const volatilityToPercent = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => ({
-        surge: Number(((thresholds?.surge ?? DEFAULT_VOLATILITY_THRESHOLDS.surge) * 100).toFixed(2)),
-        drop: Number(((thresholds?.drop ?? DEFAULT_VOLATILITY_THRESHOLDS.drop) * 100).toFixed(2)),
-    });
+    const volatilityToPercent = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => {
+        const upperSource = Number.isFinite(thresholds?.upperQuantile)
+            ? thresholds.upperQuantile
+            : (Number.isFinite(thresholds?.surge) ? thresholds.surge : DEFAULT_VOLATILITY_THRESHOLDS.surge);
+        const lowerSource = Number.isFinite(thresholds?.lowerQuantile)
+            ? thresholds.lowerQuantile
+            : (Number.isFinite(thresholds?.drop) ? -Math.abs(thresholds.drop) : -DEFAULT_VOLATILITY_THRESHOLDS.drop);
+        const clampedUpper = Math.min(Math.max(upperSource, 0), 0.5);
+        const clampedLower = Math.max(Math.min(lowerSource, 0), -0.5);
+        return {
+            surge: Number((clampedUpper * 100).toFixed(2)),
+            drop: Number((clampedLower * 100).toFixed(2)),
+            upper: Number((clampedUpper * 100).toFixed(2)),
+            lower: Number((clampedLower * 100).toFixed(2)),
+        };
+    };
 
     const formatVolatilityDescription = (thresholds = DEFAULT_VOLATILITY_THRESHOLDS) => {
         const percent = volatilityToPercent(thresholds);
-        return `大漲≧${percent.surge.toFixed(2)}%｜大跌≧${percent.drop.toFixed(2)}%`;
+        return `大漲≧${percent.surge.toFixed(2)}%｜大跌≦${percent.drop.toFixed(2)}%`;
     };
 
     const normalizeProbabilities = (values) => {
