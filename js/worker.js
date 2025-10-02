@@ -4,6 +4,7 @@
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
 // Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile separation for volatility tiers.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -112,20 +113,33 @@ function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATI
   if (filtered.length === 0) {
     return fallbackSanitized;
   }
-  const sorted = filtered.sort((a, b) => a - b);
-  const lower = computeQuantileValue(sorted, 0.25);
-  const upper = computeQuantileValue(sorted, 0.75);
-  const dropMagnitude = Number.isFinite(lower) && lower < 0
-    ? Math.min(Math.abs(lower), 0.5)
-    : fallbackSanitized.drop;
-  const surgeMagnitude = Number.isFinite(upper) && upper > 0
-    ? Math.min(Math.abs(upper), 0.5)
-    : fallbackSanitized.surge;
-  const lowerQuantile = Number.isFinite(lower) && lower < 0 ? lower : -dropMagnitude;
-  const upperQuantile = Number.isFinite(upper) && upper > 0 ? upper : surgeMagnitude;
+
+  const positives = filtered.filter((value) => value > 0).sort((a, b) => a - b);
+  const negatives = filtered.filter((value) => value < 0).sort((a, b) => a - b);
+  const combined = filtered.slice().sort((a, b) => a - b);
+
+  const positiveQuantile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
+  const negativeQuantile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
+  const fallbackUpper = combined.length > 0 ? computeQuantileValue(combined, 0.75) : NaN;
+  const fallbackLower = combined.length > 0 ? computeQuantileValue(combined, 0.25) : NaN;
+
+  const surgeCandidate = Number.isFinite(positiveQuantile) && positiveQuantile > 0
+    ? positiveQuantile
+    : (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : fallbackSanitized.surge);
+  const dropCandidate = Number.isFinite(negativeQuantile) && negativeQuantile < 0
+    ? Math.abs(negativeQuantile)
+    : (Number.isFinite(fallbackLower) && fallbackLower < 0 ? Math.abs(fallbackLower) : fallbackSanitized.drop);
+
+  const upperQuantile = Number.isFinite(positiveQuantile) && positiveQuantile > 0
+    ? positiveQuantile
+    : (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : surgeCandidate);
+  const lowerQuantile = Number.isFinite(negativeQuantile) && negativeQuantile < 0
+    ? negativeQuantile
+    : (Number.isFinite(fallbackLower) && fallbackLower < 0 ? fallbackLower : -dropCandidate);
+
   return sanitizeVolatilityThresholds({
-    surge: surgeMagnitude,
-    drop: dropMagnitude,
+    surge: surgeCandidate,
+    drop: dropCandidate,
     lowerQuantile,
     upperQuantile,
   });

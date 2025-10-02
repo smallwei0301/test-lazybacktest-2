@@ -2188,7 +2188,7 @@
                                                                 <option value="binary">二分類（漲跌）</option>
                                                                 <option value="multiclass">三分類（波動分級）</option>
                                                             </select>
-                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依訓練集隔日收盤漲跌幅的 25%／75% 分位自動決定門檻，下方數值僅供檢視。</span>
+                                                        <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依訓練集上漲樣本前 25% 與下跌樣本前 25% 的四分位自動決定門檻，下方數值僅供檢視。</span>
                                                         </label>
                                                         <div class="flex flex-col gap-1 text-xs">
                                                             <span class="font-medium" style="color: var(--foreground);">AI 買入規則</span>
@@ -2201,14 +2201,14 @@
                                                             <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">切換買入條件後，交易表與統計會依相同預測結果重新計算。</span>
                                                             <div class="grid gap-2 md:grid-cols-2 mt-2">
                                                                 <label class="flex flex-col gap-1 opacity-60">
-                                                                    <span style="color: var(--muted-foreground);">大漲定義（%｜訓練集 75% 分位）</span>
+                                                                    <span style="color: var(--muted-foreground);">大漲定義（%｜訓練集上漲樣本前 25%）</span>
                                                                     <input id="ai-volatility-surge" type="number" min="0.1" max="50" step="0.1" value="3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
-                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集隔日收盤漲跌幅第 75 百分位推導。</span>
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集上漲樣本的前 25% 四分位漲幅推導。</span>
                                                                 </label>
                                                                 <label class="flex flex-col gap-1 opacity-60">
-                                                                    <span style="color: var(--muted-foreground);">大跌定義（%｜訓練集 25% 分位）</span>
+                                                                    <span style="color: var(--muted-foreground);">大跌定義（%｜訓練集中跌幅前 25%）</span>
                                                                     <input id="ai-volatility-drop" type="number" min="0.1" max="50" step="0.1" value="3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
-                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集隔日收盤漲跌幅第 25 百分位推導。</span>
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集中跌幅的前 25% 四分位跌幅推導。</span>
                                                                 </label>
                                                             </div>
                                                         </div>
@@ -2275,6 +2275,11 @@
                                                     </thead>
                                                     <tbody id="ai-trade-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
                                                 </table>
+                                            </div>
+                                            <div class="flex justify-end mt-2">
+                                                <button id="ai-toggle-all-trades" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border opacity-60 cursor-not-allowed" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);" aria-pressed="false" disabled>
+                                                    顯示全部預測紀錄
+                                                </button>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p id="ai-trade-summary">尚未生成交易結果。</p>

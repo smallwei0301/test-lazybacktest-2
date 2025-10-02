@@ -5,8 +5,9 @@
 // Patch Tag: LB-AI-CLASS-MODE-20251230B — Classification mode toggle & binary-compatible pipelines.
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260102A — Lock volatility UI to quartile-derived thresholds & fix ANN seed override.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260102A';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260105A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -47,7 +48,7 @@
         {
             value: 'volatility-tier',
             label: '波動分級持有',
-            description: '買賣邏輯：模型依「大漲／小幅波動／大跌」三類判斷；當預測落在大漲區間且機率達門檻時於當日收盤價進場，之後小幅波動僅持有，遇到預測大跌且機率達門檻時於當日收盤前出場（門檻固定為訓練集隔日收盤漲跌幅的 25%／75% 分位數）。',
+            description: '買賣邏輯：模型依「大漲／小幅波動／大跌」三類判斷；當預測落在大漲區間且機率達門檻時於當日收盤價進場，之後小幅波動僅持有，遇到預測大跌且機率達門檻時於當日收盤前出場（門檻固定為訓練集上漲樣本前 25% 與下跌樣本前 25% 的四分位漲跌幅）。',
         },
     ];
     const DEFAULT_TRADE_RULE = TRADE_RULE_OPTIONS[0].value;
@@ -65,6 +66,7 @@
         predictionsPayload: null,
         trainingMetrics: null,
         currentTrades: [],
+        allPredictionRows: [],
         lastSeedDefault: '',
         winThreshold: 0.5,
         kellyEnabled: false,
@@ -85,6 +87,7 @@
     const globalState = {
         running: false,
         activeModel: MODEL_TYPES.ANNS,
+        showAllPredictions: false,
         models: {
             [MODEL_TYPES.LSTM]: createModelState(),
             [MODEL_TYPES.ANNS]: createModelState(),
@@ -136,6 +139,7 @@
         tradeTableBody: null,
         tradeSummary: null,
         nextDayForecast: null,
+        toggleAllTrades: null,
         seedName: null,
         saveSeedButton: null,
         savedSeedList: null,
@@ -184,7 +188,7 @@
             if (!input) return;
             input.disabled = true;
             input.setAttribute('aria-disabled', 'true');
-            input.setAttribute('title', '門檻由訓練集 25%／75% 分位數自動決定');
+            input.setAttribute('title', '門檻由訓練集上漲樣本前 25% 與下跌樣本前 25% 的四分位自動決定');
             input.classList.add('cursor-not-allowed');
         });
         [surgeLabel, dropLabel].forEach((label) => {
@@ -1071,7 +1075,7 @@
         elements.datasetSummary.textContent = `可用資料 ${sorted.length} 筆，區間 ${firstDate} ~ ${lastDate}。`;
     };
 
-    const renderTrades = (records, forecast) => {
+    const renderTrades = (records, forecast, showingAll = false) => {
         if (!elements.tradeTableBody) return;
         const rows = Array.isArray(records) ? records : [];
         if (rows.length === 0) {
@@ -1093,11 +1097,21 @@
                 : '';
             return;
         }
-        const limited = rows.slice(-200);
-        const htmlParts = limited.map((trade) => {
+        const sourceRows = showingAll ? rows : rows.slice(-200);
+        const htmlParts = sourceRows.map((trade) => {
             const probabilityText = formatPercent(trade.probability, 1);
-            const probabilityDetail = trade.predictedClassLabel
-                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(trade.predictedClassLabel)}</div>`
+            const detailParts = [];
+            if (trade.predictedClassLabel) {
+                detailParts.push(escapeHTML(trade.predictedClassLabel));
+            }
+            if (showingAll) {
+                const statusText = trade.executed
+                    ? '已執行'
+                    : (trade.triggered ? '達門檻（未成交）' : '未達門檻');
+                detailParts.push(statusText);
+            }
+            const probabilityDetail = detailParts.length > 0
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${detailParts.join('｜')}</div>`
                 : '';
             const actualReturnText = formatPercent(trade.actualReturn, 2);
             const fractionText = formatPercent(trade.fraction, 2);
@@ -1109,8 +1123,15 @@
             const badge = trade.isForecast
                 ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent); color: var(--primary-foreground);">隔日預測</span>`
                 : '';
+            const rowClass = [];
+            if (trade.isForecast) {
+                rowClass.push('bg-muted/30');
+            } else if (showingAll && !trade.executed) {
+                rowClass.push('opacity-75');
+            }
+            const rowClassAttr = rowClass.length > 0 ? ` class="${rowClass.join(' ')}"` : '';
             return `
-                <tr${trade.isForecast ? ' class="bg-muted/30"' : ''}>
+                <tr${rowClassAttr}>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.buyDate || '—')}</td>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.sellDate || trade.tradeDate || '—')}${badge}</td>
                     <td class="px-3 py-2 text-right">${probabilityText}${probabilityDetail}</td>
@@ -1145,7 +1166,29 @@
         elements.tradeTableBody.innerHTML = htmlParts.join('');
     };
 
+    const updateAllPredictionsToggleButton = (modelState) => {
+        if (!elements.toggleAllTrades) return;
+        const total = Array.isArray(modelState?.allPredictionRows) ? modelState.allPredictionRows.length : 0;
+        const executed = Array.isArray(modelState?.currentTrades) ? modelState.currentTrades.length : 0;
+        const showingAll = Boolean(globalState.showAllPredictions && total > 0);
+        elements.toggleAllTrades.disabled = total === 0;
+        if (total === 0) {
+            elements.toggleAllTrades.classList.add('opacity-60', 'cursor-not-allowed');
+        } else {
+            elements.toggleAllTrades.classList.remove('opacity-60', 'cursor-not-allowed');
+        }
+        elements.toggleAllTrades.setAttribute('aria-pressed', showingAll ? 'true' : 'false');
+        if (total === 0) {
+            elements.toggleAllTrades.textContent = '顯示全部預測紀錄';
+        } else if (showingAll) {
+            elements.toggleAllTrades.textContent = `僅顯示觸發交易（${executed} 筆）`;
+        } else {
+            elements.toggleAllTrades.textContent = `顯示全部預測紀錄（共 ${total} 筆）`;
+        }
+    };
+
     const resetOutputs = () => {
+        globalState.showAllPredictions = false;
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = '—';
         if (elements.trainLoss) elements.trainLoss.textContent = 'Loss：—';
         if (elements.testAccuracy) elements.testAccuracy.textContent = '—';
@@ -1157,6 +1200,12 @@
         if (elements.tradeSummary) elements.tradeSummary.textContent = '尚未生成交易結果。';
         if (elements.nextDayForecast) elements.nextDayForecast.textContent = '尚未計算隔日預測。';
         if (elements.tradeTableBody) elements.tradeTableBody.innerHTML = '';
+        if (elements.toggleAllTrades) {
+            elements.toggleAllTrades.disabled = true;
+            elements.toggleAllTrades.classList.add('opacity-60', 'cursor-not-allowed');
+            elements.toggleAllTrades.textContent = '顯示全部預測紀錄';
+            elements.toggleAllTrades.setAttribute('aria-pressed', 'false');
+        }
         const rule = getTradeRuleForModel();
         if (elements.tradeRuleSelect) {
             elements.tradeRuleSelect.value = rule;
@@ -1250,6 +1299,7 @@
         const executedTrades = [];
         const tradeReturns = [];
         const executedDateValues = [];
+        const dailyRecords = [];
         let wins = 0;
 
         const parseDateToUTC = (value) => {
@@ -1280,37 +1330,70 @@
                     position.lastPrice = dayClose;
                 }
 
-                const allowEntry = classIndex === 2 && entryProbability >= threshold;
-                if (!position && allowEntry) {
-                    let entryPrice = Number(metaItem.closeSameDayBuyPrice);
-                    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-                        entryPrice = Number(metaItem.buyClose);
-                    }
-                    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-                        continue;
-                    }
+                const baseBuyPrice = Number.isFinite(metaItem.closeSameDayBuyPrice) && metaItem.closeSameDayBuyPrice > 0
+                    ? metaItem.closeSameDayBuyPrice
+                    : (Number.isFinite(metaItem.buyClose) ? metaItem.buyClose : NaN);
+                const baseSellPrice = Number.isFinite(metaItem.sellPrice)
+                    ? metaItem.sellPrice
+                    : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
+                const baseReturn = Number.isFinite(metaItem.swingReturn)
+                    ? metaItem.swingReturn
+                    : (Number.isFinite(metaItem.closeSameDayReturn)
+                        ? metaItem.closeSameDayReturn
+                        : (Number.isFinite(metaItem.actualReturn) ? metaItem.actualReturn : NaN));
+                const entryEligible = Boolean(typeof metaItem.closeSameDayEligible === 'boolean'
+                    ? metaItem.closeSameDayEligible
+                    : (Number.isFinite(baseBuyPrice) && Number.isFinite(baseSellPrice)));
+                const recordIndex = dailyRecords.length;
+                const record = {
+                    buyDate: entryDateCandidate || metaItem.buyDate || null,
+                    sellDate: exitDateCandidate || metaItem.sellDate || entryDateCandidate || null,
+                    tradeDate: exitDateCandidate || entryDateCandidate || null,
+                    probability: entryProbability,
+                    predictedClass: classIndex,
+                    predictedClassLabel: formatClassLabel(classIndex, classificationMode),
+                    classificationMode,
+                    tradeRule,
+                    entryEligible,
+                    executed: false,
+                    triggered: entryProbability >= threshold && classIndex === 2,
+                    buyPrice: Number.isFinite(baseBuyPrice) ? baseBuyPrice : NaN,
+                    sellPrice: Number.isFinite(baseSellPrice) ? baseSellPrice : NaN,
+                    actualReturn: Number.isFinite(baseReturn) ? baseReturn : NaN,
+                    fraction: 0,
+                    tradeReturn: 0,
+                    holdDays: 1,
+                    probabilities: parsed.probabilities,
+                    exitClass: classIndex,
+                };
+
+                let openedThisBar = false;
+                if (!position && record.triggered && entryEligible && Number.isFinite(baseBuyPrice) && baseBuyPrice > 0) {
+                    const fraction = useKelly
+                        ? computeKellyFraction(entryProbability, trainingOdds)
+                        : fixedFraction;
                     position = {
                         entryIndex: i,
+                        entryRecordIndex: recordIndex,
                         entryDate: entryDateCandidate,
                         entrySellDateCandidate: exitDateCandidate,
-                        entryPrice,
+                        entryPrice: baseBuyPrice,
                         entryProbability,
                         entryClassIndex: classIndex,
+                        fraction,
                         holdDays: 0,
                         lastPrice: Number.isFinite(nextClose) && nextClose > 0
                             ? nextClose
-                            : (Number.isFinite(dayClose) && dayClose > 0 ? dayClose : entryPrice),
+                            : (Number.isFinite(dayClose) && dayClose > 0 ? dayClose : baseBuyPrice),
                     };
-                    continue;
-                }
-
-                if (!position) {
-                    continue;
+                    record.executed = true;
+                    record.fraction = fraction;
+                    openedThisBar = true;
                 }
 
                 const exitSignal = classIndex === 0 && exitProbability >= threshold;
                 const isLastSample = i === predictions.length - 1;
-                if (exitSignal || isLastSample) {
+                if (position && !openedThisBar && (exitSignal || isLastSample)) {
                     let exitPrice = position.lastPrice;
                     let exitDate = exitDateCandidate || entryDateCandidate;
                     if (exitSignal) {
@@ -1324,9 +1407,9 @@
 
                     if (Number.isFinite(exitPrice) && exitPrice > 0 && Number.isFinite(position.entryPrice) && position.entryPrice > 0) {
                         const grossReturn = (exitPrice - position.entryPrice) / position.entryPrice;
-                        const fraction = useKelly
-                            ? computeKellyFraction(position.entryProbability, trainingOdds)
-                            : fixedFraction;
+                        const fraction = Number.isFinite(position.fraction)
+                            ? position.fraction
+                            : (useKelly ? computeKellyFraction(position.entryProbability, trainingOdds) : fixedFraction);
                         const tradeReturn = grossReturn * fraction;
                         if (grossReturn > 0) {
                             wins += 1;
@@ -1352,28 +1435,49 @@
                             holdDays: position.holdDays + 1,
                             probabilities: parsed.probabilities,
                             classificationMode,
+                            executed: true,
                         });
                         tradeReturns.push(tradeReturn);
+                        record.executed = true;
+                        record.triggered = record.triggered || exitSignal || isLastSample;
+                        record.buyDate = position.entryDate || record.buyDate;
+                        record.sellDate = exitDate || record.sellDate;
+                        record.tradeDate = exitDate || record.tradeDate;
+                        record.buyPrice = position.entryPrice;
+                        record.sellPrice = exitPrice;
+                        record.actualReturn = grossReturn;
+                        record.fraction = fraction;
+                        record.tradeReturn = tradeReturn;
+                        record.holdDays = position.holdDays + 1;
+                        const entryRecord = dailyRecords[position.entryRecordIndex];
+                        if (entryRecord) {
+                            entryRecord.sellDate = exitDate || entryRecord.sellDate;
+                            entryRecord.sellPrice = exitPrice;
+                            entryRecord.actualReturn = grossReturn;
+                            entryRecord.tradeReturn = tradeReturn;
+                            entryRecord.holdDays = position.holdDays + 1;
+                            entryRecord.executed = true;
+                        }
                     }
                     position = null;
-                } else {
+                } else if (position) {
                     position.holdDays += 1;
                     if (Number.isFinite(nextClose) && nextClose > 0) {
                         position.lastPrice = nextClose;
                     }
                 }
+
+                dailyRecords.push(record);
             }
         } else {
             for (let i = 0; i < predictions.length; i += 1) {
                 const parsed = parsePredictionEntry(predictions[i], classificationMode);
                 const probability = parsed.pUp;
-                const metaItem = meta[i];
-                if (!Number.isFinite(probability) || !metaItem) {
+                const metaItem = meta[i] || {};
+                if (!Number.isFinite(probability)) {
                     continue;
                 }
-                if (probability < threshold) {
-                    continue;
-                }
+
                 const baseSellPrice = Number.isFinite(metaItem.sellPrice)
                     ? metaItem.sellPrice
                     : (Number.isFinite(metaItem.sellClose) ? metaItem.sellClose : NaN);
@@ -1432,10 +1536,8 @@
                         }
                     }
                     actualReturn = Number(metaItem.closeSameDayReturn);
-                    if (!Number.isFinite(actualReturn)) {
-                        if (Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice)) {
-                            actualReturn = (resolvedSellPrice - prevClose) / prevClose;
-                        }
+                    if (!Number.isFinite(actualReturn) && Number.isFinite(prevClose) && prevClose > 0 && Number.isFinite(resolvedSellPrice)) {
+                        actualReturn = (resolvedSellPrice - prevClose) / prevClose;
                     }
                 } else {
                     const prevClose = Number(metaItem.buyClose);
@@ -1475,54 +1577,77 @@
                 if (typeof entryEligible !== 'boolean') {
                     entryEligible = true;
                 }
-                if (!entryEligible) {
-                    continue;
+
+                if (!Number.isFinite(resolvedSellPrice)) {
+                    resolvedSellPrice = Number(metaItem.sellClose);
                 }
-                if (!Number.isFinite(resolvedBuyPrice) || resolvedBuyPrice <= 0 || !Number.isFinite(resolvedSellPrice)) {
-                    continue;
-                }
-                if (!Number.isFinite(actualReturn)) {
+
+                if (!Number.isFinite(actualReturn) && Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0 && Number.isFinite(resolvedSellPrice)) {
                     actualReturn = (resolvedSellPrice - resolvedBuyPrice) / resolvedBuyPrice;
                 }
-                if (!Number.isFinite(actualReturn)) {
-                    continue;
+
+                const tradeDate = sellDate || metaItem.tradeDate || metaItem.date || buyDate || null;
+                const triggered = probability >= threshold;
+                const executed = Boolean(triggered
+                    && entryEligible
+                    && Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0
+                    && Number.isFinite(resolvedSellPrice));
+                let fraction = 0;
+                let tradeReturn = 0;
+                if (executed && Number.isFinite(actualReturn)) {
+                    fraction = useKelly
+                        ? computeKellyFraction(probability, trainingOdds)
+                        : fixedFraction;
+                    tradeReturn = actualReturn * fraction;
+                    if (actualReturn > 0) {
+                        wins += 1;
+                    }
+                    if (tradeDate) {
+                        const tradeTimestamp = parseDateToUTC(tradeDate);
+                        if (Number.isFinite(tradeTimestamp)) {
+                            executedDateValues.push(tradeTimestamp);
+                        }
+                    }
+                    executedTrades.push({
+                        buyDate,
+                        sellDate: tradeDate,
+                        tradeDate,
+                        probability,
+                        actualReturn,
+                        fraction,
+                        tradeReturn,
+                        buyPrice: resolvedBuyPrice,
+                        sellPrice: resolvedSellPrice,
+                        tradeRule,
+                        predictedClass: parsed.classIndex,
+                        predictedClassLabel: formatClassLabel(parsed.classIndex, classificationMode),
+                        probabilities: parsed.probabilities,
+                        classificationMode,
+                        executed: true,
+                    });
+                    tradeReturns.push(tradeReturn);
                 }
-                const tradeDate = typeof metaItem.sellDate === 'string' && metaItem.sellDate
-                    ? metaItem.sellDate
-                    : (typeof metaItem.tradeDate === 'string' && metaItem.tradeDate
-                        ? metaItem.tradeDate
-                        : (typeof metaItem.date === 'string' && metaItem.date ? metaItem.date : null));
-                if (!tradeDate) {
-                    continue;
-                }
-                const fraction = useKelly
-                    ? computeKellyFraction(probability, trainingOdds)
-                    : fixedFraction;
-                const tradeReturn = actualReturn * fraction;
-                if (actualReturn > 0) {
-                    wins += 1;
-                }
-                const tradeTimestamp = parseDateToUTC(tradeDate);
-                if (Number.isFinite(tradeTimestamp)) {
-                    executedDateValues.push(tradeTimestamp);
-                }
-                executedTrades.push({
+
+                dailyRecords.push({
                     buyDate,
-                    sellDate: tradeDate,
-                    tradeDate,
+                    sellDate: tradeDate || sellDate,
+                    tradeDate: tradeDate || sellDate,
                     probability,
-                    actualReturn,
-                    fraction,
-                    tradeReturn,
-                    buyPrice: resolvedBuyPrice,
-                    sellPrice: resolvedSellPrice,
-                    tradeRule,
                     predictedClass: parsed.classIndex,
                     predictedClassLabel: formatClassLabel(parsed.classIndex, classificationMode),
-                    probabilities: parsed.probabilities,
                     classificationMode,
+                    tradeRule,
+                    entryEligible,
+                    executed,
+                    triggered,
+                    buyPrice: Number.isFinite(resolvedBuyPrice) ? resolvedBuyPrice : NaN,
+                    sellPrice: Number.isFinite(resolvedSellPrice) ? resolvedSellPrice : NaN,
+                    actualReturn: Number.isFinite(actualReturn) ? actualReturn : NaN,
+                    fraction,
+                    tradeReturn,
+                    holdDays: 1,
+                    probabilities: parsed.probabilities,
                 });
-                tradeReturns.push(tradeReturn);
             }
         }
 
@@ -1580,6 +1705,7 @@
             },
             rule: tradeRule,
             volatilityThresholds,
+            allRecords: dailyRecords,
         };
     };
 
@@ -1600,6 +1726,7 @@
         const resolvedVolatility = sanitizeVolatilityThresholds(options.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
         const classificationMode = normalizeClassificationMode(payload?.classificationMode || modelState.classification);
+        const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
         payload.classificationMode = classificationMode;
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
@@ -1608,6 +1735,7 @@
             volatilityThresholds: resolvedVolatility,
         }, trainingOdds);
         const evaluationRule = normalizeTradeRule(evaluation.rule || selectedRule);
+        const allRecords = Array.isArray(evaluation.allRecords) ? evaluation.allRecords : [];
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
@@ -1659,9 +1787,11 @@
         modelState.trainingMetrics = metrics;
         modelState.lastSummary = summary;
         modelState.currentTrades = evaluation.trades;
+        modelState.allPredictionRows = allRecords;
         modelState.odds = trainingOdds;
         payload.tradeRule = evaluationRule;
         payload.volatilityThresholds = resolvedVolatility;
+        payload.allRecords = allRecords;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
@@ -1670,10 +1800,17 @@
 
         if (globalState.activeModel === modelType) {
             updateSummaryMetrics(summary);
-            renderTrades(evaluation.trades, summary.forecast);
+            if (!allRecords.length && globalState.showAllPredictions) {
+                globalState.showAllPredictions = false;
+            }
+            const rowsToRender = globalState.showAllPredictions ? allRecords : evaluation.trades;
+            renderTrades(rowsToRender, summary.forecast, globalState.showAllPredictions);
+            updateAllPredictionsToggleButton(modelState);
             if (elements.tradeRuleSelect) {
                 elements.tradeRuleSelect.value = evaluationRule;
             }
+        } else {
+            updateAllPredictionsToggleButton(modelState);
         }
     };
 
@@ -1766,10 +1903,19 @@
         const modelState = getModelState(modelType);
         if (modelState && modelState.lastSummary) {
             updateSummaryMetrics(modelState.lastSummary);
-            renderTrades(modelState.currentTrades, modelState.lastSummary.forecast);
+            const hasAllRecords = Array.isArray(modelState.allPredictionRows) && modelState.allPredictionRows.length > 0;
+            if (!hasAllRecords && globalState.showAllPredictions) {
+                globalState.showAllPredictions = false;
+            }
+            const rowsToRender = globalState.showAllPredictions && hasAllRecords
+                ? modelState.allPredictionRows
+                : modelState.currentTrades;
+            renderTrades(rowsToRender, modelState.lastSummary.forecast, globalState.showAllPredictions && hasAllRecords);
+            updateAllPredictionsToggleButton(modelState);
             applySeedDefaultName(modelState.lastSummary, modelType, { force: true });
         } else {
             resetOutputs();
+            updateAllPredictionsToggleButton(modelState);
             applySeedDefaultName(null, modelType, { force: true });
         }
     };
@@ -2519,6 +2665,7 @@
         elements.tradeTableBody = document.getElementById('ai-trade-table-body');
         elements.tradeSummary = document.getElementById('ai-trade-summary');
         elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
+        elements.toggleAllTrades = document.getElementById('ai-toggle-all-trades');
         elements.seedName = document.getElementById('ai-seed-name');
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
@@ -2541,6 +2688,26 @@
                 runPrediction({ freshSeed: true });
             });
         }
+
+        if (elements.toggleAllTrades) {
+            elements.toggleAllTrades.addEventListener('click', () => {
+                const modelState = getActiveModelState();
+                const totalRecords = Array.isArray(modelState?.allPredictionRows) ? modelState.allPredictionRows.length : 0;
+                if (elements.toggleAllTrades.disabled || totalRecords === 0) {
+                    return;
+                }
+                globalState.showAllPredictions = !globalState.showAllPredictions;
+                updateAllPredictionsToggleButton(modelState);
+                if (modelState?.lastSummary) {
+                    const rowsToRender = globalState.showAllPredictions
+                        ? modelState.allPredictionRows
+                        : modelState.currentTrades;
+                    renderTrades(rowsToRender, modelState.lastSummary.forecast, globalState.showAllPredictions);
+                }
+            });
+        }
+
+        updateAllPredictionsToggleButton(getActiveModelState());
 
         if (elements.modelType) {
             elements.modelType.addEventListener('change', () => {

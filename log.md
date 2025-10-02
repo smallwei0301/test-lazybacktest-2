@@ -904,3 +904,12 @@
 - **Diagnostics**: 本地透過 ANN「新的預測」與舊種子載入重播，確認不再出現常數指派錯誤，波動門檻欄位僅顯示最新 quartile 值且不可編輯。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-05 — Patch LB-AI-VOL-QUARTILE-20260105A
+- **Issue recap**: 三分類波動門檻僅以整體 25%/75% 分位衡量，無法區分上漲與下跌樣本的尾端區間；交易表亦僅顯示達門檻的成交紀錄，無法檢視低於 50% 機率的日常預測。
+- **Fix**:
+  - `js/worker.js` 將訓練集隔日報酬拆為正報酬與負報酬兩組，再以上漲樣本前 25% 與下跌樣本前 25% 的四分位推導大漲／大跌門檻，隨模型中繼資料一併回傳。
+  - `js/ai-prediction.js` 擴充交易評估輸出每日預測紀錄、保留觸發狀態與投入比例，新增「顯示全部預測紀錄」切換按鈕並於狀態列同步更新，重算報酬時維持切換狀態。
+  - `index.html` 調整波動門檻說明文字、加入顯示全部預測按鈕，預設為停用狀態並於載入後由腳本啟用。
+- **Diagnostics**: 以同一資料集重訓 ANN 與 LSTM，確認 `volatilityThresholds.upperQuantile/lowerQuantile` 反映正負四分位；切換「顯示全部預測」時，交易表會在 200 筆限制解除後呈現每日預測並保留原有成交筆數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
