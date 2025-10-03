@@ -11,8 +11,10 @@
 // Patch Tag: LB-AI-HYBRID-20260122A — Multiclass threshold defaults & trade gating fixes.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
+// Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
+// Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260128A';
+    const VERSION_TAG = 'LB-AI-SWING-20260210A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -1120,29 +1122,57 @@
         return VOLATILITY_CLASS_LABELS[index] || VOLATILITY_CLASS_LABELS[1];
     };
 
-    const formatPredictedSwingText = (index, mode, bounds) => {
-        const classificationMode = normalizeClassificationMode(mode);
-        if (classificationMode !== CLASSIFICATION_MODES.MULTICLASS) {
-            return '—';
+    const normalizeClassReturnAverages = (stats, mode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const normalizedMode = normalizeClassificationMode(mode);
+        const safe = stats && typeof stats === 'object' ? stats : {};
+        const ensureObject = (value) => (value && typeof value === 'object' ? value : {});
+        return {
+            train: ensureObject(safe.train),
+            overall: ensureObject(safe.overall),
+            trainCounts: ensureObject(safe.trainCounts),
+            overallCounts: ensureObject(safe.overallCounts),
+            mode: normalizedMode,
+        };
+    };
+
+    const computePredictedSwingValue = (probabilities, mode, averages) => {
+        const normalizedMode = normalizeClassificationMode(mode);
+        if (!Array.isArray(probabilities) || probabilities.length === 0) return NaN;
+        const baseProbs = probabilities.slice(0, 3);
+        while (baseProbs.length < 3) baseProbs.push(0);
+        const normalizedProbs = normalizeProbabilities(baseProbs);
+        const stats = normalizeClassReturnAverages(averages, normalizedMode);
+        const pickAverage = (key, fallbackValue) => {
+            const trainValue = Number(stats.train[key]);
+            if (Number.isFinite(trainValue)) return trainValue;
+            const overallValue = Number(stats.overall[key]);
+            if (Number.isFinite(overallValue)) return overallValue;
+            return Number.isFinite(fallbackValue) ? fallbackValue : NaN;
+        };
+        if (normalizedMode === CLASSIFICATION_MODES.MULTICLASS) {
+            const dropMean = pickAverage('drop', NaN);
+            const flatMean = pickAverage('flat', 0);
+            const surgeMean = pickAverage('surge', NaN);
+            if (!Number.isFinite(dropMean) && !Number.isFinite(flatMean) && !Number.isFinite(surgeMean)) {
+                return NaN;
+            }
+            return ((normalizedProbs[0] ?? 0) * dropMean)
+                + ((normalizedProbs[1] ?? 0) * flatMean)
+                + ((normalizedProbs[2] ?? 0) * surgeMean);
         }
-        const upper = Number.isFinite(bounds?.upper) ? bounds.upper : NaN;
-        const lower = Number.isFinite(bounds?.lower) ? bounds.lower : NaN;
-        if (index === 2) {
-            return Number.isFinite(upper) ? `≥ ${formatPercent(upper, 2)}` : '≥ 門檻';
+        const downMean = pickAverage('down', NaN);
+        const upMean = pickAverage('up', NaN);
+        const downProb = normalizedProbs[0] ?? 0;
+        const upProb = normalizedProbs[2] ?? (normalizedProbs[1] ?? 0);
+        if (!Number.isFinite(downMean) && !Number.isFinite(upMean)) {
+            return NaN;
         }
-        if (index === 0) {
-            return Number.isFinite(lower) ? `≤ ${formatPercent(lower, 2)}` : '≤ 門檻';
-        }
-        if (Number.isFinite(lower) && Number.isFinite(upper)) {
-            return `${formatPercent(lower, 2)} ~ ${formatPercent(upper, 2)}`;
-        }
-        if (Number.isFinite(upper)) {
-            return `＜ ${formatPercent(upper, 2)}`;
-        }
-        if (Number.isFinite(lower)) {
-            return `＞ ${formatPercent(lower, 2)}`;
-        }
-        return '—';
+        return (downProb * downMean) + (upProb * upMean);
+    };
+
+    const formatPredictedSwingText = (value) => {
+        if (!Number.isFinite(value)) return '—';
+        return formatPercent(value, 2);
     };
 
     const readVolatilityThresholdsFromInputs = (fallback = DEFAULT_VOLATILITY_THRESHOLDS) => {
@@ -1625,11 +1655,18 @@
         const modelState = getActiveModelState();
         const fallbackMode = normalizeClassificationMode(modelState?.classification || CLASSIFICATION_MODES.MULTICLASS);
         const fallbackBounds = resolveVolatilityBounds(modelState?.volatilityThresholds || DEFAULT_VOLATILITY_THRESHOLDS);
+        const classAverages = modelState?.predictionsPayload?.classReturnAverages || null;
         if (rows.length === 0) {
             const forecastMode = normalizeClassificationMode(forecast?.classificationMode || fallbackMode);
             const upperBound = Number.isFinite(forecast?.volatilityUpper) ? forecast.volatilityUpper : fallbackBounds.upper;
             const lowerBound = Number.isFinite(forecast?.volatilityLower) ? forecast.volatilityLower : fallbackBounds.lower;
-            const swingText = formatPredictedSwingText(forecast?.predictedClass ?? 1, forecastMode, { upper: upperBound, lower: lowerBound });
+            const forecastSwingValue = Number.isFinite(forecast?.predictedSwing)
+                ? forecast.predictedSwing
+                : computePredictedSwingValue(
+                    Array.isArray(forecast?.probabilities) ? forecast.probabilities : [],
+                    forecastMode,
+                    classAverages);
+            const swingText = formatPredictedSwingText(forecastSwingValue);
             const surgeText = forecastMode === CLASSIFICATION_MODES.MULTICLASS && Number.isFinite(upperBound)
                 ? formatPercent(upperBound, 2)
                 : '—';
@@ -1679,7 +1716,13 @@
             const recordMode = normalizeClassificationMode(trade.classificationMode || fallbackMode);
             const recordUpper = Number.isFinite(trade.volatilityUpper) ? trade.volatilityUpper : fallbackBounds.upper;
             const recordLower = Number.isFinite(trade.volatilityLower) ? trade.volatilityLower : fallbackBounds.lower;
-            const predictedSwingText = formatPredictedSwingText(trade.predictedClass, recordMode, { upper: recordUpper, lower: recordLower });
+            const predictedSwingValue = Number.isFinite(trade.predictedSwing)
+                ? trade.predictedSwing
+                : computePredictedSwingValue(
+                    Array.isArray(trade.probabilities) ? trade.probabilities : [],
+                    recordMode,
+                    classAverages);
+            const predictedSwingText = formatPredictedSwingText(predictedSwingValue);
             const surgeThresholdText = recordMode === CLASSIFICATION_MODES.MULTICLASS && Number.isFinite(recordUpper)
                 ? formatPercent(recordUpper, 2)
                 : '—';
@@ -1725,7 +1768,13 @@
             const forecastMode = normalizeClassificationMode(forecast.classificationMode || fallbackMode);
             const upperBound = Number.isFinite(forecast.volatilityUpper) ? forecast.volatilityUpper : fallbackBounds.upper;
             const lowerBound = Number.isFinite(forecast.volatilityLower) ? forecast.volatilityLower : fallbackBounds.lower;
-            const swingText = formatPredictedSwingText(forecast.predictedClass ?? 1, forecastMode, { upper: upperBound, lower: lowerBound });
+            const forecastSwingValue = Number.isFinite(forecast.predictedSwing)
+                ? forecast.predictedSwing
+                : computePredictedSwingValue(
+                    Array.isArray(forecast.probabilities) ? forecast.probabilities : [],
+                    forecastMode,
+                    classAverages);
+            const swingText = formatPredictedSwingText(forecastSwingValue);
             const surgeText = forecastMode === CLASSIFICATION_MODES.MULTICLASS && Number.isFinite(upperBound)
                 ? formatPercent(upperBound, 2)
                 : '—';
@@ -1809,7 +1858,9 @@
 
     const updateSummaryMetrics = (summary) => {
         if (!summary) return;
+        const modelState = getActiveModelState();
         const activeClassification = normalizeClassificationMode(summary.classificationMode || getActiveModelState()?.classification);
+        const classAverages = summary.classReturnAverages || modelState?.predictionsPayload?.classReturnAverages || null;
         updateTradeRuleDescription(summary.tradeRule || getTradeRuleForModel());
         if (elements.tradeRuleSelect && summary.tradeRule) {
             elements.tradeRuleSelect.value = normalizeTradeRule(summary.tradeRule);
@@ -1890,8 +1941,16 @@
                 const kellyText = summary.usingKelly && Number.isFinite(forecast.fraction)
                     ? `凱利公式建議投入比例約 ${formatPercent(forecast.fraction, 2)}。`
                     : '';
+                const forecastMode = normalizeClassificationMode(forecast.classificationMode || activeClassification);
+                const swingValue = Number.isFinite(forecast.predictedSwing)
+                    ? forecast.predictedSwing
+                    : computePredictedSwingValue(
+                        Array.isArray(forecast.probabilities) ? forecast.probabilities : [],
+                        forecastMode,
+                        classAverages);
+                const swingText = formatPredictedSwingText(swingValue);
                 const classLabel = forecast.classLabel || formatClassLabel(forecast.predictedClass ?? (forecast.probability >= threshold ? 2 : 1), activeClassification);
-                elements.nextDayForecast.textContent = `${baseLabel} 的隔日大漲機率為 ${formatPercent(forecast.probability, 1)}（預測分類：${classLabel}）；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
+                elements.nextDayForecast.textContent = `${baseLabel} 的隔日大漲機率為 ${formatPercent(forecast.probability, 1)}（預測分類：${classLabel}｜預估漲跌幅 ${swingText}）；勝率門檻 ${Math.round(threshold * 100)}%，${meetsThreshold}${kellyText}`;
             }
         }
         updateVolatilityDiagnosticsDisplay(summary.volatilityDiagnostics, activeClassification);
@@ -1911,6 +1970,7 @@
         const volatilityBounds = resolveVolatilityBounds(volatilityThresholds);
         const volatilityUpper = volatilityBounds.upper;
         const volatilityLower = volatilityBounds.lower;
+        const classReturnAverages = normalizeClassReturnAverages(payload?.classReturnAverages, classificationMode);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -1934,6 +1994,7 @@
             for (let i = 0; i < predictions.length; i += 1) {
                 const metaItem = meta[i] || {};
                 const parsed = parsePredictionEntry(predictions[i], classificationMode);
+                const expectedSwing = computePredictedSwingValue(parsed.probabilities, classificationMode, classReturnAverages);
                 const classIndex = parsed.classIndex;
                 const entryProbability = parsed.pUp;
                 const exitProbability = parsed.pDown;
@@ -1983,6 +2044,7 @@
                     exitClass: classIndex,
                     volatilityUpper,
                     volatilityLower,
+                    predictedSwing: Number.isFinite(expectedSwing) ? expectedSwing : NaN,
                 };
 
                 let openedThisBar = false;
@@ -2003,6 +2065,7 @@
                         lastPrice: Number.isFinite(nextClose) && nextClose > 0
                             ? nextClose
                             : (Number.isFinite(dayClose) && dayClose > 0 ? dayClose : baseBuyPrice),
+                        expectedSwing: Number.isFinite(expectedSwing) ? expectedSwing : NaN,
                     };
                     record.executed = true;
                     record.fraction = fraction;
@@ -2056,6 +2119,9 @@
                             executed: true,
                             volatilityUpper,
                             volatilityLower,
+                            predictedSwing: Number.isFinite(position.expectedSwing)
+                                ? position.expectedSwing
+                                : (Number.isFinite(expectedSwing) ? expectedSwing : NaN),
                         });
                         tradeReturns.push(tradeReturn);
                         record.executed = true;
@@ -2077,6 +2143,9 @@
                             entryRecord.tradeReturn = tradeReturn;
                             entryRecord.holdDays = position.holdDays + 1;
                             entryRecord.executed = true;
+                            if (!Number.isFinite(entryRecord.predictedSwing) && Number.isFinite(position.expectedSwing)) {
+                                entryRecord.predictedSwing = position.expectedSwing;
+                            }
                         }
                     }
                     position = null;
@@ -2099,6 +2168,7 @@
                 if (!Number.isFinite(probability)) {
                     continue;
                 }
+                const expectedSwing = computePredictedSwingValue(parsed.probabilities, classificationMode, classReturnAverages);
 
                 const baseSellPrice = Number.isFinite(metaItem.sellPrice)
                     ? metaItem.sellPrice
@@ -2248,6 +2318,7 @@
                         executed: true,
                         volatilityUpper,
                         volatilityLower,
+                        predictedSwing: Number.isFinite(expectedSwing) ? expectedSwing : NaN,
                     });
                     tradeReturns.push(tradeReturn);
                 }
@@ -2273,6 +2344,7 @@
                     probabilities: parsed.probabilities,
                     volatilityUpper,
                     volatilityLower,
+                    predictedSwing: Number.isFinite(expectedSwing) ? expectedSwing : NaN,
                 });
             }
         }
@@ -2365,6 +2437,7 @@
             },
             rule: tradeRule,
             volatilityThresholds,
+            classReturnAverages,
             allRecords: dailyRecords,
         };
     };
@@ -2400,6 +2473,10 @@
         }, trainingOdds);
         const evaluationRule = normalizeTradeRule(evaluation.rule || selectedRule);
         const allRecords = Array.isArray(evaluation.allRecords) ? evaluation.allRecords : [];
+        const evaluationBounds = resolveVolatilityBounds(evaluation.volatilityThresholds || resolvedVolatility);
+        const volatilityUpper = evaluationBounds.upper;
+        const volatilityLower = evaluationBounds.lower;
+        const classAverages = evaluation.classReturnAverages || normalizeClassReturnAverages(payload.classReturnAverages, classificationMode);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
             : null;
@@ -2419,6 +2496,14 @@
             }
             if (evaluationRule === 'open-entry') {
                 forecast.buyPrice = Number.isFinite(forecast.buyPrice) ? NaN : forecast.buyPrice;
+            }
+            const forecastSwing = computePredictedSwingValue(
+                Array.isArray(forecast.probabilities) ? forecast.probabilities : [],
+                classificationMode,
+                classAverages
+            );
+            if (!Number.isFinite(forecast.predictedSwing) && Number.isFinite(forecastSwing)) {
+                forecast.predictedSwing = forecastSwing;
             }
         }
 
@@ -2456,6 +2541,7 @@
             classificationMode,
             testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
+            classReturnAverages: classAverages,
         };
 
         modelState.trainingMetrics = metrics;
@@ -2468,6 +2554,7 @@
         payload.volatilityThresholds = resolvedVolatility;
         payload.allRecords = allRecords;
         payload.volatilityDiagnostics = diagnostics;
+        payload.classReturnAverages = classAverages;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
@@ -3059,6 +3146,7 @@
                 volatilityThresholds: modelState.volatilityThresholds,
                 classificationMode: modelState.classification,
                 volatilityDiagnostics: modelState.volatilityDiagnostics,
+                classReturnAverages: modelState.predictionsPayload.classReturnAverages,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -3076,6 +3164,7 @@
                 volatilityThresholds: summary.volatilityThresholds,
                 classificationMode: summary.classificationMode,
                 volatilityDiagnostics: summary.volatilityDiagnostics,
+                classReturnAverages: summary.classReturnAverages,
             },
             version: VERSION_TAG,
         };
@@ -3124,6 +3213,7 @@
             hyperparameters: seed.payload?.hyperparameters || null,
             volatilityThresholds: sanitizeVolatilityThresholds(seed.payload?.volatilityThresholds || seed.summary?.volatilityThresholds || modelState.volatilityThresholds),
             classificationMode: normalizeClassificationMode(seed.payload?.classificationMode || seed.summary?.classificationMode || modelState.classification),
+            classReturnAverages: seed.payload?.classReturnAverages || null,
         };
         const seedDiagnostics = (seed.payload?.volatilityDiagnostics && typeof seed.payload.volatilityDiagnostics === 'object')
             ? seed.payload.volatilityDiagnostics

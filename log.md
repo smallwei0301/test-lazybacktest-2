@@ -976,3 +976,19 @@
 - **Diagnostics**: 重新訓練三分類 ANN，確認測試報告樣本數與診斷中的達門檻天數一致，並於交易表檢視未達勝率門檻的紀錄，確定欄位顯示的門檻與實際買入判斷相符。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-02 — Patch LB-AI-VOL-QUARTILE-20260202A / LB-AI-ANNS-REPRO-20260202A / LB-AI-ANN-DIAG-20260202A
+- **Issue recap**: 交易表的「預測漲跌幅％」僅以門檻區間顯示 ≥/≤，無法呈現模型實際預估的漲跌幅；同時 Worker 未回傳各類別平均報酬，使前端難以還原預估值，種子重播也缺乏一致性的預估幅度。
+- **Fix**:
+  - `js/worker.js` 於 ANN 訓練流程統計訓練/全樣本的大漲、平盤、大跌平均報酬並寫入 `classReturnAverages`，同時在即時預測中計算預估漲跌幅並存入模型中繼資料與診斷。
+  - `js/ai-prediction.js` 以類別平均報酬加權 `softmax` 機率計算預估漲跌幅，交易表與隔日預測欄位直接顯示百分比數值，並在摘要敘述中同步揭露預估漲跌幅；種子儲存/載入亦保存 `classReturnAverages` 以維持重播一致性。
+- **Diagnostics**: 以三分類 ANN 執行訓練後，檢查 Worker 回傳的類別平均報酬與診斷統計；於前端交易表比對每筆紀錄的預估漲跌幅是否隨機率變動，並載入儲存種子確認預估值一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-10 — Patch LB-AI-SWING-20260210A / LB-AI-ANNS-REPRO-20260210A / LB-AI-ANN-DIAG-20260210A
+- **Issue recap**: 「預測漲跌幅％」仍可能回退到四分位門檻，導致表格出現與門檻相同的數值；Worker 端的 `computeExpectedSwing` 亦在缺少樣本時改用門檻 fallback，使種子重播難以區分模型期望值與閾值。
+- **Fix**:
+  - `js/worker.js` 將 `computeExpectedSwing` 改為僅依訓練/整體平均報酬計算期望值，無樣本時回傳 `NaN`，並更新 ANN 版本代碼追蹤此行為調整。
+  - `js/ai-prediction.js` 移除預估漲跌幅的門檻 fallback，僅顯示模型期望值；若無平均報酬可用則顯示破折號，避免與門檻數值混淆，並更新版本標記供前端診斷。
+- **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

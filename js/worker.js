@@ -11,6 +11,8 @@
 // Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
+// Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
+// Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -20,8 +22,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260128A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260128A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -280,6 +282,50 @@ function classifySwingReturn(swingValue, thresholds) {
     return 0;
   }
   return 1;
+}
+
+function computeExpectedSwing(probabilities, mode, averages) {
+  if (!Array.isArray(probabilities) || probabilities.length === 0) return NaN;
+  const normalizedMode = normalizeClassificationMode(mode);
+  const sums = probabilities.reduce((acc, value) => acc + (Number.isFinite(value) ? value : 0), 0);
+  const normalised = probabilities.map((value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return 0;
+    if (sums > 0) {
+      return num / sums;
+    }
+    return 0;
+  });
+  const stats = averages && typeof averages === 'object' ? averages : {};
+  const train = stats.train && typeof stats.train === 'object' ? stats.train : {};
+  const overall = stats.overall && typeof stats.overall === 'object' ? stats.overall : {};
+  const pickAverage = (key, fallbackValue = NaN) => {
+    const trainValue = Number(train[key]);
+    if (Number.isFinite(trainValue)) return trainValue;
+    const overallValue = Number(overall[key]);
+    if (Number.isFinite(overallValue)) return overallValue;
+    return Number.isFinite(fallbackValue) ? fallbackValue : NaN;
+  };
+  if (normalizedMode === CLASSIFICATION_MODES.MULTICLASS) {
+    const dropMean = pickAverage('drop');
+    const flatMean = pickAverage('flat', 0);
+    const surgeMean = pickAverage('surge');
+    const dropProb = normalised[0] ?? 0;
+    const flatProb = normalised[1] ?? 0;
+    const surgeProb = normalised[2] ?? 0;
+    if (!Number.isFinite(dropMean) && !Number.isFinite(flatMean) && !Number.isFinite(surgeMean)) {
+      return NaN;
+    }
+    return (dropProb * dropMean) + (flatProb * flatMean) + (surgeProb * surgeMean);
+  }
+  const downMean = pickAverage('down');
+  const upMean = pickAverage('up');
+  const downProb = normalised[0] ?? 0;
+  const upProb = normalised[2] ?? (normalised[1] ?? 0);
+  if (!Number.isFinite(downMean) && !Number.isFinite(upMean)) {
+    return NaN;
+  }
+  return (downProb * downMean) + (upProb * upMean);
 }
 
 function clampProbability(value) {
@@ -1580,6 +1626,10 @@ async function handleAITrainANNMessage(message) {
         ? { ...prepared.volatilityDiagnostics }
         : null;
     const labels = new Array(totalSamples);
+    const classReturnSumsTrain = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnCountsTrain = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnSumsAll = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnCountsAll = isBinary ? [0, 0] : [0, 0, 0];
     if (isBinary) {
       for (let i = 0; i < totalSamples; i += 1) {
         const metaItem = prepared.meta[i] || {};
@@ -1588,6 +1638,21 @@ async function handleAITrainANNMessage(message) {
         labels[i] = label;
         if (metaItem) {
           metaItem.classLabel = label;
+        }
+        let swingValue = Number(metaItem?.closeEntryReturn);
+        if (!Number.isFinite(swingValue)) {
+          swingValue = Number(prepared.returns[i]);
+        }
+        if (!Number.isFinite(swingValue)) {
+          swingValue = Number(metaItem?.actualReturn);
+        }
+        if (Number.isFinite(swingValue)) {
+          classReturnSumsAll[label] += swingValue;
+          classReturnCountsAll[label] += 1;
+          if (i < rawTrainCount) {
+            classReturnSumsTrain[label] += swingValue;
+            classReturnCountsTrain[label] += 1;
+          }
         }
       }
     } else {
@@ -1607,11 +1672,60 @@ async function handleAITrainANNMessage(message) {
         if (metaItem) {
           metaItem.classLabel = label;
         }
+        if (Number.isFinite(swingValue)) {
+          classReturnSumsAll[label] += swingValue;
+          classReturnCountsAll[label] += 1;
+          if (i < rawTrainCount) {
+            classReturnSumsTrain[label] += swingValue;
+            classReturnCountsTrain[label] += 1;
+          }
+        }
       }
     }
     prepared.y = labels;
     prepared.volatilityThresholds = volatilityThresholds;
     prepared.volatilityDiagnostics = volatilityDiagnostics;
+
+    const computeClassMean = (sums, counts, index) => (counts[index] > 0 ? sums[index] / counts[index] : null);
+    let classReturnAverages = null;
+    if (isBinary) {
+      classReturnAverages = {
+        train: {
+          down: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 0),
+          up: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 1),
+        },
+        overall: {
+          down: computeClassMean(classReturnSumsAll, classReturnCountsAll, 0),
+          up: computeClassMean(classReturnSumsAll, classReturnCountsAll, 1),
+        },
+        trainCounts: { down: classReturnCountsTrain[0], up: classReturnCountsTrain[1] },
+        overallCounts: { down: classReturnCountsAll[0], up: classReturnCountsAll[1] },
+      };
+    } else {
+      classReturnAverages = {
+        train: {
+          drop: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 0),
+          flat: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 1),
+          surge: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 2),
+        },
+        overall: {
+          drop: computeClassMean(classReturnSumsAll, classReturnCountsAll, 0),
+          flat: computeClassMean(classReturnSumsAll, classReturnCountsAll, 1),
+          surge: computeClassMean(classReturnSumsAll, classReturnCountsAll, 2),
+        },
+        trainCounts: {
+          drop: classReturnCountsTrain[0],
+          flat: classReturnCountsTrain[1],
+          surge: classReturnCountsTrain[2],
+        },
+        overallCounts: {
+          drop: classReturnCountsAll[0],
+          flat: classReturnCountsAll[1],
+          surge: classReturnCountsAll[2],
+        },
+      };
+    }
+    prepared.classReturnAverages = classReturnAverages;
 
     if (isBinary) {
       const updatedDistribution = { up: 0, down: 0 };
@@ -1628,6 +1742,7 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics.datasetTotalSamples = labels.length;
         volatilityDiagnostics.datasetPositiveSamples = updatedDistribution.up;
         volatilityDiagnostics.datasetNegativeSamples = updatedDistribution.down;
+        volatilityDiagnostics.classReturnAverages = classReturnAverages;
       }
     } else {
       const updatedDistribution = { surge: 0, flat: 0, drop: 0 };
@@ -1647,6 +1762,7 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics.datasetSurgeSamples = updatedDistribution.surge;
         volatilityDiagnostics.datasetFlatSamples = updatedDistribution.flat;
         volatilityDiagnostics.datasetDropSamples = updatedDistribution.drop;
+        volatilityDiagnostics.classReturnAverages = classReturnAverages;
       }
     }
 
@@ -1855,6 +1971,10 @@ async function handleAITrainANNMessage(message) {
             probabilities: forecastProbs,
             predictedClass: forecastClass,
           };
+          const forecastSwing = computeExpectedSwing(forecastProbs, classificationMode, classReturnAverages);
+          if (Number.isFinite(forecastSwing)) {
+            forecast.predictedSwing = forecastSwing;
+          }
           if (Number.isFinite(prepared.datasetLastClose)) {
             forecast.buyPrice = prepared.datasetLastClose;
           }
@@ -1896,6 +2016,7 @@ async function handleAITrainANNMessage(message) {
         volatilityThresholds,
         classificationMode,
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
         datasetDiagnostics,
       };
 
@@ -1915,6 +2036,7 @@ async function handleAITrainANNMessage(message) {
           testLoss,
         },
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
       const runMeta = {
         version: ANN_REPRO_VERSION,
@@ -1939,6 +2061,7 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
         datasetDiagnostics,
         diagnosticsVersion: ANN_DIAGNOSTIC_VERSION,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
       workerLastMeta = runMeta;
       try {
