@@ -513,8 +513,10 @@
             }).join('')
             : '<tr><td colspan="8">尚未產生層級診斷資訊。</td></tr>';
 
-        const positivePrecision = Number.isFinite(performance.positivePrecision) ? formatPercent(performance.positivePrecision, 2) : '—';
-        const positiveRecall = Number.isFinite(performance.positiveRecall) ? formatPercent(performance.positiveRecall, 2) : '—';
+        const positivePrecisionText = Number.isFinite(performance.positivePrecision) ? formatPercent(performance.positivePrecision, 2) : '—';
+        const positiveRecallText = Number.isFinite(performance.positiveRecall) ? formatPercent(performance.positiveRecall, 2) : '—';
+        const positiveF1Text = Number.isFinite(performance.positiveF1) ? formatPercent(performance.positiveF1, 2) : '—';
+        const positiveLabel = dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '上漲' : '大漲';
         const html = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -529,6 +531,7 @@
         th { background-color: #f3f4f6; font-weight: 600; }
         .summary { background-color: #ffffff; border: 1px solid #d1d5db; padding: 1rem; border-radius: 8px; font-size: 0.9rem; }
         .meta { font-size: 0.8rem; color: #6b7280; margin-bottom: 1rem; }
+        .note { font-size: 0.75rem; color: #4b5563; margin: 0.25rem 0; }
     </style>
 </head>
 <body>
@@ -538,7 +541,10 @@
         <p>資料筆數：共 ${Number(dataset.usableSamples || 0)} 筆（原始 ${Number(dataset.totalParsedRows || 0)} 筆），訓練集 ${Number(dataset.trainSamples || 0)} 筆｜測試集 ${Number(dataset.testSamples || 0)} 筆。</p>
         <p>分類模式：${dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類（漲跌）' : '三分類（波動分級）'}｜樣本分佈：${formatClassDistribution(dataset.classDistribution, dataset.classificationMode)}。</p>
         <p>${accuracyLabel}：${formatPercent(performance.testAccuracy, 2)}｜訓練期勝率：${formatPercent(performance.trainAccuracy, 2)}。</p>
-        <p>大漲 precision：${positivePrecision}｜大漲 recall：${positiveRecall}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際大漲天數：${Number(performance.positiveActuals || 0)}。</p>
+        <p>${positiveLabel} precision：${positivePrecisionText}｜${positiveLabel} recall：${positiveRecallText}｜${positiveLabel} F1：${positiveF1Text}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際${positiveLabel}天數：${Number(performance.positiveActuals || 0)}。</p>
+        <p class="note">Precision（精確率） = TP ÷ (TP + FP) → 預測${positiveLabel}時，有多少是真的${positiveLabel}？</p>
+        <p class="note">Recall（召回率） = TP ÷ (TP + FN) → 所有真的${positiveLabel}，有多少被模型抓到？</p>
+        <p class="note">F1（調和平均） = 2 × Precision × Recall ÷ (Precision + Recall) → 精確率與召回率的綜合。</p>
     </section>
     <h2>技術指標覆蓋率</h2>
     <table>

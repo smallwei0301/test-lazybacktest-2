@@ -962,3 +962,9 @@
 - **Diagnostics**: 於二分類模式下執行 ANNS/LSTM，確認 UI 初始門檻為 50%，且 Worker 回傳的 threshold 與重播後的門檻皆維持 0.5，無需額外調整即可觸發預設交易策略。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-26 — Patch LB-AI-ANN-DIAG-20260126B
+- **Issue recap**: ANNS 功能測試報告僅於三分類情境呈現 Precision／Recall，二分類缺少相同診斷，也未提供 F1 與指標定義說明，使評估報告無法完整對照 TP/FP/FN。
+- **Fix**: `js/worker.js` 為 ANN 訓練流程計算 Precision／Recall／F1 並隨診斷回傳；`js/ai-prediction.js` 在測試報告中統一顯示上漲/大漲 Precision、Recall、F1 及其公式說明，確保二元與三元分類皆可對照混淆矩陣理解模型表現。
+- **Diagnostics**: 本地以 ANN 二分類與三分類分別執行一次訓練，確認測試報告顯示 Precision／Recall／F1 與 Worker 回傳值一致，且備註文字依分類模式顯示「上漲」或「大漲」說明。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

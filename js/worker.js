@@ -20,7 +20,7 @@ const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
 const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260118A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260118A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260126B';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -707,6 +707,11 @@ async function handleAITrainLSTMMessage(message) {
       }
       const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
       const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
+      const positiveF1 = (Number.isFinite(positivePrecision)
+        && Number.isFinite(positiveRecall)
+        && (positivePrecision + positiveRecall) > 0)
+        ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
+        : NaN;
       const deterministicTestAccuracy = isBinary
         ? (predictedLabels.length > 0 ? correctPredictions / predictedLabels.length : NaN)
         : positivePrecision;
@@ -864,7 +869,8 @@ async function handleAITrainLSTMMessage(message) {
       if (!isBinary) {
         const precisionText = Number.isFinite(positivePrecision) ? (positivePrecision * 100).toFixed(2) : '—';
         const recallText = Number.isFinite(positiveRecall) ? (positiveRecall * 100).toFixed(2) : '—';
-        finalMessage += `｜Precision ${precisionText}%｜Recall ${recallText}%`;
+        const f1Text = Number.isFinite(positiveF1) ? (positiveF1 * 100).toFixed(2) : '—';
+        finalMessage += `｜Precision ${precisionText}%｜Recall ${recallText}%｜F1 ${f1Text}%`;
       }
 
       const hyperparametersUsed = {
@@ -1741,6 +1747,11 @@ async function handleAITrainANNMessage(message) {
         : (positivePredictions > 0 ? positiveHits / positivePredictions : NaN);
       const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
       const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
+      const positiveF1 = (Number.isFinite(positivePrecision)
+        && Number.isFinite(positiveRecall)
+        && (positivePrecision + positiveRecall) > 0)
+        ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
+        : NaN;
       const confusion = { TP, TN, FP, FN };
 
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
@@ -1762,6 +1773,7 @@ async function handleAITrainANNMessage(message) {
         positiveActuals,
         positivePrecision,
         positiveRecall,
+        positiveF1,
         confusion: { ...confusion },
         accuracyLabel: isBinary ? '測試正確率' : '大漲命中率',
       };
