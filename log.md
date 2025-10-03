@@ -922,6 +922,12 @@
 - **Diagnostics**: 以多個資料期間重訓 ANN/LSTM，確認 UI 會顯示「依上漲樣本計算」或「樣本不足改用整體四分位」的文字，且達門檻天數占比接近 25%／訓練集占比接近 12.5%，與 Worker 診斷一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-13 — Patch LB-AI-VOL-QUARTILE-20260113A
+- **Issue recap**: 三分類波動門檻仍各自以正/負報酬四分位推導，導致前端顯示的 25% 位數與大漲/大跌實際採用值不一致，且診斷缺乏平盤樣本與小波動占比說明，使用者難以確認約 50% 的小波動假設。
+- **Fix**: `js/worker.js` 與 `js/ai-prediction.js` 改以訓練集報酬序列的上/下四分位（Q3/Q1）作為主要門檻，並在樣本不足時落回正/負報酬分位或預設值；同步回傳平盤天數、小波動占比與來源旗標，確保重播與 UI 診斷一致。
+- **Diagnostics**: 以 ANN/LSTM 重新訓練三分類，檢查 UI 顯示的 Q1/Q3 百分比、平盤天數與小波動占比與 Worker 診斷相符，且達門檻筆數接近 25%／小波動約 50%。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-01-05 — Patch LB-AI-VOL-QUARTILE-20260105A
 - **Issue recap**: 三分類波動門檻僅以整體 25%/75% 分位衡量，無法區分上漲與下跌樣本的尾端區間；交易表亦僅顯示達門檻的成交紀錄，無法檢視低於 50% 機率的日常預測。
 - **Fix**:

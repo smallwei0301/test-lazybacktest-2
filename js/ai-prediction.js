@@ -8,8 +8,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260113A — Combined return quartile thresholds & diagnostics parity.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260111A';
+    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260113A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -475,38 +476,54 @@
             return fallbackSanitized;
         }
 
-        const positives = filtered.filter((value) => value > 0).sort((a, b) => a - b);
-        const negatives = filtered.filter((value) => value < 0).sort((a, b) => a - b);
-        const combined = filtered.slice().sort((a, b) => a - b);
+        const sorted = filtered.slice().sort((a, b) => a - b);
+        const positives = sorted.filter((value) => value > 0);
+        const negatives = sorted.filter((value) => value < 0);
+        const zeroCount = filtered.length - positives.length - negatives.length;
 
-        const positiveQuartile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
-        const negativeQuartile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
-        const fallbackUpper = combined.length > 0 ? computeQuantileValue(combined, 0.75) : NaN;
-        const fallbackLower = combined.length > 0 ? computeQuantileValue(combined, 0.25) : NaN;
+        const combinedUpperQuartile = computeQuantileValue(sorted, 0.75);
+        const combinedLowerQuartile = computeQuantileValue(sorted, 0.25);
+        const positiveOnlyQuartile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
+        const negativeOnlyQuartile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
 
-        const usedPositiveFallback = !(Number.isFinite(positiveQuartile) && positiveQuartile > 0);
-        const usedNegativeFallback = !(Number.isFinite(negativeQuartile) && negativeQuartile < 0);
+        let positiveSource = 'combined';
+        let negativeSource = 'combined';
 
-        const surgeCandidate = usedPositiveFallback
-            ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : fallbackSanitized.surge)
-            : positiveQuartile;
-        const dropCandidate = usedNegativeFallback
-            ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? Math.abs(fallbackLower) : fallbackSanitized.drop)
-            : Math.abs(negativeQuartile);
+        let upperCandidate = Number.isFinite(combinedUpperQuartile) ? combinedUpperQuartile : NaN;
+        if (!(upperCandidate > 0)) {
+            if (Number.isFinite(positiveOnlyQuartile) && positiveOnlyQuartile > 0) {
+                upperCandidate = positiveOnlyQuartile;
+                positiveSource = 'positive-only';
+            } else {
+                const fallbackUpper = Number.isFinite(fallbackSanitized.upperQuantile) && fallbackSanitized.upperQuantile > 0
+                    ? fallbackSanitized.upperQuantile
+                    : (fallbackSanitized.surge > 0 ? fallbackSanitized.surge : NaN);
+                upperCandidate = Number.isFinite(fallbackUpper) ? fallbackUpper : NaN;
+                positiveSource = 'default';
+            }
+        }
 
-        const upperQuantile = usedPositiveFallback
-            ? (Number.isFinite(fallbackUpper) && fallbackUpper > 0 ? fallbackUpper : surgeCandidate)
-            : positiveQuartile;
-        const lowerQuantile = usedNegativeFallback
-            ? (Number.isFinite(fallbackLower) && fallbackLower < 0 ? fallbackLower : -dropCandidate)
-            : negativeQuartile;
+        let lowerCandidate = Number.isFinite(combinedLowerQuartile) ? combinedLowerQuartile : NaN;
+        if (!(lowerCandidate < 0)) {
+            if (Number.isFinite(negativeOnlyQuartile) && negativeOnlyQuartile < 0) {
+                lowerCandidate = negativeOnlyQuartile;
+                negativeSource = 'negative-only';
+            } else {
+                const fallbackLower = Number.isFinite(fallbackSanitized.lowerQuantile) && fallbackSanitized.lowerQuantile < 0
+                    ? fallbackSanitized.lowerQuantile
+                    : (fallbackSanitized.drop > 0 ? -fallbackSanitized.drop : NaN);
+                lowerCandidate = Number.isFinite(fallbackLower) ? fallbackLower : NaN;
+                negativeSource = 'default';
+            }
+        }
 
         const sanitized = sanitizeVolatilityThresholds({
-            surge: surgeCandidate,
-            drop: dropCandidate,
-            lowerQuantile,
-            upperQuantile,
+            surge: upperCandidate,
+            drop: Math.abs(lowerCandidate),
+            lowerQuantile: lowerCandidate,
+            upperQuantile: upperCandidate,
         });
+
         if (diagnosticsRef && typeof diagnosticsRef === 'object') {
             const positiveThreshold = Number.isFinite(sanitized.upperQuantile)
                 ? sanitized.upperQuantile
@@ -514,32 +531,45 @@
             const negativeThreshold = Number.isFinite(sanitized.lowerQuantile)
                 ? sanitized.lowerQuantile
                 : (Number.isFinite(sanitized.drop) ? -sanitized.drop : NaN);
-            const positiveExceedCount = Number.isFinite(positiveThreshold)
-                ? positives.filter((value) => value >= positiveThreshold).length
-                : 0;
-            const negativeExceedCount = Number.isFinite(negativeThreshold)
-                ? negatives.filter((value) => value <= negativeThreshold).length
-                : 0;
-            let midbandCount = Number.isFinite(positiveThreshold) || Number.isFinite(negativeThreshold)
-                ? filtered.length - positiveExceedCount - negativeExceedCount
-                : filtered.length;
+
+            let positiveExceedCount = 0;
+            let negativeExceedCount = 0;
+            if (Number.isFinite(positiveThreshold) || Number.isFinite(negativeThreshold)) {
+                for (let i = 0; i < filtered.length; i += 1) {
+                    const value = filtered[i];
+                    if (Number.isFinite(positiveThreshold) && value >= positiveThreshold) {
+                        positiveExceedCount += 1;
+                    } else if (Number.isFinite(negativeThreshold) && value <= negativeThreshold) {
+                        negativeExceedCount += 1;
+                    }
+                }
+            }
+
+            let midbandCount = filtered.length - positiveExceedCount - negativeExceedCount;
             if (!Number.isFinite(midbandCount) || midbandCount < 0) {
                 midbandCount = Math.max(filtered.length - positiveExceedCount - negativeExceedCount, 0);
             }
             const positiveExceedShare = positives.length > 0 ? (positiveExceedCount / positives.length) : NaN;
             const negativeExceedShare = negatives.length > 0 ? (negativeExceedCount / negatives.length) : NaN;
-            const totalPositiveShare = filtered.length > 0 ? positiveExceedCount / filtered.length : 0;
-            const totalNegativeShare = filtered.length > 0 ? negativeExceedCount / filtered.length : 0;
+            const totalPositiveShare = filtered.length > 0 ? (positiveExceedCount / filtered.length) : NaN;
+            const totalNegativeShare = filtered.length > 0 ? (negativeExceedCount / filtered.length) : NaN;
+            const zeroShare = filtered.length > 0 ? (zeroCount / filtered.length) : NaN;
+            const midbandShare = filtered.length > 0 ? (midbandCount / filtered.length) : NaN;
             diagnosticsRef.totalSamples = filtered.length;
             if (!Number.isFinite(diagnosticsRef.expectedTrainSamples)) {
                 diagnosticsRef.expectedTrainSamples = filtered.length;
             }
             diagnosticsRef.positiveSamples = positives.length;
             diagnosticsRef.negativeSamples = negatives.length;
-            diagnosticsRef.positiveQuartile = Number.isFinite(positiveQuartile) ? positiveQuartile : null;
-            diagnosticsRef.negativeQuartile = Number.isFinite(negativeQuartile) ? negativeQuartile : null;
-            diagnosticsRef.fallbackUpperQuartile = Number.isFinite(fallbackUpper) ? fallbackUpper : null;
-            diagnosticsRef.fallbackLowerQuartile = Number.isFinite(fallbackLower) ? fallbackLower : null;
+            diagnosticsRef.zeroSamples = zeroCount;
+            diagnosticsRef.upperQuartile = Number.isFinite(combinedUpperQuartile) ? combinedUpperQuartile : null;
+            diagnosticsRef.lowerQuartile = Number.isFinite(combinedLowerQuartile) ? combinedLowerQuartile : null;
+            diagnosticsRef.combinedUpperQuartile = diagnosticsRef.upperQuartile;
+            diagnosticsRef.combinedLowerQuartile = diagnosticsRef.lowerQuartile;
+            diagnosticsRef.positiveQuartile = diagnosticsRef.upperQuartile;
+            diagnosticsRef.negativeQuartile = diagnosticsRef.lowerQuartile;
+            diagnosticsRef.positiveOnlyQuartile = Number.isFinite(positiveOnlyQuartile) ? positiveOnlyQuartile : null;
+            diagnosticsRef.negativeOnlyQuartile = Number.isFinite(negativeOnlyQuartile) ? negativeOnlyQuartile : null;
             diagnosticsRef.positiveThreshold = Number.isFinite(positiveThreshold) ? positiveThreshold : null;
             diagnosticsRef.negativeThreshold = Number.isFinite(negativeThreshold) ? negativeThreshold : null;
             diagnosticsRef.positiveExceedCount = positiveExceedCount;
@@ -548,9 +578,15 @@
             diagnosticsRef.negativeExceedShare = Number.isFinite(negativeExceedShare) ? negativeExceedShare : null;
             diagnosticsRef.totalPositiveShare = Number.isFinite(totalPositiveShare) ? totalPositiveShare : null;
             diagnosticsRef.totalNegativeShare = Number.isFinite(totalNegativeShare) ? totalNegativeShare : null;
+            diagnosticsRef.zeroShare = Number.isFinite(zeroShare) ? zeroShare : null;
             diagnosticsRef.midbandCount = midbandCount;
-            diagnosticsRef.usedPositiveFallback = usedPositiveFallback;
-            diagnosticsRef.usedNegativeFallback = usedNegativeFallback;
+            diagnosticsRef.midbandShare = Number.isFinite(midbandShare) ? midbandShare : null;
+            diagnosticsRef.usedPositiveFallback = positiveSource !== 'combined';
+            diagnosticsRef.usedNegativeFallback = negativeSource !== 'combined';
+            diagnosticsRef.positiveSource = positiveSource;
+            diagnosticsRef.negativeSource = negativeSource;
+            diagnosticsRef.fallbackUpperQuartile = null;
+            diagnosticsRef.fallbackLowerQuartile = null;
         }
 
         return sanitized;
@@ -628,6 +664,9 @@
             : totalSamples;
         const positiveSamples = Number.isFinite(diagnostics.positiveSamples) ? diagnostics.positiveSamples : 0;
         const negativeSamples = Number.isFinite(diagnostics.negativeSamples) ? diagnostics.negativeSamples : 0;
+        const zeroSamples = Number.isFinite(diagnostics.zeroSamples)
+            ? diagnostics.zeroSamples
+            : Math.max(totalSamples - positiveSamples - negativeSamples, 0);
         const positiveExceed = Number.isFinite(diagnostics.positiveExceedCount) ? diagnostics.positiveExceedCount : 0;
         const negativeExceed = Number.isFinite(diagnostics.negativeExceedCount) ? diagnostics.negativeExceedCount : 0;
         let midband = Number.isFinite(diagnostics.midbandCount)
@@ -636,18 +675,14 @@
         if (!Number.isFinite(midband) || midband < 0) {
             midband = Math.max(totalSamples - positiveExceed - negativeExceed, 0);
         }
-        const positiveQuartile = Number.isFinite(diagnostics.positiveQuartile)
-            ? diagnostics.positiveQuartile
-            : (Number.isFinite(diagnostics.positiveThreshold) ? diagnostics.positiveThreshold : NaN);
-        const negativeQuartile = Number.isFinite(diagnostics.negativeQuartile)
-            ? diagnostics.negativeQuartile
-            : (Number.isFinite(diagnostics.negativeThreshold) ? diagnostics.negativeThreshold : NaN);
-        const fallbackUpper = Number.isFinite(diagnostics.fallbackUpperQuartile)
-            ? diagnostics.fallbackUpperQuartile
-            : (Number.isFinite(diagnostics.positiveThreshold) ? diagnostics.positiveThreshold : NaN);
-        const fallbackLower = Number.isFinite(diagnostics.fallbackLowerQuartile)
-            ? diagnostics.fallbackLowerQuartile
-            : (Number.isFinite(diagnostics.negativeThreshold) ? diagnostics.negativeThreshold : NaN);
+
+        const midbandShare = Number.isFinite(diagnostics.midbandShare)
+            ? diagnostics.midbandShare
+            : (totalSamples > 0 ? midband / totalSamples : NaN);
+        const zeroShare = Number.isFinite(diagnostics.zeroShare)
+            ? diagnostics.zeroShare
+            : (totalSamples > 0 ? zeroSamples / totalSamples : NaN);
+
         const positiveShare = Number.isFinite(diagnostics.positiveExceedShare)
             ? diagnostics.positiveExceedShare
             : (positiveSamples > 0 ? positiveExceed / positiveSamples : NaN);
@@ -661,41 +696,88 @@
             ? diagnostics.totalNegativeShare
             : (totalSamples > 0 ? negativeExceed / totalSamples : NaN);
 
+        const positiveThreshold = Number.isFinite(diagnostics.positiveThreshold) ? diagnostics.positiveThreshold : NaN;
+        const negativeThreshold = Number.isFinite(diagnostics.negativeThreshold) ? diagnostics.negativeThreshold : NaN;
+        const combinedUpperQuartile = Number.isFinite(diagnostics.combinedUpperQuartile)
+            ? diagnostics.combinedUpperQuartile
+            : (Number.isFinite(diagnostics.upperQuartile) ? diagnostics.upperQuartile : NaN);
+        const combinedLowerQuartile = Number.isFinite(diagnostics.combinedLowerQuartile)
+            ? diagnostics.combinedLowerQuartile
+            : (Number.isFinite(diagnostics.lowerQuartile) ? diagnostics.lowerQuartile : NaN);
+        const positiveOnlyQuartile = Number.isFinite(diagnostics.positiveOnlyQuartile)
+            ? diagnostics.positiveOnlyQuartile
+            : NaN;
+        const negativeOnlyQuartile = Number.isFinite(diagnostics.negativeOnlyQuartile)
+            ? diagnostics.negativeOnlyQuartile
+            : NaN;
+        const positiveSource = typeof diagnostics.positiveSource === 'string'
+            ? diagnostics.positiveSource
+            : (diagnostics.usedPositiveFallback ? 'default' : 'combined');
+        const negativeSource = typeof diagnostics.negativeSource === 'string'
+            ? diagnostics.negativeSource
+            : (diagnostics.usedNegativeFallback ? 'default' : 'combined');
+
         const summaryParts = [`訓練集隔日收盤漲跌幅 ${expectedSamples} 天`];
         if (expectedSamples !== totalSamples) {
             summaryParts.push(`有效樣本 ${totalSamples} 天`);
         }
-        const compositionParts = [];
-        if (positiveSamples > 0) compositionParts.push(`上漲 ${positiveSamples} 天`);
-        if (negativeSamples > 0) compositionParts.push(`下跌 ${negativeSamples} 天`);
-        if (midband > 0) compositionParts.push(`小波動 ${midband} 天`);
-        sampleEl.textContent = compositionParts.length > 0
-            ? `${summaryParts.join('｜')}（${compositionParts.join('｜')}）`
-            : summaryParts.join('｜');
+        const signComposition = [];
+        if (positiveSamples > 0) signComposition.push(`上漲 ${positiveSamples} 天`);
+        if (negativeSamples > 0) signComposition.push(`下跌 ${negativeSamples} 天`);
+        if (zeroSamples > 0) {
+            const zeroShareText = Number.isFinite(zeroShare) ? formatPercent(zeroShare, 1) : '—';
+            signComposition.push(`平盤 ${zeroSamples} 天（約 ${zeroShareText}）`);
+        }
+        const midbandText = Number.isFinite(midbandShare) ? formatPercent(midbandShare, 1) : '—';
+        const compositionText = signComposition.length > 0
+            ? `（${signComposition.join('｜')}）`
+            : '';
+        const smallBandText = midband > 0
+            ? `｜小波動門檻內 ${midband} 天（約 ${midbandText}）`
+            : '';
+        sampleEl.textContent = `${summaryParts.join('｜')}${compositionText}${smallBandText}`;
 
         const positiveCountText = positiveSamples > 0 ? `${positiveExceed}/${positiveSamples}` : `${positiveExceed}/—`;
         const positiveShareText = Number.isFinite(positiveShare) ? formatPercent(positiveShare, 1) : '—';
         const positiveTotalShareText = Number.isFinite(totalPositiveShare) ? formatPercent(totalPositiveShare, 1) : '—';
-        const positiveSourceText = diagnostics.usedPositiveFallback
-            ? (Number.isFinite(diagnostics.fallbackUpperQuartile)
-                ? `｜上漲樣本不足，改用整體漲跌 75% 四分位 ${formatPercent(fallbackUpper, 2)}`
-                : '｜上漲樣本不足，改用預設門檻')
-            : '｜依上漲樣本計算';
-        surgeEl.textContent = Number.isFinite(positiveQuartile)
-            ? `上漲樣本前 25% 四分位 ≈ ${formatPercent(positiveQuartile, 2)}（達門檻 ${positiveCountText} 天，約 ${positiveShareText}｜占訓練集 ${positiveTotalShareText}）${positiveSourceText}`
-            : `上漲樣本不足以計算四分位數${diagnostics.usedPositiveFallback ? '，已改用預設門檻。' : '。'}`;
+        let positiveSourceText = '';
+        if (positiveSource === 'combined') {
+            positiveSourceText = Number.isFinite(combinedUpperQuartile)
+                ? `｜訓練集上四分位 (Q3) ${formatPercent(combinedUpperQuartile, 2)}`
+                : '｜使用訓練集上四分位 (Q3)';
+        } else if (positiveSource === 'positive-only') {
+            positiveSourceText = Number.isFinite(positiveOnlyQuartile)
+                ? `｜正報酬上四分位 ${formatPercent(positiveOnlyQuartile, 2)}`
+                : '｜正報酬樣本上四分位';
+        } else {
+            positiveSourceText = Number.isFinite(positiveThreshold)
+                ? `｜樣本不足，改用預設門檻 ${formatPercent(positiveThreshold, 2)}`
+                : '｜樣本不足，改用預設門檻';
+        }
+        surgeEl.textContent = Number.isFinite(positiveThreshold)
+            ? `大漲門檻 ≈ ${formatPercent(positiveThreshold, 2)}（達門檻 ${positiveCountText} 天，約 ${positiveShareText}｜占訓練集 ${positiveTotalShareText}）${positiveSourceText}`
+            : '大漲門檻尚未計算，請重新訓練一次。';
 
         const negativeCountText = negativeSamples > 0 ? `${negativeExceed}/${negativeSamples}` : `${negativeExceed}/—`;
         const negativeShareText = Number.isFinite(negativeShare) ? formatPercent(negativeShare, 1) : '—';
         const negativeTotalShareText = Number.isFinite(totalNegativeShare) ? formatPercent(totalNegativeShare, 1) : '—';
-        const negativeSourceText = diagnostics.usedNegativeFallback
-            ? (Number.isFinite(diagnostics.fallbackLowerQuartile)
-                ? `｜下跌樣本不足，改用整體跌幅 25% 四分位 ${formatPercent(fallbackLower, 2)}`
-                : '｜下跌樣本不足，改用預設門檻')
-            : '｜依下跌樣本計算';
-        dropEl.textContent = Number.isFinite(negativeQuartile)
-            ? `下跌樣本前 25% 四分位 ≈ ${formatPercent(negativeQuartile, 2)}（達門檻 ${negativeCountText} 天，約 ${negativeShareText}｜占訓練集 ${negativeTotalShareText}）${negativeSourceText}`
-            : `下跌樣本不足以計算四分位數${diagnostics.usedNegativeFallback ? '，已改用預設門檻。' : '。'}`;
+        let negativeSourceText = '';
+        if (negativeSource === 'combined') {
+            negativeSourceText = Number.isFinite(combinedLowerQuartile)
+                ? `｜訓練集下四分位 (Q1) ${formatPercent(combinedLowerQuartile, 2)}`
+                : '｜使用訓練集下四分位 (Q1)';
+        } else if (negativeSource === 'negative-only') {
+            negativeSourceText = Number.isFinite(negativeOnlyQuartile)
+                ? `｜負報酬下四分位 ${formatPercent(negativeOnlyQuartile, 2)}`
+                : '｜負報酬樣本下四分位';
+        } else {
+            negativeSourceText = Number.isFinite(negativeThreshold)
+                ? `｜樣本不足，改用預設門檻 ${formatPercent(negativeThreshold, 2)}`
+                : '｜樣本不足，改用預設門檻';
+        }
+        dropEl.textContent = Number.isFinite(negativeThreshold)
+            ? `大跌門檻 ≈ ${formatPercent(negativeThreshold, 2)}（達門檻 ${negativeCountText} 天，約 ${negativeShareText}｜占訓練集 ${negativeTotalShareText}）${negativeSourceText}`
+            : '大跌門檻尚未計算，請重新訓練一次。';
     };
 
     const normalizeProbabilities = (values) => {
