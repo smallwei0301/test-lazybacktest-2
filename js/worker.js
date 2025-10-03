@@ -9,6 +9,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260111A — Quartile fallback indicators and share diagnostics for AI volatility tiers.
 // Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
 // Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
+// Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -52,7 +53,7 @@ function normalizeClassificationMode(mode) {
 }
 
 function getDefaultThresholdForMode(mode) {
-  return normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS ? 0 : 0.6;
+  return normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS ? 0 : 0.5;
 }
 
 function sanitizeVolatilityThresholds(input = {}) {

@@ -954,3 +954,11 @@
 - **Diagnostics**: 以相同資料集重訓 ANNS/LSTM，多分類下立即顯示勝率門檻 0%，交易表中的大漲預測可直接觸發「收盤價買入」策略；切換門檻或載入舊種子後，Worker 回傳的 threshold 與 UI 顯示保持一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-24 — Patch LB-AI-THRESHOLD-20260124A
+- **Issue recap**: 二分類模式仍沿用 60% 預設勝率門檻，與最新需求的 50% 不符，導致預設情境下仍須手動下調門檻才能觸發交易並與多分類邏輯對齊。
+- **Fix**:
+  - `js/ai-prediction.js` 將二分類預設勝率門檻改為 50%，並同步更新版本代碼與 UI 預設值，確保初始載入即反映新標準。
+  - `js/worker.js` 將 ANN/LSTM 的二分類預設門檻調整為 0.5，使訓練流程、重播與種子儲存皆採用一致值。
+- **Diagnostics**: 於二分類模式下執行 ANNS/LSTM，確認 UI 初始門檻為 50%，且 Worker 回傳的 threshold 與重播後的門檻皆維持 0.5，無需額外調整即可觸發預設交易策略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

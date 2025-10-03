@@ -9,8 +9,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
 // Patch Tag: LB-AI-HYBRID-20260122A — Multiclass threshold defaults & trade gating fixes.
+// Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20260122A';
+    const VERSION_TAG = 'LB-AI-THRESHOLD-20260124A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -31,7 +32,7 @@
         : CLASSIFICATION_MODES.MULTICLASS);
     const getDefaultWinThresholdForMode = (mode) => (normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS
         ? 0
-        : 0.6);
+        : 0.5);
     const resolveWinThreshold = (state) => {
         if (!state) {
             return getDefaultWinThresholdForMode();
