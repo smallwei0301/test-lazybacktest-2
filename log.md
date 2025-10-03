@@ -968,3 +968,11 @@
 - **Diagnostics**: 本地以 ANN 二分類與三分類分別執行一次訓練，確認測試報告顯示 Precision／Recall／F1 與 Worker 回傳值一致，且備註文字依分類模式顯示「上漲」或「大漲」說明。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-29 — Patch LB-AI-CLASSDIST-20260129A
+- **Issue recap**: ANN 三分類在重新推導四分位門檻後，功能測試報告仍沿用舊的樣本分佈，導致報表與門檻診斷統計不一致；交易表亦僅顯示大漲命中與否，缺少機率與門檻細節，難以判讀未成交紀錄。
+- **Fix**:
+  - `js/worker.js` 於重標記後重新累計 ANN 樣本分佈並寫回 `classDistribution` 與 `volatilityDiagnostics`，同時為 ANN/LSTM 預測加入 `probabilityUp/Down` 與門檻資訊。
+  - `js/ai-prediction.js` 在交易表與隔日預測區塊新增「大漲機率｜門檻｜大跌機率」說明，並在多分類回測記錄中保存門檻與機率欄位，確保顯示與執行邏輯一致。
+- **Diagnostics**: 以相同訓練集重訓 ANN 三分類，確認測試報告的樣本分佈與波動診斷統計一致，並檢視交易表可顯示未達門檻紀錄的機率與門檻；切換「顯示全部預測紀錄」時，仍保留狀態標籤與新機率資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

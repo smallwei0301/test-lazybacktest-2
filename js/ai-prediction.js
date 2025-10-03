@@ -10,8 +10,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
 // Patch Tag: LB-AI-HYBRID-20260122A — Multiclass threshold defaults & trade gating fixes.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
+// Patch Tag: LB-AI-CLASSDIST-20260129A — Multiclass threshold displays & ANN class distribution parity.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-THRESHOLD-20260124A';
+    const VERSION_TAG = 'LB-AI-CLASSDIST-20260129A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -1576,6 +1577,32 @@
         elements.datasetSummary.textContent = `可用資料 ${sorted.length} 筆，區間 ${firstDate} ~ ${lastDate}。`;
     };
 
+    const buildProbabilityDetail = (entry) => {
+        if (!entry) return null;
+        const fallbackState = getActiveModelState();
+        const classificationSource = entry.classificationMode
+            || fallbackState?.classification
+            || fallbackState?.lastSummary?.classificationMode;
+        const classificationMode = normalizeClassificationMode(classificationSource);
+        if (classificationMode !== CLASSIFICATION_MODES.MULTICLASS) {
+            return null;
+        }
+        const probabilities = Array.isArray(entry.probabilities) ? entry.probabilities : [];
+        const directProbability = Number(entry.probability);
+        const probabilityUp = Number.isFinite(entry.probabilityUp)
+            ? entry.probabilityUp
+            : (Number.isFinite(directProbability)
+                ? directProbability
+                : (Number.isFinite(probabilities[2]) ? probabilities[2] : NaN));
+        const probabilityDown = Number.isFinite(entry.probabilityDown)
+            ? entry.probabilityDown
+            : (Number.isFinite(probabilities[0]) ? probabilities[0] : NaN);
+        const threshold = Number.isFinite(entry.threshold)
+            ? entry.threshold
+            : getDefaultWinThresholdForMode(classificationMode);
+        return `大漲 ${formatPercent(probabilityUp, 1)}｜門檻 ≥${formatPercent(threshold, 1)}｜大跌 ${formatPercent(probabilityDown, 1)}`;
+    };
+
     const renderTrades = (records, forecast, showingAll = false) => {
         if (!elements.tradeTableBody) return;
         const rows = Array.isArray(records) ? records : [];
@@ -1601,19 +1628,24 @@
         const sourceRows = showingAll ? rows : rows.slice(-200);
         const htmlParts = sourceRows.map((trade) => {
             const probabilityText = formatPercent(trade.probability, 1);
-            const detailParts = [];
+            const statusParts = [];
             if (trade.predictedClassLabel) {
-                detailParts.push(escapeHTML(trade.predictedClassLabel));
+                statusParts.push(escapeHTML(trade.predictedClassLabel));
             }
             if (showingAll) {
                 const statusText = trade.executed
                     ? '已執行'
                     : (trade.triggered ? '達門檻（未成交）' : '未達門檻');
-                detailParts.push(statusText);
+                statusParts.push(statusText);
             }
-            const probabilityDetail = detailParts.length > 0
-                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${detailParts.join('｜')}</div>`
+            const statusDetail = statusParts.length > 0
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${statusParts.join('｜')}</div>`
                 : '';
+            const probabilityDetailText = buildProbabilityDetail(trade);
+            const probabilityDetail = probabilityDetailText
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${probabilityDetailText}</div>`
+                : '';
+            const detailHtml = `${statusDetail}${probabilityDetail}`;
             const actualReturnText = formatPercent(trade.actualReturn, 2);
             const fractionText = formatPercent(trade.fraction, 2);
             const tradeReturnText = formatPercent(trade.tradeReturn, 2);
@@ -1635,7 +1667,7 @@
                 <tr${rowClassAttr}>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.buyDate || '—')}</td>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(trade.sellDate || trade.tradeDate || '—')}${badge}</td>
-                    <td class="px-3 py-2 text-right">${probabilityText}${probabilityDetail}</td>
+                    <td class="px-3 py-2 text-right">${probabilityText}${detailHtml}</td>
                     <td class="px-3 py-2 text-right">${buyPriceText}</td>
                     <td class="px-3 py-2 text-right">${sellPriceText}</td>
                     <td class="px-3 py-2 text-right ${actualClass}">${actualReturnText}</td>
@@ -1647,9 +1679,18 @@
 
         if (forecast && Number.isFinite(forecast.probability)) {
             const tradeDateLabel = forecast.tradeDate || computeNextTradingDate(forecast.referenceDate) || forecast.referenceDate || '最近收盤';
-            const forecastDetail = forecast.classLabel
-                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${escapeHTML(forecast.classLabel)}</div>`
+            const forecastStatusParts = [];
+            if (forecast.classLabel) {
+                forecastStatusParts.push(escapeHTML(forecast.classLabel));
+            }
+            const forecastStatusDetail = forecastStatusParts.length > 0
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${forecastStatusParts.join('｜')}</div>`
                 : '';
+            const forecastProbabilityDetailText = buildProbabilityDetail(forecast);
+            const forecastProbabilityDetail = forecastProbabilityDetailText
+                ? `<div class="text-[10px]" style="color: var(--muted-foreground);">${forecastProbabilityDetailText}</div>`
+                : '';
+            const forecastDetail = `${forecastStatusDetail}${forecastProbabilityDetail}`;
             htmlParts.push(`
                 <tr class="bg-muted/30">
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHTML(forecast.buyDate || forecast.referenceDate || '最近收盤')}</td>
@@ -1889,6 +1930,10 @@
                     tradeReturn: 0,
                     holdDays: 1,
                     probabilities: parsed.probabilities,
+                    probabilityUp: entryProbability,
+                    probabilityDown: parsed.pDown,
+                    probabilityFlat: parsed.pFlat,
+                    threshold,
                     exitClass: classIndex,
                 };
 
@@ -1961,6 +2006,10 @@
                             probabilities: parsed.probabilities,
                             classificationMode,
                             executed: true,
+                            probabilityUp: position.entryProbability,
+                            probabilityDown: parsed.pDown,
+                            probabilityFlat: parsed.pFlat,
+                            threshold,
                         });
                         tradeReturns.push(tradeReturn);
                         record.executed = true;
@@ -2151,6 +2200,10 @@
                         probabilities: parsed.probabilities,
                         classificationMode,
                         executed: true,
+                        probabilityUp: probability,
+                        probabilityDown: parsed.pDown,
+                        probabilityFlat: parsed.pFlat,
+                        threshold,
                     });
                     tradeReturns.push(tradeReturn);
                 }
@@ -2174,6 +2227,10 @@
                     tradeReturn,
                     holdDays: 1,
                     probabilities: parsed.probabilities,
+                    probabilityUp: probability,
+                    probabilityDown: parsed.pDown,
+                    probabilityFlat: parsed.pFlat,
+                    threshold,
                 });
             }
         }
@@ -2312,6 +2369,9 @@
                 : sanitizedFixedFraction;
             forecast.fraction = forecastFraction;
             forecast.tradeRule = evaluationRule;
+            if (!Number.isFinite(forecast.threshold)) {
+                forecast.threshold = threshold;
+            }
             if (evaluationRule === 'open-entry') {
                 forecast.buyPrice = Number.isFinite(forecast.buyPrice) ? NaN : forecast.buyPrice;
             }

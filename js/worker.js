@@ -10,6 +10,7 @@
 // Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
 // Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
+// Patch Tag: LB-AI-CLASSDIST-20260129A — Align ANN class distributions & diagnostics with quartile thresholds.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -770,6 +771,10 @@ async function handleAITrainLSTMMessage(message) {
             probabilities: forecastProbs,
             predictedClass: forecastClass,
             classificationMode,
+            probabilityUp: forecastProb,
+            probabilityDown: Number.isFinite(forecastProbs?.[0]) ? forecastProbs[0] : null,
+            probabilityFlat: Number.isFinite(forecastProbs?.[1]) ? forecastProbs[1] : null,
+            threshold: gatingThreshold,
           };
           const lastClose = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
             ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close)
@@ -1608,6 +1613,31 @@ async function handleAITrainANNMessage(message) {
         }
       }
     }
+    const updatedDistribution = isBinary
+      ? { up: 0, down: 0 }
+      : { surge: 0, flat: 0, drop: 0 };
+    for (let i = 0; i < labels.length; i += 1) {
+      const label = labels[i];
+      if (isBinary) {
+        if (label === 1) {
+          updatedDistribution.up += 1;
+        } else {
+          updatedDistribution.down += 1;
+        }
+      } else if (label === 2) {
+        updatedDistribution.surge += 1;
+      } else if (label === 0) {
+        updatedDistribution.drop += 1;
+      } else {
+        updatedDistribution.flat += 1;
+      }
+    }
+    prepared.classDistribution = updatedDistribution;
+    if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
+      volatilityDiagnostics.classDistribution = { ...updatedDistribution };
+      volatilityDiagnostics.totalClassSamples = labels.length;
+    }
+
     prepared.y = labels;
     prepared.volatilityThresholds = volatilityThresholds;
     prepared.volatilityDiagnostics = volatilityDiagnostics;
@@ -1816,6 +1846,10 @@ async function handleAITrainANNMessage(message) {
             referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
             probabilities: forecastProbs,
             predictedClass: forecastClass,
+            probabilityUp: forecastProb,
+            probabilityDown: Number.isFinite(forecastProbs?.[0]) ? forecastProbs[0] : null,
+            probabilityFlat: Number.isFinite(forecastProbs?.[1]) ? forecastProbs[1] : null,
+            threshold,
           };
           if (Number.isFinite(prepared.datasetLastClose)) {
             forecast.buyPrice = prepared.datasetLastClose;
