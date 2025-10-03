@@ -8,9 +8,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
-// Patch Tag: LB-AI-HYBRID-20260118A — Multiclass precision metrics, diagnostics popup, and annualized summaries.
+// Patch Tag: LB-AI-HYBRID-20260122A — Multiclass threshold defaults & trade gating fixes.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-HYBRID-20260118A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20260122A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -29,6 +29,18 @@
     const normalizeClassificationMode = (mode) => (mode === CLASSIFICATION_MODES.BINARY
         ? CLASSIFICATION_MODES.BINARY
         : CLASSIFICATION_MODES.MULTICLASS);
+    const getDefaultWinThresholdForMode = (mode) => (normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS
+        ? 0
+        : 0.6);
+    const resolveWinThreshold = (state) => {
+        if (!state) {
+            return getDefaultWinThresholdForMode();
+        }
+        const classificationMode = normalizeClassificationMode(state.classification);
+        return Number.isFinite(state.winThreshold)
+            ? state.winThreshold
+            : getDefaultWinThresholdForMode(classificationMode);
+    };
     const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
     const VOLATILITY_CLASS_LABELS = ['大跌', '小幅波動', '大漲'];
 
@@ -216,14 +228,13 @@
             const state = getModelState(globalState.activeModel);
             if (state) {
                 const normalized = normalizeClassificationMode(_mode);
-                if (normalized === CLASSIFICATION_MODES.MULTICLASS) {
-                    if (!Number.isFinite(state.winThreshold) || state.winThreshold > 0) {
-                        state.winThreshold = 0;
-                    }
-                } else if (!Number.isFinite(state.winThreshold) || state.winThreshold <= 0) {
-                    state.winThreshold = 0.6;
+                const defaultThreshold = getDefaultWinThresholdForMode(normalized);
+                if (!Number.isFinite(state.winThreshold)
+                    || (normalized === CLASSIFICATION_MODES.MULTICLASS && state.winThreshold > defaultThreshold)
+                    || (normalized === CLASSIFICATION_MODES.BINARY && state.winThreshold <= 0)) {
+                    state.winThreshold = defaultThreshold;
                 }
-                elements.winThreshold.value = String(Math.round((state.winThreshold || 0) * 100));
+                elements.winThreshold.value = String(Math.round(resolveWinThreshold(state) * 100));
             }
             parseWinThreshold();
         }
@@ -1167,10 +1178,10 @@
     };
 
     const parseWinThreshold = () => {
-        if (!elements.winThreshold) return 0.5;
         const modelState = getActiveModelState();
         const classificationMode = normalizeClassificationMode(modelState?.classification || elements.classificationMode?.value);
-        const defaultPercent = classificationMode === CLASSIFICATION_MODES.MULTICLASS ? 0 : 60;
+        if (!elements.winThreshold) return getDefaultWinThresholdForMode(classificationMode);
+        const defaultPercent = Math.round(getDefaultWinThresholdForMode(classificationMode) * 100);
         const percent = Math.round(parseNumberInput(elements.winThreshold, defaultPercent, { min: 0, max: 100 }));
         elements.winThreshold.value = String(percent);
         const threshold = percent / 100;
@@ -1722,7 +1733,12 @@
         if (elements.testLoss) elements.testLoss.textContent = `Loss：${formatNumber(summary.testLoss, 4)}`;
         if (elements.tradeCount) elements.tradeCount.textContent = Number.isFinite(summary.executedTrades) ? summary.executedTrades : '—';
         if (elements.hitRate) {
-            const thresholdPercent = Number.isFinite(summary.threshold) ? `${Math.round(summary.threshold * 100)}%` : '—';
+            const thresholdValue = Number.isFinite(summary.threshold)
+                ? summary.threshold
+                : getDefaultWinThresholdForMode(activeClassification);
+            const thresholdPercent = Number.isFinite(thresholdValue)
+                ? `${Math.round(thresholdValue * 100)}%`
+                : '—';
             elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}｜勝率門檻：${thresholdPercent}`;
         }
         if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.tradeReturnMedian, 2);
@@ -1759,7 +1775,10 @@
             const totalClause = totalText ? `交易報酬% 總和 ${totalText}，` : '';
             const aiWinText = formatPercent(summary.testAccuracy, 2);
             const buyHoldAnnualText = formatPercent(summary.buyHoldAnnualized, 2);
-            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}，AI勝率 ${aiWinText}，買入持有年化報酬% ${buyHoldAnnualText}。`;
+            const thresholdValue = Number.isFinite(summary.threshold)
+                ? summary.threshold
+                : getDefaultWinThresholdForMode(activeClassification);
+            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round(thresholdValue * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}，AI勝率 ${aiWinText}，買入持有年化報酬% ${buyHoldAnnualText}。`;
         }
         if (elements.nextDayForecast) {
             const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
@@ -1787,12 +1806,13 @@
         const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
         const meta = Array.isArray(payload?.meta) ? payload.meta : [];
         const returns = Array.isArray(payload?.returns) ? payload.returns : [];
-        const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
+        const classificationMode = normalizeClassificationMode(payload?.classificationMode || payload?.hyperparameters?.classificationMode);
+        const defaultThreshold = getDefaultWinThresholdForMode(classificationMode);
+        const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
         const useKelly = Boolean(options.useKelly);
         const fixedFraction = sanitizeFraction(options.fixedFraction);
         const tradeRule = normalizeTradeRule(options.tradeRule);
         const volatilityThresholds = sanitizeVolatilityThresholds(options.volatilityThresholds || payload?.volatilityThresholds || DEFAULT_VOLATILITY_THRESHOLDS);
-        const classificationMode = normalizeClassificationMode(payload?.classificationMode || payload?.hyperparameters?.classificationMode);
 
         const executedTrades = [];
         const tradeReturns = [];
@@ -2260,7 +2280,8 @@
         const resolvedVolatility = sanitizeVolatilityThresholds(options.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
         const classificationMode = normalizeClassificationMode(payload?.classificationMode || modelState.classification);
-        const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
+        const defaultThreshold = getDefaultWinThresholdForMode(classificationMode);
+        const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
         payload.classificationMode = classificationMode;
         const diagnostics = payload?.volatilityDiagnostics && typeof payload.volatilityDiagnostics === 'object'
             ? { ...payload.volatilityDiagnostics }
@@ -2315,7 +2336,7 @@
             buyHoldAnnualized: evaluation.stats.buyHoldAnnualized,
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizedFixedFraction,
-            threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
+            threshold: Number.isFinite(options.threshold) ? options.threshold : defaultThreshold,
             seed: Number.isFinite(payload?.hyperparameters?.seed) ? payload.hyperparameters.seed : null,
             forecast,
             tradeRule: evaluationRule,
@@ -2422,7 +2443,7 @@
             syncFractionInputDisplay(modelState.fixedFraction ?? DEFAULT_FIXED_FRACTION);
         }
         if (elements.winThreshold) {
-            const thresholdPercent = Math.round(((Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5) * 100));
+            const thresholdPercent = Math.round(resolveWinThreshold(modelState) * 100);
             elements.winThreshold.value = String(thresholdPercent);
         }
         if (elements.tradeRuleSelect) {
@@ -2588,7 +2609,11 @@
             trainRatio: Number.isFinite(hyperparametersUsed?.trainRatio) ? hyperparametersUsed.trainRatio : hyperparameters.trainRatio,
             modelType: resultModelType,
             splitIndex: Number.isFinite(hyperparametersUsed?.splitIndex) ? hyperparametersUsed.splitIndex : (predictionsPayload.hyperparameters?.splitIndex ?? boundedTrainSize),
-            threshold: Number.isFinite(hyperparametersUsed?.threshold) ? hyperparametersUsed.threshold : (predictionsPayload.hyperparameters?.threshold ?? 0.5),
+            threshold: Number.isFinite(hyperparametersUsed?.threshold)
+                ? hyperparametersUsed.threshold
+                : (Number.isFinite(predictionsPayload.hyperparameters?.threshold)
+                    ? predictionsPayload.hyperparameters.threshold
+                    : getDefaultWinThresholdForMode(classificationMode)),
             seed: Number.isFinite(hyperparametersUsed?.seed)
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
@@ -2699,7 +2724,11 @@
             trainRatio: Number.isFinite(hyperparametersUsed?.trainRatio) ? hyperparametersUsed.trainRatio : hyperparameters.trainRatio,
             modelType,
             splitIndex: Number.isFinite(hyperparametersUsed?.splitIndex) ? hyperparametersUsed.splitIndex : (predictionsPayload.hyperparameters?.splitIndex ?? null),
-            threshold: Number.isFinite(hyperparametersUsed?.threshold) ? hyperparametersUsed.threshold : 0.5,
+            threshold: Number.isFinite(hyperparametersUsed?.threshold)
+                ? hyperparametersUsed.threshold
+                : (Number.isFinite(predictionsPayload.hyperparameters?.threshold)
+                    ? predictionsPayload.hyperparameters.threshold
+                    : getDefaultWinThresholdForMode(classificationMode)),
             seed: Number.isFinite(hyperparametersUsed?.seed)
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
@@ -2748,7 +2777,7 @@
         const modelState = getModelState(modelType);
         if (!modelState || !modelState.predictionsPayload || !modelState.trainingMetrics) return;
 
-        let threshold = Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5;
+        let threshold = resolveWinThreshold(modelState);
         let useKelly = Boolean(modelState.kellyEnabled);
         let fixedFraction = sanitizeFraction(modelState.fixedFraction);
         let tradeRule = getTradeRuleForModel(modelType);
@@ -2816,7 +2845,7 @@
         if (elements.optimizeMinTrades) {
             elements.optimizeMinTrades.value = String(minTrades);
         }
-        let bestThreshold = modelState.winThreshold || 0.5;
+        let bestThreshold = resolveWinThreshold(modelState);
         let bestValue = Number.NEGATIVE_INFINITY;
         let bestStats = null;
         for (let percent = 50; percent <= 100; percent += 1) {
@@ -3131,7 +3160,7 @@
 
             const hyperparameters = { ...modelState.hyperparameters };
             const riskOptions = {
-                threshold: Number.isFinite(modelState.winThreshold) ? modelState.winThreshold : 0.5,
+                threshold: resolveWinThreshold(modelState),
                 useKelly: Boolean(modelState.kellyEnabled),
                 fixedFraction: sanitizeFraction(modelState.fixedFraction),
                 tradeRule: getTradeRuleForModel(normalizedModel),

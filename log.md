@@ -946,3 +946,11 @@
 - **Diagnostics**: 於同一資料集先後執行 ANN 與 LSTM 的三分類訓練，確認 UI 顯示的大漲命中率與 Worker 回傳 precision 一致，並檢查 ANNS 測試報告顯示 12 指標覆蓋率與各層 NaN 檢查；切換至 LSTM 時按鈕顯示停用提示。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-22 — Patch LB-AI-HYBRID-20260122A / LB-AI-THRESHOLD-20260122A
+- **Issue recap**: 三分類預設勝率門檻雖設為 0%，但前端載入時仍套用舊的 50% 門檻，導致顯示「34% 大漲｜未達門檻」且不觸發交易，須手動重新輸入門檻才能成交；LSTM/ANN Worker 亦回傳 0.5 門檻，使種子重播時重現同樣錯誤。
+- **Fix**:
+  - `js/ai-prediction.js` 新增 `getDefaultWinThresholdForMode/resolveWinThreshold`，將多分類預設門檻統一為 0，二分類維持 60%，並於 UI 初始化、種子載入、交易重算與 Worker 結果整合時套用正確預設值。
+  - `js/worker.js` 將 ANN/LSTM 訓練與回傳的門檻改為依分類模式自動帶入 0 或 60%，確保重播或新預測皆採用一致的觸發條件。
+- **Diagnostics**: 以相同資料集重訓 ANNS/LSTM，多分類下立即顯示勝率門檻 0%，交易表中的大漲預測可直接觸發「收盤價買入」策略；切換門檻或載入舊種子後，Worker 回傳的 threshold 與 UI 顯示保持一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

@@ -8,6 +8,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Volatility quartile diagnostics for reproducibility.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260111A — Quartile fallback indicators and share diagnostics for AI volatility tiers.
 // Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
+// Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -48,6 +49,10 @@ const ANN_FEATURE_NAMES = [
 
 function normalizeClassificationMode(mode) {
   return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
+}
+
+function getDefaultThresholdForMode(mode) {
+  return normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS ? 0 : 0.6;
 }
 
 function sanitizeVolatilityThresholds(input = {}) {
@@ -510,6 +515,7 @@ async function handleAITrainLSTMMessage(message) {
         : null;
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
+    const gatingThreshold = getDefaultThresholdForMode(classificationMode);
 
     const inferredLookback = Array.isArray(dataset.sequences[0])
       ? dataset.sequences[0].length
@@ -802,7 +808,7 @@ async function handleAITrainLSTMMessage(message) {
           learningRate,
           trainRatio: trainRatioUsed,
           splitIndex: boundedTrainSize,
-          threshold: LSTM_THRESHOLD,
+          threshold: gatingThreshold,
           volatility: volatilityThresholds,
           seed: seedToUse,
           classificationMode,
@@ -825,7 +831,7 @@ async function handleAITrainLSTMMessage(message) {
         batchSize,
         trainRatio: trainRatioUsed,
         splitIndex: boundedTrainSize,
-        threshold: LSTM_THRESHOLD,
+        threshold: gatingThreshold,
         mean: normaliser.mean,
         std: normaliser.std,
         totalSamples,
@@ -867,7 +873,7 @@ async function handleAITrainLSTMMessage(message) {
         learningRate,
         trainRatio: trainRatioUsed,
         splitIndex: boundedTrainSize,
-        threshold: LSTM_THRESHOLD,
+        threshold: gatingThreshold,
         volatility: volatilityThresholds,
         seed: seedToUse,
         modelType: MODEL_TYPES.LSTM,
@@ -1608,7 +1614,8 @@ async function handleAITrainANNMessage(message) {
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 200));
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
     const batchSize = split.trainCount;
-    const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.5;
+    const defaultThreshold = getDefaultThresholdForMode(classificationMode);
+    const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
     const xTrain = tf.tensor2d(split.Xtr);
