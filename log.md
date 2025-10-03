@@ -937,3 +937,12 @@
 - **Diagnostics**: 以同一資料集重訓 ANN 與 LSTM，確認 `volatilityThresholds.upperQuantile/lowerQuantile` 反映正負四分位；切換「顯示全部預測」時，交易表會在 200 筆限制解除後呈現每日預測並保留原有成交筆數。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-18 — Patch LB-AI-HYBRID-20260118A / LB-AI-ANN-DIAG-20260118A / LB-AI-LSTM-REPRO-20260118A
+- **Issue recap**: 多分類模式的測試正確率仍採用整體分類準確率，導致 AI 勝率未能反映「預測大漲命中率」，同時 ANNS 測試報告按鈕在切換 LSTM 時仍保持啟用，缺乏視覺提示；交易摘要也尚未整合 AI 勝率與買入持有年化報酬。
+- **Fix**:
+  - LSTM 與 ANNS 的訓練流程統一以「預測為大漲時的 precision」作為測試期勝率，並在三分類交易邏輯中強制同時滿足大漲判斷與勝率門檻；前端勝率標籤預設為 0%，UI 亦同步標示「大漲命中率」。
+  - 擴充交易評估摘要，新增 AI 勝率與買入持有年化報酬率欄位，種子預設名稱也同步包含這兩項指標。
+  - 建立 ANNS 功能測試報告彈窗，列出 12 項技術指標覆蓋率與各層權重檢查，並於切換至 LSTM 時停用按鈕與提示「需回到 ANNS 才能檢視」。
+- **Diagnostics**: 於同一資料集先後執行 ANN 與 LSTM 的三分類訓練，確認 UI 顯示的大漲命中率與 Worker 回傳 precision 一致，並檢查 ANNS 測試報告顯示 12 指標覆蓋率與各層 NaN 檢查；切換至 LSTM 時按鈕顯示停用提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

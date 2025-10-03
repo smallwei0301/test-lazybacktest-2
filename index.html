@@ -2138,6 +2138,9 @@
                                                 <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 12%, transparent); color: var(--secondary-foreground);">
                                                     <i data-lucide="save" class="lucide-sm"></i>儲存此次結果
                                                 </button>
+                                                <button id="ai-ann-diagnostics" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border opacity-60 cursor-not-allowed" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);" aria-label="尚未產生 ANNS 功能測試報告" disabled>
+                                                    <i data-lucide="clipboard-list" class="lucide-sm"></i>ANNS 測試報告
+                                                </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
                                             <div class="grid gap-4 md:grid-cols-2">
@@ -2250,7 +2253,7 @@
                                                     <p id="ai-train-loss" class="text-[11px]" style="color: var(--muted-foreground);">Loss：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
-                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試期預測正確率</p>
+                                                    <p id="ai-test-accuracy-label" class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試期預測正確率</p>
                                                     <p id="ai-test-accuracy" class="text-lg font-semibold">—</p>
                                                     <p id="ai-test-loss" class="text-[11px]" style="color: var(--muted-foreground);">Loss：—</p>
                                                 </div>
@@ -2262,7 +2265,7 @@
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（中位數與平均指標）</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
-                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">單次／月／年平均報酬%・標準差</p>
+                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">AI勝率・單次／月／年平均報酬%・買入持有年化報酬%・標準差</p>
                                                 </div>
                                             </div>
                                             <div class="overflow-x-auto">

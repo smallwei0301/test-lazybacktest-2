@@ -8,9 +8,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
-// Patch Tag: LB-AI-VOL-QUARTILE-20260113A — Combined return quartile thresholds & diagnostics parity.
+// Patch Tag: LB-AI-HYBRID-20260118A — Multiclass precision metrics, diagnostics popup, and annualized summaries.
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-VOL-QUARTILE-20260113A';
+    const VERSION_TAG = 'LB-AI-HYBRID-20260118A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -71,11 +71,12 @@
         currentTrades: [],
         allPredictionRows: [],
         lastSeedDefault: '',
-        winThreshold: 0.5,
+        winThreshold: 0,
         kellyEnabled: false,
         fixedFraction: DEFAULT_FIXED_FRACTION,
         lastRunMeta: null,
         volatilityDiagnostics: null,
+        annDiagnostics: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -157,6 +158,8 @@
         volatilitySampleSummary: null,
         volatilitySurgeSummary: null,
         volatilityDropSummary: null,
+        annDiagnosticsButton: null,
+        testAccuracyLabel: null,
     };
 
     const colorMap = {
@@ -176,15 +179,17 @@
         if (!elements.tradeRules) return;
         const normalized = normalizeTradeRule(rule);
         let description = getTradeRuleDescription(normalized);
+        const state = getModelState(globalState.activeModel);
+        const classificationMode = state?.classification || CLASSIFICATION_MODES.MULTICLASS;
         if (normalized === 'volatility-tier') {
-            const state = getModelState(globalState.activeModel);
-            const classificationMode = state?.classification || CLASSIFICATION_MODES.MULTICLASS;
             if (classificationMode === CLASSIFICATION_MODES.BINARY) {
                 description = '買賣邏輯：模型採二分類判斷，當預測隔日上漲且機率達門檻時於當日收盤進場，之後持有至預測隔日下跌且機率達門檻時於當日收盤出場。';
             } else {
                 const thresholds = sanitizeVolatilityThresholds(state?.volatilityThresholds);
                 description = `${description}（${formatVolatilityDescription(thresholds)}）`;
             }
+        } else if (classificationMode === CLASSIFICATION_MODES.MULTICLASS) {
+            description = `${description}（需同時判定為「大漲」且機率達門檻才會進場。）`;
         }
         elements.tradeRules.textContent = description;
     };
@@ -207,6 +212,27 @@
         updateTradeRuleDescription(getTradeRuleForModel());
         const diagnostics = getModelState(globalState.activeModel)?.volatilityDiagnostics;
         updateVolatilityDiagnosticsDisplay(diagnostics, _mode);
+        if (elements.winThreshold) {
+            const state = getModelState(globalState.activeModel);
+            if (state) {
+                const normalized = normalizeClassificationMode(_mode);
+                if (normalized === CLASSIFICATION_MODES.MULTICLASS) {
+                    if (!Number.isFinite(state.winThreshold) || state.winThreshold > 0) {
+                        state.winThreshold = 0;
+                    }
+                } else if (!Number.isFinite(state.winThreshold) || state.winThreshold <= 0) {
+                    state.winThreshold = 0.6;
+                }
+                elements.winThreshold.value = String(Math.round((state.winThreshold || 0) * 100));
+            }
+            parseWinThreshold();
+        }
+        if (elements.testAccuracyLabel) {
+            const normalized = normalizeClassificationMode(_mode);
+            elements.testAccuracyLabel.textContent = normalized === CLASSIFICATION_MODES.MULTICLASS
+                ? '大漲命中率'
+                : '測試期預測正確率';
+        }
     };
 
     const convertFractionToPercent = (fraction) => {
@@ -361,9 +387,198 @@
         return `${(value * 100).toFixed(digits)}%`;
     };
 
-    const formatNumber = (value, digits = 2) => {
+    const formatNumber = (value, digits = 4) => {
         if (!Number.isFinite(value)) return '—';
-        return value.toFixed(digits);
+        return Number(value).toFixed(digits);
+    };
+
+    const formatClassDistribution = (distribution, mode = CLASSIFICATION_MODES.MULTICLASS) => {
+        if (!distribution || typeof distribution !== 'object') return '—';
+        const normalized = normalizeClassificationMode(mode);
+        if (normalized === CLASSIFICATION_MODES.BINARY) {
+            const up = Number(distribution.up) || 0;
+            const down = Number(distribution.down) || 0;
+            return `上漲：${up}｜下跌：${down}`;
+        }
+        const surge = Number(distribution.surge) || 0;
+        const flat = Number(distribution.flat) || 0;
+        const drop = Number(distribution.drop) || 0;
+        return `大漲：${surge}｜小幅波動：${flat}｜大跌：${drop}`;
+    };
+
+    const formatShape = (shape) => {
+        if (Array.isArray(shape)) {
+            return `[${shape.map((item) => (Number.isFinite(item) ? item : '∗')).join(', ')}]`;
+        }
+        if (typeof shape === 'string') return shape;
+        if (shape && typeof shape === 'object') {
+            try {
+                return JSON.stringify(shape);
+            } catch (error) {
+                return '—';
+            }
+        }
+        return '—';
+    };
+
+    const updateAnnDiagnosticsButtonState = () => {
+        if (!elements.annDiagnosticsButton) return;
+        const annState = getModelState(MODEL_TYPES.ANNS);
+        const diagnostics = annState?.annDiagnostics;
+        const hasDiagnostics = Boolean(diagnostics && Array.isArray(diagnostics.layerDiagnostics) && diagnostics.layerDiagnostics.length > 0);
+        const isAnnActive = globalState.activeModel === MODEL_TYPES.ANNS;
+        const canOpen = isAnnActive && hasDiagnostics;
+        elements.annDiagnosticsButton.disabled = !canOpen;
+        elements.annDiagnosticsButton.classList.toggle('opacity-60', !canOpen);
+        elements.annDiagnosticsButton.classList.toggle('cursor-not-allowed', !canOpen);
+        if (!isAnnActive) {
+            const label = '僅在選取 ANNS 模型時可檢視功能測試報告';
+            elements.annDiagnosticsButton.setAttribute('aria-label', label);
+            elements.annDiagnosticsButton.setAttribute('title', label);
+        } else if (hasDiagnostics) {
+            const label = '開啟 ANNS 功能測試報告';
+            elements.annDiagnosticsButton.setAttribute('aria-label', label);
+            elements.annDiagnosticsButton.setAttribute('title', label);
+        } else {
+            const label = '尚未產生 ANNS 功能測試報告';
+            elements.annDiagnosticsButton.setAttribute('aria-label', label);
+            elements.annDiagnosticsButton.setAttribute('title', label);
+        }
+    };
+
+    const buildAnnDiagnosticsHtml = (diagnostics) => {
+        const dataset = diagnostics?.dataset || {};
+        const performance = diagnostics?.performance || {};
+        const indicatorDiagnostics = Array.isArray(diagnostics?.indicatorDiagnostics) ? diagnostics.indicatorDiagnostics : [];
+        const layerDiagnostics = Array.isArray(diagnostics?.layerDiagnostics) ? diagnostics.layerDiagnostics : [];
+        const accuracyLabel = performance.accuracyLabel || '測試正確率';
+        const timestamp = Number.isFinite(diagnostics?.timestamp)
+            ? new Date(diagnostics.timestamp).toISOString()
+            : new Date().toISOString();
+        const indicatorRows = indicatorDiagnostics.length > 0
+            ? indicatorDiagnostics.map((entry) => `
+                <tr>
+                    <td>${escapeHTML(entry.name || '')}</td>
+                    <td>${Number(entry.finiteSamples || 0)} / ${Number(entry.totalSamples || 0)}</td>
+                    <td>${formatPercent(entry.coverage ?? (entry.totalSamples > 0 ? (entry.finiteSamples / entry.totalSamples) : 0), 1)}</td>
+                    <td>${formatNumber(entry.min)}</td>
+                    <td>${formatNumber(entry.max)}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5">尚未取得技術指標檢查結果。</td></tr>';
+        const layerRows = layerDiagnostics.length > 0
+            ? layerDiagnostics.map((layer) => {
+                const activation = layer.activation ? escapeHTML(layer.activation) : '—';
+                const units = Number.isFinite(layer.units) ? layer.units : '—';
+                const shapeText = formatShape(layer.outputShape);
+                const hasNaN = layer.hasNaN ? '⚠️ 發現 NaN' : '✅ 通過';
+                const weightSummaries = Array.isArray(layer.weightSummaries) && layer.weightSummaries.length > 0
+                    ? layer.weightSummaries.map((item) => {
+                        const label = `W${item.index ?? 0}`;
+                        const sizeText = `尺寸 ${Number(item.size || 0)}`;
+                        const finiteText = `有效 ${Number(item.finiteCount || 0)}`;
+                        const nanText = `NaN ${Number(item.nanCount || 0)}`;
+                        const rangeText = (Number.isFinite(item.min) && Number.isFinite(item.max))
+                            ? `範圍 [${formatNumber(item.min, 4)}, ${formatNumber(item.max, 4)}]`
+                            : '範圍 [—]';
+                        return `${label}：${sizeText}｜${finiteText}｜${nanText}｜${rangeText}`;
+                    }).join('<br/>')
+                    : '無可檢測權重';
+                const className = layer.className ? escapeHTML(layer.className) : '—';
+                const name = layer.name ? escapeHTML(layer.name) : `Layer ${layer.index}`;
+                return `
+                    <tr>
+                        <td>${layer.index ?? 0}</td>
+                        <td>${name}</td>
+                        <td>${className}</td>
+                        <td>${activation}</td>
+                        <td>${units}</td>
+                        <td>${escapeHTML(shapeText)}</td>
+                        <td>${hasNaN}</td>
+                        <td>${weightSummaries}</td>
+                    </tr>
+                `;
+            }).join('')
+            : '<tr><td colspan="8">尚未產生層級診斷資訊。</td></tr>';
+
+        const positivePrecision = Number.isFinite(performance.positivePrecision) ? formatPercent(performance.positivePrecision, 2) : '—';
+        const positiveRecall = Number.isFinite(performance.positiveRecall) ? formatPercent(performance.positiveRecall, 2) : '—';
+        const html = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8" />
+    <title>ANNS 功能測試報告</title>
+    <style>
+        body { font-family: 'Inter', 'Noto Sans TC', sans-serif; margin: 16px; color: #1f2933; background-color: #f9fafb; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
+        h2 { font-size: 1.125rem; margin: 1.5rem 0 0.75rem; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.875rem; background-color: #ffffff; }
+        th, td { border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+        th { background-color: #f3f4f6; font-weight: 600; }
+        .summary { background-color: #ffffff; border: 1px solid #d1d5db; padding: 1rem; border-radius: 8px; font-size: 0.9rem; }
+        .meta { font-size: 0.8rem; color: #6b7280; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <h1>ANNS 功能測試報告</h1>
+    <div class="meta">版本：${escapeHTML(diagnostics?.version || '—')}｜產出時間：${escapeHTML(timestamp)}</div>
+    <section class="summary">
+        <p>資料筆數：共 ${Number(dataset.usableSamples || 0)} 筆（原始 ${Number(dataset.totalParsedRows || 0)} 筆），訓練集 ${Number(dataset.trainSamples || 0)} 筆｜測試集 ${Number(dataset.testSamples || 0)} 筆。</p>
+        <p>分類模式：${dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類（漲跌）' : '三分類（波動分級）'}｜樣本分佈：${formatClassDistribution(dataset.classDistribution, dataset.classificationMode)}。</p>
+        <p>${accuracyLabel}：${formatPercent(performance.testAccuracy, 2)}｜訓練期勝率：${formatPercent(performance.trainAccuracy, 2)}。</p>
+        <p>大漲 precision：${positivePrecision}｜大漲 recall：${positiveRecall}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際大漲天數：${Number(performance.positiveActuals || 0)}。</p>
+    </section>
+    <h2>技術指標覆蓋率</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>指標名稱</th>
+                <th>有效樣本 / 總樣本</th>
+                <th>覆蓋率</th>
+                <th>最小值</th>
+                <th>最大值</th>
+            </tr>
+        </thead>
+        <tbody>${indicatorRows}</tbody>
+    </table>
+    <h2>模型層級檢查</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>名稱</th>
+                <th>類型</th>
+                <th>Activation</th>
+                <th>單元數</th>
+                <th>輸出維度</th>
+                <th>NaN 檢查</th>
+                <th>權重摘要</th>
+            </tr>
+        </thead>
+        <tbody>${layerRows}</tbody>
+    </table>
+</body>
+</html>`;
+        return html;
+    };
+
+    const openAnnDiagnosticsWindow = () => {
+        const annState = getModelState(MODEL_TYPES.ANNS);
+        const diagnostics = annState?.annDiagnostics;
+        if (!diagnostics) {
+            showStatus('[ANNS 技術指標感知器] 尚未產生功能測試報告，請先完成一次訓練。', 'warning');
+            return;
+        }
+        const popup = window.open('', 'annsDiagnostics', 'width=720,height=640,scrollbars=yes,resizable=yes');
+        if (!popup) {
+            showStatus('[ANNS 技術指標感知器] 瀏覽器封鎖了彈出視窗，請允許後再試。', 'warning');
+            return;
+        }
+        const reportHtml = buildAnnDiagnosticsHtml(diagnostics);
+        popup.document.open();
+        popup.document.write(reportHtml);
+        popup.document.close();
+        popup.focus();
     };
 
     const computeMedian = (values) => {
@@ -953,11 +1168,15 @@
 
     const parseWinThreshold = () => {
         if (!elements.winThreshold) return 0.5;
-        const percent = Math.round(parseNumberInput(elements.winThreshold, 60, { min: 0, max: 100 }));
+        const modelState = getActiveModelState();
+        const classificationMode = normalizeClassificationMode(modelState?.classification || elements.classificationMode?.value);
+        const defaultPercent = classificationMode === CLASSIFICATION_MODES.MULTICLASS ? 0 : 60;
+        const percent = Math.round(parseNumberInput(elements.winThreshold, defaultPercent, { min: 0, max: 100 }));
         elements.winThreshold.value = String(percent);
         const threshold = percent / 100;
-        const modelState = getActiveModelState();
-        modelState.winThreshold = threshold;
+        if (modelState) {
+            modelState.winThreshold = threshold;
+        }
         return threshold;
     };
 
@@ -1495,6 +1714,11 @@
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = formatPercent(summary.trainAccuracy, 2);
         if (elements.trainLoss) elements.trainLoss.textContent = `Loss：${formatNumber(summary.trainLoss, 4)}`;
         if (elements.testAccuracy) elements.testAccuracy.textContent = formatPercent(summary.testAccuracy, 2);
+        if (elements.testAccuracyLabel) {
+            const accuracyLabel = summary.testAccuracyLabel
+                || (activeClassification === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率');
+            elements.testAccuracyLabel.textContent = accuracyLabel;
+        }
         if (elements.testLoss) elements.testLoss.textContent = `Loss：${formatNumber(summary.testLoss, 4)}`;
         if (elements.tradeCount) elements.tradeCount.textContent = Number.isFinite(summary.executedTrades) ? summary.executedTrades : '—';
         if (elements.hitRate) {
@@ -1510,7 +1734,9 @@
             const monthlyText = formatPercent(summary.tradeReturnAverageMonthly, 2);
             const yearlyText = formatPercent(summary.tradeReturnAverageYearly, 2);
             const tradeCount = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
-            elements.averageProfit.textContent = `單次平均報酬%：${singleText}｜月平均報酬%：${monthlyText}｜年平均報酬%：${yearlyText}｜交易次數：${tradeCount}｜標準差：${stdText}`;
+            const aiWinText = formatPercent(summary.testAccuracy, 2);
+            const buyHoldAnnualText = formatPercent(summary.buyHoldAnnualized, 2);
+            elements.averageProfit.textContent = `AI勝率：${aiWinText}｜單次平均報酬%：${singleText}｜月平均報酬%：${monthlyText}｜年平均報酬%：${yearlyText}｜買入持有年化報酬%：${buyHoldAnnualText}｜交易次數：${tradeCount}｜標準差：${stdText}`;
         }
         if (elements.tradeSummary) {
             const strategyLabel = summary.usingKelly
@@ -1531,7 +1757,9 @@
                 ? `測試期間 ${summary.tradePeriodStart} ~ ${summary.tradePeriodEnd}，`
                 : '';
             const totalClause = totalText ? `交易報酬% 總和 ${totalText}，` : '';
-            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}。`;
+            const aiWinText = formatPercent(summary.testAccuracy, 2);
+            const buyHoldAnnualText = formatPercent(summary.buyHoldAnnualized, 2);
+            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round((summary.threshold || 0.5) * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}，AI勝率 ${aiWinText}，買入持有年化報酬% ${buyHoldAnnualText}。`;
         }
         if (elements.nextDayForecast) {
             const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
@@ -1743,6 +1971,8 @@
             for (let i = 0; i < predictions.length; i += 1) {
                 const parsed = parsePredictionEntry(predictions[i], classificationMode);
                 const probability = parsed.pUp;
+                const classIndex = parsed.classIndex;
+                const meetsClassRequirement = classificationMode === CLASSIFICATION_MODES.MULTICLASS ? classIndex === 2 : true;
                 const metaItem = meta[i] || {};
                 if (!Number.isFinite(probability)) {
                     continue;
@@ -1857,7 +2087,7 @@
                 }
 
                 const tradeDate = sellDate || metaItem.tradeDate || metaItem.date || buyDate || null;
-                const triggered = probability >= threshold;
+                const triggered = probability >= threshold && meetsClassRequirement;
                 const executed = Boolean(triggered
                     && entryEligible
                     && Number.isFinite(resolvedBuyPrice) && resolvedBuyPrice > 0
@@ -1889,8 +2119,8 @@
                         buyPrice: resolvedBuyPrice,
                         sellPrice: resolvedSellPrice,
                         tradeRule,
-                        predictedClass: parsed.classIndex,
-                        predictedClassLabel: formatClassLabel(parsed.classIndex, classificationMode),
+                        predictedClass: classIndex,
+                        predictedClassLabel: formatClassLabel(classIndex, classificationMode),
                         probabilities: parsed.probabilities,
                         classificationMode,
                         executed: true,
@@ -1957,6 +2187,38 @@
             }
         }
 
+        let buyHoldReturn = NaN;
+        let buyHoldAnnualized = NaN;
+        if (meta.length > 0) {
+            let firstClose = NaN;
+            for (let i = 0; i < meta.length; i += 1) {
+                const candidate = Number(meta[i]?.buyClose);
+                if (Number.isFinite(candidate) && candidate > 0) {
+                    firstClose = candidate;
+                    break;
+                }
+            }
+            let lastClose = NaN;
+            for (let i = meta.length - 1; i >= 0; i -= 1) {
+                const sellCandidate = Number(meta[i]?.sellClose);
+                if (Number.isFinite(sellCandidate) && sellCandidate > 0) {
+                    lastClose = sellCandidate;
+                    break;
+                }
+                const fallbackSell = Number(meta[i]?.sellPrice);
+                if (Number.isFinite(fallbackSell) && fallbackSell > 0) {
+                    lastClose = fallbackSell;
+                    break;
+                }
+            }
+            if (Number.isFinite(firstClose) && Number.isFinite(lastClose) && firstClose > 0) {
+                buyHoldReturn = (lastClose - firstClose) / firstClose;
+                if (Number.isFinite(periodYears) && periodYears > 0) {
+                    buyHoldAnnualized = ((1 + buyHoldReturn) ** (1 / periodYears)) - 1;
+                }
+            }
+        }
+
         return {
             trades: executedTrades,
             stats: {
@@ -1972,6 +2234,8 @@
                 periodEnd,
                 periodMonths,
                 periodYears,
+                buyHoldReturn,
+                buyHoldAnnualized,
             },
             rule: tradeRule,
             volatilityThresholds,
@@ -2047,6 +2311,8 @@
             tradePeriodEnd: evaluation.stats.periodEnd,
             tradePeriodMonths: evaluation.stats.periodMonths,
             tradePeriodYears: evaluation.stats.periodYears,
+            buyHoldReturn: evaluation.stats.buyHoldReturn,
+            buyHoldAnnualized: evaluation.stats.buyHoldAnnualized,
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizedFixedFraction,
             threshold: Number.isFinite(options.threshold) ? options.threshold : 0.5,
@@ -2055,6 +2321,7 @@
             tradeRule: evaluationRule,
             volatilityThresholds: resolvedVolatility,
             classificationMode,
+            testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
         };
 
@@ -2088,6 +2355,7 @@
         } else {
             updateAllPredictionsToggleButton(modelState);
         }
+        updateAnnDiagnosticsButtonState();
     };
 
     const captureActiveModelSettings = () => {
@@ -2195,6 +2463,7 @@
             updateAllPredictionsToggleButton(modelState);
             applySeedDefaultName(null, modelType, { force: true });
         }
+        updateAnnDiagnosticsButtonState();
     };
 
     const runLstmModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
@@ -2362,7 +2631,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
@@ -2409,6 +2678,8 @@
             totalPredictions: 0,
         };
         const predictionsPayload = workerResult?.predictionsPayload || null;
+        modelState.annDiagnostics = workerResult?.diagnostics ? { ...workerResult.diagnostics } : null;
+        updateAnnDiagnosticsButtonState();
         const hyperparametersUsed = workerResult?.hyperparametersUsed && typeof workerResult.hyperparametersUsed === 'object'
             ? workerResult.hyperparametersUsed
             : null;
@@ -2468,7 +2739,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${label}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
@@ -2977,6 +3248,8 @@
         elements.volatilitySampleSummary = document.getElementById('ai-volatility-sample-summary');
         elements.volatilitySurgeSummary = document.getElementById('ai-volatility-surge-summary');
         elements.volatilityDropSummary = document.getElementById('ai-volatility-drop-summary');
+        elements.annDiagnosticsButton = document.getElementById('ai-ann-diagnostics');
+        elements.testAccuracyLabel = document.getElementById('ai-test-accuracy-label');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -3009,6 +3282,12 @@
         }
 
         updateAllPredictionsToggleButton(getActiveModelState());
+
+        if (elements.annDiagnosticsButton) {
+            elements.annDiagnosticsButton.addEventListener('click', () => {
+                openAnnDiagnosticsWindow();
+            });
+        }
 
         if (elements.modelType) {
             elements.modelType.addEventListener('change', () => {
@@ -3119,6 +3398,7 @@
         updateDatasetSummary(getVisibleData());
 
         updateTradeRuleDescription(getTradeRuleForModel());
+        updateAnnDiagnosticsButtonState();
 
         const bridge = ensureBridge();
         if (bridge) {
