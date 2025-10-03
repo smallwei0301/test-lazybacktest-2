@@ -1,3 +1,33 @@
+## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
+- **Scope**: 波動分級策略與多分類 AI 預測強化。
+- **Updates**:
+  - ANN 與 LSTM 改為三分類 softmax，依自訂大漲/大跌門檻產生標籤並回傳完整機率向量與分類結果。
+  - 前端新增「波動分級持有」策略，可在大漲進場、小幅波動續抱、偵測大跌出場，交易表同步顯示分類與買賣價。
+  - 勝率摘要、種子預設名稱與最佳化流程納入月/年平均報酬與波動門檻，確保重播與 UI 資訊一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE'`
+
+## 2025-12-29 — Patch LB-AI-TRADE-RULE-20251229A
+- **Scope**: AI 買入規則擴充與交易評估一致性。
+- **Updates**:
+  - 新增「收盤價買入」選項，預測上漲時即以當日收盤價買進、隔日收盤價賣出，並在 UI 切換時同步重算交易表與摘要。
+  - `js/worker.js` 回傳收盤買入的買／賣價與報酬欄位，確保 ANN 重播與種子儲存可復現該策略。
+  - `js/ai-prediction.js` 擴充交易評估邏輯，將三種買入規則統一納入凱利與固定投入計算。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-08 — Patch LB-AI-VOL-QUARTILE-20260108A
+- **Issue recap**: 三分類模式下的大跌門檻以正值呈現，與「正漲幅／負跌幅」定義不符，且前端 quartile 仍採整體 25%/75% 分位，使得上下限無法對應訓練集的正負極端樣本。
+- **Fix**: `js/ai-prediction.js` 將漲跌幅重新拆分為正報酬與負報酬列表，各自取前 25% 四分位；同時保留負號顯示大跌門檻並更新門檻說明與版本碼，讓交易摘要、種子預設名稱與 UI 提示一致。
+- **Diagnostics**: 以同一訓練集重訓 ANN/LSTM，確認狀態列與表格顯示的大跌門檻為負值，且與 Worker 回傳的 `lowerQuantile` 一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-28 — Patch LB-AI-TRADE-RULE-20251228A
+- **Scope**: AI 預測交易邏輯與資金配置體驗同步調整。
+- **Updates**:
+  - 新增「收盤價掛單／開盤價買入」雙買入規則選項，交易表與摘要會依使用者切換即時重算並顯示對應買入邏輯。
+  - 固定投入比例改以百分比輸入，預設 100% 且與凱利公式切換同步更新種子、最佳化與摘要資訊。
+  - Worker 回傳交易 meta 含近收盤與隔日開盤進場收益，確保種子重播與前端最佳化能重建相同交易結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-22 — Patch LB-AI-LSTM-20250922A
 - **Scope**: AI 預測分頁資金控管、收益呈現與種子管理強化。
 - **Features**:
@@ -775,6 +805,58 @@
 - **Diagnostics**: 在無法連線 Tenor 的環境下重新載入回測流程，`#loadingGif` 會立即顯示 SVG 動畫且 `dataset.lbMascotSource` 標記為 `fallback:assets/...`；解鎖網路後可觀察 Sanitiser 自動覆寫為 Tenor GIF 並標記 `tenor:<url>`。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-26 — Patch LB-AI-LSTM-REPRO-20251226A / LB-AI-HYBRID-20251226A
+- **Issue recap**: LSTM 仍採用 Dropout、Adam shuffle 與未鎖定種子的初始化，導致同一資料集重訓時勝率與混淆矩陣無法完全重現，也缺乏標準化參數與模型版本的保存。前端「新的預測」僅支援 ANN，無法針對 LSTM 重新產生隨機種子。
+- **Fix**:
+  - `js/worker.js` 移除 Dropout、統一以 `seedrandom` 產生的 Glorot/Orthogonal 初始化器建立 LSTM，訓練採固定批次且禁止 shuffle，並回傳 TP/TN/FP/FN、實際切分索引與標準化 mean/std；完成後會將模型存入 `indexeddb://lstm_v1_model`，同步以 `LSTM_META` 訊息送出版本、後端與種子等重播資訊。
+  - `js/ai-prediction.js` 為 LSTM 加入與 ANN 相同的種子管理流程，按下「新的預測」會解鎖新的隨機種子並傳遞至 Worker，狀態列顯示 Seed 編號，並將 LSTM 執行 meta 寫入 `localStorage` 以利之後重播；同時統一以 Worker 回傳的閾值重算交易統計。
+- **Diagnostics**: 對同一資料集連續啟動「啟動 AI 預測」取得固定種子結果，再按「新的預測」產生新 seed，確認測試勝率、混淆矩陣與交易摘要完全一致；重複啟動舊種子可 100% 重現前一次結果，IndexedDB 可見最新 `lstm_v1_model` 條目。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
+- **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
+- **Fix**:
+  - `js/ai-prediction.js` 將 AI 預測預設模型改為 ANNS，交易表新增買入／賣出價格欄位並套用「隔日最低價跌破當日收盤才進場、優先使用隔日開盤價」的進場邏輯；同時在狀態訊息顯示平均報酬與交易次數、更新種子預設命名格式並提供刪除功能，資金控管卡片移到勝率門檻下方且進階超參數改為預設收合。
+  - `js/worker.js` 在 ANN 管線計算進場價格、實際報酬與進場旗標，回傳 `buyPrice`／`sellPrice`、`entryEligible`、`lastClose` 與 `forecast.buyPrice` 等資訊；LSTM 亦同步附帶最後收盤價，兩者的 `returns` 均改用新進場邏輯所得到的實際報酬。
+  - `index.html` 調整表格與卡片版面，新增買入邏輯說明段落，確保 UI 與後端邏輯一致可讀。
+- **Diagnostics**: 比對過往種子與新模型輸出的 `buyPrice`／`sellPrice`、交易數與平均報酬，確認凱利模式與固定投入模式皆落在相同的實際報酬；舊種子載入後仍能維持原勝率與交易統計，並可一鍵刪除多筆紀錄。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-23 — Patch LB-AI-ANNS-REPRO-20251223A
+- **Issue recap**: 將 ANN 特徵縮減為 10 欄並以訓練集計算標準化參數後，實測勝率下滑且與既有部署結果不符，需要回復原 12 維技術指標與全資料集正規化流程。
+- **Fix**:
+  - 還原 MACD Signal、MACD Hist 特徵並恢復 dataset-wide 標準化計算，確保輸入維度與 2025-12-15 研究設定一致。
+  - ANN 訊息 meta 的 `featureOrder`、版本碼更新為 `LB-AI-ANNS-REPRO-20251223A`，以利前端識別新模型配置並延續可重播種子機制。
+- **Diagnostics**: 以同一資料集重訓 ANN，確認勝率回復至調整前水準且混淆矩陣與原部署結果一致，IndexedDB 亦記錄 12 維特徵。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-22 — Patch LB-AI-HYBRID-20251222A / LB-AI-ANNS-REPRO-20251222A
+- **Issue recap**: 需要在維持 ANNS 可重播的前提下，提供一鍵生成新隨機種子的訓練流程，並確保種子管理（儲存／載入）能夠複製當下的預測結果。
+- **Fix**:
+  - 前端新增「新的預測」按鈕，動態產生安全隨機種子並傳遞至 Worker，狀態列會顯示 Seed 編號；同時保留原「啟動 AI 預測」按鈕以沿用既有種子重播結果。
+  - `js/ai-prediction.js` 追蹤種子於模型狀態、預測摘要與種子載入流程中，保存於 saved seed payload 以及 localStorage 的 ANN meta，以利後續重訓或重播。
+  - `js/worker.js` 支援 seed override，重新套用 `tf.util.seedrandom(seed)` 與 Glorot 初始化器，並在 meta/hyperparameters 回傳實際使用的 seed，確保 IndexedDB 模型和本地參數一致。
+- **Diagnostics**: 於同一資料集先後按「啟動 AI 預測」與「新的預測」比對混淆矩陣、勝率與種子欄位，再重按「啟動 AI 預測」確認可依最新種子重播完全一致的結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-27 — Patch LB-AI-HYBRID-20251227B
+- **Issue recap**: 種子預設名稱未標示模型別且 LSTM 會沿用 ANNS 勝率，勝率最佳化僅能針對交易報酬中位數，無法限制交易筆數；UI 亦缺少月／年平均報酬等指標與儲存動態回饋。
+- **Fix**:
+  - 調整 `ai-prediction.js` 交易評估邏輯，計算交易報酬總和、單次／月／年平均報酬與測試期間範圍，並在狀態列、種子預設名稱與摘要同步顯示。
+  - 新增門檻最佳化目標下拉與最小交易次數輸入，狀態訊息會依目標顯示對應績效，並更新 LSTM／ANNS 訓練完成訊息的指標清單。
+  - 將「儲存種子」移到啟動區塊，新增按鈕成功後的視覺回饋，並在種子清單標註模型前綴；UI 說明更新為單次／月／年平均報酬。
+- **Diagnostics**: 本地操作切換 LSTM 與 ANNS，確認種子預設名稱皆以【模型】開頭且指標數值對應；執行門檻最佳化時驗證最小交易筆數限制與目標指標切換生效。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-20 — Patch LB-AI-ANNS-REPRO-20251220A
+- **Issue recap**: ANNS 管線仍存在隨機初始值、批次洗牌與後端不一致等因素，導致相同資料重跑時正確率與混淆矩陣無法 100% 重現，也缺乏標準化參數與切分邊界的保存機制。
+- **Fix**:
+  - 鎖定 TensorFlow.js 4.20.0 WASM 後端並套用 `seedrandom(1337)` 的 Glorot 初始器，ANN 採全批次 SGD（epochs=200、threshold=0.5）且禁止 shuffle；技術指標回到 10 維（SMA30~WilliamsR14）。
+  - 標準化僅使用訓練集均值／標準差，保留切分索引與混淆矩陣結果；每次訓練會儲存模型至 `indexeddb://anns_v1_model` 並透過 `ANN_META` 訊息回傳 mean/std、featureOrder、seed、backend 等重現資訊。
+  - 前端接收 `ANN_META` 後寫入 `localStorage`，訓練成果統一使用 worker 回傳的超參數與閾值，並在狀態列顯示 TP/TN/FP/FN 以利比對。
+- **Diagnostics**: 於同一資料集連續重訓多次，確認測試正確率與混淆矩陣完全一致，localStorage 亦更新最新 mean/std 與切分邊界以供重播。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-15 — Patch LB-AI-ANNS-20251215A
 - **Issue recap**: ANNS 模型仍採 Adam + binaryCrossentropy，且輸入僅含 MACD Diff，與 Chen et al. (2024) 研究設定不符。
 - **Fix**: 將 `annBuildModel` 調整為 SGD（學習率 0.01）搭配 MSE，並把資料特徵擴充至 Diff/Signal/Hist 共 12 欄，同步更新標準化與預測輸入。
@@ -804,4 +886,93 @@
 - **Fix**: 於凱利模式下依預測勝率計算隔日投入比例並同步顯示於預測區與表格，同時僅保留具備有效交易日的交易紀錄再計算中位數、平均與標準差。
 - **Diagnostics**: 本地載入 AI 分頁，套用凱利公式與勝率門檻調整後可看到隔日預測顯示投入比例，並確認交易表與統計僅涵蓋具日期的交易。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-31 — Patch LB-AI-VOL-QUARTILE-20251231A / LB-AI-ANNS-REPRO-20251231A / LB-AI-LSTM-REPRO-20251231A
+- **Issue recap**: 三分類波動門檻採用固定參數，導致 ANN 與 LSTM 在不同資料期間無法自動對齊「大漲／大跌」定義，亦未在前端保存訓練集對應的量化邊界，重播時容易出現分類落差。
+- **Fix**: `worker.js` 於 ANN、LSTM 訓練前以訓練集相鄰收盤報酬計算 25/75 百分位數，重建三分類標籤並隨模型中繼資料回傳；`js/ai-prediction.js` 先行以訓練集波動度重算資料集標籤、同步更新種子與門檻說明，確保 UI、重播與門檻最佳化共用同一組 quantile。
+- **Diagnostics**: 以固定種子多次訓練 ANN/LSTM，檢查 `ANN_META` 與 `LSTM_META` 皆帶回 `lowerQuantile`／`upperQuantile`，並比對 UI 顯示與 Worker 回傳之 `volatilityThresholds` 一致，驗證再訓練與載入種子時分類結果維持不變。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-30 — Patch LB-AI-CLASS-MODE-20251230B / LB-AI-LSTM-CLASS-20251230A
+- **Issue recap**: 使用者需於 ANN 與 LSTM 間切換原本二分類與新三分類預測，但前端僅支援多分類說明，LSTM 亦缺少二分類資料集與機率輸出，導致波段持有策略無法在 LSTM 下重現舊的漲跌邏輯。
+- **Fix**:
+  - `js/ai-prediction.js` 建立預測分類模式下拉、同步將訓練結果與種子流程寫入 `classificationMode`，並在二分類波段持有時採「預測隔日下跌即收盤出場」邏輯。
+  - `js/worker.js` 將 LSTM 訓練／預測改為依 `classificationMode` 動態建立 Sigmoid 或 Softmax 輸出，正規化預測／隔日機率並回傳 `[pDown,pFlat,pUp]`，同時在 Meta 與超參數中保存分類模式。
+- **Diagnostics**: 本地以相同資料集分別執行二分類與三分類，檢查交易表的買入日／賣出日、波段持有出場點與平均報酬，確認 LSTM 與 ANN 皆依選取的分類模式輸出一致結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-02 — Patch LB-AI-VOL-QUARTILE-20260102A
+- **Issue recap**: ANNS 執行「新的預測」時，因重新指派 `resolvedVolatility` 造成 `Assignment to constant variable` 錯誤；同時 UI 仍允許手動調整大漲/大跌門檻，與訓練集 25%／75% 分位自動推導的策略不一致。
+- **Fix**:
+  - 將 ANN 前端訓練流程的 `resolvedVolatility` 改為可覆寫的 `let`，確保載入 Worker 回傳門檻時不會觸發常數重新指派錯誤。
+  - 鎖定 AI 波動門檻輸入為唯讀，改以訓練集 25%／75% 收盤漲跌分位自動更新，並在 UI/提示文字中明確標示為檢視用途。
+  - 更新波動分級策略描述與版本碼，確保種子、狀態列與交易摘要共用同一組 quartile 門檻。
+- **Diagnostics**: 本地透過 ANN「新的預測」與舊種子載入重播，確認不再出現常數指派錯誤，波動門檻欄位僅顯示最新 quartile 值且不可編輯。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-10 — Patch LB-AI-VOL-QUARTILE-20260110A
+- **Issue recap**: 三分類波動門檻雖採用訓練集 25%／75% 分位數，但 UI 缺乏訓練樣本統計，難以驗證大漲／大跌界線是否源自正確的漲跌樣本；同時勝率門檻無法調整至 0%，限制極端策略模擬。
+- **Fix**: `js/worker.js` 回傳訓練集漲跌樣本數、四分位值與達門檻筆數，並隨 ANN/LSTM 執行資訊一併保存；`js/ai-prediction.js` 與 `index.html` 新增波動統計區塊、載入種子時同步顯示診斷資料，並將勝率門檻輸入下限放寬至 0%。
+- **Diagnostics**: 以相同資料集重訓 ANN/LSTM，確認 UI 顯示訓練樣本／大漲與大跌達門檻天數，與 Worker 回傳的 `volatilityDiagnostics` 數值一致，並驗證勝率門檻可調整至 0%。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-11 — Patch LB-AI-VOL-QUARTILE-20260111A
+- **Issue recap**: 前端診斷僅顯示漲跌四分位數與筆數，未揭露是否使用 fallback 門檻，亦缺少達門檻天數占上漲／下跌樣本與整體訓練集的比例，使用者難以確認約 25%／50% 的分佈假設是否成立。
+- **Fix**: `js/worker.js` 於四分位推導時加入 fallback 旗標、整體分位備援與達門檻比例；`js/ai-prediction.js` 將上述資訊同步保存至種子與摘要，並在波動統計卡中顯示訓練樣本來源、上漲/下跌門檻筆數占比及 fallback 說明。
+- **Diagnostics**: 以多個資料期間重訓 ANN/LSTM，確認 UI 會顯示「依上漲樣本計算」或「樣本不足改用整體四分位」的文字，且達門檻天數占比接近 25%／訓練集占比接近 12.5%，與 Worker 診斷一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-13 — Patch LB-AI-VOL-QUARTILE-20260113A
+- **Issue recap**: 三分類波動門檻仍各自以正/負報酬四分位推導，導致前端顯示的 25% 位數與大漲/大跌實際採用值不一致，且診斷缺乏平盤樣本與小波動占比說明，使用者難以確認約 50% 的小波動假設。
+- **Fix**: `js/worker.js` 與 `js/ai-prediction.js` 改以訓練集報酬序列的上/下四分位（Q3/Q1）作為主要門檻，並在樣本不足時落回正/負報酬分位或預設值；同步回傳平盤天數、小波動占比與來源旗標，確保重播與 UI 診斷一致。
+- **Diagnostics**: 以 ANN/LSTM 重新訓練三分類，檢查 UI 顯示的 Q1/Q3 百分比、平盤天數與小波動占比與 Worker 診斷相符，且達門檻筆數接近 25%／小波動約 50%。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-05 — Patch LB-AI-VOL-QUARTILE-20260105A
+- **Issue recap**: 三分類波動門檻僅以整體 25%/75% 分位衡量，無法區分上漲與下跌樣本的尾端區間；交易表亦僅顯示達門檻的成交紀錄，無法檢視低於 50% 機率的日常預測。
+- **Fix**:
+  - `js/worker.js` 將訓練集隔日報酬拆為正報酬與負報酬兩組，再以上漲樣本前 25% 與下跌樣本前 25% 的四分位推導大漲／大跌門檻，隨模型中繼資料一併回傳。
+  - `js/ai-prediction.js` 擴充交易評估輸出每日預測紀錄、保留觸發狀態與投入比例，新增「顯示全部預測紀錄」切換按鈕並於狀態列同步更新，重算報酬時維持切換狀態。
+  - `index.html` 調整波動門檻說明文字、加入顯示全部預測按鈕，預設為停用狀態並於載入後由腳本啟用。
+- **Diagnostics**: 以同一資料集重訓 ANN 與 LSTM，確認 `volatilityThresholds.upperQuantile/lowerQuantile` 反映正負四分位；切換「顯示全部預測」時，交易表會在 200 筆限制解除後呈現每日預測並保留原有成交筆數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-18 — Patch LB-AI-HYBRID-20260118A / LB-AI-ANN-DIAG-20260118A / LB-AI-LSTM-REPRO-20260118A
+- **Issue recap**: 多分類模式的測試正確率仍採用整體分類準確率，導致 AI 勝率未能反映「預測大漲命中率」，同時 ANNS 測試報告按鈕在切換 LSTM 時仍保持啟用，缺乏視覺提示；交易摘要也尚未整合 AI 勝率與買入持有年化報酬。
+- **Fix**:
+  - LSTM 與 ANNS 的訓練流程統一以「預測為大漲時的 precision」作為測試期勝率，並在三分類交易邏輯中強制同時滿足大漲判斷與勝率門檻；前端勝率標籤預設為 0%，UI 亦同步標示「大漲命中率」。
+  - 擴充交易評估摘要，新增 AI 勝率與買入持有年化報酬率欄位，種子預設名稱也同步包含這兩項指標。
+  - 建立 ANNS 功能測試報告彈窗，列出 12 項技術指標覆蓋率與各層權重檢查，並於切換至 LSTM 時停用按鈕與提示「需回到 ANNS 才能檢視」。
+- **Diagnostics**: 於同一資料集先後執行 ANN 與 LSTM 的三分類訓練，確認 UI 顯示的大漲命中率與 Worker 回傳 precision 一致，並檢查 ANNS 測試報告顯示 12 指標覆蓋率與各層 NaN 檢查；切換至 LSTM 時按鈕顯示停用提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-22 — Patch LB-AI-HYBRID-20260122A / LB-AI-THRESHOLD-20260122A
+- **Issue recap**: 三分類預設勝率門檻雖設為 0%，但前端載入時仍套用舊的 50% 門檻，導致顯示「34% 大漲｜未達門檻」且不觸發交易，須手動重新輸入門檻才能成交；LSTM/ANN Worker 亦回傳 0.5 門檻，使種子重播時重現同樣錯誤。
+- **Fix**:
+  - `js/ai-prediction.js` 新增 `getDefaultWinThresholdForMode/resolveWinThreshold`，將多分類預設門檻統一為 0，二分類維持 60%，並於 UI 初始化、種子載入、交易重算與 Worker 結果整合時套用正確預設值。
+  - `js/worker.js` 將 ANN/LSTM 訓練與回傳的門檻改為依分類模式自動帶入 0 或 60%，確保重播或新預測皆採用一致的觸發條件。
+- **Diagnostics**: 以相同資料集重訓 ANNS/LSTM，多分類下立即顯示勝率門檻 0%，交易表中的大漲預測可直接觸發「收盤價買入」策略；切換門檻或載入舊種子後，Worker 回傳的 threshold 與 UI 顯示保持一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-24 — Patch LB-AI-THRESHOLD-20260124A
+- **Issue recap**: 二分類模式仍沿用 60% 預設勝率門檻，與最新需求的 50% 不符，導致預設情境下仍須手動下調門檻才能觸發交易並與多分類邏輯對齊。
+- **Fix**:
+  - `js/ai-prediction.js` 將二分類預設勝率門檻改為 50%，並同步更新版本代碼與 UI 預設值，確保初始載入即反映新標準。
+  - `js/worker.js` 將 ANN/LSTM 的二分類預設門檻調整為 0.5，使訓練流程、重播與種子儲存皆採用一致值。
+- **Diagnostics**: 於二分類模式下執行 ANNS/LSTM，確認 UI 初始門檻為 50%，且 Worker 回傳的 threshold 與重播後的門檻皆維持 0.5，無需額外調整即可觸發預設交易策略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-26 — Patch LB-AI-ANN-DIAG-20260126B
+- **Issue recap**: ANNS 功能測試報告僅於三分類情境呈現 Precision／Recall，二分類缺少相同診斷，也未提供 F1 與指標定義說明，使評估報告無法完整對照 TP/FP/FN。
+- **Fix**: `js/worker.js` 為 ANN 訓練流程計算 Precision／Recall／F1 並隨診斷回傳；`js/ai-prediction.js` 在測試報告中統一顯示上漲/大漲 Precision、Recall、F1 及其公式說明，確保二元與三元分類皆可對照混淆矩陣理解模型表現。
+- **Diagnostics**: 本地以 ANN 二分類與三分類分別執行一次訓練，確認測試報告顯示 Precision／Recall／F1 與 Worker 回傳值一致，且備註文字依分類模式顯示「上漲」或「大漲」說明。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-28 — Patch LB-AI-VOL-QUARTILE-20260128A
+- **Issue recap**: ANNS 功能測試報告的三分類樣本分佈仍沿用預設門檻統計，導致與四分位診斷顯示的達門檻天數不一致；交易表僅顯示機率，無法對照實際採用的大漲/大跌門檻與預測漲跌幅範圍。
+- **Fix**:
+  - `js/worker.js` 在依訓練集四分位重建標籤後重新統計 `classDistribution`，並將最終筆數寫入 `volatilityDiagnostics` 以確保報告與診斷同步。
+  - `js/ai-prediction.js` 與 `index.html` 為交易表新增「預測漲跌幅％」「大漲門檻％」「大跌門檻％」欄位，所有紀錄與隔日預測皆使用實際門檻值格式化顯示。
+- **Diagnostics**: 重新訓練三分類 ANN，確認測試報告樣本數與診斷中的達門檻天數一致，並於交易表檢視未達勝率門檻的紀錄，確定欄位顯示的門檻與實際買入判斷相符。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
