@@ -13,6 +13,8 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-LOSS-20260215A — Loss 選擇、類別權重與 Focal loss 支援。
+// Patch Tag: LB-AI-LOSS-META-20260217A — Loss 中繼資料與 fallback 回傳補強。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -34,6 +36,18 @@ const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
 const CLASSIFICATION_MODES = {
   BINARY: 'binary',
   MULTICLASS: 'multiclass',
+};
+const LOSS_TYPES = {
+  BCE: 'bce',
+  WEIGHTED_BCE: 'weighted_bce',
+  FOCAL: 'focal',
+};
+
+const DEFAULT_LOSS_PARAMS = {
+  wPos: 1,
+  wNeg: 1,
+  alpha: 0.6,
+  gamma: 1.8,
 };
 
 const ANN_FEATURE_NAMES = [
@@ -130,6 +144,63 @@ function computeQuantileValue(sortedValues, percentile) {
   if (!Number.isFinite(lowerValue)) return upperValue;
   if (!Number.isFinite(upperValue)) return lowerValue;
   return lowerValue + ((upperValue - lowerValue) * weight);
+}
+
+function normalizeLossType(type) {
+  if (type === LOSS_TYPES.WEIGHTED_BCE || type === LOSS_TYPES.FOCAL) {
+    return type;
+  }
+  return LOSS_TYPES.BCE;
+}
+
+function sanitizeLossParams(params = {}) {
+  const wPos = Number(params?.wPos);
+  const wNeg = Number(params?.wNeg);
+  const alpha = Number(params?.alpha);
+  const gamma = Number(params?.gamma);
+  return {
+    wPos: Number.isFinite(wPos) && wPos > 0 ? wPos : DEFAULT_LOSS_PARAMS.wPos,
+    wNeg: Number.isFinite(wNeg) && wNeg > 0 ? wNeg : DEFAULT_LOSS_PARAMS.wNeg,
+    alpha: Number.isFinite(alpha) && alpha > 0 ? Math.min(Math.max(alpha, 0.01), 0.99) : DEFAULT_LOSS_PARAMS.alpha,
+    gamma: Number.isFinite(gamma) && gamma >= 0 ? gamma : DEFAULT_LOSS_PARAMS.gamma,
+  };
+}
+
+function toFiniteOrNull(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatLossLabel(type) {
+  const normalized = normalizeLossType(type);
+  switch (normalized) {
+    case LOSS_TYPES.WEIGHTED_BCE:
+      return 'Class-weighted BCE';
+    case LOSS_TYPES.FOCAL:
+      return 'Focal loss';
+    case LOSS_TYPES.BCE:
+    default:
+      return 'BCE';
+  }
+}
+
+function buildBinaryFocalLoss(alpha = DEFAULT_LOSS_PARAMS.alpha, gamma = DEFAULT_LOSS_PARAMS.gamma) {
+  const sanitizedAlpha = Math.min(Math.max(Number.isFinite(alpha) ? alpha : DEFAULT_LOSS_PARAMS.alpha, 0.01), 0.99);
+  const sanitizedGamma = Math.max(Number.isFinite(gamma) ? gamma : DEFAULT_LOSS_PARAMS.gamma, 0);
+  return (yTrue, yPred) => tf.tidy(() => {
+    const alphaTensor = tf.scalar(sanitizedAlpha);
+    const alphaNegTensor = tf.scalar(1 - sanitizedAlpha);
+    const gammaTensor = tf.scalar(sanitizedGamma);
+    const one = tf.scalar(1);
+    const epsilon = tf.scalar(1e-7);
+    const yPredClipped = yPred.clipByValue(epsilon, one.sub(epsilon));
+    const pt = yTrue.mul(yPredClipped).add(one.sub(yTrue).mul(one.sub(yPredClipped)));
+    const alphaFactor = yTrue.mul(alphaTensor).add(one.sub(yTrue).mul(alphaNegTensor));
+    const modulatingFactor = tf.pow(one.sub(pt), gammaTensor);
+    const logPt = pt.log();
+    const lossTensor = alphaFactor.mul(modulatingFactor).mul(logPt).mul(tf.scalar(-1));
+    const meanLoss = lossTensor.mean();
+    return meanLoss;
+  });
 }
 
 function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATILITY_THRESHOLDS, diagnosticsRef = null) {
@@ -460,7 +531,13 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
-function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.BINARY) {
+function aiCreateModel(
+  lookback,
+  learningRate,
+  seed = LSTM_DEFAULT_SEED,
+  classificationMode = CLASSIFICATION_MODES.BINARY,
+  lossOptions = {},
+) {
   const baseSeed = Number.isFinite(seed) ? Math.max(1, Math.round(seed)) : LSTM_DEFAULT_SEED;
   const buildKernelInitializer = (offset = 0) =>
     tf.initializers.glorotUniform({ seed: baseSeed + offset });
@@ -469,6 +546,8 @@ function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classif
   const biasInitializer = tf.initializers.zeros();
   const normalizedMode = normalizeClassificationMode(classificationMode);
   const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
+  const requestedLossType = normalizeLossType(lossOptions?.lossType);
+  const sanitizedLossParams = sanitizeLossParams(lossOptions?.lossParams);
 
   const model = tf.sequential();
   model.add(
@@ -506,9 +585,21 @@ function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classif
     }),
   );
   const optimizer = tf.train.adam(learningRate);
-  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
-  model.compile({ optimizer, loss, metrics: ['accuracy'] });
-  return model;
+  let lossFunction = 'categoricalCrossentropy';
+  let lossTypeUsed = LOSS_TYPES.BCE;
+  if (isBinary) {
+    if (requestedLossType === LOSS_TYPES.FOCAL) {
+      lossFunction = buildBinaryFocalLoss(sanitizedLossParams.alpha, sanitizedLossParams.gamma);
+      lossTypeUsed = LOSS_TYPES.FOCAL;
+    } else {
+      lossFunction = 'binaryCrossentropy';
+      lossTypeUsed = requestedLossType === LOSS_TYPES.WEIGHTED_BCE
+        ? LOSS_TYPES.WEIGHTED_BCE
+        : LOSS_TYPES.BCE;
+    }
+  }
+  model.compile({ optimizer, loss: lossFunction, metrics: ['accuracy'] });
+  return { model, lossType: lossTypeUsed, lossParams: sanitizedLossParams };
 }
 
 function aiComputeTrainingOdds(returns, trainSize) {
@@ -564,6 +655,8 @@ async function handleAITrainLSTMMessage(message) {
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     const gatingThreshold = getDefaultThresholdForMode(classificationMode);
+    const requestedLossType = normalizeLossType(hyper.lossType);
+    const requestedLossParams = sanitizeLossParams(hyper.lossParams);
 
     const inferredLookback = Array.isArray(dataset.sequences[0])
       ? dataset.sequences[0].length
@@ -605,6 +698,20 @@ async function handleAITrainLSTMMessage(message) {
       throw new Error('樣本與標籤數量不一致，無法訓練模型。');
     }
 
+    const trainLabelSlice = labelIndices.slice(0, boundedTrainSize);
+    const trainPositive = trainLabelSlice.reduce((acc, value) => (value > 0 ? acc + 1 : acc), 0);
+    const trainNegative = trainLabelSlice.length - trainPositive;
+    const trainDistribution = {
+      positive: trainPositive,
+      negative: trainNegative,
+      total: trainLabelSlice.length,
+      positiveRatio: trainLabelSlice.length > 0 ? trainPositive / trainLabelSlice.length : null,
+      negativeRatio: trainLabelSlice.length > 0 ? trainNegative / trainLabelSlice.length : null,
+    };
+
+    let lossTypeUsed = requestedLossType;
+    let lossParamsUsed = sanitizeLossParams(requestedLossParams);
+    let effectiveLossType = lossTypeUsed;
     const normaliser = aiComputeNormalisation(sequences, boundedTrainSize);
     const normalizedSequences = aiNormaliseSequences(sequences, normaliser);
     const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
@@ -636,10 +743,17 @@ async function handleAITrainLSTMMessage(message) {
       }
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
-      model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode);
+      const creation = aiCreateModel(lookback, learningRate, seedToUse, classificationMode, {
+        lossType: requestedLossType,
+        lossParams: requestedLossParams,
+      });
+      model = creation.model;
+      lossTypeUsed = creation.lossType;
+      lossParamsUsed = sanitizeLossParams(creation.lossParams);
+      effectiveLossType = lossTypeUsed;
+      const hasBothClasses = trainDistribution.positive > 0 && trainDistribution.negative > 0;
 
-      aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
-      const history = await model.fit(xTrain, yTrain, {
+      const fitOptions = {
         epochs,
         batchSize,
         shuffle: false,
@@ -650,10 +764,22 @@ async function handleAITrainLSTMMessage(message) {
             const accPercent = Number.isFinite(accValue)
               ? `${(accValue * 100).toFixed(2)}%`
               : '—';
-            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}｜${formatLossLabel(effectiveLossType)}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
-      });
+      };
+      if (isBinary && lossTypeUsed === LOSS_TYPES.WEIGHTED_BCE) {
+        if (hasBothClasses) {
+          const weightPos = Number.isFinite(lossParamsUsed.wPos) ? lossParamsUsed.wPos : DEFAULT_LOSS_PARAMS.wPos;
+          const weightNeg = Number.isFinite(lossParamsUsed.wNeg) ? lossParamsUsed.wNeg : DEFAULT_LOSS_PARAMS.wNeg;
+          fitOptions.classWeight = { 0: weightNeg, 1: weightPos };
+        } else {
+          effectiveLossType = LOSS_TYPES.BCE;
+        }
+      }
+
+      aiPostProgress(id, `訓練中（共 ${epochs} 輪｜${formatLossLabel(effectiveLossType)}）...`);
+      const history = await model.fit(xTrain, yTrain, fitOptions);
 
       const accuracyKey = history.history.acc
         ? 'acc'
@@ -766,6 +892,24 @@ async function handleAITrainLSTMMessage(message) {
         ? testAccuracy
         : deterministicTestAccuracy;
       const confusion = { TP, TN, FP, FN };
+      const classificationMetrics = {
+        accuracy: toFiniteOrNull(resolvedTestAccuracy),
+        precision: toFiniteOrNull(positivePrecision),
+        recall: toFiniteOrNull(positiveRecall),
+        f1: toFiniteOrNull(positiveF1),
+        confusion: { ...confusion },
+        trainDistribution: {
+          positive: trainDistribution.positive,
+          negative: trainDistribution.negative,
+          total: trainDistribution.total,
+          positiveRatio: toFiniteOrNull(trainDistribution.positiveRatio),
+          negativeRatio: toFiniteOrNull(trainDistribution.negativeRatio),
+        },
+        lossType: effectiveLossType,
+        lossParams: { ...lossParamsUsed },
+        requestedLossType,
+        requestedLossParams: { ...requestedLossParams },
+      };
 
       const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
       const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
@@ -831,12 +975,17 @@ async function handleAITrainLSTMMessage(message) {
 
       const trainRatioUsed = boundedTrainSize / totalSamples;
       const trainingMetrics = {
-        trainAccuracy: finalTrainAccuracy,
-        trainLoss: finalTrainLoss,
-        testAccuracy: resolvedTestAccuracy,
-        testLoss,
+        trainAccuracy: toFiniteOrNull(finalTrainAccuracy),
+        trainLoss: toFiniteOrNull(finalTrainLoss),
+        testAccuracy: toFiniteOrNull(resolvedTestAccuracy),
+        testLoss: toFiniteOrNull(testLoss),
         totalPredictions: predictedLabels.length,
+        lossType: effectiveLossType,
+        lossParams: { ...lossParamsUsed },
+        requestedLossType,
+        requestedLossParams: { ...requestedLossParams },
       };
+      trainingMetrics.classificationMetrics = classificationMetrics;
 
       if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
         volatilityDiagnostics.expectedTrainSamples = boundedTrainSize;
@@ -865,6 +1014,10 @@ async function handleAITrainLSTMMessage(message) {
           volatility: volatilityThresholds,
           seed: seedToUse,
           classificationMode,
+          lossType: effectiveLossType,
+          lossParams: { ...lossParamsUsed },
+          requestedLossType,
+          requestedLossParams: { ...requestedLossParams },
         },
         predictedLabels,
         volatilityThresholds,
@@ -893,6 +1046,10 @@ async function handleAITrainLSTMMessage(message) {
         volatility: volatilityThresholds,
         classificationMode,
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        lossType: effectiveLossType,
+        lossParams: { ...lossParamsUsed },
+        requestedLossType,
+        requestedLossParams: { ...requestedLossParams },
       };
       workerLastMeta = runMeta;
 
@@ -932,6 +1089,10 @@ async function handleAITrainLSTMMessage(message) {
         seed: seedToUse,
         modelType: MODEL_TYPES.LSTM,
         classificationMode,
+        lossType: effectiveLossType,
+        lossParams: { ...lossParamsUsed },
+        requestedLossType,
+        requestedLossParams: { ...requestedLossParams },
       };
 
       aiPostResult(id, {
@@ -940,6 +1101,12 @@ async function handleAITrainLSTMMessage(message) {
         confusion,
         hyperparametersUsed,
         finalMessage,
+        classificationMetrics,
+        lossType: effectiveLossType,
+        lossParams: { ...lossParamsUsed },
+        requestedLossType,
+        requestedLossParams: { ...requestedLossParams },
+        modelType: MODEL_TYPES.LSTM,
       });
     } finally {
       tensorsToDispose.forEach((tensor) => {
