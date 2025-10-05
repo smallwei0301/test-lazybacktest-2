@@ -1,3 +1,11 @@
+## 2026-03-01 — Patch LB-AI-LOSS-20260301A
+- **Scope**: AI 二分類 Loss 選項、權重建議與診斷同步。
+- **Updates**:
+  - `js/worker.js` 依據主執行緒傳入的 lossType/lossParams 切換 BCE、類別權重 BCE 與 Focal loss，並回傳實際採用的 loss 設定。
+  - 訓練前統計訓練集漲跌比重，計算建議的 class weight、focal alpha/gamma，透過 `lossDiagnostics` 回傳前端。
+  - 混淆矩陣擴充 Accuracy / Precision / Recall / F1，UI 可直接顯示 0.5 門檻下的完整評估指標。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
