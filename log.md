@@ -1,3 +1,11 @@
+## 2026-02-15 — Patch LB-AI-F1-BOOST-20260215A
+- **Scope**: 提升 AI 預測預設模型的 Precision/Recall/F1 與門檻自動化。
+- **Updates**:
+  - Worker 引入 `annCreateBalancedTrainingSet` 進行類別 oversampling，並於診斷回傳訓練樣本平衡摘要、候選門檻掃描結果與最佳門檻。
+  - 新增門檻掃描函式 `annFindBestThreshold`/`annEvaluateThreshold`，以測試集 F1 最大化自動設定勝率門檻並記錄 F1 改善幅度。
+  - 前端摘要與 ANNS 功能報告顯示 Precision/Recall/F1、最佳門檻、F1 改善與樣本平衡資訊，狀態列同步揭露。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
