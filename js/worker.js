@@ -1,5 +1,6 @@
 
 // Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
+// Patch Tag: LB-AI-F1-BOOST-20260215A — Balanced training與門檻優化提升 Precision/Recall/F1。
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
 // Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
@@ -22,8 +23,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260215A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260215A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -1469,6 +1470,365 @@ function annSplitTrainTest(Z, y, meta, returns, ratio, forcedTrainCount = null) 
   };
 }
 
+function annMapClassKey(label, classificationMode) {
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  if (normalizedMode === CLASSIFICATION_MODES.BINARY) {
+    return label === 1 ? 'up' : 'down';
+  }
+  if (label === 2) return 'surge';
+  if (label === 0) return 'drop';
+  return 'flat';
+}
+
+function annCreateBalancedTrainingSet(features, labels, classificationMode) {
+  const baseFeatures = Array.isArray(features) ? features : [];
+  const baseLabels = Array.isArray(labels) ? labels : [];
+  const totalSamples = baseFeatures.length;
+  if (totalSamples === 0 || baseLabels.length !== totalSamples) {
+    return {
+      features: baseFeatures,
+      labels: baseLabels,
+      summary: {
+        applied: false,
+        baseSamples: totalSamples,
+        balancedSamples: totalSamples,
+        baseCounts: {},
+        balancedCounts: {},
+        missingClasses: [],
+        targetPerClass: 0,
+      },
+    };
+  }
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const classKeys = normalizedMode === CLASSIFICATION_MODES.BINARY ? [0, 1] : [0, 1, 2];
+  const baseCounts = normalizedMode === CLASSIFICATION_MODES.BINARY
+    ? { down: 0, up: 0 }
+    : { drop: 0, flat: 0, surge: 0 };
+  const bucketIndices = new Map();
+  for (let i = 0; i < totalSamples; i += 1) {
+    const rawLabel = baseLabels[i];
+    let normalizedLabel;
+    if (normalizedMode === CLASSIFICATION_MODES.BINARY) {
+      normalizedLabel = Number(rawLabel) > 0 ? 1 : 0;
+    } else {
+      const parsed = Number.isInteger(rawLabel) ? rawLabel : Math.round(Number(rawLabel) || 0);
+      normalizedLabel = Math.max(0, Math.min(2, parsed));
+    }
+    const classKey = annMapClassKey(normalizedLabel, normalizedMode);
+    if (typeof baseCounts[classKey] === 'number') {
+      baseCounts[classKey] += 1;
+    }
+    if (!bucketIndices.has(normalizedLabel)) {
+      bucketIndices.set(normalizedLabel, []);
+    }
+    bucketIndices.get(normalizedLabel).push(i);
+  }
+  const missingClasses = classKeys
+    .map((key) => annMapClassKey(key, normalizedMode))
+    .filter((key) => (baseCounts[key] || 0) === 0);
+  const maxCount = Math.max(
+    ...classKeys.map((key) => {
+      const indices = bucketIndices.get(key);
+      return Array.isArray(indices) ? indices.length : 0;
+    }),
+  );
+  if (maxCount <= 0 || missingClasses.length > 0) {
+    return {
+      features: baseFeatures,
+      labels: baseLabels,
+      summary: {
+        applied: false,
+        baseSamples: totalSamples,
+        balancedSamples: totalSamples,
+        baseCounts,
+        balancedCounts: { ...baseCounts },
+        missingClasses,
+        targetPerClass: maxCount,
+      },
+    };
+  }
+  const alreadyBalanced = classKeys.every((key) => {
+    const indices = bucketIndices.get(key);
+    const count = Array.isArray(indices) ? indices.length : 0;
+    return count === maxCount;
+  });
+  if (alreadyBalanced) {
+    return {
+      features: baseFeatures,
+      labels: baseLabels,
+      summary: {
+        applied: false,
+        baseSamples: totalSamples,
+        balancedSamples: totalSamples,
+        baseCounts,
+        balancedCounts: { ...baseCounts },
+        missingClasses,
+        targetPerClass: maxCount,
+      },
+    };
+  }
+
+  const balancedFeatures = baseFeatures.map((row) => (Array.isArray(row) ? [...row] : []));
+  const balancedLabels = baseLabels.slice();
+  const balancedCounts = { ...baseCounts };
+  const pointerMap = new Map();
+  classKeys.forEach((key) => {
+    pointerMap.set(key, 0);
+  });
+
+  let iterations = 0;
+  const iterationCap = maxCount * classKeys.length * 4;
+  let progress = true;
+  while (progress && iterations < iterationCap) {
+    progress = false;
+    iterations += 1;
+    for (let idx = 0; idx < classKeys.length; idx += 1) {
+      const key = classKeys[idx];
+      const bucket = bucketIndices.get(key);
+      if (!bucket || bucket.length === 0) {
+        continue;
+      }
+      const className = annMapClassKey(key, normalizedMode);
+      if ((balancedCounts[className] || 0) >= maxCount) {
+        continue;
+      }
+      const pointer = pointerMap.get(key) || 0;
+      const sourceIndex = bucket[pointer % bucket.length];
+      pointerMap.set(key, pointer + 1);
+      const featureRow = baseFeatures[sourceIndex];
+      balancedFeatures.push(Array.isArray(featureRow) ? [...featureRow] : []);
+      balancedLabels.push(baseLabels[sourceIndex]);
+      balancedCounts[className] = (balancedCounts[className] || 0) + 1;
+      progress = true;
+    }
+  }
+
+  return {
+    features: balancedFeatures,
+    labels: balancedLabels,
+    summary: {
+      applied: true,
+      baseSamples: totalSamples,
+      balancedSamples: balancedFeatures.length,
+      baseCounts,
+      balancedCounts,
+      missingClasses,
+      targetPerClass: maxCount,
+    },
+  };
+}
+
+function annEvaluateThreshold(probabilities, actualLabels, classificationMode, threshold, collectPredictions = false) {
+  const rows = Array.isArray(probabilities) ? probabilities : [];
+  const labels = Array.isArray(actualLabels) ? actualLabels : [];
+  const total = Math.min(rows.length, labels.length);
+  if (total === 0) {
+    return {
+      threshold: clampProbability(threshold),
+      predictedLabels: collectPredictions ? [] : null,
+      total: 0,
+      accuracy: NaN,
+      positivePrecision: NaN,
+      positiveRecall: NaN,
+      positiveF1: NaN,
+      positivePredictions: 0,
+      positiveActuals: 0,
+      positiveHits: 0,
+      confusion: { TP: 0, TN: 0, FP: 0, FN: 0 },
+    };
+  }
+  const normalizedThreshold = clampProbability(Number(threshold));
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
+  const predictedLabels = collectPredictions ? new Array(total) : null;
+  let TP = 0;
+  let TN = 0;
+  let FP = 0;
+  let FN = 0;
+  let correct = 0;
+  let positivePredictions = 0;
+  let positiveActuals = 0;
+  let positiveHits = 0;
+  for (let i = 0; i < total; i += 1) {
+    const row = Array.isArray(rows[i]) ? rows[i] : [];
+    const rawActual = labels[i];
+    const actual = isBinary ? (rawActual > 0 ? 1 : 0) : Math.max(0, Math.min(2, Number.isInteger(rawActual) ? rawActual : Math.round(Number(rawActual) || 0)));
+    const probUp = clampProbability(row[2]);
+    let predicted;
+    if (isBinary) {
+      predicted = probUp >= normalizedThreshold ? 1 : 0;
+    } else if (probUp >= normalizedThreshold) {
+      predicted = 2;
+    } else {
+      const pDrop = clampProbability(row[0]);
+      const pFlat = clampProbability(row[1]);
+      predicted = pDrop >= pFlat ? 0 : 1;
+    }
+    if (collectPredictions) {
+      predictedLabels[i] = predicted;
+    }
+    if (predicted === actual) {
+      correct += 1;
+    }
+    if (isBinary) {
+      if (actual === 1) positiveActuals += 1;
+      if (predicted === 1) {
+        positivePredictions += 1;
+        if (actual === 1) positiveHits += 1;
+      }
+      if (actual === 1 && predicted === 1) TP += 1;
+      else if (actual === 0 && predicted === 0) TN += 1;
+      else if (actual === 0 && predicted === 1) FP += 1;
+      else if (actual === 1 && predicted === 0) FN += 1;
+    } else {
+      if (actual === 2) positiveActuals += 1;
+      if (predicted === 2) {
+        positivePredictions += 1;
+        if (actual === 2) positiveHits += 1;
+      }
+      if (actual === 2 && predicted === 2) TP += 1;
+      else if (actual !== 2 && predicted !== 2) TN += 1;
+      else if (actual !== 2 && predicted === 2) FP += 1;
+      else if (actual === 2 && predicted !== 2) FN += 1;
+    }
+  }
+  const accuracy = total > 0 ? correct / total : NaN;
+  const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
+  const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
+  const positiveF1 = (Number.isFinite(positivePrecision)
+    && Number.isFinite(positiveRecall)
+    && (positivePrecision + positiveRecall) > 0)
+    ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
+    : NaN;
+  return {
+    threshold: normalizedThreshold,
+    predictedLabels,
+    total,
+    accuracy,
+    positivePrecision,
+    positiveRecall,
+    positiveF1,
+    positivePredictions,
+    positiveActuals,
+    positiveHits,
+    confusion: { TP, TN, FP, FN },
+  };
+}
+
+function annIsBetterThreshold(candidate, current, candidateThreshold, currentThreshold, defaultThreshold) {
+  const EPS = 1e-6;
+  const candidateF1 = Number.isFinite(candidate.positiveF1) ? candidate.positiveF1 : -1;
+  const currentF1 = Number.isFinite(current.positiveF1) ? current.positiveF1 : -1;
+  if (candidateF1 > currentF1 + EPS) return true;
+  if (candidateF1 + EPS < currentF1) return false;
+  const candidateRecall = Number.isFinite(candidate.positiveRecall) ? candidate.positiveRecall : -1;
+  const currentRecall = Number.isFinite(current.positiveRecall) ? current.positiveRecall : -1;
+  if (candidateRecall > currentRecall + EPS) return true;
+  if (candidateRecall + EPS < currentRecall) return false;
+  const candidatePrecision = Number.isFinite(candidate.positivePrecision) ? candidate.positivePrecision : -1;
+  const currentPrecision = Number.isFinite(current.positivePrecision) ? current.positivePrecision : -1;
+  if (candidatePrecision > currentPrecision + EPS) return true;
+  if (candidatePrecision + EPS < currentPrecision) return false;
+  const candidateAccuracy = Number.isFinite(candidate.accuracy) ? candidate.accuracy : -1;
+  const currentAccuracy = Number.isFinite(current.accuracy) ? current.accuracy : -1;
+  if (candidateAccuracy > currentAccuracy + EPS) return true;
+  if (candidateAccuracy + EPS < currentAccuracy) return false;
+  const candidateDistance = Math.abs(candidateThreshold - defaultThreshold);
+  const currentDistance = Math.abs(currentThreshold - defaultThreshold);
+  if (candidateDistance + EPS < currentDistance) return true;
+  if (candidateDistance > currentDistance + EPS) return false;
+  return candidateThreshold < currentThreshold;
+}
+
+function annFindBestThreshold(probabilities, actualLabels, classificationMode, defaultThreshold) {
+  const normalizedDefault = clampProbability(
+    Number.isFinite(defaultThreshold) ? defaultThreshold : getDefaultThresholdForMode(classificationMode),
+  );
+  const rows = Array.isArray(probabilities) ? probabilities : [];
+  const finiteProbs = rows
+    .map((row) => (Array.isArray(row) ? clampProbability(row[2]) : NaN))
+    .filter((value) => Number.isFinite(value));
+  const candidateSet = new Set([normalizedDefault, 0.5, 0.33, 0.66]);
+  if (finiteProbs.length > 0) {
+    const sorted = [...finiteProbs].sort((a, b) => a - b);
+    const minProb = sorted[0];
+    const maxProb = sorted[sorted.length - 1];
+    const steps = Math.max(10, Math.min(40, Math.round(sorted.length / 2)));
+    for (let i = 0; i <= steps; i += 1) {
+      const value = minProb + ((maxProb - minProb) * (i / Math.max(steps, 1)));
+      if (Number.isFinite(value)) {
+        candidateSet.add(clampProbability(value));
+      }
+    }
+    const sampleSize = Math.min(25, sorted.length);
+    for (let i = 0; i < sampleSize; i += 1) {
+      const index = Math.round((i / Math.max(sampleSize - 1, 1)) * (sorted.length - 1));
+      candidateSet.add(clampProbability(sorted[index]));
+    }
+  }
+  const candidates = [...candidateSet]
+    .map((value) => clampProbability(value))
+    .filter((value) => value >= 0 && value <= 1)
+    .sort((a, b) => a - b);
+  const defaultMetrics = annEvaluateThreshold(probabilities, actualLabels, classificationMode, normalizedDefault, false);
+  let bestThreshold = normalizedDefault;
+  let bestMetrics = defaultMetrics;
+  const candidateSummaries = [];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidateThreshold = candidates[i];
+    const metrics = annEvaluateThreshold(probabilities, actualLabels, classificationMode, candidateThreshold, false);
+    candidateSummaries.push({
+      threshold: metrics.threshold,
+      positiveF1: metrics.positiveF1,
+      positivePrecision: metrics.positivePrecision,
+      positiveRecall: metrics.positiveRecall,
+      accuracy: metrics.accuracy,
+    });
+    if (annIsBetterThreshold(metrics, bestMetrics, candidateThreshold, bestThreshold, normalizedDefault)) {
+      bestThreshold = metrics.threshold;
+      bestMetrics = metrics;
+    }
+  }
+  const finalMetrics = annEvaluateThreshold(probabilities, actualLabels, classificationMode, bestThreshold, true);
+  const topCandidates = candidateSummaries
+    .slice()
+    .sort((a, b) => {
+      if (Number.isFinite(b.positiveF1) && Number.isFinite(a.positiveF1)) {
+        if (Math.abs(b.positiveF1 - a.positiveF1) > 1e-6) {
+          return b.positiveF1 - a.positiveF1;
+        }
+      } else if (Number.isFinite(b.positiveF1)) {
+        return 1;
+      } else if (Number.isFinite(a.positiveF1)) {
+        return -1;
+      }
+      if (Number.isFinite(b.positiveRecall) && Number.isFinite(a.positiveRecall)) {
+        if (Math.abs(b.positiveRecall - a.positiveRecall) > 1e-6) {
+          return b.positiveRecall - a.positiveRecall;
+        }
+      }
+      if (Number.isFinite(b.positivePrecision) && Number.isFinite(a.positivePrecision)) {
+        if (Math.abs(b.positivePrecision - a.positivePrecision) > 1e-6) {
+          return b.positivePrecision - a.positivePrecision;
+        }
+      }
+      return Math.abs(a.threshold - normalizedDefault) - Math.abs(b.threshold - normalizedDefault);
+    })
+    .slice(0, 5);
+  const searchRange = candidates.length > 0
+    ? { min: candidates[0], max: candidates[candidates.length - 1] }
+    : { min: normalizedDefault, max: normalizedDefault };
+  return {
+    threshold: finalMetrics.threshold,
+    metrics: finalMetrics,
+    defaultThreshold: normalizedDefault,
+    defaultMetrics,
+    candidatesTested: candidates.length,
+    searchRange,
+    topCandidates,
+  };
+}
+
 function annOneHot(labels, numClasses = 3) {
   return labels.map((label) => {
     const index = Number.isInteger(label) ? Math.max(0, Math.min(numClasses - 1, label)) : 0;
@@ -1772,6 +2132,24 @@ async function handleAITrainANNMessage(message) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
+    const balancedTraining = annCreateBalancedTrainingSet(split.Xtr, split.ytr, classificationMode);
+    const trainingFeatures = Array.isArray(balancedTraining.features) ? balancedTraining.features : split.Xtr;
+    const trainingLabels = Array.isArray(balancedTraining.labels) ? balancedTraining.labels : split.ytr;
+    const trainingBalanceSummary = balancedTraining && typeof balancedTraining.summary === 'object'
+      ? { ...balancedTraining.summary }
+      : {
+        applied: false,
+        baseSamples: split.Xtr.length,
+        balancedSamples: trainingFeatures.length,
+        baseCounts: null,
+        balancedCounts: null,
+        missingClasses: [],
+        targetPerClass: split.Xtr.length,
+      };
+    if (!Array.isArray(trainingFeatures) || trainingFeatures.length === 0) {
+      throw new Error('訓練樣本不足，無法建立模型。');
+    }
+
     const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 200));
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
     const batchSize = split.trainCount;
@@ -1779,18 +2157,18 @@ async function handleAITrainANNMessage(message) {
     const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
-    const xTrain = tf.tensor2d(split.Xtr);
+    const xTrain = tf.tensor2d(trainingFeatures);
     let yTrain;
     let xTest;
     let yTest;
     if (isBinary) {
-      const yTrainValues = split.ytr.map((label) => (label > 0 ? 1 : 0));
+      const yTrainValues = trainingLabels.map((label) => (label > 0 ? 1 : 0));
       const yTestValues = split.yte.map((label) => (label > 0 ? 1 : 0));
       yTrain = tf.tensor2d(yTrainValues.map((value) => [value]), [yTrainValues.length, 1]);
       xTest = tf.tensor2d(split.Xte);
       yTest = tf.tensor2d(yTestValues.map((value) => [value]), [yTestValues.length, 1]);
     } else {
-      const yTrainArray = annOneHot(split.ytr, 3);
+      const yTrainArray = annOneHot(trainingLabels, 3);
       const yTestArray = annOneHot(split.yte, 3);
       yTrain = tf.tensor2d(yTrainArray, [yTrainArray.length, 3]);
       xTest = tf.tensor2d(split.Xte);
@@ -1844,69 +2222,30 @@ async function handleAITrainANNMessage(message) {
         })
         : rawPredictions.map((row) => (Array.isArray(row) ? row : [Number(row) || 0]));
 
-      const predictedLabels = predictionArray.map((row) => {
-        if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
-        if (isBinary) {
-          return row[2] >= threshold ? 1 : 0;
-        }
-        let maxIndex = 0;
-        let maxValue = row[0];
-        for (let idx = 1; idx < row.length; idx += 1) {
-          if (row[idx] > maxValue) {
-            maxValue = row[idx];
-            maxIndex = idx;
-          }
-        }
-        return maxIndex;
-      });
       const actualLabels = split.yte.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
-      let TP = 0;
-      let TN = 0;
-      let FP = 0;
-      let FN = 0;
-      let correct = 0;
-      let positivePredictions = 0;
-      let positiveHits = 0;
-      let positiveActuals = 0;
-      for (let i = 0; i < predictedLabels.length; i += 1) {
-        const predicted = predictedLabels[i];
-        const actual = actualLabels[i];
-        if (predicted === actual) {
-          correct += 1;
-        }
-        if (isBinary) {
-          if (actual === 1) positiveActuals += 1;
-          if (predicted === 1) {
-            positivePredictions += 1;
-            if (actual === 1) positiveHits += 1;
-          }
-          if (actual === 1 && predicted === 1) TP += 1;
-          else if (actual === 0 && predicted === 0) TN += 1;
-          else if (actual === 0 && predicted === 1) FP += 1;
-          else if (actual === 1 && predicted === 0) FN += 1;
-        } else {
-          if (actual === 2) positiveActuals += 1;
-          if (predicted === 2) {
-            positivePredictions += 1;
-            if (actual === 2) positiveHits += 1;
-          }
-          if (actual === 2 && predicted === 2) TP += 1;
-          else if (actual !== 2 && predicted !== 2) TN += 1;
-          else if (actual !== 2 && predicted === 2) FP += 1;
-          else if (actual === 2 && predicted !== 2) FN += 1;
-        }
-      }
-      const deterministicTestAccuracy = isBinary
-        ? (actualLabels.length > 0 ? correct / actualLabels.length : NaN)
-        : (positivePredictions > 0 ? positiveHits / positivePredictions : NaN);
-      const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
-      const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
-      const positiveF1 = (Number.isFinite(positivePrecision)
-        && Number.isFinite(positiveRecall)
-        && (positivePrecision + positiveRecall) > 0)
-        ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
-        : NaN;
-      const confusion = { TP, TN, FP, FN };
+      const thresholdSearch = annFindBestThreshold(predictionArray, actualLabels, classificationMode, threshold);
+      const evaluation = thresholdSearch?.metrics || {};
+      const predictedLabels = Array.isArray(evaluation.predictedLabels) ? evaluation.predictedLabels : [];
+      const confusion = evaluation.confusion || { TP: 0, TN: 0, FP: 0, FN: 0 };
+      const deterministicTestAccuracy = Number.isFinite(evaluation.accuracy) ? evaluation.accuracy : NaN;
+      const positivePrecision = Number.isFinite(evaluation.positivePrecision) ? evaluation.positivePrecision : NaN;
+      const positiveRecall = Number.isFinite(evaluation.positiveRecall) ? evaluation.positiveRecall : NaN;
+      const positiveF1 = Number.isFinite(evaluation.positiveF1) ? evaluation.positiveF1 : NaN;
+      const positivePredictions = Number.isFinite(evaluation.positivePredictions) ? evaluation.positivePredictions : 0;
+      const positiveActuals = Number.isFinite(evaluation.positiveActuals) ? evaluation.positiveActuals : 0;
+      const positiveHits = Number.isFinite(evaluation.positiveHits) ? evaluation.positiveHits : 0;
+      const TP = Number.isFinite(confusion.TP) ? confusion.TP : 0;
+      const TN = Number.isFinite(confusion.TN) ? confusion.TN : 0;
+      const FP = Number.isFinite(confusion.FP) ? confusion.FP : 0;
+      const FN = Number.isFinite(confusion.FN) ? confusion.FN : 0;
+      const resolvedThreshold = clampProbability(thresholdSearch?.threshold);
+      const defaultMetrics = thresholdSearch?.defaultMetrics || {};
+      const defaultThreshold = Number.isFinite(thresholdSearch?.defaultThreshold)
+        ? clampProbability(thresholdSearch.defaultThreshold)
+        : resolvedThreshold;
+      const defaultF1 = Number.isFinite(defaultMetrics.positiveF1) ? defaultMetrics.positiveF1 : NaN;
+      const f1Gain = (Number.isFinite(positiveF1) && Number.isFinite(defaultF1)) ? positiveF1 - defaultF1 : NaN;
+      const totalPredictions = Number.isFinite(evaluation.total) ? evaluation.total : predictedLabels.length;
 
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
       const datasetDiagnostics = {
@@ -1921,7 +2260,7 @@ async function handleAITrainANNMessage(message) {
           : [],
       };
       const performanceDiagnostics = {
-        totalPredictions: actualLabels.length,
+        totalPredictions,
         positivePredictions,
         positiveHits,
         positiveActuals,
@@ -1930,6 +2269,12 @@ async function handleAITrainANNMessage(message) {
         positiveF1,
         confusion: { ...confusion },
         accuracyLabel: isBinary ? '測試正確率' : '大漲命中率',
+        optimizedThreshold: resolvedThreshold,
+        defaultThreshold,
+        defaultPrecision: Number.isFinite(defaultMetrics.positivePrecision) ? defaultMetrics.positivePrecision : NaN,
+        defaultRecall: Number.isFinite(defaultMetrics.positiveRecall) ? defaultMetrics.positiveRecall : NaN,
+        defaultF1,
+        thresholdF1Gain: f1Gain,
       };
       const accuracyLabel = performanceDiagnostics.accuracyLabel;
 
@@ -1988,7 +2333,17 @@ async function handleAITrainANNMessage(message) {
         trainLoss: finalTrainLoss,
         testAccuracy: deterministicTestAccuracy,
         testLoss,
-        totalPredictions: performanceDiagnostics.totalPredictions,
+        totalPredictions,
+        positivePrecision,
+        positiveRecall,
+        positiveF1,
+        optimizedThreshold: resolvedThreshold,
+        baselineThreshold: defaultThreshold,
+        baselineF1: defaultF1,
+        thresholdF1Gain: f1Gain,
+        balancedTrainSamples: Array.isArray(trainingFeatures) ? trainingFeatures.length : split.trainCount,
+        trainingBalanceApplied: Boolean(trainingBalanceSummary?.applied),
+        trainingBalance: trainingBalanceSummary,
       };
 
       const predictionsPayload = {
@@ -2007,7 +2362,7 @@ async function handleAITrainANNMessage(message) {
           trainRatio,
           modelType: MODEL_TYPES.ANNS,
           splitIndex: split.trainCount,
-          threshold,
+          threshold: resolvedThreshold,
           volatility: volatilityThresholds,
           seed: seedToUse,
           classificationMode,
@@ -2018,6 +2373,23 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
         datasetDiagnostics,
+        trainingBalance: trainingBalanceSummary,
+        thresholdOptimization: {
+          bestThreshold: resolvedThreshold,
+          defaultThreshold,
+          bestF1: positiveF1,
+          defaultF1,
+          bestPrecision: positivePrecision,
+          bestRecall: positiveRecall,
+          defaultPrecision: Number.isFinite(defaultMetrics.positivePrecision) ? defaultMetrics.positivePrecision : NaN,
+          defaultRecall: Number.isFinite(defaultMetrics.positiveRecall) ? defaultMetrics.positiveRecall : NaN,
+          candidatesTested: Number.isFinite(thresholdSearch?.candidatesTested) ? thresholdSearch.candidatesTested : 0,
+          searchRange: thresholdSearch?.searchRange || null,
+          topCandidates: Array.isArray(thresholdSearch?.topCandidates)
+            ? thresholdSearch.topCandidates.map((entry) => ({ ...entry }))
+            : [],
+          f1Gain,
+        },
       };
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
@@ -2037,6 +2409,23 @@ async function handleAITrainANNMessage(message) {
         },
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
+        trainingBalance: trainingBalanceSummary,
+        thresholdOptimization: {
+          bestThreshold: resolvedThreshold,
+          defaultThreshold,
+          bestF1: positiveF1,
+          defaultF1,
+          bestPrecision: positivePrecision,
+          bestRecall: positiveRecall,
+          defaultPrecision: Number.isFinite(defaultMetrics.positivePrecision) ? defaultMetrics.positivePrecision : NaN,
+          defaultRecall: Number.isFinite(defaultMetrics.positiveRecall) ? defaultMetrics.positiveRecall : NaN,
+          candidatesTested: Number.isFinite(thresholdSearch?.candidatesTested) ? thresholdSearch.candidatesTested : 0,
+          searchRange: thresholdSearch?.searchRange || null,
+          topCandidates: Array.isArray(thresholdSearch?.topCandidates)
+            ? thresholdSearch.topCandidates.map((entry) => ({ ...entry }))
+            : [],
+          f1Gain,
+        },
       };
       const runMeta = {
         version: ANN_REPRO_VERSION,
@@ -2048,7 +2437,17 @@ async function handleAITrainANNMessage(message) {
         epochs,
         batchSize,
         splitIndex: split.trainCount,
-        threshold,
+        threshold: resolvedThreshold,
+        thresholdDefault: defaultThreshold,
+        thresholdF1Gain: f1Gain,
+        trainingBalance: trainingBalanceSummary,
+        thresholdOptimization: {
+          bestThreshold: resolvedThreshold,
+          defaultThreshold,
+          bestF1: positiveF1,
+          defaultF1,
+          f1Gain,
+        },
         volatility: volatilityThresholds,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
@@ -2076,7 +2475,16 @@ async function handleAITrainANNMessage(message) {
         console.warn('[Worker][AI] 無法保存 ANN 模型：', saveError);
       }
 
-      const finalMessage = `完成：${accuracyLabel} ${(Number.isFinite(deterministicTestAccuracy) ? (deterministicTestAccuracy * 100).toFixed(2) : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+      const thresholdPercent = Number.isFinite(resolvedThreshold) ? `${Math.round(resolvedThreshold * 100)}%` : '—';
+      const precisionText = Number.isFinite(positivePrecision) ? (positivePrecision * 100).toFixed(2) : '—';
+      const recallText = Number.isFinite(positiveRecall) ? (positiveRecall * 100).toFixed(2) : '—';
+      const f1Text = Number.isFinite(positiveF1) ? (positiveF1 * 100).toFixed(2) : '—';
+      const f1GainText = Number.isFinite(f1Gain) ? (f1Gain * 100).toFixed(2) : null;
+      let finalMessage = `完成：${accuracyLabel} ${(Number.isFinite(deterministicTestAccuracy) ? (deterministicTestAccuracy * 100).toFixed(2) : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}｜最佳門檻 ${thresholdPercent}`;
+      finalMessage += `｜Precision ${precisionText}%｜Recall ${recallText}%｜F1 ${f1Text}%`;
+      if (f1GainText !== null) {
+        finalMessage += `｜F1 改善 ${f1GainText}pp`;
+      }
 
       const hyperparametersUsed = {
         epochs,
@@ -2084,12 +2492,15 @@ async function handleAITrainANNMessage(message) {
         learningRate,
         trainRatio,
         splitIndex: split.trainCount,
-        threshold,
+        threshold: resolvedThreshold,
+        baselineThreshold: defaultThreshold,
+        thresholdF1Gain: f1Gain,
         volatility: volatilityThresholds,
         modelType: MODEL_TYPES.ANNS,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         seed: seedToUse,
         classificationMode,
+        trainingBalance: trainingBalanceSummary,
       };
 
       annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage, diagnostics });

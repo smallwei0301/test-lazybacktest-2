@@ -13,8 +13,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-F1-BOOST-20260215A — 訓練樣本平衡與門檻掃描優化 Precision/Recall/F1。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-F1-BOOST-20260215A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -464,12 +465,62 @@
     const buildAnnDiagnosticsHtml = (diagnostics) => {
         const dataset = diagnostics?.dataset || {};
         const performance = diagnostics?.performance || {};
+        const trainingBalance = diagnostics?.trainingBalance || null;
+        const thresholdOptimization = diagnostics?.thresholdOptimization || {};
         const indicatorDiagnostics = Array.isArray(diagnostics?.indicatorDiagnostics) ? diagnostics.indicatorDiagnostics : [];
         const layerDiagnostics = Array.isArray(diagnostics?.layerDiagnostics) ? diagnostics.layerDiagnostics : [];
         const accuracyLabel = performance.accuracyLabel || '測試正確率';
         const timestamp = Number.isFinite(diagnostics?.timestamp)
             ? new Date(diagnostics.timestamp).toISOString()
             : new Date().toISOString();
+        const optimizedThresholdText = Number.isFinite(performance.optimizedThreshold)
+            ? formatPercent(performance.optimizedThreshold, 2)
+            : '—';
+        const defaultThresholdText = Number.isFinite(performance.defaultThreshold)
+            ? formatPercent(performance.defaultThreshold, 2)
+            : '—';
+        const f1GainText = Number.isFinite(performance.thresholdF1Gain)
+            ? formatPercent(performance.thresholdF1Gain, 2)
+            : '—';
+        const balanceEntries = dataset.classificationMode === CLASSIFICATION_MODES.BINARY
+            ? [
+                { key: 'up', label: '上漲' },
+                { key: 'down', label: '下跌' },
+            ]
+            : [
+                { key: 'surge', label: '大漲' },
+                { key: 'flat', label: '小幅波動' },
+                { key: 'drop', label: '大跌' },
+            ];
+        const balanceSummaryText = trainingBalance
+            ? `原始樣本 ${Number(trainingBalance.baseSamples || 0)}｜平衡後 ${Number(trainingBalance.balancedSamples || 0)}｜已套用：${trainingBalance.applied ? '是' : '否'}`
+            : '未啟用樣本平衡。';
+        const balanceRows = trainingBalance && trainingBalance.baseCounts
+            ? balanceEntries.map(({ key, label }) => {
+                const baseCount = Number(trainingBalance.baseCounts?.[key] ?? 0);
+                const balancedCount = Number(trainingBalance.balancedCounts?.[key] ?? baseCount);
+                return `
+                <tr>
+                    <td>${label}</td>
+                    <td>${baseCount}</td>
+                    <td>${balancedCount}</td>
+                </tr>`;
+            }).join('')
+            : '<tr><td colspan="3">尚未建立樣本平衡統計。</td></tr>';
+        const thresholdRange = thresholdOptimization?.searchRange || null;
+        const thresholdRangeText = thresholdRange
+            ? `${formatPercent(thresholdRange.min, 2)}～${formatPercent(thresholdRange.max, 2)}`
+            : '—';
+        const candidateRows = Array.isArray(thresholdOptimization?.topCandidates) && thresholdOptimization.topCandidates.length > 0
+            ? thresholdOptimization.topCandidates.map((entry) => `
+                <tr>
+                    <td>${formatPercent(entry.threshold, 2)}</td>
+                    <td>${formatPercent(entry.positivePrecision, 2)}</td>
+                    <td>${formatPercent(entry.positiveRecall, 2)}</td>
+                    <td>${formatPercent(entry.positiveF1, 2)}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="4">尚未產生門檻掃描結果。</td></tr>';
         const indicatorRows = indicatorDiagnostics.length > 0
             ? indicatorDiagnostics.map((entry) => `
                 <tr>
@@ -545,10 +596,36 @@
         <p>分類模式：${dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類（漲跌）' : '三分類（波動分級）'}｜樣本分佈：${formatClassDistribution(dataset.classDistribution, dataset.classificationMode)}。</p>
         <p>${accuracyLabel}：${formatPercent(performance.testAccuracy, 2)}｜訓練期勝率：${formatPercent(performance.trainAccuracy, 2)}。</p>
         <p>${positiveLabel} precision：${positivePrecisionText}｜${positiveLabel} recall：${positiveRecallText}｜${positiveLabel} F1：${positiveF1Text}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際${positiveLabel}天數：${Number(performance.positiveActuals || 0)}。</p>
+        <p>最佳勝率門檻：${optimizedThresholdText}（原始 ${defaultThresholdText}）｜F1 改善：${f1GainText}｜候選門檻數：${Number(thresholdOptimization.candidatesTested || 0)}。</p>
         <p class="note">Precision（精確率） = TP ÷ (TP + FP) → 預測${positiveLabel}時，有多少是真的${positiveLabel}？</p>
         <p class="note">Recall（召回率） = TP ÷ (TP + FN) → 所有真的${positiveLabel}，有多少被模型抓到？</p>
         <p class="note">F1（調和平均） = 2 × Precision × Recall ÷ (Precision + Recall) → 精確率與召回率的綜合。</p>
     </section>
+    <h2>訓練樣本平衡</h2>
+    <p>${escapeHTML(balanceSummaryText)}</p>
+    <table>
+        <thead>
+            <tr>
+                <th>類別</th>
+                <th>原始樣本</th>
+                <th>平衡後樣本</th>
+            </tr>
+        </thead>
+        <tbody>${balanceRows}</tbody>
+    </table>
+    <h2>勝率門檻優化</h2>
+    <p>掃描範圍：${thresholdRangeText}｜候選門檻數：${Number(thresholdOptimization.candidatesTested || 0)}</p>
+    <table>
+        <thead>
+            <tr>
+                <th>門檻</th>
+                <th>Precision</th>
+                <th>Recall</th>
+                <th>F1</th>
+            </tr>
+        </thead>
+        <tbody>${candidateRows}</tbody>
+    </table>
     <h2>技術指標覆蓋率</h2>
     <table>
         <thead>
@@ -1885,7 +1962,16 @@
             const thresholdPercent = Number.isFinite(thresholdValue)
                 ? `${Math.round(thresholdValue * 100)}%`
                 : '—';
-            elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}｜勝率門檻：${thresholdPercent}`;
+            const precisionSegment = Number.isFinite(summary.positivePrecision)
+                ? `｜Precision：${formatPercent(summary.positivePrecision, 2)}`
+                : '';
+            const recallSegment = Number.isFinite(summary.positiveRecall)
+                ? `｜Recall：${formatPercent(summary.positiveRecall, 2)}`
+                : '';
+            const f1Segment = Number.isFinite(summary.positiveF1)
+                ? `｜F1：${formatPercent(summary.positiveF1, 2)}`
+                : '';
+            elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}｜勝率門檻：${thresholdPercent}${precisionSegment}${recallSegment}${f1Segment}`;
         }
         if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.tradeReturnMedian, 2);
         if (elements.averageProfit) {
@@ -2507,6 +2593,36 @@
             }
         }
 
+        const summaryPositivePrecision = Number.isFinite(metrics.positivePrecision)
+            ? metrics.positivePrecision
+            : (Number.isFinite(payload?.thresholdOptimization?.bestPrecision)
+                ? payload.thresholdOptimization.bestPrecision
+                : NaN);
+        const summaryPositiveRecall = Number.isFinite(metrics.positiveRecall)
+            ? metrics.positiveRecall
+            : (Number.isFinite(payload?.thresholdOptimization?.bestRecall)
+                ? payload.thresholdOptimization.bestRecall
+                : NaN);
+        const summaryPositiveF1 = Number.isFinite(metrics.positiveF1)
+            ? metrics.positiveF1
+            : (Number.isFinite(payload?.thresholdOptimization?.bestF1)
+                ? payload.thresholdOptimization.bestF1
+                : NaN);
+        const summaryBaselineThreshold = Number.isFinite(metrics.baselineThreshold)
+            ? metrics.baselineThreshold
+            : (Number.isFinite(payload?.thresholdOptimization?.defaultThreshold)
+                ? payload.thresholdOptimization.defaultThreshold
+                : defaultThreshold);
+        const summaryThresholdGain = Number.isFinite(metrics.thresholdF1Gain)
+            ? metrics.thresholdF1Gain
+            : (Number.isFinite(payload?.thresholdOptimization?.f1Gain)
+                ? payload.thresholdOptimization.f1Gain
+                : NaN);
+        const summaryTrainingBalance = payload?.trainingBalance
+            || (metrics.trainingBalance && typeof metrics.trainingBalance === 'object'
+                ? { ...metrics.trainingBalance }
+                : null);
+
         const summary = {
             version: VERSION_TAG,
             trainAccuracy: metrics.trainAccuracy,
@@ -2542,7 +2658,14 @@
             testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
             classReturnAverages: classAverages,
+            positivePrecision: summaryPositivePrecision,
+            positiveRecall: summaryPositiveRecall,
+            positiveF1: summaryPositiveF1,
+            thresholdF1Gain: summaryThresholdGain,
+            baselineThreshold: summaryBaselineThreshold,
+            trainingBalance: summaryTrainingBalance,
         };
+        summary.optimizedThreshold = summary.threshold;
 
         modelState.trainingMetrics = metrics;
         modelState.lastSummary = summary;
@@ -2555,6 +2678,7 @@
         payload.allRecords = allRecords;
         payload.volatilityDiagnostics = diagnostics;
         payload.classReturnAverages = classAverages;
+        payload.trainingBalance = summaryTrainingBalance;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
@@ -2855,7 +2979,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}${Number.isFinite(summary.positiveF1) ? `｜F1 ${formatPercent(summary.positiveF1, 2)}` : ''}${Number.isFinite(summary.thresholdF1Gain) ? `｜F1 改善 ${formatPercent(summary.thresholdF1Gain, 2)}` : ''}${Number.isFinite(summary.threshold) ? `｜最佳門檻 ${Math.round(summary.threshold * 100)}%` : ''}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${formatModelLabel(resultModelType)}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
@@ -2967,7 +3091,7 @@
         const seedSuffix = Number.isFinite(resolvedHyper.seed) ? `（Seed ${resolvedHyper.seed}）` : '';
         const summary = modelState.lastSummary;
         const appended = summary
-            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
+            ? `｜交易報酬% 中位數 ${formatPercent(summary.tradeReturnMedian, 2)}｜單次平均報酬% ${formatPercent(Number.isFinite(summary.tradeReturnAverageSingle) ? summary.tradeReturnAverageSingle : summary.tradeReturnAverage, 2)}｜月平均報酬% ${formatPercent(summary.tradeReturnAverageMonthly, 2)}｜年平均報酬% ${formatPercent(summary.tradeReturnAverageYearly, 2)}｜AI勝率 ${formatPercent(summary.testAccuracy, 2)}${Number.isFinite(summary.positiveF1) ? `｜F1 ${formatPercent(summary.positiveF1, 2)}` : ''}${Number.isFinite(summary.thresholdF1Gain) ? `｜F1 改善 ${formatPercent(summary.thresholdF1Gain, 2)}` : ''}${Number.isFinite(summary.threshold) ? `｜最佳門檻 ${Math.round(summary.threshold * 100)}%` : ''}｜買入持有年化報酬% ${formatPercent(summary.buyHoldAnnualized, 2)}｜交易次數 ${Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0}`
             : '';
         showStatus(`[${label}] ${finalMessage}${seedSuffix}${appended}`, 'success');
     };
