@@ -13,8 +13,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-F1-OPT-20260218A — 門檻自動校準與樣本權重同步。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-F1-OPT-20260218A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -470,6 +471,8 @@
         const timestamp = Number.isFinite(diagnostics?.timestamp)
             ? new Date(diagnostics.timestamp).toISOString()
             : new Date().toISOString();
+        const thresholdDiagnostics = diagnostics?.thresholdDiagnostics || null;
+        const sampleWeightSummary = diagnostics?.sampleWeightSummary || null;
         const indicatorRows = indicatorDiagnostics.length > 0
             ? indicatorDiagnostics.map((entry) => `
                 <tr>
@@ -520,6 +523,46 @@
         const positiveRecallText = Number.isFinite(performance.positiveRecall) ? formatPercent(performance.positiveRecall, 2) : '—';
         const positiveF1Text = Number.isFinite(performance.positiveF1) ? formatPercent(performance.positiveF1, 2) : '—';
         const positiveLabel = dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '上漲' : '大漲';
+        let thresholdSummaryHtml = '';
+        if (thresholdDiagnostics) {
+            const usedText = Number.isFinite(thresholdDiagnostics.thresholdUsed)
+                ? formatPercent(thresholdDiagnostics.thresholdUsed, 1)
+                : '—';
+            const defaultText = Number.isFinite(thresholdDiagnostics.defaultThreshold)
+                ? formatPercent(thresholdDiagnostics.defaultThreshold, 1)
+                : '—';
+            const optimizedThresholdText = Number.isFinite(thresholdDiagnostics.optimizedThreshold)
+                ? formatPercent(thresholdDiagnostics.optimizedThreshold, 1)
+                : '—';
+            const optimizedF1Text = Number.isFinite(thresholdDiagnostics.optimizedF1)
+                ? formatPercent(thresholdDiagnostics.optimizedF1, 2)
+                : '—';
+            const baselineF1Text = Number.isFinite(thresholdDiagnostics.baselineF1)
+                ? formatPercent(thresholdDiagnostics.baselineF1, 2)
+                : '—';
+            const sourceLabel = (() => {
+                if (thresholdDiagnostics.source === 'user') return '使用者指定';
+                if (thresholdDiagnostics.source === 'train-optimized') return '訓練集最佳化';
+                return '預設';
+            })();
+            thresholdSummaryHtml = `<p>勝率門檻：${usedText}（來源：${sourceLabel}；預設 ${defaultText}；最佳化門檻 ${optimizedThresholdText}｜最佳化 F1 ${optimizedF1Text}｜預設 F1 ${baselineF1Text}）。</p>`;
+        }
+        let sampleWeightSummaryHtml = '';
+        if (sampleWeightSummary) {
+            const minText = Number.isFinite(sampleWeightSummary.minWeight)
+                ? sampleWeightSummary.minWeight.toFixed(2)
+                : '—';
+            const maxText = Number.isFinite(sampleWeightSummary.maxWeight)
+                ? sampleWeightSummary.maxWeight.toFixed(2)
+                : '—';
+            const classWeightsEntries = sampleWeightSummary.classWeights && typeof sampleWeightSummary.classWeights === 'object'
+                ? Object.entries(sampleWeightSummary.classWeights)
+                    .map(([key, value]) => `${escapeHTML(key)}=${Number.isFinite(value) ? Number(value).toFixed(2) : '—'}`)
+                    .join('、')
+                : '';
+            const classWeightsText = classWeightsEntries || '—';
+            sampleWeightSummaryHtml = `<p>樣本權重範圍：${minText}～${maxText}；類別權重 ${classWeightsText}。</p>`;
+        }
         const html = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -545,6 +588,8 @@
         <p>分類模式：${dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類（漲跌）' : '三分類（波動分級）'}｜樣本分佈：${formatClassDistribution(dataset.classDistribution, dataset.classificationMode)}。</p>
         <p>${accuracyLabel}：${formatPercent(performance.testAccuracy, 2)}｜訓練期勝率：${formatPercent(performance.trainAccuracy, 2)}。</p>
         <p>${positiveLabel} precision：${positivePrecisionText}｜${positiveLabel} recall：${positiveRecallText}｜${positiveLabel} F1：${positiveF1Text}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際${positiveLabel}天數：${Number(performance.positiveActuals || 0)}。</p>
+        ${thresholdSummaryHtml}
+        ${sampleWeightSummaryHtml}
         <p class="note">Precision（精確率） = TP ÷ (TP + FP) → 預測${positiveLabel}時，有多少是真的${positiveLabel}？</p>
         <p class="note">Recall（召回率） = TP ÷ (TP + FN) → 所有真的${positiveLabel}，有多少被模型抓到？</p>
         <p class="note">F1（調和平均） = 2 × Precision × Recall ÷ (Precision + Recall) → 精確率與召回率的綜合。</p>
