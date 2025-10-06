@@ -1,3 +1,19 @@
+## 2026-02-21 — Patch LB-AI-LOSS-TUNING-20260221A
+- **Scope**: Loss 版本標記同步與多分類摘要修正。
+- **Updates**:
+  - `js/ai-prediction.js` 新增 Categorical crossentropy 常數，於多分類訓練時回傳正確的 Loss 類型摘要並更新版本碼 `LB-AI-LOSS-TUNING-20260221A`。
+  - `js/worker.js` 將 ANN/LSTM 的 repro patch 版本升級為 `LB-AI-ANNS-REPRO-20260221A`、`LB-AI-LSTM-REPRO-20260221A`，非二分類時強制記錄 Loss 類型為 Categorical crossentropy，確保前端摘要與實際編譯設定一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-20 — Patch LB-AI-LOSS-TUNING-20260220A
+- **Scope**: AI 二分類損失函數調整、建議值揭露與評估診斷強化。
+- **Updates**:
+  - 前端新增 Loss 類型下拉與權重/alpha/gamma 輸入欄位，於訓練前統計上漲/下跌樣本並顯示建議值、可一鍵套用。
+  - 模型結果面板補齊 Accuracy／Precision／Recall／F1 以及 TP/TN/FP/FN 與本次 Loss 參數摘要，讓使用者對照訓練設定。
+  - Web Worker 支援 Class-weighted BCE 與 Focal loss，編譯時依參數切換 loss function，同步回傳混淆矩陣與 F1。
+  - 新增 Loss A/B 測試按鈕，使用相同種子連跑 BCE / Weighted BCE / Focal，並將各組 F1/Precision/Recall 列於表格標示推薦組合。
+- **Testing**: 受限於容器無法啟動瀏覽器，已完成程式碼檢閱與資料流程推演；後續於本機瀏覽器驗證 loss 切換與 A/B 表格更新。
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
