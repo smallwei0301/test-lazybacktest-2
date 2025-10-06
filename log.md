@@ -1,3 +1,11 @@
+## 2026-02-18 — Patch LB-AI-F1-OPT-20260218A
+- **Scope**: AI 預測勝率門檻最佳化與樣本權重調整。
+- **Updates**:
+  - LSTM 與 ANN 訓練流程導入訓練集機率掃描，依 F1 最大化自動校準勝率門檻，並保留使用者覆寫需求，將實際採用門檻回傳前端。
+  - 計算各類別樣本權重並帶入 `model.fit`，同步於執行資訊、預測結果與診斷報告揭露權重範圍與類別比重，減少正負樣本不平衡對 Precision/F1 的影響。
+  - 前端 ANN 功能測試報告新增門檻與權重摘要，UI 取得 `thresholdDiagnostics` 後可即時呈現預設／最佳化門檻與對應 F1。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
