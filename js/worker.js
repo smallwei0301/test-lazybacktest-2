@@ -13,6 +13,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-LOSS-TUNING-20260221A — Loss 類型切換支援 Categorical crossentropy 記錄與版本碼更新。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -22,13 +23,13 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260221A';
 const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
 const LSTM_REPRO_VERSION = 'lstm_v1';
-const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20260118A';
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20260221A';
 const LSTM_THRESHOLD = 0.5;
 const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
 const CLASSIFICATION_MODES = {
@@ -404,6 +405,62 @@ const MODEL_TYPES = {
   ANNS: 'anns',
 };
 
+const LOSS_TYPES = {
+  BCE: 'bce',
+  WEIGHTED_BCE: 'weighted_bce',
+  FOCAL: 'focal',
+  CATEGORICAL: 'categorical',
+};
+const DEFAULT_WEIGHTED_PARAMS = { wPos: 1, wNeg: 1 };
+const DEFAULT_FOCAL_PARAMS = { alpha: 0.65, gamma: 1.8 };
+const normalizeLossType = (value) => (Object.values(LOSS_TYPES).includes(value)
+  ? value
+  : LOSS_TYPES.BCE);
+const sanitizeLossParams = (lossType, params = {}) => {
+  if (lossType === LOSS_TYPES.WEIGHTED_BCE) {
+    const wPosRaw = Number(params.wPos);
+    const wNegRaw = Number(params.wNeg);
+    const wPos = Math.min(Math.max(Number.isFinite(wPosRaw) ? wPosRaw : DEFAULT_WEIGHTED_PARAMS.wPos, 0.01), 50);
+    const wNeg = Math.min(Math.max(Number.isFinite(wNegRaw) ? wNegRaw : DEFAULT_WEIGHTED_PARAMS.wNeg, 0.01), 50);
+    return { wPos, wNeg };
+  }
+  if (lossType === LOSS_TYPES.FOCAL) {
+    const alphaRaw = Number(params.alpha);
+    const gammaRaw = Number(params.gamma);
+    const alpha = Math.min(Math.max(Number.isFinite(alphaRaw) ? alphaRaw : DEFAULT_FOCAL_PARAMS.alpha, 0), 1);
+    const gamma = Math.min(Math.max(Number.isFinite(gammaRaw) ? gammaRaw : DEFAULT_FOCAL_PARAMS.gamma, 0), 5);
+    return { alpha, gamma };
+  }
+  return {};
+};
+
+const buildWeightedBinaryCrossentropy = (wPos, wNeg) => (yTrue, yPred) => tf.tidy(() => {
+  const epsilon = tf.scalar(1e-7);
+  const one = tf.scalar(1);
+  const clipped = yPred.clipByValue(epsilon, one.sub(epsilon));
+  const posWeight = tf.scalar(Number.isFinite(wPos) ? wPos : DEFAULT_WEIGHTED_PARAMS.wPos);
+  const negWeight = tf.scalar(Number.isFinite(wNeg) ? wNeg : DEFAULT_WEIGHTED_PARAMS.wNeg);
+  const posTerm = yTrue.mul(clipped.log()).mul(posWeight).mul(-1);
+  const negTerm = one.sub(yTrue).mul(one.sub(clipped).log()).mul(negWeight).mul(-1);
+  const loss = posTerm.add(negTerm);
+  return loss.mean();
+});
+
+const buildBinaryFocalLoss = (alpha, gamma) => (yTrue, yPred) => tf.tidy(() => {
+  const epsilon = tf.scalar(1e-7);
+  const one = tf.scalar(1);
+  const clipped = yPred.clipByValue(epsilon, one.sub(epsilon));
+  const complement = one.sub(clipped);
+  const alphaPos = tf.scalar(Number.isFinite(alpha) ? alpha : DEFAULT_FOCAL_PARAMS.alpha);
+  const alphaNeg = tf.scalar(1 - (Number.isFinite(alpha) ? alpha : DEFAULT_FOCAL_PARAMS.alpha));
+  const gammaScalar = tf.scalar(Number.isFinite(gamma) ? gamma : DEFAULT_FOCAL_PARAMS.gamma);
+  const posFactor = complement.pow(gammaScalar);
+  const negFactor = clipped.pow(gammaScalar);
+  const posTerm = yTrue.mul(posFactor).mul(clipped.log()).mul(alphaPos).mul(-1);
+  const negTerm = one.sub(yTrue).mul(negFactor).mul(complement.log()).mul(alphaNeg).mul(-1);
+  return posTerm.add(negTerm).mean();
+});
+
 const WORKER_DATA_VERSION = "v11.7";
 const workerCachedStockData = new Map(); // Map<marketKey, Map<cacheKey, CacheEntry>>
 const workerMonthlyCache = new Map(); // Map<marketKey, Map<stockKey, Map<monthKey, MonthCacheEntry>>>
@@ -460,7 +517,7 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
-function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.BINARY) {
+function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.BINARY, lossConfig = null) {
   const baseSeed = Number.isFinite(seed) ? Math.max(1, Math.round(seed)) : LSTM_DEFAULT_SEED;
   const buildKernelInitializer = (offset = 0) =>
     tf.initializers.glorotUniform({ seed: baseSeed + offset });
@@ -506,7 +563,20 @@ function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classif
     }),
   );
   const optimizer = tf.train.adam(learningRate);
-  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  let loss;
+  if (isBinary) {
+    const resolvedType = normalizeLossType(lossConfig?.type);
+    const params = sanitizeLossParams(resolvedType, lossConfig?.params);
+    if (resolvedType === LOSS_TYPES.WEIGHTED_BCE) {
+      loss = buildWeightedBinaryCrossentropy(params.wPos, params.wNeg);
+    } else if (resolvedType === LOSS_TYPES.FOCAL) {
+      loss = buildBinaryFocalLoss(params.alpha, params.gamma);
+    } else {
+      loss = 'binaryCrossentropy';
+    }
+  } else {
+    loss = 'categoricalCrossentropy';
+  }
   model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
 }
@@ -564,6 +634,9 @@ async function handleAITrainLSTMMessage(message) {
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     const gatingThreshold = getDefaultThresholdForMode(classificationMode);
+    const resolvedLossType = normalizeLossType(hyper.lossType);
+    const resolvedLossParams = sanitizeLossParams(resolvedLossType, hyper.lossParams);
+    let lossConfig = { type: resolvedLossType, params: resolvedLossParams };
 
     const inferredLookback = Array.isArray(dataset.sequences[0])
       ? dataset.sequences[0].length
@@ -636,7 +709,7 @@ async function handleAITrainLSTMMessage(message) {
       }
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
-      model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode);
+      model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode, lossConfig);
 
       aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
       const history = await model.fit(xTrain, yTrain, {
@@ -830,12 +903,21 @@ async function handleAITrainLSTMMessage(message) {
       }
 
       const trainRatioUsed = boundedTrainSize / totalSamples;
+      if (!isBinary) {
+        lossConfig = { type: LOSS_TYPES.CATEGORICAL, params: {} };
+      }
+
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
         testAccuracy: resolvedTestAccuracy,
         testLoss,
         totalPredictions: predictedLabels.length,
+        testPrecision: positivePrecision,
+        testRecall: positiveRecall,
+        testF1: positiveF1,
+        lossConfig,
+        confusion,
       };
 
       if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
@@ -932,6 +1014,8 @@ async function handleAITrainLSTMMessage(message) {
         seed: seedToUse,
         modelType: MODEL_TYPES.LSTM,
         classificationMode,
+        lossType: resolvedLossType,
+        lossParams: resolvedLossParams,
       };
 
       aiPostResult(id, {
@@ -940,6 +1024,7 @@ async function handleAITrainLSTMMessage(message) {
         confusion,
         hyperparametersUsed,
         finalMessage,
+        lossConfigUsed: lossConfig,
       });
     } finally {
       tensorsToDispose.forEach((tensor) => {
@@ -1479,7 +1564,7 @@ function annOneHot(labels, numClasses = 3) {
 }
 
 // Patch Tag: LB-AI-ANNS-REPRO-20251223A — Seeded initialisers & deterministic ANN stack.
-function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.MULTICLASS) {
+function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.MULTICLASS, lossConfig = null) {
   const model = tf.sequential();
   const initializerSeed = Number.isFinite(seed) ? seed : ANN_DEFAULT_SEED;
   const kernelInitializer = tf.initializers.glorotUniform({ seed: initializerSeed });
@@ -1506,7 +1591,20 @@ function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED, c
     biasInitializer,
   }));
   const optimizer = tf.train.sgd(learningRate);
-  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  let loss;
+  if (isBinary) {
+    const resolvedType = normalizeLossType(lossConfig?.type);
+    const params = sanitizeLossParams(resolvedType, lossConfig?.params);
+    if (resolvedType === LOSS_TYPES.WEIGHTED_BCE) {
+      loss = buildWeightedBinaryCrossentropy(params.wPos, params.wNeg);
+    } else if (resolvedType === LOSS_TYPES.FOCAL) {
+      loss = buildBinaryFocalLoss(params.alpha, params.gamma);
+    } else {
+      loss = 'binaryCrossentropy';
+    }
+  } else {
+    loss = 'categoricalCrossentropy';
+  }
   model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
 }
@@ -1613,6 +1711,9 @@ async function handleAITrainANNMessage(message) {
     const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode);
     const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
+    const resolvedLossType = normalizeLossType(options.lossType);
+    const resolvedLossParams = sanitizeLossParams(resolvedLossType, options.lossParams);
+    let lossConfig = { type: resolvedLossType, params: resolvedLossParams };
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
       throw new Error('有效樣本不足，請延長資料範圍。');
     }
@@ -1778,7 +1879,7 @@ async function handleAITrainANNMessage(message) {
     const defaultThreshold = getDefaultThresholdForMode(classificationMode);
     const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
 
-    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
+    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode, lossConfig);
     const xTrain = tf.tensor2d(split.Xtr);
     let yTrain;
     let xTest;
@@ -1983,12 +2084,21 @@ async function handleAITrainANNMessage(message) {
         }
       }
 
+      if (!isBinary) {
+        lossConfig = { type: LOSS_TYPES.CATEGORICAL, params: {} };
+      }
+
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
         testAccuracy: deterministicTestAccuracy,
         testLoss,
         totalPredictions: performanceDiagnostics.totalPredictions,
+        testPrecision: positivePrecision,
+        testRecall: positiveRecall,
+        testF1: positiveF1,
+        lossConfig,
+        confusion,
       };
 
       const predictionsPayload = {
@@ -2090,9 +2200,19 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         seed: seedToUse,
         classificationMode,
+        lossType: resolvedLossType,
+        lossParams: resolvedLossParams,
       };
 
-      annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage, diagnostics });
+      annPostResult(id, {
+        trainingMetrics,
+        predictionsPayload,
+        confusion,
+        hyperparametersUsed,
+        finalMessage,
+        diagnostics,
+        lossConfigUsed: lossConfig,
+      });
       model.dispose();
     } finally {
       tensorsToDispose.forEach((tensor) => {
