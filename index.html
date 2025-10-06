@@ -2172,10 +2172,11 @@
                                                                 <input id="ai-win-threshold" type="number" min="0" max="100" step="1" value="0" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                                 <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
                                                             </div>
-                                                        </div>
                                                     </div>
-                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
-                                                        <span class="text-xs font-medium" style="color: var(--foreground);">資金控管</span>
+                                                </div>
+                                                <p id="ai-threshold-diagnostics" class="text-[11px] hidden leading-relaxed" style="color: var(--muted-foreground);">尚未進行門檻驗證，預設沿用固定門檻。</p>
+                                                <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                    <span class="text-xs font-medium" style="color: var(--foreground);">資金控管</span>
                                                         <label class="inline-flex items-center gap-2 text-xs">
                                                             <input id="ai-enable-kelly" type="checkbox" class="rounded border-border text-primary focus:ring-primary" />
                                                             <span>啟用凱利公式估算投入比例（預設根據訓練期勝率與平均盈虧比）</span>
