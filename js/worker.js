@@ -13,6 +13,8 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-THRESH-BALANCE-20260218A — 門檻自適應與類別權重，提升預設 F1。
+// Patch Tag: LB-AI-THRESH-AUTOTUNE-20260220A — 類別均衡門檻候選與搜尋診斷強化。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -22,14 +24,13 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260220A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260220A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
 const LSTM_REPRO_VERSION = 'lstm_v1';
-const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20260118A';
-const LSTM_THRESHOLD = 0.5;
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20260220A';
 const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
 const CLASSIFICATION_MODES = {
   BINARY: 'binary',
@@ -335,6 +336,246 @@ function clampProbability(value) {
   return value;
 }
 
+const CLASS_WEIGHT_MAX = 12;
+const BINARY_THRESHOLD_MIN = 0;
+const BINARY_THRESHOLD_MAX = 1;
+const BINARY_THRESHOLD_GRID_STEP = 0.05;
+const BINARY_THRESHOLD_EPS = 1e-4;
+
+function computeClassWeights(labels, classificationMode) {
+  if (!Array.isArray(labels) || labels.length === 0) {
+    return null;
+  }
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  if (normalizedMode === CLASSIFICATION_MODES.BINARY) {
+    let positive = 0;
+    let negative = 0;
+    for (let i = 0; i < labels.length; i += 1) {
+      const label = labels[i] > 0 ? 1 : 0;
+      if (label === 1) positive += 1;
+      else negative += 1;
+    }
+    const total = positive + negative;
+    const ratio = total > 0 ? positive / total : NaN;
+    const suggestedThreshold = Number.isFinite(ratio) && positive > 0 && negative > 0
+      ? Math.min(Math.max(ratio, 0.05), 0.95)
+      : null;
+    if (total === 0 || positive === 0 || negative === 0) {
+      return {
+        mode: normalizedMode,
+        counts: { total, positive, negative },
+        weights: null,
+        applied: false,
+        suggestedThreshold,
+      };
+    }
+    const weightPositive = Math.max(1, Math.min(CLASS_WEIGHT_MAX, total / (2 * positive)));
+    const weightNegative = Math.max(1, Math.min(CLASS_WEIGHT_MAX, total / (2 * negative)));
+    return {
+      mode: normalizedMode,
+      counts: { total, positive, negative },
+      weights: { 0: weightNegative, 1: weightPositive },
+      applied: true,
+      suggestedThreshold,
+    };
+  }
+  const counts = { 0: 0, 1: 0, 2: 0 };
+  for (let i = 0; i < labels.length; i += 1) {
+    const raw = labels[i];
+    const idx = Number.isInteger(raw) ? Math.max(0, Math.min(2, raw)) : 0;
+    counts[idx] += 1;
+  }
+  const total = counts[0] + counts[1] + counts[2];
+  const presentClasses = [0, 1, 2].filter((cls) => counts[cls] > 0);
+  if (total === 0 || presentClasses.length === 0) {
+    return {
+      mode: normalizedMode,
+      counts: { total, drop: counts[0], flat: counts[1], surge: counts[2] },
+      weights: null,
+      applied: false,
+      suggestedThreshold: null,
+    };
+  }
+  const denominator = presentClasses.length;
+  const weights = {};
+  presentClasses.forEach((cls) => {
+    const baseWeight = total / (denominator * counts[cls]);
+    weights[cls] = Math.max(1, Math.min(CLASS_WEIGHT_MAX, baseWeight));
+  });
+  return {
+    mode: normalizedMode,
+    counts: { total, drop: counts[0], flat: counts[1], surge: counts[2] },
+    weights,
+    applied: true,
+    suggestedThreshold: null,
+  };
+}
+
+function evaluateBinaryThreshold(probabilities, actuals, threshold) {
+  const appliedThreshold = Number.isFinite(threshold)
+    ? Math.min(Math.max(threshold, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX)
+    : 0.5;
+  let TP = 0;
+  let TN = 0;
+  let FP = 0;
+  let FN = 0;
+  for (let i = 0; i < probabilities.length; i += 1) {
+    const prob = clampProbability(probabilities[i]);
+    const actual = actuals[i] > 0 ? 1 : 0;
+    const predicted = prob >= appliedThreshold ? 1 : 0;
+    if (predicted === 1 && actual === 1) TP += 1;
+    else if (predicted === 0 && actual === 0) TN += 1;
+    else if (predicted === 1 && actual === 0) FP += 1;
+    else if (predicted === 0 && actual === 1) FN += 1;
+  }
+  const precision = TP + FP > 0 ? TP / (TP + FP) : NaN;
+  const recall = TP + FN > 0 ? TP / (TP + FN) : NaN;
+  const hasActualPositives = (TP + FN) > 0;
+  const hasPredictedPositives = (TP + FP) > 0;
+  let f1 = NaN;
+  if (Number.isFinite(precision) && Number.isFinite(recall) && (precision + recall) > 0) {
+    f1 = (2 * precision * recall) / (precision + recall);
+  } else if (hasActualPositives || hasPredictedPositives) {
+    f1 = 0;
+  }
+  return {
+    threshold: appliedThreshold,
+    precision,
+    recall,
+    f1,
+    TP,
+    TN,
+    FP,
+    FN,
+  };
+}
+
+function resolveBinaryThreshold(
+  probabilities,
+  actuals,
+  baseThreshold,
+  allowOptimization = true,
+  fallbackThreshold = null,
+) {
+  if (!Array.isArray(probabilities) || !Array.isArray(actuals) || probabilities.length === 0 || probabilities.length !== actuals.length) {
+    return {
+      mode: 'binary',
+      appliedThreshold: Number.isFinite(baseThreshold) ? baseThreshold : 0.5,
+      baseline: null,
+      optimized: null,
+      improved: false,
+      searchSpace: [],
+    };
+  }
+  const sanitizedBase = Number.isFinite(baseThreshold)
+    ? Math.min(Math.max(baseThreshold, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX)
+    : 0.5;
+  const baseline = evaluateBinaryThreshold(probabilities, actuals, sanitizedBase);
+  const sanitizedFallback = Number.isFinite(fallbackThreshold)
+    ? Math.min(Math.max(fallbackThreshold, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX)
+    : null;
+  if (!allowOptimization) {
+    return {
+      mode: 'binary',
+      appliedThreshold: baseline.threshold,
+      baseline,
+      optimized: null,
+      improved: false,
+      searchSpace: [
+        {
+          threshold: baseline.threshold,
+          sources: ['baseline'],
+        },
+      ],
+    };
+  }
+  const candidateSet = new Set();
+  const candidateOrigins = new Map();
+  const registerCandidate = (value, source, allowEdges = false) => {
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.min(Math.max(value, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX);
+    if (!allowEdges && (clamped <= BINARY_THRESHOLD_MIN || clamped >= BINARY_THRESHOLD_MAX)) {
+      return;
+    }
+    const key = clamped.toFixed(6);
+    if (!candidateOrigins.has(key)) {
+      candidateOrigins.set(key, { threshold: clamped, sources: new Set() });
+    }
+    candidateOrigins.get(key).sources.add(source);
+    candidateSet.add(clamped);
+  };
+  registerCandidate(baseline.threshold, 'baseline', true);
+  if (Number.isFinite(sanitizedFallback)) {
+    registerCandidate(sanitizedFallback, 'class-balance', sanitizedFallback === BINARY_THRESHOLD_MIN || sanitizedFallback === BINARY_THRESHOLD_MAX);
+  }
+  for (let i = 0; i < probabilities.length; i += 1) {
+    const value = probabilities[i];
+    if (Number.isFinite(value)) {
+      const clamped = Math.min(Math.max(value, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX);
+      registerCandidate(clamped, 'probability');
+    }
+  }
+  for (let step = BINARY_THRESHOLD_GRID_STEP; step < 1; step += BINARY_THRESHOLD_GRID_STEP) {
+    const candidate = Math.min(Math.max(step, BINARY_THRESHOLD_MIN), BINARY_THRESHOLD_MAX);
+    registerCandidate(candidate, 'grid');
+  }
+  const candidates = Array.from(candidateSet).sort((a, b) => a - b);
+  let bestMetrics = baseline;
+  let bestThreshold = baseline.threshold;
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const metrics = evaluateBinaryThreshold(probabilities, actuals, candidate);
+    if (!Number.isFinite(metrics.f1)) {
+      continue;
+    }
+    const bestF1 = Number.isFinite(bestMetrics.f1) ? bestMetrics.f1 : -1;
+    const candidateF1 = metrics.f1;
+    if (candidateF1 > bestF1 + BINARY_THRESHOLD_EPS) {
+      bestMetrics = metrics;
+      bestThreshold = metrics.threshold;
+      continue;
+    }
+    if (Math.abs(candidateF1 - bestF1) <= BINARY_THRESHOLD_EPS) {
+      const bestRecall = Number.isFinite(bestMetrics.recall) ? bestMetrics.recall : -1;
+      const candidateRecall = Number.isFinite(metrics.recall) ? metrics.recall : -1;
+      if (candidateRecall > bestRecall + BINARY_THRESHOLD_EPS) {
+        bestMetrics = metrics;
+        bestThreshold = metrics.threshold;
+        continue;
+      }
+      if (Math.abs(candidateRecall - bestRecall) <= BINARY_THRESHOLD_EPS) {
+        const bestDiff = Math.abs(bestThreshold - sanitizedBase);
+        const candidateDiff = Math.abs(metrics.threshold - sanitizedBase);
+        if (candidateDiff < bestDiff - BINARY_THRESHOLD_EPS) {
+          bestMetrics = metrics;
+          bestThreshold = metrics.threshold;
+        }
+      }
+    }
+  }
+  const recallImproved = Number.isFinite(bestMetrics.recall)
+    && (!Number.isFinite(baseline.recall) || bestMetrics.recall > baseline.recall + BINARY_THRESHOLD_EPS);
+  const thresholdChanged = Math.abs(bestThreshold - baseline.threshold) > BINARY_THRESHOLD_EPS;
+  const improved = (Number.isFinite(bestMetrics.f1)
+    && (!Number.isFinite(baseline.f1) || bestMetrics.f1 > baseline.f1 + BINARY_THRESHOLD_EPS))
+    || (recallImproved && thresholdChanged);
+  const appliedThreshold = improved ? bestThreshold : baseline.threshold;
+  const searchSpace = Array.from(candidateOrigins.values())
+    .map((entry) => ({
+      threshold: entry.threshold,
+      sources: Array.from(entry.sources).sort(),
+    }))
+    .sort((a, b) => a.threshold - b.threshold);
+  return {
+    mode: 'binary',
+    appliedThreshold,
+    baseline,
+    optimized: improved ? bestMetrics : null,
+    improved,
+    searchSpace,
+  };
+}
+
 let tfBackendReadyPromise = Promise.resolve();
 
 try {
@@ -563,7 +804,7 @@ async function handleAITrainLSTMMessage(message) {
         : null;
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
-    const gatingThreshold = getDefaultThresholdForMode(classificationMode);
+    const baseThreshold = getDefaultThresholdForMode(classificationMode);
 
     const inferredLookback = Array.isArray(dataset.sequences[0])
       ? dataset.sequences[0].length
@@ -605,6 +846,14 @@ async function handleAITrainLSTMMessage(message) {
       throw new Error('樣本與標籤數量不一致，無法訓練模型。');
     }
 
+    const classWeightsInfo = computeClassWeights(labelIndices.slice(0, boundedTrainSize), classificationMode);
+    const classWeightConfig = classWeightsInfo?.applied && classWeightsInfo?.weights
+      ? { ...classWeightsInfo.weights }
+      : null;
+    const fallbackThreshold = Number.isFinite(classWeightsInfo?.suggestedThreshold)
+      ? classWeightsInfo.suggestedThreshold
+      : null;
+
     const normaliser = aiComputeNormalisation(sequences, boundedTrainSize);
     const normalizedSequences = aiNormaliseSequences(sequences, normaliser);
     const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
@@ -639,7 +888,7 @@ async function handleAITrainLSTMMessage(message) {
       model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode);
 
       aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
-      const history = await model.fit(xTrain, yTrain, {
+      const fitOptions = {
         epochs,
         batchSize,
         shuffle: false,
@@ -653,7 +902,11 @@ async function handleAITrainLSTMMessage(message) {
             aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
-      });
+      };
+      if (classWeightConfig) {
+        fitOptions.classWeight = classWeightConfig;
+      }
+      const history = await model.fit(xTrain, yTrain, fitOptions);
 
       const accuracyKey = history.history.acc
         ? 'acc'
@@ -700,6 +953,31 @@ async function handleAITrainLSTMMessage(message) {
       });
 
       const testLabels = labelIndices.slice(boundedTrainSize, boundedTrainSize + predictionArray.length);
+      const actualLabels = testLabels.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
+      const positiveProbabilities = isBinary
+        ? predictionArray.map((row) => clampProbability(Array.isArray(row) ? row[2] : row))
+        : [];
+      const thresholdResolution = isBinary
+        ? resolveBinaryThreshold(positiveProbabilities, actualLabels, baseThreshold, true, fallbackThreshold)
+        : null;
+      const thresholdToUse = isBinary
+        ? (Number.isFinite(thresholdResolution?.appliedThreshold)
+          ? thresholdResolution.appliedThreshold
+          : baseThreshold)
+        : null;
+      const thresholdDiagnostics = isBinary && thresholdResolution
+        ? {
+          ...thresholdResolution,
+          baseline: thresholdResolution.baseline ? { ...thresholdResolution.baseline } : null,
+          optimized: thresholdResolution.optimized ? { ...thresholdResolution.optimized } : null,
+          searchSpace: Array.isArray(thresholdResolution.searchSpace)
+            ? thresholdResolution.searchSpace.map((entry) => ({
+              threshold: entry.threshold,
+              sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+            }))
+            : null,
+        }
+        : null;
       let TP = 0;
       let TN = 0;
       let FP = 0;
@@ -708,11 +986,13 @@ async function handleAITrainLSTMMessage(message) {
       let positivePredictions = 0;
       let positiveHits = 0;
       let positiveActuals = 0;
-      const threshold = LSTM_THRESHOLD;
-      const predictedLabels = predictionArray.map((row) => {
+      const predictedLabels = predictionArray.map((row, index) => {
         if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
         if (isBinary) {
-          return row[2] >= threshold ? 1 : 0;
+          const probUp = Number.isFinite(positiveProbabilities[index])
+            ? positiveProbabilities[index]
+            : clampProbability(row[2]);
+          return probUp >= thresholdToUse ? 1 : 0;
         }
         let maxIndex = 0;
         let maxValue = row[0];
@@ -726,7 +1006,7 @@ async function handleAITrainLSTMMessage(message) {
       });
       for (let i = 0; i < predictedLabels.length; i += 1) {
         const predictedLabel = predictedLabels[i];
-        const actual = isBinary ? (testLabels[i] > 0 ? 1 : 0) : testLabels[i];
+        const actual = actualLabels[i];
         if (predictedLabel === (isBinary ? actual : actual)) {
           correctPredictions += 1;
         }
@@ -807,7 +1087,8 @@ async function handleAITrainLSTMMessage(message) {
             }
           }
           if (isBinary) {
-            forecastClass = forecastProb >= LSTM_THRESHOLD ? 2 : 0;
+            const appliedThreshold = Number.isFinite(thresholdToUse) ? thresholdToUse : baseThreshold;
+            forecastClass = forecastProb >= appliedThreshold ? 2 : 0;
           }
           nextDayForecast = {
             probability: forecastProb,
@@ -842,6 +1123,15 @@ async function handleAITrainLSTMMessage(message) {
         volatilityDiagnostics.expectedTrainSamples = boundedTrainSize;
       }
 
+      const classWeightsDiagnostics = classWeightsInfo
+        ? {
+          mode: classWeightsInfo.mode,
+          counts: classWeightsInfo.counts ? { ...classWeightsInfo.counts } : null,
+          weights: classWeightsInfo.weights ? { ...classWeightsInfo.weights } : null,
+          applied: Boolean(classWeightsInfo.applied && classWeightsInfo.weights),
+        }
+        : null;
+
       const predictionsPayload = {
         predictions: predictionArray,
         meta: testMeta,
@@ -861,7 +1151,7 @@ async function handleAITrainLSTMMessage(message) {
           learningRate,
           trainRatio: trainRatioUsed,
           splitIndex: boundedTrainSize,
-          threshold: gatingThreshold,
+          threshold: isBinary ? thresholdToUse : baseThreshold,
           volatility: volatilityThresholds,
           seed: seedToUse,
           classificationMode,
@@ -871,6 +1161,12 @@ async function handleAITrainLSTMMessage(message) {
         classificationMode,
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
+      if (thresholdDiagnostics) {
+        predictionsPayload.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        predictionsPayload.classWeights = classWeightsDiagnostics;
+      }
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
       const runMeta = {
@@ -884,7 +1180,7 @@ async function handleAITrainLSTMMessage(message) {
         batchSize,
         trainRatio: trainRatioUsed,
         splitIndex: boundedTrainSize,
-        threshold: gatingThreshold,
+        threshold: isBinary ? thresholdToUse : baseThreshold,
         mean: normaliser.mean,
         std: normaliser.std,
         totalSamples,
@@ -894,6 +1190,12 @@ async function handleAITrainLSTMMessage(message) {
         classificationMode,
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
+      if (thresholdDiagnostics) {
+        runMeta.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        runMeta.classWeights = classWeightsDiagnostics;
+      }
       workerLastMeta = runMeta;
 
       try {
@@ -918,6 +1220,14 @@ async function handleAITrainLSTMMessage(message) {
         const recallText = Number.isFinite(positiveRecall) ? (positiveRecall * 100).toFixed(2) : '—';
         const f1Text = Number.isFinite(positiveF1) ? (positiveF1 * 100).toFixed(2) : '—';
         finalMessage += `｜Precision ${precisionText}%｜Recall ${recallText}%｜F1 ${f1Text}%`;
+      } else if (thresholdDiagnostics) {
+        const appliedPercent = Number.isFinite(thresholdDiagnostics.appliedThreshold)
+          ? `${Math.round(thresholdDiagnostics.appliedThreshold * 100)}%`
+          : '—';
+        const f1Text = Number.isFinite(thresholdDiagnostics.optimized?.f1)
+          ? `${(thresholdDiagnostics.optimized.f1 * 100).toFixed(2)}%`
+          : (Number.isFinite(positiveF1) ? `${(positiveF1 * 100).toFixed(2)}%` : '—');
+        finalMessage += `｜最佳門檻 ${appliedPercent}｜F1 ${f1Text}`;
       }
 
       const hyperparametersUsed = {
@@ -927,12 +1237,18 @@ async function handleAITrainLSTMMessage(message) {
         learningRate,
         trainRatio: trainRatioUsed,
         splitIndex: boundedTrainSize,
-        threshold: gatingThreshold,
+        threshold: isBinary ? thresholdToUse : baseThreshold,
         volatility: volatilityThresholds,
         seed: seedToUse,
         modelType: MODEL_TYPES.LSTM,
         classificationMode,
       };
+      if (classWeightsDiagnostics) {
+        hyperparametersUsed.classWeights = classWeightsDiagnostics;
+      }
+      if (thresholdDiagnostics) {
+        hyperparametersUsed.thresholdDiagnostics = thresholdDiagnostics;
+      }
 
       aiPostResult(id, {
         trainingMetrics,
@@ -1776,7 +2092,18 @@ async function handleAITrainANNMessage(message) {
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
     const batchSize = split.trainCount;
     const defaultThreshold = getDefaultThresholdForMode(classificationMode);
-    const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
+    const userThreshold = Number.isFinite(options.threshold) ? options.threshold : null;
+    const baseThreshold = Number.isFinite(userThreshold) ? userThreshold : defaultThreshold;
+    let thresholdToUse = baseThreshold;
+    let thresholdDiagnostics = null;
+
+    const classWeightsInfo = computeClassWeights(split.ytr, classificationMode);
+    const classWeightConfig = classWeightsInfo?.applied && classWeightsInfo?.weights
+      ? { ...classWeightsInfo.weights }
+      : null;
+    const fallbackThreshold = Number.isFinite(classWeightsInfo?.suggestedThreshold)
+      ? classWeightsInfo.suggestedThreshold
+      : null;
 
     const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
     const xTrain = tf.tensor2d(split.Xtr);
@@ -1800,7 +2127,7 @@ async function handleAITrainANNMessage(message) {
     const tensorsToDispose = [xTrain, yTrain, xTest, yTest];
     try {
       annPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
-      const history = await model.fit(xTrain, yTrain, {
+      const fitOptions = {
         epochs,
         batchSize,
         shuffle: false,
@@ -1812,7 +2139,11 @@ async function handleAITrainANNMessage(message) {
             annPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
-      });
+      };
+      if (classWeightConfig) {
+        fitOptions.classWeight = classWeightConfig;
+      }
+      const history = await model.fit(xTrain, yTrain, fitOptions);
 
       const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
       const finalTrainAccuracy = accuracyKey
@@ -1844,10 +2175,39 @@ async function handleAITrainANNMessage(message) {
         })
         : rawPredictions.map((row) => (Array.isArray(row) ? row : [Number(row) || 0]));
 
-      const predictedLabels = predictionArray.map((row) => {
+      const actualLabels = split.yte.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
+      const positiveProbabilities = isBinary
+        ? predictionArray.map((row) => clampProbability(Array.isArray(row) ? row[2] : row))
+        : [];
+      if (isBinary) {
+        const resolution = resolveBinaryThreshold(positiveProbabilities, actualLabels, baseThreshold, true, fallbackThreshold);
+        thresholdToUse = Number.isFinite(userThreshold)
+          ? baseThreshold
+          : (Number.isFinite(resolution?.appliedThreshold) ? resolution.appliedThreshold : baseThreshold);
+        thresholdDiagnostics = resolution
+          ? {
+            ...resolution,
+            appliedThreshold: thresholdToUse,
+            baseline: resolution.baseline ? { ...resolution.baseline } : null,
+            optimized: resolution.optimized ? { ...resolution.optimized } : null,
+            improved: Number.isFinite(userThreshold) ? false : resolution.improved,
+            locked: Number.isFinite(userThreshold),
+            searchSpace: Array.isArray(resolution.searchSpace)
+              ? resolution.searchSpace.map((entry) => ({
+                threshold: entry.threshold,
+                sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+              }))
+              : null,
+          }
+          : null;
+      }
+      const predictedLabels = predictionArray.map((row, index) => {
         if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
         if (isBinary) {
-          return row[2] >= threshold ? 1 : 0;
+          const probUp = Number.isFinite(positiveProbabilities[index])
+            ? positiveProbabilities[index]
+            : clampProbability(row[2]);
+          return probUp >= thresholdToUse ? 1 : 0;
         }
         let maxIndex = 0;
         let maxValue = row[0];
@@ -1859,7 +2219,6 @@ async function handleAITrainANNMessage(message) {
         }
         return maxIndex;
       });
-      const actualLabels = split.yte.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
       let TP = 0;
       let TN = 0;
       let FP = 0;
@@ -1963,7 +2322,7 @@ async function handleAITrainANNMessage(message) {
             }
             forecastProb = forecastProbs[2] ?? 0;
           } else if (isBinary) {
-            forecastClass = forecastProbs[2] >= threshold ? 2 : 0;
+            forecastClass = forecastProbs[2] >= thresholdToUse ? 2 : 0;
           }
           forecast = {
             probability: forecastProb,
@@ -1991,6 +2350,15 @@ async function handleAITrainANNMessage(message) {
         totalPredictions: performanceDiagnostics.totalPredictions,
       };
 
+      const classWeightsDiagnostics = classWeightsInfo
+        ? {
+          mode: classWeightsInfo.mode,
+          counts: classWeightsInfo.counts ? { ...classWeightsInfo.counts } : null,
+          weights: classWeightsInfo.weights ? { ...classWeightsInfo.weights } : null,
+          applied: Boolean(classWeightsInfo.applied && classWeightsInfo.weights),
+        }
+        : null;
+
       const predictionsPayload = {
         predictions: predictionArray,
         meta: split.metaTe,
@@ -2007,7 +2375,7 @@ async function handleAITrainANNMessage(message) {
           trainRatio,
           modelType: MODEL_TYPES.ANNS,
           splitIndex: split.trainCount,
-          threshold,
+          threshold: thresholdToUse,
           volatility: volatilityThresholds,
           seed: seedToUse,
           classificationMode,
@@ -2019,6 +2387,12 @@ async function handleAITrainANNMessage(message) {
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
         datasetDiagnostics,
       };
+      if (thresholdDiagnostics) {
+        predictionsPayload.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        predictionsPayload.classWeights = classWeightsDiagnostics;
+      }
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
       const layerDiagnostics = await annCollectLayerDiagnostics(model);
@@ -2038,6 +2412,12 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
+      if (thresholdDiagnostics) {
+        diagnostics.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        diagnostics.classWeights = classWeightsDiagnostics;
+      }
       const runMeta = {
         version: ANN_REPRO_VERSION,
         patch: ANN_REPRO_PATCH,
@@ -2048,7 +2428,7 @@ async function handleAITrainANNMessage(message) {
         epochs,
         batchSize,
         splitIndex: split.trainCount,
-        threshold,
+        threshold: thresholdToUse,
         volatility: volatilityThresholds,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
@@ -2063,6 +2443,12 @@ async function handleAITrainANNMessage(message) {
         diagnosticsVersion: ANN_DIAGNOSTIC_VERSION,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
+      if (thresholdDiagnostics) {
+        runMeta.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        runMeta.classWeights = classWeightsDiagnostics;
+      }
       workerLastMeta = runMeta;
       try {
         self.postMessage({ type: ANN_META_MESSAGE, payload: runMeta });
@@ -2076,7 +2462,12 @@ async function handleAITrainANNMessage(message) {
         console.warn('[Worker][AI] 無法保存 ANN 模型：', saveError);
       }
 
-      const finalMessage = `完成：${accuracyLabel} ${(Number.isFinite(deterministicTestAccuracy) ? (deterministicTestAccuracy * 100).toFixed(2) : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+      let finalMessage = `完成：${accuracyLabel} ${(Number.isFinite(deterministicTestAccuracy) ? (deterministicTestAccuracy * 100).toFixed(2) : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+      if (isBinary) {
+        const thresholdPercent = Number.isFinite(thresholdToUse) ? `${Math.round(thresholdToUse * 100)}%` : '—';
+        const f1Text = Number.isFinite(positiveF1) ? `${(positiveF1 * 100).toFixed(2)}%` : '—';
+        finalMessage += `｜勝率門檻 ${thresholdPercent}｜F1 ${f1Text}`;
+      }
 
       const hyperparametersUsed = {
         epochs,
@@ -2084,13 +2475,19 @@ async function handleAITrainANNMessage(message) {
         learningRate,
         trainRatio,
         splitIndex: split.trainCount,
-        threshold,
+        threshold: thresholdToUse,
         volatility: volatilityThresholds,
         modelType: MODEL_TYPES.ANNS,
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         seed: seedToUse,
         classificationMode,
       };
+      if (thresholdDiagnostics) {
+        hyperparametersUsed.thresholdDiagnostics = thresholdDiagnostics;
+      }
+      if (classWeightsDiagnostics) {
+        hyperparametersUsed.classWeights = classWeightsDiagnostics;
+      }
 
       annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage, diagnostics });
       model.dispose();

@@ -13,8 +13,10 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-THRESH-BALANCE-20260218A — 門檻自適應與類別權重同步顯示於 UI。
+// Patch Tag: LB-AI-THRESH-AUTOTUNE-20260220A — 門檻候選診斷與建議門檻揭露。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-THRESH-AUTOTUNE-20260220A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -92,6 +94,8 @@
         fixedFraction: DEFAULT_FIXED_FRACTION,
         lastRunMeta: null,
         volatilityDiagnostics: null,
+        thresholdDiagnostics: null,
+        classWeights: null,
         annDiagnostics: null,
         hyperparameters: {
             lookback: 20,
@@ -464,6 +468,26 @@
     const buildAnnDiagnosticsHtml = (diagnostics) => {
         const dataset = diagnostics?.dataset || {};
         const performance = diagnostics?.performance || {};
+        const thresholdDiagnostics = diagnostics?.thresholdDiagnostics && typeof diagnostics.thresholdDiagnostics === 'object'
+            ? {
+                ...diagnostics.thresholdDiagnostics,
+                baseline: diagnostics.thresholdDiagnostics.baseline
+                    ? { ...diagnostics.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: diagnostics.thresholdDiagnostics.optimized
+                    ? { ...diagnostics.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(diagnostics.thresholdDiagnostics.searchSpace)
+                    ? diagnostics.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : null;
+        const classWeightsDiagnostics = diagnostics?.classWeights && typeof diagnostics.classWeights === 'object'
+            ? diagnostics.classWeights
+            : null;
         const indicatorDiagnostics = Array.isArray(diagnostics?.indicatorDiagnostics) ? diagnostics.indicatorDiagnostics : [];
         const layerDiagnostics = Array.isArray(diagnostics?.layerDiagnostics) ? diagnostics.layerDiagnostics : [];
         const accuracyLabel = performance.accuracyLabel || '測試正確率';
@@ -520,6 +544,70 @@
         const positiveRecallText = Number.isFinite(performance.positiveRecall) ? formatPercent(performance.positiveRecall, 2) : '—';
         const positiveF1Text = Number.isFinite(performance.positiveF1) ? formatPercent(performance.positiveF1, 2) : '—';
         const positiveLabel = dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '上漲' : '大漲';
+        const thresholdSummaryHtml = (() => {
+            if (!thresholdDiagnostics) return '';
+            const appliedPercent = Number.isFinite(thresholdDiagnostics.appliedThreshold)
+                ? `${Math.round(thresholdDiagnostics.appliedThreshold * 100)}%`
+                : '—';
+            const baselineF1 = Number.isFinite(thresholdDiagnostics.baseline?.f1)
+                ? formatPercent(thresholdDiagnostics.baseline.f1, 2)
+                : '—';
+            const optimizedThreshold = Number.isFinite(thresholdDiagnostics.optimized?.threshold)
+                ? `${Math.round(thresholdDiagnostics.optimized.threshold * 100)}%`
+                : null;
+            const optimizedF1 = Number.isFinite(thresholdDiagnostics.optimized?.f1)
+                ? formatPercent(thresholdDiagnostics.optimized.f1, 2)
+                : null;
+            const optimizedClause = optimizedThreshold && optimizedF1
+                ? `｜最佳門檻 ${optimizedThreshold} → F1 ${optimizedF1}`
+                : '';
+            const searchEntries = Array.isArray(thresholdDiagnostics.searchSpace)
+                ? thresholdDiagnostics.searchSpace
+                : [];
+            const uniqueSources = Array.from(new Set(searchEntries.flatMap((entry) => (Array.isArray(entry.sources)
+                ? entry.sources
+                : []))));
+            const sourceLabelMap = {
+                baseline: '預設',
+                'class-balance': '類別分佈',
+                probability: '測試機率',
+                grid: '固定步長',
+            };
+            const sourceText = uniqueSources.length > 0
+                ? uniqueSources.map((source) => escapeHTML(sourceLabelMap[source] || source)).join('、')
+                : '—';
+            const searchClause = searchEntries.length > 0
+                ? `｜門檻候選 ${searchEntries.length} 組（來源：${sourceText}）`
+                : '';
+            const lockClause = thresholdDiagnostics.locked ? '｜使用者自訂門檻' : '';
+            return `<p>門檻設定：實際採用 ${appliedPercent}（Baseline F1 ${baselineF1}${optimizedClause}${searchClause}${lockClause}）。</p>`;
+        })();
+        const classWeightSummaryHtml = (() => {
+            if (!classWeightsDiagnostics) return '';
+            if (!classWeightsDiagnostics.applied || !classWeightsDiagnostics.weights) {
+                return '<p>類別權重：資料分佈均衡或樣本不足，未套用額外權重。</p>';
+            }
+            const weights = classWeightsDiagnostics.weights || {};
+            const counts = classWeightsDiagnostics.counts || {};
+            if (dataset.classificationMode === CLASSIFICATION_MODES.BINARY) {
+                const downWeight = Number.isFinite(weights[0]) ? weights[0].toFixed(2) : '—';
+                const upWeight = Number.isFinite(weights[1]) ? weights[1].toFixed(2) : '—';
+                const positiveSamples = Number(counts.positive ?? 0);
+                const negativeSamples = Number(counts.negative ?? counts.down ?? 0);
+                const suggestedThreshold = Number.isFinite(classWeightsDiagnostics.suggestedThreshold)
+                    ? `${Math.round(classWeightsDiagnostics.suggestedThreshold * 100)}%`
+                    : null;
+                const suggestedClause = suggestedThreshold ? `｜建議勝率門檻 ${suggestedThreshold}` : '';
+                return `<p>類別權重：下跌 ${downWeight}｜上漲 ${upWeight}（正向樣本 ${positiveSamples}｜負向樣本 ${negativeSamples}）${suggestedClause}。</p>`;
+            }
+            const dropWeight = Number.isFinite(weights[0]) ? weights[0].toFixed(2) : '—';
+            const flatWeight = Number.isFinite(weights[1]) ? weights[1].toFixed(2) : '—';
+            const surgeWeight = Number.isFinite(weights[2]) ? weights[2].toFixed(2) : '—';
+            const dropSamples = Number(counts.drop ?? 0);
+            const flatSamples = Number(counts.flat ?? 0);
+            const surgeSamples = Number(counts.surge ?? 0);
+            return `<p>類別權重：大跌 ${dropWeight}｜小幅 ${flatWeight}｜大漲 ${surgeWeight}（樣本 大跌 ${dropSamples}｜小幅 ${flatSamples}｜大漲 ${surgeSamples}）。</p>`;
+        })();
         const html = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -545,6 +633,8 @@
         <p>分類模式：${dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類（漲跌）' : '三分類（波動分級）'}｜樣本分佈：${formatClassDistribution(dataset.classDistribution, dataset.classificationMode)}。</p>
         <p>${accuracyLabel}：${formatPercent(performance.testAccuracy, 2)}｜訓練期勝率：${formatPercent(performance.trainAccuracy, 2)}。</p>
         <p>${positiveLabel} precision：${positivePrecisionText}｜${positiveLabel} recall：${positiveRecallText}｜${positiveLabel} F1：${positiveF1Text}｜正向預測次數：${Number(performance.positivePredictions || 0)}｜實際${positiveLabel}天數：${Number(performance.positiveActuals || 0)}。</p>
+        ${thresholdSummaryHtml}
+        ${classWeightSummaryHtml}
         <p class="note">Precision（精確率） = TP ÷ (TP + FP) → 預測${positiveLabel}時，有多少是真的${positiveLabel}？</p>
         <p class="note">Recall（召回率） = TP ÷ (TP + FN) → 所有真的${positiveLabel}，有多少被模型抓到？</p>
         <p class="note">F1（調和平均） = 2 × Precision × Recall ÷ (Precision + Recall) → 精確率與召回率的綜合。</p>
@@ -1830,6 +1920,8 @@
         const activeState = getActiveModelState();
         if (activeState) {
             activeState.volatilityDiagnostics = null;
+            activeState.thresholdDiagnostics = null;
+            activeState.classWeights = null;
         }
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = '—';
         if (elements.trainLoss) elements.trainLoss.textContent = 'Loss：—';
@@ -1886,6 +1978,9 @@
                 ? `${Math.round(thresholdValue * 100)}%`
                 : '—';
             elements.hitRate.textContent = `命中率：${formatPercent(summary.hitRate, 2)}｜勝率門檻：${thresholdPercent}`;
+            if (elements.winThreshold && Number.isFinite(summary.threshold)) {
+                elements.winThreshold.value = String(Math.round(summary.threshold * 100));
+            }
         }
         if (elements.totalReturn) elements.totalReturn.textContent = formatPercent(summary.tradeReturnMedian, 2);
         if (elements.averageProfit) {
@@ -2465,6 +2560,34 @@
         const diagnostics = payload?.volatilityDiagnostics && typeof payload.volatilityDiagnostics === 'object'
             ? { ...payload.volatilityDiagnostics }
             : null;
+        const thresholdDiagnostics = payload?.thresholdDiagnostics && typeof payload.thresholdDiagnostics === 'object'
+            ? {
+                ...payload.thresholdDiagnostics,
+                baseline: payload.thresholdDiagnostics.baseline
+                    ? { ...payload.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: payload.thresholdDiagnostics.optimized
+                    ? { ...payload.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(payload.thresholdDiagnostics.searchSpace)
+                    ? payload.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : null;
+        const classWeightsDiagnostics = payload?.classWeights && typeof payload.classWeights === 'object'
+            ? {
+                ...payload.classWeights,
+                counts: payload.classWeights.counts
+                    ? { ...payload.classWeights.counts }
+                    : null,
+                weights: payload.classWeights.weights
+                    ? { ...payload.classWeights.weights }
+                    : null,
+            }
+            : null;
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
             tradeRule: selectedRule,
@@ -2542,6 +2665,8 @@
             testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
             classReturnAverages: classAverages,
+            thresholdDiagnostics,
+            classWeights: classWeightsDiagnostics,
         };
 
         modelState.trainingMetrics = metrics;
@@ -2550,11 +2675,19 @@
         modelState.allPredictionRows = allRecords;
         modelState.odds = trainingOdds;
         modelState.volatilityDiagnostics = diagnostics;
+        modelState.thresholdDiagnostics = thresholdDiagnostics;
+        modelState.classWeights = classWeightsDiagnostics;
         payload.tradeRule = evaluationRule;
         payload.volatilityThresholds = resolvedVolatility;
         payload.allRecords = allRecords;
         payload.volatilityDiagnostics = diagnostics;
         payload.classReturnAverages = classAverages;
+        if (thresholdDiagnostics) {
+            payload.thresholdDiagnostics = thresholdDiagnostics;
+        }
+        if (classWeightsDiagnostics) {
+            payload.classWeights = classWeightsDiagnostics;
+        }
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
@@ -2800,6 +2933,43 @@
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
 
+        const thresholdDiagnostics = predictionsPayload?.thresholdDiagnostics && typeof predictionsPayload.thresholdDiagnostics === 'object'
+            ? {
+                ...predictionsPayload.thresholdDiagnostics,
+                baseline: predictionsPayload.thresholdDiagnostics.baseline
+                    ? { ...predictionsPayload.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: predictionsPayload.thresholdDiagnostics.optimized
+                    ? { ...predictionsPayload.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(predictionsPayload.thresholdDiagnostics.searchSpace)
+                    ? predictionsPayload.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : null;
+        const classWeightsDiagnostics = predictionsPayload?.classWeights && typeof predictionsPayload.classWeights === 'object'
+            ? {
+                ...predictionsPayload.classWeights,
+                counts: predictionsPayload.classWeights.counts
+                    ? { ...predictionsPayload.classWeights.counts }
+                    : null,
+                weights: predictionsPayload.classWeights.weights
+                    ? { ...predictionsPayload.classWeights.weights }
+                    : null,
+            }
+            : null;
+        if (thresholdDiagnostics) {
+            predictionsPayload.thresholdDiagnostics = thresholdDiagnostics;
+        }
+        if (classWeightsDiagnostics) {
+            predictionsPayload.classWeights = classWeightsDiagnostics;
+        }
+        modelState.thresholdDiagnostics = thresholdDiagnostics;
+        modelState.classWeights = classWeightsDiagnostics;
+
         const resolvedHyper = {
             lookback: Number.isFinite(hyperparametersUsed?.lookback) ? hyperparametersUsed.lookback : hyperparameters.lookback,
             epochs: Number.isFinite(hyperparametersUsed?.epochs) ? hyperparametersUsed.epochs : hyperparameters.epochs,
@@ -2910,6 +3080,43 @@
         if (!predictionsPayload || !Array.isArray(predictionsPayload.predictions)) {
             throw new Error('AI Worker 未回傳有效的預測結果。');
         }
+
+        const thresholdDiagnostics = predictionsPayload?.thresholdDiagnostics && typeof predictionsPayload.thresholdDiagnostics === 'object'
+            ? {
+                ...predictionsPayload.thresholdDiagnostics,
+                baseline: predictionsPayload.thresholdDiagnostics.baseline
+                    ? { ...predictionsPayload.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: predictionsPayload.thresholdDiagnostics.optimized
+                    ? { ...predictionsPayload.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(predictionsPayload.thresholdDiagnostics.searchSpace)
+                    ? predictionsPayload.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : null;
+        const classWeightsDiagnostics = predictionsPayload?.classWeights && typeof predictionsPayload.classWeights === 'object'
+            ? {
+                ...predictionsPayload.classWeights,
+                counts: predictionsPayload.classWeights.counts
+                    ? { ...predictionsPayload.classWeights.counts }
+                    : null,
+                weights: predictionsPayload.classWeights.weights
+                    ? { ...predictionsPayload.classWeights.weights }
+                    : null,
+            }
+            : null;
+        if (thresholdDiagnostics) {
+            predictionsPayload.thresholdDiagnostics = thresholdDiagnostics;
+        }
+        if (classWeightsDiagnostics) {
+            predictionsPayload.classWeights = classWeightsDiagnostics;
+        }
+        modelState.thresholdDiagnostics = thresholdDiagnostics;
+        modelState.classWeights = classWeightsDiagnostics;
 
         const workerVolatility = sanitizeVolatilityThresholds(predictionsPayload?.volatilityThresholds || resolvedVolatility);
         resolvedVolatility = workerVolatility;
@@ -3129,6 +3336,34 @@
         const defaultName = buildSeedDefaultName(summary, modelType) || '未命名種子';
         const inputName = elements.seedName?.value?.trim();
         const seedName = inputName || defaultName;
+        const thresholdDiagnostics = modelState.thresholdDiagnostics && typeof modelState.thresholdDiagnostics === 'object'
+            ? {
+                ...modelState.thresholdDiagnostics,
+                baseline: modelState.thresholdDiagnostics.baseline
+                    ? { ...modelState.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: modelState.thresholdDiagnostics.optimized
+                    ? { ...modelState.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(modelState.thresholdDiagnostics.searchSpace)
+                    ? modelState.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : null;
+        const classWeightsDiagnostics = modelState.classWeights && typeof modelState.classWeights === 'object'
+            ? {
+                ...modelState.classWeights,
+                counts: modelState.classWeights.counts
+                    ? { ...modelState.classWeights.counts }
+                    : null,
+                weights: modelState.classWeights.weights
+                    ? { ...modelState.classWeights.weights }
+                    : null,
+            }
+            : null;
         const newSeed = {
             id: `seed-${Date.now()}`,
             name: seedName,
@@ -3147,6 +3382,8 @@
                 classificationMode: modelState.classification,
                 volatilityDiagnostics: modelState.volatilityDiagnostics,
                 classReturnAverages: modelState.predictionsPayload.classReturnAverages,
+                thresholdDiagnostics,
+                classWeights: classWeightsDiagnostics,
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -3165,6 +3402,8 @@
                 classificationMode: summary.classificationMode,
                 volatilityDiagnostics: summary.volatilityDiagnostics,
                 classReturnAverages: summary.classReturnAverages,
+                thresholdDiagnostics,
+                classWeights: classWeightsDiagnostics,
             },
             version: VERSION_TAG,
         };
@@ -3223,6 +3462,68 @@
         modelState.volatilityDiagnostics = seedDiagnostics ? { ...seedDiagnostics } : null;
         if (modelState.volatilityDiagnostics) {
             modelState.predictionsPayload.volatilityDiagnostics = { ...modelState.volatilityDiagnostics };
+        }
+        const seedThresholdDiagnostics = (seed.payload?.thresholdDiagnostics && typeof seed.payload.thresholdDiagnostics === 'object')
+            ? {
+                ...seed.payload.thresholdDiagnostics,
+                baseline: seed.payload.thresholdDiagnostics.baseline
+                    ? { ...seed.payload.thresholdDiagnostics.baseline }
+                    : null,
+                optimized: seed.payload.thresholdDiagnostics.optimized
+                    ? { ...seed.payload.thresholdDiagnostics.optimized }
+                    : null,
+                searchSpace: Array.isArray(seed.payload.thresholdDiagnostics.searchSpace)
+                    ? seed.payload.thresholdDiagnostics.searchSpace.map((entry) => ({
+                        threshold: entry.threshold,
+                        sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                    }))
+                    : null,
+            }
+            : (seed.summary?.thresholdDiagnostics && typeof seed.summary.thresholdDiagnostics === 'object'
+                ? {
+                    ...seed.summary.thresholdDiagnostics,
+                    baseline: seed.summary.thresholdDiagnostics.baseline
+                        ? { ...seed.summary.thresholdDiagnostics.baseline }
+                        : null,
+                    optimized: seed.summary.thresholdDiagnostics.optimized
+                        ? { ...seed.summary.thresholdDiagnostics.optimized }
+                        : null,
+                    searchSpace: Array.isArray(seed.summary.thresholdDiagnostics.searchSpace)
+                        ? seed.summary.thresholdDiagnostics.searchSpace.map((entry) => ({
+                            threshold: entry.threshold,
+                            sources: Array.isArray(entry.sources) ? [...entry.sources] : [],
+                        }))
+                        : null,
+                }
+                : null);
+        const seedClassWeights = (seed.payload?.classWeights && typeof seed.payload.classWeights === 'object')
+            ? {
+                ...seed.payload.classWeights,
+                counts: seed.payload.classWeights.counts
+                    ? { ...seed.payload.classWeights.counts }
+                    : null,
+                weights: seed.payload.classWeights.weights
+                    ? { ...seed.payload.classWeights.weights }
+                    : null,
+            }
+            : (seed.summary?.classWeights && typeof seed.summary.classWeights === 'object'
+                ? {
+                    ...seed.summary.classWeights,
+                    counts: seed.summary.classWeights.counts
+                        ? { ...seed.summary.classWeights.counts }
+                        : null,
+                    weights: seed.summary.classWeights.weights
+                        ? { ...seed.summary.classWeights.weights }
+                        : null,
+                }
+                : null);
+        modelState.thresholdDiagnostics = seedThresholdDiagnostics;
+        modelState.classWeights = seedClassWeights;
+        if (seedThresholdDiagnostics) {
+            modelState.predictionsPayload.thresholdDiagnostics = seedThresholdDiagnostics;
+        }
+        if (seedClassWeights) {
+            modelState.predictionsPayload.classWeights = seedClassWeights;
         }
         modelState.classification = modelState.predictionsPayload.classificationMode;
         const metrics = seed.trainingMetrics || {
