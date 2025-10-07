@@ -1016,3 +1016,19 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-02-18 — Patch LB-AI-THRESH-BALANCE-20260218A / LB-AI-ANNS-REPRO-20260218A / LB-AI-ANN-DIAG-20260218A / LB-AI-LSTM-REPRO-20260218A
+- **Issue recap**: AI 二分類模式仍使用固定 50% 勝率門檻且未考量樣本不平衡，導致在漲跌樣本分布失衡時 Precision/Recall 明顯偏低，預設 F1 表現不足。功能測試報告也缺乏門檻與權重資訊，使用者難以理解模型決策依據。
+- **Fix**:
+  - `js/worker.js` 為 LSTM/ANN 訓練自動計算類別權重並傳遞至 `model.fit`，同時掃描測試集機率找出最佳 F1 門檻（若使用者未指定）並隨訓練結果回傳完整的 `thresholdDiagnostics` 與 `classWeights` 診斷。
+  - `js/ai-prediction.js` 儲存並重播 Worker 回傳的門檻與權重資訊，交易摘要與 ANNS 功能測試報告新增門檻調適、最佳 F1、類別權重與樣本數描述，種子匯出/匯入同樣保留這些診斷，版本標記同步更新。
+- **Diagnostics**: 以不平衡漲跌資料重訓 LSTM 與 ANN，確認最終採用門檻自動調整且 F1 提升；檢視功能測試報告與交易摘要，確保顯示實際門檻、最佳門檻建議與類別權重，並驗證種子儲存後重播仍保留相同設定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-20 — Patch LB-AI-THRESH-AUTOTUNE-20260220A / LB-AI-ANNS-REPRO-20260220A / LB-AI-ANN-DIAG-20260220A / LB-AI-LSTM-REPRO-20260220A
+- **Issue recap**: 門檻自適應雖能找出較高 F1，但遇到極端不平衡資料或測試集無法計算 F1 時仍維持 50% 預設值，隔日預測也未套用實際門檻，使得 UI 與模型決策不一致，缺乏診斷候選資訊。類別權重亦未回傳建議門檻供前端參考。
+- **Fix**:
+  - `js/worker.js` 將類別分佈轉為 `suggestedThreshold` 候選並納入門檻搜尋；`resolveBinaryThreshold` 新增來源標記與候選清單，並在 Precision/Recall 任一為 0 時回傳 F1=0，避免 NaN 阻斷優化，同時讓 LSTM 隔日預測採用最佳化門檻。
+  - `js/ai-prediction.js` 顯示門檻候選來源、建議門檻與類別權重統計，並在模型摘要中同步更新勝率門檻輸入值，確保 UI 與 Worker 決策一致。
+- **Diagnostics**: 以高度不平衡樣本重訓 LSTM/ANN，確認門檻診斷列出 baseline／類別分佈／機率候選並採用建議值；檢查隔日預測標記與 UI 勝率輸入同步更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
