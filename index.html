@@ -1963,6 +1963,63 @@
                                                     <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
                                                 </fieldset>
                                             </div>
+                                            <div class="mt-6 border-t pt-4 space-y-3" id="rolling-optimize-panel">
+                                                <div class="flex flex-col gap-1">
+                                                    <div class="flex flex-wrap items-center gap-3 justify-between">
+                                                        <h4 class="text-sm font-semibold" style="color: var(--foreground);">訓練期參數優化</h4>
+                                                        <span class="text-[11px]" style="color: var(--muted-foreground);">每個視窗會先在訓練資料上搜尋參數，再用相同設定驗證測試期。</span>
+                                                    </div>
+                                                </div>
+                                                <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" />
+                                                    <span>啟用訓練期自動優化</span>
+                                                </label>
+                                                <div id="rolling-optimize-settings" class="hidden space-y-3">
+                                                    <div class="grid gap-3 md:grid-cols-2">
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            優化目標
+                                                            <select id="rolling-optimize-target" data-rolling-input class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="annualizedReturn">年化報酬率</option>
+                                                                <option value="sharpeRatio">Sharpe Ratio</option>
+                                                                <option value="sortinoRatio">Sortino Ratio</option>
+                                                                <option value="winRate">勝率</option>
+                                                                <option value="maxDrawdown">最大回撤（越小越好）</option>
+                                                            </select>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            單一參數掃描步數
+                                                            <input id="rolling-optimize-trials" data-rolling-input type="number" min="10" max="400" step="1" value="60" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議維持 40~80，可平衡探索密度與運算時間。</span>
+                                                        </label>
+                                                    </div>
+                                                    <div>
+                                                        <p class="text-xs font-medium mb-2" style="color: var(--foreground);">優化範圍</p>
+                                                        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                                            <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-entry" data-rolling-input checked />
+                                                                <span>做多進場參數</span>
+                                                            </label>
+                                                            <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-exit" data-rolling-input checked />
+                                                                <span>做多出場參數</span>
+                                                            </label>
+                                                            <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-short-entry" data-rolling-input />
+                                                                <span>做空進場參數</span>
+                                                            </label>
+                                                            <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-short-exit" data-rolling-input />
+                                                                <span>回補出場參數</span>
+                                                            </label>
+                                                            <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-risk" data-rolling-input />
+                                                                <span>風險管理（停損 / 停利）</span>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">優化會沿用主回測的暖身推算與快取資料，不會額外觸發 Proxy 抓價，確保 Walk-Forward 過程可快速重播。</p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="card">
@@ -2050,6 +2107,7 @@
                                                                 <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">勝率%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">交易數</th>
+                                                                <th class="px-3 py-2 text-left font-semibold">參數摘要</th>
                                                                 <th class="px-3 py-2 text-left font-semibold">評語</th>
                                                             </tr>
                                                         </thead>
@@ -2058,7 +2116,7 @@
                                                 </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。各指標達到門檻大約可取得 70 分，超標幅度愈大愈接近 100 分，若落後門檻則迅速扣分。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
                                             </div>
                                         </div>
                                     </div>

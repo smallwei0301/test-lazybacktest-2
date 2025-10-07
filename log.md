@@ -1,7 +1,26 @@
+
+## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
+- **Scope**: Walk-Forward 測試報告與資料驗證。
+- **Updates**:
+  - 修正 Worker 在滾動測試期間沿用完整快取資料的問題，改為依視窗暖身起點與結束日切片資料，確保訓練／測試指標與單窗回測一致。
+  - 啟動滾動測試前新增視窗覆蓋檢查，若資料期間不足或交易日低於建議門檻，會中止執行並提示不足原因。
+  - 重構 Walk-Forward 評分公式，改以門檻比率換算 0～100 分，並在報告說明門檻約 70 分，超標才逐步加分。
+  - 逐窗結果表加入參數摘要欄與更完整的多空／風控設定敘述，便於比對每個視窗採用的策略組合。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-01-15 — Patch LB-ROLLING-TEST-AUTO-OPT-20260115A
+- **Scope**: Walk-Forward 訓練期參數優化。
+- **Updates**:
+  - 滾動測試設定新增「訓練期自動優化」開關，可選擇目標指標、掃描步數與要優化的策略範圍（做多 / 做空 / 風險控管）。
+  - 每個視窗在訓練期自動呼叫批量優化模組，找出最佳參數後再重跑訓練與測試期，報告會附上參數調整摘要。
+  - 進度條與逐窗備註會標示優化狀態，缺少模組或沒有可優化參數時會自動降級為原始設定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-01-09 — Patch LB-SINGLE-OPT-WARMUP-20260109A
 - **Issue recap**: 單一參數優化在 `LB-SINGLE-OPT-20251115A` 改版後，Worker 未帶入 `dataStartDate` 與暖身視窗，僅以使用者設定起始日回測，導致表格內的年化報酬率與夏普值與實際回測落差。
 - **Fix**: Worker 在處理優化訊息時同步寫入 `lookbackDays`、`effectiveStartDate`、`dataStartDate`，並在每輪優化測試前將 `originalStartDate`、暖身起點與緩衝天數灌入參數，確保與主回測共用相同資料視窗。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。

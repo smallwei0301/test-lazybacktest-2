@@ -2157,6 +2157,24 @@ function buildCacheKey(
   return `${marketPrefix}${stockNo}__${dataKey}__${endKey}__${priceModeKey}__${splitFlag}__${effectiveKey}`;
 }
 
+function filterDatasetForWindow(data, warmupStartIso, endIso) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return [];
+  }
+  return data.filter((row) => {
+    if (!row || !row.date) {
+      return false;
+    }
+    if (warmupStartIso && row.date < warmupStartIso) {
+      return false;
+    }
+    if (endIso && row.date > endIso) {
+      return false;
+    }
+    return true;
+  });
+}
+
 function ensureMarketCache(marketKey) {
   if (!workerCachedStockData.has(marketKey)) {
     workerCachedStockData.set(marketKey, new Map());
@@ -11638,7 +11656,10 @@ self.onmessage = async function (e) {
         return;
       }
 
-      const strategyData = Array.isArray(dataToUse) ? dataToUse : [];
+      const warmupStartISO = dataStartDate || params.startDate || null;
+      const strategyData = Array.isArray(dataToUse)
+        ? filterDatasetForWindow(dataToUse, warmupStartISO, params.endDate || null)
+        : [];
       const startISO = effectiveStartDate || params.startDate || null;
       const endISO = params.endDate || null;
       const visibleStrategyData = Array.isArray(strategyData)

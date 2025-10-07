@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.1 ---
-// Patch Tag: LB-ROLLING-TEST-20250912A
+// --- 滾動測試模組 - v1.3 ---
+// Patch Tag: LB-ROLLING-TEST-20250918A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -10,6 +10,7 @@
         windows: [],
         results: [],
         config: null,
+        optimizationPlan: { enabled: false, scopes: [], config: null },
         startTime: null,
         progress: {
             totalSteps: 0,
@@ -17,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912A',
+        version: 'LB-ROLLING-TEST-20250918A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -36,6 +37,36 @@
         winRate: 0.05,
     };
 
+    const METRIC_LABELS = {
+        annualizedReturn: '年化報酬率',
+        sharpeRatio: 'Sharpe Ratio',
+        sortinoRatio: 'Sortino Ratio',
+        maxDrawdown: '最大回撤',
+        winRate: '勝率',
+    };
+
+    const PARAM_NAME_LABELS = {
+        shortPeriod: '短天數',
+        longPeriod: '長天數',
+        period: '週期',
+        breakoutPeriod: '突破期',
+        signalPeriod: '訊號期',
+        threshold: '門檻',
+        upperThreshold: '上限',
+        lowerThreshold: '下限',
+        multiplier: '倍數',
+        length: '期間',
+        offset: '位移',
+        atrPeriod: 'ATR 期間',
+        maPeriod: '均線天數',
+        stopLoss: '停損 (%)',
+        takeProfit: '停利 (%)',
+        trailingStop: '移動停損',
+        riskReward: 'RR 比',
+        channelPeriod: '通道期',
+        breakoutThreshold: '突破門檻',
+    };
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -44,7 +75,10 @@
         const inputs = tab.querySelectorAll('[data-rolling-input]');
         inputs.forEach((input) => {
             ['change', 'input'].forEach((evt) => {
-                input.addEventListener(evt, () => updateRollingPlanPreview());
+                input.addEventListener(evt, () => {
+                    updateRollingPlanPreview();
+                    syncRollingOptimizeUI();
+                });
             });
         });
 
@@ -53,7 +87,15 @@
         if (startBtn) startBtn.addEventListener('click', startRollingTest);
         if (stopBtn) stopBtn.addEventListener('click', stopRollingTest);
 
+        const shortToggle = document.getElementById('enableShortSelling');
+        if (shortToggle) {
+            shortToggle.addEventListener('change', () => {
+                syncRollingOptimizeUI();
+            });
+        }
+
         updateRollingPlanPreview();
+        syncRollingOptimizeUI();
         state.initialized = true;
     }
 
@@ -79,13 +121,39 @@
             return;
         }
 
+        const coverageIssues = validateWindowCoverage(windows, cachedRows, config);
+        if (coverageIssues.length > 0) {
+            setPlanWarning(true);
+            const primary = coverageIssues[0];
+            const detail = coverageIssues.length > 1 ? `（共 ${coverageIssues.length} 項問題）` : '';
+            setAlert(`滾動測試無法啟動：${primary}${detail}`, 'error');
+            showError?.(`[Rolling Test] ${primary}`);
+            return;
+        }
+
+        state.optimizationPlan = { enabled: false, scopes: [], config: null };
+
+        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        if (!baseParams) {
+            setAlert('無法取得回測參數，請重新整理頁面後再試一次。', 'error');
+            showError?.('滾動測試無法讀取目前的策略參數設定');
+            return;
+        }
+
+        const optimizationPlan = buildRollingOptimizationPlan(config.optimization, baseParams);
+        state.optimizationPlan = optimizationPlan;
+        if (config?.optimization?.enabled && !optimizationPlan.enabled) {
+            showInfo?.('已啟用訓練期優化，但目前策略未選擇可優化的參數。');
+        }
+        const stepsPerWindow = optimizationPlan.enabled ? 3 : 2;
+
         state.running = true;
         state.cancelled = false;
         state.config = config;
         state.windows = windows;
         state.results = [];
         state.startTime = Date.now();
-        state.progress.totalSteps = windows.length * 2; // 訓練 + 測試
+        state.progress.totalSteps = windows.length * stepsPerWindow;
         state.progress.currentStep = 0;
         state.progress.windowIndex = 0;
         state.progress.stage = '';
@@ -96,7 +164,7 @@
         setAlert('系統已開始滾動測試，請保持頁面開啟。', 'info');
         updateProgressUI();
 
-        runRollingSequence().catch((error) => {
+        runRollingSequence(baseParams).catch((error) => {
             console.error('[Rolling Test] Unexpected error:', error);
             showError?.(`滾動測試失敗：${error?.message || error}`);
             setAlert(`滾動測試失敗：${error?.message || '未知錯誤'}`, 'error');
@@ -117,18 +185,38 @@
         setAlert('已送出停止指令，系統會在目前視窗結束後停止。', 'warning');
     }
 
-    async function runRollingSequence() {
-        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+    async function runRollingSequence(baseParams) {
         if (!baseParams) throw new Error('無法取得回測參數，請重新整理頁面');
+        const optimizationPlan = state.optimizationPlan || { enabled: false, scopes: [] };
 
         for (let i = 0; i < state.windows.length; i += 1) {
             if (state.cancelled) break;
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
+            let windowParams = deepClone(baseParams);
+            let optimizationSummary = null;
+
+            if (optimizationPlan.enabled) {
+                try {
+                    state.progress.stage = '參數優化';
+                    updateProgressUI(`視窗 ${state.progress.windowIndex}/${state.windows.length} · 參數優化`);
+                    const optimizationResult = await optimizeParametersForWindow(windowParams, win, optimizationPlan);
+                    if (optimizationResult?.params) {
+                        windowParams = optimizationResult.params;
+                    }
+                    optimizationSummary = optimizationResult?.summary || null;
+                } catch (error) {
+                    console.warn('[Rolling Test] Optimization failed:', error);
+                    optimizationSummary = { error: error?.message || '參數優化失敗' };
+                }
+                state.progress.currentStep += 1;
+                updateProgressUI();
+            }
+
             let trainingResult = null;
             try {
-                trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
+                trainingResult = await runSingleWindow(windowParams, win.trainingStart, win.trainingEnd, {
                     phase: '訓練期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
@@ -142,7 +230,7 @@
 
             let testingResult = null;
             try {
-                testingResult = await runSingleWindow(baseParams, win.testingStart, win.testingEnd, {
+                testingResult = await runSingleWindow(windowParams, win.testingStart, win.testingEnd, {
                     phase: '測試期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
@@ -156,6 +244,8 @@
                 window: win,
                 training: trainingResult,
                 testing: testingResult,
+                optimization: optimizationSummary,
+                params: deepClone(windowParams),
             });
         }
     }
@@ -306,6 +396,8 @@
             testing: extractMetrics(entry.testing),
             rawTraining: entry.training,
             rawTesting: entry.testing,
+            optimization: entry.optimization || null,
+            paramsSnapshot: entry.params || null,
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
@@ -335,7 +427,10 @@
                 title: 'Walk-Forward 評分',
                 value: `${aggregate.score} 分`,
                 accent: aggregate.gradeColor,
-                description: `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
+                description: [
+                    `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
+                    '（達門檻約 70 分，超標越多加分）',
+                ].join(''),
             },
             {
                 title: '平均年化報酬 (OOS)',
@@ -389,19 +484,188 @@
 
         aggregate.evaluations.forEach((entry) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = [
-                `<td class="px-3 py-2">${entry.index + 1}</td>`,
-                `<td class="px-3 py-2">${entry.window.testingStart} ~ ${entry.window.testingEnd}</td>`,
-                `<td class="px-3 py-2 text-right ${entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(entry.metrics.annualizedReturn)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatNumber(entry.metrics.sharpeRatio)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatNumber(entry.metrics.sortinoRatio)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatPercent(entry.metrics.maxDrawdown)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatPercent(entry.metrics.winRate)}</td>`,
-                `<td class="px-3 py-2 text-right">${Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—'}</td>`,
-                `<td class="px-3 py-2 text-left">${entry.comment}</td>`,
-            ].join('');
+
+            const indexCell = document.createElement('td');
+            indexCell.className = 'px-3 py-2';
+            indexCell.textContent = entry.index + 1;
+            tr.appendChild(indexCell);
+
+            const periodCell = document.createElement('td');
+            periodCell.className = 'px-3 py-2';
+            periodCell.textContent = `${entry.window.testingStart} ~ ${entry.window.testingEnd}`;
+            tr.appendChild(periodCell);
+
+            const annCell = document.createElement('td');
+            annCell.className = `px-3 py-2 text-right ${Number.isFinite(entry.metrics.annualizedReturn) && entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
+            annCell.textContent = formatPercent(entry.metrics.annualizedReturn);
+            tr.appendChild(annCell);
+
+            const sharpeCell = document.createElement('td');
+            sharpeCell.className = 'px-3 py-2 text-right';
+            sharpeCell.textContent = formatNumber(entry.metrics.sharpeRatio);
+            tr.appendChild(sharpeCell);
+
+            const sortinoCell = document.createElement('td');
+            sortinoCell.className = 'px-3 py-2 text-right';
+            sortinoCell.textContent = formatNumber(entry.metrics.sortinoRatio);
+            tr.appendChild(sortinoCell);
+
+            const maxddCell = document.createElement('td');
+            maxddCell.className = 'px-3 py-2 text-right';
+            maxddCell.textContent = formatPercent(entry.metrics.maxDrawdown);
+            tr.appendChild(maxddCell);
+
+            const winRateCell = document.createElement('td');
+            winRateCell.className = 'px-3 py-2 text-right';
+            winRateCell.textContent = formatPercent(entry.metrics.winRate);
+            tr.appendChild(winRateCell);
+
+            const tradesCell = document.createElement('td');
+            tradesCell.className = 'px-3 py-2 text-right';
+            tradesCell.textContent = Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—';
+            tr.appendChild(tradesCell);
+
+            const paramsCell = document.createElement('td');
+            paramsCell.className = 'px-3 py-2 text-left whitespace-pre-wrap';
+            paramsCell.textContent = buildParameterSummary(entry.paramsSnapshot);
+            tr.appendChild(paramsCell);
+
+            const commentCell = document.createElement('td');
+            commentCell.className = 'px-3 py-2 text-left';
+            commentCell.textContent = entry.comment || '—';
+            tr.appendChild(commentCell);
+
             tbody.appendChild(tr);
         });
+    }
+
+    function buildParameterSummary(params) {
+        if (!params || typeof params !== 'object') return '—';
+        const blocks = [];
+
+        const longEntry = describeStrategyBlock('做多進場', params.entryStrategy, params.entryParams, params.entryStages, 'entry');
+        if (longEntry) blocks.push(longEntry);
+
+        const longExit = describeStrategyBlock('做多出場', params.exitStrategy, params.exitParams, params.exitStages, 'exit');
+        if (longExit) blocks.push(longExit);
+
+        if (params.enableShorting) {
+            const shortEntry = describeStrategyBlock('做空進場', params.shortEntryStrategy, params.shortEntryParams, params.shortEntryStages, 'shortEntry');
+            if (shortEntry) blocks.push(shortEntry);
+            const shortExit = describeStrategyBlock('回補出場', params.shortExitStrategy, params.shortExitParams, params.shortExitStages, 'shortExit');
+            if (shortExit) blocks.push(shortExit);
+        }
+
+        const risk = buildRiskSummary(params);
+        if (risk) blocks.push(risk);
+
+        return blocks.length > 0 ? blocks.join('｜') : '—';
+    }
+
+    function describeStrategyBlock(label, strategyKey, paramObj, stages, scope) {
+        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
+        const details = [];
+        const paramText = formatParamEntries(paramObj);
+        if (paramText) details.push(paramText);
+        const stageText = formatStageSummary(stages);
+        if (stageText) details.push(stageText);
+
+        if (!strategyName && details.length === 0) return '';
+        let summary = `${label}：${strategyName || '—'}`;
+        if (details.length > 0) {
+            summary += `（${details.join('、')}）`;
+        }
+        return summary;
+    }
+
+    function resolveStrategyDisplayName(strategyKey, scope) {
+        if (!strategyKey) return '';
+        let lookupKey = strategyKey;
+        if (scope) {
+            lookupKey = resolveStrategyConfigKey(strategyKey, scope) || strategyKey;
+        }
+        const info = strategyDescriptions?.[lookupKey];
+        if (info?.name) return info.name;
+        if (info?.label) return info.label;
+        return strategyKey;
+    }
+
+    function formatParamEntries(paramObj) {
+        if (!paramObj || typeof paramObj !== 'object') return '';
+        const entries = Object.entries(paramObj)
+            .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+            .map(([key, value]) => {
+                const formatted = formatParamValue(value);
+                if (!formatted) return null;
+                const label = PARAM_NAME_LABELS[key] || key;
+                return `${label}=${formatted}`;
+            })
+            .filter((entry) => entry);
+        return entries.length > 0 ? entries.join('、') : '';
+    }
+
+    function formatParamValue(value) {
+        if (Array.isArray(value)) {
+            const formatted = value
+                .filter((item) => item !== null && item !== undefined && item !== '')
+                .map((item) => formatParamValue(item))
+                .filter((item) => item !== '');
+            return formatted.join(' / ');
+        }
+        if (typeof value === 'number') {
+            return trimNumber(value);
+        }
+        if (typeof value === 'boolean') {
+            return value ? '是' : '否';
+        }
+        if (typeof value === 'string') {
+            return value.trim();
+        }
+        return '';
+    }
+
+    function formatStageSummary(stages) {
+        if (!Array.isArray(stages) || stages.length === 0) return '';
+        const valid = stages
+            .map((stage) => (Number.isFinite(stage) ? Number(stage) : null))
+            .filter((stage) => stage !== null && stage > 0);
+        if (valid.length === 0) return '';
+        return `分批 ${valid.map((stage) => `${trimNumber(stage)}%`).join(' + ')}`;
+    }
+
+    function buildRiskSummary(params) {
+        const parts = [];
+        if (Number.isFinite(params.stopLoss) && params.stopLoss > 0) {
+            parts.push(`停損 ${trimNumber(params.stopLoss)}%`);
+        }
+        if (Number.isFinite(params.takeProfit) && params.takeProfit > 0) {
+            parts.push(`停利 ${trimNumber(params.takeProfit)}%`);
+        }
+        const timing = resolveTradeTimingLabel(params.tradeTiming);
+        if (timing) parts.push(`執行點 ${timing}`);
+        const basis = resolvePositionBasisLabel(params.positionBasis);
+        if (basis) parts.push(`部位基準 ${basis}`);
+        return parts.length > 0 ? `風控：${parts.join('、')}` : '';
+    }
+
+    function resolveTradeTimingLabel(value) {
+        if (value === 'close') return '收盤';
+        if (value === 'open') return '開盤';
+        return '';
+    }
+
+    function resolvePositionBasisLabel(value) {
+        if (value === 'initialCapital') return '初始本金';
+        if (value === 'totalCapital') return '總資金';
+        return '';
+    }
+
+    function trimNumber(value) {
+        if (!Number.isFinite(value)) return '';
+        const abs = Math.abs(value);
+        if (abs >= 100) return value.toFixed(0);
+        if (abs >= 10) return value.toFixed(1).replace(/\.0$/, '');
+        return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
     function computeAggregateReport(entries, thresholds, minTrades) {
@@ -422,12 +686,20 @@
                 if (!Number.isFinite(entry.testing.tradesCount) || entry.testing.tradesCount < minTrades) {
                     commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
                 }
+                if (entry.optimization) {
+                    if (Array.isArray(entry.optimization.messages) && entry.optimization.messages.length > 0) {
+                        commentParts.push(entry.optimization.messages.join('；'));
+                    } else if (entry.optimization.error) {
+                        commentParts.push(`優化失敗：${entry.optimization.error}`);
+                    }
+                }
             }
             return {
                 index: entry.index,
                 window: entry.window,
                 metrics: entry.testing,
                 evaluation,
+                paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
             };
         });
@@ -493,31 +765,58 @@
 
         metricsList.forEach((metrics) => {
             if (!metrics || metrics.error) return;
-            if (Number.isFinite(metrics.annualizedReturn)) {
-                weightedScore += SCORE_WEIGHTS.annualizedReturn * normalisePositive(metrics.annualizedReturn, thresholds.annualizedReturn, 2);
+            const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
+            if (annScore !== null) {
+                weightedScore += SCORE_WEIGHTS.annualizedReturn * annScore;
                 weightSum += SCORE_WEIGHTS.annualizedReturn;
             }
-            if (Number.isFinite(metrics.sharpeRatio)) {
-                weightedScore += SCORE_WEIGHTS.sharpeRatio * normalisePositive(metrics.sharpeRatio, thresholds.sharpeRatio, 2);
+            const sharpeScore = scorePositiveMetric(metrics.sharpeRatio, thresholds.sharpeRatio);
+            if (sharpeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.sharpeRatio * sharpeScore;
                 weightSum += SCORE_WEIGHTS.sharpeRatio;
             }
-            if (Number.isFinite(metrics.sortinoRatio)) {
-                weightedScore += SCORE_WEIGHTS.sortinoRatio * normalisePositive(metrics.sortinoRatio, thresholds.sortinoRatio, 2.5);
+            const sortinoScore = scorePositiveMetric(metrics.sortinoRatio, thresholds.sortinoRatio);
+            if (sortinoScore !== null) {
+                weightedScore += SCORE_WEIGHTS.sortinoRatio * sortinoScore;
                 weightSum += SCORE_WEIGHTS.sortinoRatio;
             }
-            if (Number.isFinite(metrics.maxDrawdown)) {
-                weightedScore += SCORE_WEIGHTS.maxDrawdown * normaliseInverse(metrics.maxDrawdown, thresholds.maxDrawdown, 2);
+            const drawdownScore = scoreInverseMetric(metrics.maxDrawdown, thresholds.maxDrawdown);
+            if (drawdownScore !== null) {
+                weightedScore += SCORE_WEIGHTS.maxDrawdown * drawdownScore;
                 weightSum += SCORE_WEIGHTS.maxDrawdown;
             }
-            if (Number.isFinite(metrics.winRate)) {
-                weightedScore += SCORE_WEIGHTS.winRate * normalisePositive(metrics.winRate, thresholds.winRate, 2);
+            const winRateScore = scorePositiveMetric(metrics.winRate, thresholds.winRate);
+            if (winRateScore !== null) {
+                weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
             }
         });
 
         if (weightSum === 0) return 0;
-        const normalized = Math.min(100, Math.max(0, (weightedScore / weightSum) * 100));
-        return Math.round(normalized);
+        return Math.round(weightedScore / weightSum);
+    }
+
+    function scorePositiveMetric(value, baseline) {
+        if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) return null;
+        const ratio = value / baseline;
+        return shapeScoreFromRatio(ratio);
+    }
+
+    function scoreInverseMetric(value, baseline) {
+        if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0 || baseline <= 0) return null;
+        const ratio = baseline / value;
+        return shapeScoreFromRatio(ratio);
+    }
+
+    function shapeScoreFromRatio(ratio) {
+        if (!Number.isFinite(ratio) || ratio <= 0) return 0;
+        if (ratio >= 2) {
+            return Math.min(100, 95 + (ratio - 2) * 10);
+        }
+        if (ratio >= 1) {
+            return 70 + (ratio - 1) * 25;
+        }
+        return Math.max(0, ratio * 70);
     }
 
     function resolveGrade(score, passRate, passCount, total) {
@@ -606,16 +905,6 @@
 
     function toFiniteNumber(value) {
         return Number.isFinite(value) ? Number(value) : null;
-    }
-
-    function normalisePositive(value, baseline, cap = 2) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) return 0;
-        return Math.min(cap, Math.max(0, value / baseline));
-    }
-
-    function normaliseInverse(value, baseline, cap = 2) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0) return 0;
-        return Math.min(cap, Math.max(0, baseline / value));
     }
 
     function average(values) {
@@ -836,6 +1125,7 @@
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const optimization = getRollingOptimizationConfig();
         return {
             trainingMonths,
             testingMonths,
@@ -844,7 +1134,344 @@
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            optimization,
         };
+    }
+
+    function getRollingOptimizationConfig() {
+        const enabled = Boolean(document.getElementById('rolling-optimize-enabled')?.checked);
+        const targetSelect = document.getElementById('rolling-optimize-target');
+        const targetMetric = targetSelect?.value || 'annualizedReturn';
+        const trialsValue = clampNumber(readInputValue('rolling-optimize-trials', 60), 5, 500);
+        const trials = Math.max(5, Math.round(trialsValue));
+        const optimizeEntry = Boolean(document.getElementById('rolling-optimize-entry')?.checked);
+        const optimizeExit = Boolean(document.getElementById('rolling-optimize-exit')?.checked);
+        const optimizeShortEntry = Boolean(document.getElementById('rolling-optimize-short-entry')?.checked);
+        const optimizeShortExit = Boolean(document.getElementById('rolling-optimize-short-exit')?.checked);
+        const optimizeRisk = Boolean(document.getElementById('rolling-optimize-risk')?.checked);
+
+        return {
+            enabled,
+            targetMetric,
+            trials,
+            optimizeEntry,
+            optimizeExit,
+            optimizeShortEntry,
+            optimizeShortExit,
+            optimizeRisk,
+        };
+    }
+
+    function syncRollingOptimizeUI() {
+        const toggle = document.getElementById('rolling-optimize-enabled');
+        const container = document.getElementById('rolling-optimize-settings');
+        if (!toggle || !container) return;
+
+        const enabled = Boolean(toggle.checked);
+        if (enabled) container.classList.remove('hidden');
+        else container.classList.add('hidden');
+
+        const shortEnabled = Boolean(document.getElementById('enableShortSelling')?.checked);
+        const shortControls = document.querySelectorAll('#rolling-optimize-panel .rolling-optimize-short');
+        shortControls.forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const checkbox = label.querySelector('input[type="checkbox"]');
+            if (!checkbox) return;
+            if (shortEnabled) {
+                checkbox.disabled = false;
+                label.classList.remove('opacity-60');
+            } else {
+                checkbox.checked = false;
+                checkbox.disabled = true;
+                label.classList.add('opacity-60');
+            }
+        });
+    }
+
+    const OPTIMIZE_SCOPE_DEFINITIONS = {
+        entry: { strategyKey: 'entryStrategy', paramsKey: 'entryParams', label: '做多進場' },
+        exit: { strategyKey: 'exitStrategy', paramsKey: 'exitParams', label: '做多出場' },
+        shortEntry: { strategyKey: 'shortEntryStrategy', paramsKey: 'shortEntryParams', label: '做空進場' },
+        shortExit: { strategyKey: 'shortExitStrategy', paramsKey: 'shortExitParams', label: '回補出場' },
+    };
+
+    function buildRollingOptimizationPlan(optConfig, baseParams) {
+        const normalized = {
+            enabled: Boolean(optConfig?.enabled),
+            targetMetric: optConfig?.targetMetric || 'annualizedReturn',
+            trials: Number.isFinite(optConfig?.trials) ? Math.max(5, Math.round(optConfig.trials)) : 60,
+            optimizeEntry: Boolean(optConfig?.optimizeEntry),
+            optimizeExit: Boolean(optConfig?.optimizeExit),
+            optimizeShortEntry: Boolean(optConfig?.optimizeShortEntry),
+            optimizeShortExit: Boolean(optConfig?.optimizeShortExit),
+            optimizeRisk: Boolean(optConfig?.optimizeRisk),
+        };
+
+        const plan = {
+            enabled: false,
+            scopes: [],
+            config: normalized,
+        };
+
+        if (!normalized.enabled || !baseParams) {
+            return plan;
+        }
+
+        const scopes = resolveOptimizationScopes(normalized, baseParams);
+        plan.scopes = scopes;
+        plan.enabled = scopes.length > 0;
+        return plan;
+    }
+
+    function resolveOptimizationScopes(optConfig, baseParams) {
+        if (!optConfig?.enabled || !baseParams) return [];
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) return [];
+
+        const scopes = [];
+        const canOptimize = (strategyName, scope) => {
+            if (!strategyName) return false;
+            const key = resolveStrategyConfigKey(strategyName, scope);
+            const info = strategyDescriptions?.[key];
+            return Boolean(info?.optimizeTargets && info.optimizeTargets.length > 0);
+        };
+
+        if (optConfig.optimizeEntry && canOptimize(baseParams.entryStrategy, 'entry')) {
+            scopes.push('entry');
+        }
+        if (optConfig.optimizeExit && canOptimize(baseParams.exitStrategy, 'exit')) {
+            scopes.push('exit');
+        }
+        if (optConfig.optimizeShortEntry && baseParams.enableShorting && canOptimize(baseParams.shortEntryStrategy, 'shortEntry')) {
+            scopes.push('shortEntry');
+        }
+        if (optConfig.optimizeShortExit && baseParams.enableShorting && canOptimize(baseParams.shortExitStrategy, 'shortExit')) {
+            scopes.push('shortExit');
+        }
+        if (optConfig.optimizeRisk) {
+            const hasRiskTargets = Boolean(globalOptimizeTargets?.stopLoss?.range || globalOptimizeTargets?.takeProfit?.range);
+            if (hasRiskTargets) scopes.push('risk');
+        }
+
+        return scopes;
+    }
+
+    async function optimizeParametersForWindow(baseWindowParams, windowInfo, plan) {
+        const targetMetric = plan?.config?.targetMetric || 'annualizedReturn';
+        const metricLabel = resolveMetricLabel(targetMetric);
+        const summary = {
+            targetMetric,
+            metricLabel,
+            messages: [],
+            scopeResults: [],
+        };
+
+        const outputParams = deepClone(baseWindowParams);
+
+        if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
+            return { params: outputParams, summary };
+        }
+
+        if (typeof optimizeSingleStrategyParameter !== 'function') {
+            summary.error = '缺少批量優化模組';
+            summary.messages.push('優化模組未載入，已沿用原始參數。');
+            return { params: outputParams, summary };
+        }
+
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+            summary.error = '無法讀取策略參數設定';
+            summary.messages.push('找不到策略參數範圍，已沿用原始參數。');
+            return { params: outputParams, summary };
+        }
+
+        const workingParams = deepClone(baseWindowParams);
+        workingParams.startDate = windowInfo.trainingStart;
+        workingParams.endDate = windowInfo.trainingEnd;
+
+        for (let i = 0; i < plan.scopes.length; i += 1) {
+            const scope = plan.scopes[i];
+            let result = null;
+            if (scope === 'risk') {
+                result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
+            } else {
+                result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+            }
+            if (!result) continue;
+            summary.scopeResults.push(result);
+            const message = buildOptimizationMessage(result);
+            if (message) summary.messages.push(message);
+            if (result.error) summary.error = result.error;
+        }
+
+        if (summary.messages.length > 0) {
+            summary.messages.unshift(`優化目標：${metricLabel}`);
+        } else if (!summary.error) {
+            summary.messages.push('優化：維持原始參數');
+        }
+
+        return { params: outputParams, summary };
+    }
+
+    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams) {
+        const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+        if (!definition) return null;
+
+        const strategyName = workingParams[definition.strategyKey];
+        const configKey = resolveStrategyConfigKey(strategyName, scope);
+        const strategyInfo = strategyDescriptions?.[configKey];
+        if (!strategyInfo || !Array.isArray(strategyInfo.optimizeTargets) || strategyInfo.optimizeTargets.length === 0) {
+            return { scope, label: definition.label, skipped: true, changedKeys: [] };
+        }
+
+        const labelMap = {};
+        strategyInfo.optimizeTargets.forEach((target) => {
+            labelMap[target.name] = target.label || target.name;
+        });
+
+        const baseParams = outputParams[definition.paramsKey] && Object.keys(outputParams[definition.paramsKey]).length > 0
+            ? { ...outputParams[definition.paramsKey] }
+            : { ...(strategyInfo.defaultParams || {}) };
+
+        let optimizedParams = { ...baseParams };
+        const changedKeys = new Set();
+
+        for (let i = 0; i < strategyInfo.optimizeTargets.length; i += 1) {
+            const target = strategyInfo.optimizeTargets[i];
+            workingParams[definition.paramsKey] = { ...optimizedParams };
+            const result = await optimizeSingleStrategyParameter(workingParams, target, scope, plan.config.targetMetric, plan.config.trials);
+            if (result && result.value !== undefined) {
+                optimizedParams[target.name] = result.value;
+                if (!areValuesClose(result.value, baseParams[target.name])) {
+                    changedKeys.add(target.name);
+                }
+            }
+        }
+
+        outputParams[definition.paramsKey] = optimizedParams;
+        workingParams[definition.paramsKey] = { ...optimizedParams };
+
+        return {
+            scope,
+            label: definition.label,
+            params: optimizedParams,
+            baseParams,
+            changedKeys: Array.from(changedKeys),
+            labelMap,
+        };
+    }
+
+    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams) {
+        if (typeof optimizeRiskManagementParameters !== 'function') {
+            return { scope: 'risk', label: '風險管理', error: '缺少風險優化模組', changedKeys: [] };
+        }
+
+        const optimizeTargets = [];
+        if (globalOptimizeTargets?.stopLoss?.range) {
+            optimizeTargets.push({ name: 'stopLoss', range: globalOptimizeTargets.stopLoss.range });
+        }
+        if (globalOptimizeTargets?.takeProfit?.range) {
+            optimizeTargets.push({ name: 'takeProfit', range: globalOptimizeTargets.takeProfit.range });
+        }
+        if (optimizeTargets.length === 0) {
+            return { scope: 'risk', label: '風險管理', skipped: true, changedKeys: [] };
+        }
+
+        const baseStopLoss = Number.isFinite(outputParams.stopLoss) ? outputParams.stopLoss : 0;
+        const baseTakeProfit = Number.isFinite(outputParams.takeProfit) ? outputParams.takeProfit : 0;
+        const labelMap = {
+            stopLoss: globalOptimizeTargets?.stopLoss?.label || '停損 (%)',
+            takeProfit: globalOptimizeTargets?.takeProfit?.label || '停利 (%)',
+        };
+
+        let optimizedResult = {};
+        try {
+            const riskParams = deepClone(workingParams);
+            optimizedResult = await optimizeRiskManagementParameters(riskParams, optimizeTargets, plan.config.targetMetric, plan.config.trials);
+        } catch (error) {
+            return { scope: 'risk', label: '風險管理', error: error?.message || '優化失敗', changedKeys: [] };
+        }
+
+        const changedKeys = [];
+
+        if (optimizedResult && optimizedResult.stopLoss !== undefined && Number.isFinite(optimizedResult.stopLoss)) {
+            outputParams.stopLoss = optimizedResult.stopLoss;
+            workingParams.stopLoss = optimizedResult.stopLoss;
+            if (!areValuesClose(optimizedResult.stopLoss, baseStopLoss)) changedKeys.push('stopLoss');
+        }
+
+        if (optimizedResult && optimizedResult.takeProfit !== undefined && Number.isFinite(optimizedResult.takeProfit)) {
+            outputParams.takeProfit = optimizedResult.takeProfit;
+            workingParams.takeProfit = optimizedResult.takeProfit;
+            if (!areValuesClose(optimizedResult.takeProfit, baseTakeProfit)) changedKeys.push('takeProfit');
+        }
+
+        const resultParams = {};
+        if (Number.isFinite(outputParams.stopLoss)) resultParams.stopLoss = outputParams.stopLoss;
+        if (Number.isFinite(outputParams.takeProfit)) resultParams.takeProfit = outputParams.takeProfit;
+
+        return {
+            scope: 'risk',
+            label: '風險管理',
+            params: resultParams,
+            baseParams: { stopLoss: baseStopLoss, takeProfit: baseTakeProfit },
+            changedKeys,
+            labelMap,
+        };
+    }
+
+    function resolveStrategyConfigKey(strategyName, scope) {
+        if (!strategyName) return null;
+        let key = strategyName;
+        if (scope === 'exit' && strategyDescriptions?.[`${strategyName}_exit`]) {
+            key = `${strategyName}_exit`;
+        } else if (scope === 'shortEntry' && !strategyDescriptions?.[key] && strategyDescriptions?.[`short_${strategyName}`]) {
+            key = `short_${strategyName}`;
+        } else if (scope === 'shortExit' && !strategyDescriptions?.[key] && strategyDescriptions?.[`cover_${strategyName}`]) {
+            key = `cover_${strategyName}`;
+        }
+        return key;
+    }
+
+    function buildOptimizationMessage(result) {
+        if (!result || result.skipped) return null;
+        if (result.error) {
+            return `${result.label}優化失敗：${result.error}`;
+        }
+        const changedKeys = Array.isArray(result.changedKeys) ? result.changedKeys : [];
+        if (changedKeys.length === 0) {
+            return `${result.label}優化：維持原始參數`;
+        }
+        const formatted = changedKeys.map((key) => {
+            const label = result.labelMap?.[key] || key;
+            const value = formatOptimizationParamValue(result.params?.[key]);
+            return `${label}=${value}`;
+        });
+        return `${result.label}優化：${formatted.join('、')}`;
+    }
+
+    function formatOptimizationParamValue(value) {
+        if (value === null || value === undefined) return '—';
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) return '—';
+            const abs = Math.abs(value);
+            if (abs >= 1000) return value.toFixed(0);
+            if (abs >= 100) return value.toFixed(1).replace(/\.0$/, '');
+            if (abs >= 10) return value.toFixed(1).replace(/\.0$/, '');
+            return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
+        }
+        return String(value);
+    }
+
+    function areValuesClose(a, b) {
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+            const diff = Math.abs(a - b);
+            const tolerance = Math.max(1e-6, Math.abs(a) * 1e-4);
+            return diff <= tolerance;
+        }
+        return a === b;
+    }
+
+    function resolveMetricLabel(metric) {
+        return METRIC_LABELS[metric] || metric;
     }
 
     function readInputValue(id, fallback) {
@@ -925,6 +1552,41 @@
             if (row.date >= startIso && row.date <= endIso) return count + 1;
             return count;
         }, 0);
+    }
+
+    function validateWindowCoverage(windows, rows, config) {
+        if (!Array.isArray(windows) || windows.length === 0) return [];
+        const issues = [];
+        const datasetStart = Array.isArray(rows) && rows.length > 0 ? rows[0]?.date : null;
+        const datasetEnd = Array.isArray(rows) && rows.length > 0 ? rows[rows.length - 1]?.date : null;
+        const minTrainingDays = Math.max(15, Math.ceil((config?.trainingMonths || 1) * 5));
+        const minTestingDays = Math.max(5, Math.ceil((config?.testingMonths || 1) * 3));
+
+        windows.forEach((win, index) => {
+            if (datasetStart && win.trainingStart < datasetStart) {
+                issues.push(`視窗 ${index + 1} 的訓練起點 (${win.trainingStart}) 早於可用資料 (${datasetStart})`);
+            }
+            if (datasetEnd && win.testingEnd > datasetEnd) {
+                issues.push(`視窗 ${index + 1} 的測試終點 (${win.testingEnd}) 超出可用資料 (${datasetEnd})`);
+            }
+
+            const trainingDays = countTradingDays(win.trainingStart, win.trainingEnd, rows);
+            const testingDays = countTradingDays(win.testingStart, win.testingEnd, rows);
+
+            if (trainingDays === 0) {
+                issues.push(`視窗 ${index + 1} 的訓練區間 (${win.trainingStart} ~ ${win.trainingEnd}) 缺少交易資料`);
+            } else if (trainingDays < minTrainingDays) {
+                issues.push(`視窗 ${index + 1} 的訓練區間僅有 ${trainingDays} 筆交易日（建議至少 ${minTrainingDays} 筆）`);
+            }
+
+            if (testingDays === 0) {
+                issues.push(`視窗 ${index + 1} 的測試區間 (${win.testingStart} ~ ${win.testingEnd}) 缺少交易資料`);
+            } else if (testingDays < minTestingDays) {
+                issues.push(`視窗 ${index + 1} 的測試區間僅有 ${testingDays} 筆交易日（建議至少 ${minTestingDays} 筆）`);
+            }
+        });
+
+        return issues;
     }
 
     function getCachedAvailability(rowsOverride) {
