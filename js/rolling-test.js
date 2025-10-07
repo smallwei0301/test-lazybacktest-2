@@ -1,6 +1,6 @@
-// --- 滾動測試模組 - v1.1 ---
-// Patch Tag: LB-ROLLING-TEST-20250912A
-/* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
+// --- 滾動測試模組 - v1.2 ---
+// Patch Tag: LB-ROLLING-OPT-20250930A
+/* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo, strategyDescriptions */
 
 (function() {
     const state = {
@@ -10,6 +10,7 @@
         windows: [],
         results: [],
         config: null,
+        baseParams: null,
         startTime: null,
         progress: {
             totalSteps: 0,
@@ -17,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912A',
+        version: 'LB-ROLLING-OPT-20250930A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -34,6 +35,14 @@
         sortinoRatio: 0.2,
         maxDrawdown: 0.1,
         winRate: 0.05,
+    };
+
+    const OPTIMIZATION_TARGETS = {
+        annualizedReturn: { label: '年化報酬率', direction: 'max' },
+        sharpeRatio: { label: 'Sharpe Ratio', direction: 'max' },
+        sortinoRatio: { label: 'Sortino Ratio', direction: 'max' },
+        winRate: { label: '勝率', direction: 'max' },
+        maxDrawdown: { label: '最大回撤', direction: 'min' },
     };
 
     function initRollingTest() {
@@ -66,6 +75,13 @@
         const availability = getCachedAvailability(cachedRows);
         const windows = computeRollingWindows(config, availability);
 
+        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        if (!baseParams) {
+            setAlert('無法取得回測參數，請確認主畫面設定無誤後再試。', 'error');
+            showError?.('滾動測試無法讀取回測參數');
+            return;
+        }
+
         if (!Array.isArray(cachedRows) || cachedRows.length === 0) {
             setPlanWarning(true);
             setAlert('請先在主畫面執行一次完整回測，以建立快取資料後再啟動滾動測試。', 'error');
@@ -84,8 +100,9 @@
         state.config = config;
         state.windows = windows;
         state.results = [];
+        state.baseParams = deepClone(baseParams);
         state.startTime = Date.now();
-        state.progress.totalSteps = windows.length * 2; // 訓練 + 測試
+        state.progress.totalSteps = computeTotalStepsEstimate(baseParams, windows.length, config);
         state.progress.currentStep = 0;
         state.progress.windowIndex = 0;
         state.progress.stage = '';
@@ -96,7 +113,7 @@
         setAlert('系統已開始滾動測試，請保持頁面開啟。', 'info');
         updateProgressUI();
 
-        runRollingSequence().catch((error) => {
+        runRollingSequence(state.baseParams).catch((error) => {
             console.error('[Rolling Test] Unexpected error:', error);
             showError?.(`滾動測試失敗：${error?.message || error}`);
             setAlert(`滾動測試失敗：${error?.message || '未知錯誤'}`, 'error');
@@ -117,8 +134,29 @@
         setAlert('已送出停止指令，系統會在目前視窗結束後停止。', 'warning');
     }
 
-    async function runRollingSequence() {
-        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+    function computeTotalStepsEstimate(baseParams, windowCount, config) {
+        if (!Number.isFinite(windowCount) || windowCount <= 0) return 0;
+        if (!config?.optimization?.enabled) return windowCount * 2;
+        const optimizationRuns = estimateOptimizationRuns(baseParams, config);
+        const trainingSteps = Math.max(optimizationRuns, 1);
+        return windowCount * (trainingSteps + 1);
+    }
+
+    function estimateOptimizationRuns(baseParams, config) {
+        if (!config?.optimization?.enabled) return 1;
+        const tasks = buildOptimizationTasks(baseParams);
+        if (!Array.isArray(tasks) || tasks.length === 0) return 1;
+        let total = 0;
+        tasks.forEach((task) => {
+            const descriptor = resolveStrategyDescriptor(task.strategyKey);
+            if (!descriptor || !Array.isArray(descriptor.optimizeTargets) || descriptor.optimizeTargets.length === 0) return;
+            const combosCount = generateParameterCombosForStrategy(descriptor, config.optimization.samples, task.initialParams, { estimateOnly: true });
+            total += combosCount;
+        });
+        return Math.max(total, 1);
+    }
+
+    async function runRollingSequence(baseParams) {
         if (!baseParams) throw new Error('無法取得回測參數，請重新整理頁面');
 
         for (let i = 0; i < state.windows.length; i += 1) {
@@ -126,16 +164,44 @@
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
+            let parameterOverrides = null;
+            let optimizationInfo = null;
             let trainingResult = null;
-            try {
-                trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
-                    phase: '訓練期',
-                    windowIndex: i + 1,
-                    totalWindows: state.windows.length,
-                });
-            } catch (error) {
-                console.warn('[Rolling Test] Training window failed:', error);
-                trainingResult = { error: error?.message || '訓練期回測失敗' };
+
+            if (state.config?.optimization?.enabled) {
+                try {
+                    optimizationInfo = await optimizeParametersForWindow(baseParams, win, {
+                        target: state.config.optimization.target,
+                        samples: state.config.optimization.samples,
+                        windowIndex: i + 1,
+                        totalWindows: state.windows.length,
+                    });
+                    if (optimizationInfo?.overrides && Object.keys(optimizationInfo.overrides).length > 0) {
+                        parameterOverrides = optimizationInfo.overrides;
+                    }
+                    if (optimizationInfo?.trainingResult) {
+                        trainingResult = optimizationInfo.trainingResult;
+                    }
+                } catch (error) {
+                    console.warn('[Rolling Test] Optimization failed:', error);
+                    optimizationInfo = {
+                        error: error?.message || '訓練期最佳化失敗',
+                        target: state.config.optimization.target,
+                    };
+                }
+            }
+
+            if (!trainingResult) {
+                try {
+                    trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
+                        phase: '訓練期',
+                        windowIndex: i + 1,
+                        totalWindows: state.windows.length,
+                    }, parameterOverrides);
+                } catch (error) {
+                    console.warn('[Rolling Test] Training window failed:', error);
+                    trainingResult = { error: error?.message || '訓練期回測失敗' };
+                }
             }
 
             if (state.cancelled) break;
@@ -146,7 +212,7 @@
                     phase: '測試期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
-                });
+                }, parameterOverrides);
             } catch (error) {
                 console.warn('[Rolling Test] Testing window failed:', error);
                 testingResult = { error: error?.message || '測試期回測失敗' };
@@ -156,13 +222,406 @@
                 window: win,
                 training: trainingResult,
                 testing: testingResult,
+                optimization: optimizationInfo,
+                overrides: parameterOverrides,
             });
         }
+    }
+
+    function buildOptimizationTasks(baseParams) {
+        if (!baseParams || typeof baseParams !== 'object') return [];
+        const tasks = [];
+        if (baseParams.entryStrategy) {
+            tasks.push({
+                type: 'entry',
+                label: '多頭進場',
+                strategyKey: baseParams.entryStrategy,
+                paramsKey: 'entryParams',
+                initialParams: baseParams.entryParams || {},
+            });
+        }
+        if (baseParams.exitStrategy) {
+            tasks.push({
+                type: 'exit',
+                label: '多頭出場',
+                strategyKey: baseParams.exitStrategy,
+                paramsKey: 'exitParams',
+                initialParams: baseParams.exitParams || {},
+            });
+        }
+        if (baseParams.enableShorting) {
+            if (baseParams.shortEntryStrategy) {
+                tasks.push({
+                    type: 'shortEntry',
+                    label: '空頭進場',
+                    strategyKey: baseParams.shortEntryStrategy,
+                    paramsKey: 'shortEntryParams',
+                    initialParams: baseParams.shortEntryParams || {},
+                });
+            }
+            if (baseParams.shortExitStrategy) {
+                tasks.push({
+                    type: 'shortExit',
+                    label: '空頭出場',
+                    strategyKey: baseParams.shortExitStrategy,
+                    paramsKey: 'shortExitParams',
+                    initialParams: baseParams.shortExitParams || {},
+                });
+            }
+        }
+        return tasks;
+    }
+
+    function resolveStrategyDescriptor(strategyKey) {
+        if (!strategyKey || typeof strategyKey !== 'string') return null;
+        if (typeof strategyDescriptions !== 'undefined' && strategyDescriptions[strategyKey]) {
+            return strategyDescriptions[strategyKey];
+        }
+        return null;
+    }
+
+    function generateParameterCombosForStrategy(descriptor, sampleLimit, baseParamSet, options = {}) {
+        if (!descriptor || !Array.isArray(descriptor.optimizeTargets) || descriptor.optimizeTargets.length === 0) {
+            return options.estimateOnly ? 0 : [];
+        }
+        const sanitizedBase = (baseParamSet && typeof baseParamSet === 'object') ? baseParamSet : (descriptor.defaultParams || {});
+        const grid = buildParameterGrid(descriptor.optimizeTargets, sampleLimit, sanitizedBase, options);
+        return grid;
+    }
+
+    function buildParameterGrid(optTargets, maxSamples, baseParamSet, options = {}) {
+        const limit = Math.max(1, Number.isFinite(maxSamples) ? Math.floor(maxSamples) : 1);
+        const paramCount = optTargets.length;
+        if (paramCount === 0) {
+            return options.estimateOnly ? 0 : [];
+        }
+        const perParamCount = Math.max(1, Math.floor(Math.pow(limit, 1 / paramCount)));
+        const valueMatrix = optTargets.map((target) => {
+            const baseValue = baseParamSet ? baseParamSet[target.name] : undefined;
+            return sampleRangeValues(target.range, perParamCount, baseValue);
+        });
+
+        let comboCount = 1;
+        valueMatrix.forEach((values) => {
+            comboCount *= Math.max(values.length, 1);
+        });
+        if (options.estimateOnly) {
+            return Math.max(1, Math.min(comboCount, limit));
+        }
+
+        const combos = [];
+        const current = {};
+        function backtrack(index) {
+            if (index >= optTargets.length) {
+                combos.push({ ...current });
+                return;
+            }
+            const target = optTargets[index];
+            const candidates = valueMatrix[index];
+            candidates.forEach((value) => {
+                current[target.name] = value;
+                backtrack(index + 1);
+            });
+        }
+        backtrack(0);
+
+        let finalCombos = combos;
+        if (finalCombos.length > limit) {
+            const trimmed = [];
+            const step = (finalCombos.length - 1) / (limit - 1 || 1);
+            for (let i = 0; i < limit; i += 1) {
+                const index = Math.round(i * step);
+                trimmed.push({ ...finalCombos[index] });
+            }
+            finalCombos = trimmed;
+        } else {
+            finalCombos = finalCombos.map((combo) => ({ ...combo }));
+        }
+
+        const baseCombo = {};
+        optTargets.forEach((target) => {
+            if (baseParamSet && Object.prototype.hasOwnProperty.call(baseParamSet, target.name)) {
+                baseCombo[target.name] = baseParamSet[target.name];
+            }
+        });
+        if (Object.keys(baseCombo).length > 0) {
+            const hasBase = finalCombos.some((combo) => optTargets.every((target) => approxEqual(combo[target.name], baseCombo[target.name])));
+            if (!hasBase) {
+                if (finalCombos.length >= limit) finalCombos.pop();
+                finalCombos.push({ ...baseCombo });
+            }
+        }
+
+        return finalCombos;
+    }
+
+    function sampleRangeValues(range, desiredCount, baseValue) {
+        const values = enumerateRangeValues(range);
+        if (!values || values.length === 0) {
+            if (Number.isFinite(baseValue)) return [baseValue];
+            return [];
+        }
+        if (!Number.isFinite(desiredCount) || desiredCount <= 1) {
+            if (Number.isFinite(baseValue)) {
+                return [findNearestValue(values, baseValue)];
+            }
+            const midIndex = Math.floor(values.length / 2);
+            return [values[midIndex]];
+        }
+        const limit = Math.min(values.length, Math.max(1, Math.floor(desiredCount)));
+        if (limit >= values.length) {
+            return ensureIncludesBase([...values], baseValue, values);
+        }
+        const selected = [];
+        const step = (values.length - 1) / (limit - 1);
+        for (let i = 0; i < limit; i += 1) {
+            const index = Math.round(i * step);
+            const candidate = values[index];
+            if (!selected.some((value) => approxEqual(value, candidate))) {
+                selected.push(candidate);
+            }
+        }
+        return ensureIncludesBase(selected, baseValue, values);
+    }
+
+    function enumerateRangeValues(range) {
+        if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return [];
+        const stepValue = Number.isFinite(range.step) && range.step > 0 ? range.step : 1;
+        const decimals = countDecimalPlaces(stepValue);
+        const multiplier = 10 ** decimals;
+        const start = Math.round(range.from * multiplier);
+        const end = Math.round(range.to * multiplier);
+        const step = Math.max(1, Math.round(stepValue * multiplier));
+        const values = [];
+        if (start <= end) {
+            for (let value = start; value <= end; value += step) {
+                values.push(value / multiplier);
+            }
+        } else {
+            for (let value = start; value >= end; value -= step) {
+                values.push(value / multiplier);
+            }
+        }
+        return values;
+    }
+
+    function ensureIncludesBase(values, baseValue, fullRangeValues) {
+        if (!Number.isFinite(baseValue)) return values;
+        if (values.some((value) => approxEqual(value, baseValue))) return values;
+        const nearest = findNearestValue(fullRangeValues, baseValue);
+        if (!values.some((value) => approxEqual(value, nearest))) {
+            if (values.length === 0) return [nearest];
+            const clone = values.slice(0, values.length - 1);
+            clone.push(nearest);
+            clone.sort((a, b) => a - b);
+            return clone;
+        }
+        return values;
+    }
+
+    function findNearestValue(candidates, target) {
+        if (!Array.isArray(candidates) || candidates.length === 0 || !Number.isFinite(target)) return target;
+        let nearest = candidates[0];
+        let minDiff = Math.abs(candidates[0] - target);
+        for (let i = 1; i < candidates.length; i += 1) {
+            const diff = Math.abs(candidates[i] - target);
+            if (diff < minDiff) {
+                minDiff = diff;
+                nearest = candidates[i];
+            }
+        }
+        return nearest;
+    }
+
+    function approxEqual(a, b, tolerance = 1e-6) {
+        if (a === b) return true;
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+        return Math.abs(a - b) <= tolerance;
+    }
+
+    function countDecimalPlaces(value) {
+        if (!Number.isFinite(value)) return 0;
+        const text = value.toString();
+        if (text.includes('e')) {
+            const [coeff, exponent] = text.split('e');
+            const decimals = (coeff.split('.')[1] || '').length;
+            const exp = parseInt(exponent, 10);
+            return Math.max(0, decimals - exp);
+        }
+        const decimalPart = text.split('.')[1];
+        return decimalPart ? decimalPart.length : 0;
+    }
+
+    async function optimizeParametersForWindow(baseParams, window, options) {
+        const resultPayload = {
+            overrides: null,
+            trainingResult: null,
+            target: options?.target || 'annualizedReturn',
+            testedCandidates: 0,
+            stages: [],
+        };
+
+        const tasks = buildOptimizationTasks(baseParams);
+        if (!options?.samples || !tasks || tasks.length === 0) {
+            return resultPayload;
+        }
+
+        const targetKey = OPTIMIZATION_TARGETS[options.target] ? options.target : 'annualizedReturn';
+        const overrides = {};
+        let cumulativeBestMetric = targetKey === 'maxDrawdown' ? Infinity : -Infinity;
+        let cumulativeBestResult = null;
+
+        for (let t = 0; t < tasks.length; t += 1) {
+            if (state.cancelled) break;
+            const task = tasks[t];
+            const descriptor = resolveStrategyDescriptor(task.strategyKey);
+            if (!descriptor || !Array.isArray(descriptor.optimizeTargets) || descriptor.optimizeTargets.length === 0) {
+                continue;
+            }
+            const baseForTask = {
+                ...(descriptor.defaultParams || {}),
+                ...(task.initialParams || {}),
+                ...(overrides[task.paramsKey] || {}),
+            };
+            const combos = generateParameterCombosForStrategy(descriptor, options.samples, baseForTask);
+            if (!Array.isArray(combos) || combos.length === 0) {
+                continue;
+            }
+
+            let stageBestMetric = targetKey === 'maxDrawdown' ? Infinity : -Infinity;
+            let stageBestResult = null;
+            let stageBestParams = baseForTask;
+
+            for (let i = 0; i < combos.length; i += 1) {
+                if (state.cancelled) break;
+                const candidateParams = combos[i];
+                const candidateOverrides = {
+                    ...overrides,
+                    [task.paramsKey]: { ...candidateParams },
+                };
+                const context = {
+                    phase: `訓練期最佳化 · ${task.label} (${i + 1}/${combos.length})`,
+                    windowIndex: options.windowIndex,
+                    totalWindows: options.totalWindows,
+                };
+                let candidateResult = null;
+                try {
+                    candidateResult = await runSingleWindow(baseParams, window.trainingStart, window.trainingEnd, context, candidateOverrides);
+                } catch (error) {
+                    candidateResult = { error: error?.message || '最佳化回測失敗' };
+                }
+                resultPayload.testedCandidates += 1;
+                const metricValue = resolveOptimizationMetric(candidateResult, targetKey);
+                if (isBetterMetric(metricValue, stageBestMetric, targetKey)) {
+                    stageBestMetric = metricValue;
+                    stageBestResult = candidateResult;
+                    stageBestParams = { ...candidateParams };
+                }
+                if (isBetterMetric(metricValue, cumulativeBestMetric, targetKey)) {
+                    cumulativeBestMetric = metricValue;
+                    cumulativeBestResult = candidateResult;
+                    overrides[task.paramsKey] = { ...candidateParams };
+                }
+            }
+
+            if (stageBestParams) {
+                overrides[task.paramsKey] = { ...stageBestParams };
+            }
+            if (stageBestResult) {
+                cumulativeBestResult = stageBestResult;
+                cumulativeBestMetric = resolveOptimizationMetric(stageBestResult, targetKey);
+            }
+
+            resultPayload.stages.push({
+                type: task.type,
+                label: task.label,
+                strategy: task.strategyKey,
+                combosTested: combos.length,
+                bestMetric: stageBestMetric,
+                bestParams: { ...stageBestParams },
+            });
+        }
+
+        if (overrides && Object.keys(overrides).length > 0) {
+            resultPayload.overrides = overrides;
+        }
+        if (cumulativeBestResult) {
+            resultPayload.trainingResult = cumulativeBestResult;
+        }
+
+        return resultPayload;
+    }
+
+    function resolveOptimizationMetric(result, targetKey) {
+        if (!result || result.error) return null;
+        switch (targetKey) {
+            case 'sharpeRatio':
+                return Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null;
+            case 'sortinoRatio':
+                return Number.isFinite(result.sortinoRatio) ? result.sortinoRatio : null;
+            case 'winRate':
+                if (Number.isFinite(result.winTrades) && Number.isFinite(result.tradesCount) && result.tradesCount > 0) {
+                    return (result.winTrades / result.tradesCount) * 100;
+                }
+                return Number.isFinite(result.winRate) ? result.winRate : null;
+            case 'maxDrawdown':
+                return Number.isFinite(result.maxDrawdown) ? result.maxDrawdown : null;
+            case 'annualizedReturn':
+            default:
+                return Number.isFinite(result.annualizedReturn) ? result.annualizedReturn : null;
+        }
+    }
+
+    function isBetterMetric(candidate, currentBest, targetKey) {
+        if (!Number.isFinite(candidate)) return false;
+        if (!Number.isFinite(currentBest)) return true;
+        const direction = OPTIMIZATION_TARGETS[targetKey]?.direction || 'max';
+        if (direction === 'min') {
+            return candidate < currentBest;
+        }
+        return candidate > currentBest;
+    }
+
+    function formatOptimizationSummary(optimization) {
+        if (!optimization || optimization.error) return '';
+        if (!Array.isArray(optimization.stages) || optimization.stages.length === 0) return '';
+        const segments = optimization.stages
+            .map((stage) => {
+                if (!stage || !stage.bestParams || Object.keys(stage.bestParams).length === 0) return null;
+                const paramText = formatParamPairs(stage.bestParams);
+                if (!paramText) return null;
+                return `${stage.label}${paramText}`;
+            })
+            .filter(Boolean);
+        if (segments.length === 0) return '';
+        const targetLabel = OPTIMIZATION_TARGETS[optimization.target]?.label || '目標';
+        const testedText = Number.isFinite(optimization.testedCandidates) && optimization.testedCandidates > 0
+            ? `（測試 ${optimization.testedCandidates} 組）`
+            : '';
+        return `最佳化(${targetLabel})：${segments.join('；')}${testedText}`;
+    }
+
+    function formatParamPairs(params) {
+        if (!params || typeof params !== 'object') return '';
+        const pairs = Object.entries(params)
+            .map(([key, value]) => `${key}=${formatParamValue(value)}`)
+            .join(', ');
+        return pairs ? `（${pairs}）` : '';
+    }
+
+    function formatParamValue(value) {
+        if (!Number.isFinite(value)) return String(value);
+        const decimals = Math.abs(value) >= 1 ? 2 : 3;
+        let text = value.toFixed(decimals);
+        text = text.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+        if (text.endsWith('.')) text = text.slice(0, -1);
+        return text;
     }
 
     function finalizeRollingRun() {
         toggleRollingControls(false);
         state.running = false;
+        state.baseParams = null;
         ensureProgressPanelVisible(state.results.length > 0);
         if (state.cancelled) {
             setAlert('滾動測試已中止，可重新調整參數後再試。', 'warning');
@@ -306,6 +765,7 @@
             testing: extractMetrics(entry.testing),
             rawTraining: entry.training,
             rawTesting: entry.testing,
+            optimization: entry.optimization,
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
@@ -421,6 +881,10 @@
                 }
                 if (!Number.isFinite(entry.testing.tradesCount) || entry.testing.tradesCount < minTrades) {
                     commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
+                }
+                const optimizationSummary = formatOptimizationSummary(entry.optimization);
+                if (optimizationSummary) {
+                    commentParts.push(optimizationSummary);
                 }
             }
             return {
@@ -665,10 +1129,10 @@
         return windows;
     }
 
-    function runSingleWindow(baseParams, startIso, endIso, context) {
+    function runSingleWindow(baseParams, startIso, endIso, context, overrides) {
         return new Promise((resolve, reject) => {
             try {
-                const payload = prepareWorkerPayload(baseParams, startIso, endIso);
+                const payload = prepareWorkerPayload(baseParams, startIso, endIso, overrides);
                 if (!payload) {
                     reject(new Error('無法準備回測參數'));
                     return;
@@ -725,20 +1189,35 @@
         });
     }
 
-    function prepareWorkerPayload(baseParams, startIso, endIso) {
+    function prepareWorkerPayload(baseParams, startIso, endIso, overrides) {
         if (!baseParams || !startIso || !endIso) return null;
         const clone = deepClone(baseParams);
         clone.startDate = startIso;
         clone.endDate = endIso;
         if ('recentYears' in clone) delete clone.recentYears;
 
-        const enriched = enrichParamsWithLookback(clone);
+        const merged = applyParamOverrides(clone, overrides);
+        const enriched = enrichParamsWithLookback(merged);
         return {
             params: enriched,
             dataStartDate: enriched.dataStartDate || enriched.startDate,
             effectiveStartDate: enriched.effectiveStartDate || enriched.startDate,
             lookbackDays: Number.isFinite(enriched.lookbackDays) ? enriched.lookbackDays : null,
         };
+    }
+
+    function applyParamOverrides(baseParams, overrides) {
+        if (!overrides || typeof overrides !== 'object') return baseParams;
+        const merged = { ...baseParams };
+        Object.keys(overrides).forEach((key) => {
+            const value = overrides[key];
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                merged[key] = { ...(merged[key] || {}), ...value };
+            } else {
+                merged[key] = value;
+            }
+        });
+        return merged;
     }
 
     function buildCachedMeta() {
@@ -835,6 +1314,10 @@
             maxDrawdown: clampNumber(readInputValue('rolling-threshold-maxdd', DEFAULT_THRESHOLDS.maxDrawdown), 1, 100),
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
         };
+        const optimizeEnabled = Boolean(document.getElementById('rolling-optimize-enable')?.checked);
+        const rawTarget = document.getElementById('rolling-optimize-target')?.value || 'annualizedReturn';
+        const optimizationTarget = OPTIMIZATION_TARGETS[rawTarget] ? rawTarget : 'annualizedReturn';
+        const optimizationSamples = clampNumber(readInputValue('rolling-optimize-samples', 25), 5, 200);
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
         return {
             trainingMonths,
@@ -842,6 +1325,11 @@
             stepMonths,
             minTrades,
             thresholds,
+            optimization: {
+                enabled: optimizeEnabled,
+                target: optimizationTarget,
+                samples: optimizationSamples,
+            },
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
         };

@@ -1962,6 +1962,33 @@
                                                     </div>
                                                     <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
                                                 </fieldset>
+                                                <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
+                                                    <legend class="font-medium">訓練期最佳化</legend>
+                                                    <p class="text-[11px] font-normal" style="color: var(--muted-foreground);">
+                                                        啟用後，系統會在每個訓練視窗內掃描策略參數，依選定目標（如年化報酬率）挑選最佳組合，再帶入後續測試期。
+                                                    </p>
+                                                    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                                        <label class="flex items-center gap-2">
+                                                            <input id="rolling-optimize-enable" data-rolling-input type="checkbox" class="w-4 h-4 rounded border-border text-primary focus:ring-ring" />
+                                                            <span>啟用訓練期自動最佳化</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1">
+                                                            <span class="font-medium">最佳化目標</span>
+                                                            <select id="rolling-optimize-target" data-rolling-input class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="annualizedReturn">年化報酬率</option>
+                                                                <option value="sharpeRatio">Sharpe Ratio</option>
+                                                                <option value="sortinoRatio">Sortino Ratio</option>
+                                                                <option value="winRate">勝率</option>
+                                                                <option value="maxDrawdown">最大回撤（越低越好）</option>
+                                                            </select>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1">
+                                                            <span class="font-medium">每策略最多嘗試組合</span>
+                                                            <input id="rolling-optimize-samples" data-rolling-input type="number" min="5" max="200" step="1" value="25" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">會依參數數量等分取樣，確保效能與準確度平衡。</span>
+                                                        </label>
+                                                    </div>
+                                                </fieldset>
                                             </div>
                                         </div>
                                     </div>
