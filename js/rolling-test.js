@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.3 ---
-// Patch Tag: LB-ROLLING-TEST-20250918A
+// --- 滾動測試模組 - v1.4 ---
+// Patch Tag: LB-ROLLING-TEST-20250920B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250918A',
+        version: 'LB-ROLLING-TEST-20250920B',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -27,14 +27,16 @@
         sortinoRatio: 1.2,
         maxDrawdown: 25,
         winRate: 45,
+        walkForwardEfficiency: 60,
     };
 
     const SCORE_WEIGHTS = {
-        annualizedReturn: 0.35,
-        sharpeRatio: 0.3,
+        annualizedReturn: 0.25,
+        sharpeRatio: 0.25,
         sortinoRatio: 0.2,
         maxDrawdown: 0.1,
-        winRate: 0.05,
+        winRate: 0.1,
+        walkForwardEfficiency: 0.1,
     };
 
     const METRIC_LABELS = {
@@ -43,7 +45,19 @@
         sortinoRatio: 'Sortino Ratio',
         maxDrawdown: '最大回撤',
         winRate: '勝率',
+        walkForwardEfficiency: 'Walk-Forward 效率',
     };
+
+    const METRIC_FIX_TIPS = {
+        annualizedReturn: '調整進場濾網或延長訓練視窗，提高測試期的年化增長率。',
+        sharpeRatio: '強化風險控管或加入波動濾網，提升夏普值穩定度。',
+        sortinoRatio: '加強下行保護（如停損或避險條件），降低負報酬波動。',
+        maxDrawdown: '收緊部位或加入防守型出場機制，壓低測試期最大回撤。',
+        winRate: '檢視進出場條件與樣本數，避免低交易筆數造成勝率不穩。',
+        walkForwardEfficiency: '回顧訓練與測試收益落差，確認優化後參數具泛化能力。',
+    };
+
+    const MAX_PARAM_ENTRIES = 3;
 
     const PARAM_NAME_LABELS = {
         shortPeriod: '短天數',
@@ -433,6 +447,11 @@
                 ].join(''),
             },
             {
+                title: 'Walk-Forward 效率',
+                value: formatPercent(aggregate.averageWalkForwardEfficiency),
+                description: `Pardo (2011) 建議 ≥ ${formatPercent(aggregate.thresholds.walkForwardEfficiency)}，反映訓練與測試收益落差`,
+            },
+            {
                 title: '平均年化報酬 (OOS)',
                 value: formatPercent(aggregate.averageAnnualizedReturn),
                 description: 'Out-of-Sample 平均年化報酬率',
@@ -440,12 +459,7 @@
             {
                 title: 'Sharpe / Sortino 中位數',
                 value: `${formatNumber(aggregate.medianSharpe)} / ${formatNumber(aggregate.medianSortino)}`,
-                description: 'Sharpe 與 Sortino 比率中位數',
-            },
-            {
-                title: '通過視窗比例',
-                value: formatPercent(aggregate.passRate),
-                description: `共有 ${aggregate.passCount} 個視窗達標，勝率門檻 ${aggregate.thresholds.winRate}%`,
+                description: `QuantConnect / TradeStation 常見門檻：Sharpe ≥ ${aggregate.thresholds.sharpeRatio}、Sortino ≥ ${aggregate.thresholds.sortinoRatio}`,
             },
         ];
 
@@ -519,6 +533,11 @@
             winRateCell.className = 'px-3 py-2 text-right';
             winRateCell.textContent = formatPercent(entry.metrics.winRate);
             tr.appendChild(winRateCell);
+
+            const wfeCell = document.createElement('td');
+            wfeCell.className = 'px-3 py-2 text-right';
+            wfeCell.textContent = formatPercent(entry.metrics.walkForwardEfficiency);
+            tr.appendChild(wfeCell);
 
             const tradesCell = document.createElement('td');
             tradesCell.className = 'px-3 py-2 text-right';
@@ -601,7 +620,12 @@
                 return `${label}=${formatted}`;
             })
             .filter((entry) => entry);
-        return entries.length > 0 ? entries.join('、') : '';
+        if (entries.length === 0) return '';
+        const limited = entries.slice(0, MAX_PARAM_ENTRIES);
+        if (entries.length > MAX_PARAM_ENTRIES) {
+            limited.push('…');
+        }
+        return limited.join('、');
     }
 
     function formatParamValue(value) {
@@ -630,7 +654,7 @@
             .map((stage) => (Number.isFinite(stage) ? Number(stage) : null))
             .filter((stage) => stage !== null && stage > 0);
         if (valid.length === 0) return '';
-        return `分批 ${valid.map((stage) => `${trimNumber(stage)}%`).join(' + ')}`;
+        return `分批${valid.map((stage) => `${trimNumber(stage)}%`).join('+')}`;
     }
 
     function buildRiskSummary(params) {
@@ -670,7 +694,9 @@
 
     function computeAggregateReport(entries, thresholds, minTrades) {
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds, minTrades);
+            const walkForwardEfficiency = computeWalkForwardEfficiency(entry.training, entry.testing);
+            const metrics = { ...entry.testing, walkForwardEfficiency };
+            const evaluation = evaluateWindow(metrics, thresholds, minTrades, entry.training);
             const commentParts = [];
             if (entry.testing.error) {
                 commentParts.push(entry.testing.error);
@@ -693,11 +719,15 @@
                         commentParts.push(`優化失敗：${entry.optimization.error}`);
                     }
                 }
+                if (Number.isFinite(walkForwardEfficiency)) {
+                    commentParts.push(`WFE ${formatPercent(walkForwardEfficiency)}`);
+                }
             }
             return {
                 index: entry.index,
                 window: entry.window,
-                metrics: entry.testing,
+                metrics,
+                trainingMetrics: entry.training,
                 evaluation,
                 paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
@@ -712,12 +742,15 @@
         const averageSharpe = average(validMetrics.map((m) => m.sharpeRatio));
         const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
         const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
+        const averageWalkForwardEfficiency = average(validMetrics.map((m) => m.walkForwardEfficiency));
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
-        const score = computeCompositeScore(validMetrics, thresholds);
+        const score = computeCompositeScore(evaluations, thresholds);
         const gradeInfo = resolveGrade(score, passRate, passCount, evaluations.length);
+        const failureStats = buildFailureStats(evaluations);
+        const recommendations = buildRecommendations(failureStats, evaluations.length);
 
         const summaryText = buildSummaryText({
             gradeLabel: gradeInfo.label,
@@ -728,7 +761,9 @@
             medianSharpe,
             medianSortino,
             averageMaxDrawdown,
+            averageWalkForwardEfficiency,
             thresholds,
+            recommendations,
         });
 
         return {
@@ -746,24 +781,30 @@
             averageMaxDrawdown,
             medianSharpe,
             medianSortino,
+            averageWalkForwardEfficiency,
             thresholds,
+            recommendations,
         };
     }
 
     function buildSummaryText(context) {
         const parts = [];
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
-        parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
-        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
+        parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}，Walk-Forward 效率 ${formatPercent(context.averageWalkForwardEfficiency)}`);
+        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%、WFE ≥ ${formatPercent(context.thresholds.walkForwardEfficiency)}）`);
+        if (Array.isArray(context.recommendations) && context.recommendations.length > 0) {
+            parts.push(`建議：${context.recommendations.join('；')}`);
+        }
         return parts.join('；');
     }
 
-    function computeCompositeScore(metricsList, thresholds) {
-        if (!Array.isArray(metricsList) || metricsList.length === 0) return 0;
+    function computeCompositeScore(evaluations, thresholds) {
+        if (!Array.isArray(evaluations) || evaluations.length === 0) return 0;
         let weightedScore = 0;
         let weightSum = 0;
 
-        metricsList.forEach((metrics) => {
+        evaluations.forEach((entry) => {
+            const metrics = entry?.metrics;
             if (!metrics || metrics.error) return;
             const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
             if (annScore !== null) {
@@ -790,10 +831,44 @@
                 weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
             }
+            const wfeScore = scorePositiveMetric(metrics.walkForwardEfficiency, thresholds.walkForwardEfficiency);
+            if (wfeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.walkForwardEfficiency * wfeScore;
+                weightSum += SCORE_WEIGHTS.walkForwardEfficiency;
+            }
         });
 
         if (weightSum === 0) return 0;
         return Math.round(weightedScore / weightSum);
+    }
+
+    function buildFailureStats(evaluations) {
+        const stats = new Map();
+        if (!Array.isArray(evaluations)) return stats;
+        evaluations.forEach((entry) => {
+            const failures = entry?.evaluation?.failures;
+            if (!Array.isArray(failures) || failures.length === 0) return;
+            failures.forEach((failure) => {
+                if (!failure || !failure.metric) return;
+                const key = failure.metric;
+                const existing = stats.get(key) || { count: 0, label: failure.label || METRIC_LABELS[key] || key };
+                existing.count += 1;
+                stats.set(key, existing);
+            });
+        });
+        return stats;
+    }
+
+    function buildRecommendations(failureStats, totalWindows) {
+        if (!(failureStats instanceof Map) || failureStats.size === 0 || !Number.isFinite(totalWindows) || totalWindows <= 0) {
+            return [];
+        }
+        const sorted = Array.from(failureStats.entries()).sort((a, b) => b[1].count - a[1].count);
+        return sorted.slice(0, 2).map(([metric, info]) => {
+            const label = info.label || METRIC_LABELS[metric] || metric;
+            const tip = METRIC_FIX_TIPS[metric] || '檢視策略設定並調整參數。';
+            return `${label} 未達標 ${info.count}/${totalWindows} → ${tip}`;
+        });
     }
 
     function scorePositiveMetric(value, baseline) {
@@ -835,37 +910,64 @@
         return { label: '未通過', color: 'var(--destructive)' };
     }
 
-    function evaluateWindow(metrics, thresholds, minTrades) {
+    function evaluateWindow(metrics, thresholds, minTrades, trainingMetrics) {
         const reasons = [];
+        const failures = [];
         if (!metrics || metrics.error) {
             reasons.push(metrics?.error || '無法取得結果');
-            return { pass: false, reasons };
+            return { pass: false, reasons, failures };
         }
 
         const checks = [];
         if (Number.isFinite(metrics.annualizedReturn)) {
             const pass = metrics.annualizedReturn >= thresholds.annualizedReturn;
-            if (!pass) reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
+            if (!pass) {
+                reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
+                failures.push({ metric: 'annualizedReturn', label: '年化報酬' });
+            }
             checks.push(pass);
         }
         if (Number.isFinite(metrics.sharpeRatio)) {
             const pass = metrics.sharpeRatio >= thresholds.sharpeRatio;
-            if (!pass) reasons.push(`Sharpe < ${thresholds.sharpeRatio}`);
+            if (!pass) {
+                reasons.push(`Sharpe < ${thresholds.sharpeRatio}`);
+                failures.push({ metric: 'sharpeRatio', label: 'Sharpe' });
+            }
             checks.push(pass);
         }
         if (Number.isFinite(metrics.sortinoRatio)) {
             const pass = metrics.sortinoRatio >= thresholds.sortinoRatio;
-            if (!pass) reasons.push(`Sortino < ${thresholds.sortinoRatio}`);
+            if (!pass) {
+                reasons.push(`Sortino < ${thresholds.sortinoRatio}`);
+                failures.push({ metric: 'sortinoRatio', label: 'Sortino' });
+            }
             checks.push(pass);
         }
         if (Number.isFinite(metrics.maxDrawdown)) {
             const pass = metrics.maxDrawdown <= thresholds.maxDrawdown;
-            if (!pass) reasons.push(`最大回撤高於 ${formatPercent(thresholds.maxDrawdown)}`);
+            if (!pass) {
+                reasons.push(`最大回撤高於 ${formatPercent(thresholds.maxDrawdown)}`);
+                failures.push({ metric: 'maxDrawdown', label: '最大回撤' });
+            }
             checks.push(pass);
         }
         if (Number.isFinite(metrics.winRate)) {
             const pass = metrics.winRate >= thresholds.winRate;
-            if (!pass) reasons.push(`勝率低於 ${thresholds.winRate}%`);
+            if (!pass) {
+                reasons.push(`勝率低於 ${thresholds.winRate}%`);
+                failures.push({ metric: 'winRate', label: '勝率' });
+            }
+            checks.push(pass);
+        }
+        const walkForwardEfficiency = Number.isFinite(metrics.walkForwardEfficiency)
+            ? metrics.walkForwardEfficiency
+            : computeWalkForwardEfficiency(trainingMetrics, metrics);
+        if (Number.isFinite(walkForwardEfficiency)) {
+            const pass = walkForwardEfficiency >= thresholds.walkForwardEfficiency;
+            if (!pass) {
+                reasons.push(`Walk-Forward 效率低於 ${formatPercent(thresholds.walkForwardEfficiency)}`);
+                failures.push({ metric: 'walkForwardEfficiency', label: 'Walk-Forward 效率' });
+            }
             checks.push(pass);
         }
         if (Number.isFinite(minTrades) && minTrades > 0) {
@@ -876,7 +978,23 @@
         }
 
         const pass = checks.length > 0 ? checks.every(Boolean) : false;
-        return { pass, reasons };
+        return { pass, reasons, failures };
+    }
+
+    function computeWalkForwardEfficiency(trainingMetrics, testingMetrics) {
+        if (!trainingMetrics || !testingMetrics) return null;
+        const train = Number.isFinite(trainingMetrics?.annualizedReturn)
+            ? Number(trainingMetrics.annualizedReturn)
+            : null;
+        const test = Number.isFinite(testingMetrics?.annualizedReturn)
+            ? Number(testingMetrics.annualizedReturn)
+            : null;
+        if (!Number.isFinite(train) || !Number.isFinite(test) || Math.abs(train) < 1e-6) {
+            return null;
+        }
+        const efficiency = (test / train) * 100;
+        if (!Number.isFinite(efficiency)) return null;
+        return efficiency;
     }
 
     function extractMetrics(result) {
@@ -1123,6 +1241,7 @@
             sortinoRatio: clampNumber(readInputValue('rolling-threshold-sortino', DEFAULT_THRESHOLDS.sortinoRatio), 0, 10),
             maxDrawdown: clampNumber(readInputValue('rolling-threshold-maxdd', DEFAULT_THRESHOLDS.maxDrawdown), 1, 100),
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
+            walkForwardEfficiency: clampNumber(readInputValue('rolling-threshold-wfe', DEFAULT_THRESHOLDS.walkForwardEfficiency), 0, 300),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
         const optimization = getRollingOptimizationConfig();
