@@ -992,3 +992,9 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-18 — Patch LB-SINGLE-OPT-COVERAGE-20260218A
+- **Issue recap**: 單一參數優化沿用主畫面快取資料，即使新參數需要更長暖身期也不會補抓，導致優化表格的年化報酬率與夏普值與實際回測不一致。
+- **Fix**: `js/worker.js` 在 `runOptimization` 內加入覆蓋範圍檢查與 `coverageCoversRange` 工具，若快取未涵蓋 `dataStartDate`→`endDate` 會自動補抓資料並更新 `workerLastDataset`，同步將版本碼調整為 `LB-SINGLE-OPT-20260218A`。
+- **Diagnostics**: 啟動參數優化時觀察 Worker 日誌，確認遇到快取不足會輸出覆蓋警示、顯示「補抓優化所需歷史資料...」進度訊息並重新載入資料後再進入掃描流程。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

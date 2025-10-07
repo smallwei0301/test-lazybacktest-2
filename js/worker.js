@@ -3027,6 +3027,35 @@ function computeCoverageFingerprint(coverage) {
   return parts.join("|");
 }
 
+function normalizeIsoRange(startISO, endISO) {
+  const start = isoToUTC(startISO);
+  const end = isoToUTC(endISO);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+  return { start, end: end + DAY_MS };
+}
+
+function coverageCoversRange(coverage, targetRange) {
+  if (!targetRange || !targetRange.start || !targetRange.end) return false;
+  const targetBounds = normalizeIsoRange(targetRange.start, targetRange.end);
+  if (!targetBounds) return false;
+  const mergedBounds = mergeRangeBounds(
+    (coverage || [])
+      .map((range) => normalizeIsoRange(range.start, range.end))
+      .filter((range) => !!range),
+  );
+  if (mergedBounds.length === 0) return false;
+  let cursor = targetBounds.start;
+  for (let i = 0; i < mergedBounds.length && cursor < targetBounds.end; i += 1) {
+    const segment = mergedBounds[i];
+    if (segment.end <= cursor) continue;
+    if (segment.start > cursor) return false;
+    cursor = Math.max(cursor, segment.end);
+  }
+  return cursor >= targetBounds.end;
+}
+
 function hydrateWorkerCacheFromMainThread(options = {}) {
   const {
     stockNo,
@@ -10998,7 +11027,7 @@ function formatAbsoluteLabel(value) {
 }
 
 // --- 參數優化邏輯 ---
-const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
+const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20260218A";
 
 function buildOptimizationValueSweep(range) {
   const safeRange = range && typeof range === "object" ? range : {};
@@ -11161,6 +11190,13 @@ async function runOptimization(
   const results = [];
   let stockData = null;
   let dataFetched = false;
+  const optDataStart = baseParams.dataStartDate || baseParams.startDate;
+  const optEffectiveStart =
+    baseParams.effectiveStartDate || baseParams.startDate;
+  const optLookback = Number.isFinite(baseParams.lookbackDays)
+    ? baseParams.lookbackDays
+    : null;
+  const marketKey = baseParams.marketType || baseParams.market || "TWSE";
 
   // Data acquisition policy:
   // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
@@ -11179,49 +11215,84 @@ async function runOptimization(
         "優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。",
       );
     }
-  } else {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      const fetched = await fetchStockData(
-        baseParams.stockNo,
-        optDataStart,
-        baseParams.endDate,
-        baseParams.marketType || baseParams.market || "TWSE",
-        {
-          adjusted: baseParams.adjustedPrice,
-          splitAdjustment: baseParams.splitAdjustment,
-          effectiveStartDate: optEffectiveStart,
-          lookbackDays: optLookback,
-        },
-      );
-      stockData = fetched?.data || [];
-      dataFetched = true;
-      if (!Array.isArray(stockData) || stockData.length === 0)
-        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
-        type: "progress",
-        progress: 50,
-        message: "數據獲取完成，開始優化...",
-      });
-    }
+  } else if (Array.isArray(cachedData) && cachedData.length > 0) {
+    stockData = cachedData;
+  } else if (
+    Array.isArray(workerLastDataset) &&
+    workerLastDataset.length > 0
+  ) {
+    stockData = workerLastDataset;
+    console.log("[Worker Opt] Using worker's cached data.");
   }
 
+  const fetchIfNeeded = async () => {
+    const fetched = await fetchStockData(
+      baseParams.stockNo,
+      optDataStart,
+      baseParams.endDate,
+      marketKey,
+      {
+        adjusted: baseParams.adjustedPrice,
+        splitAdjustment: baseParams.splitAdjustment,
+        effectiveStartDate: optEffectiveStart,
+        lookbackDays: optLookback,
+      },
+    );
+    const fetchedData = Array.isArray(fetched?.data) ? fetched.data : [];
+    if (fetchedData.length === 0) {
+      throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
+    }
+    stockData = fetchedData;
+    workerLastDataset = fetchedData;
+    dataFetched = true;
+    self.postMessage({
+      type: "progress",
+      progress: 50,
+      message: "數據獲取完成，開始優化...",
+    });
+  };
+
   if (!stockData) {
-    throw new Error("優化失敗：無可用數據");
+    await fetchIfNeeded();
+  }
+
+  let datasetCoverage =
+    Array.isArray(stockData) && stockData.length > 0
+      ? computeCoverageFromRows(stockData)
+      : null;
+  const coverageTargetEnd =
+    baseParams.endDate ||
+    (Array.isArray(stockData) && stockData.length > 0
+      ? stockData[stockData.length - 1]?.date || optEffectiveStart || optDataStart
+      : optEffectiveStart || optDataStart);
+  const coverageTarget =
+    optDataStart && coverageTargetEnd
+      ? { start: optDataStart, end: coverageTargetEnd }
+      : null;
+  if (
+    coverageTarget &&
+    datasetCoverage &&
+    !coverageCoversRange(datasetCoverage, coverageTarget)
+  ) {
+    if (!dataFetched) {
+      console.warn(
+        `[Worker Opt] Cached dataset lacks required lookback ${coverageTarget.start}→${coverageTarget.end}, refetching to align optimization with backtest results.`,
+      );
+      self.postMessage({
+        type: "progress",
+        progress: 35,
+        message: "補抓優化所需歷史資料...",
+      });
+      await fetchIfNeeded();
+      datasetCoverage =
+        Array.isArray(stockData) && stockData.length > 0
+          ? computeCoverageFromRows(stockData)
+          : datasetCoverage;
+    } else {
+      console.warn(
+        "[Worker Opt] Dataset coverage remains insufficient even after fetching; results may still differ.",
+      );
+    }
   }
 
   const sweepValues = buildOptimizationValueSweep(optRange);
