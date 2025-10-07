@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.1 ---
-// Patch Tag: LB-ROLLING-TEST-20250912A
+// --- 滾動測試模組 - v1.2 ---
+// Patch Tag: LB-ROLLING-TEST-20250912B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -17,7 +17,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912A',
+        version: 'LB-ROLLING-TEST-20250912B',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -35,6 +35,232 @@
         maxDrawdown: 0.1,
         winRate: 0.05,
     };
+
+    const OPTIMIZATION_SCOPE_MAP = {
+        entry: {
+            value: 'entry',
+            label: '多單進場策略',
+            strategyKey: 'entryStrategy',
+            paramsKey: 'entryParams',
+        },
+        exit: {
+            value: 'exit',
+            label: '多單出場策略',
+            strategyKey: 'exitStrategy',
+            paramsKey: 'exitParams',
+        },
+        shortEntry: {
+            value: 'shortEntry',
+            label: '空單進場策略',
+            strategyKey: 'shortEntryStrategy',
+            paramsKey: 'shortEntryParams',
+        },
+        shortExit: {
+            value: 'shortExit',
+            label: '空單回補策略',
+            strategyKey: 'shortExitStrategy',
+            paramsKey: 'shortExitParams',
+        },
+    };
+
+    const OPTIMIZATION_METRICS = [
+        { value: 'annualizedReturn', label: '年化報酬率', direction: 'max' },
+        { value: 'sharpeRatio', label: 'Sharpe Ratio', direction: 'max' },
+        { value: 'sortinoRatio', label: 'Sortino Ratio', direction: 'max' },
+        { value: 'winRate', label: '勝率', direction: 'max' },
+        { value: 'maxDrawdown', label: '最大回撤', direction: 'min' },
+    ];
+
+    function resolveOptimizationSettings(baseParams) {
+        const toggle = document.getElementById('rolling-optimize-enabled');
+        const scopeSelect = document.getElementById('rolling-optimize-scope');
+        const paramSelect = document.getElementById('rolling-optimize-parameter');
+        const metricSelect = document.getElementById('rolling-optimize-metric');
+        const summaryEl = document.getElementById('rolling-optimize-summary');
+
+        const enabled = Boolean(toggle?.checked);
+        const summaryFallback = '訓練期自動優化目前未啟用。';
+
+        if (!baseParams || typeof strategyDescriptions === 'undefined') {
+            if (scopeSelect) { scopeSelect.innerHTML = ''; scopeSelect.disabled = true; }
+            if (paramSelect) { paramSelect.innerHTML = ''; paramSelect.disabled = true; }
+            ensureMetricSelectOptions(metricSelect);
+            if (summaryEl) summaryEl.textContent = enabled ? '策略資訊不足，無法進行自動優化。' : summaryFallback;
+            return { enabled: false, candidateCount: 0, summaryText: summaryEl?.textContent || summaryFallback };
+        }
+
+        const scopeOptions = computeAvailableOptimizationScopes(baseParams);
+        const resolvedScopeValue = syncSelectOptions(scopeSelect, scopeOptions.map((opt) => ({ value: opt.value, label: opt.label })), scopeSelect?.value);
+        const scopeEntry = scopeOptions.find((opt) => opt.value === resolvedScopeValue) || scopeOptions[0] || null;
+
+        const parameterOptions = Array.isArray(scopeEntry?.strategyInfo?.optimizeTargets)
+            ? scopeEntry.strategyInfo.optimizeTargets.map((target) => ({
+                value: target.name,
+                label: target.label || target.name,
+                range: target.range || null,
+            }))
+            : [];
+
+        const resolvedParamValue = syncSelectOptions(paramSelect, parameterOptions.map((opt) => ({ value: opt.value, label: opt.label })), paramSelect?.value);
+        const parameterEntry = parameterOptions.find((opt) => opt.value === resolvedParamValue) || parameterOptions[0] || null;
+
+        ensureMetricSelectOptions(metricSelect);
+        const metricInfo = resolveMetricInfo(metricSelect?.value);
+        if (metricSelect && metricInfo) {
+            metricSelect.value = metricInfo.value;
+        }
+        if (metricSelect) {
+            metricSelect.disabled = !enabled;
+        }
+
+        const shouldDisableControls = !enabled || scopeOptions.length === 0;
+        if (scopeSelect) scopeSelect.disabled = shouldDisableControls || scopeOptions.length === 0;
+        if (paramSelect) paramSelect.disabled = shouldDisableControls || parameterOptions.length === 0;
+
+        let candidates = [];
+        if (enabled && scopeEntry && parameterEntry) {
+            candidates = buildCandidateValues(parameterEntry.range);
+        }
+
+        const optimizationEnabled = enabled
+            && scopeEntry
+            && parameterEntry
+            && metricInfo
+            && Array.isArray(candidates)
+            && candidates.length > 0;
+
+        const summaryText = buildOptimizationSummaryText({
+            enabled,
+            scopeEntry,
+            parameterEntry,
+            metricInfo,
+            candidateCount: candidates.length,
+        });
+
+        if (summaryEl) summaryEl.textContent = summaryText;
+
+        return {
+            enabled: optimizationEnabled,
+            scope: scopeEntry?.value || null,
+            scopeLabel: scopeEntry?.label || null,
+            strategyName: scopeEntry?.strategyName || null,
+            parameterName: parameterEntry?.value || null,
+            parameterLabel: parameterEntry?.label || null,
+            metric: metricInfo?.value || null,
+            metricLabel: metricInfo?.label || null,
+            direction: metricInfo?.direction || 'max',
+            candidateValues: optimizationEnabled ? candidates : [],
+            candidateCount: optimizationEnabled ? candidates.length : 0,
+            originalValue: scopeEntry ? baseParams?.[scopeEntry.paramsKey]?.[parameterEntry?.value] : null,
+            summaryText,
+        };
+    }
+
+    function computeAvailableOptimizationScopes(baseParams) {
+        const scopes = [];
+        Object.values(OPTIMIZATION_SCOPE_MAP).forEach((entry) => {
+            if (!baseParams) return;
+            if ((entry.value === 'shortEntry' || entry.value === 'shortExit') && !baseParams.enableShorting) return;
+            const strategyName = baseParams[entry.strategyKey];
+            if (!strategyName) return;
+            const strategyInfo = strategyDescriptions?.[strategyName];
+            if (!strategyInfo || !Array.isArray(strategyInfo.optimizeTargets) || strategyInfo.optimizeTargets.length === 0) return;
+            scopes.push({
+                ...entry,
+                strategyName,
+                strategyInfo,
+            });
+        });
+        return scopes;
+    }
+
+    function ensureMetricSelectOptions(metricSelect) {
+        if (!metricSelect) return;
+        const previousValue = metricSelect.value;
+        if (metricSelect.childElementCount === 0) {
+            OPTIMIZATION_METRICS.forEach((metric) => {
+                const option = document.createElement('option');
+                option.value = metric.value;
+                option.textContent = metric.label;
+                metricSelect.appendChild(option);
+            });
+        }
+        if (previousValue && OPTIMIZATION_METRICS.some((metric) => metric.value === previousValue)) {
+            metricSelect.value = previousValue;
+        } else if (OPTIMIZATION_METRICS.length > 0) {
+            metricSelect.value = OPTIMIZATION_METRICS[0].value;
+        }
+    }
+
+    function syncSelectOptions(selectEl, options, preferredValue) {
+        if (!selectEl) return null;
+        const previousValue = preferredValue ?? selectEl.value;
+        selectEl.innerHTML = '';
+        options.forEach((opt) => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label || opt.value;
+            selectEl.appendChild(option);
+        });
+        if (options.length === 0) {
+            selectEl.value = '';
+            return null;
+        }
+        const hasPreferred = options.some((opt) => opt.value === previousValue);
+        const resolvedValue = hasPreferred ? previousValue : options[0].value;
+        selectEl.value = resolvedValue;
+        return resolvedValue;
+    }
+
+    function resolveMetricInfo(metricValue) {
+        const fallback = OPTIMIZATION_METRICS[0] || null;
+        if (!metricValue) return fallback;
+        return OPTIMIZATION_METRICS.find((metric) => metric.value === metricValue) || fallback;
+    }
+
+    function buildCandidateValues(range) {
+        if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return [];
+        const step = Number.isFinite(range.step) && range.step > 0 ? range.step : 1;
+        const from = range.from;
+        const to = range.to;
+        const values = [];
+        const decimals = countDecimals(step);
+        if (from <= to) {
+            for (let value = from; value <= to + (step / 2); value += step) {
+                values.push(Number(value.toFixed(decimals)));
+                if (values.length >= 500) break;
+            }
+        } else {
+            for (let value = from; value >= to - (step / 2); value -= step) {
+                values.push(Number(value.toFixed(decimals)));
+                if (values.length >= 500) break;
+            }
+        }
+        return values;
+    }
+
+    function countDecimals(value) {
+        if (!Number.isFinite(value)) return 0;
+        const parts = value.toString().split('.');
+        return parts.length > 1 ? parts[1].length : 0;
+    }
+
+    function buildOptimizationSummaryText(context) {
+        if (!context.enabled) {
+            return '訓練期自動優化目前未啟用。';
+        }
+        if (!context.scopeEntry || !context.parameterEntry) {
+            return '已啟用訓練期自動優化，但目前策略無可優化參數，將沿用原設定。';
+        }
+        if (!context.metricInfo) {
+            return `已啟用訓練期自動優化：${context.scopeEntry.label} · ${context.parameterEntry.label}，請選擇評估指標。`;
+        }
+        if (!Number.isFinite(context.candidateCount) || context.candidateCount <= 0) {
+            return `已啟用訓練期自動優化：${context.scopeEntry.label} · ${context.parameterEntry.label}，但缺少候選參數範圍。`;
+        }
+        const directionText = context.metricInfo.direction === 'min' ? '（最小化）' : '（最大化）';
+        return `訓練期自動優化：${context.scopeEntry.label} / ${context.parameterEntry.label}，候選 ${context.candidateCount} 組，目標 ${context.metricInfo.label}${directionText}`;
+    }
 
     function initRollingTest() {
         if (state.initialized) return;
@@ -85,7 +311,8 @@
         state.windows = windows;
         state.results = [];
         state.startTime = Date.now();
-        state.progress.totalSteps = windows.length * 2; // 訓練 + 測試
+        const trainingStepsPerWindow = Math.max(state.config?.optimization?.enabled ? state.config.optimization.candidateCount : 1, 1);
+        state.progress.totalSteps = windows.length * (trainingStepsPerWindow + 1); // 訓練(含優化) + 測試
         state.progress.currentStep = 0;
         state.progress.windowIndex = 0;
         state.progress.stage = '';
@@ -127,35 +354,87 @@
             state.progress.windowIndex = i + 1;
 
             let trainingResult = null;
-            try {
-                trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
-                    phase: '訓練期',
-                    windowIndex: i + 1,
-                    totalWindows: state.windows.length,
-                });
-            } catch (error) {
-                console.warn('[Rolling Test] Training window failed:', error);
-                trainingResult = { error: error?.message || '訓練期回測失敗' };
+            let testingResult = null;
+            let optimizationDecision = null;
+            let overrideParams = null;
+
+            if (state.config?.optimization?.enabled) {
+                try {
+                    const outcome = await optimizeWindowParameters(baseParams, win, state.config.optimization, {
+                        windowIndex: i + 1,
+                        totalWindows: state.windows.length,
+                    });
+                    trainingResult = outcome.trainingResult;
+                    overrideParams = outcome.paramOverrides;
+                    optimizationDecision = outcome.decision;
+                    if (trainingResult && typeof trainingResult === 'object') {
+                        trainingResult.optimizationDecision = optimizationDecision;
+                    }
+                } catch (error) {
+                    console.warn('[Rolling Test] Optimization failed for window', i + 1, error);
+                    optimizationDecision = {
+                        enabled: true,
+                        error: error?.message || '訓練期優化失敗',
+                        candidateCount: state.config.optimization?.candidateCount || 0,
+                        metric: state.config.optimization?.metric || null,
+                        metricLabel: state.config.optimization?.metricLabel || null,
+                        parameterLabel: state.config.optimization?.parameterLabel || null,
+                        scopeLabel: state.config.optimization?.scopeLabel || null,
+                    };
+                    if (!state.cancelled) {
+                        try {
+                            state.progress.totalSteps += 1;
+                            trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
+                                phase: '訓練期(原參數)',
+                                windowIndex: i + 1,
+                                totalWindows: state.windows.length,
+                            });
+                        } catch (fallbackError) {
+                            console.warn('[Rolling Test] Fallback training failed:', fallbackError);
+                            trainingResult = { error: fallbackError?.message || '訓練期回測失敗' };
+                        }
+                    } else {
+                        trainingResult = { error: '滾動測試已中止' };
+                    }
+                }
+            } else {
+                try {
+                    trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
+                        phase: '訓練期',
+                        windowIndex: i + 1,
+                        totalWindows: state.windows.length,
+                    });
+                } catch (error) {
+                    console.warn('[Rolling Test] Training window failed:', error);
+                    trainingResult = { error: error?.message || '訓練期回測失敗' };
+                }
             }
 
             if (state.cancelled) break;
 
-            let testingResult = null;
             try {
                 testingResult = await runSingleWindow(baseParams, win.testingStart, win.testingEnd, {
                     phase: '測試期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
+                }, {
+                    paramOverrides: overrideParams,
+                    optimizationDecision,
                 });
             } catch (error) {
                 console.warn('[Rolling Test] Testing window failed:', error);
                 testingResult = { error: error?.message || '測試期回測失敗' };
             }
 
+            if (testingResult && typeof testingResult === 'object' && optimizationDecision) {
+                testingResult.optimizationDecision = optimizationDecision;
+            }
+
             state.results.push({
                 window: win,
                 training: trainingResult,
                 testing: testingResult,
+                optimization: optimizationDecision,
             });
         }
     }
@@ -306,14 +585,26 @@
             testing: extractMetrics(entry.testing),
             rawTraining: entry.training,
             rawTesting: entry.testing,
+            optimization: entry.optimization || entry.training?.optimizationDecision || null,
         }));
 
-        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        const aggregate = computeAggregateReport(
+            analysisEntries,
+            state.config?.thresholds || DEFAULT_THRESHOLDS,
+            state.config?.minTrades || 0,
+            state.config?.optimization || null,
+        );
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
         if (intro) {
-            intro.textContent = `共完成 ${aggregate.totalWindows} 個 Walk-Forward 視窗（訓練 ${state.config.trainingMonths} 個月 / 測試 ${state.config.testingMonths} 個月 / 平移 ${state.config.stepMonths} 個月）`;
+            const baseIntro = `共完成 ${aggregate.totalWindows} 個 Walk-Forward 視窗（訓練 ${state.config.trainingMonths} 個月 / 測試 ${state.config.testingMonths} 個月 / 平移 ${state.config.stepMonths} 個月）`;
+            if (state.config?.optimization?.enabled) {
+                const optSummary = describeOptimizationForIntro(state.config.optimization);
+                intro.textContent = `${baseIntro} · ${optSummary}`;
+            } else {
+                intro.textContent = baseIntro;
+            }
         }
         if (report) report.classList.remove('hidden');
 
@@ -404,7 +695,7 @@
         });
     }
 
-    function computeAggregateReport(entries, thresholds, minTrades) {
+    function computeAggregateReport(entries, thresholds, minTrades, optimizationConfig) {
         const evaluations = entries.map((entry) => {
             const evaluation = evaluateWindow(entry.testing, thresholds, minTrades);
             const commentParts = [];
@@ -422,6 +713,17 @@
                 if (!Number.isFinite(entry.testing.tradesCount) || entry.testing.tradesCount < minTrades) {
                     commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
                 }
+                if (entry.optimization?.enabled) {
+                    if (Number.isFinite(entry.optimization.bestValue) || entry.optimization.bestValue === 0) {
+                        const valueText = formatOptimizationValue(entry.optimization.bestValue);
+                        const metricText = formatOptimizationMetric(entry.optimization.metric, entry.optimization.bestMetrics);
+                        commentParts.push(`最佳 ${entry.optimization.parameterLabel || entry.optimization.parameterName} = ${valueText}${metricText ? `，訓練${metricText}` : ''}`);
+                    } else if (entry.optimization.error) {
+                        commentParts.push(`優化失敗：${entry.optimization.error}`);
+                    }
+                } else if (entry.optimization?.error) {
+                    commentParts.push(`優化失敗：${entry.optimization.error}`);
+                }
             }
             return {
                 index: entry.index,
@@ -429,6 +731,7 @@
                 metrics: entry.testing,
                 evaluation,
                 comment: commentParts.join('；') || '—',
+                optimization: entry.optimization || null,
             };
         });
 
@@ -457,6 +760,7 @@
             medianSortino,
             averageMaxDrawdown,
             thresholds,
+            optimization: optimizationConfig,
         });
 
         return {
@@ -483,6 +787,9 @@
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
         parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
+        if (context.optimization?.enabled) {
+            parts.push(describeOptimizationForSummary(context.optimization));
+        }
         return parts.join('；');
     }
 
@@ -665,16 +972,25 @@
         return windows;
     }
 
-    function runSingleWindow(baseParams, startIso, endIso, context) {
+    function runSingleWindow(baseParams, startIso, endIso, context, options = {}) {
         return new Promise((resolve, reject) => {
             try {
-                const payload = prepareWorkerPayload(baseParams, startIso, endIso);
+                const payload = prepareWorkerPayload(baseParams, startIso, endIso, options.paramOverrides || null);
                 if (!payload) {
                     reject(new Error('無法準備回測參數'));
                     return;
                 }
-                state.progress.stage = context?.phase || '';
-                updateProgressUI(`視窗 ${context?.windowIndex}/${context?.totalWindows} · ${context?.phase || ''}`);
+                const stageLabel = context?.phase || '';
+                state.progress.stage = stageLabel;
+                const windowIndex = context?.windowIndex || state.progress.windowIndex || 0;
+                const totalWindows = context?.totalWindows || state.windows.length || 0;
+                const baseMessage = totalWindows > 0 ? `視窗 ${windowIndex}/${totalWindows}` : '視窗處理中';
+                const progressMessage = context?.progressNote
+                    ? `${baseMessage} · ${context.progressNote}`
+                    : stageLabel
+                        ? `${baseMessage} · ${stageLabel}`
+                        : baseMessage;
+                updateProgressUI(progressMessage);
 
                 const worker = new Worker(workerUrl);
                 const message = {
@@ -725,12 +1041,23 @@
         });
     }
 
-    function prepareWorkerPayload(baseParams, startIso, endIso) {
+    function prepareWorkerPayload(baseParams, startIso, endIso, paramOverrides) {
         if (!baseParams || !startIso || !endIso) return null;
         const clone = deepClone(baseParams);
         clone.startDate = startIso;
         clone.endDate = endIso;
         if ('recentYears' in clone) delete clone.recentYears;
+
+        if (paramOverrides && typeof paramOverrides === 'object') {
+            Object.keys(paramOverrides).forEach((key) => {
+                const overrideValue = paramOverrides[key];
+                if (overrideValue && typeof overrideValue === 'object' && !Array.isArray(overrideValue)) {
+                    clone[key] = { ...(clone[key] || {}), ...overrideValue };
+                } else {
+                    clone[key] = overrideValue;
+                }
+            });
+        }
 
         const enriched = enrichParamsWithLookback(clone);
         return {
@@ -741,6 +1068,175 @@
         };
     }
 
+    async function optimizeWindowParameters(baseParams, window, optimization, context) {
+        if (!optimization || !optimization.enabled) {
+            throw new Error('尚未啟用訓練期自動優化');
+        }
+        const candidates = Array.isArray(optimization.candidateValues) ? optimization.candidateValues : [];
+        if (candidates.length === 0) {
+            throw new Error('缺少優化候選參數');
+        }
+
+        const evaluationLog = [];
+        let bestCandidate = null;
+
+        for (let idx = 0; idx < candidates.length; idx += 1) {
+            if (state.cancelled) break;
+            const candidateValue = candidates[idx];
+            const overrides = buildParamOverrides(baseParams, optimization, candidateValue);
+            const result = await runSingleWindow(baseParams, window.trainingStart, window.trainingEnd, {
+                phase: '訓練期優化',
+                windowIndex: context?.windowIndex,
+                totalWindows: context?.totalWindows,
+                progressNote: `訓練期優化 ${idx + 1}/${candidates.length}`,
+            }, {
+                paramOverrides: overrides,
+            });
+
+            const metrics = extractMetrics(result);
+            const score = computeOptimizationScore(metrics, optimization);
+            const candidateRecord = {
+                value: candidateValue,
+                metrics,
+                score,
+                overrides,
+                result,
+            };
+            evaluationLog.push({
+                value: candidateValue,
+                score,
+                metrics,
+            });
+
+            if (!bestCandidate || isBetterOptimizationCandidate(candidateRecord, bestCandidate, optimization.direction)) {
+                bestCandidate = candidateRecord;
+            }
+        }
+
+        if (!bestCandidate || !bestCandidate.result || bestCandidate.metrics?.error) {
+            throw new Error('無法於訓練期取得有效優化結果');
+        }
+
+        const decision = {
+            enabled: true,
+            scope: optimization.scope,
+            scopeLabel: optimization.scopeLabel,
+            parameterName: optimization.parameterName,
+            parameterLabel: optimization.parameterLabel,
+            metric: optimization.metric,
+            metricLabel: optimization.metricLabel,
+            direction: optimization.direction,
+            candidateCount: candidates.length,
+            bestValue: bestCandidate.value,
+            bestMetrics: bestCandidate.metrics,
+            evaluationLog,
+        };
+
+        return {
+            paramOverrides: bestCandidate.overrides,
+            trainingResult: bestCandidate.result,
+            decision,
+        };
+    }
+
+    function buildParamOverrides(baseParams, optimization, candidateValue) {
+        if (!optimization?.scope) return null;
+        const scopeEntry = OPTIMIZATION_SCOPE_MAP[optimization.scope];
+        if (!scopeEntry) return null;
+        const overrides = {};
+        const paramsKey = scopeEntry.paramsKey;
+        if (paramsKey) {
+            const baseParamsObj = baseParams?.[paramsKey] && typeof baseParams[paramsKey] === 'object'
+                ? baseParams[paramsKey]
+                : {};
+            overrides[paramsKey] = { ...baseParamsObj, [optimization.parameterName]: candidateValue };
+        }
+        return overrides;
+    }
+
+    function computeOptimizationScore(metrics, optimization) {
+        if (!optimization || !optimization.metric) return Number.NEGATIVE_INFINITY;
+        if (!metrics || metrics.error) {
+            return optimization.direction === 'min' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        }
+        const metricValue = metrics[optimization.metric];
+        if (!Number.isFinite(metricValue)) {
+            return optimization.direction === 'min' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        }
+        return metricValue;
+    }
+
+    function isBetterOptimizationCandidate(candidate, currentBest, direction) {
+        if (!currentBest) return true;
+        const isMinimize = direction === 'min';
+        if (isMinimize) {
+            if (!Number.isFinite(candidate.score)) return false;
+            if (!Number.isFinite(currentBest.score)) return true;
+            if (candidate.score < currentBest.score) return true;
+            if (candidate.score === currentBest.score) {
+                return Number.isFinite(candidate.metrics?.tradesCount) && candidate.metrics.tradesCount > (currentBest.metrics?.tradesCount || 0);
+            }
+            return false;
+        }
+        if (!Number.isFinite(candidate.score)) return false;
+        if (!Number.isFinite(currentBest.score)) return true;
+        if (candidate.score > currentBest.score) return true;
+        if (candidate.score === currentBest.score) {
+            return Number.isFinite(candidate.metrics?.tradesCount) && candidate.metrics.tradesCount > (currentBest.metrics?.tradesCount || 0);
+        }
+        return false;
+    }
+
+    function formatOptimizationValue(value) {
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) return '—';
+            if (Number.isInteger(value)) return value.toString();
+            const precision = Math.abs(value) >= 100 ? 2 : 4;
+            return Number(value.toFixed(precision)).toString();
+        }
+        if (value === null || typeof value === 'undefined') return '—';
+        return String(value);
+    }
+
+    function formatOptimizationMetric(metricKey, metrics) {
+        if (!metricKey || !metrics || metrics.error) return '';
+        const label = resolveMetricLabel(metricKey) || metricKey;
+        const rawValue = metrics[metricKey];
+        if (!Number.isFinite(rawValue)) return '';
+        if (metricKey === 'annualizedReturn' || metricKey === 'winRate' || metricKey === 'maxDrawdown') {
+            return `${label} ${formatPercent(rawValue)}`;
+        }
+        return `${label} ${formatNumber(rawValue)}`;
+    }
+
+    function resolveMetricLabel(metricKey) {
+        const metric = OPTIMIZATION_METRICS.find((item) => item.value === metricKey);
+        return metric?.label || null;
+    }
+
+    function describeOptimizationForIntro(optimization) {
+        if (!optimization || !optimization.enabled) {
+            return '訓練期自動優化未啟用';
+        }
+        const candidateCount = Number.isFinite(optimization.candidateCount) ? optimization.candidateCount : (optimization.candidateValues?.length || 0);
+        const metricLabel = optimization.metricLabel || resolveMetricLabel(optimization.metric) || optimization.metric || '評估指標';
+        const directionText = optimization.direction === 'min' ? '最小化' : '最大化';
+        const scopeLabel = optimization.scopeLabel || '策略';
+        const parameterLabel = optimization.parameterLabel || optimization.parameterName || '參數';
+        return `訓練期自動優化：${scopeLabel} / ${parameterLabel}（候選 ${candidateCount} 組，目標 ${metricLabel}·${directionText}）`;
+    }
+
+    function describeOptimizationForSummary(optimization) {
+        if (!optimization || !optimization.enabled) {
+            return '訓練期自動優化：未啟用';
+        }
+        const candidateCount = Number.isFinite(optimization.candidateCount) ? optimization.candidateCount : (optimization.candidateValues?.length || 0);
+        const metricLabel = optimization.metricLabel || resolveMetricLabel(optimization.metric) || optimization.metric || '評估指標';
+        const directionText = optimization.direction === 'min' ? '最小化' : '最大化';
+        const scopeLabel = optimization.scopeLabel || '策略';
+        const parameterLabel = optimization.parameterLabel || optimization.parameterName || '參數';
+        return `訓練期自動優化：${scopeLabel} / ${parameterLabel}，候選 ${candidateCount} 組，目標 ${metricLabel}（${directionText}）`;
+    }
     function buildCachedMeta() {
         const dataDebug = lastOverallResult?.dataDebug || {};
         const coverage = typeof computeCoverageFromRows === 'function' && Array.isArray(cachedStockData)
@@ -836,6 +1332,7 @@
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const optimization = resolveOptimizationSettings(params);
         return {
             trainingMonths,
             testingMonths,
@@ -844,6 +1341,7 @@
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            optimization,
         };
     }
 

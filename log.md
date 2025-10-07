@@ -997,3 +997,12 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-15 — Patch LB-ROLLING-TEST-20250912B
+- **Issue recap**: Walk-Forward 測試僅沿用既有參數，無法在每個訓練視窗重新優化策略，導致測試期表現無法反映實務上「先訓練再驗證」的流程，UI 亦缺乏優化設定與進度提示。
+- **Fix**:
+  - `index.html` 新增訓練期自動優化切換、策略/參數/指標選擇與摘要提示區，方便使用者於滾動測試前配置 Walk-Forward 優化規則。
+  - `js/rolling-test.js` 導入 `resolveOptimizationSettings` 與 `optimizeWindowParameters`，於每個訓練視窗內依指定指標逐一測試候選參數，挑出最佳值再套用至測試期，同步調整進度條、報告彙整與逐窗評語顯示優化結果。
+  - 更新滾動測試版本代碼為 `LB-ROLLING-TEST-20250912B`，並補強自動優化失敗時的備援流程與摘要描述，確保 UI 與結果報告能揭露優化狀態。
+- **Diagnostics**: 以多單進場策略檢查優化選項在策略切換時重新帶出參數範圍，確認 Walk-Forward 報告 intro/summary 顯示候選組數與目標指標，並測試優化失敗時的備援訓練與評語提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
