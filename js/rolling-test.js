@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.1 ---
-// Patch Tag: LB-ROLLING-TEST-20250912A
+// --- 滾動測試模組 - v1.2 ---
+// Patch Tag: LB-ROLLING-TEST-20250912B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -10,6 +10,7 @@
         windows: [],
         results: [],
         config: null,
+        optimizationPlan: { enabled: false, scopes: [], config: null },
         startTime: null,
         progress: {
             totalSteps: 0,
@@ -17,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912A',
+        version: 'LB-ROLLING-TEST-20250912B',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -36,6 +37,14 @@
         winRate: 0.05,
     };
 
+    const METRIC_LABELS = {
+        annualizedReturn: '年化報酬率',
+        sharpeRatio: 'Sharpe Ratio',
+        sortinoRatio: 'Sortino Ratio',
+        maxDrawdown: '最大回撤',
+        winRate: '勝率',
+    };
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -44,7 +53,10 @@
         const inputs = tab.querySelectorAll('[data-rolling-input]');
         inputs.forEach((input) => {
             ['change', 'input'].forEach((evt) => {
-                input.addEventListener(evt, () => updateRollingPlanPreview());
+                input.addEventListener(evt, () => {
+                    updateRollingPlanPreview();
+                    syncRollingOptimizeUI();
+                });
             });
         });
 
@@ -53,7 +65,15 @@
         if (startBtn) startBtn.addEventListener('click', startRollingTest);
         if (stopBtn) stopBtn.addEventListener('click', stopRollingTest);
 
+        const shortToggle = document.getElementById('enableShortSelling');
+        if (shortToggle) {
+            shortToggle.addEventListener('change', () => {
+                syncRollingOptimizeUI();
+            });
+        }
+
         updateRollingPlanPreview();
+        syncRollingOptimizeUI();
         state.initialized = true;
     }
 
@@ -79,13 +99,29 @@
             return;
         }
 
+        state.optimizationPlan = { enabled: false, scopes: [], config: null };
+
+        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        if (!baseParams) {
+            setAlert('無法取得回測參數，請重新整理頁面後再試一次。', 'error');
+            showError?.('滾動測試無法讀取目前的策略參數設定');
+            return;
+        }
+
+        const optimizationPlan = buildRollingOptimizationPlan(config.optimization, baseParams);
+        state.optimizationPlan = optimizationPlan;
+        if (config?.optimization?.enabled && !optimizationPlan.enabled) {
+            showInfo?.('已啟用訓練期優化，但目前策略未選擇可優化的參數。');
+        }
+        const stepsPerWindow = optimizationPlan.enabled ? 3 : 2;
+
         state.running = true;
         state.cancelled = false;
         state.config = config;
         state.windows = windows;
         state.results = [];
         state.startTime = Date.now();
-        state.progress.totalSteps = windows.length * 2; // 訓練 + 測試
+        state.progress.totalSteps = windows.length * stepsPerWindow;
         state.progress.currentStep = 0;
         state.progress.windowIndex = 0;
         state.progress.stage = '';
@@ -96,7 +132,7 @@
         setAlert('系統已開始滾動測試，請保持頁面開啟。', 'info');
         updateProgressUI();
 
-        runRollingSequence().catch((error) => {
+        runRollingSequence(baseParams).catch((error) => {
             console.error('[Rolling Test] Unexpected error:', error);
             showError?.(`滾動測試失敗：${error?.message || error}`);
             setAlert(`滾動測試失敗：${error?.message || '未知錯誤'}`, 'error');
@@ -117,18 +153,38 @@
         setAlert('已送出停止指令，系統會在目前視窗結束後停止。', 'warning');
     }
 
-    async function runRollingSequence() {
-        const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+    async function runRollingSequence(baseParams) {
         if (!baseParams) throw new Error('無法取得回測參數，請重新整理頁面');
+        const optimizationPlan = state.optimizationPlan || { enabled: false, scopes: [] };
 
         for (let i = 0; i < state.windows.length; i += 1) {
             if (state.cancelled) break;
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
+            let windowParams = deepClone(baseParams);
+            let optimizationSummary = null;
+
+            if (optimizationPlan.enabled) {
+                try {
+                    state.progress.stage = '參數優化';
+                    updateProgressUI(`視窗 ${state.progress.windowIndex}/${state.windows.length} · 參數優化`);
+                    const optimizationResult = await optimizeParametersForWindow(windowParams, win, optimizationPlan);
+                    if (optimizationResult?.params) {
+                        windowParams = optimizationResult.params;
+                    }
+                    optimizationSummary = optimizationResult?.summary || null;
+                } catch (error) {
+                    console.warn('[Rolling Test] Optimization failed:', error);
+                    optimizationSummary = { error: error?.message || '參數優化失敗' };
+                }
+                state.progress.currentStep += 1;
+                updateProgressUI();
+            }
+
             let trainingResult = null;
             try {
-                trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
+                trainingResult = await runSingleWindow(windowParams, win.trainingStart, win.trainingEnd, {
                     phase: '訓練期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
@@ -142,7 +198,7 @@
 
             let testingResult = null;
             try {
-                testingResult = await runSingleWindow(baseParams, win.testingStart, win.testingEnd, {
+                testingResult = await runSingleWindow(windowParams, win.testingStart, win.testingEnd, {
                     phase: '測試期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
@@ -156,6 +212,8 @@
                 window: win,
                 training: trainingResult,
                 testing: testingResult,
+                optimization: optimizationSummary,
+                params: deepClone(windowParams),
             });
         }
     }
@@ -306,6 +364,8 @@
             testing: extractMetrics(entry.testing),
             rawTraining: entry.training,
             rawTesting: entry.testing,
+            optimization: entry.optimization || null,
+            paramsSnapshot: entry.params || null,
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
@@ -421,6 +481,13 @@
                 }
                 if (!Number.isFinite(entry.testing.tradesCount) || entry.testing.tradesCount < minTrades) {
                     commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
+                }
+                if (entry.optimization) {
+                    if (Array.isArray(entry.optimization.messages) && entry.optimization.messages.length > 0) {
+                        commentParts.push(entry.optimization.messages.join('；'));
+                    } else if (entry.optimization.error) {
+                        commentParts.push(`優化失敗：${entry.optimization.error}`);
+                    }
                 }
             }
             return {
@@ -836,6 +903,7 @@
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const optimization = getRollingOptimizationConfig();
         return {
             trainingMonths,
             testingMonths,
@@ -844,7 +912,344 @@
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            optimization,
         };
+    }
+
+    function getRollingOptimizationConfig() {
+        const enabled = Boolean(document.getElementById('rolling-optimize-enabled')?.checked);
+        const targetSelect = document.getElementById('rolling-optimize-target');
+        const targetMetric = targetSelect?.value || 'annualizedReturn';
+        const trialsValue = clampNumber(readInputValue('rolling-optimize-trials', 60), 5, 500);
+        const trials = Math.max(5, Math.round(trialsValue));
+        const optimizeEntry = Boolean(document.getElementById('rolling-optimize-entry')?.checked);
+        const optimizeExit = Boolean(document.getElementById('rolling-optimize-exit')?.checked);
+        const optimizeShortEntry = Boolean(document.getElementById('rolling-optimize-short-entry')?.checked);
+        const optimizeShortExit = Boolean(document.getElementById('rolling-optimize-short-exit')?.checked);
+        const optimizeRisk = Boolean(document.getElementById('rolling-optimize-risk')?.checked);
+
+        return {
+            enabled,
+            targetMetric,
+            trials,
+            optimizeEntry,
+            optimizeExit,
+            optimizeShortEntry,
+            optimizeShortExit,
+            optimizeRisk,
+        };
+    }
+
+    function syncRollingOptimizeUI() {
+        const toggle = document.getElementById('rolling-optimize-enabled');
+        const container = document.getElementById('rolling-optimize-settings');
+        if (!toggle || !container) return;
+
+        const enabled = Boolean(toggle.checked);
+        if (enabled) container.classList.remove('hidden');
+        else container.classList.add('hidden');
+
+        const shortEnabled = Boolean(document.getElementById('enableShortSelling')?.checked);
+        const shortControls = document.querySelectorAll('#rolling-optimize-panel .rolling-optimize-short');
+        shortControls.forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const checkbox = label.querySelector('input[type="checkbox"]');
+            if (!checkbox) return;
+            if (shortEnabled) {
+                checkbox.disabled = false;
+                label.classList.remove('opacity-60');
+            } else {
+                checkbox.checked = false;
+                checkbox.disabled = true;
+                label.classList.add('opacity-60');
+            }
+        });
+    }
+
+    const OPTIMIZE_SCOPE_DEFINITIONS = {
+        entry: { strategyKey: 'entryStrategy', paramsKey: 'entryParams', label: '做多進場' },
+        exit: { strategyKey: 'exitStrategy', paramsKey: 'exitParams', label: '做多出場' },
+        shortEntry: { strategyKey: 'shortEntryStrategy', paramsKey: 'shortEntryParams', label: '做空進場' },
+        shortExit: { strategyKey: 'shortExitStrategy', paramsKey: 'shortExitParams', label: '回補出場' },
+    };
+
+    function buildRollingOptimizationPlan(optConfig, baseParams) {
+        const normalized = {
+            enabled: Boolean(optConfig?.enabled),
+            targetMetric: optConfig?.targetMetric || 'annualizedReturn',
+            trials: Number.isFinite(optConfig?.trials) ? Math.max(5, Math.round(optConfig.trials)) : 60,
+            optimizeEntry: Boolean(optConfig?.optimizeEntry),
+            optimizeExit: Boolean(optConfig?.optimizeExit),
+            optimizeShortEntry: Boolean(optConfig?.optimizeShortEntry),
+            optimizeShortExit: Boolean(optConfig?.optimizeShortExit),
+            optimizeRisk: Boolean(optConfig?.optimizeRisk),
+        };
+
+        const plan = {
+            enabled: false,
+            scopes: [],
+            config: normalized,
+        };
+
+        if (!normalized.enabled || !baseParams) {
+            return plan;
+        }
+
+        const scopes = resolveOptimizationScopes(normalized, baseParams);
+        plan.scopes = scopes;
+        plan.enabled = scopes.length > 0;
+        return plan;
+    }
+
+    function resolveOptimizationScopes(optConfig, baseParams) {
+        if (!optConfig?.enabled || !baseParams) return [];
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) return [];
+
+        const scopes = [];
+        const canOptimize = (strategyName, scope) => {
+            if (!strategyName) return false;
+            const key = resolveStrategyConfigKey(strategyName, scope);
+            const info = strategyDescriptions?.[key];
+            return Boolean(info?.optimizeTargets && info.optimizeTargets.length > 0);
+        };
+
+        if (optConfig.optimizeEntry && canOptimize(baseParams.entryStrategy, 'entry')) {
+            scopes.push('entry');
+        }
+        if (optConfig.optimizeExit && canOptimize(baseParams.exitStrategy, 'exit')) {
+            scopes.push('exit');
+        }
+        if (optConfig.optimizeShortEntry && baseParams.enableShorting && canOptimize(baseParams.shortEntryStrategy, 'shortEntry')) {
+            scopes.push('shortEntry');
+        }
+        if (optConfig.optimizeShortExit && baseParams.enableShorting && canOptimize(baseParams.shortExitStrategy, 'shortExit')) {
+            scopes.push('shortExit');
+        }
+        if (optConfig.optimizeRisk) {
+            const hasRiskTargets = Boolean(globalOptimizeTargets?.stopLoss?.range || globalOptimizeTargets?.takeProfit?.range);
+            if (hasRiskTargets) scopes.push('risk');
+        }
+
+        return scopes;
+    }
+
+    async function optimizeParametersForWindow(baseWindowParams, windowInfo, plan) {
+        const targetMetric = plan?.config?.targetMetric || 'annualizedReturn';
+        const metricLabel = resolveMetricLabel(targetMetric);
+        const summary = {
+            targetMetric,
+            metricLabel,
+            messages: [],
+            scopeResults: [],
+        };
+
+        const outputParams = deepClone(baseWindowParams);
+
+        if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
+            return { params: outputParams, summary };
+        }
+
+        if (typeof optimizeSingleStrategyParameter !== 'function') {
+            summary.error = '缺少批量優化模組';
+            summary.messages.push('優化模組未載入，已沿用原始參數。');
+            return { params: outputParams, summary };
+        }
+
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+            summary.error = '無法讀取策略參數設定';
+            summary.messages.push('找不到策略參數範圍，已沿用原始參數。');
+            return { params: outputParams, summary };
+        }
+
+        const workingParams = deepClone(baseWindowParams);
+        workingParams.startDate = windowInfo.trainingStart;
+        workingParams.endDate = windowInfo.trainingEnd;
+
+        for (let i = 0; i < plan.scopes.length; i += 1) {
+            const scope = plan.scopes[i];
+            let result = null;
+            if (scope === 'risk') {
+                result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
+            } else {
+                result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+            }
+            if (!result) continue;
+            summary.scopeResults.push(result);
+            const message = buildOptimizationMessage(result);
+            if (message) summary.messages.push(message);
+            if (result.error) summary.error = result.error;
+        }
+
+        if (summary.messages.length > 0) {
+            summary.messages.unshift(`優化目標：${metricLabel}`);
+        } else if (!summary.error) {
+            summary.messages.push('優化：維持原始參數');
+        }
+
+        return { params: outputParams, summary };
+    }
+
+    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams) {
+        const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+        if (!definition) return null;
+
+        const strategyName = workingParams[definition.strategyKey];
+        const configKey = resolveStrategyConfigKey(strategyName, scope);
+        const strategyInfo = strategyDescriptions?.[configKey];
+        if (!strategyInfo || !Array.isArray(strategyInfo.optimizeTargets) || strategyInfo.optimizeTargets.length === 0) {
+            return { scope, label: definition.label, skipped: true, changedKeys: [] };
+        }
+
+        const labelMap = {};
+        strategyInfo.optimizeTargets.forEach((target) => {
+            labelMap[target.name] = target.label || target.name;
+        });
+
+        const baseParams = outputParams[definition.paramsKey] && Object.keys(outputParams[definition.paramsKey]).length > 0
+            ? { ...outputParams[definition.paramsKey] }
+            : { ...(strategyInfo.defaultParams || {}) };
+
+        let optimizedParams = { ...baseParams };
+        const changedKeys = new Set();
+
+        for (let i = 0; i < strategyInfo.optimizeTargets.length; i += 1) {
+            const target = strategyInfo.optimizeTargets[i];
+            workingParams[definition.paramsKey] = { ...optimizedParams };
+            const result = await optimizeSingleStrategyParameter(workingParams, target, scope, plan.config.targetMetric, plan.config.trials);
+            if (result && result.value !== undefined) {
+                optimizedParams[target.name] = result.value;
+                if (!areValuesClose(result.value, baseParams[target.name])) {
+                    changedKeys.add(target.name);
+                }
+            }
+        }
+
+        outputParams[definition.paramsKey] = optimizedParams;
+        workingParams[definition.paramsKey] = { ...optimizedParams };
+
+        return {
+            scope,
+            label: definition.label,
+            params: optimizedParams,
+            baseParams,
+            changedKeys: Array.from(changedKeys),
+            labelMap,
+        };
+    }
+
+    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams) {
+        if (typeof optimizeRiskManagementParameters !== 'function') {
+            return { scope: 'risk', label: '風險管理', error: '缺少風險優化模組', changedKeys: [] };
+        }
+
+        const optimizeTargets = [];
+        if (globalOptimizeTargets?.stopLoss?.range) {
+            optimizeTargets.push({ name: 'stopLoss', range: globalOptimizeTargets.stopLoss.range });
+        }
+        if (globalOptimizeTargets?.takeProfit?.range) {
+            optimizeTargets.push({ name: 'takeProfit', range: globalOptimizeTargets.takeProfit.range });
+        }
+        if (optimizeTargets.length === 0) {
+            return { scope: 'risk', label: '風險管理', skipped: true, changedKeys: [] };
+        }
+
+        const baseStopLoss = Number.isFinite(outputParams.stopLoss) ? outputParams.stopLoss : 0;
+        const baseTakeProfit = Number.isFinite(outputParams.takeProfit) ? outputParams.takeProfit : 0;
+        const labelMap = {
+            stopLoss: globalOptimizeTargets?.stopLoss?.label || '停損 (%)',
+            takeProfit: globalOptimizeTargets?.takeProfit?.label || '停利 (%)',
+        };
+
+        let optimizedResult = {};
+        try {
+            const riskParams = deepClone(workingParams);
+            optimizedResult = await optimizeRiskManagementParameters(riskParams, optimizeTargets, plan.config.targetMetric, plan.config.trials);
+        } catch (error) {
+            return { scope: 'risk', label: '風險管理', error: error?.message || '優化失敗', changedKeys: [] };
+        }
+
+        const changedKeys = [];
+
+        if (optimizedResult && optimizedResult.stopLoss !== undefined && Number.isFinite(optimizedResult.stopLoss)) {
+            outputParams.stopLoss = optimizedResult.stopLoss;
+            workingParams.stopLoss = optimizedResult.stopLoss;
+            if (!areValuesClose(optimizedResult.stopLoss, baseStopLoss)) changedKeys.push('stopLoss');
+        }
+
+        if (optimizedResult && optimizedResult.takeProfit !== undefined && Number.isFinite(optimizedResult.takeProfit)) {
+            outputParams.takeProfit = optimizedResult.takeProfit;
+            workingParams.takeProfit = optimizedResult.takeProfit;
+            if (!areValuesClose(optimizedResult.takeProfit, baseTakeProfit)) changedKeys.push('takeProfit');
+        }
+
+        const resultParams = {};
+        if (Number.isFinite(outputParams.stopLoss)) resultParams.stopLoss = outputParams.stopLoss;
+        if (Number.isFinite(outputParams.takeProfit)) resultParams.takeProfit = outputParams.takeProfit;
+
+        return {
+            scope: 'risk',
+            label: '風險管理',
+            params: resultParams,
+            baseParams: { stopLoss: baseStopLoss, takeProfit: baseTakeProfit },
+            changedKeys,
+            labelMap,
+        };
+    }
+
+    function resolveStrategyConfigKey(strategyName, scope) {
+        if (!strategyName) return null;
+        let key = strategyName;
+        if (scope === 'exit' && strategyDescriptions?.[`${strategyName}_exit`]) {
+            key = `${strategyName}_exit`;
+        } else if (scope === 'shortEntry' && !strategyDescriptions?.[key] && strategyDescriptions?.[`short_${strategyName}`]) {
+            key = `short_${strategyName}`;
+        } else if (scope === 'shortExit' && !strategyDescriptions?.[key] && strategyDescriptions?.[`cover_${strategyName}`]) {
+            key = `cover_${strategyName}`;
+        }
+        return key;
+    }
+
+    function buildOptimizationMessage(result) {
+        if (!result || result.skipped) return null;
+        if (result.error) {
+            return `${result.label}優化失敗：${result.error}`;
+        }
+        const changedKeys = Array.isArray(result.changedKeys) ? result.changedKeys : [];
+        if (changedKeys.length === 0) {
+            return `${result.label}優化：維持原始參數`;
+        }
+        const formatted = changedKeys.map((key) => {
+            const label = result.labelMap?.[key] || key;
+            const value = formatOptimizationParamValue(result.params?.[key]);
+            return `${label}=${value}`;
+        });
+        return `${result.label}優化：${formatted.join('、')}`;
+    }
+
+    function formatOptimizationParamValue(value) {
+        if (value === null || value === undefined) return '—';
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) return '—';
+            const abs = Math.abs(value);
+            if (abs >= 1000) return value.toFixed(0);
+            if (abs >= 100) return value.toFixed(1).replace(/\.0$/, '');
+            if (abs >= 10) return value.toFixed(1).replace(/\.0$/, '');
+            return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
+        }
+        return String(value);
+    }
+
+    function areValuesClose(a, b) {
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+            const diff = Math.abs(a - b);
+            const tolerance = Math.max(1e-6, Math.abs(a) * 1e-4);
+            return diff <= tolerance;
+        }
+        return a === b;
+    }
+
+    function resolveMetricLabel(metric) {
+        return METRIC_LABELS[metric] || metric;
     }
 
     function readInputValue(id, fallback) {
