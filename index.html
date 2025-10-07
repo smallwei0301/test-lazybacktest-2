@@ -1962,6 +1962,34 @@
                                                     </div>
                                                     <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
                                                 </fieldset>
+                                                <div class="col-span-full flex flex-col gap-2 p-3 border rounded-md" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 12%, transparent);">
+                                                    <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--foreground);">
+                                                        <label for="rolling-autotune-toggle" class="flex items-center gap-2 font-medium">
+                                                            <input id="rolling-autotune-toggle" data-rolling-input type="checkbox" class="h-4 w-4 rounded border-border" />
+                                                            <span>訓練期自動優化</span>
+                                                        </label>
+                                                        <select id="rolling-autotune-scope" data-rolling-input class="min-w-[150px] px-2 py-1 border border-border rounded-md bg-input text-foreground disabled:opacity-60 disabled:cursor-not-allowed" style="border-color: var(--border); background-color: var(--input);" disabled>
+                                                            <option value="entry">進場策略</option>
+                                                            <option value="exit">出場策略</option>
+                                                            <option value="shortEntry">做空進場</option>
+                                                            <option value="shortExit">做空回補</option>
+                                                        </select>
+                                                        <select id="rolling-autotune-metric" data-rolling-input class="min-w-[140px] px-2 py-1 border border-border rounded-md bg-input text-foreground disabled:opacity-60 disabled:cursor-not-allowed" style="border-color: var(--border); background-color: var(--input);" disabled>
+                                                            <option value="annualizedReturn">年化報酬率</option>
+                                                            <option value="sharpeRatio">Sharpe Ratio</option>
+                                                            <option value="sortinoRatio">Sortino Ratio</option>
+                                                            <option value="winRate">勝率</option>
+                                                            <option value="maxDrawdown">最大回撤</option>
+                                                        </select>
+                                                        <label class="flex items-center gap-2">
+                                                            <span>最大測試組合</span>
+                                                            <input id="rolling-autotune-max" data-rolling-input type="number" min="5" max="200" step="1" value="60" class="w-20 px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs disabled:opacity-60 disabled:cursor-not-allowed" style="border-color: var(--border); background-color: var(--input);" disabled />
+                                                        </label>
+                                                    </div>
+                                                    <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                        勾選後，系統會在每個訓練視窗先針對指定策略的參數做網格掃描，依選定目標（例如年化報酬率）挑出最佳組合，再以該組合執行測試期回測。建議限制組合數量以縮短等待時間。
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

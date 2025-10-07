@@ -1,6 +1,6 @@
-// --- 滾動測試模組 - v1.1 ---
-// Patch Tag: LB-ROLLING-TEST-20250912A
-/* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
+// --- 滾動測試模組 - v1.2 ---
+// Patch Tag: LB-ROLLING-AUTOTUNE-20260115A
+/* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo, strategyDescriptions */
 
 (function() {
     const state = {
@@ -17,7 +17,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912A',
+        version: 'LB-ROLLING-AUTOTUNE-20260115A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -36,6 +36,29 @@
         winRate: 0.05,
     };
 
+    const AUTO_TUNE_DEFAULTS = {
+        metric: 'annualizedReturn',
+        scope: 'entry',
+        maxCombinations: 60,
+    };
+
+    const AUTO_TUNE_METRIC_LABELS = {
+        annualizedReturn: '年化報酬率',
+        sharpeRatio: 'Sharpe Ratio',
+        sortinoRatio: 'Sortino Ratio',
+        winRate: '勝率',
+        maxDrawdown: '最大回撤',
+    };
+
+    const AUTO_TUNE_SCOPE_CONFIG = {
+        entry: { label: '進場策略', strategyKey: 'entryStrategy', paramsKey: 'entryParams', requiresShort: false },
+        exit: { label: '出場策略', strategyKey: 'exitStrategy', paramsKey: 'exitParams', requiresShort: false },
+        shortEntry: { label: '做空進場', strategyKey: 'shortEntryStrategy', paramsKey: 'shortEntryParams', requiresShort: true },
+        shortExit: { label: '做空回補', strategyKey: 'shortExitStrategy', paramsKey: 'shortExitParams', requiresShort: true },
+    };
+
+    const AUTO_TUNE_MINIMIZE_METRICS = new Set(['maxDrawdown']);
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -48,11 +71,21 @@
             });
         });
 
+        const autoTuneToggle = document.getElementById('rolling-autotune-toggle');
+        if (autoTuneToggle) {
+            autoTuneToggle.addEventListener('change', () => {
+                handleAutoTuneToggleChange();
+                updateRollingPlanPreview();
+            });
+        }
+
         const startBtn = document.getElementById('start-rolling-test');
         const stopBtn = document.getElementById('stop-rolling-test');
         if (startBtn) startBtn.addEventListener('click', startRollingTest);
         if (stopBtn) stopBtn.addEventListener('click', stopRollingTest);
 
+        refreshAutoTuneScopeOptions();
+        handleAutoTuneToggleChange();
         updateRollingPlanPreview();
         state.initialized = true;
     }
@@ -126,23 +159,63 @@
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
+            const windowBaseParams = deepClone(baseParams);
+            let paramsForTesting = windowBaseParams;
             let trainingResult = null;
-            try {
-                trainingResult = await runSingleWindow(baseParams, win.trainingStart, win.trainingEnd, {
-                    phase: '訓練期',
-                    windowIndex: i + 1,
-                    totalWindows: state.windows.length,
-                });
-            } catch (error) {
-                console.warn('[Rolling Test] Training window failed:', error);
-                trainingResult = { error: error?.message || '訓練期回測失敗' };
+            let autoTuneMeta = null;
+
+            if (state.config?.autoTune?.enabled) {
+                let autoOutcome = null;
+                try {
+                    autoOutcome = await performAutoTuneForWindow(windowBaseParams, win, i);
+                } catch (error) {
+                    console.warn('[Rolling AutoTune] 執行訓練優化失敗：', error);
+                    autoOutcome = { error: error?.message || '訓練優化失敗' };
+                }
+
+                if (state.cancelled) break;
+
+                if (autoOutcome?.trainingResult) {
+                    trainingResult = autoOutcome.trainingResult;
+                    paramsForTesting = autoOutcome.bestParams || windowBaseParams;
+                    state.progress.stage = '訓練期優化';
+                    state.progress.currentStep += 1;
+                    updateProgressUI(`視窗 ${i + 1}/${state.windows.length} · 訓練期優化完成`);
+                } else {
+                    state.progress.stage = '訓練期';
+                    try {
+                        trainingResult = await runSingleWindow(windowBaseParams, win.trainingStart, win.trainingEnd, {
+                            phase: '訓練期',
+                            windowIndex: i + 1,
+                            totalWindows: state.windows.length,
+                        });
+                    } catch (error) {
+                        console.warn('[Rolling Test] Training window failed:', error);
+                        trainingResult = { error: error?.message || '訓練期回測失敗' };
+                    }
+                }
+
+                autoTuneMeta = buildAutoTuneMeta(autoOutcome, state.config.autoTune);
+            } else {
+                state.progress.stage = '訓練期';
+                try {
+                    trainingResult = await runSingleWindow(windowBaseParams, win.trainingStart, win.trainingEnd, {
+                        phase: '訓練期',
+                        windowIndex: i + 1,
+                        totalWindows: state.windows.length,
+                    });
+                } catch (error) {
+                    console.warn('[Rolling Test] Training window failed:', error);
+                    trainingResult = { error: error?.message || '訓練期回測失敗' };
+                }
             }
 
             if (state.cancelled) break;
 
             let testingResult = null;
             try {
-                testingResult = await runSingleWindow(baseParams, win.testingStart, win.testingEnd, {
+                state.progress.stage = '測試期';
+                testingResult = await runSingleWindow(paramsForTesting, win.testingStart, win.testingEnd, {
                     phase: '測試期',
                     windowIndex: i + 1,
                     totalWindows: state.windows.length,
@@ -156,8 +229,369 @@
                 window: win,
                 training: trainingResult,
                 testing: testingResult,
+                autoTune: autoTuneMeta,
             });
         }
+    }
+
+    function buildAutoTuneMeta(outcome, config) {
+        if (!config?.enabled) return null;
+        if (!outcome) {
+            return {
+                enabled: true,
+                scope: config.scope,
+                metric: config.metric,
+                error: '未執行訓練優化',
+                combosTested: 0,
+                totalCandidates: null,
+                bestParamValues: null,
+                summary: null,
+            };
+        }
+        return {
+            enabled: true,
+            scope: outcome.scope || config.scope,
+            metric: outcome.metric || config.metric,
+            error: outcome.error || null,
+            combosTested: Number.isFinite(outcome.combosTested) ? outcome.combosTested : 0,
+            totalCandidates: Number.isFinite(outcome.totalCandidates) ? outcome.totalCandidates : null,
+            bestParamValues: outcome.bestParamValues || null,
+            summary: outcome.summary || null,
+        };
+    }
+
+    async function performAutoTuneForWindow(baseParams, windowDef, index) {
+        const autoConfig = state.config?.autoTune;
+        if (!autoConfig?.enabled) return null;
+
+        const scope = autoConfig.scope || AUTO_TUNE_DEFAULTS.scope;
+        const metric = autoConfig.metric || AUTO_TUNE_DEFAULTS.metric;
+        const scopeConfig = AUTO_TUNE_SCOPE_CONFIG[scope];
+        if (!scopeConfig) {
+            return { error: '未支援的優化範圍', scope, metric, combosTested: 0 };
+        }
+        if (scopeConfig.requiresShort && !baseParams?.enableShorting) {
+            return { error: '尚未啟用做空策略', scope, metric, combosTested: 0 };
+        }
+
+        const strategyKey = baseParams?.[scopeConfig.strategyKey];
+        if (!strategyKey) {
+            return { error: '尚未選擇策略', scope, metric, combosTested: 0 };
+        }
+
+        const strategyMeta = strategyDescriptions?.[strategyKey];
+        if (!strategyMeta || !Array.isArray(strategyMeta.optimizeTargets) || strategyMeta.optimizeTargets.length === 0) {
+            return { error: '該策略無可優化參數', scope, metric, combosTested: 0 };
+        }
+
+        const plan = buildAutoTunePlan(strategyMeta.optimizeTargets, baseParams?.[scopeConfig.paramsKey] || {}, autoConfig.maxCombinations);
+        if (!plan || plan.combinations.length === 0) {
+            return {
+                error: '無可用的參數組合',
+                scope,
+                metric,
+                combosTested: 0,
+                totalCandidates: plan?.totalCandidates || 0,
+            };
+        }
+
+        const combos = plan.combinations;
+        const totalCandidates = plan.totalCandidates;
+        let best = null;
+        let bestParams = null;
+        let evaluated = 0;
+
+        for (let idx = 0; idx < combos.length; idx += 1) {
+            if (state.cancelled) break;
+            const combo = combos[idx];
+            state.progress.stage = '訓練期優化';
+            updateProgressUI(`視窗 ${index + 1}/${state.windows.length} · 訓練期優化（${idx + 1}/${combos.length}）`);
+            const candidateParams = applyAutoTuneParams(baseParams, scope, combo);
+            let outcome = null;
+            try {
+                outcome = await runSingleWindow(candidateParams, windowDef.trainingStart, windowDef.trainingEnd, {
+                    phase: '訓練期優化',
+                    windowIndex: index + 1,
+                    totalWindows: state.windows.length,
+                }, { countTowardsProgress: false, suppressStageUpdate: true });
+            } catch (error) {
+                console.warn('[Rolling AutoTune] 測試參數組合失敗：', combo, error);
+                continue;
+            }
+            if (!outcome) continue;
+            evaluated += 1;
+
+            const metrics = extractMetrics(outcome);
+            const score = computeAutoTuneScore(metrics, metric);
+            if (score === null) continue;
+
+            if (!best || isAutoTuneCandidateBetter({ score, metrics }, best, metric)) {
+                best = { score, metrics, outcome, combo };
+                bestParams = candidateParams;
+            }
+        }
+
+        if (state.cancelled) {
+            return { scope, metric, combosTested: evaluated, totalCandidates };
+        }
+
+        if (!best) {
+            return {
+                error: evaluated === 0 ? '無法取得有效的訓練結果' : '未找到符合目標的組合',
+                scope,
+                metric,
+                combosTested: evaluated,
+                totalCandidates,
+            };
+        }
+
+        return {
+            trainingResult: best.outcome,
+            bestParams,
+            bestParamValues: best.combo,
+            combosTested: evaluated,
+            totalCandidates,
+            metric,
+            scope,
+            summary: buildAutoTuneSummary(metric, best.metrics, best.combo, evaluated, totalCandidates, strategyMeta),
+        };
+    }
+
+    function buildAutoTunePlan(targets, baseValues, maxCombinations) {
+        if (!Array.isArray(targets) || targets.length === 0) return null;
+        const validTargets = targets.filter((target) => target && target.name && target.range);
+        if (validTargets.length === 0) return null;
+        const safeMaxCombinations = Math.max(5, Math.min(Number(maxCombinations) || AUTO_TUNE_DEFAULTS.maxCombinations, 200));
+        const limitPerParam = Math.max(3, Math.floor(Math.pow(safeMaxCombinations, 1 / validTargets.length)) + 1);
+        const sweeps = [];
+        let totalCandidates = 1;
+
+        validTargets.forEach((target) => {
+            const values = buildAutoTuneValues(target.range, baseValues?.[target.name], limitPerParam);
+            if (values.length > 0) {
+                sweeps.push({
+                    name: target.name,
+                    label: target.label || target.name,
+                    values,
+                });
+                totalCandidates *= values.length;
+            }
+        });
+
+        if (sweeps.length === 0) return null;
+        const combinations = enumerateAutoTuneCombinations(sweeps, safeMaxCombinations);
+        return { sweeps, combinations, totalCandidates };
+    }
+
+    function buildAutoTuneValues(range, baseValue, limit) {
+        if (!range) return [];
+        const min = Math.min(range.from, range.to);
+        const max = Math.max(range.from, range.to);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+            const single = Number.isFinite(baseValue) ? Number(baseValue) : min;
+            return Number.isFinite(single) ? [Number(single)] : [];
+        }
+        const rawStep = Number.isFinite(range.step) && range.step > 0 ? range.step : (max - min) / Math.max(limit - 1, 1);
+        const precision = inferStepPrecision(rawStep);
+        const values = [];
+        for (let value = min; value <= max + rawStep / 2; value += rawStep) {
+            values.push(normalizeCandidateValue(value, precision));
+        }
+        const unique = Array.from(new Set(values.filter((val) => Number.isFinite(val)))).sort((a, b) => a - b);
+        if (unique.length === 0) return [];
+
+        const result = [];
+        const baseNormalized = Number.isFinite(baseValue) ? normalizeCandidateValue(baseValue, precision) : null;
+        if (baseNormalized !== null && baseNormalized >= unique[0] && baseNormalized <= unique[unique.length - 1]) {
+            result.push(baseNormalized);
+        }
+        result.push(unique[0]);
+        if (unique.length > 1) {
+            result.push(unique[unique.length - 1]);
+        }
+
+        const stepCount = unique.length;
+        for (let i = 0; i < stepCount && result.length < limit; i += 1) {
+            const ratio = stepCount === 1 ? 0 : i / (stepCount - 1);
+            const index = Math.min(stepCount - 1, Math.round(ratio * (stepCount - 1)));
+            result.push(unique[index]);
+        }
+
+        const finalValues = Array.from(new Set(result.filter((val) => Number.isFinite(val)))).sort((a, b) => a - b);
+        if (baseNormalized !== null) {
+            const baseIndex = finalValues.indexOf(baseNormalized);
+            if (baseIndex > 0) {
+                finalValues.splice(baseIndex, 1);
+                finalValues.unshift(baseNormalized);
+            }
+        }
+        return finalValues.slice(0, limit);
+    }
+
+    function enumerateAutoTuneCombinations(sweeps, maxCombinations) {
+        const limit = Math.max(1, Math.min(Number(maxCombinations) || AUTO_TUNE_DEFAULTS.maxCombinations, 500));
+        const combinations = [];
+        const seen = new Set();
+
+        function dfs(depth, current) {
+            if (combinations.length >= limit) return;
+            if (depth >= sweeps.length) {
+                const combo = {};
+                sweeps.forEach((sweep) => {
+                    combo[sweep.name] = current[sweep.name];
+                });
+                const key = JSON.stringify(combo);
+                if (!seen.has(key)) {
+                    combinations.push(combo);
+                    seen.add(key);
+                }
+                return;
+            }
+            const sweep = sweeps[depth];
+            for (let idx = 0; idx < sweep.values.length; idx += 1) {
+                current[sweep.name] = sweep.values[idx];
+                dfs(depth + 1, current);
+                if (combinations.length >= limit) break;
+            }
+        }
+
+        dfs(0, {});
+        return combinations;
+    }
+
+    function applyAutoTuneParams(baseParams, scope, values) {
+        const scopeConfig = AUTO_TUNE_SCOPE_CONFIG[scope];
+        if (!scopeConfig) return deepClone(baseParams || {});
+        const clone = deepClone(baseParams || {});
+        if (scopeConfig.requiresShort) {
+            clone.enableShorting = true;
+        }
+        const targetKey = scopeConfig.paramsKey;
+        const original = clone[targetKey] && typeof clone[targetKey] === 'object' ? clone[targetKey] : {};
+        const nextParams = { ...original };
+        Object.entries(values || {}).forEach(([key, value]) => {
+            nextParams[key] = Number.isFinite(value) ? Number(value) : value;
+        });
+        clone[targetKey] = nextParams;
+        return clone;
+    }
+
+    function computeAutoTuneScore(metrics, metric) {
+        if (!metrics || !metric) return null;
+        const value = metrics[metric];
+        if (!Number.isFinite(value)) return null;
+        if (AUTO_TUNE_MINIMIZE_METRICS.has(metric)) {
+            return -value;
+        }
+        return value;
+    }
+
+    function isAutoTuneCandidateBetter(candidate, current, metric) {
+        if (!current) return true;
+        if (candidate.score > current.score) return true;
+        if (candidate.score < current.score) return false;
+        const candidateMetrics = candidate.metrics || {};
+        const currentMetrics = current.metrics || {};
+        const candidateDrawdown = candidateMetrics.maxDrawdown;
+        const currentDrawdown = currentMetrics.maxDrawdown;
+        if (Number.isFinite(candidateDrawdown) && Number.isFinite(currentDrawdown) && candidateDrawdown !== currentDrawdown) {
+            return candidateDrawdown < currentDrawdown;
+        }
+        const candidateSharpe = candidateMetrics.sharpeRatio;
+        const currentSharpe = currentMetrics.sharpeRatio;
+        if (Number.isFinite(candidateSharpe) && Number.isFinite(currentSharpe) && candidateSharpe !== currentSharpe) {
+            return candidateSharpe > currentSharpe;
+        }
+        if (metric !== 'annualizedReturn') {
+            const candidateReturn = candidateMetrics.annualizedReturn;
+            const currentReturn = currentMetrics.annualizedReturn;
+            if (Number.isFinite(candidateReturn) && Number.isFinite(currentReturn) && candidateReturn !== currentReturn) {
+                return candidateReturn > currentReturn;
+            }
+        }
+        return false;
+    }
+
+    function buildAutoTuneSummary(metric, metrics, combo, tested, totalCandidates, strategyMeta) {
+        const parts = [];
+        const metricLabel = AUTO_TUNE_METRIC_LABELS[metric] || metric;
+        const metricValue = metrics ? metrics[metric] : null;
+        const formattedMetric = formatAutoTuneMetric(metric, metricValue);
+        if (formattedMetric) {
+            parts.push(`最佳${metricLabel}：${formattedMetric}`);
+        }
+        if (Number.isFinite(tested)) {
+            if (Number.isFinite(totalCandidates) && totalCandidates > tested) {
+                parts.push(`掃描 ${tested}/${totalCandidates} 組`);
+            } else {
+                parts.push(`掃描 ${tested} 組`);
+            }
+        }
+        const paramSummary = formatAutoTuneParams(combo, strategyMeta);
+        if (paramSummary) {
+            parts.push(`參數 ${paramSummary}`);
+        }
+        return parts.join('；');
+    }
+
+    function formatAutoTuneMetric(metric, value) {
+        if (!Number.isFinite(value)) return null;
+        if (metric === 'annualizedReturn' || metric === 'winRate' || metric === 'maxDrawdown') {
+            return formatPercent(value);
+        }
+        if (metric === 'sharpeRatio' || metric === 'sortinoRatio') {
+            return formatNumber(value);
+        }
+        return value.toFixed(2);
+    }
+
+    function formatAutoTuneParams(combo, strategyMeta) {
+        if (!combo) return '';
+        const entries = Object.entries(combo);
+        if (entries.length === 0) return '';
+        const labelMap = new Map();
+        if (strategyMeta && Array.isArray(strategyMeta.optimizeTargets)) {
+            strategyMeta.optimizeTargets.forEach((target) => {
+                if (target?.name) {
+                    labelMap.set(target.name, target.label || target.name);
+                }
+            });
+        }
+        return entries
+            .map(([key, value]) => {
+                const label = labelMap.get(key) || key;
+                return `${label}=${formatAutoTuneParamValue(value)}`;
+            })
+            .join('、');
+    }
+
+    function formatAutoTuneParamValue(value) {
+        if (!Number.isFinite(value)) return value;
+        const rounded = Math.round(value);
+        if (Math.abs(rounded - value) < 1e-6) {
+            return rounded.toString();
+        }
+        return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
+    }
+
+    function inferStepPrecision(step) {
+        if (!Number.isFinite(step) || step <= 0) return 4;
+        const stepStr = step.toString();
+        if (stepStr.includes('e-')) {
+            const [, exponent] = stepStr.split('e-');
+            const digits = parseInt(exponent, 10);
+            return Number.isFinite(digits) ? Math.min(digits + 1, 6) : 4;
+        }
+        const decimals = stepStr.split('.')[1];
+        if (!decimals) return 2;
+        return Math.min(decimals.length + 1, 6);
+    }
+
+    function normalizeCandidateValue(value, precision) {
+        if (!Number.isFinite(value)) return value;
+        const digits = Number.isFinite(precision) ? precision : 4;
+        const factor = 10 ** Math.min(Math.max(digits, 0), 6);
+        return Math.round(value * factor) / factor;
     }
 
     function finalizeRollingRun() {
@@ -306,6 +740,7 @@
             testing: extractMetrics(entry.testing),
             rawTraining: entry.training,
             rawTesting: entry.testing,
+            autoTune: entry.autoTune || null,
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
@@ -421,6 +856,13 @@
                 }
                 if (!Number.isFinite(entry.testing.tradesCount) || entry.testing.tradesCount < minTrades) {
                     commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
+                }
+            }
+            if (entry.autoTune) {
+                if (entry.autoTune.summary) {
+                    commentParts.push(`優化：${entry.autoTune.summary}`);
+                } else if (entry.autoTune.error) {
+                    commentParts.push(`優化失敗：${entry.autoTune.error}`);
                 }
             }
             return {
@@ -665,7 +1107,9 @@
         return windows;
     }
 
-    function runSingleWindow(baseParams, startIso, endIso, context) {
+    function runSingleWindow(baseParams, startIso, endIso, context, options = {}) {
+        const countTowardsProgress = options.countTowardsProgress !== false;
+        const suppressStageUpdate = Boolean(options.suppressStageUpdate);
         return new Promise((resolve, reject) => {
             try {
                 const payload = prepareWorkerPayload(baseParams, startIso, endIso);
@@ -673,8 +1117,10 @@
                     reject(new Error('無法準備回測參數'));
                     return;
                 }
-                state.progress.stage = context?.phase || '';
-                updateProgressUI(`視窗 ${context?.windowIndex}/${context?.totalWindows} · ${context?.phase || ''}`);
+                if (!suppressStageUpdate) {
+                    state.progress.stage = context?.phase || '';
+                    updateProgressUI(`視窗 ${context?.windowIndex}/${context?.totalWindows} · ${context?.phase || ''}`);
+                }
 
                 const worker = new Worker(workerUrl);
                 const message = {
@@ -697,14 +1143,24 @@
                         return;
                     }
                     if (type === 'result' || type === 'backtest_result') {
-                        state.progress.currentStep += 1;
+                        if (countTowardsProgress) {
+                            state.progress.currentStep += 1;
+                        }
+                        if (!suppressStageUpdate) {
+                            state.progress.stage = context?.phase || '';
+                        }
                         updateProgressUI();
                         worker.terminate();
                         resolve(type === 'result' ? data : result);
                         return;
                     }
                     if (type === 'error' || type === 'marketError') {
-                        state.progress.currentStep += 1;
+                        if (countTowardsProgress) {
+                            state.progress.currentStep += 1;
+                        }
+                        if (!suppressStageUpdate) {
+                            state.progress.stage = context?.phase || '';
+                        }
                         updateProgressUI();
                         worker.terminate();
                         reject(new Error(event.data?.message || '回測失敗'));
@@ -712,7 +1168,12 @@
                 };
 
                 worker.onerror = (error) => {
-                    state.progress.currentStep += 1;
+                    if (countTowardsProgress) {
+                        state.progress.currentStep += 1;
+                    }
+                    if (!suppressStageUpdate) {
+                        state.progress.stage = context?.phase || '';
+                    }
                     updateProgressUI();
                     worker.terminate();
                     reject(error instanceof Error ? error : new Error(error.message || 'Worker 錯誤'));
@@ -836,6 +1297,12 @@
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const autoTuneScope = document.getElementById('rolling-autotune-scope')?.value || AUTO_TUNE_DEFAULTS.scope;
+        const autoTuneMetric = document.getElementById('rolling-autotune-metric')?.value || AUTO_TUNE_DEFAULTS.metric;
+        const autoTuneMax = clampNumber(readInputValue('rolling-autotune-max', AUTO_TUNE_DEFAULTS.maxCombinations), 5, 200);
+        const toggle = document.getElementById('rolling-autotune-toggle');
+        const autoTuneEnabled = Boolean(toggle?.checked);
+        const scopeAvailable = autoTuneEnabled && isAutoTuneScopeAvailable(params, autoTuneScope);
         return {
             trainingMonths,
             testingMonths,
@@ -844,6 +1311,12 @@
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            autoTune: {
+                enabled: scopeAvailable,
+                scope: autoTuneScope,
+                metric: autoTuneMetric,
+                maxCombinations: autoTuneMax,
+            },
         };
     }
 
@@ -859,7 +1332,83 @@
         return Math.min(Math.max(value, min), max);
     }
 
+    function handleAutoTuneToggleChange() {
+        const toggle = document.getElementById('rolling-autotune-toggle');
+        const scopeSelect = document.getElementById('rolling-autotune-scope');
+        const metricSelect = document.getElementById('rolling-autotune-metric');
+        const maxInput = document.getElementById('rolling-autotune-max');
+        const scopeAvailable = scopeSelect && Array.from(scopeSelect.options || []).some((opt) => !opt.disabled);
+        if (toggle && !scopeAvailable) {
+            toggle.checked = false;
+        }
+        const enabled = Boolean(toggle?.checked) && scopeAvailable;
+        [scopeSelect, metricSelect, maxInput].forEach((el) => {
+            if (el) el.disabled = !enabled;
+        });
+    }
+
+    function refreshAutoTuneScopeOptions() {
+        const scopeSelect = document.getElementById('rolling-autotune-scope');
+        const toggle = document.getElementById('rolling-autotune-toggle');
+        const metricSelect = document.getElementById('rolling-autotune-metric');
+        const maxInput = document.getElementById('rolling-autotune-max');
+        if (!scopeSelect || !toggle) return;
+
+        const previousValue = scopeSelect.value;
+        let baseParams = null;
+        try {
+            baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        } catch (error) {
+            console.warn('[Rolling AutoTune] 無法取得回測參數以刷新可用範圍：', error);
+        }
+
+        scopeSelect.innerHTML = '';
+        let firstEnabledValue = null;
+        Object.entries(AUTO_TUNE_SCOPE_CONFIG).forEach(([value, meta]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            const available = isAutoTuneScopeAvailable(baseParams, value);
+            option.disabled = !available;
+            option.textContent = available ? meta.label : `${meta.label}（不可用）`;
+            scopeSelect.appendChild(option);
+            if (available && firstEnabledValue === null) {
+                firstEnabledValue = value;
+            }
+        });
+
+        let nextValue = previousValue;
+        if (!Array.from(scopeSelect.options).some((opt) => opt.value === previousValue && !opt.disabled)) {
+            nextValue = firstEnabledValue || '';
+        }
+        if (nextValue) {
+            scopeSelect.value = nextValue;
+        } else {
+            scopeSelect.selectedIndex = -1;
+        }
+
+        const hasAvailable = Boolean(firstEnabledValue);
+        toggle.disabled = !hasAvailable;
+        if (!hasAvailable) {
+            toggle.checked = false;
+            [scopeSelect, metricSelect, maxInput].forEach((el) => {
+                if (el) el.disabled = true;
+            });
+        }
+    }
+
+    function isAutoTuneScopeAvailable(baseParams, scope) {
+        const scopeConfig = AUTO_TUNE_SCOPE_CONFIG[scope];
+        if (!scopeConfig) return false;
+        if (scopeConfig.requiresShort && !baseParams?.enableShorting) return false;
+        const strategyKey = baseParams?.[scopeConfig.strategyKey];
+        if (!strategyKey) return false;
+        const strategyMeta = strategyDescriptions?.[strategyKey];
+        return Boolean(strategyMeta && Array.isArray(strategyMeta.optimizeTargets) && strategyMeta.optimizeTargets.length > 0);
+    }
+
     function updateRollingPlanPreview() {
+        refreshAutoTuneScopeOptions();
+        handleAutoTuneToggleChange();
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
         const config = getRollingConfig();

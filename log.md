@@ -1,3 +1,11 @@
+## 2026-01-15 — Patch LB-ROLLING-AUTOTUNE-20260115A
+- **Scope**: Walk-Forward 滾動測試加入訓練期自動優化流程。
+- **Updates**:
+  - 於滾動測試設定新增「訓練期自動優化」選項，可指定優化範圍（進出場／做空策略）、評分指標與最大測試組合數。
+  - 每個訓練視窗先進行網格掃描，依目標指標挑選最佳參數後再執行測試期回測，報告會揭露優化摘要與參數組合。
+  - 依策略的可優化參數動態更新下拉選項，無可用參數時自動停用開關以避免誤觸。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('rolling-test.js parsed');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
