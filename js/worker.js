@@ -416,7 +416,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-ANNUALIZED-20250925A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -7930,7 +7930,8 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const referenceStage = currentLongEntryBreakdown[0] || null;
+      const aggregatedEntry = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -7943,6 +7944,24 @@ function runStrategy(data, params, options = {}) {
         stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
         positionId: currentLongPositionId,
       };
+      if (referenceStage && typeof referenceStage === "object") {
+        if (referenceStage.kdValues) {
+          aggregatedEntry.kdValues = { ...referenceStage.kdValues };
+        }
+        if (referenceStage.macdValues) {
+          aggregatedEntry.macdValues = { ...referenceStage.macdValues };
+        }
+        if (referenceStage.indicatorValues) {
+          try {
+            aggregatedEntry.indicatorValues = JSON.parse(
+              JSON.stringify(referenceStage.indicatorValues),
+            );
+          } catch (cloneError) {
+            aggregatedEntry.indicatorValues = referenceStage.indicatorValues;
+          }
+        }
+      }
+      return aggregatedEntry;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -10063,19 +10082,38 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          const subPeriodDays = diffIsoDays(
+            subDates[0],
+            subDates[subDates.length - 1],
+          );
+          const subYears = subPeriodDays > 0 ? subPeriodDays / 365.2425 : 0;
+          const subAnnualizedReturn =
+            subYears > 0 && subStartVal > 0
+              ? (Math.pow(subEndVal / subStartVal, 1 / subYears) - 1) * 100
+              : null;
+          const subBHAnnualizedReturn =
+            subYears > 0 && subStartBHPrice > 0
+              ? (Math.pow(subEndBHPrice / subStartBHPrice, 1 / subYears) - 1) * 100
+              : null;
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            Number.isFinite(subAnnualizedReturn) ? subAnnualizedReturn : 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            Number.isFinite(subAnnualizedReturn) ? subAnnualizedReturn : 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: Number.isFinite(subAnnualizedReturn)
+              ? subAnnualizedReturn
+              : null,
+            buyHoldAnnualizedReturn: Number.isFinite(subBHAnnualizedReturn)
+              ? subBHAnnualizedReturn
+              : null,
+            periodDays: subPeriodDays,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
@@ -10324,6 +10362,9 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
+  const baselineAnnualized = Number.isFinite(baselineMetrics?.annualizedReturn)
+    ? baselineMetrics.annualizedReturn
+    : null;
 
   const summaryAccumulator = {
     driftValues: [],
@@ -10342,6 +10383,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         baseParams,
         baselineReturn,
         baselineSharpe,
+        baselineAnnualized,
         summaryAccumulator,
       }),
     )
@@ -10427,6 +10469,7 @@ function buildSensitivityGroup({
   baseParams,
   baselineReturn,
   baselineSharpe,
+  baselineAnnualized,
   summaryAccumulator,
 }) {
   const paramEntries = Object.entries(context.params || {})
@@ -10446,6 +10489,7 @@ function buildSensitivityGroup({
         baseParams,
         baselineReturn,
         baselineSharpe,
+        baselineAnnualized,
         summaryAccumulator,
       }),
     )
@@ -10542,6 +10586,7 @@ function evaluateSensitivityParameter({
   baseParams,
   baselineReturn,
   baselineSharpe,
+  baselineAnnualized,
   summaryAccumulator,
 }) {
   if (!Number.isFinite(baseValue)) {
@@ -10584,8 +10629,32 @@ function evaluateSensitivityParameter({
         Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
           ? scenarioReturn - baselineReturn
           : null;
-      const driftPercent =
-        Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
+      const scenarioAnnualized = Number.isFinite(scenarioResult.annualizedReturn)
+        ? scenarioResult.annualizedReturn
+        : null;
+      let deltaAnnualized = null;
+      if (
+        Number.isFinite(scenarioAnnualized) &&
+        Number.isFinite(baselineAnnualized)
+      ) {
+        deltaAnnualized = scenarioAnnualized - baselineAnnualized;
+      } else if (
+        Number.isFinite(scenarioAnnualized) &&
+        baselineAnnualized === null
+      ) {
+        deltaAnnualized = scenarioAnnualized;
+      } else if (
+        scenarioAnnualized === null &&
+        Number.isFinite(baselineAnnualized)
+      ) {
+        deltaAnnualized = -baselineAnnualized;
+      }
+      const driftSource = Number.isFinite(deltaAnnualized)
+        ? deltaAnnualized
+        : deltaReturn;
+      const driftPercent = Number.isFinite(driftSource)
+        ? Math.abs(driftSource)
+        : null;
       const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
         ? scenarioResult.sharpeRatio
         : null;
@@ -10601,20 +10670,20 @@ function evaluateSensitivityParameter({
         deltaSharpe = -baselineSharpe;
       }
 
-      if (Number.isFinite(driftPercent)) {
-        absoluteDrifts.push(driftPercent);
-        summaryAccumulator.driftValues.push(driftPercent);
-        summaryAccumulator.scenarioCount += 1;
-      }
-      if (Number.isFinite(deltaReturn)) {
-        if (deltaReturn >= 0) {
-          positiveDeltas.push(deltaReturn);
-          summaryAccumulator.positive.push(deltaReturn);
-        } else {
-          negativeDeltas.push(deltaReturn);
-          summaryAccumulator.negative.push(deltaReturn);
+        if (Number.isFinite(driftPercent)) {
+          absoluteDrifts.push(driftPercent);
+          summaryAccumulator.driftValues.push(driftPercent);
+          summaryAccumulator.scenarioCount += 1;
         }
-      }
+        if (Number.isFinite(driftSource)) {
+          if (driftSource >= 0) {
+            positiveDeltas.push(driftSource);
+            summaryAccumulator.positive.push(driftSource);
+          } else {
+            negativeDeltas.push(driftSource);
+            summaryAccumulator.negative.push(driftSource);
+          }
+        }
       if (Number.isFinite(deltaSharpe)) {
         if (deltaSharpe >= 0) {
           sharpeGains.push(deltaSharpe);
@@ -10632,6 +10701,7 @@ function evaluateSensitivityParameter({
         direction: adjustment.direction,
         value: adjustment.value,
         deltaReturn,
+        deltaAnnualized,
         driftPercent,
         deltaSharpe,
         run: {
@@ -10651,6 +10721,7 @@ function evaluateSensitivityParameter({
         direction: adjustment.direction,
         value: adjustment.value,
         deltaReturn: null,
+        deltaAnnualized: null,
         driftPercent: null,
         deltaSharpe: null,
         run: null,

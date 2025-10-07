@@ -1,4 +1,15 @@
 
+## 2026-09-25 — Patch LB-UI-REFINE-20250925A
+- **Scope**: Tooltip 樣式一致化、敏感度評分與策略戰報敘述調整、績效分析呈現。
+- **Updates**:
+  - 導航列與頁尾品牌改為一致的圓角方塊標誌，`Lazy` 採用深灰色字體，強調產品識別。
+  - 將所有 tooltip 換成黑色描邊的「i」圓圈指示，移除舊有問號按鈕並調整 hover 互動。
+  - `LB-SENSITIVITY-ANNUALIZED-20250925A`: 敏感度分析改以年化報酬差評分，記錄 `deltaAnnualized`、基準年化報酬並更新穩定度計算。
+  - 完成 `renderPerformanceTable`，在績效分頁即時輸出各期間總報酬、年化、Sharpe/Sortino 與統計天數。
+  - 交易紀錄卡片整合所有進出場策略的前/中/後參數，分段進場仍可檢視首段觸發指標。
+  - `LB-STRATEGY-STATUS-20250925A`: 策略戰報文案改為專業語氣，聚焦差距說明與下一步調整方向。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
