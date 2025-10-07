@@ -1120,67 +1120,67 @@ const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250920A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
-        badgeText: '等待開局',
+        badgeText: '等待回測',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
             color: 'var(--muted-foreground)',
         },
-        title: '戰況房間尚未開啟',
-        subtitle: '回測一跑完就會推送戰術戰報，先在大廳補給一下。',
+        title: '尚未執行回測',
+        subtitle: '請設定參數並啟動回測，系統會在結果產生後整理策略戰報。',
     },
     loading: {
-        badgeText: '戰況載入中',
+        badgeText: '計算中',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
             color: 'var(--accent)',
         },
-        title: '策略戰況加載進度條...',
-        subtitle: '資料正在背景練等，馬上就能看到策略對上買入持有的實況。',
+        title: '回測結果載入中',
+        subtitle: '系統正在整理圖表與指標，通常數秒內完成；若長時間未完成，請確認網路或重新執行。',
     },
     leading: {
-        badgeText: '策略超神',
+        badgeText: '策略領先',
         badgeStyle: {
             backgroundColor: 'rgba(16, 185, 129, 0.18)',
             color: 'rgb(5, 122, 85)',
         },
-        title: '策略暫時打爆買入持有',
-        subtitle: '恭喜這局先搶下 MVP，記得補好防禦別被逆轉。',
+        title: '策略表現優於買入持有',
+        subtitle: '請檢視關鍵指標與風險數據，確認獲利與回撤水準符合資金管理規劃。',
     },
     tie: {
-        badgeText: '僵持對決',
+        badgeText: '表現接近',
         badgeStyle: {
             backgroundColor: 'rgba(251, 191, 36, 0.18)',
             color: 'rgb(180, 83, 9)',
         },
-        title: '策略與買入持有互卡血條',
-        subtitle: '雙方血量貼著走，先看下一波波段再決定要不要衝。',
+        title: '策略與買入持有相近',
+        subtitle: '報酬差距不大，可搭配敏感度與風控建議確認是否仍具改善空間。',
     },
     behind: {
-        badgeText: '策略逆風',
+        badgeText: '策略落後',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.18)',
             color: 'rgb(220, 38, 38)',
         },
-        title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
+        title: '買入持有暫時領先',
+        subtitle: '請優先檢視敏感度、停損停利與分段資金建議，評估是否調整參數或縮減部位。',
     },
     missing: {
-        badgeText: '資料載入',
+        badgeText: '等待結果',
         badgeStyle: {
             backgroundColor: 'rgba(148, 163, 184, 0.2)',
             color: 'rgb(71, 85, 105)',
         },
-        title: '戰報還在整理',
-        subtitle: '買入持有基準尚未回傳，請先跑完一次回測再回來看戰況。',
+        title: '尚未取得基準資料',
+        subtitle: '請先完成一次回測以取得買入持有基準，再回到戰報區比對差異。',
     },
     error: {
-        badgeText: '戰況當機',
+        badgeText: '載入失敗',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.24)',
             color: 'rgb(185, 28, 28)',
         },
-        title: '策略戰況暫停更新',
-        subtitle: '剛剛算戰況時跳出例外，重跑回測或調整參數再挑戰。',
+        title: '策略戰報產出失敗',
+        subtitle: '產生戰報時發生錯誤，請重新執行回測並查看控制台訊息。',
     },
 };
 
@@ -1337,11 +1337,11 @@ function buildStrategyComparisonSummary(result) {
         const diffValue = Number.isFinite(diff) ? diff : 0;
         const diffText = Math.abs(diffValue).toFixed(2);
         if (diffValue >= 1.5) {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前領先 ${diffText} 個百分點，這局暫時吃雞但別忘記補裝備。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}；策略高出 ${diffText} 個百分點，建議檢視是否維持現有部位與風控節奏。`;
         } else if (diffValue <= -1.5) {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前落後 ${diffText} 個百分點，被買入持有打成殘血，快調整戰術。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}；策略落後 ${diffText} 個百分點，請檢視參數設定與資金管控是否需要調整。`;
         } else {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前差距壓在 ${diffText} 個百分點內，雙方血條黏著走先觀察盤勢。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}；目前差距約 ${diffText} 個百分點，建議持續觀察並搭配敏感度驗證穩定度。`;
         }
     }
     return {
@@ -1373,50 +1373,50 @@ function buildStrategyHealthSummary(result) {
     const positives = [];
 
     if (!Number.isFinite(annualizedReturn)) {
-        warnings.push('年化報酬資料缺席，像副本沒存檔，先確認回測區間有沒有跑滿交易日。');
+        warnings.push('年化報酬無法計算，請確認回測區間是否涵蓋足夠的有效交易日。');
     } else if (annualizedReturn >= 12) {
         positives.push(`年化報酬 ${formatPercentSigned(annualizedReturn, 2)}`);
     } else {
-        warnings.push(`年化報酬只有 ${formatPercentSigned(annualizedReturn, 2)}，輸出速度像被拖慢的練等，節奏要再加速。`);
+        warnings.push(`年化報酬僅 ${formatPercentSigned(annualizedReturn, 2)}，建議檢視進出場條件或資金利用率，提升資金運用效率。`);
     }
 
     if (!Number.isFinite(sharpe)) {
-        warnings.push('夏普值缺資料，像團隊沒有補師，暫時看不出風險調整後報酬。');
+        warnings.push('夏普值無法計算，請檢查報酬序列是否完整並排除極端缺值。');
     } else if (sharpe >= 1) {
         positives.push(`夏普值 ${sharpe.toFixed(2)}`);
     } else {
-        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬像狂按換線，請先把防禦裝備穿好。`);
+        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，代表波動尚未轉化為足夠報酬，請調整風控或降低槓桿。`);
     }
 
     if (!Number.isFinite(sortino)) {
-        warnings.push('索提諾比率缺資料，像副本沒有仇恨條，無法判斷下檔風險。');
+        warnings.push('索提諾比率無法計算，請確認回測結果是否包含有效的下檔波動資料。');
     } else if (sortino >= 1) {
         positives.push(`索提諾比率 ${sortino.toFixed(2)}`);
     } else {
-        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，遇到回檔可能直接被打斷連段，記得留好防守技能。`);
+        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，建議強化停損或分段出場，以降低下檔風險。`);
     }
 
     if (!Number.isFinite(maxDrawdown)) {
-        warnings.push('最大回撤資料缺漏，像戰報沒錄影，請再檢查結果。');
+        warnings.push('最大回撤無法取得，請檢查資產序列是否完整。');
     } else if (maxDrawdown <= 15) {
         positives.push(`最大回撤僅 ${maxDrawdown.toFixed(2)}%`);
     } else {
-        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，一旦回檔就會掉裝備，資金控管務必先排好。`);
+        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，建議評估停損、分批出場或降低部位。`);
     }
 
     if (Number.isFinite(returnRatio)) {
         if (returnRatio >= 0.5 && returnRatio <= 1.5) {
-            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，節奏穩得像自動掛機。`);
+            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，不同時期的報酬節奏維持穩定。`);
         } else {
-            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，不同場景就卡手，記得多做滾動驗證免得翻車。`);
+            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，建議增加樣本或進行滾動驗證，以確認策略穩定性。`);
         }
     }
 
     if (Number.isFinite(sharpeHalfRatio)) {
         if (sharpeHalfRatio >= 0.5 && sharpeHalfRatio <= 1.5) {
-            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，體感穩如常駐 buff。`);
+            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，風險調整後報酬在不同時期維持一致。`);
         } else {
-            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，驗證樣本要再補一輪。`);
+            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，建議以不同時間窗重新驗證。`);
         }
     }
 
@@ -1433,9 +1433,9 @@ function buildStrategyHealthSummary(result) {
     if (positives.length > 0) {
         const unique = Array.from(new Set(positives));
         if (allGood) {
-            positiveLine = `體檢結論：${unique.join('、')} 全面滿 Buff，策略狀態神勇請維持輸出。`;
+            positiveLine = `整體結論：${unique.join('、')}。目前指標齊備且表現穩定，請維持既定紀律並持續監測。`;
         } else {
-            positiveLine = `${unique.join('、')} 表現還算有料，記得顧好核心裝備並調整倉位避免被反打。`;
+            positiveLine = `亮點：${unique.join('、')}。請依據上述警示項目調整策略，確保成果得以延續。`;
         }
     }
 
@@ -1468,22 +1468,22 @@ function buildSensitivityScoreAdvice(result) {
     const segments = [];
 
     if (rawScore === null) {
-        segments.push('敏感度總分失聯，像存檔壞軌，請重跑擾動測試確認穩定度');
+        segments.push('敏感度總分無法取得，請重新執行擾動測試並確認資料回傳完整。');
     } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，參數調校像滿級裝備`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健區間，可維持現有參數並定期複查。`);
     } else if (rawScore >= 40) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調參時請像打副本一樣小心`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，建議列為觀察重點，調參時請增加樣本或搭配風控保護。`);
     } else {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超敏感，碰一下就暴擊先開保護`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，顯示對參數高度敏感，請縮小部位並重新檢視策略邏輯。`);
     }
 
     if (averageDrift !== null) {
         if (averageDrift <= 20) {
-            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
+            segments.push('平均漂移維持在 ±20pp 以內，參數穩定性良好。');
         } else if (averageDrift <= 40) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長回測樣本或調整部位分配，以降低參數偏移風險。`);
         } else {
-            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，請強化風控、縮小部位或重新設計參數區間。`);
         }
     }
 
@@ -1495,19 +1495,19 @@ function buildSensitivityScoreAdvice(result) {
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
             if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
+                segments.push(`${dominantDirection}方向平均偏移超過 15pp，請優先調整該方向閾值或設定分段資金保護。`);
             } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
+                segments.push(`${dominantDirection}方向平均偏移介於 10～15pp，請再做滾動驗證並評估是否調整停損或加強分段機制。`);
             } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+                segments.push('調高與調低方向平均偏移皆落在 10pp 內，方向風險處於可控範圍。');
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，建議列入例行追蹤清單。`);
             }
         }
     }
 
     if (sampleCount !== null) {
-        segments.push(`擾動樣本 ${sampleCount} 組，資料量夠組團分析`);
+        segments.push(`擾動樣本 ${sampleCount} 組，資料量足以支援敏感度評估。`);
     }
 
     if (segments.length === 0) {
@@ -5081,10 +5081,12 @@ function runBacktestInternal() {
 }
 
 function clearPreviousResults() {
+    lastOverallResult = null;
+    lastSubPeriodResults = null;
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    displayPerformanceTable(null);
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -5099,7 +5101,6 @@ function clearPreviousResults() {
     const resEl=document.getElementById("result");
     resEl.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md';
     resEl.innerHTML = `<i class="fas fa-info-circle mr-2"></i> 請設定參數並執行。`;
-    lastOverallResult = null; lastSubPeriodResults = null;
     lastIndicatorSeries = null;
     lastPositionStates = [];
     lastDatasetDiagnostics = null;
@@ -5130,6 +5131,29 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function renderTooltipIcon(content, options = {}) {
+    if (typeof content !== 'string' || content.trim().length === 0) {
+        return '';
+    }
+    const className = typeof options.className === 'string' && options.className.trim().length > 0
+        ? ` ${options.className.trim()}`
+        : '';
+    const triggerClass = typeof options.triggerClass === 'string' && options.triggerClass.trim().length > 0
+        ? ` ${options.triggerClass.trim()}`
+        : '';
+    const textClass = typeof options.textClass === 'string' && options.textClass.trim().length > 0
+        ? ` ${options.textClass.trim()}`
+        : '';
+    const label = typeof options.label === 'string' && options.label.trim().length > 0
+        ? options.label.trim()
+        : '顯示詳細說明';
+    const iconText = typeof options.iconText === 'string' && options.iconText.trim().length > 0
+        ? escapeHtml(options.iconText.trim())
+        : 'i';
+    const ariaLabel = escapeHtml(label);
+    return `<span class="tooltip${className}" role="tooltip"><span class="tooltip-trigger tooltip-icon${triggerClass}" tabindex="0" aria-label="${ariaLabel}">${iconText}</span><span class="tooltiptext${textClass}">${content}</span></span>`;
 }
 
 function formatSkipReasons(skipReasons) {
@@ -6259,6 +6283,7 @@ function displayBacktestResult(result) {
     if (!result) {
         resetStrategyStatusCard('missing');
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
+        displayPerformanceTable(null);
         return;
     }
     updateStrategyStatusCard(result);
@@ -6270,10 +6295,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
-                            </span>
+                            ${renderTooltipIcon(`將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。`, { className: 'ml-2', label: '年化報酬率說明' })}
                         </div>
                         <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
                     </div>
@@ -6282,10 +6304,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">買入持有年化</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。</span>
-                            </span>
+                            ${renderTooltipIcon(`在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。`, { className: 'ml-2', label: '買入持有年化說明' })}
                         </div>
                         <p class="text-2xl font-bold ${bhAnnR>=0?'text-emerald-600':'text-rose-600'}">${bhAnnR>=0?'+':''}${bhAnnR.toFixed(2)}%</p>
                     </div>
@@ -6294,10 +6313,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
-                            </span>
+                            ${renderTooltipIcon(`策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。`, { className: 'ml-2', label: '總報酬率說明' })}
                         </div>
                         <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
                     </div>
@@ -6306,10 +6322,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">Buy & Hold</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">買入持有總報酬率</span>
-                            </span>
+                            ${renderTooltipIcon('買入持有總報酬率', { className: 'ml-2', label: '買入持有報酬率說明' })}
                         </div>
                         <p class="text-2xl font-bold ${bhR>=0?'text-emerald-600':'text-rose-600'}">${bhR>=0?'+':''}${bhR.toFixed(2)}%</p>
                     </div>
@@ -6324,10 +6337,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
-                            </span>
+                            ${renderTooltipIcon('策略<strong>總資金</strong>曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%', { className: 'ml-2', label: '最大回撤說明' })}
                         </div>
                         <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
                     </div>
@@ -6336,10 +6346,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">夏普值</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。</span>
-                            </span>
+                            ${renderTooltipIcon('衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。', { className: 'ml-2', label: '夏普值說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--primary);">${sharpe}</p>
                     </div>
@@ -6348,10 +6355,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">索提諾比率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。</span>
-                            </span>
+                            ${renderTooltipIcon("衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。", { className: 'ml-2', label: '索提諾比率說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--muted-foreground);">${sortino}</p>
                     </div>
@@ -6360,10 +6364,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">過擬合(報酬率比)</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${overfittingTooltip}</span>
-                            </span>
+                            ${renderTooltipIcon(overfittingTooltip, { className: 'ml-2', label: '過擬合指標說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--accent);">${annReturnRatioStr}</p>
                     </div>
@@ -6372,10 +6373,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--secondary);">過擬合(夏普值比)</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${overfittingTooltip}</span>
-                            </span>
+                            ${renderTooltipIcon(overfittingTooltip, { className: 'ml-2', label: '過擬合指標說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--secondary);">${sharpeRatioStr}</p>
                     </div>
@@ -6394,10 +6392,7 @@ function displayBacktestResult(result) {
         const headerHtml = `
         <div class="flex items-center mb-6">
             <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
-            <span class="tooltip ml-2">
-                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                <span class="tooltiptext">${tooltipContent}</span>
-            </span>
+            ${renderTooltipIcon(tooltipContent, { className: 'ml-2', label: '敏感度分析說明' })}
         </div>`;
         if (!data) {
             return `
@@ -6486,16 +6481,21 @@ function displayBacktestResult(result) {
                 `漂移：${driftText}`,
                 `Sharpe Δ：${sharpeText}${sharpeBase}`
             ].join('<br>');
-            return `<div class="sensitivity-scenario-chip tooltip">
+            const tooltipIcon = renderTooltipIcon(tooltipContent, {
+                className: 'ml-auto flex-shrink-0',
+                textClass: ' tooltiptext--sensitivity',
+                label: `${label} 擾動結果`
+            });
+            return `<div class="sensitivity-scenario-chip">
                 <div class="sensitivity-scenario-chip__header">
                     <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
                     <span class="sensitivity-scenario-chip__delta ${deltaCls}">${deltaText}</span>
+                    ${tooltipIcon}
                 </div>
                 <div class="sensitivity-scenario-chip__metrics">
                     <span class="${driftCls}">漂移 ${driftText}</span>
                     <span class="text-[11px]" style="color: var(--muted-foreground);">Sharpe ${sharpeText}</span>
                 </div>
-                <span class="tooltiptext tooltiptext--sensitivity">${tooltipContent}</span>
             </div>`;
         };
         const renderDirectionalCell = (param) => {
@@ -6672,10 +6672,11 @@ function displayBacktestResult(result) {
                                 <th class="px-3 py-2 text-center font-medium">
                                     <span class="inline-flex items-center justify-center gap-1">
                                         擾動網格
-                                        <span class="tooltip">
-                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。</span>
-                                        </span>
+                                        ${renderTooltipIcon('針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。', {
+                                            className: 'ml-1',
+                                            textClass: ' tooltiptext--sensitivity',
+                                            label: '擾動網格說明'
+                                        })}
                                     </span>
                                 </th>
                                 <th class="px-3 py-2 text-center font-medium">平均漂移</th>
@@ -6764,7 +6765,11 @@ function displayBacktestResult(result) {
             return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
         })();
         const directionTooltipHtml = directionSafeTooltip
-            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
+            ? renderTooltipIcon(directionSafeTooltip, {
+                className: 'ml-1',
+                textClass: ' tooltiptext--sensitivity',
+                label: '偏移方向補充'
+            })
             : '';
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
@@ -6772,10 +6777,11 @@ function displayBacktestResult(result) {
                     <div class="flex flex-col items-center text-center gap-3">
                         <div class="flex items-center gap-2">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
-                            <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
-                            </span>
+                            ${renderTooltipIcon(stabilityTooltip, {
+                                className: 'ml-1',
+                                textClass: ' tooltiptext--sensitivity',
+                                label: '穩定度分數說明'
+                            })}
                         </div>
                         <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
                         <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
@@ -6785,10 +6791,11 @@ function displayBacktestResult(result) {
                     <div class="flex flex-col items-center text-center gap-3">
                         <div class="flex items-center gap-2">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
-                            <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
-                            </span>
+                            ${renderTooltipIcon('平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。', {
+                                className: 'ml-1',
+                                textClass: ' tooltiptext--sensitivity',
+                                label: '平均漂移說明'
+                            })}
                         </div>
                         <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
                         <div class="text-xs text-muted-foreground leading-relaxed flex flex-col items-center gap-1">
@@ -6820,7 +6827,7 @@ function displayBacktestResult(result) {
         const interpretationHint = `
             <div class="p-4 rounded-xl border" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                 <div class="flex items-start gap-3">
-                    <span class="info-icon inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full" style="background-color: var(--primary); color: var(--primary-foreground);">i</span>
+                    <span class="tooltip-icon inline-flex items-center justify-center w-6 h-6 text-xs font-semibold" aria-hidden="true">i</span>
                     <div>
                         <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
                         <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
@@ -6863,10 +6870,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">勝率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">包含做多與做空交易</span>
-                            </span>
+                            ${renderTooltipIcon('包含做多與做空交易', { className: 'ml-2', label: '勝率計算說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${winR}%</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">(${winTrades}/${totalTrades})</p>
@@ -6876,10 +6880,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">總交易次數</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">包含做多與做空交易</span>
-                            </span>
+                            ${renderTooltipIcon('包含做多與做空交易', { className: 'ml-2', label: '交易次數說明' })}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${totalTrades}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
@@ -6909,10 +6910,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">📈 進場策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${entryDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${renderTooltipIcon(entryDesc.desc.replace(/\n/g,'<br>'), { className: 'ml-2', label: '進場策略說明' })}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${entryDesc.name}</p>
                     </div>
@@ -6920,10 +6918,10 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">📉 出場策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${exitDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${renderTooltipIcon(exitDesc.desc.replace(/\n/g,'<br>'), {
+                                className: 'ml-2',
+                                label: '出場策略說明'
+                            })}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${exitDesc.name}</p>
                     </div>
@@ -6932,10 +6930,10 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">📉 做空策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${shortEntryDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${renderTooltipIcon(shortEntryDesc.desc.replace(/\n/g,'<br>'), {
+                                className: 'ml-2',
+                                label: '做空策略說明'
+                            })}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${shortEntryDesc.name}</p>
                     </div>
@@ -6944,10 +6942,10 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">📈 回補策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${shortExitDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${renderTooltipIcon(shortExitDesc.desc.replace(/\n/g,'<br>'), {
+                                className: 'ml-2',
+                                label: '回補策略說明'
+                            })}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${shortExitDesc.name}</p>
                     </div>
@@ -6964,10 +6962,10 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm text-orange-600 font-medium">⚠️ 全局風控</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs bg-blue-600 text-white rounded-full cursor-help">?</span>
-                                <span class="tooltiptext">停損/停利設定 (多空共用)</span>
-                            </span>
+                            ${renderTooltipIcon('停損/停利設定 (多空共用)', {
+                                className: 'ml-2',
+                                label: '全局風控說明'
+                            })}
                         </div>
                         <p class="text-base font-semibold text-gray-800">損:${result.stopLoss>0?result.stopLoss+'%':'N/A'} / 利:${result.takeProfit>0?result.takeProfit+'%':'N/A'}</p>
                     </div>
@@ -7005,10 +7003,141 @@ function displayBacktestResult(result) {
         `;
 
         initSensitivityCollapse(el);
+        displayPerformanceTable(result.subPeriodResults || null);
 
         console.log("[Main] displayBacktestResult finished.");
+}
+
+const PERFORMANCE_PERIOD_ORDER = {
+    '1M': 1,
+    '3M': 2,
+    '6M': 3,
+    '1Y': 4,
+    '2Y': 5,
+    '3Y': 6,
+    '4Y': 7,
+    '5Y': 8,
+    '6Y': 9,
+    '7Y': 10,
+    '8Y': 11,
+    '9Y': 12,
+    '10Y': 13,
+};
+
+function displayPerformanceTable(subPeriodResultsOverride) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) {
+        console.error("[Main] Element 'performance-table-container' not found");
+        return;
     }
-const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
+
+    const overall = lastOverallResult;
+    if (!overall) {
+        container.innerHTML = `<div class="w-full py-8 text-sm text-center" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</div>`;
+        return;
+    }
+
+    const tooltip = renderTooltipIcon('依固定時間窗切片策略績效，對照買入持有基準，快速辨識不同期間的強弱與風險。', {
+        className: 'ml-2',
+        label: '期間績效說明'
+    });
+
+    const periodResults = subPeriodResultsOverride || lastSubPeriodResults || {};
+    const periodKeys = Object.keys(periodResults || {});
+    periodKeys.sort((a, b) => (PERFORMANCE_PERIOD_ORDER[a] || 999) - (PERFORMANCE_PERIOD_ORDER[b] || 999));
+
+    const formatPercent = (value, digits = 2, options = { showSign: true }) => {
+        if (!Number.isFinite(value)) return '—';
+        const rounded = value.toFixed(digits);
+        if (options.showSign) {
+            return `${value >= 0 ? '+' : ''}${rounded}%`;
+        }
+        return `${rounded}%`;
+    };
+
+    const formatRatio = (value) => {
+        if (!Number.isFinite(value)) return '—';
+        if (!isFinite(value)) return value > 0 ? '∞' : '-∞';
+        return value.toFixed(2);
+    };
+
+    const renderRow = (label, data) => {
+        if (!data || typeof data !== 'object') {
+            return `<tr class="border-b last:border-b-0" style="border-color: var(--border);">
+                <td class="px-4 py-3 font-medium whitespace-nowrap" style="color: var(--foreground);">${label}</td>
+                <td class="px-4 py-3 text-sm" style="color: var(--muted-foreground);" colspan="5">期間內資料不足或計算尚未完成</td>
+            </tr>`;
+        }
+        const { totalReturn, totalBuyHoldReturn, sharpeRatio, sortinoRatio, maxDrawdown } = data;
+        const returnClass = Number.isFinite(totalReturn) ? (totalReturn >= 0 ? 'text-emerald-600' : 'text-rose-600') : 'text-foreground';
+        const bhClass = Number.isFinite(totalBuyHoldReturn) ? (totalBuyHoldReturn >= 0 ? 'text-emerald-600' : 'text-rose-600') : 'text-foreground';
+        const maxDDValue = Number.isFinite(maxDrawdown) ? Math.abs(maxDrawdown) : maxDrawdown;
+        return `<tr class="border-b last:border-b-0" style="border-color: var(--border);">
+            <td class="px-4 py-3 font-medium whitespace-nowrap" style="color: var(--foreground);">${label}</td>
+            <td class="px-4 py-3 text-sm ${returnClass}">${formatPercent(totalReturn)}</td>
+            <td class="px-4 py-3 text-sm ${bhClass}">${formatPercent(totalBuyHoldReturn)}</td>
+            <td class="px-4 py-3 text-sm" style="color: var(--foreground);">${formatRatio(sharpeRatio)}</td>
+            <td class="px-4 py-3 text-sm" style="color: var(--foreground);">${formatRatio(sortinoRatio)}</td>
+            <td class="px-4 py-3 text-sm" style="color: var(--foreground);">${formatPercent(maxDDValue, 2, { showSign: false })}</td>
+        </tr>`;
+    };
+
+    const periodRowsHtml = periodKeys.length > 0
+        ? periodKeys.map((key) => renderRow(key, periodResults[key])).join('')
+        : `<tr style="border-color: var(--border);">
+            <td class="px-4 py-3 text-sm" style="color: var(--muted-foreground);" colspan="6">尚未產出期間拆分，建議延長回測時間或確認 Worker 是否回傳子期間指標。</td>
+        </tr>`;
+
+    const buyHoldSeries = Array.isArray(overall.buyHoldReturns) ? overall.buyHoldReturns : [];
+    const overallBH = buyHoldSeries.length > 0 ? Number(buyHoldSeries[buyHoldSeries.length - 1]) : NaN;
+    const overallReturn = Number.isFinite(overall.returnRate) ? overall.returnRate : NaN;
+    const overallSharpe = Number.isFinite(overall.sharpeRatio) ? overall.sharpeRatio : NaN;
+    const overallSortino = Number.isFinite(overall.sortinoRatio) ? overall.sortinoRatio : NaN;
+    const overallMaxDD = Number.isFinite(overall.maxDrawdown) ? Math.abs(overall.maxDrawdown) : NaN;
+    const overallReturnClass = Number.isFinite(overallReturn)
+        ? (overallReturn >= 0 ? 'text-emerald-600' : 'text-rose-600')
+        : 'text-foreground';
+    const overallBHClass = Number.isFinite(overallBH)
+        ? (overallBH >= 0 ? 'text-emerald-600' : 'text-rose-600')
+        : 'text-foreground';
+
+    const tableHtml = `
+        <div class="w-full space-y-4">
+            <div class="flex items-center justify-between">
+                <p class="text-sm font-semibold" style="color: var(--foreground);">期間績效摘要</p>
+                ${tooltip}
+            </div>
+            <div class="overflow-x-auto rounded-xl border" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--muted) 8%, var(--background));">
+                <table class="min-w-full text-sm" style="color: var(--foreground);">
+                    <thead style="background: color-mix(in srgb, var(--background) 92%, var(--muted)); color: var(--muted-foreground);">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-medium">期間</th>
+                            <th class="px-4 py-3 text-left font-medium">策略報酬</th>
+                            <th class="px-4 py-3 text-left font-medium">買入持有</th>
+                            <th class="px-4 py-3 text-left font-medium">夏普值</th>
+                            <th class="px-4 py-3 text-left font-medium">索提諾比率</th>
+                            <th class="px-4 py-3 text-left font-medium">最大回撤</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${periodRowsHtml}
+                        <tr style="background: color-mix(in srgb, var(--background) 88%, var(--muted)); font-weight: 600; color: var(--foreground);">
+                            <td class="px-4 py-3 whitespace-nowrap">整體區間</td>
+                            <td class="px-4 py-3 ${overallReturnClass}">${formatPercent(overallReturn)}</td>
+                            <td class="px-4 py-3 ${overallBHClass}">${formatPercent(overallBH)}</td>
+                            <td class="px-4 py-3">${formatRatio(overallSharpe)}</td>
+                            <td class="px-4 py-3">${formatRatio(overallSortino)}</td>
+                            <td class="px-4 py-3">${formatPercent(overallMaxDD, 2, { showSign: false })}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+    container.innerHTML = tableHtml;
+}
+
+const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v);
 
 const formatIndicatorValues = (indicatorValues) => { 
     try { 

@@ -145,10 +145,67 @@
     color: var(--muted-foreground);
 }
 
-.tooltip { position: relative; display: inline-block; vertical-align: middle; }
-.tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+.tooltip {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+    align-items: center;
+    gap: 0.25rem;
+}
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 250px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 50;
+    bottom: 135%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.tooltip:hover .tooltiptext,
+.tooltip:focus-within .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
 #backtest-result .tooltiptext { z-index: 10000; }
+.tooltip-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+    text-decoration: none;
+}
+.tooltip-trigger:focus-visible {
+    outline: 2px solid #111827;
+    outline-offset: 2px;
+}
+.tooltip-icon,
+.info-icon {
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+    padding: 0.125rem;
+    border-radius: 9999px;
+    border: 1px solid #111827;
+    background-color: transparent;
+    color: #111827;
+    font-weight: 600;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+.card .lucide {
+    color: inherit !important;
+    stroke: currentColor !important;
+}
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
 }
@@ -265,8 +322,6 @@
     gap: 0.4rem;
     min-height: 92px;
 }
-
-.sensitivity-scenario-chip.tooltip { display: grid; }
 
 .sensitivity-scenario-chip__header {
     display: flex;

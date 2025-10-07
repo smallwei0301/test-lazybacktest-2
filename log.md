@@ -1,4 +1,13 @@
 
+## 2026-09-23 — Patch LB-UI-TOOLTIP-20260923A
+- **Scope**: Tooltip 統一樣式、績效表格與策略戰報文案調整。
+- **Updates**:
+  - 將前端殘留的 Tooltip 全數改為黑色圓框「i」樣式，新增 `renderTooltipIcon` 擴充參數，涵蓋敏感度卡、策略設定、交易統計等區塊。
+  - 新增期間績效分析表格，支援年化報酬/買入持有/夏普/索提諾/最大回撤，並整合說明 Tooltip。
+  - 交易紀錄卡全面帶出 KD、MACD 與自訂指標的前中後快照，確保均線黃金交叉等策略能呈現參數細節。
+  - 策略戰報與敏感度建議改寫為專業且可執行的建議文案，移除遊戲化語氣。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
