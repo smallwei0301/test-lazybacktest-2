@@ -1,3 +1,11 @@
+## 2026-01-15 — Patch LB-BATCH-GA-20260115A
+- **Scope**: 批量優化計算方法擴充與遺傳因子搜尋流程。
+- **Updates**:
+  - `index.html` 新增「批量優化計算方法」選擇器，可於交替掃描與 GA 遺傳因子間切換，並調整設定欄位版面以容納新選項。
+  - `js/batch-optimization.js` 導入 GA 尋優流程、共用候選值掃描工具與 Worker 評分快取，支援多世代族群演化並保留原有序列掃描備援。
+  - `js/worker.js` 強化 `buildOptimizationValueSweep`，允許前端提供離散候選值陣列供遺傳因子快速評估。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:

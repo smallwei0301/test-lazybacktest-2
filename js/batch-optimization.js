@@ -56,6 +56,15 @@ let batchWorkerStatus = {
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
 
+const BATCH_OPTIMIZATION_METHOD_VERSION = 'LB-BATCH-GA-20260115A';
+
+function getCurrentOptimizationMethod(defaultMethod = 'sequential') {
+    const method = (batchOptimizationConfig && typeof batchOptimizationConfig === 'object')
+        ? batchOptimizationConfig.optimizationMethod
+        : null;
+    return method || defaultMethod;
+}
+
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
     const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
@@ -180,8 +189,11 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            optimizationMethod: 'sequential'
         };
+
+        console.log(`[Batch Optimization] Method version: ${BATCH_OPTIMIZATION_METHOD_VERSION}`);
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
         try {
@@ -389,7 +401,9 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+
+        batchOptimizationConfig = { ...config };
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
@@ -485,12 +499,13 @@ function getBatchOptimizationConfig() {
         // 初始化配置，設定預設值
         const config = {
             batchSize: 100,        // 預設批次大小
-            maxCombinations: 10000, // 預設最大組合數  
+            maxCombinations: 10000, // 預設最大組合數
             parameterTrials: 100,   // 預設參數優化次數
             targetMetric: 'annualizedReturn', // 預設優化目標指標
             concurrency: 4,         // 預設併發數
             iterationLimit: 6,      // 預設迭代上限
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'], // 顯示所有指標
+            optimizationMethod: 'sequential'
         };
         
         // 獲取參數優化次數
@@ -515,6 +530,11 @@ function getBatchOptimizationConfig() {
         const iterationLimitElement = document.getElementById('batch-optimize-iteration-limit');
         if (iterationLimitElement && iterationLimitElement.value) {
             config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
+        }
+
+        const methodElement = document.getElementById('batch-optimize-method');
+        if (methodElement && methodElement.value) {
+            config.optimizationMethod = methodElement.value;
         }
         
         // 安全檢查優化目標
@@ -922,10 +942,11 @@ async function optimizeCombinationIterative(combination, config) {
 // 這模擬了用戶在單一策略內反覆優化參數的過程
 async function optimizeStrategyWithInternalConvergence(strategy, strategyType, strategyInfo, targetMetric, trials, baseCombo) {
     console.log(`[Batch Optimization] Starting internal convergence optimization for ${strategy}`);
-    
+
     const maxInternalIterations = 5; // 策略內參數迭代次數限制
     const optimizeTargets = strategyInfo.optimizeTargets;
-    
+    const optimizationMethod = getCurrentOptimizationMethod();
+
     if (!optimizeTargets || optimizeTargets.length === 0) {
         console.log(`[Batch Optimization] No parameters to optimize for ${strategy}`);
         return strategyInfo.defaultParams || {};
@@ -953,7 +974,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
         for (let i = 0; i < optimizeTargets.length; i++) {
             const optimizeTarget = optimizeTargets[i];
             console.log(`[Batch Optimization] Optimizing ${strategy}.${optimizeTarget.name}...`);
-            
+
             // 構建完整的 baseParams
             const baseParams = getBacktestParams();
             
@@ -988,7 +1009,8 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 optimizeTarget,
                 strategyType,
                 targetMetric,
-                Math.max(1, parseInt(trials, 10) || 1)
+                Math.max(1, parseInt(trials, 10) || 1),
+                { method: optimizationMethod }
             );
             
             if (bestParam.value !== undefined) {
@@ -1385,10 +1407,11 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
 // 這是批量優化無法找到最佳參數的關鍵問題：之前使用默認參數而非組合參數
 async function optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, order = 'forward', baseCombo = null) {
     console.log(`[Batch Optimization] Starting simplified multi-parameter optimization for ${strategy}...`);
-    
+
     try {
         const optimizeTargets = strategyInfo.optimizeTargets;
-        
+        const optimizationMethod = getCurrentOptimizationMethod();
+
         // 修復：使用完整的組合參數作為基礎，而非預設參數
         // 這確保優化時的 baseParams 與用戶手動操作時一致
         const baseParams = getBacktestParams();
@@ -1467,11 +1490,12 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             
             // 優化當前參數
             const bestParam = await optimizeSingleStrategyParameter(
-                baseParams, 
-                optimizeTarget, 
-                strategyType, 
-                targetMetric, 
-                trialsPerParam
+                baseParams,
+                optimizeTarget,
+                strategyType,
+                targetMetric,
+                trialsPerParam,
+                { method: optimizationMethod }
             );
             
             if (bestParam.value !== undefined) {
@@ -1492,130 +1516,436 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
     }
 }
 
-// 優化單一策略參數
-async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials) {
+// 優化單一策略參數（支援 GA 遺傳因子與序列掃描）
+function valueKey(value) {
+    return Number(value).toFixed(6);
+}
+
+function sanitizeOptimizeRange(range) {
+    const safeRange = range && typeof range === 'object' ? range : {};
+    if (Array.isArray(safeRange.values) && safeRange.values.length > 0) {
+        const values = safeRange.values
+            .map(v => Number(v))
+            .filter(v => Number.isFinite(v));
+        return { values };
+    }
+
+    const sanitized = {};
+    const from = Number(safeRange.from);
+    const to = Number(safeRange.to);
+    let step = Number(safeRange.step);
+
+    if (!Number.isFinite(step) || step <= 0) {
+        step = 1;
+    }
+    sanitized.step = step;
+
+    if (Number.isFinite(from)) {
+        sanitized.from = from;
+    }
+    if (Number.isFinite(to)) {
+        sanitized.to = to;
+    }
+    if (!Number.isFinite(sanitized.from) && Number.isFinite(sanitized.to)) {
+        sanitized.from = sanitized.to;
+    }
+    if (!Number.isFinite(sanitized.to) && Number.isFinite(sanitized.from)) {
+        sanitized.to = sanitized.from;
+    }
+    if (!Number.isFinite(sanitized.from) && !Number.isFinite(sanitized.to)) {
+        sanitized.from = 1;
+        sanitized.to = 1;
+    }
+
+    return sanitized;
+}
+
+function buildParameterValueCandidates(range) {
+    const sanitized = sanitizeOptimizeRange(range);
+
+    if (Array.isArray(sanitized.values) && sanitized.values.length > 0) {
+        const dedup = [];
+        const seen = new Set();
+        sanitized.values.forEach(val => {
+            const key = valueKey(val);
+            if (!seen.has(key)) {
+                seen.add(key);
+                dedup.push(val);
+            }
+        });
+        return dedup;
+    }
+
+    const from = Number(sanitized.from);
+    const to = Number(sanitized.to);
+    const step = Math.abs(Number(sanitized.step));
+
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(step) || step <= 0) {
+        return [];
+    }
+
+    const ascending = to >= from;
+    const start = ascending ? from : to;
+    const end = ascending ? to : from;
+    const span = end - start;
+    const approxSteps = Math.min(10000, Math.max(0, Math.floor(span / step + 1e-9)));
+    const values = [];
+
+    for (let idx = 0; idx <= approxSteps; idx++) {
+        const value = start + idx * step;
+        if (value > end + step * 1e-6) break;
+        values.push(Number(value.toFixed(4)));
+    }
+
+    const finalValue = Number(end.toFixed(4));
+    if (values.length === 0 || Math.abs(values[values.length - 1] - finalValue) > 1e-6) {
+        values.push(finalValue);
+    }
+
+    if (!ascending) {
+        values.reverse();
+    }
+
+    const deduped = [];
+    const seen = new Set();
+    values.forEach(val => {
+        const key = valueKey(val);
+        if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(val);
+        }
+    });
+
+    return deduped;
+}
+
+function sortCandidatesByMetric(candidates, metric) {
+    if (!Array.isArray(candidates)) return [];
+
+    return candidates
+        .filter(candidate => candidate && candidate.value !== undefined && !Number.isNaN(Number(candidate.value)))
+        .map(candidate => {
+            let metricValue = candidate.metric;
+            if (!Number.isFinite(metricValue)) {
+                metricValue = getMetricFromResult(candidate.raw, metric);
+            }
+            return {
+                value: Number(candidate.value),
+                metric: Number.isFinite(metricValue) ? metricValue : NaN,
+                raw: candidate.raw || null
+            };
+        })
+        .filter(candidate => !Number.isNaN(candidate.metric))
+        .sort((a, b) => {
+            if (metric === 'maxDrawdown') {
+                const diff = Math.abs(a.metric) - Math.abs(b.metric);
+                if (Math.abs(diff) > 1e-9) {
+                    return diff;
+                }
+            }
+            const safeA = Number.isFinite(a.metric) ? a.metric : -Infinity;
+            const safeB = Number.isFinite(b.metric) ? b.metric : -Infinity;
+            return safeB - safeA;
+        });
+}
+
+function snapToDomain(value, domain) {
+    if (!Array.isArray(domain) || domain.length === 0) return Number(value);
+    let closest = Number(domain[0]);
+    let minDiff = Math.abs(closest - value);
+    for (let i = 1; i < domain.length; i++) {
+        const candidate = Number(domain[i]);
+        const diff = Math.abs(candidate - value);
+        if (diff < minDiff) {
+            closest = candidate;
+            minDiff = diff;
+        }
+    }
+    return Number(closest);
+}
+
+async function runWorkerParameterSweep(params, optimizeTarget, strategyType, optimizeRange, targetMetric) {
     return new Promise((resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
-            resolve({ value: undefined, metric: -Infinity });
+            resolve([]);
             return;
         }
-        
+
         const optimizeWorker = new Worker(workerUrl);
-        
+        const preparedParams = enrichParamsWithLookback(params);
+
         optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
+            const { type, data } = e.data || {};
+
             if (type === 'result') {
                 optimizeWorker.terminate();
 
-                console.debug('[Batch Optimization] optimizeSingleStrategyParameter worker returned data:', data);
-
-                if (!data || !Array.isArray(data.results) || data.results.length === 0) {
-                    console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
-                    resolve({ value: undefined, metric: -Infinity });
+                if (!data || !Array.isArray(data.results)) {
+                    resolve([]);
                     return;
                 }
 
-                // Normalize and sort using getMetricFromResult to be tolerant to missing/NaN metrics
-                const results = data.results.map(r => ({
-                    __orig: r,
-                    paramValue: (r.paramValue !== undefined) ? r.paramValue : (r.value !== undefined ? r.value : (r.param !== undefined ? r.param : undefined)),
-                    metricVal: getMetricFromResult(r, targetMetric)
-                }));
-
-                // Filter out entries without a paramValue
-                const validResults = results.filter(r => r.paramValue !== undefined && !isNaN(r.metricVal));
-                if (validResults.length === 0) {
-                    console.warn(`[Batch Optimization] Optimization returned results but none had usable paramValue/metric for ${optimizeTarget.name}`);
-                    // fallback: try to pick first result that has paramValue even if metric NaN
-                    const fallback = results.find(r => r.paramValue !== undefined);
-                    if (fallback) {
-                        resolve({ value: fallback.paramValue, metric: fallback.metricVal });
-                    } else {
-                        resolve({ value: undefined, metric: -Infinity });
-                    }
-                    return;
-                }
-
-                // Sort: for maxDrawdown smaller is better
-                validResults.sort((a, b) => {
-                    if (targetMetric === 'maxDrawdown') {
-                        return Math.abs(a.metricVal) - Math.abs(b.metricVal);
-                    }
-                    return b.metricVal - a.metricVal;
+                const mapped = data.results.map(r => {
+                    const paramValue = (r.paramValue !== undefined)
+                        ? r.paramValue
+                        : (r.value !== undefined ? r.value : (r.param !== undefined ? r.param : undefined));
+                    const metricVal = getMetricFromResult(r, targetMetric);
+                    return { value: paramValue, metric: metricVal, raw: r };
                 });
 
-                const best = validResults[0];
-                console.debug('[Batch Optimization] Selected best optimization result:', best);
-                resolve({ value: best.paramValue, metric: best.metricVal });
+                resolve(mapped);
             } else if (type === 'error') {
-                console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
+                console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data?.data?.message || e.data?.error);
                 optimizeWorker.terminate();
-                resolve({ value: undefined, metric: -Infinity });
+                resolve([]);
             }
         };
-        
+
         optimizeWorker.onerror = function(error) {
             console.error(`[Batch Optimization] ${optimizeTarget.name} optimization worker error:`, error);
             optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
+            resolve([]);
         };
-        
-        // 使用策略配置中的原始步長，不進行動態調整
-        // 修復：批量優化應該使用與單次優化相同的參數範圍和步長，
-        // 以確保搜索空間的一致性，避免跳過最優參數值
-        const range = optimizeTarget.range;
-        const optimizedRange = {
-            from: range.from,
-            to: range.to,
-            step: range.step || 1  // 使用原始步長，確保與單次優化一致
-        };
-        
-        console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
-        
-        const preparedParams = enrichParamsWithLookback(params);
 
-        // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
-            optimizeRange: optimizedRange,
+            optimizeRange,
             useCachedData: true,
             cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
         });
-        
-        // 設定超時
+
         setTimeout(() => {
             optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
-        }, 60000); // 60秒超時
+            resolve([]);
+        }, 60000);
     });
+}
+
+async function optimizeSingleStrategyParameterGA(params, optimizeTarget, strategyType, targetMetric, trials, sanitizedRange) {
+    try {
+        const domain = buildParameterValueCandidates(sanitizedRange);
+        if (!Array.isArray(domain) || domain.length === 0) {
+            console.warn(`[Batch Optimization][GA] ${optimizeTarget.name} 缺少有效的候選值，無法使用遺傳因子。`);
+            return { value: undefined, metric: -Infinity };
+        }
+
+        const domainSorted = [...domain].sort((a, b) => a - b);
+        const safeTrials = Math.max(1, parseInt(trials, 10) || 1);
+        let populationSize = Math.min(domainSorted.length, Math.max(4, Math.ceil(Math.sqrt(domainSorted.length))));
+        populationSize = Math.min(populationSize, Math.max(3, Math.min(safeTrials, domainSorted.length)));
+        if (populationSize <= 0) {
+            populationSize = Math.min(domainSorted.length, 3);
+        }
+
+        const maxGenerations = Math.min(12, Math.max(1, Math.floor(safeTrials / populationSize) || 1));
+        const mutationRate = 0.2;
+        const eliteRatio = 0.25;
+        const stagnationLimit = 3;
+
+        const population = [];
+        const initialStep = Math.max(1, Math.floor(domainSorted.length / populationSize));
+        for (let idx = 0; idx < domainSorted.length && population.length < populationSize; idx += initialStep) {
+            population.push(domainSorted[idx]);
+        }
+        while (population.length < populationSize) {
+            population.push(domainSorted[Math.floor(Math.random() * domainSorted.length)]);
+        }
+
+        const evaluationCache = new Map();
+        let bestCandidate = null;
+        let bestGeneration = -1;
+
+        for (let generation = 0; generation < maxGenerations; generation++) {
+            console.log(`[Batch Optimization][GA] Generation ${generation + 1}/${maxGenerations} for ${optimizeTarget.name}`);
+
+            const uniquePopulation = Array.from(new Set(population.map(v => Number(v)))).filter(v => Number.isFinite(v));
+            const toEvaluate = uniquePopulation.filter(v => !evaluationCache.has(valueKey(v)));
+
+            if (toEvaluate.length > 0) {
+                const evalResults = await runWorkerParameterSweep(
+                    params,
+                    optimizeTarget,
+                    strategyType,
+                    { values: toEvaluate },
+                    targetMetric
+                );
+
+                evalResults.forEach(result => {
+                    if (result.value === undefined) return;
+                    evaluationCache.set(valueKey(result.value), {
+                        value: Number(result.value),
+                        metric: result.metric,
+                        raw: result.raw
+                    });
+                });
+            }
+
+            const scoredPopulation = uniquePopulation.map(v => {
+                const cached = evaluationCache.get(valueKey(v));
+                if (cached) return cached;
+                return { value: Number(v), metric: -Infinity, raw: null };
+            });
+
+            const ranked = sortCandidatesByMetric(scoredPopulation, targetMetric);
+            if (ranked.length === 0) {
+                console.warn(`[Batch Optimization][GA] ${optimizeTarget.name} 在第 ${generation + 1} 代無有效結果。`);
+                break;
+            }
+
+            const leader = ranked[0];
+            if (!bestCandidate || isBetterMetric(leader.metric, bestCandidate.metric, targetMetric)) {
+                bestCandidate = { value: leader.value, metric: leader.metric };
+                bestGeneration = generation;
+            }
+
+            if (generation - bestGeneration >= stagnationLimit) {
+                console.log(`[Batch Optimization][GA] ${optimizeTarget.name} 已停滯 ${stagnationLimit} 代，提前結束。`);
+                break;
+            }
+
+            const eliteCount = Math.max(1, Math.floor(populationSize * eliteRatio));
+            const elites = ranked.slice(0, eliteCount).map(item => item.value);
+            const parentPool = ranked.slice(0, Math.max(eliteCount * 2, Math.ceil(ranked.length / 2)));
+
+            const nextPopulation = elites.slice();
+            const diversityGuard = new Set(elites.map(valueKey));
+
+            const pickParent = () => {
+                if (parentPool.length === 0) {
+                    return domainSorted[Math.floor(Math.random() * domainSorted.length)];
+                }
+                const chosen = parentPool[Math.floor(Math.random() * parentPool.length)];
+                return chosen ? chosen.value : domainSorted[Math.floor(Math.random() * domainSorted.length)];
+            };
+
+            while (nextPopulation.length < populationSize) {
+                if (Math.random() < mutationRate) {
+                    const mutated = domainSorted[Math.floor(Math.random() * domainSorted.length)];
+                    nextPopulation.push(mutated);
+                    diversityGuard.add(valueKey(mutated));
+                    continue;
+                }
+
+                const parentA = pickParent();
+                const parentB = pickParent();
+                const childGuess = (Number(parentA) + Number(parentB)) / 2;
+                const snapped = snapToDomain(childGuess, domainSorted);
+
+                if (!diversityGuard.has(valueKey(snapped)) || diversityGuard.size < domainSorted.length) {
+                    diversityGuard.add(valueKey(snapped));
+                    nextPopulation.push(snapped);
+                } else {
+                    const fallback = domainSorted[Math.floor(Math.random() * domainSorted.length)];
+                    nextPopulation.push(fallback);
+                }
+            }
+
+            population.length = 0;
+            Array.prototype.push.apply(population, nextPopulation);
+        }
+
+        if (!bestCandidate && evaluationCache.size > 0) {
+            const finalRanked = sortCandidatesByMetric(Array.from(evaluationCache.values()), targetMetric);
+            if (finalRanked.length > 0) {
+                bestCandidate = { value: finalRanked[0].value, metric: finalRanked[0].metric };
+            }
+        }
+
+        if (bestCandidate) {
+            console.log(`[Batch Optimization][GA] ${optimizeTarget.name} best value ${bestCandidate.value} (${targetMetric}: ${bestCandidate.metric})`);
+            return bestCandidate;
+        }
+
+        return { value: undefined, metric: -Infinity };
+    } catch (error) {
+        console.error(`[Batch Optimization][GA] ${optimizeTarget.name} optimization failed:`, error);
+        return { value: undefined, metric: -Infinity };
+    }
+}
+
+async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials, options = {}) {
+    const method = (options && options.method) || getCurrentOptimizationMethod();
+    const safeTrials = Math.max(1, parseInt(trials, 10) || 1);
+    const sanitizedRange = sanitizeOptimizeRange(optimizeTarget.range);
+
+    if (method === 'ga') {
+        const gaResult = await optimizeSingleStrategyParameterGA(
+            params,
+            optimizeTarget,
+            strategyType,
+            targetMetric,
+            safeTrials,
+            sanitizedRange
+        );
+
+        if (gaResult && gaResult.value !== undefined) {
+            return gaResult;
+        }
+
+        console.warn(`[Batch Optimization][GA] ${optimizeTarget.name} 未取得有效 GA 結果，改用交替掃描。`);
+    }
+
+    const sweepResults = await runWorkerParameterSweep(
+        params,
+        optimizeTarget,
+        strategyType,
+        sanitizedRange,
+        targetMetric
+    );
+
+    const ranked = sortCandidatesByMetric(sweepResults, targetMetric);
+    if (ranked.length === 0) {
+        const fallback = sweepResults.find(item => item && item.value !== undefined);
+        if (fallback) {
+            const metricVal = Number.isFinite(fallback.metric) ? fallback.metric : -Infinity;
+            return { value: fallback.value, metric: metricVal };
+        }
+        return { value: undefined, metric: -Infinity };
+    }
+
+    return { value: ranked[0].value, metric: ranked[0].metric };
 }
 
 // 優化風險管理參數（停損和停利）
 async function optimizeRiskManagementParameters(baseParams, optimizeTargets, targetMetric, trials) {
     console.log('[Batch Optimization] Starting multi-parameter risk management optimization...');
-    
+
     try {
+        const optimizationMethod = getCurrentOptimizationMethod();
         // 第一階段：優化停損參數
         const stopLossTarget = optimizeTargets.find(t => t.name === 'stopLoss');
         console.log('[Batch Optimization] Phase 1: Optimizing stopLoss...', stopLossTarget);
-        
-        const bestStopLoss = await optimizeSingleRiskParameter(baseParams, stopLossTarget, targetMetric, Math.floor(trials / 2));
+
+        const bestStopLoss = await optimizeSingleStrategyParameter(
+            baseParams,
+            stopLossTarget,
+            'risk',
+            targetMetric,
+            Math.max(1, Math.floor(trials / 2)),
+            { method: optimizationMethod }
+        );
         console.log('[Batch Optimization] Best stopLoss result:', bestStopLoss);
-        
+
         // 第二階段：基於最佳停損值優化停利參數
         const takeProfitTarget = optimizeTargets.find(t => t.name === 'takeProfit');
         const paramsWithBestStopLoss = { ...baseParams };
         if (bestStopLoss.value !== undefined) {
             paramsWithBestStopLoss.stopLoss = bestStopLoss.value;
         }
-        
+
         console.log('[Batch Optimization] Phase 2: Optimizing takeProfit with stopLoss =', bestStopLoss.value);
-        const bestTakeProfit = await optimizeSingleRiskParameter(paramsWithBestStopLoss, takeProfitTarget, targetMetric, Math.floor(trials / 2));
+        const bestTakeProfit = await optimizeSingleStrategyParameter(
+            paramsWithBestStopLoss,
+            takeProfitTarget,
+            'risk',
+            targetMetric,
+            Math.max(1, Math.floor(trials / 2)),
+            { method: optimizationMethod }
+        );
         console.log('[Batch Optimization] Best takeProfit result:', bestTakeProfit);
         
         // 組合最佳參數
@@ -1634,77 +1964,6 @@ async function optimizeRiskManagementParameters(baseParams, optimizeTargets, tar
         console.error('[Batch Optimization] Error in multi-parameter optimization:', error);
         return {};
     }
-}
-
-// 優化單一風險管理參數
-async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric, trials) {
-    return new Promise((resolve) => {
-        if (!workerUrl) {
-            console.error('[Batch Optimization] Worker not available');
-            resolve({ value: undefined, metric: -Infinity });
-            return;
-        }
-        
-        const optimizeWorker = new Worker(workerUrl);
-        
-        optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
-            if (type === 'result') {
-                optimizeWorker.terminate();
-                
-                if (data && data.results && data.results.length > 0) {
-                    // 根據目標指標排序結果
-                    const sortedResults = data.results.sort((a, b) => {
-                        const aValue = a[targetMetric] || -Infinity;
-                        const bValue = b[targetMetric] || -Infinity;
-                        
-                        if (targetMetric === 'maxDrawdown') {
-                            // 最大回撤越小越好
-                            return Math.abs(aValue) - Math.abs(bValue);
-                        } else {
-                            // 其他指標越大越好
-                            return bValue - aValue;
-                        }
-                    });
-                    
-                    const bestResult = sortedResults[0];
-                    console.log(`[Batch Optimization] Best ${optimizeTarget.name}: ${bestResult.paramValue}, ${targetMetric}: ${bestResult[targetMetric]}`);
-                    
-                    resolve({
-                        value: bestResult.paramValue,
-                        metric: bestResult[targetMetric]
-                    });
-                } else {
-                    console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
-                    resolve({ value: undefined, metric: -Infinity });
-                }
-            } else if (type === 'error') {
-                console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
-                optimizeWorker.terminate();
-                resolve({ value: undefined, metric: -Infinity });
-            }
-        };
-        
-        optimizeWorker.onerror = function(error) {
-            console.error(`[Batch Optimization] ${optimizeTarget.name} optimization worker error:`, error);
-            optimizeWorker.terminate();
-            resolve({ value: undefined, metric: -Infinity });
-        };
-        
-        const preparedParams = enrichParamsWithLookback(params);
-
-        // 發送優化任務
-        optimizeWorker.postMessage({
-            type: 'runOptimization',
-            params: preparedParams,
-            optimizeTargetStrategy: 'risk',
-            optimizeParamName: optimizeTarget.name,
-            optimizeRange: optimizeTarget.range,
-            useCachedData: true,
-            cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
-        });
-    });
 }
 
 // 顯示批量優化結果
