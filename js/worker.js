@@ -10309,6 +10309,7 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
   };
 }
 
+// Patch Tag: LB-SENSITIVITY-ANNUALIZED-20250929A — Use annualized returns to score parameter drift.
 function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   if (!Array.isArray(data) || data.length === 0 || !baseParams) {
     return null;
@@ -10318,9 +10319,19 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+  const baselineAnnualized = Number.isFinite(
+    baselineMetrics?.annualizedReturn,
+  )
+    ? baselineMetrics.annualizedReturn
+    : null;
+  const baselineTotalReturn = Number.isFinite(baselineMetrics?.returnRate)
     ? baselineMetrics.returnRate
-    : 0;
+    : null;
+  const baselineReturn = Number.isFinite(baselineAnnualized)
+    ? baselineAnnualized
+    : Number.isFinite(baselineTotalReturn)
+      ? baselineTotalReturn
+      : 0;
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
@@ -10411,10 +10422,11 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
-      returnRate: baselineReturn,
-      annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
-        ? baselineMetrics.annualizedReturn
-        : null,
+      returnRate: baselineTotalReturn,
+      annualizedReturn: baselineAnnualized,
+      comparisonMetric: Number.isFinite(baselineAnnualized)
+        ? "annualized"
+        : "total",
       sharpeRatio: baselineSharpe,
     },
     groups,
@@ -10577,9 +10589,17 @@ function evaluateSensitivityParameter({
     }
 
     if (scenarioResult && typeof scenarioResult === "object") {
-      const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
+      const scenarioAnnualized = Number.isFinite(
+        scenarioResult.annualizedReturn,
+      )
+        ? scenarioResult.annualizedReturn
+        : null;
+      const scenarioTotalReturn = Number.isFinite(scenarioResult.returnRate)
         ? scenarioResult.returnRate
         : null;
+      const scenarioReturn = Number.isFinite(scenarioAnnualized)
+        ? scenarioAnnualized
+        : scenarioTotalReturn;
       const deltaReturn =
         Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
           ? scenarioReturn - baselineReturn
@@ -10635,12 +10655,8 @@ function evaluateSensitivityParameter({
         driftPercent,
         deltaSharpe,
         run: {
-          returnRate: scenarioReturn,
-          annualizedReturn: Number.isFinite(
-            scenarioResult.annualizedReturn
-          )
-            ? scenarioResult.annualizedReturn
-            : null,
+          returnRate: scenarioTotalReturn,
+          annualizedReturn: scenarioAnnualized,
           sharpeRatio: scenarioSharpe,
         },
       });
