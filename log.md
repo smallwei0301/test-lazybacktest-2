@@ -1,3 +1,11 @@
+## 2026-02-18 — Patch LB-AI-LSTM-DIAG-20260218A
+- **Issue recap**: 勝率門檻輸入框未反映驗證後自動調整的門檻值，且 LSTM 訓練流程缺乏可供檢視的測試報告與門檻調校診斷。
+- **Fix**:
+  - `js/ai-prediction.js` 訓練結果會同步更新勝率門檻輸入值並觸發重算，確保 UI 與實際採用門檻一致；新增 LSTM 測試報告按鈕與視窗，整理資料切分、指標表現、混淆矩陣與門檻驗證結果。
+  - `js/worker.js` 回傳 LSTM 訓練診斷，包含正規化參數、樣本統計、Precision／Recall／F1 與門檻調整資訊，供前端報告呈現與追蹤。
+- **Diagnostics**: 切換模型時會依活動模型啟用對應報告按鈕，LSTM 報告揭露驗證樣本數、調整後門檻與 F1 改善幅度。
+- **Testing**: `node --check js/ai-prediction.js`、`node --check js/worker.js`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:

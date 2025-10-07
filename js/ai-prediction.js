@@ -15,8 +15,9 @@
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
 // Patch Tag: LB-AI-THRESH-AUTO-20260215A — 門檻驗證分流與 F1 專注調校 UI。
 // Patch Tag: LB-AI-THRESH-AUTO-20260215B — 門檻驗證 UI 串接與樣本摘要強化。
+// Patch Tag: LB-AI-LSTM-DIAG-20260218A — LSTM 測試報告與門檻顯示同步調整。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-THRESH-AUTO-20260215B';
+    const VERSION_TAG = 'LB-AI-LSTM-DIAG-20260218A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -95,6 +96,7 @@
         lastRunMeta: null,
         volatilityDiagnostics: null,
         annDiagnostics: null,
+        lstmDiagnostics: null,
         thresholdDiagnostics: null,
         hyperparameters: {
             lookback: 20,
@@ -180,6 +182,7 @@
         volatilityDropSummary: null,
         annDiagnosticsButton: null,
         testAccuracyLabel: null,
+        lstmDiagnosticsButton: null,
     };
 
     const colorMap = {
@@ -600,6 +603,182 @@
             return;
         }
         const reportHtml = buildAnnDiagnosticsHtml(diagnostics);
+        popup.document.open();
+        popup.document.write(reportHtml);
+        popup.document.close();
+        popup.focus();
+    };
+
+    const updateLstmDiagnosticsButtonState = () => {
+        if (!elements.lstmDiagnosticsButton) return;
+        const lstmState = getModelState(MODEL_TYPES.LSTM);
+        const diagnostics = lstmState?.lstmDiagnostics;
+        const hasDiagnostics = Boolean(diagnostics && typeof diagnostics === 'object');
+        const isLstmActive = globalState.activeModel === MODEL_TYPES.LSTM;
+        const canOpen = isLstmActive && hasDiagnostics;
+        elements.lstmDiagnosticsButton.disabled = !canOpen;
+        elements.lstmDiagnosticsButton.classList.toggle('opacity-60', !canOpen);
+        elements.lstmDiagnosticsButton.classList.toggle('cursor-not-allowed', !canOpen);
+        if (!isLstmActive) {
+            const label = '僅在選取 LSTM 模型時可檢視測試報告';
+            elements.lstmDiagnosticsButton.setAttribute('aria-label', label);
+            elements.lstmDiagnosticsButton.setAttribute('title', label);
+        } else if (hasDiagnostics) {
+            const label = '開啟 LSTM 測試報告';
+            elements.lstmDiagnosticsButton.setAttribute('aria-label', label);
+            elements.lstmDiagnosticsButton.setAttribute('title', label);
+        } else {
+            const label = '尚未產生 LSTM 測試報告';
+            elements.lstmDiagnosticsButton.setAttribute('aria-label', label);
+            elements.lstmDiagnosticsButton.setAttribute('title', label);
+        }
+    };
+
+    const buildLstmDiagnosticsHtml = (diagnostics) => {
+        const dataset = diagnostics?.dataset || {};
+        const performance = diagnostics?.performance || {};
+        const thresholdDiagnostics = diagnostics?.thresholdDiagnostics || null;
+        const timestamp = Number.isFinite(diagnostics?.timestamp)
+            ? new Date(diagnostics.timestamp).toISOString()
+            : new Date().toISOString();
+        const normalization = dataset?.normalization || {};
+        const confusion = performance?.confusion || {};
+        const classificationLabel = dataset.classificationMode === CLASSIFICATION_MODES.BINARY ? '二分類' : '三分類';
+        const resolvedThreshold = Number.isFinite(performance?.threshold)
+            ? formatPercent(performance.threshold, 1)
+            : '—';
+        let thresholdSummary = '尚未啟用驗證門檻調整。';
+        if (thresholdDiagnostics && typeof thresholdDiagnostics === 'object') {
+            const appliedText = thresholdDiagnostics.applied ? '已自動調整' : '維持原設定';
+            const resolvedText = Number.isFinite(thresholdDiagnostics.resolvedThreshold)
+                ? formatPercent(thresholdDiagnostics.resolvedThreshold, 1)
+                : '—';
+            const baselineF1 = Number.isFinite(thresholdDiagnostics?.baseline?.f1)
+                ? formatPercent(thresholdDiagnostics.baseline.f1, 1)
+                : null;
+            const bestF1 = Number.isFinite(thresholdDiagnostics?.best?.f1)
+                ? formatPercent(thresholdDiagnostics.best.f1, 1)
+                : null;
+            const improvement = Number.isFinite(thresholdDiagnostics?.improvement)
+                ? formatPercent(thresholdDiagnostics.improvement, 1)
+                : null;
+            const details = [
+                `${appliedText}（門檻 ${resolvedText}）`,
+            ];
+            if (bestF1) {
+                let text = `最佳 F1 ${bestF1}`;
+                if (baselineF1) {
+                    text += `｜原始 ${baselineF1}`;
+                }
+                if (improvement) {
+                    text += `｜改善 ${improvement}`;
+                }
+                details.push(text);
+            }
+            if (Number.isFinite(thresholdDiagnostics.sampleCount)) {
+                const positives = Number.isFinite(thresholdDiagnostics.positiveCount)
+                    ? thresholdDiagnostics.positiveCount
+                    : '—';
+                details.push(`驗證樣本 ${thresholdDiagnostics.sampleCount}｜正樣本 ${positives}`);
+            }
+            thresholdSummary = details.join('｜');
+        }
+
+        const html = `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <title>LSTM 測試報告</title>
+    <style>
+        body { font-family: 'Noto Sans TC', 'Segoe UI', sans-serif; margin: 16px; line-height: 1.6; color: #111; background: #f8fafc; }
+        h1 { font-size: 20px; margin-bottom: 12px; }
+        h2 { font-size: 16px; margin-top: 24px; margin-bottom: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; background: #fff; }
+        th, td { border: 1px solid #d4d4d4; padding: 8px; font-size: 13px; text-align: left; }
+        th { background: #eff6ff; font-weight: 600; }
+        caption { text-align: left; font-weight: 600; margin-bottom: 4px; }
+        .meta { color: #64748b; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>LSTM 測試報告</h1>
+    <p class="meta">產生時間：${escapeHTML(timestamp)}｜分類模式：${escapeHTML(classificationLabel)}</p>
+    <h2>資料切分與正規化</h2>
+    <table>
+        <tbody>
+            <tr><th>Lookback</th><td>${Number.isFinite(dataset.lookback) ? dataset.lookback : '—'}</td></tr>
+            <tr><th>訓練樣本</th><td>${Number.isFinite(dataset.trainSamples) ? dataset.trainSamples : '—'}</td></tr>
+            <tr><th>驗證樣本</th><td>${Number.isFinite(dataset.validationSamples) ? dataset.validationSamples : '—'}</td></tr>
+            <tr><th>測試樣本</th><td>${Number.isFinite(dataset.testSamples) ? dataset.testSamples : '—'}</td></tr>
+            <tr><th>訓練比例</th><td>${Number.isFinite(dataset.trainRatio) ? formatPercent(dataset.trainRatio, 1) : '—'}</td></tr>
+            <tr><th>正規化均值 / 標準差</th><td>${formatNumber(normalization.mean, 4)} ／ ${formatNumber(normalization.std, 4)}</td></tr>
+            <tr><th>訓練賠率（Odds）</th><td>${Number.isFinite(diagnostics?.trainingOdds) ? formatNumber(diagnostics.trainingOdds, 2) : '—'}</td></tr>
+            <tr><th>驗證門檻結果</th><td>${escapeHTML(thresholdSummary)}</td></tr>
+        </tbody>
+    </table>
+
+    <h2>模型表現</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>指標</th>
+                <th>數值</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>${escapeHTML(performance.accuracyLabel || '測試正確率')}</td><td>${formatPercent(performance.testAccuracy, 2)}</td></tr>
+            <tr><td>訓練正確率</td><td>${formatPercent(performance.trainAccuracy, 2)}</td></tr>
+            <tr><td>驗證正確率</td><td>${formatPercent(performance.validationAccuracy, 2)}</td></tr>
+            <tr><td>測試 Loss</td><td>${formatNumber(performance.testLoss, 4)}</td></tr>
+            <tr><td>訓練 Loss</td><td>${formatNumber(performance.trainLoss, 4)}</td></tr>
+            <tr><td>驗證 Loss</td><td>${formatNumber(performance.validationLoss, 4)}</td></tr>
+            <tr><td>Precision（上漲／大漲）</td><td>${formatPercent(performance.positivePrecision, 2)}</td></tr>
+            <tr><td>Recall（上漲／大漲）</td><td>${formatPercent(performance.positiveRecall, 2)}</td></tr>
+            <tr><td>F1（上漲／大漲）</td><td>${formatPercent(performance.positiveF1, 2)}</td></tr>
+            <tr><td>採用門檻</td><td>${escapeHTML(resolvedThreshold)}</td></tr>
+        </tbody>
+    </table>
+
+    <h2>混淆矩陣</h2>
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th>預測正類</th>
+                <th>預測負類</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <th>實際正類</th>
+                <td>${Number.isFinite(confusion.TP) ? confusion.TP : '—'}</td>
+                <td>${Number.isFinite(confusion.FN) ? confusion.FN : '—'}</td>
+            </tr>
+            <tr>
+                <th>實際負類</th>
+                <td>${Number.isFinite(confusion.FP) ? confusion.FP : '—'}</td>
+                <td>${Number.isFinite(confusion.TN) ? confusion.TN : '—'}</td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>`;
+        return html;
+    };
+
+    const openLstmDiagnosticsWindow = () => {
+        const lstmState = getModelState(MODEL_TYPES.LSTM);
+        const diagnostics = lstmState?.lstmDiagnostics;
+        if (!diagnostics) {
+            showStatus('[LSTM 長短期記憶網路] 尚未產生測試報告，請先完成一次訓練。', 'warning');
+            return;
+        }
+        const popup = window.open('', 'lstmDiagnostics', 'width=720,height=640,scrollbars=yes,resizable=yes');
+        if (!popup) {
+            showStatus('[LSTM 長短期記憶網路] 瀏覽器封鎖了彈出視窗，請允許後再試。', 'warning');
+            return;
+        }
+        const reportHtml = buildLstmDiagnosticsHtml(diagnostics);
         popup.document.open();
         popup.document.write(reportHtml);
         popup.document.close();
@@ -2722,6 +2901,14 @@
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
 
+        if (globalState.activeModel === modelType && elements.winThreshold) {
+            const displayThreshold = Number.isFinite(threshold)
+                ? threshold
+                : getDefaultWinThresholdForMode(classificationMode);
+            elements.winThreshold.value = String(Math.round(displayThreshold * 100));
+            parseWinThreshold();
+        }
+
         applySeedDefaultName(summary, modelType);
 
         if (globalState.activeModel === modelType) {
@@ -2739,6 +2926,7 @@
             updateAllPredictionsToggleButton(modelState);
         }
         updateAnnDiagnosticsButtonState();
+        updateLstmDiagnosticsButtonState();
     };
 
     const captureActiveModelSettings = () => {
@@ -2823,6 +3011,8 @@
         updateVolatilityDiagnosticsDisplay(modelState.volatilityDiagnostics, classificationMode);
         updateThresholdDiagnosticsDisplay(modelState.thresholdDiagnostics, classificationMode);
         updateClassificationUIState(classificationMode);
+        updateAnnDiagnosticsButtonState();
+        updateLstmDiagnosticsButtonState();
         parseTrainRatio();
         parseWinThreshold();
     };
@@ -2848,6 +3038,7 @@
             applySeedDefaultName(null, modelType, { force: true });
         }
         updateAnnDiagnosticsButtonState();
+        updateLstmDiagnosticsButtonState();
     };
 
     const runLstmModel = async (modelState, rows, hyperparameters, riskOptions, runtimeOptions = {}) => {
@@ -2947,6 +3138,9 @@
             workerPayload.overrides = { seed: requestedSeed };
         }
         const workerResult = await sendAIWorkerTrainingTask('ai-train-lstm', workerPayload, { modelType });
+
+        modelState.lstmDiagnostics = workerResult?.diagnostics ? { ...workerResult.diagnostics } : null;
+        updateLstmDiagnosticsButtonState();
 
         const resultModelType = workerResult.modelType || modelType;
         const trainingMetrics = workerResult?.trainingMetrics || {
@@ -3379,6 +3573,9 @@
         if (!seed) return;
         const modelType = globalState.activeModel;
         const modelState = getModelState(modelType);
+        if (modelType === MODEL_TYPES.LSTM) {
+            modelState.lstmDiagnostics = null;
+        }
         modelState.predictionsPayload = {
             predictions: Array.isArray(seed.payload?.predictions) ? seed.payload.predictions : [],
             meta: Array.isArray(seed.payload?.meta) ? seed.payload.meta : [],
@@ -3496,6 +3693,8 @@
         parseWinThreshold();
         recomputeTradesFromState(modelType);
         showStatus(`已載入種子：${seed.name || '未命名種子'}。`, 'success');
+        updateAnnDiagnosticsButtonState();
+        updateLstmDiagnosticsButtonState();
     };
 
     const handleLoadSeed = () => {
@@ -3679,6 +3878,7 @@
         elements.volatilitySurgeSummary = document.getElementById('ai-volatility-surge-summary');
         elements.volatilityDropSummary = document.getElementById('ai-volatility-drop-summary');
         elements.annDiagnosticsButton = document.getElementById('ai-ann-diagnostics');
+        elements.lstmDiagnosticsButton = document.getElementById('ai-lstm-diagnostics');
         elements.testAccuracyLabel = document.getElementById('ai-test-accuracy-label');
 
         if (elements.runButton) {
@@ -3716,6 +3916,12 @@
         if (elements.annDiagnosticsButton) {
             elements.annDiagnosticsButton.addEventListener('click', () => {
                 openAnnDiagnosticsWindow();
+            });
+        }
+
+        if (elements.lstmDiagnosticsButton) {
+            elements.lstmDiagnosticsButton.addEventListener('click', () => {
+                openLstmDiagnosticsWindow();
             });
         }
 

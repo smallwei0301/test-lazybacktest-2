@@ -14,6 +14,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-THRESH-AUTO-20260215A — Validation-driven threshold tuning & F1 optimisation。
+// Patch Tag: LB-AI-LSTM-DIAG-20260218A — LSTM 測試報告診斷與門檻同步回傳。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -1166,6 +1167,39 @@ async function handleAITrainLSTMMessage(message) {
       }
 
       const accuracyLabel = isBinary ? '測試正確率' : '大漲命中率';
+      const resolvedThresholdValue = Number.isFinite(gatingThreshold) ? gatingThreshold : defaultThreshold;
+      const diagnostics = {
+        timestamp: Date.now(),
+        dataset: {
+          lookback,
+          totalSamples,
+          trainSamples,
+          validationSamples: validationSize,
+          testSamples,
+          trainRatio: trainRatioUsed,
+          normalization: { mean: normaliser.mean, std: normaliser.std },
+          classificationMode,
+          volatilityThresholds: volatilityThresholds ? { ...volatilityThresholds } : null,
+        },
+        performance: {
+          accuracyLabel,
+          testAccuracy: resolvedTestAccuracy,
+          deterministicTestAccuracy,
+          trainAccuracy: finalTrainAccuracy,
+          validationAccuracy: finalValidationAccuracy,
+          testLoss,
+          trainLoss: finalTrainLoss,
+          validationLoss: finalValidationLoss,
+          positivePrecision,
+          positiveRecall,
+          positiveF1,
+          confusion: { ...confusion },
+          threshold: resolvedThresholdValue,
+        },
+        thresholdDiagnostics: thresholdDiagnostics ? { ...thresholdDiagnostics } : null,
+        trainingOdds,
+      };
+
       const accuracyText = Number.isFinite(resolvedTestAccuracy)
         ? (resolvedTestAccuracy * 100).toFixed(2)
         : '—';
@@ -1224,6 +1258,7 @@ async function handleAITrainLSTMMessage(message) {
         confusion,
         hyperparametersUsed,
         finalMessage,
+        diagnostics,
       });
     } finally {
       tensorsToDispose.forEach((tensor) => {
