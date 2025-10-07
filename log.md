@@ -1016,3 +1016,12 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-20 — Patch LB-UI-REFRESH-20250929A / LB-SENSITIVITY-ANNUALIZED-20250929A / LB-STRATEGY-STATUS-20250929A
+- **Issue recap**: 前端績效分析表雖有子期間計算卻無法渲染於「期間績效分析」卡；敏感度分數僅以總報酬率計算，長期回測時分數常被壓到 0；tooltip 樣式與字句仍沿用彩色問號圖示，與 Footer/Navigation 的品牌元件不一致，策略戰報文案也充滿宅式語氣難以理解。
+- **Fix**:
+  - `js/backtest.js` 新增 `displayPerformanceTable`（`LB-UI-REFRESH-20250929A`）重建子期間績效表格並即時渲染，並重新整理 tooltip 樣式、戰況提示文案與交易紀錄指標格式化邏輯，確保各策略皆能顯示前/當/後數值。
+  - `js/worker.js` 將敏感度基準改採年化報酬率（`LB-SENSITIVITY-ANNUALIZED-20250929A`），同時回傳比較指標類型供前端診斷。
+  - `index.html` 與 `css/style.css` 統一導覽列與 Footer 品牌標記、更新 tooltip 圓框圖示為黑色 i、調整 Lucide 圖示色彩繼承與 LazyBacktest 字樣配色，戰況版本碼同步提升至 `LB-STRATEGY-STATUS-20250929A`。
+- **Diagnostics**: 以靜態檢閱確認「期間績效分析」表格含總計列、tooltip icon 全改為黑色中空圓、交易紀錄對應多種策略皆顯示前中後數據；檢查敏感度摘要 JSON `baseline.comparisonMetric`=annualized 並觀察 UI 文字與品牌色彩一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

@@ -46,6 +46,7 @@
         --input: #ffffff;
         --ring: rgba(8, 145, 178, 0.5);
         --radius: 0.5rem;
+        --brand-lazy: #1f2937;
       }
       
       .card {
@@ -320,6 +321,9 @@
         width: 1.25rem;
         height: 1.25rem;
         stroke-width: 2;
+        stroke: currentColor;
+        color: inherit;
+        fill: none;
       }
       
       .lucide-sm {
@@ -352,8 +356,11 @@
                                 </div>
                             </div>
                         </div>
-                        <div>
-                                    <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
+                        <div class="flex flex-col">
+                            <div class="flex items-baseline gap-1">
+                                <span class="text-lg font-extrabold" style="color: var(--brand-lazy);">Lazy</span>
+                                <span class="text-lg font-bold" style="color: var(--foreground);">Backtest</span>
+                            </div>
                             <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
                         </div>
                     </div>
@@ -2382,13 +2389,24 @@
                         <div>
                             <div class="flex items-center space-x-3 mb-4">
                                 <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
-                                    <!-- simple brand mark -->
-                                    <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                                        <rect width="28" height="20" rx="4" fill="#0EA5A4" />
-                                    </svg>
+                                    <div class="w-7 h-7 flex flex-col justify-between">
+                                        <div class="flex justify-between">
+                                            <div class="w-1.5 h-1.5 rounded-full" style="background-color: var(--primary);"></div>
+                                            <div class="w-1.5 h-1.5 rounded-full" style="background-color: var(--primary);"></div>
+                                            <div class="w-1.5 h-1.5 rounded-full" style="background-color: var(--primary);"></div>
+                                        </div>
+                                        <div class="flex justify-between items-end">
+                                            <div class="w-1.5 h-3 rounded-sm" style="background-color: var(--primary);"></div>
+                                            <div class="w-1.5 h-4 rounded-sm" style="background-color: var(--primary);"></div>
+                                            <div class="w-1.5 h-2 rounded-sm" style="background-color: var(--primary);"></div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div>
-                                    <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                    <div class="flex items-baseline gap-1">
+                                        <span class="text-lg font-extrabold" style="color: var(--brand-lazy);">Lazy</span>
+                                        <span class="text-lg font-bold" style="color: #0f172a;">Backtest</span>
+                                    </div>
                                     <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
                                 </div>
                             </div>
@@ -2428,7 +2446,7 @@
 
                     <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
                         <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
-                        <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                        <p style="color: #9ca3af;">© 2025 <span style="color: var(--brand-lazy); font-weight: 600;">Lazy</span><span style="color: #374151; font-weight: 600;">Backtest</span>. 僅供教育與研究用途，不構成投資建議。</p>
                     </div>
                 </div>
             </footer>

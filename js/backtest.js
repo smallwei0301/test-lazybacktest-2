@@ -1116,71 +1116,71 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250920A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250929A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
-        badgeText: '等待開局',
+        badgeText: '等待回測',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
             color: 'var(--muted-foreground)',
         },
-        title: '戰況房間尚未開啟',
-        subtitle: '回測一跑完就會推送戰術戰報，先在大廳補給一下。',
+        title: '尚未產生策略戰況',
+        subtitle: '執行回測後會提供策略與買入持有的比較摘要。',
     },
     loading: {
-        badgeText: '戰況載入中',
+        badgeText: '計算中',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
             color: 'var(--accent)',
         },
-        title: '策略戰況加載進度條...',
-        subtitle: '資料正在背景練等，馬上就能看到策略對上買入持有的實況。',
+        title: '策略戰況運算中',
+        subtitle: '正在整理策略與買入持有的比較指標，稍候即可檢視重點。',
     },
     leading: {
-        badgeText: '策略超神',
+        badgeText: '策略領先',
         badgeStyle: {
             backgroundColor: 'rgba(16, 185, 129, 0.18)',
             color: 'rgb(5, 122, 85)',
         },
-        title: '策略暫時打爆買入持有',
-        subtitle: '恭喜這局先搶下 MVP，記得補好防禦別被逆轉。',
+        title: '策略表現領先買入持有',
+        subtitle: '請同步檢查風險控制與部位配置，確保優勢可持續。',
     },
     tie: {
-        badgeText: '僵持對決',
+        badgeText: '表現接近',
         badgeStyle: {
             backgroundColor: 'rgba(251, 191, 36, 0.18)',
             color: 'rgb(180, 83, 9)',
         },
-        title: '策略與買入持有互卡血條',
-        subtitle: '雙方血量貼著走，先看下一波波段再決定要不要衝。',
+        title: '策略與買入持有表現接近',
+        subtitle: '可檢視敏感度分析與交易紀律，尋找提升空間。',
     },
     behind: {
-        badgeText: '策略逆風',
+        badgeText: '策略落後',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.18)',
             color: 'rgb(220, 38, 38)',
         },
-        title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
+        title: '買入持有暫時較佳',
+        subtitle: '請依建議調整參數、檢視停損停利與資金分段，縮小落差。',
     },
     missing: {
-        badgeText: '資料載入',
+        badgeText: '資料待補',
         badgeStyle: {
             backgroundColor: 'rgba(148, 163, 184, 0.2)',
             color: 'rgb(71, 85, 105)',
         },
-        title: '戰報還在整理',
-        subtitle: '買入持有基準尚未回傳，請先跑完一次回測再回來看戰況。',
+        title: '尚未取得買入持有基準',
+        subtitle: '請先完成一次回測後再檢視戰況摘要。',
     },
     error: {
-        badgeText: '戰況當機',
+        badgeText: '計算失敗',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.24)',
             color: 'rgb(185, 28, 28)',
         },
         title: '策略戰況暫停更新',
-        subtitle: '剛剛算戰況時跳出例外，重跑回測或調整參數再挑戰。',
+        subtitle: '計算戰況時發生例外，請重新執行回測或調整參數。',
     },
 };
 
@@ -1301,8 +1301,8 @@ function resetStrategyStatusCard(stateKey = 'idle') {
     applyStrategyStatusState(stateKey, {
         detail: {
             bulletLines: [
-                '等你按下回測鍵，戰況小組就會開串直播策略對決買入持有。',
-                '回測結束後會送上懶人包條列，滑手機也能秒懂重點。',
+                '尚未執行回測，請設定參數後啟動測試。',
+                '完成回測後會提供策略與基準的差異摘要與建議。',
             ],
         },
     });
@@ -1313,8 +1313,8 @@ function showStrategyStatusLoading() {
     applyStrategyStatusState('loading', {
         detail: {
             bulletLines: [
-                '策略戰況火速運算中，先泡杯咖啡等資料上線。',
-                '稍後就把策略差距與指標重點用條列送上版面。',
+                '系統正在計算策略與買入持有的差異。',
+                '稍後將列出主要差距與建議調整項目。',
             ],
         },
     });
@@ -6271,7 +6271,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
                             </span>
                         </div>
@@ -6283,7 +6283,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">買入持有年化</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。</span>
                             </span>
                         </div>
@@ -6295,7 +6295,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
                             </span>
                         </div>
@@ -6307,7 +6307,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">Buy & Hold</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">買入持有總報酬率</span>
                             </span>
                         </div>
@@ -6325,7 +6325,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
                             </span>
                         </div>
@@ -6337,7 +6337,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">夏普值</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。</span>
                             </span>
                         </div>
@@ -6349,7 +6349,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">索提諾比率</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。</span>
                             </span>
                         </div>
@@ -6361,7 +6361,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">過擬合(報酬率比)</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${overfittingTooltip}</span>
                             </span>
                         </div>
@@ -6373,7 +6373,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--secondary);">過擬合(夏普值比)</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${overfittingTooltip}</span>
                             </span>
                         </div>
@@ -6395,7 +6395,7 @@ function displayBacktestResult(result) {
         <div class="flex items-center mb-6">
             <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
             <span class="tooltip ml-2">
-                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                
                 <span class="tooltiptext">${tooltipContent}</span>
             </span>
         </div>`;
@@ -6673,7 +6673,7 @@ function displayBacktestResult(result) {
                                     <span class="inline-flex items-center justify-center gap-1">
                                         擾動網格
                                         <span class="tooltip">
-                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                            
                                             <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。</span>
                                         </span>
                                     </span>
@@ -6764,7 +6764,7 @@ function displayBacktestResult(result) {
             return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
         })();
         const directionTooltipHtml = directionSafeTooltip
-            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
+            ? `<span class="tooltip"><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
             : '';
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
@@ -6773,7 +6773,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center gap-2">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
                             <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
                             </span>
                         </div>
@@ -6786,7 +6786,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center gap-2">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                             <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
                             </span>
                         </div>
@@ -6820,7 +6820,7 @@ function displayBacktestResult(result) {
         const interpretationHint = `
             <div class="p-4 rounded-xl border" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                 <div class="flex items-start gap-3">
-                    <span class="info-icon inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full" style="background-color: var(--primary); color: var(--primary-foreground);">i</span>
+                    <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full" style="border: 1.5px solid #111827; color: #111827; background: transparent;">i</span>
                     <div>
                         <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
                         <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
@@ -6864,7 +6864,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">勝率</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">包含做多與做空交易</span>
                             </span>
                         </div>
@@ -6877,7 +6877,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">總交易次數</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">包含做多與做空交易</span>
                             </span>
                         </div>
@@ -6910,7 +6910,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">📈 進場策略</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${entryDesc.desc.replace(/\n/g,'<br>')}</span>
                             </span>
                         </div>
@@ -6921,7 +6921,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">📉 出場策略</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${exitDesc.desc.replace(/\n/g,'<br>')}</span>
                             </span>
                         </div>
@@ -6933,7 +6933,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">📉 做空策略</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${shortEntryDesc.desc.replace(/\n/g,'<br>')}</span>
                             </span>
                         </div>
@@ -6945,7 +6945,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">📈 回補策略</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
+                                
                                 <span class="tooltiptext">${shortExitDesc.desc.replace(/\n/g,'<br>')}</span>
                             </span>
                         </div>
@@ -6965,7 +6965,7 @@ function displayBacktestResult(result) {
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm text-orange-600 font-medium">⚠️ 全局風控</p>
                             <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs bg-blue-600 text-white rounded-full cursor-help">?</span>
+                                
                                 <span class="tooltiptext">停損/停利設定 (多空共用)</span>
                             </span>
                         </div>
@@ -7004,32 +7004,197 @@ function displayBacktestResult(result) {
             </div>
         `;
 
+        displayPerformanceTable(result.subPeriodResults);
+
         initSensitivityCollapse(el);
 
         console.log("[Main] displayBacktestResult finished.");
+}
+
+// Patch Tag: LB-UI-REFRESH-20250929A — Restore performance analysis table with refreshed styling.
+function displayPerformanceTable(subPeriodResults) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) {
+        console.error('[Main] performance-table-container not found');
+        return;
     }
+
+    if (!lastOverallResult) {
+        container.innerHTML = `<p class="text-sm" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>`;
+        return;
+    }
+
+    const periods = subPeriodResults ? Object.keys(subPeriodResults) : [];
+    const periodOrder = {
+        '1M': 1,
+        '6M': 2,
+        '1Y': 3,
+        '2Y': 4,
+        '3Y': 5,
+        '4Y': 6,
+        '5Y': 7,
+        '6Y': 8,
+        '7Y': 9,
+        '8Y': 10,
+        '9Y': 11,
+        '10Y': 12,
+    };
+    periods.sort((a, b) => (periodOrder[a] || 99) - (periodOrder[b] || 99));
+
+    const formatPercent = (value, digits = 2, options = {}) => {
+        if (!Number.isFinite(value)) return 'N/A';
+        const { signed = true } = options;
+        const prefix = signed ? (value >= 0 ? '+' : '') : '';
+        return `${prefix}${value.toFixed(digits)}%`;
+    };
+
+    const formatRatio = (value) => {
+        if (!Number.isFinite(value)) return 'N/A';
+        return value.toFixed(2);
+    };
+
+    const renderRow = (label, data, opts = {}) => {
+        if (!data) {
+            return `
+                <tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                    <td class="px-4 py-2 font-medium" style="color: var(--foreground);">${label}</td>
+                    <td class="px-4 py-2 text-sm italic" colspan="5" style="color: var(--muted-foreground);">數據不足或未計算</td>
+                </tr>
+            `;
+        }
+
+        const totalReturn = Number.isFinite(data.totalReturn) ? data.totalReturn : null;
+        const totalBhReturn = Number.isFinite(data.totalBuyHoldReturn) ? data.totalBuyHoldReturn : null;
+        const sharpe = Number.isFinite(data.sharpeRatio) ? data.sharpeRatio : null;
+        const sortino = Number.isFinite(data.sortinoRatio) ? data.sortinoRatio : null;
+        const maxDD = Number.isFinite(data.maxDrawdown) ? data.maxDrawdown : null;
+
+        const returnColor = totalReturn !== null ? (totalReturn >= 0 ? '#047857' : '#b91c1c') : 'var(--muted-foreground)';
+        const bhReturnColor = totalBhReturn !== null ? (totalBhReturn >= 0 ? '#047857' : '#b91c1c') : 'var(--muted-foreground)';
+
+        const rowStyle = opts.highlight
+            ? 'background: color-mix(in srgb, var(--muted) 12%, var(--background)); font-weight: 600;'
+            : '';
+
+        return `
+            <tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); ${rowStyle}">
+                <td class="px-4 py-2" style="color: var(--foreground);">${label}</td>
+                <td class="px-4 py-2" style="color: ${returnColor}; text-align: right;">${formatPercent(totalReturn)}</td>
+                <td class="px-4 py-2" style="color: ${bhReturnColor}; text-align: right;">${formatPercent(totalBhReturn)}</td>
+                <td class="px-4 py-2" style="color: var(--foreground); text-align: right;">${formatRatio(sharpe)}</td>
+                <td class="px-4 py-2" style="color: var(--foreground); text-align: right;">${formatRatio(sortino)}</td>
+                <td class="px-4 py-2" style="color: var(--foreground); text-align: right;">${formatPercent(maxDD, 2, { signed: false })}</td>
+            </tr>
+        `;
+    };
+
+    let rowsHtml = periods
+        .map((period) => renderRow(period, subPeriodResults ? subPeriodResults[period] : null))
+        .join('');
+
+    const overallReturn = Number.isFinite(lastOverallResult.returnRate)
+        ? lastOverallResult.returnRate
+        : null;
+    const overallBHReturnRaw = Array.isArray(lastOverallResult.buyHoldReturns)
+        ? lastOverallResult.buyHoldReturns[lastOverallResult.buyHoldReturns.length - 1]
+        : null;
+    const overallBHReturn = Number.isFinite(overallBHReturnRaw) ? overallBHReturnRaw : null;
+    const overallSharpe = Number.isFinite(lastOverallResult.sharpeRatio)
+        ? lastOverallResult.sharpeRatio
+        : null;
+    const overallSortino = Number.isFinite(lastOverallResult.sortinoRatio)
+        ? lastOverallResult.sortinoRatio
+        : null;
+    const overallMaxDD = Number.isFinite(lastOverallResult.maxDrawdown)
+        ? lastOverallResult.maxDrawdown
+        : null;
+
+    rowsHtml += renderRow('最後 (總計)', {
+        totalReturn: overallReturn,
+        totalBuyHoldReturn: overallBHReturn,
+        sharpeRatio: overallSharpe,
+        sortinoRatio: overallSortino,
+        maxDrawdown: overallMaxDD,
+    }, { highlight: true });
+
+    container.innerHTML = `
+        <div class="w-full">
+            <div class="overflow-x-auto rounded-lg border" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, #ffffff 92%, var(--background));">
+                <table class="w-full text-sm">
+                    <thead style="background: color-mix(in srgb, var(--muted) 18%, #ffffff); color: var(--muted-foreground);">
+                        <tr>
+                            <th class="px-4 py-2 text-left font-semibold">期間</th>
+                            <th class="px-4 py-2 text-right font-semibold">策略累積報酬</th>
+                            <th class="px-4 py-2 text-right font-semibold">買入持有累積報酬</th>
+                            <th class="px-4 py-2 text-right font-semibold">夏普值</th>
+                            <th class="px-4 py-2 text-right font-semibold">索提諾比率</th>
+                            <th class="px-4 py-2 text-right font-semibold">最大回撤</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color: var(--foreground);">
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
 const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
 
-const formatIndicatorValues = (indicatorValues) => { 
-    try { 
-        if (!indicatorValues || typeof indicatorValues !== 'object' || Object.keys(indicatorValues).length === 0) return ''; 
-        const formatV = (v) => checkDisplay(v) ? v.toFixed(2) : '--'; 
-        const parts = Object.entries(indicatorValues).map(([label, values]) => { 
-            if (Array.isArray(values) && values.length === 3) { 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values[0])} / ${formatV(values[1])} / ${formatV(values[2])}</span>`; 
-            } else if (checkDisplay(values)) { 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values)}</span>`; 
-            } else if (Array.isArray(values) && values.length === 2){ 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values[0])} / ${formatV(values[1])}</span>`; 
-            } 
-            return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ?</span>`; 
-        }).filter(part => part !== null); 
-        return parts.length > 0 ? '<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(' + parts.join(' ') + ')</div>' : ''; 
-    } catch (e) { 
-        console.error("[Main] Error in formatIndicatorValues:", e, indicatorValues); 
-        return '<div class="mt-1 text-xs" style="color: #dc2626;">(指標值格式錯誤)</div>'; 
-    } 
-}; 
+const formatIndicatorValues = (indicatorValues) => {
+    try {
+        if (!indicatorValues || typeof indicatorValues !== 'object' || Object.keys(indicatorValues).length === 0) return '';
+        const formatNumber = (value) => (Number.isFinite(value) ? value.toFixed(2) : '--');
+        const normaliseTriplet = (value) => {
+            if (Array.isArray(value)) {
+                if (value.length === 3) {
+                    return { prev: value[0], current: value[1], next: value[2] };
+                }
+                if (value.length === 2) {
+                    return { prev: value[0], current: value[1], next: null };
+                }
+            }
+            if (value && typeof value === 'object') {
+                const prev = value.prev ?? value.previous ?? value.before ?? value.kPrev ?? value.dPrev ?? null;
+                const current = value.current ?? value.now ?? value.value ?? value.kNow ?? value.dNow ?? null;
+                const next = value.next ?? value.after ?? value.forward ?? value.kNext ?? value.dNext ?? null;
+                if (prev !== null || current !== null || next !== null) {
+                    return { prev, current, next };
+                }
+            }
+            return null;
+        };
+        const parts = Object.entries(indicatorValues).map(([label, values]) => {
+            const triplet = normaliseTriplet(values);
+            if (triplet) {
+                const { prev, current, next } = triplet;
+                return `<div class="mr-2 whitespace-nowrap">${label}: 前 ${formatNumber(prev)} ｜ 當 ${formatNumber(current)} ｜ 後 ${formatNumber(next)}</div>`;
+            }
+            if (Array.isArray(values)) {
+                const series = values.map((v) => formatNumber(v)).join(' / ');
+                return `<div class="mr-2 whitespace-nowrap">${label}: ${series}</div>`;
+            }
+            if (Number.isFinite(values)) {
+                return `<div class="mr-2 whitespace-nowrap">${label}: ${formatNumber(values)}</div>`;
+            }
+            if (values && typeof values === 'object') {
+                const entries = Object.entries(values)
+                    .map(([key, val]) => `${key}: ${formatNumber(val)}`)
+                    .join(' / ');
+                if (entries) {
+                    return `<div class="mr-2 whitespace-nowrap">${label}: ${entries}</div>`;
+                }
+            }
+            return `<div class="mr-2 whitespace-nowrap">${label}: --</div>`;
+        }).filter(Boolean);
+        return parts.length > 0
+            ? `<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(${parts.join(' ')})</div>`
+            : '';
+    } catch (e) {
+        console.error("[Main] Error in formatIndicatorValues:", e, indicatorValues);
+        return '<div class="mt-1 text-xs" style="color: #dc2626;">(指標值格式錯誤)</div>';
+    }
+};
 
 const formatKDParams = (kdVals) => { 
     try { 
