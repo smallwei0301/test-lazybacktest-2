@@ -11002,6 +11002,20 @@ const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
 
 function buildOptimizationValueSweep(range) {
   const safeRange = range && typeof range === "object" ? range : {};
+  if (Array.isArray(safeRange.values) && safeRange.values.length > 0) {
+    const dedup = [];
+    const seen = new Set();
+    safeRange.values.forEach((val) => {
+      const num = Number(val);
+      if (!Number.isFinite(num)) return;
+      const key = num.toFixed(4);
+      if (!seen.has(key)) {
+        seen.add(key);
+        dedup.push(num);
+      }
+    });
+    return dedup;
+  }
   const rawFrom = Number.isFinite(Number(safeRange.from))
     ? Number(safeRange.from)
     : 1;
