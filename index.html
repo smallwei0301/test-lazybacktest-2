@@ -1,5 +1,6 @@
 
 <!DOCTYPE html>
+<!-- Patch Tag: LB-AI-LOSS-OPTIONS-20260215A — Loss 選項與比較 UI 介面整合。 -->
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -2221,6 +2222,50 @@
                                                                 <span id="ai-volatility-drop-summary"></span>
                                                             </div>
                                                         </div>
+                                                        <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 12%, transparent);">
+                                                            <span class="text-xs font-medium" style="color: var(--foreground);">Loss 設定</span>
+                                                            <label class="flex flex-col gap-1 text-xs">
+                                                                <span class="font-medium" style="color: var(--foreground);">Loss 類型</span>
+                                                                <select id="ai-loss-type" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                    <option value="bce">Binary Crossentropy（預設）</option>
+                                                                    <option value="weighted_bce">Class-weighted BCE</option>
+                                                                    <option value="focal">Focal Loss</option>
+                                                                </select>
+                                                                <span class="text-[11px]" style="color: var(--muted-foreground);">僅支援二分類；三分類會自動使用 Categorical Crossentropy。</span>
+                                                            </label>
+                                                            <div class="grid gap-2 md:grid-cols-2">
+                                                                <label class="flex flex-col gap-1 text-xs">
+                                                                    <span style="color: var(--muted-foreground);">正類權重 w_pos</span>
+                                                                    <input id="ai-loss-w-pos" type="number" min="0" step="0.01" value="1.00" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">Class-weighted BCE 專用。</span>
+                                                                </label>
+                                                                <label class="flex flex-col gap-1 text-xs">
+                                                                    <span style="color: var(--muted-foreground);">負類權重 w_neg</span>
+                                                                    <input id="ai-loss-w-neg" type="number" min="0" step="0.01" value="1.00" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">Class-weighted BCE 專用。</span>
+                                                                </label>
+                                                                <label class="flex flex-col gap-1 text-xs">
+                                                                    <span style="color: var(--muted-foreground);">Focal α（正負平衡）</span>
+                                                                    <input id="ai-loss-alpha" type="number" min="0" max="1" step="0.01" value="0.60" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">推薦依訓練集比例設定 0.6~0.7。</span>
+                                                                </label>
+                                                                <label class="flex flex-col gap-1 text-xs">
+                                                                    <span style="color: var(--muted-foreground);">Focal γ（專注難樣本）</span>
+                                                                    <input id="ai-loss-gamma" type="number" min="0.5" max="5" step="0.1" value="1.80" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">建議 1.5~2.0 起步。</span>
+                                                                </label>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-2 mt-1">
+                                                                <button id="ai-loss-apply" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary);">
+                                                                    <i data-lucide="sparkles" class="lucide-xs"></i>套用建議值
+                                                                </button>
+                                                                <button id="ai-loss-ab-test" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: color-mix(in srgb, var(--secondary) 45%, transparent); color: var(--secondary-foreground); background-color: color-mix(in srgb, var(--secondary) 15%, transparent);">
+                                                                    <i data-lucide="bar-chart-3" class="lucide-xs"></i>Loss A/B 測試
+                                                                </button>
+                                                            </div>
+                                                            <p id="ai-loss-recommendation" class="text-[11px]" style="color: var(--muted-foreground);">尚未計算建議值。</p>
+                                                            <p id="ai-loss-class-stats" class="text-[11px]" style="color: var(--muted-foreground);">訓練集樣本：—</p>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
@@ -2256,6 +2301,9 @@
                                                     <p id="ai-test-accuracy-label" class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試期預測正確率</p>
                                                     <p id="ai-test-accuracy" class="text-lg font-semibold">—</p>
                                                     <p id="ai-test-loss" class="text-[11px]" style="color: var(--muted-foreground);">Loss：—</p>
+                                                    <p id="ai-test-precision" class="text-[11px]" style="color: var(--muted-foreground);">Precision：—</p>
+                                                    <p id="ai-test-recall" class="text-[11px]" style="color: var(--muted-foreground);">Recall：—</p>
+                                                    <p id="ai-test-f1" class="text-[11px]" style="color: var(--muted-foreground);">F1：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
                                                     <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">執行交易筆數</p>
@@ -2292,6 +2340,39 @@
                                                 <button id="ai-toggle-all-trades" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border opacity-60 cursor-not-allowed" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);" aria-pressed="false" disabled>
                                                     顯示全部預測紀錄
                                                 </button>
+                                            </div>
+                                            <div class="grid gap-4 md:grid-cols-2">
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border);">
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">Loss 與混淆矩陣</p>
+                                                    <p id="ai-loss-summary" class="text-[11px]" style="color: var(--muted-foreground);">使用 Loss：—</p>
+                                                    <div class="grid grid-cols-2 gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                        <span>TP：<span id="ai-confusion-tp">—</span></span>
+                                                        <span>TN：<span id="ai-confusion-tn">—</span></span>
+                                                        <span>FP：<span id="ai-confusion-fp">—</span></span>
+                                                        <span>FN：<span id="ai-confusion-fn">—</span></span>
+                                                    </div>
+                                                </div>
+                                                <div class="p-3 border rounded-lg" style="border-color: var(--border);">
+                                                    <div class="flex items-center justify-between mb-2">
+                                                        <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">Loss A/B 測試結果</p>
+                                                        <span id="ai-loss-comparison-note" class="text-[11px]" style="color: var(--muted-foreground);">尚未執行。</span>
+                                                    </div>
+                                                    <div class="overflow-x-auto">
+                                                        <table class="min-w-full divide-y divide-border text-[11px]" style="border-color: var(--border);">
+                                                            <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                                <tr>
+                                                                    <th class="px-2 py-1 text-left font-semibold">Loss</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">Accuracy</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">Precision</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">Recall</th>
+                                                                    <th class="px-2 py-1 text-right font-semibold">F1</th>
+                                                                    <th class="px-2 py-1 text-left font-semibold">備註</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody id="ai-loss-comparison-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p id="ai-trade-summary">尚未生成交易結果。</p>

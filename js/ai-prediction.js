@@ -6,6 +6,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260102A — Lock volatility UI to quartile-derived thresholds & fix ANN seed override.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile tiers & full prediction table toggle.
+// Patch Tag: LB-AI-LOSS-OPTIONS-20260215A — Loss 選項、推薦與 A/B 測試流程整合。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260108A — Sign-corrected quartile display & segregated gain/loss thresholds.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Train-set quartile diagnostics & UI disclosure.
 // Patch Tag: LB-AI-HYBRID-20260122A — Multiclass threshold defaults & trade gating fixes.
@@ -13,8 +14,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-LOSS-20260220A — Loss 選項、Precision/Recall 指標與 A/B 測試面板。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-LOSS-20260220A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -46,6 +48,18 @@
             : getDefaultWinThresholdForMode(classificationMode);
     };
     const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
+    const LOSS_TYPES = {
+        BCE: 'bce',
+        WEIGHTED_BCE: 'weighted_bce',
+        FOCAL: 'focal',
+    };
+    const LOSS_LABELS = {
+        [LOSS_TYPES.BCE]: 'Binary Crossentropy',
+        [LOSS_TYPES.WEIGHTED_BCE]: 'Class-weighted BCE',
+        [LOSS_TYPES.FOCAL]: 'Focal Loss',
+    };
+    const LOSS_TYPE_SEQUENCE = [LOSS_TYPES.BCE, LOSS_TYPES.WEIGHTED_BCE, LOSS_TYPES.FOCAL];
+    const DEFAULT_FOCAL_GAMMA = 1.8;
     const VOLATILITY_CLASS_LABELS = ['大跌', '小幅波動', '大漲'];
 
     const TRADE_RULE_OPTIONS = [
@@ -104,6 +118,18 @@
         tradeRule: DEFAULT_TRADE_RULE,
         classification: CLASSIFICATION_MODES.MULTICLASS,
         volatilityThresholds: { ...DEFAULT_VOLATILITY_THRESHOLDS },
+        loss: {
+            type: LOSS_TYPES.BCE,
+            params: {
+                wPos: 1,
+                wNeg: 1,
+                alpha: 0.6,
+                gamma: DEFAULT_FOCAL_GAMMA,
+            },
+            recommendations: null,
+            classStats: null,
+        },
+        lossComparisons: {},
     });
     const globalState = {
         running: false,
@@ -153,6 +179,9 @@
         trainLoss: null,
         testAccuracy: null,
         testLoss: null,
+        testPrecision: null,
+        testRecall: null,
+        testF1: null,
         tradeCount: null,
         hitRate: null,
         totalReturn: null,
@@ -176,6 +205,22 @@
         volatilityDropSummary: null,
         annDiagnosticsButton: null,
         testAccuracyLabel: null,
+        lossType: null,
+        lossWPos: null,
+        lossWNeg: null,
+        lossAlpha: null,
+        lossGamma: null,
+        lossRecommendation: null,
+        lossClassStats: null,
+        lossApplyButton: null,
+        lossAbTestButton: null,
+        lossComparisonBody: null,
+        lossComparisonNote: null,
+        lossSummary: null,
+        confusionTP: null,
+        confusionTN: null,
+        confusionFP: null,
+        confusionFN: null,
     };
 
     const colorMap = {
@@ -188,6 +233,8 @@
     const FRACTION_MAX_PERCENT = 100;
     const DAY_MS = 24 * 60 * 60 * 1000;
 
+    const normalizeLossType = (type) => (Object.values(LOSS_TYPES).includes(type) ? type : LOSS_TYPES.BCE);
+    const getLossLabel = (type) => LOSS_LABELS[normalizeLossType(type)] || LOSS_LABELS[LOSS_TYPES.BCE];
     const normalizeTradeRule = (rule) => (TRADE_RULE_MAP[rule] ? rule : DEFAULT_TRADE_RULE);
     const getTradeRuleConfig = (rule) => TRADE_RULE_MAP[normalizeTradeRule(rule)];
     const getTradeRuleDescription = (rule) => getTradeRuleConfig(rule).description;
@@ -208,6 +255,363 @@
             description = `${description}（需同時判定為「大漲」且機率達門檻才會進場。）`;
         }
         elements.tradeRules.textContent = description;
+    };
+
+    const sanitizePositiveNumber = (value, fallback = 1, options = {}) => {
+        const raw = Number(value);
+        if (!Number.isFinite(raw)) return fallback;
+        const min = Number.isFinite(options.min) ? options.min : 1e-6;
+        const max = Number.isFinite(options.max) ? options.max : Infinity;
+        return Math.min(Math.max(raw, min), max);
+    };
+
+    const computeClassStatsFromLabels = (labels, trainSize, classificationMode) => {
+        if (!Array.isArray(labels) || labels.length === 0) return null;
+        if (normalizeClassificationMode(classificationMode) !== CLASSIFICATION_MODES.BINARY) {
+            return null;
+        }
+        const usableSize = Math.max(0, Math.min(Math.round(trainSize), labels.length));
+        if (usableSize <= 0) return null;
+        let positive = 0;
+        for (let i = 0; i < usableSize; i += 1) {
+            const label = Number(labels[i]);
+            if (Number.isFinite(label) && label > 0) {
+                positive += 1;
+            }
+        }
+        const total = usableSize;
+        const negative = total - positive;
+        const positiveRatio = total > 0 ? positive / total : 0;
+        const negativeRatio = total > 0 ? negative / total : 0;
+        return {
+            positive,
+            negative,
+            total,
+            positiveRatio,
+            negativeRatio,
+        };
+    };
+
+    const computeLossRecommendationsFromStats = (stats) => {
+        if (!stats || !Number.isFinite(stats.total) || stats.total <= 0) return null;
+        const ratioPos = Number.isFinite(stats.positiveRatio) ? stats.positiveRatio : (stats.positive / stats.total);
+        const ratioNeg = Number.isFinite(stats.negativeRatio) ? stats.negativeRatio : (stats.negative / stats.total);
+        const baseWPos = ratioNeg > 0 ? ratioNeg : 1;
+        const baseWNeg = ratioPos > 0 ? ratioPos : 1;
+        let adjustedWPos = baseWPos;
+        if (ratioPos > 0 && ratioPos < 0.4) {
+            adjustedWPos *= 1.3;
+        }
+        return {
+            wPos: sanitizePositiveNumber(adjustedWPos, 1, { min: 1e-4 }),
+            wNeg: sanitizePositiveNumber(baseWNeg, 1, { min: 1e-4 }),
+            alpha: Math.min(Math.max(ratioNeg || 0.6, 0.05), 0.95),
+            gamma: DEFAULT_FOCAL_GAMMA,
+        };
+    };
+
+    const sanitizeLossParams = (type, params = {}, recommendations = null) => {
+        const normalized = normalizeLossType(type);
+        const source = params && typeof params === 'object' ? params : {};
+        const fallback = recommendations && typeof recommendations === 'object' ? recommendations : {};
+        if (normalized === LOSS_TYPES.WEIGHTED_BCE) {
+            return {
+                wPos: sanitizePositiveNumber(source.wPos ?? source.w_pos ?? fallback.wPos ?? fallback.w_pos ?? 1, 1, { min: 1e-4 }),
+                wNeg: sanitizePositiveNumber(source.wNeg ?? source.w_neg ?? fallback.wNeg ?? fallback.w_neg ?? 1, 1, { min: 1e-4 }),
+            };
+        }
+        if (normalized === LOSS_TYPES.FOCAL) {
+            const alphaSource = source.alpha ?? fallback.alpha ?? 0.6;
+            const gammaSource = source.gamma ?? fallback.gamma ?? DEFAULT_FOCAL_GAMMA;
+            return {
+                alpha: Math.min(Math.max(Number(alphaSource) || 0.6, 0.05), 0.95),
+                gamma: Math.min(Math.max(Number(gammaSource) || DEFAULT_FOCAL_GAMMA, 0.5), 5),
+            };
+        }
+        return {};
+    };
+
+    const formatLossParamsText = (type, params = {}) => {
+        const normalized = normalizeLossType(type);
+        if (normalized === LOSS_TYPES.WEIGHTED_BCE) {
+            return `w_pos=${formatNumber(params.wPos ?? params.w_pos ?? NaN, 3)}｜w_neg=${formatNumber(params.wNeg ?? params.w_neg ?? NaN, 3)}`;
+        }
+        if (normalized === LOSS_TYPES.FOCAL) {
+            return `alpha=${formatNumber(params.alpha ?? NaN, 3)}｜gamma=${formatNumber(params.gamma ?? NaN, 3)}`;
+        }
+        return '—';
+    };
+
+    const formatClassStatsText = (stats) => {
+        if (!stats) return '尚未計算訓練集樣本分佈。';
+        const upText = Number.isFinite(stats.positive) ? stats.positive : 0;
+        const downText = Number.isFinite(stats.negative) ? stats.negative : 0;
+        const ratioText = Number.isFinite(stats.positiveRatio)
+            ? `${(stats.positiveRatio * 100).toFixed(1)}%`
+            : '—';
+        return `訓練集樣本：上漲 ${upText} 筆（${ratioText}）｜下跌 ${downText} 筆。`;
+    };
+
+    const formatLossSummaryText = (lossType, params = {}) => {
+        const label = getLossLabel(lossType);
+        const detail = formatLossParamsText(lossType, params);
+        if (lossType === LOSS_TYPES.BCE) {
+            return `使用 Loss：${label}`;
+        }
+        return `使用 Loss：${label}（${detail}）`;
+    };
+
+    const serializeLossParamsForWorker = (type, params = {}) => {
+        const normalized = normalizeLossType(type);
+        if (normalized === LOSS_TYPES.WEIGHTED_BCE) {
+            return {
+                w_pos: sanitizePositiveNumber(params.wPos ?? params.w_pos ?? 1, 1, { min: 1e-4 }),
+                w_neg: sanitizePositiveNumber(params.wNeg ?? params.w_neg ?? 1, 1, { min: 1e-4 }),
+            };
+        }
+        if (normalized === LOSS_TYPES.FOCAL) {
+            return {
+                alpha: Math.min(Math.max(params.alpha ?? 0.6, 0.05), 0.95),
+                gamma: Math.min(Math.max(params.gamma ?? DEFAULT_FOCAL_GAMMA, 0.5), 5),
+            };
+        }
+        return {};
+    };
+
+    const updateLossInputsState = (lossState, classificationMode) => {
+        const normalizedMode = normalizeClassificationMode(classificationMode);
+        const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
+        const lossTypeSelect = elements.lossType;
+        const inputs = {
+            wPos: elements.lossWPos,
+            wNeg: elements.lossWNeg,
+            alpha: elements.lossAlpha,
+            gamma: elements.lossGamma,
+        };
+        if (lossTypeSelect) {
+            lossTypeSelect.disabled = !isBinary;
+            lossTypeSelect.classList.toggle('opacity-60', !isBinary);
+            lossTypeSelect.classList.toggle('cursor-not-allowed', !isBinary);
+            if (!isBinary) {
+                lossTypeSelect.setAttribute('aria-disabled', 'true');
+            } else {
+                lossTypeSelect.removeAttribute('aria-disabled');
+            }
+        }
+        const lossType = normalizeLossType(lossState?.type);
+        const enableWeighted = isBinary && lossType === LOSS_TYPES.WEIGHTED_BCE;
+        const enableFocal = isBinary && lossType === LOSS_TYPES.FOCAL;
+        if (inputs.wPos) {
+            inputs.wPos.disabled = !enableWeighted;
+            inputs.wPos.classList.toggle('opacity-60', !enableWeighted);
+            inputs.wPos.classList.toggle('cursor-not-allowed', !enableWeighted);
+        }
+        if (inputs.wNeg) {
+            inputs.wNeg.disabled = !enableWeighted;
+            inputs.wNeg.classList.toggle('opacity-60', !enableWeighted);
+            inputs.wNeg.classList.toggle('cursor-not-allowed', !enableWeighted);
+        }
+        if (inputs.alpha) {
+            inputs.alpha.disabled = !enableFocal;
+            inputs.alpha.classList.toggle('opacity-60', !enableFocal);
+            inputs.alpha.classList.toggle('cursor-not-allowed', !enableFocal);
+        }
+        if (inputs.gamma) {
+            inputs.gamma.disabled = !enableFocal;
+            inputs.gamma.classList.toggle('opacity-60', !enableFocal);
+            inputs.gamma.classList.toggle('cursor-not-allowed', !enableFocal);
+        }
+    };
+
+    const applyLossStateToInputs = (lossState) => {
+        if (!lossState) return;
+        if (elements.lossType) {
+            elements.lossType.value = normalizeLossType(lossState.type);
+        }
+        const params = lossState.params || {};
+        if (elements.lossWPos && Number.isFinite(params.wPos)) {
+            elements.lossWPos.value = params.wPos.toFixed(2);
+        }
+        if (elements.lossWNeg && Number.isFinite(params.wNeg)) {
+            elements.lossWNeg.value = params.wNeg.toFixed(2);
+        }
+        if (elements.lossAlpha && Number.isFinite(params.alpha)) {
+            elements.lossAlpha.value = params.alpha.toFixed(2);
+        }
+        if (elements.lossGamma && Number.isFinite(params.gamma)) {
+            elements.lossGamma.value = params.gamma.toFixed(2);
+        }
+    };
+
+    const updateLossRecommendationDisplay = (lossState) => {
+        if (elements.lossRecommendation) {
+            if (lossState?.recommendations) {
+                const recText = [];
+                if (Number.isFinite(lossState.recommendations.wPos) && Number.isFinite(lossState.recommendations.wNeg)) {
+                    recText.push(`建議權重：w_pos=${formatNumber(lossState.recommendations.wPos, 3)}｜w_neg=${formatNumber(lossState.recommendations.wNeg, 3)}`);
+                }
+                if (Number.isFinite(lossState.recommendations.alpha) && Number.isFinite(lossState.recommendations.gamma)) {
+                    recText.push(`Focal：alpha=${formatNumber(lossState.recommendations.alpha, 3)}｜gamma=${formatNumber(lossState.recommendations.gamma, 2)}`);
+                }
+                elements.lossRecommendation.textContent = recText.length > 0
+                    ? recText.join('；')
+                    : '尚未計算建議值。';
+            } else {
+                elements.lossRecommendation.textContent = '尚未計算建議值。';
+            }
+        }
+        if (elements.lossClassStats) {
+            elements.lossClassStats.textContent = formatClassStatsText(lossState?.classStats || null);
+        }
+    };
+
+    const readLossInputsToState = (lossState) => {
+        if (!lossState) return;
+        const type = elements.lossType ? elements.lossType.value : lossState.type;
+        const recommendations = lossState.recommendations || null;
+        const rawParams = {
+            wPos: elements.lossWPos ? Number(elements.lossWPos.value) : lossState.params?.wPos,
+            wNeg: elements.lossWNeg ? Number(elements.lossWNeg.value) : lossState.params?.wNeg,
+            alpha: elements.lossAlpha ? Number(elements.lossAlpha.value) : lossState.params?.alpha,
+            gamma: elements.lossGamma ? Number(elements.lossGamma.value) : lossState.params?.gamma,
+        };
+        const sanitized = sanitizeLossParams(type, rawParams, recommendations);
+        lossState.type = normalizeLossType(type);
+        lossState.params = { ...lossState.params, ...sanitized };
+    };
+
+    const ensureLossState = (modelState) => {
+        if (!modelState.loss || typeof modelState.loss !== 'object') {
+            modelState.loss = {
+                type: LOSS_TYPES.BCE,
+                params: {
+                    wPos: 1,
+                    wNeg: 1,
+                    alpha: 0.6,
+                    gamma: DEFAULT_FOCAL_GAMMA,
+                },
+                recommendations: null,
+                classStats: null,
+            };
+        }
+        if (!modelState.lossComparisons || typeof modelState.lossComparisons !== 'object') {
+            modelState.lossComparisons = {};
+        }
+        return modelState.loss;
+    };
+
+    const buildLossConfigForClassification = (modelState, classificationMode, override = null) => {
+        const normalizedMode = normalizeClassificationMode(classificationMode);
+        const lossState = ensureLossState(modelState);
+        if (normalizedMode !== CLASSIFICATION_MODES.BINARY) {
+            return { type: LOSS_TYPES.BCE, params: {} };
+        }
+        const source = override && typeof override === 'object'
+            ? override
+            : lossState;
+        const recommendations = lossState.recommendations || null;
+        const paramsSource = source?.params && typeof source.params === 'object'
+            ? source.params
+            : source;
+        const normalizedType = normalizeLossType(source?.type);
+        const params = sanitizeLossParams(normalizedType, paramsSource || {}, recommendations);
+        return {
+            type: normalizedType,
+            params,
+        };
+    };
+
+    const applyLossRecommendations = () => {
+        const modelState = getActiveModelState();
+        if (!modelState) return;
+        const lossState = ensureLossState(modelState);
+        const recommendations = lossState.recommendations;
+        if (!recommendations) {
+            showStatus('尚未計算 Loss 建議值，請先完成一次訓練。', 'warning');
+            return;
+        }
+        if (elements.lossWPos && Number.isFinite(recommendations.wPos)) {
+            elements.lossWPos.value = recommendations.wPos.toFixed(2);
+        }
+        if (elements.lossWNeg && Number.isFinite(recommendations.wNeg)) {
+            elements.lossWNeg.value = recommendations.wNeg.toFixed(2);
+        }
+        if (elements.lossAlpha && Number.isFinite(recommendations.alpha)) {
+            elements.lossAlpha.value = recommendations.alpha.toFixed(2);
+        }
+        if (elements.lossGamma && Number.isFinite(recommendations.gamma)) {
+            elements.lossGamma.value = recommendations.gamma.toFixed(2);
+        }
+        readLossInputsToState(lossState);
+        updateLossInputsState(lossState, normalizeClassificationMode(modelState.classification));
+        showStatus('已套用 Loss 建議值，請重新訓練模型以套用。', 'info');
+    };
+
+    const updateLossUIState = (modelState) => {
+        const lossState = ensureLossState(modelState);
+        const classificationMode = normalizeClassificationMode(modelState?.classification);
+        applyLossStateToInputs(lossState);
+        updateLossInputsState(lossState, classificationMode);
+        updateLossRecommendationDisplay(lossState);
+        updateLossComparisonTable(modelState);
+    };
+
+    const recordLossComparison = (modelState, summary) => {
+        if (!modelState || !summary || !summary.lossType) return;
+        ensureLossState(modelState);
+        if (!modelState.lossComparisons || typeof modelState.lossComparisons !== 'object') {
+            modelState.lossComparisons = {};
+        }
+        const key = normalizeLossType(summary.lossType);
+        modelState.lossComparisons[key] = {
+            lossType: key,
+            lossLabel: getLossLabel(key),
+            params: summary.lossParams || {},
+            accuracy: Number.isFinite(summary.testAccuracy) ? summary.testAccuracy : NaN,
+            precision: Number.isFinite(summary.testPrecision) ? summary.testPrecision : NaN,
+            recall: Number.isFinite(summary.testRecall) ? summary.testRecall : NaN,
+            f1: Number.isFinite(summary.testF1) ? summary.testF1 : NaN,
+            timestamp: Date.now(),
+        };
+    };
+
+    const updateLossComparisonTable = (modelState) => {
+        if (!elements.lossComparisonBody) return;
+        const comparisons = modelState?.lossComparisons && typeof modelState.lossComparisons === 'object'
+            ? Object.values(modelState.lossComparisons)
+            : [];
+        if (comparisons.length === 0) {
+            elements.lossComparisonBody.innerHTML = '';
+            if (elements.lossComparisonNote) {
+                elements.lossComparisonNote.textContent = '尚未執行。';
+            }
+            return;
+        }
+        const best = comparisons.reduce((acc, item) => {
+            if (!Number.isFinite(item?.f1)) return acc;
+            if (!acc || item.f1 > acc.f1) return item;
+            return acc;
+        }, null);
+        const rows = comparisons
+            .sort((a, b) => (Number.isFinite(b.f1) ? b.f1 : -Infinity) - (Number.isFinite(a.f1) ? a.f1 : -Infinity))
+            .map((item) => {
+                const isBest = best && item.lossType === best.lossType && Number.isFinite(item.f1);
+                const badge = isBest ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">推薦</span>' : '—';
+                return `
+                    <tr>
+                        <td class="px-2 py-1 text-left">${escapeHTML(item.lossLabel || getLossLabel(item.lossType))}</td>
+                        <td class="px-2 py-1 text-right">${formatPercent(item.accuracy, 2)}</td>
+                        <td class="px-2 py-1 text-right">${formatPercent(item.precision, 2)}</td>
+                        <td class="px-2 py-1 text-right">${formatPercent(item.recall, 2)}</td>
+                        <td class="px-2 py-1 text-right">${formatPercent(item.f1, 2)}</td>
+                        <td class="px-2 py-1 text-left">${badge}</td>
+                    </tr>
+                `;
+            });
+        elements.lossComparisonBody.innerHTML = rows.join('');
+        if (elements.lossComparisonNote) {
+            elements.lossComparisonNote.textContent = '已完成最新 A/B 測試。';
+        }
     };
 
     const updateClassificationUIState = (_mode = CLASSIFICATION_MODES.MULTICLASS) => {
@@ -247,6 +651,12 @@
             elements.testAccuracyLabel.textContent = normalized === CLASSIFICATION_MODES.MULTICLASS
                 ? '大漲命中率'
                 : '測試期預測正確率';
+        }
+        const activeState = getActiveModelState();
+        if (activeState) {
+            const lossState = ensureLossState(activeState);
+            updateLossInputsState(lossState, _mode);
+            updateLossRecommendationDisplay(lossState);
         }
     };
 
@@ -1469,6 +1879,11 @@
             elements.freshRunButton.classList.toggle('opacity-60', globalState.running);
             elements.freshRunButton.classList.toggle('cursor-not-allowed', globalState.running);
         }
+        if (elements.lossAbTestButton) {
+            elements.lossAbTestButton.disabled = globalState.running;
+            elements.lossAbTestButton.classList.toggle('opacity-60', globalState.running);
+            elements.lossAbTestButton.classList.toggle('cursor-not-allowed', globalState.running);
+        }
     };
 
     const parseNumberInput = (el, fallback, options = {}) => {
@@ -1620,6 +2035,60 @@
             lastClose: sorted.length > 0 ? sorted[sorted.length - 1].close : null,
             volatilityThresholds,
             classificationMode,
+        };
+    };
+
+    const prepareDatasetForTraining = (dataset, classificationMode, boundedTrainSize, resolvedVolatility) => {
+        const working = dataset;
+        const sampleCount = Array.isArray(working.sequences) ? working.sequences.length : 0;
+        const labels = new Array(sampleCount);
+        let recalibratedVolatility = resolvedVolatility;
+        let volatilityDiagnostics = null;
+        let classStats = null;
+        if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+            for (let i = 0; i < sampleCount; i += 1) {
+                const metaItem = working.meta[i] || {};
+                const actualReturn = Number.isFinite(metaItem?.actualReturn)
+                    ? metaItem.actualReturn
+                    : working.returns[i];
+                const label = Number(actualReturn > 0);
+                labels[i] = label;
+                if (metaItem) {
+                    metaItem.classLabel = label;
+                }
+            }
+            classStats = computeClassStatsFromLabels(labels, boundedTrainSize, classificationMode);
+        } else {
+            const swingTargets = Array.isArray(working.swingTargets)
+                ? working.swingTargets
+                : working.meta.map((item) => Number(item?.swingReturn));
+            const trainingSwings = swingTargets
+                .slice(0, boundedTrainSize)
+                .filter((value) => Number.isFinite(value));
+            const diagnosticsPayload = {};
+            recalibratedVolatility = deriveVolatilityThresholdsFromReturns(trainingSwings, resolvedVolatility, diagnosticsPayload);
+            diagnosticsPayload.expectedTrainSamples = trainingSwings.length;
+            volatilityDiagnostics = diagnosticsPayload;
+            for (let i = 0; i < sampleCount; i += 1) {
+                const metaItem = working.meta[i] || {};
+                const swingValue = Number.isFinite(swingTargets[i])
+                    ? swingTargets[i]
+                    : Number(metaItem?.swingReturn);
+                const label = classifySwingReturn(swingValue, recalibratedVolatility);
+                labels[i] = label;
+                if (metaItem) {
+                    metaItem.classLabel = label;
+                }
+            }
+        }
+        working.labels = labels;
+        working.volatilityThresholds = recalibratedVolatility;
+        working.volatilityDiagnostics = volatilityDiagnostics;
+        return {
+            dataset: working,
+            volatility: recalibratedVolatility,
+            diagnostics: volatilityDiagnostics,
+            classStats,
         };
     };
 
@@ -1835,6 +2304,9 @@
         if (elements.trainLoss) elements.trainLoss.textContent = 'Loss：—';
         if (elements.testAccuracy) elements.testAccuracy.textContent = '—';
         if (elements.testLoss) elements.testLoss.textContent = 'Loss：—';
+        if (elements.testPrecision) elements.testPrecision.textContent = 'Precision：—';
+        if (elements.testRecall) elements.testRecall.textContent = 'Recall：—';
+        if (elements.testF1) elements.testF1.textContent = 'F1：—';
         if (elements.tradeCount) elements.tradeCount.textContent = '—';
         if (elements.hitRate) elements.hitRate.textContent = '命中率：—｜勝率門檻：—';
         if (elements.totalReturn) elements.totalReturn.textContent = '—';
@@ -1848,12 +2320,22 @@
             elements.toggleAllTrades.textContent = '顯示全部預測紀錄';
             elements.toggleAllTrades.setAttribute('aria-pressed', 'false');
         }
+        if (elements.lossSummary) elements.lossSummary.textContent = '使用 Loss：—';
+        if (elements.confusionTP) elements.confusionTP.textContent = '—';
+        if (elements.confusionTN) elements.confusionTN.textContent = '—';
+        if (elements.confusionFP) elements.confusionFP.textContent = '—';
+        if (elements.confusionFN) elements.confusionFN.textContent = '—';
         const rule = getTradeRuleForModel();
         if (elements.tradeRuleSelect) {
             elements.tradeRuleSelect.value = rule;
         }
         updateTradeRuleDescription(rule);
         updateVolatilityDiagnosticsDisplay(null, getActiveModelState()?.classification);
+        const activeState = getActiveModelState();
+        if (activeState) {
+            updateLossRecommendationDisplay(activeState.loss || null);
+            updateLossComparisonTable(activeState);
+        }
     };
 
     const updateSummaryMetrics = (summary) => {
@@ -1877,6 +2359,9 @@
             elements.testAccuracyLabel.textContent = accuracyLabel;
         }
         if (elements.testLoss) elements.testLoss.textContent = `Loss：${formatNumber(summary.testLoss, 4)}`;
+        if (elements.testPrecision) elements.testPrecision.textContent = `Precision：${formatPercent(summary.testPrecision, 2)}`;
+        if (elements.testRecall) elements.testRecall.textContent = `Recall：${formatPercent(summary.testRecall, 2)}`;
+        if (elements.testF1) elements.testF1.textContent = `F1：${formatPercent(summary.testF1, 2)}`;
         if (elements.tradeCount) elements.tradeCount.textContent = Number.isFinite(summary.executedTrades) ? summary.executedTrades : '—';
         if (elements.hitRate) {
             const thresholdValue = Number.isFinite(summary.threshold)
@@ -1900,6 +2385,14 @@
             const buyHoldAnnualText = formatPercent(summary.buyHoldAnnualized, 2);
             elements.averageProfit.textContent = `AI勝率：${aiWinText}｜單次平均報酬%：${singleText}｜月平均報酬%：${monthlyText}｜年平均報酬%：${yearlyText}｜買入持有年化報酬%：${buyHoldAnnualText}｜交易次數：${tradeCount}｜標準差：${stdText}`;
         }
+        if (elements.lossSummary) {
+            elements.lossSummary.textContent = formatLossSummaryText(summary.lossType || LOSS_TYPES.BCE, summary.lossParams || {});
+        }
+        const confusion = summary.confusion || {};
+        if (elements.confusionTP) elements.confusionTP.textContent = Number.isFinite(confusion.TP) ? confusion.TP : '—';
+        if (elements.confusionTN) elements.confusionTN.textContent = Number.isFinite(confusion.TN) ? confusion.TN : '—';
+        if (elements.confusionFP) elements.confusionFP.textContent = Number.isFinite(confusion.FP) ? confusion.FP : '—';
+        if (elements.confusionFN) elements.confusionFN.textContent = Number.isFinite(confusion.FN) ? confusion.FN : '—';
         if (elements.tradeSummary) {
             const strategyLabel = summary.usingKelly
                 ? '已啟用凱利公式'
@@ -2513,6 +3006,9 @@
             trainLoss: metrics.trainLoss,
             testAccuracy: metrics.testAccuracy,
             testLoss: metrics.testLoss,
+            testPrecision: Number.isFinite(metrics.testPrecision) ? metrics.testPrecision : NaN,
+            testRecall: Number.isFinite(metrics.testRecall) ? metrics.testRecall : NaN,
+            testF1: Number.isFinite(metrics.testF1) ? metrics.testF1 : NaN,
             totalPredictions: Number.isFinite(metrics.totalPredictions)
                 ? metrics.totalPredictions
                 : (Array.isArray(payload.predictions) ? payload.predictions.length : 0),
@@ -2542,6 +3038,9 @@
             testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
             classReturnAverages: classAverages,
+            lossType: metrics.lossType || payload?.hyperparameters?.lossConfig?.type || ensureLossState(modelState).type,
+            lossParams: metrics.lossParams || payload?.hyperparameters?.lossConfig?.params || ensureLossState(modelState).params,
+            confusion: metrics.confusion || null,
         };
 
         modelState.trainingMetrics = metrics;
@@ -2558,6 +3057,17 @@
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
         modelState.classification = classificationMode;
+        if (!summary.confusion && metrics.confusion) {
+            summary.confusion = metrics.confusion;
+        }
+        const lossState = ensureLossState(modelState);
+        if (summary.lossType) {
+            lossState.type = normalizeLossType(summary.lossType);
+        }
+        if (summary.lossParams && typeof summary.lossParams === 'object') {
+            lossState.params = { ...lossState.params, ...summary.lossParams };
+        }
+        recordLossComparison(modelState, summary);
 
         applySeedDefaultName(summary, modelType);
 
@@ -2575,6 +3085,7 @@
         } else {
             updateAllPredictionsToggleButton(modelState);
         }
+        updateLossUIState(modelState);
         updateAnnDiagnosticsButtonState();
     };
 
@@ -2606,6 +3117,8 @@
         if (elements.classificationMode) {
             modelState.classification = normalizeClassificationMode(elements.classificationMode.value);
         }
+        const lossState = ensureLossState(modelState);
+        readLossInputsToState(lossState);
     };
 
     const applyModelSettingsToUI = (modelState) => {
@@ -2659,6 +3172,7 @@
         }
         updateVolatilityDiagnosticsDisplay(modelState.volatilityDiagnostics, classificationMode);
         updateClassificationUIState(classificationMode);
+        updateLossUIState(modelState);
         parseTrainRatio();
         parseWinThreshold();
     };
@@ -2692,7 +3206,7 @@
         const classificationMode = normalizeClassificationMode(modelState.classification);
         let resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
-        const dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility, classificationMode);
+        let dataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility, classificationMode);
         const minimumSamples = Math.max(45, hyperparameters.lookback * 3);
         if (dataset.sequences.length < minimumSamples) {
             showStatus(`[${label}] 資料樣本不足（需至少 ${minimumSamples} 筆有效樣本，目前 ${dataset.sequences.length} 筆），請延長回測期間。`, 'warning');
@@ -2713,51 +3227,27 @@
             showStatus(`[${label}] 批次大小 ${hyperparameters.batchSize} 大於訓練樣本數 ${boundedTrainSize}，已自動調整為 ${effectiveBatchSize}。`, 'warning');
         }
 
-        const sampleCount = dataset.sequences.length;
-        const datasetLabels = new Array(sampleCount);
-        let recalibratedVolatility = resolvedVolatility;
-        let volatilityDiagnostics = null;
-        if (classificationMode === CLASSIFICATION_MODES.BINARY) {
-            for (let i = 0; i < sampleCount; i += 1) {
-                const metaItem = dataset.meta[i] || {};
-                const actualReturn = Number.isFinite(metaItem?.actualReturn)
-                    ? metaItem.actualReturn
-                    : dataset.returns[i];
-                const label = Number(actualReturn > 0);
-                datasetLabels[i] = label;
-                if (metaItem) {
-                    metaItem.classLabel = label;
-                }
-            }
-        } else {
-            const swingTargets = Array.isArray(dataset.swingTargets)
-                ? dataset.swingTargets
-                : dataset.meta.map((item) => Number(item?.swingReturn));
-            const trainingSwings = swingTargets
-                .slice(0, boundedTrainSize)
-                .filter((value) => Number.isFinite(value));
-            const diagnosticsPayload = {};
-            recalibratedVolatility = deriveVolatilityThresholdsFromReturns(trainingSwings, resolvedVolatility, diagnosticsPayload);
-            diagnosticsPayload.expectedTrainSamples = trainingSwings.length;
-            volatilityDiagnostics = diagnosticsPayload;
-            for (let i = 0; i < sampleCount; i += 1) {
-                const metaItem = dataset.meta[i] || {};
-                const swingValue = Number.isFinite(swingTargets[i])
-                    ? swingTargets[i]
-                    : Number(metaItem?.swingReturn);
-                const label = classifySwingReturn(swingValue, recalibratedVolatility);
-                datasetLabels[i] = label;
-                if (metaItem) {
-                    metaItem.classLabel = label;
-                }
-            }
-        }
-        dataset.labels = datasetLabels;
-        dataset.volatilityThresholds = recalibratedVolatility;
-        dataset.volatilityDiagnostics = volatilityDiagnostics;
-        resolvedVolatility = recalibratedVolatility;
+        const preparation = prepareDatasetForTraining(dataset, classificationMode, boundedTrainSize, resolvedVolatility);
+        dataset = preparation.dataset;
+        const volatilityDiagnostics = preparation.diagnostics;
+        resolvedVolatility = preparation.volatility;
         modelState.volatilityThresholds = resolvedVolatility;
         modelState.volatilityDiagnostics = volatilityDiagnostics;
+        const lossState = ensureLossState(modelState);
+        const lossOverride = runtimeOptions?.lossOverride || null;
+        const effectiveLossConfig = buildLossConfigForClassification(modelState, classificationMode, lossOverride);
+        if (!lossOverride) {
+            lossState.type = effectiveLossConfig.type;
+            lossState.params = { ...lossState.params, ...effectiveLossConfig.params };
+        }
+        if (preparation.classStats) {
+            lossState.classStats = preparation.classStats;
+            lossState.recommendations = computeLossRecommendationsFromStats(preparation.classStats);
+        }
+        if (globalState.activeModel === MODEL_TYPES.LSTM) {
+            updateLossRecommendationDisplay(lossState);
+            updateLossInputsState(lossState, classificationMode);
+        }
 
         const requestedSeed = Number.isFinite(runtimeOptions?.seedOverride)
             ? Math.max(1, Math.round(runtimeOptions.seedOverride))
@@ -2777,6 +3267,7 @@
                 seed: Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null),
                 volatility: resolvedVolatility,
                 classificationMode,
+                lossConfig: effectiveLossConfig,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -2817,6 +3308,11 @@
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
             classificationMode,
+            lossConfig: (hyperparametersUsed?.lossConfig && typeof hyperparametersUsed.lossConfig === 'object')
+                ? hyperparametersUsed.lossConfig
+                : (predictionsPayload.hyperparameters?.lossConfig && typeof predictionsPayload.hyperparameters.lossConfig === 'object'
+                    ? predictionsPayload.hyperparameters.lossConfig
+                    : effectiveLossConfig),
         };
 
         predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
@@ -2875,6 +3371,35 @@
         let resolvedVolatility = sanitizeVolatilityThresholds(riskOptions?.volatilityThresholds || modelState.volatilityThresholds);
         modelState.volatilityThresholds = resolvedVolatility;
         const classificationMode = normalizeClassificationMode(modelState.classification);
+        const lossState = ensureLossState(modelState);
+
+        const previewDataset = buildDataset(rows, hyperparameters.lookback, resolvedVolatility, classificationMode);
+        const previewTotalSamples = previewDataset.sequences.length;
+        if (previewTotalSamples > 1) {
+            const rawPreviewTrainSize = Math.max(Math.floor(previewTotalSamples * hyperparameters.trainRatio), hyperparameters.lookback);
+            const previewTrainSize = Math.min(Math.max(rawPreviewTrainSize, hyperparameters.lookback), previewTotalSamples - 1);
+            const previewPreparation = prepareDatasetForTraining(previewDataset, classificationMode, previewTrainSize, resolvedVolatility);
+            resolvedVolatility = previewPreparation.volatility;
+            modelState.volatilityThresholds = resolvedVolatility;
+            if (previewPreparation.diagnostics) {
+                modelState.volatilityDiagnostics = previewPreparation.diagnostics;
+            }
+            if (previewPreparation.classStats) {
+                lossState.classStats = previewPreparation.classStats;
+                lossState.recommendations = computeLossRecommendationsFromStats(previewPreparation.classStats);
+            }
+            if (globalState.activeModel === MODEL_TYPES.ANNS) {
+                updateLossRecommendationDisplay(lossState);
+                updateLossInputsState(lossState, classificationMode);
+            }
+        }
+
+        const lossOverride = runtimeOptions?.lossOverride || null;
+        const effectiveLossConfig = buildLossConfigForClassification(modelState, classificationMode, lossOverride);
+        if (!lossOverride) {
+            lossState.type = effectiveLossConfig.type;
+            lossState.params = { ...lossState.params, ...effectiveLossConfig.params };
+        }
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const taskPayload = {
@@ -2887,6 +3412,7 @@
                 lookback: hyperparameters.lookback,
                 volatility: resolvedVolatility,
                 classificationMode,
+                lossConfig: effectiveLossConfig,
             },
         };
         if (Number.isFinite(requestedSeed)) {
@@ -2932,6 +3458,11 @@
                 ? hyperparametersUsed.seed
                 : (Number.isFinite(requestedSeed) ? requestedSeed : (Number.isFinite(hyperparameters.seed) ? hyperparameters.seed : null)),
             classificationMode,
+            lossConfig: (hyperparametersUsed?.lossConfig && typeof hyperparametersUsed.lossConfig === 'object')
+                ? hyperparametersUsed.lossConfig
+                : (predictionsPayload.hyperparameters?.lossConfig && typeof predictionsPayload.hyperparameters.lossConfig === 'object'
+                    ? predictionsPayload.hyperparameters.lossConfig
+                    : effectiveLossConfig),
         };
 
         predictionsPayload.hyperparameters = { ...resolvedHyper, volatility: resolvedVolatility };
@@ -3341,6 +3872,86 @@
         showStatus(`已刪除 ${selectedIds.length} 筆種子。`, 'success');
     };
 
+    const runLossABTest = async () => {
+        if (globalState.running) return;
+        const modelType = globalState.activeModel;
+        if (modelType !== MODEL_TYPES.LSTM && modelType !== MODEL_TYPES.ANNS) {
+            showStatus('目前僅支援 LSTM 與 ANN 進行 Loss A/B 測試。', 'warning');
+            return;
+        }
+        const modelState = getModelState(modelType);
+        if (!modelState) return;
+        const classificationMode = normalizeClassificationMode(modelState.classification);
+        if (classificationMode !== CLASSIFICATION_MODES.BINARY) {
+            showStatus('Loss A/B 測試僅適用於二分類模式，請先切換為漲跌分類。', 'warning');
+            return;
+        }
+        const rows = getVisibleData();
+        if (!Array.isArray(rows) || rows.length === 0) {
+            showStatus('尚未取得資料，請先在主頁面完成一次回測。', 'warning');
+            return;
+        }
+        captureActiveModelSettings();
+        const hyperparameters = { ...modelState.hyperparameters };
+        const riskOptions = {
+            threshold: resolveWinThreshold(modelState),
+            useKelly: Boolean(modelState.kellyEnabled),
+            fixedFraction: sanitizeFraction(modelState.fixedFraction),
+            tradeRule: getTradeRuleForModel(modelType),
+            volatilityThresholds: sanitizeVolatilityThresholds(modelState.volatilityThresholds),
+        };
+        const seedOverride = Number.isFinite(hyperparameters.seed) ? Math.round(hyperparameters.seed) : null;
+        const lossState = ensureLossState(modelState);
+        const recommendations = lossState.recommendations || null;
+        const weightedParams = sanitizeLossParams(LOSS_TYPES.WEIGHTED_BCE, {}, recommendations);
+        const focalParams = sanitizeLossParams(LOSS_TYPES.FOCAL, {}, recommendations);
+        const scenarios = [
+            { type: LOSS_TYPES.BCE, params: {}, label: 'BCE' },
+            { type: LOSS_TYPES.WEIGHTED_BCE, params: weightedParams, label: 'Class-weighted BCE' },
+            { type: LOSS_TYPES.FOCAL, params: focalParams, label: 'Focal Loss' },
+        ];
+        toggleRunning(true);
+        if (elements.lossComparisonNote) {
+            elements.lossComparisonNote.textContent = 'A/B 測試執行中…';
+        }
+        try {
+            for (let index = 0; index < scenarios.length; index += 1) {
+                const scenario = scenarios[index];
+                const override = { type: scenario.type, params: scenario.params };
+                if (elements.lossComparisonNote) {
+                    elements.lossComparisonNote.textContent = 'A/B 測試執行中…';
+                }
+                lossState.type = scenario.type;
+                lossState.params = { ...scenario.params };
+                applyLossStateToInputs(lossState);
+                updateLossInputsState(lossState, classificationMode);
+                readLossInputsToState(lossState);
+                showStatus(`執行 Loss A/B 測試：${scenario.label}（${index + 1}/3）`, 'info');
+                const runtimeOptions = { lossOverride: override };
+                if (Number.isFinite(seedOverride)) {
+                    runtimeOptions.seedOverride = seedOverride;
+                }
+                const runHyperparameters = index === 0
+                    ? { ...hyperparameters }
+                    : { ...modelState.hyperparameters };
+                if (modelType === MODEL_TYPES.LSTM) {
+                    await runLstmModel(modelState, rows, runHyperparameters, riskOptions, runtimeOptions);
+                } else {
+                    await runAnnModel(modelState, rows, runHyperparameters, riskOptions, runtimeOptions);
+                }
+                riskOptions.volatilityThresholds = sanitizeVolatilityThresholds(modelState.volatilityThresholds);
+                riskOptions.threshold = resolveWinThreshold(modelState);
+            }
+            showStatus('Loss A/B 測試完成，請檢視比較表選擇合適設定。', 'success');
+        } catch (error) {
+            console.error('[AI Prediction] Loss A/B 測試失敗：', error);
+            const message = error instanceof Error ? error.message : String(error || '未知錯誤');
+            showStatus(`Loss A/B 測試失敗：${message}`, 'error');
+        } finally {
+            toggleRunning(false);
+        }
+    };
+
     const runPrediction = async (options = {}) => {
         if (globalState.running) return;
         toggleRunning(true);
@@ -3457,6 +4068,9 @@
         elements.trainLoss = document.getElementById('ai-train-loss');
         elements.testAccuracy = document.getElementById('ai-test-accuracy');
         elements.testLoss = document.getElementById('ai-test-loss');
+        elements.testPrecision = document.getElementById('ai-test-precision');
+        elements.testRecall = document.getElementById('ai-test-recall');
+        elements.testF1 = document.getElementById('ai-test-f1');
         elements.tradeCount = document.getElementById('ai-trade-count');
         elements.hitRate = document.getElementById('ai-hit-rate');
         elements.totalReturn = document.getElementById('ai-total-return');
@@ -3481,6 +4095,22 @@
         elements.volatilityDropSummary = document.getElementById('ai-volatility-drop-summary');
         elements.annDiagnosticsButton = document.getElementById('ai-ann-diagnostics');
         elements.testAccuracyLabel = document.getElementById('ai-test-accuracy-label');
+        elements.lossType = document.getElementById('ai-loss-type');
+        elements.lossWPos = document.getElementById('ai-loss-w-pos');
+        elements.lossWNeg = document.getElementById('ai-loss-w-neg');
+        elements.lossAlpha = document.getElementById('ai-loss-alpha');
+        elements.lossGamma = document.getElementById('ai-loss-gamma');
+        elements.lossRecommendation = document.getElementById('ai-loss-recommendation');
+        elements.lossClassStats = document.getElementById('ai-loss-class-stats');
+        elements.lossApplyButton = document.getElementById('ai-loss-apply');
+        elements.lossAbTestButton = document.getElementById('ai-loss-ab-test');
+        elements.lossComparisonBody = document.getElementById('ai-loss-comparison-body');
+        elements.lossComparisonNote = document.getElementById('ai-loss-comparison-note');
+        elements.lossSummary = document.getElementById('ai-loss-summary');
+        elements.confusionTP = document.getElementById('ai-confusion-tp');
+        elements.confusionTN = document.getElementById('ai-confusion-tn');
+        elements.confusionFP = document.getElementById('ai-confusion-fp');
+        elements.confusionFN = document.getElementById('ai-confusion-fn');
 
         if (elements.runButton) {
             elements.runButton.addEventListener('click', () => {
@@ -3601,6 +4231,47 @@
         if (elements.optimizeThreshold) {
             elements.optimizeThreshold.addEventListener('click', () => {
                 optimiseWinThreshold();
+            });
+        }
+
+        const handleLossInputChange = () => {
+            const modelState = getActiveModelState();
+            if (!modelState) return;
+            const lossState = ensureLossState(modelState);
+            readLossInputsToState(lossState);
+        };
+
+        if (elements.lossType) {
+            elements.lossType.addEventListener('change', () => {
+                const modelState = getActiveModelState();
+                if (!modelState) return;
+                const lossState = ensureLossState(modelState);
+                readLossInputsToState(lossState);
+                updateLossInputsState(lossState, normalizeClassificationMode(modelState.classification));
+            });
+        }
+
+        const bindLossNumericInput = (key) => {
+            const element = elements[key];
+            if (!element) return;
+            element.addEventListener('change', handleLossInputChange);
+            element.addEventListener('blur', handleLossInputChange);
+        };
+
+        bindLossNumericInput('lossWPos');
+        bindLossNumericInput('lossWNeg');
+        bindLossNumericInput('lossAlpha');
+        bindLossNumericInput('lossGamma');
+
+        if (elements.lossApplyButton) {
+            elements.lossApplyButton.addEventListener('click', () => {
+                applyLossRecommendations();
+            });
+        }
+
+        if (elements.lossAbTestButton) {
+            elements.lossAbTestButton.addEventListener('click', () => {
+                runLossABTest();
             });
         }
 
