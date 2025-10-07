@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.2 ---
-// Patch Tag: LB-ROLLING-TEST-20250912B
+// --- 滾動測試模組 - v1.3 ---
+// Patch Tag: LB-ROLLING-TEST-20250918A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250912B',
+        version: 'LB-ROLLING-TEST-20250918A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -43,6 +43,28 @@
         sortinoRatio: 'Sortino Ratio',
         maxDrawdown: '最大回撤',
         winRate: '勝率',
+    };
+
+    const PARAM_NAME_LABELS = {
+        shortPeriod: '短天數',
+        longPeriod: '長天數',
+        period: '週期',
+        breakoutPeriod: '突破期',
+        signalPeriod: '訊號期',
+        threshold: '門檻',
+        upperThreshold: '上限',
+        lowerThreshold: '下限',
+        multiplier: '倍數',
+        length: '期間',
+        offset: '位移',
+        atrPeriod: 'ATR 期間',
+        maPeriod: '均線天數',
+        stopLoss: '停損 (%)',
+        takeProfit: '停利 (%)',
+        trailingStop: '移動停損',
+        riskReward: 'RR 比',
+        channelPeriod: '通道期',
+        breakoutThreshold: '突破門檻',
     };
 
     function initRollingTest() {
@@ -96,6 +118,16 @@
         if (!windows || windows.length === 0) {
             setAlert('目前設定無法建立有效的 Walk-Forward 視窗，請調整視窗長度或日期區間。', 'warning');
             showInfo?.('請調整滾動測試設定，例如延長日期區間或縮短視窗長度');
+            return;
+        }
+
+        const coverageIssues = validateWindowCoverage(windows, cachedRows, config);
+        if (coverageIssues.length > 0) {
+            setPlanWarning(true);
+            const primary = coverageIssues[0];
+            const detail = coverageIssues.length > 1 ? `（共 ${coverageIssues.length} 項問題）` : '';
+            setAlert(`滾動測試無法啟動：${primary}${detail}`, 'error');
+            showError?.(`[Rolling Test] ${primary}`);
             return;
         }
 
@@ -395,7 +427,10 @@
                 title: 'Walk-Forward 評分',
                 value: `${aggregate.score} 分`,
                 accent: aggregate.gradeColor,
-                description: `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
+                description: [
+                    `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
+                    '（達門檻約 70 分，超標越多加分）',
+                ].join(''),
             },
             {
                 title: '平均年化報酬 (OOS)',
@@ -449,19 +484,188 @@
 
         aggregate.evaluations.forEach((entry) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = [
-                `<td class="px-3 py-2">${entry.index + 1}</td>`,
-                `<td class="px-3 py-2">${entry.window.testingStart} ~ ${entry.window.testingEnd}</td>`,
-                `<td class="px-3 py-2 text-right ${entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatPercent(entry.metrics.annualizedReturn)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatNumber(entry.metrics.sharpeRatio)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatNumber(entry.metrics.sortinoRatio)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatPercent(entry.metrics.maxDrawdown)}</td>`,
-                `<td class="px-3 py-2 text-right">${formatPercent(entry.metrics.winRate)}</td>`,
-                `<td class="px-3 py-2 text-right">${Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—'}</td>`,
-                `<td class="px-3 py-2 text-left">${entry.comment}</td>`,
-            ].join('');
+
+            const indexCell = document.createElement('td');
+            indexCell.className = 'px-3 py-2';
+            indexCell.textContent = entry.index + 1;
+            tr.appendChild(indexCell);
+
+            const periodCell = document.createElement('td');
+            periodCell.className = 'px-3 py-2';
+            periodCell.textContent = `${entry.window.testingStart} ~ ${entry.window.testingEnd}`;
+            tr.appendChild(periodCell);
+
+            const annCell = document.createElement('td');
+            annCell.className = `px-3 py-2 text-right ${Number.isFinite(entry.metrics.annualizedReturn) && entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
+            annCell.textContent = formatPercent(entry.metrics.annualizedReturn);
+            tr.appendChild(annCell);
+
+            const sharpeCell = document.createElement('td');
+            sharpeCell.className = 'px-3 py-2 text-right';
+            sharpeCell.textContent = formatNumber(entry.metrics.sharpeRatio);
+            tr.appendChild(sharpeCell);
+
+            const sortinoCell = document.createElement('td');
+            sortinoCell.className = 'px-3 py-2 text-right';
+            sortinoCell.textContent = formatNumber(entry.metrics.sortinoRatio);
+            tr.appendChild(sortinoCell);
+
+            const maxddCell = document.createElement('td');
+            maxddCell.className = 'px-3 py-2 text-right';
+            maxddCell.textContent = formatPercent(entry.metrics.maxDrawdown);
+            tr.appendChild(maxddCell);
+
+            const winRateCell = document.createElement('td');
+            winRateCell.className = 'px-3 py-2 text-right';
+            winRateCell.textContent = formatPercent(entry.metrics.winRate);
+            tr.appendChild(winRateCell);
+
+            const tradesCell = document.createElement('td');
+            tradesCell.className = 'px-3 py-2 text-right';
+            tradesCell.textContent = Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—';
+            tr.appendChild(tradesCell);
+
+            const paramsCell = document.createElement('td');
+            paramsCell.className = 'px-3 py-2 text-left whitespace-pre-wrap';
+            paramsCell.textContent = buildParameterSummary(entry.paramsSnapshot);
+            tr.appendChild(paramsCell);
+
+            const commentCell = document.createElement('td');
+            commentCell.className = 'px-3 py-2 text-left';
+            commentCell.textContent = entry.comment || '—';
+            tr.appendChild(commentCell);
+
             tbody.appendChild(tr);
         });
+    }
+
+    function buildParameterSummary(params) {
+        if (!params || typeof params !== 'object') return '—';
+        const blocks = [];
+
+        const longEntry = describeStrategyBlock('做多進場', params.entryStrategy, params.entryParams, params.entryStages, 'entry');
+        if (longEntry) blocks.push(longEntry);
+
+        const longExit = describeStrategyBlock('做多出場', params.exitStrategy, params.exitParams, params.exitStages, 'exit');
+        if (longExit) blocks.push(longExit);
+
+        if (params.enableShorting) {
+            const shortEntry = describeStrategyBlock('做空進場', params.shortEntryStrategy, params.shortEntryParams, params.shortEntryStages, 'shortEntry');
+            if (shortEntry) blocks.push(shortEntry);
+            const shortExit = describeStrategyBlock('回補出場', params.shortExitStrategy, params.shortExitParams, params.shortExitStages, 'shortExit');
+            if (shortExit) blocks.push(shortExit);
+        }
+
+        const risk = buildRiskSummary(params);
+        if (risk) blocks.push(risk);
+
+        return blocks.length > 0 ? blocks.join('｜') : '—';
+    }
+
+    function describeStrategyBlock(label, strategyKey, paramObj, stages, scope) {
+        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
+        const details = [];
+        const paramText = formatParamEntries(paramObj);
+        if (paramText) details.push(paramText);
+        const stageText = formatStageSummary(stages);
+        if (stageText) details.push(stageText);
+
+        if (!strategyName && details.length === 0) return '';
+        let summary = `${label}：${strategyName || '—'}`;
+        if (details.length > 0) {
+            summary += `（${details.join('、')}）`;
+        }
+        return summary;
+    }
+
+    function resolveStrategyDisplayName(strategyKey, scope) {
+        if (!strategyKey) return '';
+        let lookupKey = strategyKey;
+        if (scope) {
+            lookupKey = resolveStrategyConfigKey(strategyKey, scope) || strategyKey;
+        }
+        const info = strategyDescriptions?.[lookupKey];
+        if (info?.name) return info.name;
+        if (info?.label) return info.label;
+        return strategyKey;
+    }
+
+    function formatParamEntries(paramObj) {
+        if (!paramObj || typeof paramObj !== 'object') return '';
+        const entries = Object.entries(paramObj)
+            .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+            .map(([key, value]) => {
+                const formatted = formatParamValue(value);
+                if (!formatted) return null;
+                const label = PARAM_NAME_LABELS[key] || key;
+                return `${label}=${formatted}`;
+            })
+            .filter((entry) => entry);
+        return entries.length > 0 ? entries.join('、') : '';
+    }
+
+    function formatParamValue(value) {
+        if (Array.isArray(value)) {
+            const formatted = value
+                .filter((item) => item !== null && item !== undefined && item !== '')
+                .map((item) => formatParamValue(item))
+                .filter((item) => item !== '');
+            return formatted.join(' / ');
+        }
+        if (typeof value === 'number') {
+            return trimNumber(value);
+        }
+        if (typeof value === 'boolean') {
+            return value ? '是' : '否';
+        }
+        if (typeof value === 'string') {
+            return value.trim();
+        }
+        return '';
+    }
+
+    function formatStageSummary(stages) {
+        if (!Array.isArray(stages) || stages.length === 0) return '';
+        const valid = stages
+            .map((stage) => (Number.isFinite(stage) ? Number(stage) : null))
+            .filter((stage) => stage !== null && stage > 0);
+        if (valid.length === 0) return '';
+        return `分批 ${valid.map((stage) => `${trimNumber(stage)}%`).join(' + ')}`;
+    }
+
+    function buildRiskSummary(params) {
+        const parts = [];
+        if (Number.isFinite(params.stopLoss) && params.stopLoss > 0) {
+            parts.push(`停損 ${trimNumber(params.stopLoss)}%`);
+        }
+        if (Number.isFinite(params.takeProfit) && params.takeProfit > 0) {
+            parts.push(`停利 ${trimNumber(params.takeProfit)}%`);
+        }
+        const timing = resolveTradeTimingLabel(params.tradeTiming);
+        if (timing) parts.push(`執行點 ${timing}`);
+        const basis = resolvePositionBasisLabel(params.positionBasis);
+        if (basis) parts.push(`部位基準 ${basis}`);
+        return parts.length > 0 ? `風控：${parts.join('、')}` : '';
+    }
+
+    function resolveTradeTimingLabel(value) {
+        if (value === 'close') return '收盤';
+        if (value === 'open') return '開盤';
+        return '';
+    }
+
+    function resolvePositionBasisLabel(value) {
+        if (value === 'initialCapital') return '初始本金';
+        if (value === 'totalCapital') return '總資金';
+        return '';
+    }
+
+    function trimNumber(value) {
+        if (!Number.isFinite(value)) return '';
+        const abs = Math.abs(value);
+        if (abs >= 100) return value.toFixed(0);
+        if (abs >= 10) return value.toFixed(1).replace(/\.0$/, '');
+        return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
     function computeAggregateReport(entries, thresholds, minTrades) {
@@ -495,6 +699,7 @@
                 window: entry.window,
                 metrics: entry.testing,
                 evaluation,
+                paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
             };
         });
@@ -560,31 +765,58 @@
 
         metricsList.forEach((metrics) => {
             if (!metrics || metrics.error) return;
-            if (Number.isFinite(metrics.annualizedReturn)) {
-                weightedScore += SCORE_WEIGHTS.annualizedReturn * normalisePositive(metrics.annualizedReturn, thresholds.annualizedReturn, 2);
+            const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
+            if (annScore !== null) {
+                weightedScore += SCORE_WEIGHTS.annualizedReturn * annScore;
                 weightSum += SCORE_WEIGHTS.annualizedReturn;
             }
-            if (Number.isFinite(metrics.sharpeRatio)) {
-                weightedScore += SCORE_WEIGHTS.sharpeRatio * normalisePositive(metrics.sharpeRatio, thresholds.sharpeRatio, 2);
+            const sharpeScore = scorePositiveMetric(metrics.sharpeRatio, thresholds.sharpeRatio);
+            if (sharpeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.sharpeRatio * sharpeScore;
                 weightSum += SCORE_WEIGHTS.sharpeRatio;
             }
-            if (Number.isFinite(metrics.sortinoRatio)) {
-                weightedScore += SCORE_WEIGHTS.sortinoRatio * normalisePositive(metrics.sortinoRatio, thresholds.sortinoRatio, 2.5);
+            const sortinoScore = scorePositiveMetric(metrics.sortinoRatio, thresholds.sortinoRatio);
+            if (sortinoScore !== null) {
+                weightedScore += SCORE_WEIGHTS.sortinoRatio * sortinoScore;
                 weightSum += SCORE_WEIGHTS.sortinoRatio;
             }
-            if (Number.isFinite(metrics.maxDrawdown)) {
-                weightedScore += SCORE_WEIGHTS.maxDrawdown * normaliseInverse(metrics.maxDrawdown, thresholds.maxDrawdown, 2);
+            const drawdownScore = scoreInverseMetric(metrics.maxDrawdown, thresholds.maxDrawdown);
+            if (drawdownScore !== null) {
+                weightedScore += SCORE_WEIGHTS.maxDrawdown * drawdownScore;
                 weightSum += SCORE_WEIGHTS.maxDrawdown;
             }
-            if (Number.isFinite(metrics.winRate)) {
-                weightedScore += SCORE_WEIGHTS.winRate * normalisePositive(metrics.winRate, thresholds.winRate, 2);
+            const winRateScore = scorePositiveMetric(metrics.winRate, thresholds.winRate);
+            if (winRateScore !== null) {
+                weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
             }
         });
 
         if (weightSum === 0) return 0;
-        const normalized = Math.min(100, Math.max(0, (weightedScore / weightSum) * 100));
-        return Math.round(normalized);
+        return Math.round(weightedScore / weightSum);
+    }
+
+    function scorePositiveMetric(value, baseline) {
+        if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) return null;
+        const ratio = value / baseline;
+        return shapeScoreFromRatio(ratio);
+    }
+
+    function scoreInverseMetric(value, baseline) {
+        if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0 || baseline <= 0) return null;
+        const ratio = baseline / value;
+        return shapeScoreFromRatio(ratio);
+    }
+
+    function shapeScoreFromRatio(ratio) {
+        if (!Number.isFinite(ratio) || ratio <= 0) return 0;
+        if (ratio >= 2) {
+            return Math.min(100, 95 + (ratio - 2) * 10);
+        }
+        if (ratio >= 1) {
+            return 70 + (ratio - 1) * 25;
+        }
+        return Math.max(0, ratio * 70);
     }
 
     function resolveGrade(score, passRate, passCount, total) {
@@ -673,16 +905,6 @@
 
     function toFiniteNumber(value) {
         return Number.isFinite(value) ? Number(value) : null;
-    }
-
-    function normalisePositive(value, baseline, cap = 2) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) return 0;
-        return Math.min(cap, Math.max(0, value / baseline));
-    }
-
-    function normaliseInverse(value, baseline, cap = 2) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0) return 0;
-        return Math.min(cap, Math.max(0, baseline / value));
     }
 
     function average(values) {
@@ -1330,6 +1552,41 @@
             if (row.date >= startIso && row.date <= endIso) return count + 1;
             return count;
         }, 0);
+    }
+
+    function validateWindowCoverage(windows, rows, config) {
+        if (!Array.isArray(windows) || windows.length === 0) return [];
+        const issues = [];
+        const datasetStart = Array.isArray(rows) && rows.length > 0 ? rows[0]?.date : null;
+        const datasetEnd = Array.isArray(rows) && rows.length > 0 ? rows[rows.length - 1]?.date : null;
+        const minTrainingDays = Math.max(15, Math.ceil((config?.trainingMonths || 1) * 5));
+        const minTestingDays = Math.max(5, Math.ceil((config?.testingMonths || 1) * 3));
+
+        windows.forEach((win, index) => {
+            if (datasetStart && win.trainingStart < datasetStart) {
+                issues.push(`視窗 ${index + 1} 的訓練起點 (${win.trainingStart}) 早於可用資料 (${datasetStart})`);
+            }
+            if (datasetEnd && win.testingEnd > datasetEnd) {
+                issues.push(`視窗 ${index + 1} 的測試終點 (${win.testingEnd}) 超出可用資料 (${datasetEnd})`);
+            }
+
+            const trainingDays = countTradingDays(win.trainingStart, win.trainingEnd, rows);
+            const testingDays = countTradingDays(win.testingStart, win.testingEnd, rows);
+
+            if (trainingDays === 0) {
+                issues.push(`視窗 ${index + 1} 的訓練區間 (${win.trainingStart} ~ ${win.trainingEnd}) 缺少交易資料`);
+            } else if (trainingDays < minTrainingDays) {
+                issues.push(`視窗 ${index + 1} 的訓練區間僅有 ${trainingDays} 筆交易日（建議至少 ${minTrainingDays} 筆）`);
+            }
+
+            if (testingDays === 0) {
+                issues.push(`視窗 ${index + 1} 的測試區間 (${win.testingStart} ~ ${win.testingEnd}) 缺少交易資料`);
+            } else if (testingDays < minTestingDays) {
+                issues.push(`視窗 ${index + 1} 的測試區間僅有 ${testingDays} 筆交易日（建議至少 ${minTestingDays} 筆）`);
+            }
+        });
+
+        return issues;
     }
 
     function getCachedAvailability(rowsOverride) {

@@ -1,3 +1,12 @@
+## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
+- **Scope**: Walk-Forward 測試報告與資料驗證。
+- **Updates**:
+  - 修正 Worker 在滾動測試期間沿用完整快取資料的問題，改為依視窗暖身起點與結束日切片資料，確保訓練／測試指標與單窗回測一致。
+  - 啟動滾動測試前新增視窗覆蓋檢查，若資料期間不足或交易日低於建議門檻，會中止執行並提示不足原因。
+  - 重構 Walk-Forward 評分公式，改以門檻比率換算 0～100 分，並在報告說明門檻約 70 分，超標才逐步加分。
+  - 逐窗結果表加入參數摘要欄與更完整的多空／風控設定敘述，便於比對每個視窗採用的策略組合。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-01-15 — Patch LB-ROLLING-TEST-AUTO-OPT-20260115A
 - **Scope**: Walk-Forward 訓練期參數優化。
 - **Updates**:
