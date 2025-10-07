@@ -1,4 +1,12 @@
 
+## 2026-02-10 — Patch LB-ROLLING-TEST-SCORE-20260210A
+- **Scope**: Walk-Forward 評分公式、摘要敘述與參數優化狀態診斷。
+- **Updates**:
+  - 導入 Walk-Forward Efficiency（WFE）計算並與年化報酬、Sharpe、Sortino、最大回撤、勝率共同組成權重分數，採用 QuantConnect、CME Group 與 Pardo (2011) 推薦門檻。
+  - 調整滾動測試總結為 actionable 建議，含批量優化覆蓋率、變動參數摘要與需改善指標方向。
+  - 精簡逐窗參數摘要欄位，限制關鍵參數顯示長度並保留分批說明，強化表格可讀性。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:

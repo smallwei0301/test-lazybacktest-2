@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.3 ---
-// Patch Tag: LB-ROLLING-TEST-20250918A
+// --- 滾動測試模組 - v1.4 ---
+// Patch Tag: LB-ROLLING-TEST-SCORE-20260210A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250918A',
+        version: 'LB-ROLLING-TEST-SCORE-20260210A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -27,14 +27,16 @@
         sortinoRatio: 1.2,
         maxDrawdown: 25,
         winRate: 45,
+        walkForwardEfficiency: 55,
     };
 
     const SCORE_WEIGHTS = {
-        annualizedReturn: 0.35,
-        sharpeRatio: 0.3,
-        sortinoRatio: 0.2,
-        maxDrawdown: 0.1,
-        winRate: 0.05,
+        annualizedReturn: 0.25,
+        sharpeRatio: 0.2,
+        sortinoRatio: 0.15,
+        maxDrawdown: 0.15,
+        winRate: 0.1,
+        walkForwardEfficiency: 0.15,
     };
 
     const METRIC_LABELS = {
@@ -149,7 +151,10 @@
 
         state.running = true;
         state.cancelled = false;
-        state.config = config;
+        state.config = {
+            ...config,
+            thresholds: { ...DEFAULT_THRESHOLDS, ...(config?.thresholds || {}) },
+        };
         state.windows = windows;
         state.results = [];
         state.startTime = Date.now();
@@ -389,18 +394,32 @@
             return;
         }
 
-        const analysisEntries = state.results.map((entry, index) => ({
-            index,
-            window: entry.window,
-            training: extractMetrics(entry.training),
-            testing: extractMetrics(entry.testing),
-            rawTraining: entry.training,
-            rawTesting: entry.testing,
-            optimization: entry.optimization || null,
-            paramsSnapshot: entry.params || null,
-        }));
+        const analysisEntries = state.results.map((entry, index) => {
+            const trainingMetrics = extractMetrics(entry.training);
+            const testingMetrics = extractMetrics(entry.testing);
+            const efficiency = computeWalkForwardEfficiency(trainingMetrics, testingMetrics);
+            if (testingMetrics && !testingMetrics.error) {
+                testingMetrics.walkForwardEfficiency = Number.isFinite(efficiency) ? efficiency : null;
+                testingMetrics.trainingAnnualizedReturn = trainingMetrics?.annualizedReturn ?? null;
+            }
+            return {
+                index,
+                window: entry.window,
+                training: trainingMetrics,
+                testing: testingMetrics,
+                rawTraining: entry.training,
+                rawTesting: entry.testing,
+                optimization: entry.optimization || null,
+                paramsSnapshot: entry.params || null,
+            };
+        });
 
-        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        const aggregate = computeAggregateReport(
+            analysisEntries,
+            state.config?.thresholds || DEFAULT_THRESHOLDS,
+            state.config?.minTrades || 0,
+            state.optimizationPlan,
+        );
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -441,6 +460,11 @@
                 title: 'Sharpe / Sortino 中位數',
                 value: `${formatNumber(aggregate.medianSharpe)} / ${formatNumber(aggregate.medianSortino)}`,
                 description: 'Sharpe 與 Sortino 比率中位數',
+            },
+            {
+                title: '平均 Walk-Forward 效率',
+                value: formatPercent(aggregate.averageWalkForwardEfficiency),
+                description: `測試/訓練年化報酬比值，門檻 ${formatPercent(aggregate.thresholds.walkForwardEfficiency)}`,
             },
             {
                 title: '通過視窗比例',
@@ -601,7 +625,10 @@
                 return `${label}=${formatted}`;
             })
             .filter((entry) => entry);
-        return entries.length > 0 ? entries.join('、') : '';
+        if (entries.length === 0) return '';
+        const limited = entries.slice(0, 2);
+        if (entries.length > 2) limited.push('…');
+        return limited.join('、');
     }
 
     function formatParamValue(value) {
@@ -630,7 +657,9 @@
             .map((stage) => (Number.isFinite(stage) ? Number(stage) : null))
             .filter((stage) => stage !== null && stage > 0);
         if (valid.length === 0) return '';
-        return `分批 ${valid.map((stage) => `${trimNumber(stage)}%`).join(' + ')}`;
+        const formatted = valid.slice(0, 3).map((stage) => `${trimNumber(stage)}%`);
+        if (valid.length > 3) formatted.push('…');
+        return `分批 ${formatted.join(' + ')}`;
     }
 
     function buildRiskSummary(params) {
@@ -668,9 +697,10 @@
         return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
-    function computeAggregateReport(entries, thresholds, minTrades) {
+    function computeAggregateReport(entries, thresholds, minTrades, optimizationPlan) {
+        const mergedThresholds = { ...DEFAULT_THRESHOLDS, ...(thresholds || {}) };
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds, minTrades);
+            const evaluation = evaluateWindow(entry.testing, mergedThresholds, minTrades);
             const commentParts = [];
             if (entry.testing.error) {
                 commentParts.push(entry.testing.error);
@@ -712,12 +742,14 @@
         const averageSharpe = average(validMetrics.map((m) => m.sharpeRatio));
         const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
         const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
+        const averageWalkForwardEfficiency = average(validMetrics.map((m) => m.walkForwardEfficiency));
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
-        const score = computeCompositeScore(validMetrics, thresholds);
+        const score = computeCompositeScore(validMetrics, mergedThresholds);
         const gradeInfo = resolveGrade(score, passRate, passCount, evaluations.length);
+        const optimizationUsage = summarizeOptimizationUsage(entries, optimizationPlan);
 
         const summaryText = buildSummaryText({
             gradeLabel: gradeInfo.label,
@@ -728,7 +760,9 @@
             medianSharpe,
             medianSortino,
             averageMaxDrawdown,
-            thresholds,
+            averageWalkForwardEfficiency,
+            thresholds: mergedThresholds,
+            optimizationUsage,
         });
 
         return {
@@ -746,16 +780,132 @@
             averageMaxDrawdown,
             medianSharpe,
             medianSortino,
-            thresholds,
+            averageWalkForwardEfficiency,
+            thresholds: mergedThresholds,
+            optimizationUsage,
         };
     }
 
     function buildSummaryText(context) {
         const parts = [];
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
-        parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
-        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
+        const metricPieces = [];
+        metricPieces.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}`);
+        metricPieces.push(`Sharpe 中位數 ${formatNumber(context.medianSharpe)}`);
+        metricPieces.push(`Sortino 中位數 ${formatNumber(context.medianSortino)}`);
+        metricPieces.push(`平均 Walk-Forward 效率 ${formatPercent(context.averageWalkForwardEfficiency)}`);
+        metricPieces.push(`平均最大回撤 ${formatPercent(context.averageMaxDrawdown)}`);
+        parts.push(metricPieces.join('，'));
+        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%、WFE ≥ ${formatPercent(context.thresholds.walkForwardEfficiency)}）`);
+
+        if (context.optimizationUsage?.planEnabled) {
+            if (context.optimizationUsage.fullyApplied) {
+                const changed = context.optimizationUsage.changedLabels?.length
+                    ? context.optimizationUsage.changedLabels.join('、')
+                    : '參數已維持穩定';
+                parts.push(`批量優化：覆蓋所有視窗，調整重點 ${changed}`);
+            } else {
+                const applied = `${context.optimizationUsage.windowsWithOptimization}/${context.optimizationUsage.total}`;
+                const status = context.optimizationUsage.hasErrors ? '（部分視窗出現錯誤）' : '';
+                parts.push(`批量優化：僅套用 ${applied} 視窗${status}`);
+            }
+        } else {
+            parts.push('批量優化：未啟用，沿用主回測參數');
+        }
+
+        const recommendations = buildRecommendations(context);
+        if (recommendations.length > 0) {
+            parts.push(`建議：${recommendations.join('、')}`);
+        } else {
+            parts.push('建議：維持目前參數組合，並持續監測新增視窗的穩健度');
+        }
         return parts.join('；');
+    }
+
+    function buildRecommendations(context) {
+        const suggestions = [];
+        if (!Number.isFinite(context.averageAnnualizedReturn) || context.averageAnnualizedReturn < context.thresholds.annualizedReturn) {
+            suggestions.push('提高年化報酬，可調整訓練視窗或加入趨勢濾網');
+        }
+        if (!Number.isFinite(context.medianSharpe) || context.medianSharpe < context.thresholds.sharpeRatio) {
+            suggestions.push('提升 Sharpe，比重移向風險報酬較佳的參數組');
+        }
+        if (!Number.isFinite(context.medianSortino) || context.medianSortino < context.thresholds.sortinoRatio) {
+            suggestions.push('改善 Sortino，檢視下行風險控制與停損條件');
+        }
+        if (Number.isFinite(context.averageMaxDrawdown) && context.averageMaxDrawdown > context.thresholds.maxDrawdown) {
+            suggestions.push('收斂最大回撤，可縮小部位或提高風控強度');
+        }
+        if (!Number.isFinite(context.averageWalkForwardEfficiency) || context.averageWalkForwardEfficiency < context.thresholds.walkForwardEfficiency) {
+            suggestions.push('提升 Walk-Forward 效率，延長訓練樣本並強化批量優化');
+        }
+        if (context.optimizationUsage?.planEnabled) {
+            if (!context.optimizationUsage.fullyApplied) {
+                suggestions.push('檢查批量優化設定，確保所有視窗皆完成最佳化');
+            } else if (!context.optimizationUsage.changedKeys || context.optimizationUsage.changedKeys.length === 0) {
+                suggestions.push('增加優化掃描步數或範圍以探索更多參數組合');
+            }
+        } else {
+            suggestions.push('啟用訓練期批量優化以搜尋最優參數');
+        }
+        return suggestions;
+    }
+
+    function summarizeOptimizationUsage(entries, optimizationPlan) {
+        const total = entries.length;
+        const planEnabled = Boolean(optimizationPlan?.enabled && Array.isArray(optimizationPlan.scopes) && optimizationPlan.scopes.length > 0);
+        if (!planEnabled) {
+            return {
+                planEnabled: false,
+                fullyApplied: false,
+                windowsWithOptimization: 0,
+                total,
+                optimizedScopes: [],
+                changedKeys: [],
+                changedLabels: [],
+                hasErrors: false,
+            };
+        }
+
+        let windowsWithOptimization = 0;
+        const optimizedScopes = new Set();
+        const changedKeys = new Set();
+        const changedLabels = new Set();
+        let hasErrors = false;
+
+        entries.forEach((entry) => {
+            const opt = entry.optimization;
+            if (!opt) return;
+            const results = Array.isArray(opt.scopeResults) ? opt.scopeResults : [];
+            const applied = results.filter((result) => !result.skipped && !result.error);
+            if (applied.length > 0) {
+                windowsWithOptimization += 1;
+            }
+            results.forEach((result) => {
+                if (result.error) hasErrors = true;
+                if (!result.skipped && !result.error) {
+                    optimizedScopes.add(result.scope);
+                    (result.changedKeys || []).forEach((key) => {
+                        changedKeys.add(key);
+                        const label = result.labelMap?.[key] || key;
+                        if (label) changedLabels.add(label);
+                    });
+                }
+            });
+        });
+
+        const fullyApplied = total > 0 && windowsWithOptimization === total && !hasErrors;
+
+        return {
+            planEnabled: true,
+            fullyApplied,
+            windowsWithOptimization,
+            total,
+            optimizedScopes: Array.from(optimizedScopes),
+            changedKeys: Array.from(changedKeys),
+            changedLabels: Array.from(changedLabels),
+            hasErrors,
+        };
     }
 
     function computeCompositeScore(metricsList, thresholds) {
@@ -790,6 +940,11 @@
                 weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
             }
+            const wfeScore = scorePositiveMetric(metrics.walkForwardEfficiency, thresholds.walkForwardEfficiency);
+            if (wfeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.walkForwardEfficiency * wfeScore;
+                weightSum += SCORE_WEIGHTS.walkForwardEfficiency;
+            }
         });
 
         if (weightSum === 0) return 0;
@@ -817,6 +972,15 @@
             return 70 + (ratio - 1) * 25;
         }
         return Math.max(0, ratio * 70);
+    }
+
+    function computeWalkForwardEfficiency(trainingMetrics, testingMetrics) {
+        if (!trainingMetrics || trainingMetrics.error || !testingMetrics || testingMetrics.error) return null;
+        const inSample = Number(trainingMetrics.annualizedReturn);
+        const outSample = Number(testingMetrics.annualizedReturn);
+        if (!Number.isFinite(inSample) || inSample <= 0) return null;
+        if (!Number.isFinite(outSample)) return null;
+        return (outSample / inSample) * 100;
     }
 
     function resolveGrade(score, passRate, passCount, total) {
@@ -866,6 +1030,11 @@
         if (Number.isFinite(metrics.winRate)) {
             const pass = metrics.winRate >= thresholds.winRate;
             if (!pass) reasons.push(`勝率低於 ${thresholds.winRate}%`);
+            checks.push(pass);
+        }
+        if (Number.isFinite(metrics.walkForwardEfficiency)) {
+            const pass = metrics.walkForwardEfficiency >= thresholds.walkForwardEfficiency;
+            if (!pass) reasons.push(`WFE < ${formatPercent(thresholds.walkForwardEfficiency)}`);
             checks.push(pass);
         }
         if (Number.isFinite(minTrades) && minTrades > 0) {
@@ -1123,6 +1292,7 @@
             sortinoRatio: clampNumber(readInputValue('rolling-threshold-sortino', DEFAULT_THRESHOLDS.sortinoRatio), 0, 10),
             maxDrawdown: clampNumber(readInputValue('rolling-threshold-maxdd', DEFAULT_THRESHOLDS.maxDrawdown), 1, 100),
             winRate: clampNumber(readInputValue('rolling-threshold-win', DEFAULT_THRESHOLDS.winRate), 0, 100),
+            walkForwardEfficiency: clampNumber(readInputValue('rolling-threshold-wfe', DEFAULT_THRESHOLDS.walkForwardEfficiency), 0, 200),
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
         const optimization = getRollingOptimizationConfig();

@@ -2116,7 +2116,7 @@
                                                 </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。各指標達到門檻大約可取得 70 分，超標幅度愈大愈接近 100 分，若落後門檻則迅速扣分。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                                <p>評分公式遵循 QuantConnect Walk-Forward Analysis 指南（2023）與 CME Group《Enhancing Trading Strategy Performance with Walk-Forward Optimization》（2014）建議的門檻（Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%、勝率 ≥ 45%），並納入 TradeStation 創辦人 Robert Pardo 在《The Evaluation and Optimization of Trading Strategies》（2011）提出的 Walk-Forward Efficiency（WFE）= 測試期績效 ÷ 訓練期績效 × 100。系統以 Score = Σ w<sub>i</sub>·S<sub>i</sub> 計算總分，其中權重 w = {0.25, 0.20, 0.15, 0.15, 0.10, 0.15} 對應年化報酬、Sharpe、Sortino、最大回撤、勝率與 WFE，S<sub>i</sub> 為指標相對門檻值的分段得分（達門檻約 70 分、超標逐步逼近 100 分，低於門檻則快速扣分）。總分 ≥ 85 為「專業合格」、70~84 為「可進一步驗證」、55~69 建議調整參數或風控，低於 55 則視為未通過。</p>
                                             </div>
                                         </div>
                                     </div>
