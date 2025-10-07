@@ -13,8 +13,10 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-THRESH-AUTO-20260215A — 門檻驗證分流與 F1 專注調校 UI。
+// Patch Tag: LB-AI-THRESH-AUTO-20260215B — 門檻驗證 UI 串接與樣本摘要強化。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-THRESH-AUTO-20260215B';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -93,6 +95,7 @@
         lastRunMeta: null,
         volatilityDiagnostics: null,
         annDiagnostics: null,
+        thresholdDiagnostics: null,
         hyperparameters: {
             lookback: 20,
             epochs: 80,
@@ -161,6 +164,7 @@
         tradeSummary: null,
         nextDayForecast: null,
         toggleAllTrades: null,
+        thresholdDiagnostics: null,
         seedName: null,
         saveSeedButton: null,
         savedSeedList: null,
@@ -1030,6 +1034,68 @@
             : '大跌門檻尚未計算，請重新訓練一次。';
     };
 
+    const cloneThresholdDiagnostics = (diagnostics) => {
+        if (!diagnostics || typeof diagnostics !== 'object') return null;
+        const clone = { ...diagnostics };
+        Object.keys(clone).forEach((key) => {
+            const value = clone[key];
+            if (Array.isArray(value)) {
+                clone[key] = value.map((item) => (item && typeof item === 'object' ? { ...item } : item));
+            } else if (value && typeof value === 'object' && !(value instanceof Date)) {
+                clone[key] = { ...value };
+            }
+        });
+        return clone;
+    };
+
+    const updateThresholdDiagnosticsDisplay = (diagnostics, classificationMode = CLASSIFICATION_MODES.MULTICLASS) => {
+        const container = elements.thresholdDiagnostics;
+        if (!container) return;
+        if (!diagnostics || typeof diagnostics !== 'object') {
+            container.textContent = '尚未進行門檻驗證，預設沿用固定門檻。';
+            container.classList.add('hidden');
+            return;
+        }
+        const normalizedMode = normalizeClassificationMode(classificationMode);
+        const label = normalizedMode === CLASSIFICATION_MODES.BINARY ? '上漲' : '大漲';
+        const resolvedThreshold = Number.isFinite(diagnostics.resolvedThreshold)
+            ? `${(diagnostics.resolvedThreshold * 100).toFixed(1)}%`
+            : '—';
+        const statusText = (!diagnostics.applied && Number.isFinite(diagnostics.resolvedThreshold)) ? '維持原設定' : '已自動調整';
+        const sampleText = Number.isFinite(diagnostics.sampleCount) ? diagnostics.sampleCount : '—';
+        const positiveText = Number.isFinite(diagnostics.positiveCount) ? diagnostics.positiveCount : '—';
+        const bestF1Text = Number.isFinite(diagnostics?.best?.f1)
+            ? `${(diagnostics.best.f1 * 100).toFixed(1)}%`
+            : '—';
+        const baselineF1Text = Number.isFinite(diagnostics?.baseline?.f1)
+            ? `${(diagnostics.baseline.f1 * 100).toFixed(1)}%`
+            : null;
+        const improvementText = Number.isFinite(diagnostics?.improvement)
+            ? `${(diagnostics.improvement * 100).toFixed(1)}%`
+            : null;
+        let reasonText = '';
+        if (diagnostics.reason === 'insufficient_samples') {
+            reasonText = '（驗證樣本不足，建議延長資料範圍）';
+        }
+        const parts = [
+            `${statusText}：${label}門檻 ${resolvedThreshold}`,
+            `驗證樣本 ${sampleText} 天（正樣本 ${positiveText} 天）`,
+        ];
+        if (bestF1Text !== '—') {
+            let f1Part = `F1 ${bestF1Text}`;
+            if (baselineF1Text) {
+                f1Part += `（原始 ${baselineF1Text}`;
+                if (improvementText) {
+                    f1Part += `，改善 ${improvementText}`;
+                }
+                f1Part += '）';
+            }
+            parts.push(f1Part);
+        }
+        container.textContent = `${parts.join('｜')}${reasonText}`;
+        container.classList.remove('hidden');
+    };
+
     const normalizeProbabilities = (values) => {
         const probs = values.map((value) => {
             const num = Number(value);
@@ -1830,6 +1896,7 @@
         const activeState = getActiveModelState();
         if (activeState) {
             activeState.volatilityDiagnostics = null;
+            activeState.thresholdDiagnostics = null;
         }
         if (elements.trainAccuracy) elements.trainAccuracy.textContent = '—';
         if (elements.trainLoss) elements.trainLoss.textContent = 'Loss：—';
@@ -1853,7 +1920,9 @@
             elements.tradeRuleSelect.value = rule;
         }
         updateTradeRuleDescription(rule);
-        updateVolatilityDiagnosticsDisplay(null, getActiveModelState()?.classification);
+        const classificationMode = activeState?.classification;
+        updateVolatilityDiagnosticsDisplay(null, classificationMode);
+        updateThresholdDiagnosticsDisplay(null, classificationMode);
     };
 
     const updateSummaryMetrics = (summary) => {
@@ -1915,6 +1984,12 @@
                 : null;
             const totalPredictions = Number.isFinite(summary.totalPredictions) ? summary.totalPredictions : 0;
             const executedCount = Number.isFinite(summary.executedTrades) ? summary.executedTrades : 0;
+            const formatSampleCount = (value) => (Number.isFinite(value) ? Math.round(value) : '—');
+            const trainSamplesText = formatSampleCount(summary.trainSamples);
+            const validationSamplesText = formatSampleCount(summary.validationSamples);
+            const testSamplesValue = Number.isFinite(summary.testSamples) ? summary.testSamples : totalPredictions;
+            const testSamplesText = formatSampleCount(testSamplesValue);
+            const datasetClause = `（訓練樣本 ${trainSamplesText} 筆｜驗證樣本 ${validationSamplesText} 筆｜測試樣本 ${testSamplesText} 筆）`;
             const periodClause = summary.tradePeriodStart && summary.tradePeriodEnd
                 ? `測試期間 ${summary.tradePeriodStart} ~ ${summary.tradePeriodEnd}，`
                 : '';
@@ -1924,7 +1999,7 @@
             const thresholdValue = Number.isFinite(summary.threshold)
                 ? summary.threshold
                 : getDefaultWinThresholdForMode(activeClassification);
-            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本，勝率門檻設定為 ${Math.round(thresholdValue * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}，AI勝率 ${aiWinText}，買入持有年化報酬% ${buyHoldAnnualText}。`;
+            elements.tradeSummary.textContent = `${periodClause}共評估 ${totalPredictions} 筆測試樣本${datasetClause}，勝率門檻設定為 ${Math.round(thresholdValue * 100)}%，執行 ${executedCount} 筆交易，${strategyLabel}。${totalClause}交易報酬% 中位數 ${medianText}，單次平均報酬% ${singleText}，月平均報酬% ${monthlyText}，年平均報酬% ${yearlyText}，AI勝率 ${aiWinText}，買入持有年化報酬% ${buyHoldAnnualText}。`;
         }
         if (elements.nextDayForecast) {
             const threshold = Number.isFinite(summary.threshold) ? summary.threshold : parseWinThreshold();
@@ -1954,6 +2029,7 @@
             }
         }
         updateVolatilityDiagnosticsDisplay(summary.volatilityDiagnostics, activeClassification);
+        updateThresholdDiagnosticsDisplay(summary.thresholdDiagnostics, activeClassification);
     };
 
     const computeTradeOutcomes = (payload, options, trainingOdds) => {
@@ -2465,6 +2541,54 @@
         const diagnostics = payload?.volatilityDiagnostics && typeof payload.volatilityDiagnostics === 'object'
             ? { ...payload.volatilityDiagnostics }
             : null;
+        const thresholdDiagnostics = cloneThresholdDiagnostics(
+            payload?.thresholdDiagnostics
+            || metrics?.thresholdDiagnostics
+            || payload?.hyperparameters?.thresholdDiagnostics
+        );
+        const hyperparameters = payload?.hyperparameters && typeof payload.hyperparameters === 'object'
+            ? payload.hyperparameters
+            : {};
+        const datasetDiagnostics = payload?.datasetDiagnostics && typeof payload.datasetDiagnostics === 'object'
+            ? payload.datasetDiagnostics
+            : {};
+        const resolveSampleCount = (...candidates) => {
+            for (let i = 0; i < candidates.length; i += 1) {
+                const candidate = Number(candidates[i]);
+                if (Number.isFinite(candidate) && candidate >= 0) {
+                    return Math.round(candidate);
+                }
+            }
+            return NaN;
+        };
+        const trainSamples = resolveSampleCount(
+            metrics.trainSamples,
+            payload?.trainSamples,
+            hyperparameters.trainSamples,
+            datasetDiagnostics.trainSamples,
+        );
+        const validationSamples = resolveSampleCount(
+            metrics.validationSamples,
+            payload?.validationSamples,
+            hyperparameters.validationSamples,
+            datasetDiagnostics.validationSamples,
+        );
+        const trainAndValidationSamples = resolveSampleCount(
+            metrics.trainAndValidationSamples,
+            payload?.trainAndValidationSamples,
+            hyperparameters.trainAndValidationSamples,
+            datasetDiagnostics.trainAndValidationSamples,
+            hyperparameters.splitIndex,
+        );
+        const testSamples = resolveSampleCount(
+            metrics.testSamples,
+            payload?.testSamples,
+            hyperparameters.testSamples,
+            datasetDiagnostics.testSamples,
+            metrics.totalPredictions,
+            Array.isArray(payload?.predictions) ? payload.predictions.length : NaN,
+            Array.isArray(payload?.returns) ? payload.returns.length : NaN,
+        );
         const evaluation = computeTradeOutcomes(payload, {
             ...options,
             tradeRule: selectedRule,
@@ -2533,7 +2657,7 @@
             buyHoldAnnualized: evaluation.stats.buyHoldAnnualized,
             usingKelly: Boolean(options.useKelly),
             fixedFraction: sanitizedFixedFraction,
-            threshold: Number.isFinite(options.threshold) ? options.threshold : defaultThreshold,
+            threshold,
             seed: Number.isFinite(payload?.hyperparameters?.seed) ? payload.hyperparameters.seed : null,
             forecast,
             tradeRule: evaluationRule,
@@ -2541,19 +2665,58 @@
             classificationMode,
             testAccuracyLabel: classificationMode === CLASSIFICATION_MODES.MULTICLASS ? '大漲命中率' : '測試期預測正確率',
             volatilityDiagnostics: diagnostics,
+            trainSamples: Number.isFinite(trainSamples) ? trainSamples : null,
+            validationSamples: Number.isFinite(validationSamples) ? validationSamples : null,
+            trainAndValidationSamples: Number.isFinite(trainAndValidationSamples) ? trainAndValidationSamples : null,
+            testSamples: Number.isFinite(testSamples)
+                ? testSamples
+                : (Number.isFinite(metrics.totalPredictions) ? Math.round(metrics.totalPredictions) : null),
+            thresholdDiagnostics,
             classReturnAverages: classAverages,
         };
 
-        modelState.trainingMetrics = metrics;
+        const metricsForState = { ...metrics };
+        if (Number.isFinite(trainSamples)) {
+            metricsForState.trainSamples = trainSamples;
+        }
+        if (Number.isFinite(validationSamples)) {
+            metricsForState.validationSamples = validationSamples;
+        }
+        if (Number.isFinite(trainAndValidationSamples)) {
+            metricsForState.trainAndValidationSamples = trainAndValidationSamples;
+        }
+        if (Number.isFinite(testSamples)) {
+            metricsForState.testSamples = testSamples;
+        }
+        metricsForState.thresholdDiagnostics = thresholdDiagnostics || null;
+        modelState.trainingMetrics = metricsForState;
         modelState.lastSummary = summary;
         modelState.currentTrades = evaluation.trades;
         modelState.allPredictionRows = allRecords;
         modelState.odds = trainingOdds;
         modelState.volatilityDiagnostics = diagnostics;
+        modelState.thresholdDiagnostics = thresholdDiagnostics;
         payload.tradeRule = evaluationRule;
         payload.volatilityThresholds = resolvedVolatility;
         payload.allRecords = allRecords;
         payload.volatilityDiagnostics = diagnostics;
+        if (thresholdDiagnostics) {
+            payload.thresholdDiagnostics = thresholdDiagnostics;
+        } else if (payload.thresholdDiagnostics) {
+            delete payload.thresholdDiagnostics;
+        }
+        if (Number.isFinite(trainSamples)) {
+            payload.trainSamples = trainSamples;
+        }
+        if (Number.isFinite(validationSamples)) {
+            payload.validationSamples = validationSamples;
+        }
+        if (Number.isFinite(trainAndValidationSamples)) {
+            payload.trainAndValidationSamples = trainAndValidationSamples;
+        }
+        if (Number.isFinite(testSamples)) {
+            payload.testSamples = testSamples;
+        }
         payload.classReturnAverages = classAverages;
         modelState.predictionsPayload = payload;
         modelState.tradeRule = evaluationRule;
@@ -2658,6 +2821,7 @@
             elements.volatilityDrop.value = percent.drop.toFixed(2);
         }
         updateVolatilityDiagnosticsDisplay(modelState.volatilityDiagnostics, classificationMode);
+        updateThresholdDiagnosticsDisplay(modelState.thresholdDiagnostics, classificationMode);
         updateClassificationUIState(classificationMode);
         parseTrainRatio();
         parseWinThreshold();
@@ -3147,6 +3311,12 @@
                 classificationMode: modelState.classification,
                 volatilityDiagnostics: modelState.volatilityDiagnostics,
                 classReturnAverages: modelState.predictionsPayload.classReturnAverages,
+                thresholdDiagnostics: cloneThresholdDiagnostics(
+                    modelState.thresholdDiagnostics
+                    || modelState.predictionsPayload.thresholdDiagnostics
+                    || summary.thresholdDiagnostics
+                    || modelState.trainingMetrics?.thresholdDiagnostics
+                ),
             },
             trainingMetrics: modelState.trainingMetrics,
             summary: {
@@ -3165,6 +3335,13 @@
                 classificationMode: summary.classificationMode,
                 volatilityDiagnostics: summary.volatilityDiagnostics,
                 classReturnAverages: summary.classReturnAverages,
+                thresholdDiagnostics: cloneThresholdDiagnostics(summary.thresholdDiagnostics),
+                trainSamples: Number.isFinite(summary.trainSamples) ? summary.trainSamples : null,
+                validationSamples: Number.isFinite(summary.validationSamples) ? summary.validationSamples : null,
+                trainAndValidationSamples: Number.isFinite(summary.trainAndValidationSamples)
+                    ? summary.trainAndValidationSamples
+                    : null,
+                testSamples: Number.isFinite(summary.testSamples) ? summary.testSamples : null,
             },
             version: VERSION_TAG,
         };
@@ -3214,6 +3391,11 @@
             volatilityThresholds: sanitizeVolatilityThresholds(seed.payload?.volatilityThresholds || seed.summary?.volatilityThresholds || modelState.volatilityThresholds),
             classificationMode: normalizeClassificationMode(seed.payload?.classificationMode || seed.summary?.classificationMode || modelState.classification),
             classReturnAverages: seed.payload?.classReturnAverages || null,
+            thresholdDiagnostics: cloneThresholdDiagnostics(
+                seed.payload?.thresholdDiagnostics
+                || seed.summary?.thresholdDiagnostics
+                || seed.trainingMetrics?.thresholdDiagnostics
+            ),
         };
         const seedDiagnostics = (seed.payload?.volatilityDiagnostics && typeof seed.payload.volatilityDiagnostics === 'object')
             ? seed.payload.volatilityDiagnostics
@@ -3224,16 +3406,32 @@
         if (modelState.volatilityDiagnostics) {
             modelState.predictionsPayload.volatilityDiagnostics = { ...modelState.volatilityDiagnostics };
         }
+        const seedThresholdDiagnostics = cloneThresholdDiagnostics(
+            seed.payload?.thresholdDiagnostics
+            || seed.summary?.thresholdDiagnostics
+            || seed.trainingMetrics?.thresholdDiagnostics
+        );
+        modelState.thresholdDiagnostics = seedThresholdDiagnostics;
+        if (seedThresholdDiagnostics) {
+            modelState.predictionsPayload.thresholdDiagnostics = seedThresholdDiagnostics;
+        } else if (modelState.predictionsPayload.thresholdDiagnostics) {
+            delete modelState.predictionsPayload.thresholdDiagnostics;
+        }
         modelState.classification = modelState.predictionsPayload.classificationMode;
-        const metrics = seed.trainingMetrics || {
-            trainAccuracy: NaN,
-            trainLoss: NaN,
-            testAccuracy: NaN,
-            testLoss: NaN,
-            totalPredictions: Array.isArray(modelState.predictionsPayload.predictions)
-                ? modelState.predictionsPayload.predictions.length
-                : 0,
-        };
+        const metrics = seed.trainingMetrics
+            ? { ...seed.trainingMetrics }
+            : {
+                trainAccuracy: NaN,
+                trainLoss: NaN,
+                testAccuracy: NaN,
+                testLoss: NaN,
+                totalPredictions: Array.isArray(modelState.predictionsPayload.predictions)
+                    ? modelState.predictionsPayload.predictions.length
+                    : 0,
+            };
+        if (seedThresholdDiagnostics) {
+            metrics.thresholdDiagnostics = seedThresholdDiagnostics;
+        }
         modelState.trainingMetrics = metrics;
         modelState.odds = Number.isFinite(seed.payload?.trainingOdds) ? seed.payload.trainingOdds : modelState.odds;
         modelState.volatilityThresholds = sanitizeVolatilityThresholds(seed.summary?.volatilityThresholds || modelState.predictionsPayload.volatilityThresholds || modelState.volatilityThresholds);
@@ -3465,6 +3663,7 @@
         elements.tradeSummary = document.getElementById('ai-trade-summary');
         elements.nextDayForecast = document.getElementById('ai-next-day-forecast');
         elements.toggleAllTrades = document.getElementById('ai-toggle-all-trades');
+        elements.thresholdDiagnostics = document.getElementById('ai-threshold-diagnostics');
         elements.seedName = document.getElementById('ai-seed-name');
         elements.saveSeedButton = document.getElementById('ai-save-seed');
         elements.savedSeedList = document.getElementById('ai-saved-seeds');
