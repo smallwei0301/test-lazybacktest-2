@@ -1,4 +1,12 @@
 
+## 2025-09-20 — Patch LB-ROLLING-TEST-20250920B
+- **Scope**: Walk-Forward 評分、效率門檻與報告摘要。
+- **Updates**:
+  - 引入 Pardo (2011) 的 Walk-Forward Efficiency 與 TradeStation/QuantConnect 門檻，將 Sharpe、Sortino、年化報酬、最大回撤、勝率與 WFE 轉換為 0~100 分的加權評分，並在 UI 顯示平均 WFE 與逐窗效率。
+  - 新增 WFE 門檻輸入欄位與逐窗表格欄位，分數卡調整為顯示 WFE 與國際平台門檻，總結文字同步輸出最常失敗指標與具體優化建議。
+  - 精簡參數摘要，限制每段最多三個關鍵參數並壓縮分批字串，使逐窗報告更易閱讀。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
