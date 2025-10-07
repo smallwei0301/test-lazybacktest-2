@@ -11253,6 +11253,31 @@ async function runOptimization(
       message: `測試 ${optParamName}=${curVal}`,
     });
     const testParams = instantiateOptimizationParams(template);
+    const baseEffectiveStart =
+      baseParams?.effectiveStartDate || baseParams?.startDate || null;
+    const baseDataStart =
+      baseParams?.dataStartDate || baseEffectiveStart || baseParams?.startDate || null;
+    const baseLookback =
+      Number.isFinite(baseParams?.lookbackDays) && baseParams.lookbackDays > 0
+        ? baseParams.lookbackDays
+        : null;
+    if (baseParams?.startDate && !testParams.originalStartDate) {
+      testParams.originalStartDate = baseParams.startDate;
+    }
+    if (baseEffectiveStart) {
+      testParams.startDate = baseEffectiveStart;
+      testParams.effectiveStartDate = baseEffectiveStart;
+    } else if (testParams.effectiveStartDate) {
+      testParams.startDate = testParams.effectiveStartDate;
+    }
+    if (baseDataStart) {
+      testParams.dataStartDate = baseDataStart;
+    } else if (!testParams.dataStartDate && testParams.startDate) {
+      testParams.dataStartDate = testParams.startDate;
+    }
+    if (baseLookback !== null) {
+      testParams.lookbackDays = baseLookback;
+    }
     testParams.__optimizationParam = optParamName;
     testParams.__optimizationValue = curVal;
     if (optimizeTargetStrategy === "risk") {
@@ -11409,7 +11434,41 @@ self.onmessage = async function (e) {
     windowDecision?.dataStartDate ||
     params?.dataStartDate ||
     effectiveStartDate ||
-    params?.startDate;
+    params?.startDate ||
+    null;
+  const resolvedEffectiveStart =
+    effectiveStartDate ||
+    params?.effectiveStartDate ||
+    params?.startDate ||
+    null;
+  const resolvedDataStart =
+    dataStartDate ||
+    params?.dataStartDate ||
+    resolvedEffectiveStart ||
+    params?.startDate ||
+    null;
+  const resolvedLookback =
+    Number.isFinite(lookbackDays) && lookbackDays > 0 ? lookbackDays : null;
+  if (params && typeof params === "object") {
+    if (resolvedLookback !== null) {
+      params.lookbackDays = resolvedLookback;
+    }
+    if (resolvedEffectiveStart) {
+      params.effectiveStartDate = resolvedEffectiveStart;
+    }
+    if (resolvedDataStart) {
+      params.dataStartDate = resolvedDataStart;
+    }
+  }
+  if (resolvedLookback !== null) {
+    e.data.lookbackDays = resolvedLookback;
+  }
+  if (resolvedEffectiveStart) {
+    e.data.effectiveStartDate = resolvedEffectiveStart;
+  }
+  if (resolvedDataStart) {
+    e.data.dataStartDate = resolvedDataStart;
+  }
   try {
     if (type === "runBacktest") {
       let dataToUse = null;

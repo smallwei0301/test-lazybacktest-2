@@ -1,3 +1,8 @@
+## 2026-01-09 — Patch LB-SINGLE-OPT-WARMUP-20260109A
+- **Issue recap**: 單一參數優化在 `LB-SINGLE-OPT-20251115A` 改版後，Worker 未帶入 `dataStartDate` 與暖身視窗，僅以使用者設定起始日回測，導致表格內的年化報酬率與夏普值與實際回測落差。
+- **Fix**: Worker 在處理優化訊息時同步寫入 `lookbackDays`、`effectiveStartDate`、`dataStartDate`，並在每輪優化測試前將 `originalStartDate`、暖身起點與緩衝天數灌入參數，確保與主回測共用相同資料視窗。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-30 — Patch LB-AI-TRADE-VOLATILITY-20251230A
 - **Scope**: 波動分級策略與多分類 AI 預測強化。
 - **Updates**:
