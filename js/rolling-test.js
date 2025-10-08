@@ -1271,11 +1271,15 @@
             return { params: outputParams, summary };
         }
 
-        if (typeof optimizeSingleStrategyParameter !== 'function') {
+        const requiresStrategyOptimizer = plan.scopes.some((scope) => scope !== 'risk');
+
+        if (requiresStrategyOptimizer && typeof optimizeSingleStrategyParameter !== 'function') {
             summary.error = '缺少批量優化模組';
             summary.messages.push('優化模組未載入，已沿用原始參數。');
             return { params: outputParams, summary };
         }
+
+        const missingStrategyOptimizer = typeof optimizeSingleStrategyParameter !== 'function';
 
         if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
             summary.error = '無法讀取策略參數設定';
@@ -1292,8 +1296,15 @@
             let result = null;
             if (scope === 'risk') {
                 result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
-            } else {
+            } else if (!missingStrategyOptimizer) {
                 result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+            } else {
+                result = {
+                    scope,
+                    label: OPTIMIZE_SCOPE_DEFINITIONS[scope]?.label || scope,
+                    error: '優化模組未載入',
+                    changedKeys: [],
+                };
             }
             if (!result) continue;
             summary.scopeResults.push(result);
