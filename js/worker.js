@@ -11253,27 +11253,33 @@ async function runOptimization(
       message: `測試 ${optParamName}=${curVal}`,
     });
     const testParams = instantiateOptimizationParams(template);
+    const baseUserStart = baseParams?.startDate || null;
     const baseEffectiveStart =
-      baseParams?.effectiveStartDate || baseParams?.startDate || null;
+      baseParams?.effectiveStartDate || null;
     const baseDataStart =
-      baseParams?.dataStartDate || baseEffectiveStart || baseParams?.startDate || null;
+      baseParams?.dataStartDate ||
+      baseEffectiveStart ||
+      null;
     const baseLookback =
       Number.isFinite(baseParams?.lookbackDays) && baseParams.lookbackDays > 0
         ? baseParams.lookbackDays
         : null;
-    if (baseParams?.startDate && !testParams.originalStartDate) {
-      testParams.originalStartDate = baseParams.startDate;
+    if (baseUserStart && !testParams.originalStartDate) {
+      testParams.originalStartDate = baseUserStart;
+    }
+    if (!testParams.startDate && baseUserStart) {
+      testParams.startDate = baseUserStart;
     }
     if (baseEffectiveStart) {
-      testParams.startDate = baseEffectiveStart;
       testParams.effectiveStartDate = baseEffectiveStart;
-    } else if (testParams.effectiveStartDate) {
-      testParams.startDate = testParams.effectiveStartDate;
+    } else if (!testParams.effectiveStartDate && testParams.startDate) {
+      testParams.effectiveStartDate = testParams.startDate;
     }
     if (baseDataStart) {
       testParams.dataStartDate = baseDataStart;
-    } else if (!testParams.dataStartDate && testParams.startDate) {
-      testParams.dataStartDate = testParams.startDate;
+    } else if (!testParams.dataStartDate) {
+      testParams.dataStartDate =
+        testParams.effectiveStartDate || testParams.startDate || null;
     }
     if (baseLookback !== null) {
       testParams.lookbackDays = baseLookback;
