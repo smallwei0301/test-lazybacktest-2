@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.4 ---
-// Patch Tag: LB-ROLLING-TEST-20250922B
+// --- 滾動測試模組 - v1.5 ---
+// Patch Tag: LB-ROLLING-TEST-20250925A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250922B',
+        version: 'LB-ROLLING-TEST-20250925A',
         batchOptimizerInitialized: false,
     };
 
@@ -40,6 +40,7 @@
     };
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
+    const DEFAULT_OPTIMIZATION_ITERATIONS = 4;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -1248,6 +1249,9 @@
             optimizeShortEntry: Boolean(optConfig?.optimizeShortEntry),
             optimizeShortExit: Boolean(optConfig?.optimizeShortExit),
             optimizeRisk: Boolean(optConfig?.optimizeRisk),
+            iterationLimit: Number.isFinite(optConfig?.iterationLimit)
+                ? Math.max(1, Math.round(optConfig.iterationLimit))
+                : DEFAULT_OPTIMIZATION_ITERATIONS,
         };
 
         const plan = {
@@ -1340,20 +1344,60 @@
         workingParams.startDate = windowInfo.trainingStart;
         workingParams.endDate = windowInfo.trainingEnd;
 
-        for (let i = 0; i < plan.scopes.length; i += 1) {
-            const scope = plan.scopes[i];
-            let result = null;
-            if (scope === 'risk') {
-                result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
-            } else {
-                result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+        const iterationLimit = Math.max(1, Number(plan?.config?.iterationLimit) || DEFAULT_OPTIMIZATION_ITERATIONS);
+        const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
+        const scopeLastResult = new Map();
+        const scopeMetricHistory = new Map();
+
+        for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
+            let iterationChanged = false;
+
+            for (let i = 0; i < plan.scopes.length; i += 1) {
+                const scope = plan.scopes[i];
+                let result = null;
+                if (scope === 'risk') {
+                    result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
+                } else {
+                    result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+                }
+                if (!result) continue;
+
+                scopeLastResult.set(scope, result);
+
+                if (Number.isFinite(result.metricValue)) {
+                    const history = scopeMetricHistory.get(scope) || [];
+                    history.push(result.metricValue);
+                    scopeMetricHistory.set(scope, history);
+                }
+
+                if (Array.isArray(result.changedKeys) && result.changedKeys.length > 0) {
+                    iterationChanged = true;
+                }
+
+                if (result.error && !summary.error) {
+                    summary.error = result.error;
+                }
             }
-            if (!result) continue;
-            summary.scopeResults.push(result);
+
+            if (!iterationChanged) {
+                break;
+            }
+        }
+
+        summary.scopeResults = collectFinalScopeResults(
+            plan.scopes,
+            scopeLastResult,
+            scopeMetricHistory,
+            baselineSnapshots,
+            outputParams,
+            plan.config.targetMetric,
+        );
+
+        summary.scopeResults.forEach((result) => {
             const message = buildOptimizationMessage(result);
             if (message) summary.messages.push(message);
-            if (result.error) summary.error = result.error;
-        }
+            if (result.error && !summary.error) summary.error = result.error;
+        });
 
         if (summary.messages.length > 0) {
             summary.messages.unshift(`優化目標：${metricLabel}`);
@@ -1477,6 +1521,74 @@
             metricLabel: resolveMetricLabel(plan.config.targetMetric),
             metricValue: null,
         };
+    }
+
+    function captureOptimizationBaselines(scopes, params) {
+        const snapshot = {};
+        if (!Array.isArray(scopes)) return snapshot;
+        scopes.forEach((scope) => {
+            if (scope === 'risk') {
+                snapshot.risk = buildRiskParamsSnapshot(params);
+                return;
+            }
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+            snapshot[scope] = deepClone(params[definition.paramsKey] || {});
+        });
+        return snapshot;
+    }
+
+    function collectFinalScopeResults(scopes, scopeLastResult, scopeMetricHistory, baselines, params, targetMetric) {
+        if (!Array.isArray(scopes) || scopes.length === 0) return [];
+        const results = [];
+        scopes.forEach((scope) => {
+            const last = scopeLastResult.get(scope);
+            if (!last) return;
+
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            let finalParams;
+            if (scope === 'risk') {
+                finalParams = buildRiskParamsSnapshot(params);
+            } else if (definition) {
+                finalParams = deepClone(params[definition.paramsKey] || {});
+            } else {
+                finalParams = deepClone(last.params || {});
+            }
+
+            const baseParams = baselines?.[scope] ? deepClone(baselines[scope]) : {};
+            const changedKeys = resolveChangedKeysFromSnapshots(baseParams, finalParams);
+            const history = scopeMetricHistory.get(scope) || [];
+            const metricValue = resolveScopeMetricValue(
+                history.length > 0
+                    ? history
+                    : (Number.isFinite(last.metricValue) ? [last.metricValue] : []),
+                targetMetric,
+            );
+
+            results.push({
+                ...last,
+                params: finalParams,
+                baseParams,
+                changedKeys,
+                metricValue,
+                metricLabel: resolveMetricLabel(targetMetric),
+            });
+        });
+        return results;
+    }
+
+    function buildRiskParamsSnapshot(params) {
+        const snapshot = {};
+        if (Number.isFinite(params?.stopLoss)) snapshot.stopLoss = params.stopLoss;
+        if (Number.isFinite(params?.takeProfit)) snapshot.takeProfit = params.takeProfit;
+        return snapshot;
+    }
+
+    function resolveChangedKeysFromSnapshots(baseParams, finalParams) {
+        const base = baseParams || {};
+        const current = finalParams || {};
+        const keys = new Set([...Object.keys(base), ...Object.keys(current)]);
+        return Array.from(keys).filter((key) => !areValuesClose(base[key], current[key]));
     }
 
     function resolveStrategyConfigKey(strategyName, scope) {

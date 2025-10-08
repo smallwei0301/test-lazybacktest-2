@@ -1025,3 +1025,11 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-18 — Patch LB-ROLLING-TEST-20250925A
+- **Issue recap**: Walk-Forward 訓練期僅逐參數掃描一次，未套用批量優化的交替迭代流程，導致滾動測試未能收斂到批量優化挑選的最佳參數組合。
+- **Fix**:
+  - `js/rolling-test.js` 導入批量優化迭代上限設定，於訓練視窗對做多/做空進出場與風險管理重複交替優化，並以原始參數快照計算實際調整鍵值。
+  - 同步收集各迭代指標並整合訊息摘要，確保最終報告揭露批量優化引擎選出的參數與指標成效，版本碼更新為 `LB-ROLLING-TEST-20250925A`。
+- **Diagnostics**: 於本地以滾動測試啟用訓練期優化，確認多輪迭代後的參數與批量優化面板載入結果一致，並檢視報告訊息顯示迭代後的調整明細。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
