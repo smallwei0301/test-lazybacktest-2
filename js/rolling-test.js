@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.3 ---
-// Patch Tag: LB-ROLLING-TEST-20250918A
+// --- 滾動測試模組 - v1.4 ---
+// Patch Tag: LB-ROLLING-TEST-20250924A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250918A',
+        version: 'LB-ROLLING-TEST-20250924A',
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -66,6 +66,9 @@
         channelPeriod: '通道期',
         breakoutThreshold: '突破門檻',
     };
+
+    const PARAM_DISPLAY_LIMIT = 2;
+    const RISK_DISPLAY_LIMIT = 3;
 
     function initRollingTest() {
         if (state.initialized) return;
@@ -429,8 +432,8 @@
                 accent: aggregate.gradeColor,
                 description: [
                     `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
-                    '（達門檻約 70 分，超標越多加分）',
-                ].join(''),
+                    '門檻約 70 分；加權：年化 35%、Sharpe 30%、Sortino 20%、MaxDD 10%、勝率 5%',
+                ].join('｜'),
             },
             {
                 title: '平均年化報酬 (OOS)',
@@ -601,7 +604,13 @@
                 return `${label}=${formatted}`;
             })
             .filter((entry) => entry);
-        return entries.length > 0 ? entries.join('、') : '';
+        if (entries.length === 0) return '';
+        if (entries.length > PARAM_DISPLAY_LIMIT) {
+            const trimmed = entries.slice(0, PARAM_DISPLAY_LIMIT);
+            trimmed.push(`…${entries.length - PARAM_DISPLAY_LIMIT} 項`);
+            return trimmed.join('、');
+        }
+        return entries.join('、');
     }
 
     function formatParamValue(value) {
@@ -645,7 +654,13 @@
         if (timing) parts.push(`執行點 ${timing}`);
         const basis = resolvePositionBasisLabel(params.positionBasis);
         if (basis) parts.push(`部位基準 ${basis}`);
-        return parts.length > 0 ? `風控：${parts.join('、')}` : '';
+        if (parts.length === 0) return '';
+        if (parts.length > RISK_DISPLAY_LIMIT) {
+            const trimmed = parts.slice(0, RISK_DISPLAY_LIMIT);
+            trimmed.push(`…${parts.length - RISK_DISPLAY_LIMIT} 項`);
+            return `風控：${trimmed.join('、')}`;
+        }
+        return `風控：${parts.join('、')}`;
     }
 
     function resolveTradeTimingLabel(value) {
@@ -755,7 +770,37 @@
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
         parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
+        const suggestions = buildImprovementSuggestions(context);
+        if (suggestions.length > 0) {
+            parts.push(`建議：${suggestions.join('、')}`);
+        } else {
+            parts.push('建議：維持現行參數設定並持續監控樣本表現');
+        }
         return parts.join('；');
+    }
+
+    function buildImprovementSuggestions(context) {
+        const suggestions = [];
+        const { thresholds } = context;
+
+        if (!Number.isFinite(context.averageAnnualizedReturn) || context.averageAnnualizedReturn < thresholds.annualizedReturn) {
+            suggestions.push('提高年化報酬，可啟用訓練期優化或調整視窗長度');
+        }
+        if (!Number.isFinite(context.medianSharpe) || context.medianSharpe < thresholds.sharpeRatio
+            || !Number.isFinite(context.medianSortino) || context.medianSortino < thresholds.sortinoRatio) {
+            suggestions.push('提升風險報酬比，建議調整進出場參數或加入分批機制');
+        }
+        if (Number.isFinite(context.averageMaxDrawdown) && context.averageMaxDrawdown > thresholds.maxDrawdown) {
+            suggestions.push('收斂最大回撤，可搭配停損或降低槓桿');
+        }
+        if (Number.isFinite(context.passRate) && context.passRate < 50) {
+            suggestions.push('提高視窗達標率，嘗試縮短測試視窗或放寬門檻設定');
+        }
+        if (context.passCount === 0) {
+            suggestions.push('所有視窗未達門檻，建議重新檢視策略設計或資料期間');
+        }
+
+        return [...new Set(suggestions)];
     }
 
     function computeCompositeScore(metricsList, thresholds) {
