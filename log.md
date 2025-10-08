@@ -1016,3 +1016,11 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-17 — Patch LB-AI-LOSS-META-20260217A
+- **Issue recap**: Loss 選項導入後，Worker 回傳仍缺少實際使用的 Loss 類型與參數，導致 Weighted BCE fallback 至 BCE 時 UI 仍顯示加權 Loss，混淆測試比較表；同時混淆矩陣未隨新的分類指標結構同步更新。
+- **Fix**:
+  - `js/worker.js` 於訓練流程補齊 `requestedLossType`、`effectiveLossType` 與 Loss 參數，並在 `classificationMetrics`、`hyperparametersUsed`、`predictionsPayload`、`runMeta` 中同步揭露；若加權 Loss 因缺少某類樣本回退至 BCE，也會於回傳欄位反映實際採用的 Loss。
+  - `js/ai-prediction.js` 更新版本代碼並改寫混淆矩陣來源優先順序，優先使用 Worker 回傳的 `classificationMetrics.confusion`，確保 UI 與種子儲存皆取用最新統計。
+- **Diagnostics**: 以 Weighted BCE／Focal loss 參數測試回傳資料結構，確認 Loss 比較表採用實際 Loss 類型，並在種子儲存後重新載入檢視混淆矩陣與 Loss 設定是否一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
