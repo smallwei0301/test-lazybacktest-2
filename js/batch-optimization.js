@@ -48,6 +48,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let lastBatchOfiContext = null;
 
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
@@ -55,6 +56,21 @@ let batchWorkerStatus = {
     inFlightCount: 0,
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
+
+function recomputeBatchOfiScores() {
+    try {
+        if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+            lastBatchOfiContext = null;
+            return;
+        }
+        if (!window.lazybacktestOfi || typeof window.lazybacktestOfi.attachScores !== 'function') {
+            return;
+        }
+        lastBatchOfiContext = window.lazybacktestOfi.attachScores(batchOptimizationResults);
+    } catch (error) {
+        console.error('[Batch Optimization] OFI 計算失敗:', error);
+    }
+}
 
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
@@ -152,6 +168,27 @@ function renderBatchWorkerStatus() {
     } catch (error) {
         console.error('[Batch Worker Status] render error:', error);
     }
+}
+
+function renderOfiCell(result) {
+    if (!result || typeof result !== 'object') {
+        return '<span class="text-xs text-gray-400">-</span>';
+    }
+    const score = Number.isFinite(result.ofiScore) ? result.ofiScore : null;
+    const verdict = result.ofiVerdict || null;
+    if (!Number.isFinite(score)) {
+        return '<span class="text-xs text-gray-400">資料不足</span>';
+    }
+    const displayScore = score.toFixed(1);
+    const verdictIcon = verdict?.icon || '';
+    const verdictLabel = verdict?.label || '';
+    const verdictText = verdictIcon ? `${verdictIcon} ${verdictLabel}` : verdictLabel || '';
+    return `
+        <div class="flex flex-col text-sm text-gray-900">
+            <span class="font-semibold">${displayScore}</span>
+            <span class="text-xs text-gray-500">${verdictText}</span>
+        </div>
+    `;
 }
 
 // 初始化批量優化功能
@@ -1226,7 +1263,10 @@ async function processStrategyCombinations(combinations, config) {
     
     // 將結果添加到全局結果中
     batchOptimizationResults.push(...results);
-    
+    if (results.length > 0) {
+        recomputeBatchOfiScores();
+    }
+
     console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
 }
 
@@ -1743,11 +1783,22 @@ function sortBatchResults() {
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+
+    recomputeBatchOfiScores();
+
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
+        let aValue;
+        let bValue;
+
+        if (sortKey === 'ofiScore') {
+            const fallback = sortDirection === 'asc' ? Infinity : -Infinity;
+            aValue = Number.isFinite(a.ofiScore) ? a.ofiScore : fallback;
+            bValue = Number.isFinite(b.ofiScore) ? b.ofiScore : fallback;
+        } else {
+            aValue = Number.isFinite(a[sortKey]) ? a[sortKey] : 0;
+            bValue = Number.isFinite(b[sortKey]) ? b[sortKey] : 0;
+        }
+
         // 處理特殊情況
         if (sortKey === 'maxDrawdown') {
             // 最大回撤越小越好
@@ -1794,20 +1845,24 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
+    recomputeBatchOfiScores();
+
     tbody.innerHTML = '';
-    
+
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
         
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
+
+        const ofiCell = renderOfiCell(result);
         
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
@@ -1860,6 +1915,7 @@ function renderBatchResultsTable() {
             </td>
             <td class="px-3 py-2 text-sm text-gray-900">${buyStrategyName}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${sellStrategyName}${riskManagementInfo}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${ofiCell}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
@@ -3119,7 +3175,8 @@ window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
-    getWorkerStrategyName: getWorkerStrategyName
+    getWorkerStrategyName: getWorkerStrategyName,
+    getOfiContext: () => lastBatchOfiContext
 };
 
 // 測試風險管理優化功能
@@ -3536,7 +3593,7 @@ function updateCrossOptimizationProgress(currentTask = null) {
 function addCrossOptimizationResults(newResults) {
     newResults.forEach(newResult => {
         // 查找是否有相同的買入策略、賣出策略和年化報酬率的結果
-        const existingIndex = batchOptimizationResults.findIndex(existing => 
+        const existingIndex = batchOptimizationResults.findIndex(existing =>
             existing.buyStrategy === newResult.buyStrategy &&
             existing.sellStrategy === newResult.sellStrategy &&
             Math.abs(existing.annualizedReturn - newResult.annualizedReturn) < 0.0001 // 允許微小差異
@@ -3568,6 +3625,9 @@ function addCrossOptimizationResults(newResults) {
             console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
         }
     });
+    if (newResults.length > 0) {
+        recomputeBatchOfiScores();
+    }
 }
 
 // 快速優化單一策略參數（減少步數，用於交叉優化）
