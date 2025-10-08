@@ -49,6 +49,65 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+// 過擬合風險量化 (OFI) 版本與預設參數
+const OFI_VERSION_CODE = 'LB-OFI-20251212A';
+const OFI_DEFAULT_CONFIG = {
+    preferredBlocks: 10,
+    maxBlocks: 12,
+    minBlocks: 4,
+    minBlockSize: 20,
+    alpha: 0.1,
+    maxSplits: 320,
+    minStrategiesForCrossSection: 3,
+    iqrReference: 0.5,
+    island: {
+        radius: 0.35,
+        targetCluster: 9,
+        centroidPenaltyRadius: 0.45
+    }
+};
+const OFI_WEIGHTS = {
+    cPBO: 0.35,
+    level: 0.20,
+    stability: 0.15,
+    island: 0.20,
+    dsr: 0.10
+};
+
+// 批量結果視圖設定
+const batchOptimizationFilters = {
+    spaOnly: false
+};
+
+let batchResultIdCounter = 1;
+
+function attachBatchResultMetadata(result) {
+    if (!result || typeof result !== 'object') return;
+    if (!result.__batchId) {
+        result.__batchId = `batch-${batchResultIdCounter++}`;
+    }
+}
+
+function createEmptyOfi(preservedSpa) {
+    const spaInfo = preservedSpa && typeof preservedSpa === 'object'
+        ? { ...preservedSpa }
+        : { status: 'pending', pValue: null, mcs: null, qualified: false };
+    return {
+        version: OFI_VERSION_CODE,
+        score: null,
+        normalizedScore: null,
+        updatedAt: null,
+        components: {
+            cPBO: { value: null, eligible: 0, fails: 0, score: null, status: 'insufficient' },
+            oos: { median: null, iqr: null, quantiles: [], logitMedian: null, status: 'insufficient' },
+            island: { score: null, componentSize: 0, centroidPenalty: null, normalizedSize: null, status: 'insufficient' },
+            dsr: { value: null, sharpe: null, sampleSize: 0, sigma: null, threshold: null, trials: null, status: 'insufficient' },
+            spa: spaInfo,
+        },
+        weights: { ...OFI_WEIGHTS },
+    };
+}
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -180,7 +239,9 @@ function initBatchOptimization() {
         batchOptimizationConfig = {
             batchSize: 100,
             maxCombinations: 10000,
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio']
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio'],
+            sortKey: 'annualizedReturn',
+            sortDirection: 'desc'
         };
         
         // 在 UI 中顯示推薦的 concurrency（若瀏覽器支援）
@@ -192,8 +253,9 @@ function initBatchOptimization() {
         } catch (e) {
             // ignore
         }
-        
+
         console.log('[Batch Optimization] Initialized successfully');
+        updateOfiVersionLabel();
     } catch (error) {
         console.error('[Batch Optimization] Initialization failed:', error);
     }
@@ -318,9 +380,10 @@ function bindBatchOptimizationEvents() {
             sortKeySelect.addEventListener('change', (e) => {
                 batchOptimizationConfig.sortKey = e.target.value;
                 sortBatchResults();
+                updateOfiSortButtonState();
             });
         }
-        
+
         const sortDirectionBtn = document.getElementById('batch-sort-direction');
         if (sortDirectionBtn) {
             sortDirectionBtn.addEventListener('click', () => {
@@ -329,7 +392,35 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const ofiSortButton = document.getElementById('batch-ofi-sort');
+        if (ofiSortButton) {
+            ofiSortButton.addEventListener('click', () => {
+                batchOptimizationConfig.sortKey = 'ofiScore';
+                batchOptimizationConfig.sortDirection = 'desc';
+                const sortKeyElement = document.getElementById('batch-sort-key');
+                if (sortKeyElement) {
+                    sortKeyElement.value = 'ofiScore';
+                }
+                updateSortDirectionButton();
+                updateOfiSortButtonState();
+                sortBatchResults();
+            });
+        }
+
+        const spaFilterButton = document.getElementById('batch-filter-spa');
+        if (spaFilterButton) {
+            spaFilterButton.addEventListener('click', () => {
+                batchOptimizationFilters.spaOnly = !batchOptimizationFilters.spaOnly;
+                updateSpaFilterButtonState();
+                renderBatchResultsTable();
+            });
+        }
+
+        updateSortDirectionButton();
+        updateOfiSortButtonState();
+        updateSpaFilterButtonState();
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -1230,6 +1321,678 @@ async function processStrategyCombinations(combinations, config) {
     console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
 }
 
+// --- OFI 計算與工具 ---
+
+function recomputeBatchOFIMetrics(options = {}) {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return;
+    }
+
+    const config = { ...OFI_DEFAULT_CONFIG, ...(options || {}) };
+    const totalTrials = Math.max(batchOptimizationResults.length, config.minStrategiesForCrossSection);
+
+    const preparedSamples = batchOptimizationResults.map((result, index) => {
+        attachBatchResultMetadata(result);
+        const preservedSpa = result.ofi?.components?.spa;
+        const baselineOfi = createEmptyOfi(preservedSpa);
+        result.ofi = baselineOfi;
+        if (!result || typeof result !== 'object') {
+            return null;
+        }
+        const strategyReturns = Array.isArray(result.strategyReturns) ? result.strategyReturns : null;
+        const dailyReturns = computeDailyReturnsFromCumulative(strategyReturns);
+        baselineOfi.components.dsr = computeDeflatedSharpeRatio(dailyReturns, totalTrials);
+        baselineOfi.components.dsr.status = Number.isFinite(baselineOfi.components.dsr.value)
+            ? 'computed'
+            : 'insufficient';
+        const eligible = Array.isArray(dailyReturns) && dailyReturns.length >= config.minBlocks * config.minBlockSize;
+        return {
+            index,
+            result,
+            ofi: baselineOfi,
+            dailyReturns,
+            eligible,
+        };
+    }).filter(Boolean);
+
+    const crossSectionSamples = preparedSamples.filter(sample => sample.eligible);
+    const blockCount = determineCommonBlockCount(crossSectionSamples, config);
+
+    if (!blockCount || crossSectionSamples.length < config.minStrategiesForCrossSection) {
+        preparedSamples.forEach(sample => finalizeOfiScore(sample, config, new Map()));
+        return;
+    }
+
+    crossSectionSamples.forEach(sample => {
+        sample.blocks = splitReturnsIntoBlocks(sample.dailyReturns, blockCount);
+    });
+
+    let splits = generateCscvSplits(blockCount);
+    if (splits.length > config.maxSplits) {
+        splits = downSampleSplits(splits, config.maxSplits);
+    }
+
+    const perSplitIsValues = new Array(splits.length).fill(null).map(() => []);
+    const perSplitOosValues = new Array(splits.length).fill(null).map(() => []);
+
+    crossSectionSamples.forEach(sample => {
+        sample.isSharpe = new Array(splits.length).fill(-Infinity);
+        sample.oosSharpe = new Array(splits.length).fill(-Infinity);
+    });
+
+    splits.forEach((split, splitIndex) => {
+        const isMetrics = [];
+        const oosMetrics = [];
+        crossSectionSamples.forEach(sample => {
+            const isReturns = collectReturnsFromBlocks(sample.blocks, split.isIndices);
+            const oosReturns = collectReturnsFromBlocks(sample.blocks, split.oosIndices);
+            const isSharpe = computeAnnualizedSharpe(isReturns);
+            const oosSharpe = computeAnnualizedSharpe(oosReturns);
+            sample.isSharpe[splitIndex] = Number.isFinite(isSharpe) ? isSharpe : -Infinity;
+            sample.oosSharpe[splitIndex] = Number.isFinite(oosSharpe) ? oosSharpe : -Infinity;
+            isMetrics.push(sample.isSharpe[splitIndex]);
+            oosMetrics.push(sample.oosSharpe[splitIndex]);
+        });
+        perSplitIsValues[splitIndex] = isMetrics;
+        perSplitOosValues[splitIndex] = oosMetrics;
+    });
+
+    splits.forEach((split, splitIndex) => {
+        const isQuantiles = computeQuantilesDescending(perSplitIsValues[splitIndex]);
+        const oosQuantiles = computeQuantilesDescending(perSplitOosValues[splitIndex]);
+        crossSectionSamples.forEach((sample, sampleIdx) => {
+            const isQuantile = Number.isFinite(isQuantiles[sampleIdx]) ? isQuantiles[sampleIdx] : 0;
+            const oosQuantile = Number.isFinite(oosQuantiles[sampleIdx]) ? oosQuantiles[sampleIdx] : 0;
+            if (isQuantile >= 1 - config.alpha) {
+                sample.ofi.components.cPBO.eligible += 1;
+                if (oosQuantile < 0.5) {
+                    sample.ofi.components.cPBO.fails += 1;
+                }
+            }
+            sample.ofi.components.oos.quantiles.push(oosQuantile);
+        });
+    });
+
+    crossSectionSamples.forEach(sample => {
+        const eligible = sample.ofi.components.cPBO.eligible;
+        sample.ofi.components.cPBO.value = eligible > 0
+            ? sample.ofi.components.cPBO.fails / eligible
+            : null;
+        sample.ofi.components.cPBO.status = eligible > 0 ? 'computed' : 'insufficient';
+        const quantiles = sample.ofi.components.oos.quantiles;
+        if (quantiles.length > 0) {
+            const median = computeMedian(quantiles);
+            const iqr = computeIQR(quantiles);
+            sample.ofi.components.oos.median = median;
+            sample.ofi.components.oos.iqr = iqr;
+            sample.ofi.components.oos.logitMedian = computeLogit(median);
+            sample.ofi.components.oos.status = 'computed';
+        }
+        sample.ofi.blockCount = blockCount;
+    });
+
+    const islandScores = computeIslandScores(crossSectionSamples, config);
+
+    preparedSamples.forEach(sample => finalizeOfiScore(sample, config, islandScores));
+}
+
+function finalizeOfiScore(sample, config, islandScores) {
+    if (!sample || !sample.ofi) return;
+    const components = sample.ofi.components;
+
+    const cPBOScore = Number.isFinite(components.cPBO.value)
+        ? clamp01(1 - components.cPBO.value)
+        : 0.5;
+    components.cPBO.score = cPBOScore;
+
+    const levelScore = Number.isFinite(components.oos.median)
+        ? clamp01(components.oos.median)
+        : 0.5;
+    const stabilityScore = Number.isFinite(components.oos.iqr)
+        ? clamp01(1 - clamp01(components.oos.iqr / config.iqrReference))
+        : 0.5;
+
+    const islandInfo = islandScores.get(sample.index) || null;
+    if (islandInfo) {
+        components.island.score = clamp01(islandInfo.score);
+        components.island.componentSize = islandInfo.componentSize;
+        components.island.centroidPenalty = islandInfo.centroidPenalty;
+        components.island.normalizedSize = islandInfo.normalizedSize;
+        components.island.status = 'computed';
+    }
+    const islandScore = Number.isFinite(components.island.score)
+        ? clamp01(components.island.score)
+        : 0.5;
+
+    const dsrScore = Number.isFinite(components.dsr.value)
+        ? clamp01(components.dsr.value)
+        : 0;
+
+    const totalScore = (
+        OFI_WEIGHTS.cPBO * cPBOScore +
+        OFI_WEIGHTS.level * levelScore +
+        OFI_WEIGHTS.stability * stabilityScore +
+        OFI_WEIGHTS.island * islandScore +
+        OFI_WEIGHTS.dsr * dsrScore
+    ) * 100;
+
+    sample.ofi.score = Number.isFinite(totalScore) ? Number(totalScore.toFixed(2)) : null;
+    sample.ofi.normalizedScore = Number.isFinite(totalScore) ? Number((totalScore / 100).toFixed(4)) : null;
+    sample.ofi.updatedAt = Date.now();
+    sample.ofi.components.summary = {
+        cPBO: cPBOScore,
+        level: levelScore,
+        stability: stabilityScore,
+        island: islandScore,
+        dsr: dsrScore
+    };
+}
+
+function computeDailyReturnsFromCumulative(strategyReturns) {
+    if (!Array.isArray(strategyReturns) || strategyReturns.length < 2) {
+        return [];
+    }
+    const returns = [];
+    let previous = null;
+    for (let i = 0; i < strategyReturns.length; i++) {
+        const currentPercent = strategyReturns[i];
+        if (!Number.isFinite(currentPercent)) continue;
+        const currentValue = 1 + currentPercent / 100;
+        if (previous !== null && previous > 0) {
+            returns.push(currentValue / previous - 1);
+        }
+        previous = currentValue;
+    }
+    return returns;
+}
+
+function determineCommonBlockCount(samples, config) {
+    if (!Array.isArray(samples) || samples.length === 0) {
+        return null;
+    }
+    const perSampleMax = samples.map(sample => {
+        const length = Array.isArray(sample.dailyReturns) ? sample.dailyReturns.length : 0;
+        if (length <= 0) return 0;
+        return Math.floor(length / config.minBlockSize);
+    });
+    let globalMax = perSampleMax.reduce((acc, val) => Math.min(acc, val), Number.POSITIVE_INFINITY);
+    if (!Number.isFinite(globalMax)) {
+        globalMax = 0;
+    }
+    globalMax = Math.min(globalMax, config.maxBlocks);
+    if (globalMax < config.minBlocks) {
+        return null;
+    }
+    const ensureEven = (value) => {
+        let v = Math.floor(value);
+        if (v % 2 !== 0) v -= 1;
+        return v;
+    };
+    let candidate = ensureEven(Math.min(config.preferredBlocks, globalMax));
+    if (candidate < config.minBlocks) {
+        candidate = ensureEven(globalMax);
+    }
+    if (candidate < config.minBlocks) {
+        return null;
+    }
+    return candidate;
+}
+
+function splitReturnsIntoBlocks(dailyReturns, blockCount) {
+    if (!Array.isArray(dailyReturns) || dailyReturns.length === 0 || !Number.isFinite(blockCount) || blockCount <= 0) {
+        return [];
+    }
+    const total = dailyReturns.length;
+    const baseSize = Math.floor(total / blockCount);
+    const remainder = total % blockCount;
+    const blocks = [];
+    let cursor = 0;
+    for (let i = 0; i < blockCount; i++) {
+        const extra = i < remainder ? 1 : 0;
+        const size = baseSize + extra;
+        const blockReturns = dailyReturns.slice(cursor, cursor + size);
+        blocks.push({ returns: blockReturns });
+        cursor += size;
+    }
+    return blocks;
+}
+
+function generateCscvSplits(blockCount) {
+    const total = blockCount;
+    const choose = blockCount / 2;
+    const results = [];
+    const combination = [];
+    function backtrack(start, depth) {
+        if (depth === choose) {
+            const isIndices = combination.slice();
+            const oosIndices = [];
+            for (let i = 0; i < total; i++) {
+                if (!isIndices.includes(i)) {
+                    oosIndices.push(i);
+                }
+            }
+            results.push({ isIndices, oosIndices });
+            return;
+        }
+        for (let i = start; i < total; i++) {
+            combination.push(i);
+            backtrack(i + 1, depth + 1);
+            combination.pop();
+        }
+    }
+    backtrack(0, 0);
+    return results;
+}
+
+function downSampleSplits(splits, maxSplits) {
+    if (!Array.isArray(splits) || splits.length <= maxSplits) {
+        return splits;
+    }
+    const sampled = [];
+    const step = splits.length / maxSplits;
+    for (let i = 0; i < maxSplits; i++) {
+        const index = Math.floor(i * step);
+        sampled.push(splits[index]);
+    }
+    return sampled;
+}
+
+function collectReturnsFromBlocks(blocks, indices) {
+    if (!Array.isArray(blocks) || !Array.isArray(indices)) {
+        return [];
+    }
+    const result = [];
+    indices.forEach(idx => {
+        const block = blocks[idx];
+        if (block && Array.isArray(block.returns)) {
+            result.push(...block.returns);
+        }
+    });
+    return result;
+}
+
+function computeAnnualizedSharpe(dailyReturns) {
+    if (!Array.isArray(dailyReturns) || dailyReturns.length < 2) {
+        return NaN;
+    }
+    const mean = dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length;
+    const variance = dailyReturns.reduce((sum, value) => {
+        const diff = value - mean;
+        return sum + diff * diff;
+    }, 0) / dailyReturns.length;
+    const std = Math.sqrt(variance);
+    if (!Number.isFinite(std) || std === 0) {
+        return 0;
+    }
+    const annualMean = mean * 252;
+    const annualStd = std * Math.sqrt(252);
+    return annualStd !== 0 ? annualMean / annualStd : 0;
+}
+
+function computeQuantilesDescending(values) {
+    if (!Array.isArray(values) || values.length === 0) {
+        return [];
+    }
+    const enumerated = values.map((value, index) => ({
+        value: Number.isFinite(value) ? value : -Infinity,
+        index
+    }));
+    enumerated.sort((a, b) => b.value - a.value);
+    const quantiles = new Array(values.length).fill(0);
+    let i = 0;
+    while (i < enumerated.length) {
+        let j = i + 1;
+        while (j < enumerated.length && enumerated[j].value === enumerated[i].value) {
+            j++;
+        }
+        const midRank = (i + j - 1) / 2;
+        const quantile = 1 - (midRank + 0.5) / enumerated.length;
+        for (let k = i; k < j; k++) {
+            quantiles[enumerated[k].index] = quantile;
+        }
+        i = j;
+    }
+    return quantiles;
+}
+
+function computeMedian(values) {
+    if (!Array.isArray(values) || values.length === 0) {
+        return null;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    return sorted[mid];
+}
+
+function computeIQR(values) {
+    if (!Array.isArray(values) || values.length === 0) {
+        return null;
+    }
+    const sorted = [...values].sort((a, b) => a - b);
+    const q1 = computeQuantile(sorted, 0.25);
+    const q3 = computeQuantile(sorted, 0.75);
+    if (q1 === null || q3 === null) {
+        return null;
+    }
+    return q3 - q1;
+}
+
+function computeQuantile(sortedValues, quantile) {
+    if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
+        return null;
+    }
+    const pos = (sortedValues.length - 1) * quantile;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    if (sortedValues[base + 1] !== undefined) {
+        return sortedValues[base] + rest * (sortedValues[base + 1] - sortedValues[base]);
+    }
+    return sortedValues[base];
+}
+
+function computeLogit(prob) {
+    if (!Number.isFinite(prob) || prob <= 0 || prob >= 1) {
+        return null;
+    }
+    return Math.log(prob / (1 - prob));
+}
+
+function clamp01(value) {
+    if (!Number.isFinite(value)) return value;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+}
+
+function computeIslandScores(samples, config) {
+    const scoreMap = new Map();
+    if (!Array.isArray(samples) || samples.length === 0) {
+        return scoreMap;
+    }
+    const groups = new Map();
+    samples.forEach(sample => {
+        const key = `${sample.result.buyStrategy || 'NA'}|${sample.result.sellStrategy || 'NA'}`;
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+        groups.get(key).push(sample);
+    });
+
+    groups.forEach(groupSamples => {
+        const vectors = groupSamples.map(sample => buildCombinedParameterVector(sample.result));
+        const dimension = vectors.reduce((max, vector) => Math.max(max, vector.length), 0) || 1;
+        const paddedVectors = vectors.map(vector => padVector(vector, dimension));
+        const distanceMatrix = buildDistanceMatrix(paddedVectors);
+        const components = findConnectedComponents(distanceMatrix, config.island.radius || 0.35);
+        components.forEach(component => {
+            const members = component;
+            const componentSize = members.length;
+            const normalizedSize = Math.min(1, componentSize / (config.island.targetCluster || componentSize || 1));
+            const centroid = computeCentroid(members, paddedVectors, dimension);
+            const centroidDistances = members.map(idx => euclideanDistance(paddedVectors[idx], centroid));
+            const avgDistance = centroidDistances.length > 0
+                ? centroidDistances.reduce((sum, val) => sum + val, 0) / centroidDistances.length
+                : 0;
+            const penaltyRadius = config.island.centroidPenaltyRadius || config.island.radius || 0.35;
+            const centroidPenalty = Math.min(1, penaltyRadius > 0 ? avgDistance / penaltyRadius : 0);
+            const avgMedian = members.reduce((sum, idx) => {
+                const median = groupSamples[idx].ofi.components.oos.median;
+                const safeMedian = Number.isFinite(median) ? clamp01(median) : 0.5;
+                return sum + safeMedian;
+            }, 0) / members.length;
+            const score = clamp01(avgMedian * 0.5 + normalizedSize * 0.3 + (1 - centroidPenalty) * 0.2);
+            members.forEach(idx => {
+                scoreMap.set(groupSamples[idx].index, {
+                    score,
+                    componentSize,
+                    centroidPenalty,
+                    normalizedSize
+                });
+            });
+        });
+    });
+    return scoreMap;
+}
+
+function buildCombinedParameterVector(result) {
+    const entryVector = buildNormalizedParameterVector(result.buyStrategy, result.buyParams, 'entry');
+    const exitVector = buildNormalizedParameterVector(result.sellStrategy, result.sellParams, 'exit');
+    const riskVector = buildRiskParameterVector(result);
+    return [...entryVector, ...exitVector, ...riskVector];
+}
+
+function buildNormalizedParameterVector(strategyKey, params, strategyType) {
+    const values = [];
+    const strategyInfo = strategyDescriptions?.[strategyKey];
+    if (strategyInfo && Array.isArray(strategyInfo.optimizeTargets) && strategyInfo.optimizeTargets.length > 0) {
+        strategyInfo.optimizeTargets.forEach(target => {
+            const rawValue = params && Number.isFinite(params[target.name])
+                ? Number(params[target.name])
+                : Number(strategyInfo.defaultParams?.[target.name]);
+            const normalized = normalizeValue(rawValue, target.range);
+            values.push(normalized);
+        });
+    } else if (params && typeof params === 'object') {
+        Object.keys(params).sort().forEach(key => {
+            const rawValue = Number(params[key]);
+            if (Number.isFinite(rawValue)) {
+                values.push(normalizeValue(rawValue, null));
+            }
+        });
+    }
+    if (values.length === 0 && strategyInfo && strategyInfo.defaultParams) {
+        Object.keys(strategyInfo.defaultParams).sort().forEach(key => {
+            const rawValue = Number(strategyInfo.defaultParams[key]);
+            if (Number.isFinite(rawValue)) {
+                values.push(normalizeValue(rawValue, null));
+            }
+        });
+    }
+    return values;
+}
+
+function buildRiskParameterVector(result) {
+    const values = [];
+    const riskConfig = typeof globalOptimizeTargets === 'object' ? globalOptimizeTargets : null;
+    const stopLossRange = riskConfig?.stopLoss?.range || null;
+    const takeProfitRange = riskConfig?.takeProfit?.range || null;
+    const stopLoss = result?.riskManagement?.stopLoss ?? result?.usedStopLoss;
+    const takeProfit = result?.riskManagement?.takeProfit ?? result?.usedTakeProfit;
+    if (Number.isFinite(stopLoss)) {
+        values.push(normalizeValue(stopLoss, stopLossRange));
+    }
+    if (Number.isFinite(takeProfit)) {
+        values.push(normalizeValue(takeProfit, takeProfitRange));
+    }
+    return values;
+}
+
+function normalizeValue(value, range) {
+    if (!Number.isFinite(value)) {
+        return 0.5;
+    }
+    if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) {
+        return clamp01((value % 100) / 100);
+    }
+    const span = range.to - range.from;
+    if (!Number.isFinite(span) || span === 0) {
+        return 0.5;
+    }
+    return clamp01((value - range.from) / span);
+}
+
+function padVector(vector, length) {
+    if (!Array.isArray(vector)) {
+        return new Array(length).fill(0.5);
+    }
+    if (vector.length >= length) {
+        return vector.slice(0, length);
+    }
+    const padded = vector.slice();
+    while (padded.length < length) {
+        padded.push(0.5);
+    }
+    return padded;
+}
+
+function buildDistanceMatrix(vectors) {
+    const size = vectors.length;
+    const matrix = Array.from({ length: size }, () => new Array(size).fill(0));
+    for (let i = 0; i < size; i++) {
+        for (let j = i + 1; j < size; j++) {
+            const distance = euclideanDistance(vectors[i], vectors[j]);
+            matrix[i][j] = distance;
+            matrix[j][i] = distance;
+        }
+    }
+    return matrix;
+}
+
+function euclideanDistance(a, b) {
+    const length = Math.max(a.length, b.length);
+    let sum = 0;
+    for (let i = 0; i < length; i++) {
+        const diff = (a[i] ?? 0) - (b[i] ?? 0);
+        sum += diff * diff;
+    }
+    return Math.sqrt(sum / length);
+}
+
+function findConnectedComponents(distanceMatrix, radius) {
+    const size = distanceMatrix.length;
+    const visited = new Array(size).fill(false);
+    const components = [];
+    for (let i = 0; i < size; i++) {
+        if (visited[i]) continue;
+        const queue = [i];
+        visited[i] = true;
+        const members = [];
+        while (queue.length > 0) {
+            const node = queue.shift();
+            members.push(node);
+            for (let j = 0; j < size; j++) {
+                if (!visited[j] && distanceMatrix[node][j] <= radius) {
+                    visited[j] = true;
+                    queue.push(j);
+                }
+            }
+        }
+        components.push(members);
+    }
+    return components;
+}
+
+function computeCentroid(indices, vectors, dimension) {
+    const centroid = new Array(dimension).fill(0);
+    if (!Array.isArray(indices) || indices.length === 0) {
+        return centroid;
+    }
+    indices.forEach(idx => {
+        const vector = vectors[idx] || [];
+        for (let d = 0; d < dimension; d++) {
+            centroid[d] += vector[d] ?? 0;
+        }
+    });
+    for (let d = 0; d < dimension; d++) {
+        centroid[d] /= indices.length;
+    }
+    return centroid;
+}
+
+function computeDeflatedSharpeRatio(dailyReturns, trials) {
+    const safeTrials = Math.max(1, Math.floor(trials));
+    if (!Array.isArray(dailyReturns) || dailyReturns.length < 10) {
+        return { value: null, sharpe: null, sampleSize: dailyReturns ? dailyReturns.length : 0, sigma: null, threshold: null, trials: safeTrials, status: 'insufficient' };
+    }
+    const n = dailyReturns.length;
+    const mean = dailyReturns.reduce((sum, value) => sum + value, 0) / n;
+    const variance = dailyReturns.reduce((sum, value) => {
+        const diff = value - mean;
+        return sum + diff * diff;
+    }, 0) / n;
+    const std = Math.sqrt(variance);
+    if (!Number.isFinite(std) || std === 0) {
+        return { value: null, sharpe: null, sampleSize: n, sigma: null, threshold: null, trials: safeTrials, status: 'insufficient' };
+    }
+    const sharpe = (mean / std) * Math.sqrt(252);
+    const skewness = computeSkewness(dailyReturns, mean, std);
+    const kurtosis = computeKurtosis(dailyReturns, mean, std);
+    const sigmaSRNumerator = 1 - skewness * sharpe + ((kurtosis - 1) / 4) * sharpe * sharpe;
+    const sigmaSR = sigmaSRNumerator > 0 && n > 1
+        ? Math.sqrt(sigmaSRNumerator / (n - 1))
+        : 0;
+    if (!Number.isFinite(sigmaSR) || sigmaSR <= 0) {
+        return { value: null, sharpe, sampleSize: n, sigma: sigmaSR, threshold: null, trials: safeTrials, status: 'insufficient' };
+    }
+    const threshold = sigmaSR * inverseStandardNormal(1 - 1 / safeTrials);
+    const statistic = (sharpe - threshold) / sigmaSR;
+    const value = clamp01(standardNormalCdf(statistic));
+    return { value, sharpe, sampleSize: n, sigma: sigmaSR, threshold, trials: safeTrials, status: 'computed' };
+}
+
+function computeSkewness(values, mean, std) {
+    if (!Array.isArray(values) || values.length === 0 || !Number.isFinite(std) || std === 0) {
+        return 0;
+    }
+    const n = values.length;
+    const skew = values.reduce((sum, value) => {
+        const diff = value - mean;
+        return sum + Math.pow(diff / std, 3);
+    }, 0) / n;
+    return skew;
+}
+
+function computeKurtosis(values, mean, std) {
+    if (!Array.isArray(values) || values.length === 0 || !Number.isFinite(std) || std === 0) {
+        return 3;
+    }
+    const n = values.length;
+    const kurt = values.reduce((sum, value) => {
+        const diff = value - mean;
+        return sum + Math.pow(diff / std, 4);
+    }, 0) / n;
+    return kurt;
+}
+
+function standardNormalCdf(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x));
+    const d = 0.3989423 * Math.exp(-x * x / 2);
+    let probability = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    if (x > 0) {
+        probability = 1 - probability;
+    }
+    return probability;
+}
+
+function inverseStandardNormal(p) {
+    if (p <= 0) return -Infinity;
+    if (p >= 1) return Infinity;
+    const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
+    const b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
+    const c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878];
+    const d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742];
+    const plow = 0.02425;
+    const phigh = 1 - plow;
+    let q, r;
+    if (p < plow) {
+        q = Math.sqrt(-2 * Math.log(p));
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+    if (phigh < p) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    }
+    q = p - 0.5;
+    r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+        (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination) {
     return new Promise((resolve) => {
@@ -1724,12 +2487,11 @@ function showBatchResults() {
             resultsDiv.classList.remove('hidden');
         }
         
-        // 排序結果
+        // 重新計算 OFI 指標並排序顯示
+        recomputeBatchOFIMetrics();
+        updateOfiVersionLabel();
         sortBatchResults();
-        
-        // 渲染結果表格
-        renderBatchResultsTable();
-        
+
         // 重置運行狀態
         restoreBatchOptimizationUI();
     } catch (error) {
@@ -1738,55 +2500,117 @@ function showBatchResults() {
     }
 }
 
+function getResultSortValue(result, sortKey) {
+    if (!result) return Number.NEGATIVE_INFINITY;
+    switch (sortKey) {
+        case 'tradeCount':
+            return Number.isFinite(result.tradesCount)
+                ? result.tradesCount
+                : (Number.isFinite(result.totalTrades)
+                    ? result.totalTrades
+                    : (Number.isFinite(result.tradeCount) ? result.tradeCount : 0));
+        case 'maxDrawdown':
+            return Number.isFinite(result.maxDrawdown)
+                ? -Math.abs(result.maxDrawdown)
+                : Number.NEGATIVE_INFINITY;
+        case 'ofiScore':
+            return Number.isFinite(result.ofi?.score) ? result.ofi.score : Number.NEGATIVE_INFINITY;
+        case 'ofiCPBO':
+            return Number.isFinite(result.ofi?.components?.cPBO?.score)
+                ? result.ofi.components.cPBO.score
+                : Number.NEGATIVE_INFINITY;
+        case 'ofiMedianOOS':
+            return Number.isFinite(result.ofi?.components?.oos?.median)
+                ? result.ofi.components.oos.median
+                : Number.NEGATIVE_INFINITY;
+        case 'ofiIQR':
+            return Number.isFinite(result.ofi?.components?.oos?.iqr)
+                ? -result.ofi.components.oos.iqr
+                : Number.NEGATIVE_INFINITY;
+        case 'ofiIsland':
+            return Number.isFinite(result.ofi?.components?.island?.score)
+                ? result.ofi.components.island.score
+                : Number.NEGATIVE_INFINITY;
+        case 'ofiDSR':
+            return Number.isFinite(result.ofi?.components?.dsr?.value)
+                ? result.ofi.components.dsr.value
+                : Number.NEGATIVE_INFINITY;
+        default:
+            const value = result[sortKey];
+            return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+    }
+}
+
 // 排序結果
 function sortBatchResults() {
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+    const direction = sortDirection === 'asc' ? 1 : -1;
+
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
-        // 處理特殊情況
-        if (sortKey === 'maxDrawdown') {
-            // 最大回撤越小越好
-            aValue = Math.abs(aValue);
-            bValue = Math.abs(bValue);
-            // 對於回撤，我們要倒序排列（小的值排在前面）
-            if (sortDirection === 'desc') {
-                return aValue - bValue;
-            } else {
-                return bValue - aValue;
-            }
-        }
-        
-        // 處理 NaN 值，將它們排到最後
-        if (isNaN(aValue) && isNaN(bValue)) return 0;
-        if (isNaN(aValue)) return 1;
-        if (isNaN(bValue)) return -1;
-        
-        if (sortDirection === 'asc') {
-            return aValue - bValue;
-        } else {
-            return bValue - aValue;
-        }
+        const aValue = getResultSortValue(a, sortKey);
+        const bValue = getResultSortValue(b, sortKey);
+
+        const aIsFinite = Number.isFinite(aValue);
+        const bIsFinite = Number.isFinite(bValue);
+        if (!aIsFinite && !bIsFinite) return 0;
+        if (!aIsFinite) return 1;
+        if (!bIsFinite) return -1;
+        if (aValue === bValue) return 0;
+        return direction * (aValue > bValue ? 1 : -1);
     });
-    
-    // 重新渲染表格
+
     renderBatchResultsTable();
+}
+
+function displayBatchOptimizationResults() {
+    recomputeBatchOFIMetrics();
+    updateOfiVersionLabel();
+    sortBatchResults();
 }
 
 // 更新排序方向按鈕
 function updateSortDirectionButton() {
     const button = document.getElementById('batch-sort-direction');
-    if (button) {
-        const icon = button.querySelector('i');
-        if (batchOptimizationConfig.sortDirection === 'asc') {
-            icon.className = 'fas fa-sort-up';
-        } else {
-            icon.className = 'fas fa-sort-down';
-        }
+    if (!button) return;
+    const iconName = batchOptimizationConfig.sortDirection === 'asc' ? 'arrow-up' : 'arrow-down';
+    button.innerHTML = `<i data-lucide="${iconName}" class="lucide"></i>`;
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons({ elements: [button] });
+    }
+}
+
+function updateOfiSortButtonState() {
+    const button = document.getElementById('batch-ofi-sort');
+    if (!button) return;
+    const isActive = batchOptimizationConfig.sortKey === 'ofiScore';
+    if (isActive) {
+        button.classList.add('bg-indigo-100', 'text-indigo-700', 'border-indigo-300');
+        button.classList.remove('text-foreground');
+        button.classList.remove('border-border');
+        button.dataset.active = 'true';
+    } else {
+        button.classList.remove('bg-indigo-100', 'text-indigo-700', 'border-indigo-300');
+        button.classList.add('text-foreground');
+        button.classList.add('border-border');
+        button.dataset.active = 'false';
+    }
+}
+
+function updateSpaFilterButtonState() {
+    const button = document.getElementById('batch-filter-spa');
+    if (!button) return;
+    if (batchOptimizationFilters.spaOnly) {
+        button.classList.add('bg-emerald-100', 'text-emerald-700', 'border-emerald-300');
+        button.classList.remove('text-foreground');
+        button.classList.remove('border-border');
+        button.textContent = '僅顯示通過 SPA/MCS';
+    } else {
+        button.classList.remove('bg-emerald-100', 'text-emerald-700', 'border-emerald-300');
+        button.classList.add('text-foreground');
+        button.classList.add('border-border');
+        button.textContent = '只看通過 SPA/MCS';
     }
 }
 
@@ -1794,25 +2618,60 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
+    const visibleResults = getVisibleBatchResults();
+
+    if (visibleResults.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="11" class="px-3 py-6 text-sm text-center text-gray-500">目前沒有符合條件的結果，請調整排序或篩選條件。</td></tr>`;
+        return;
+    }
+
     tbody.innerHTML = '';
-    
-    batchOptimizationResults.forEach((result, index) => {
+
+    visibleResults.forEach(({ result, index: originalIndex }, displayIndex) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
-        
+
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
-        
+
+        const ofi = result.ofi || {};
+        const ofiScore = Number.isFinite(ofi.score) ? Math.round(ofi.score) : null;
+        const ofiBadgeClass = ofiScore !== null
+            ? (ofiScore >= 75 ? 'bg-emerald-100 text-emerald-700'
+                : ofiScore >= 55 ? 'bg-amber-100 text-amber-700'
+                : 'bg-rose-100 text-rose-700')
+            : 'bg-gray-100 text-gray-500';
+        const cPBOValue = ofi.components?.cPBO?.value;
+        const cPBOText = Number.isFinite(cPBOValue) ? `${(cPBOValue * 100).toFixed(0)}%` : '—';
+        const oosMedian = ofi.components?.oos?.median;
+        const oosMedianText = Number.isFinite(oosMedian) ? oosMedian.toFixed(2) : '—';
+        const oosIqr = ofi.components?.oos?.iqr;
+        const oosIqrText = Number.isFinite(oosIqr) ? oosIqr.toFixed(2) : '—';
+        const islandScore = ofi.components?.island?.score;
+        const islandText = Number.isFinite(islandScore) ? islandScore.toFixed(2) : '—';
+        const dsrValue = ofi.components?.dsr?.value;
+        const dsrText = Number.isFinite(dsrValue) ? dsrValue.toFixed(2) : '—';
+        const spaInfo = ofi.components?.spa || { status: 'pending', qualified: false };
+        const spaQualified = Boolean(spaInfo.qualified || spaInfo.status === 'passed');
+        const spaLabel = spaQualified
+            ? 'SPA/MCS 通過'
+            : (spaInfo.status === 'pending' ? 'SPA/MCS 未檢定' : 'SPA/MCS 未通過');
+        const spaClass = spaQualified
+            ? 'text-emerald-600'
+            : (spaInfo.status === 'pending' ? 'text-gray-500' : 'text-rose-600');
+        const blockCount = ofi.blockCount || null;
+        const resultId = result.__batchId || `batch-${originalIndex}`;
+
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
-        
+
         if (result.optimizationTypes && result.optimizationTypes.length > 1) {
             // 多重結果，顯示合併標籤
             const typeMap = {
@@ -1854,25 +2713,36 @@ function renderBatchResultsTable() {
         }
         
         row.innerHTML = `
-            <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
+            <td class="px-3 py-2 text-sm text-gray-900 font-medium">${displayIndex + 1}</td>
             <td class="px-3 py-2 text-sm">
                 <span class="px-2 py-1 text-xs rounded-full ${typeClass}">${optimizationType}</span>
             </td>
             <td class="px-3 py-2 text-sm text-gray-900">${buyStrategyName}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${sellStrategyName}${riskManagementInfo}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">
+                <div class="flex flex-col gap-1 text-xs">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 rounded-full font-semibold ${ofiBadgeClass}">OFI ${ofiScore !== null ? ofiScore : '—'}</span>
+                        <span class="text-[11px] text-gray-500">cPBO ${cPBOText}</span>
+                    </div>
+                    <div class="text-[11px] text-gray-600">OOS 中位 ${oosMedianText}｜IQR ${oosIqrText}</div>
+                    <div class="text-[11px] text-gray-600">Island ${islandText}｜DSR ${dsrText}${blockCount ? `｜S=${blockCount}` : ''}</div>
+                    <div class="text-[11px] ${spaClass}">${spaLabel}</div>
+                </div>
+            </td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.annualizedReturn)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
-                        onclick="loadBatchStrategy(${index})">
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
+                        onclick="loadBatchStrategyById('${resultId}')">
                     載入
                 </button>
             </td>
         `;
-        
+
         tbody.appendChild(row);
     });
 }
@@ -1976,6 +2846,30 @@ function addCrossOptimizationControls() {
     }
 }
 
+function getVisibleBatchResults() {
+    if (!Array.isArray(batchOptimizationResults)) {
+        return [];
+    }
+    const visible = [];
+    batchOptimizationResults.forEach((result, index) => {
+        if (batchOptimizationFilters.spaOnly) {
+            const spaInfo = result?.ofi?.components?.spa;
+            const qualified = Boolean(spaInfo?.qualified || spaInfo?.status === 'passed');
+            if (!qualified) {
+                return;
+            }
+        }
+        visible.push({ result, index });
+    });
+    return visible;
+}
+
+function updateOfiVersionLabel() {
+    const label = document.getElementById('ofi-version-label');
+    if (!label) return;
+    label.textContent = `OFI 版本 ${OFI_VERSION_CODE}`;
+}
+
 // 開始進場策略交叉優化
 async function startEntryCrossOptimization() {
     console.log('[Cross Optimization] startEntryCrossOptimization called');
@@ -2037,8 +2931,9 @@ async function startEntryCrossOptimization() {
         if (results.length > 0) {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
+            recomputeBatchOFIMetrics();
+            updateOfiVersionLabel();
             sortBatchResults();
-            renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 進場策略交叉優化完成！新增 ${results.length} 個優化結果`);
         } else {
@@ -2185,8 +3080,9 @@ async function startExitCrossOptimization() {
         if (results.length > 0) {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
+            recomputeBatchOFIMetrics();
+            updateOfiVersionLabel();
             sortBatchResults();
-            renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 出場策略交叉優化完成！新增 ${results.length} 個優化結果`);
         } else {
@@ -2798,6 +3694,21 @@ function loadBatchStrategy(index) {
     // 切換到優化頁籤
     switchTab('optimization');
 }
+
+function loadBatchStrategyById(batchId) {
+    if (!batchId) {
+        console.warn('[Batch Optimization] Missing batch result id');
+        return;
+    }
+    const index = batchOptimizationResults.findIndex(result => result && result.__batchId === batchId);
+    if (index === -1) {
+        console.warn('[Batch Optimization] Cannot find result for id:', batchId);
+        return;
+    }
+    loadBatchStrategy(index);
+}
+
+window.loadBatchStrategyById = loadBatchStrategyById;
 
 // 添加測試按鈕（開發用）
 function addTestButton() {

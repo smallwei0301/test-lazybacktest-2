@@ -763,6 +763,12 @@
 - **Diagnostics**: 在桌機與行動尺寸檢視英雄區，確認輸入框於不同字數與清空狀態下都維持置中排版且光標與底線對齊。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-12-12 — Patch LB-OFI-20251212A
+- **Issue recap**: 批量優化結果缺乏逐策略的過擬合風險評分，僅能依單一績效指標排序，無法呼應 PBO/DSR 等學術指標，亦缺少對 SPA/MCS 合格策略的一鍵篩選。
+- **Fix**: 新增 `recomputeBatchOFIMetrics` 以 CSCV+DSR 組合計算 `OFI`（含 cPBO、OOS 分位、IslandScore、DSR）；在結果表格顯示 OFI 明細、版本與 SPA/MCS 標示，並加入「策略穩健度排序」與「只看通過 SPA/MCS」控制；更新排序/濾器狀態與 UI 元件。
+- **Diagnostics**: 以測試資料驗證 OFI 組成、排序與 SPA 篩選狀態切換，確認 `batch-ofi-sort` 與 `batch-filter-spa` 可驅動重新渲染並顯示版本碼 `LB-OFI-20251212A`；交叉優化結果也會重新計算 OFI。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/batch-optimization.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-11-16 — Patch LB-PROGRESS-PIPELINE-20251116A
 - **Issue recap**: 回測進度條會自動衝到 100% 但後端流程仍在跑，且遇到 Netlify Blob 首次未命中時進度訊息卡在「檢查 Netlify Blob 範圍快取...」。
 - **Fix**: 以階段化動畫取代舊自動補數邏輯，進度僅依實際回報推進並同步於狀態文字顯示百分比；同時在 Blob 快取落空後立即發布轉換訊息，縮短停留時間。
