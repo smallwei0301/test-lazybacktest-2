@@ -1271,14 +1271,6 @@
             return { params: outputParams, summary };
         }
 
-        const requiresStrategyOptimizer = plan.scopes.some((scope) => scope !== 'risk');
-
-        if (requiresStrategyOptimizer && typeof optimizeSingleStrategyParameter !== 'function') {
-            summary.error = '缺少批量優化模組';
-            summary.messages.push('優化模組未載入，已沿用原始參數。');
-            return { params: outputParams, summary };
-        }
-
         const missingStrategyOptimizer = typeof optimizeSingleStrategyParameter !== 'function';
 
         if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
