@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.3 ---
-// Patch Tag: LB-ROLLING-TEST-20250918A
+// --- 滾動測試模組 - v1.4 ---
+// Patch Tag: LB-ROLLING-TEST-20250922B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,8 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250918A',
+        version: 'LB-ROLLING-TEST-20250922B',
+        batchOptimizerInitialized: false,
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -30,12 +31,15 @@
     };
 
     const SCORE_WEIGHTS = {
-        annualizedReturn: 0.35,
-        sharpeRatio: 0.3,
-        sortinoRatio: 0.2,
-        maxDrawdown: 0.1,
-        winRate: 0.05,
+        annualizedReturn: 0.28,
+        sharpeRatio: 0.24,
+        sortinoRatio: 0.16,
+        maxDrawdown: 0.12,
+        winRate: 0.1,
+        walkForwardEfficiency: 0.1,
     };
+
+    const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -389,16 +393,25 @@
             return;
         }
 
-        const analysisEntries = state.results.map((entry, index) => ({
-            index,
-            window: entry.window,
-            training: extractMetrics(entry.training),
-            testing: extractMetrics(entry.testing),
-            rawTraining: entry.training,
-            rawTesting: entry.testing,
-            optimization: entry.optimization || null,
-            paramsSnapshot: entry.params || null,
-        }));
+        const analysisEntries = state.results.map((entry, index) => {
+            const trainingMetrics = extractMetrics(entry.training);
+            const testingMetrics = extractMetrics(entry.testing);
+            const walkForwardEfficiency = computeWalkForwardEfficiency(trainingMetrics, testingMetrics);
+            if (Number.isFinite(walkForwardEfficiency)) {
+                testingMetrics.walkForwardEfficiency = walkForwardEfficiency;
+            }
+            return {
+                index,
+                window: entry.window,
+                training: trainingMetrics,
+                testing: testingMetrics,
+                walkForwardEfficiency,
+                rawTraining: entry.training,
+                rawTesting: entry.testing,
+                optimization: entry.optimization || null,
+                paramsSnapshot: entry.params || null,
+            };
+        });
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
 
@@ -429,7 +442,7 @@
                 accent: aggregate.gradeColor,
                 description: [
                     `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
-                    '（達門檻約 70 分，超標越多加分）',
+                    '（含 Walk-Forward Efficiency 及風險門檻加權）',
                 ].join(''),
             },
             {
@@ -441,6 +454,11 @@
                 title: 'Sharpe / Sortino 中位數',
                 value: `${formatNumber(aggregate.medianSharpe)} / ${formatNumber(aggregate.medianSortino)}`,
                 description: 'Sharpe 與 Sortino 比率中位數',
+            },
+            {
+                title: 'Walk-Forward Efficiency',
+                value: formatPercent(aggregate.averageWalkForwardEfficiency),
+                description: `Pardo 定義的 OOS/訓練報酬比率（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`,
             },
             {
                 title: '通過視窗比例',
@@ -541,41 +559,52 @@
 
     function buildParameterSummary(params) {
         if (!params || typeof params !== 'object') return '—';
-        const blocks = [];
+        const segments = [];
 
-        const longEntry = describeStrategyBlock('做多進場', params.entryStrategy, params.entryParams, params.entryStages, 'entry');
-        if (longEntry) blocks.push(longEntry);
-
-        const longExit = describeStrategyBlock('做多出場', params.exitStrategy, params.exitParams, params.exitStages, 'exit');
-        if (longExit) blocks.push(longExit);
+        const longSegment = describeTradingSide('多頭', {
+            entryStrategy: params.entryStrategy,
+            entryParams: params.entryParams,
+            entryStages: params.entryStages,
+            exitStrategy: params.exitStrategy,
+            exitParams: params.exitParams,
+            exitStages: params.exitStages,
+        });
+        if (longSegment) segments.push(longSegment);
 
         if (params.enableShorting) {
-            const shortEntry = describeStrategyBlock('做空進場', params.shortEntryStrategy, params.shortEntryParams, params.shortEntryStages, 'shortEntry');
-            if (shortEntry) blocks.push(shortEntry);
-            const shortExit = describeStrategyBlock('回補出場', params.shortExitStrategy, params.shortExitParams, params.shortExitStages, 'shortExit');
-            if (shortExit) blocks.push(shortExit);
+            const shortSegment = describeTradingSide('空頭', {
+                entryStrategy: params.shortEntryStrategy,
+                entryParams: params.shortEntryParams,
+                entryStages: params.shortEntryStages,
+                exitStrategy: params.shortExitStrategy,
+                exitParams: params.shortExitParams,
+                exitStages: params.shortExitStages,
+                scopePrefix: 'short',
+            });
+            if (shortSegment) segments.push(shortSegment);
         }
 
         const risk = buildRiskSummary(params);
-        if (risk) blocks.push(risk);
+        if (risk) segments.push(`風控：${risk}`);
 
-        return blocks.length > 0 ? blocks.join('｜') : '—';
+        return segments.length > 0 ? segments.join('｜') : '—';
     }
 
-    function describeStrategyBlock(label, strategyKey, paramObj, stages, scope) {
-        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
-        const details = [];
-        const paramText = formatParamEntries(paramObj);
-        if (paramText) details.push(paramText);
-        const stageText = formatStageSummary(stages);
-        if (stageText) details.push(stageText);
+    function describeTradingSide(label, config) {
+        const entrySummary = describeStrategyFlow('入', config.entryStrategy, config.entryParams, config.entryStages, config.scopePrefix ? `${config.scopePrefix}Entry` : 'entry');
+        const exitSummary = describeStrategyFlow('出', config.exitStrategy, config.exitParams, config.exitStages, config.scopePrefix ? `${config.scopePrefix}Exit` : 'exit');
+        const parts = [entrySummary, exitSummary].filter(Boolean);
+        if (parts.length === 0) return '';
+        return `${label} ${parts.join(' → ')}`;
+    }
 
-        if (!strategyName && details.length === 0) return '';
-        let summary = `${label}：${strategyName || '—'}`;
-        if (details.length > 0) {
-            summary += `（${details.join('、')}）`;
-        }
-        return summary;
+    function describeStrategyFlow(prefix, strategyKey, paramObj, stages, scope) {
+        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
+        if (!strategyName) return '';
+        const paramText = formatParamEntries(paramObj);
+        const stageText = formatStageSummary(stages);
+        const details = [paramText, stageText].filter(Boolean).join('、');
+        return `${prefix}:${strategyName}${details ? `（${details}）` : ''}`;
     }
 
     function resolveStrategyDisplayName(strategyKey, scope) {
@@ -601,7 +630,10 @@
                 return `${label}=${formatted}`;
             })
             .filter((entry) => entry);
-        return entries.length > 0 ? entries.join('、') : '';
+        if (entries.length === 0) return '';
+        const compact = entries.slice(0, 2);
+        if (entries.length > 2) compact.push('…');
+        return compact.join('、');
     }
 
     function formatParamValue(value) {
@@ -645,7 +677,7 @@
         if (timing) parts.push(`執行點 ${timing}`);
         const basis = resolvePositionBasisLabel(params.positionBasis);
         if (basis) parts.push(`部位基準 ${basis}`);
-        return parts.length > 0 ? `風控：${parts.join('、')}` : '';
+        return parts.join('、');
     }
 
     function resolveTradeTimingLabel(value) {
@@ -716,7 +748,7 @@
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
-        const score = computeCompositeScore(validMetrics, thresholds);
+        const score = computeCompositeScore(entries, thresholds);
         const gradeInfo = resolveGrade(score, passRate, passCount, evaluations.length);
 
         const summaryText = buildSummaryText({
@@ -728,6 +760,7 @@
             medianSharpe,
             medianSortino,
             averageMaxDrawdown,
+            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
         });
 
@@ -746,6 +779,7 @@
             averageMaxDrawdown,
             medianSharpe,
             medianSortino,
+            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
         };
     }
@@ -754,16 +788,20 @@
         const parts = [];
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
         parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
+        if (Number.isFinite(context.averageWalkForwardEfficiency)) {
+            parts.push(`Walk-Forward Efficiency 平均 ${formatPercent(context.averageWalkForwardEfficiency)}（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`);
+        }
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
         return parts.join('；');
     }
 
-    function computeCompositeScore(metricsList, thresholds) {
-        if (!Array.isArray(metricsList) || metricsList.length === 0) return 0;
+    function computeCompositeScore(entries, thresholds) {
+        if (!Array.isArray(entries) || entries.length === 0) return 0;
         let weightedScore = 0;
         let weightSum = 0;
 
-        metricsList.forEach((metrics) => {
+        entries.forEach((entry) => {
+            const metrics = entry?.testing;
             if (!metrics || metrics.error) return;
             const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
             if (annScore !== null) {
@@ -789,6 +827,11 @@
             if (winRateScore !== null) {
                 weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
+            }
+            const wfeScore = scorePositiveMetric(metrics.walkForwardEfficiency, WALK_FORWARD_EFFICIENCY_BASELINE);
+            if (wfeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.walkForwardEfficiency * wfeScore;
+                weightSum += SCORE_WEIGHTS.walkForwardEfficiency;
             }
         });
 
@@ -1263,12 +1306,22 @@
             metricLabel,
             messages: [],
             scopeResults: [],
+            engine: 'batchOptimizationWorker',
         };
 
         const outputParams = deepClone(baseWindowParams);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
+        }
+
+        if (!state.batchOptimizerInitialized && window.batchOptimization && typeof window.batchOptimization.init === 'function') {
+            try {
+                window.batchOptimization.init();
+                state.batchOptimizerInitialized = true;
+            } catch (error) {
+                console.warn('[Rolling Test] Failed to initialize batch optimization module:', error);
+            }
         }
 
         if (typeof optimizeSingleStrategyParameter !== 'function') {
@@ -1333,6 +1386,7 @@
 
         let optimizedParams = { ...baseParams };
         const changedKeys = new Set();
+        const metricSnapshots = [];
 
         for (let i = 0; i < strategyInfo.optimizeTargets.length; i += 1) {
             const target = strategyInfo.optimizeTargets[i];
@@ -1342,6 +1396,9 @@
                 optimizedParams[target.name] = result.value;
                 if (!areValuesClose(result.value, baseParams[target.name])) {
                     changedKeys.add(target.name);
+                }
+                if (Number.isFinite(result.metric)) {
+                    metricSnapshots.push(result.metric);
                 }
             }
         }
@@ -1356,6 +1413,8 @@
             baseParams,
             changedKeys: Array.from(changedKeys),
             labelMap,
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue: resolveScopeMetricValue(metricSnapshots, plan.config.targetMetric),
         };
     }
 
@@ -1415,6 +1474,8 @@
             baseParams: { stopLoss: baseStopLoss, takeProfit: baseTakeProfit },
             changedKeys,
             labelMap,
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue: null,
         };
     }
 
@@ -1445,7 +1506,10 @@
             const value = formatOptimizationParamValue(result.params?.[key]);
             return `${label}=${value}`;
         });
-        return `${result.label}優化：${formatted.join('、')}`;
+        const metricText = Number.isFinite(result.metricValue)
+            ? `（${result.metricLabel || '目標值'}=${formatNumber(result.metricValue)}）`
+            : '';
+        return `${result.label}優化：${formatted.join('、')}${metricText}`;
     }
 
     function formatOptimizationParamValue(value) {
@@ -1472,6 +1536,30 @@
 
     function resolveMetricLabel(metric) {
         return METRIC_LABELS[metric] || metric;
+    }
+
+    function resolveScopeMetricValue(metrics, targetMetric) {
+        if (!Array.isArray(metrics) || metrics.length === 0) return null;
+        if (targetMetric === 'maxDrawdown') {
+            return metrics.reduce((best, current) => {
+                if (!Number.isFinite(current)) return best;
+                if (!Number.isFinite(best)) return current;
+                return Math.min(best, current);
+            }, null);
+        }
+        return metrics.reduce((best, current) => {
+            if (!Number.isFinite(current)) return best;
+            if (!Number.isFinite(best)) return current;
+            return Math.max(best, current);
+        }, null);
+    }
+
+    function computeWalkForwardEfficiency(trainingMetrics, testingMetrics) {
+        if (!trainingMetrics || !testingMetrics) return null;
+        const trainReturn = toFiniteNumber(trainingMetrics.annualizedReturn);
+        const testReturn = toFiniteNumber(testingMetrics.annualizedReturn);
+        if (!Number.isFinite(trainReturn) || trainReturn <= 0 || !Number.isFinite(testReturn)) return null;
+        return (testReturn / trainReturn) * 100;
     }
 
     function readInputValue(id, fallback) {

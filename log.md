@@ -1,4 +1,13 @@
 
+## 2025-09-22 — Patch LB-ROLLING-TEST-20250922B
+- **Scope**: Walk-Forward 評分與滾動測試批量優化整合。
+- **Updates**:
+  - 導入 Pardo (2014) Walk-Forward Efficiency 與 QuantConnect／TradeStation 門檻，重寫評分公式並公開權重與分段換算規則。
+  - 總結卡片新增 Walk-Forward Efficiency 指標，並在報告說明具體門檻與評級標準。
+  - 精簡參數摘要文字，聚合多空流程與風控設定，提升逐窗表格的可讀性。
+  - 訓練期優化自動初始化批量優化 Worker，保證滾動測試使用與批量優化一致的搜尋範圍與最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
