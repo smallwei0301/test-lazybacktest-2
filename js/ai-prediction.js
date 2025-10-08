@@ -2473,9 +2473,9 @@
         }, trainingOdds);
         const evaluationRule = normalizeTradeRule(evaluation.rule || selectedRule);
         const allRecords = Array.isArray(evaluation.allRecords) ? evaluation.allRecords : [];
-        const evaluationBounds = resolveVolatilityBounds(evaluation.volatilityThresholds || resolvedVolatility);
-        const volatilityUpper = evaluationBounds.upper;
-        const volatilityLower = evaluationBounds.lower;
+        const { upper: evaluationVolatilityUpper, lower: evaluationVolatilityLower } = resolveVolatilityBounds(
+            evaluation.volatilityThresholds || resolvedVolatility
+        );
         const classAverages = evaluation.classReturnAverages || normalizeClassReturnAverages(payload.classReturnAverages, classificationMode);
         const forecast = payload.forecast && Number.isFinite(payload.forecast?.probability)
             ? annotateForecast({ ...payload.forecast }, payload) || { ...payload.forecast }
@@ -2489,10 +2489,10 @@
             forecast.fraction = forecastFraction;
             forecast.tradeRule = evaluationRule;
             if (!Number.isFinite(forecast.volatilityUpper)) {
-                forecast.volatilityUpper = volatilityUpper;
+                forecast.volatilityUpper = evaluationVolatilityUpper;
             }
             if (!Number.isFinite(forecast.volatilityLower)) {
-                forecast.volatilityLower = volatilityLower;
+                forecast.volatilityLower = evaluationVolatilityLower;
             }
             if (evaluationRule === 'open-entry') {
                 forecast.buyPrice = Number.isFinite(forecast.buyPrice) ? NaN : forecast.buyPrice;
