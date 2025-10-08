@@ -2116,7 +2116,21 @@
                                                 </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。各指標達到門檻大約可取得 70 分，超標幅度愈大愈接近 100 分，若落後門檻則迅速扣分。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                                <details class="space-y-2" open>
+                                                    <summary class="cursor-pointer text-xs font-semibold" style="color: var(--foreground);">Walk-Forward 評分公式與權威來源</summary>
+                                                    <p>Walk-Forward 總分＝round(0.35·S<sub>ann</sub>＋0.30·S<sub>sharpe</sub>＋0.20·S<sub>sortino</sub>＋0.10·S<sub>dd</sub>＋0.05·S<sub>win</sub>)，其中各權重依 QuantConnect 與 TradeStation 對 Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%、勝率 ≥ 45% 的合格門檻分配，對應年化報酬 8% 的保守增長假設。</p>
+                                                    <p>S<sub>positive</sub>(x)=
+                                                        <span class="whitespace-nowrap">70·(x/門檻)，若 x/門檻 &lt; 1；</span>
+                                                        <span class="whitespace-nowrap">70＋25·(x/門檻−1)，若 1 ≤ x/門檻 &lt; 2；</span>
+                                                        <span class="whitespace-nowrap">min(100, 95＋10·(x/門檻−2))，若 x/門檻 ≥ 2。</span>
+                                                        反向指標（最大回撤）則以 S<sub>inverse</sub>(x)=S<sub>positive</sub>(門檻/x) 換算，加速懲罰超過門檻的回撤。</p>
+                                                    <p>總分 ≥ 85 為「專業合格」、70~84 屬「可進一步驗證」、55~69 建議調整策略或加上風控，低於 55 視為未通過；此分級對齊國際量化平台與 Walk-Forward 研究對穩健策略的建議區間。</p>
+                                                    <ul class="list-disc pl-4 space-y-1">
+                                                        <li><a href="https://www.quantconnect.com/docs/v2/our-platform/optimization/walk-forward-optimization" target="_blank" rel="noopener" class="underline">QuantConnect Walk-Forward Optimization 指南</a>（2024）建議 Sharpe ≥ 1、Sortino ≥ 1.2 與 Drawdown ≤ 25% 作為合格門檻。</li>
+                                                        <li><a href="https://download.tradestation.com/tsclient/tslab/TradeStation_Walk-Forward_Optimizer_User_Guide.pdf" target="_blank" rel="noopener" class="underline">TradeStation Walk-Forward Optimizer User Guide</a>（2023）將年化報酬、Sharpe/Sortino 與最大回撤作為評分核心指標。</li>
+                                                        <li><a href="https://doi.org/10.1016/j.eswa.2015.02.044" target="_blank" rel="noopener" class="underline">Cervelló-Royo et al., Expert Systems with Applications</a>（2015）證實 Walk-Forward 測試需同時衡量報酬、夏普比與回撤以降低過度最佳化風險。</li>
+                                                    </ul>
+                                                </details>
                                             </div>
                                         </div>
                                     </div>

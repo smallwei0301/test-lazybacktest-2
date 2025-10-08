@@ -1,4 +1,12 @@
 
+## 2025-09-24 — Patch LB-ROLLING-TEST-20250924A
+- **Scope**: Walk-Forward 評分公式、摘要文案與參數摘要。
+- **Updates**:
+  - 調整 Walk-Forward 總分描述與細節說明，補上加權公式、分段得分函式與國際權威來源引用。
+  - 總結段落新增具體建議邏輯，依各項指標相對門檻提出調整方向。
+  - 逐窗參數摘要改為精簡呈現，僅顯示重點參數與風控設定並標示剩餘項目數量。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('rolling-test ok');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
