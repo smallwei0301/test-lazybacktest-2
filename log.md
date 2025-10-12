@@ -1,4 +1,13 @@
 
+## 2025-07-02 — Patch LB-STRATEGY-COMPARE-20250702A
+- **Scope**: 策略比較儀表板與資金基準敘述調整。
+- **Updates**:
+  - 新增「策略比較」分頁，可多選已儲存策略並勾選 Walk-Forward 評分、趨勢區間回報等分析模組，自動生成比較表。
+  - 建立 `js/strategy-comparison.js`，整合儲存策略快照、欄位格式化與狀態同步事件，預留模組勾選框以支援未來擴充。
+  - 儲存策略流程擴充快照內容，記錄 Walk-Forward 分數、趨勢資訊與儲存時間，並在 localStorage 更新時廣播事件供比較分頁即時刷新。
+  - 全域文案將「初始本金」改為「初始本金-固定金額買入」、「總資金」改為「總資金-獲利再投入」，確保 UI 與工具提示一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js','js/strategy-comparison.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
