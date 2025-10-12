@@ -18,6 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
+        aggregateSummary: null,
         version: 'LB-ROLLING-TEST-20250918A',
     };
 
@@ -381,6 +382,7 @@
         if (summary) summary.textContent = '';
         const intro = document.getElementById('rolling-report-intro');
         if (intro) intro.textContent = '';
+        state.aggregateSummary = null;
     }
 
     function renderRollingReport() {
@@ -401,6 +403,7 @@
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        state.aggregateSummary = aggregate;
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -655,8 +658,8 @@
     }
 
     function resolvePositionBasisLabel(value) {
-        if (value === 'initialCapital') return '初始本金';
-        if (value === 'totalCapital') return '總資金';
+        if (value === 'initialCapital') return '初始本金-固定金額買入';
+        if (value === 'totalCapital') return '總資金-獲利再投入';
         return '';
     }
 
