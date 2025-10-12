@@ -2114,7 +2114,7 @@ function buildOfiTooltip(result) {
     if (result?.ofiMeta?.flowVerdict) {
         lines.push(`Flow 判定：${result.ofiMeta.flowVerdict}`);
     }
-    if (result?.ofiMeta?.island?.message && (!result.ofiMeta.island.reason || result.ofiMeta.island.reason === 'no_island')) {
+    if (result?.ofiMeta?.island?.message) {
         lines.push(`Island 提示：${result.ofiMeta.island.message}`);
     }
     return lines.join('\n');

@@ -1,9 +1,9 @@
 /*
  * Overfit Indicator computation module
- * Version: LB-OFI-STRATWEIGHT-20251013A
+ * Version: LB-OFI-ISLANDTIP-20251014A
  */
 (function () {
-  const MODULE_VERSION = "LB-OFI-STRATWEIGHT-20251013A";
+  const MODULE_VERSION = "LB-OFI-ISLANDTIP-20251014A";
 
   const DEFAULT_CONFIG = {
     desiredSegments: 10,
@@ -822,7 +822,12 @@
       }
       const group = groups.get(groupKey);
       if (!group) return;
-      if (!group.axisX || !group.axisY) return;
+      if (!group.axisX || !group.axisY) {
+        if (!item.islandMeta) {
+          item.islandMeta = buildAxisIssueMeta(group.axisIssue, group.axisIssueDetails) || null;
+        }
+        return;
+      }
       const point = extractPointForIsland(item, group);
       if (!point) return;
       const keyX = point.keyX;
@@ -905,6 +910,8 @@
     return {
       axisX: axisCandidates.axisX,
       axisY: axisCandidates.axisY,
+      axisIssue: axisCandidates.issue || null,
+      axisIssueDetails: axisCandidates.details || null,
       grid: new Map(),
       xValues: new Map(),
       yValues: new Map(),
@@ -916,16 +923,59 @@
     const entryParams = collectParamEntries(item.buyParams, "entry");
     const exitParams = collectParamEntries(item.sellParams, "exit");
     const combined = entryParams.concat(exitParams);
+    const result = {
+      axisX: null,
+      axisY: null,
+      issue: null,
+      details: null,
+    };
     if (entryParams.length >= 2) {
-      return { axisX: entryParams[0], axisY: entryParams[1] };
+      result.axisX = entryParams[0];
+      result.axisY = entryParams[1];
+      return result;
     }
     if (entryParams.length === 1 && combined.length >= 2) {
-      return { axisX: entryParams[0], axisY: combined.find((param) => param.key !== entryParams[0].key) };
+      const primary = entryParams[0];
+      const secondary = combined.find((param) => param.key !== primary.key);
+      if (secondary) {
+        result.axisX = primary;
+        result.axisY = secondary;
+        return result;
+      }
+      result.axisX = primary;
+      const duplicates = combined.filter((param) => param.key === primary.key);
+      if (duplicates.length >= 2) {
+        result.issue = "duplicate_param_names";
+        result.details = {
+          duplicatedKey: primary.key,
+          contexts: duplicates.map((param) => param.context),
+        };
+      } else {
+        result.issue = "insufficient_numeric_params";
+        result.details = {
+          numericParamCount: combined.length,
+        };
+      }
+      return result;
     }
     if (combined.length >= 2) {
-      return { axisX: combined[0], axisY: combined[1] };
+      result.axisX = combined[0];
+      result.axisY = combined[1];
+      return result;
     }
-    return { axisX: null, axisY: null };
+    if (combined.length === 1) {
+      result.axisX = combined[0];
+      result.issue = "insufficient_numeric_params";
+      result.details = {
+        numericParamCount: combined.length,
+      };
+      return result;
+    }
+    result.issue = "no_numeric_params";
+    result.details = {
+      numericParamCount: 0,
+    };
+    return result;
   }
 
   function collectParamEntries(params, context) {
@@ -937,6 +987,52 @@
         value: Number(params[key]),
       }))
       .filter((entry) => Number.isFinite(entry.value));
+  }
+
+  function buildAxisIssueMeta(issue, details) {
+    if (!issue) return null;
+    const baseMeta = {
+      rawScore: 0,
+      normalisedScore: 0,
+    };
+    if (issue === "duplicate_param_names") {
+      const duplicatedKey = details?.duplicatedKey;
+      const keyLabel = duplicatedKey ? `「${duplicatedKey}」` : "";
+      return {
+        ...baseMeta,
+        reason: issue,
+        message: `參數名稱${keyLabel}在進出場重複，無法建立雙軸，熱島分數固定為 0。請將進出場參數改用不同名稱或新增第二個數值參數；參數名稱重複會導致熱島為 0。`,
+        diagnostics: {
+          duplicatedKey,
+          contexts: Array.isArray(details?.contexts) ? details.contexts : [],
+        },
+      };
+    }
+    if (issue === "insufficient_numeric_params") {
+      return {
+        ...baseMeta,
+        reason: issue,
+        message: "僅找到 1 個可調數值參數，無法建立熱島。請至少提供兩個名稱不同的數值參數組合。",
+        diagnostics: {
+          numericParamCount: details?.numericParamCount ?? 1,
+        },
+      };
+    }
+    if (issue === "no_numeric_params") {
+      return {
+        ...baseMeta,
+        reason: issue,
+        message: "未偵測到任何可用的數值參數，無法計算熱島分數。請確認批量優化參數皆為數值型態。",
+        diagnostics: {
+          numericParamCount: 0,
+        },
+      };
+    }
+    return {
+      ...baseMeta,
+      reason: issue,
+      message: "未取得完整參數熱圖或無高分島嶼",
+    };
   }
 
   function extractPointForIsland(item, group) {
@@ -1111,12 +1207,21 @@
         item.islandMeta = info.meta;
       } else {
         item.islandScore = 0;
-        item.islandMeta = {
-          reason: "no_island",
-          message: "未取得完整參數熱圖或無高分島嶼",
-          rawScore: 0,
-          normalisedScore: 0,
-        };
+        if (item.islandMeta) {
+          if (!Number.isFinite(item.islandMeta.rawScore)) {
+            item.islandMeta.rawScore = 0;
+          }
+          if (!Number.isFinite(item.islandMeta.normalisedScore)) {
+            item.islandMeta.normalisedScore = 0;
+          }
+        } else {
+          item.islandMeta = {
+            reason: "no_island",
+            message: "未取得完整參數熱圖或無高分島嶼",
+            rawScore: 0,
+            normalisedScore: 0,
+          };
+        }
       }
     });
   }

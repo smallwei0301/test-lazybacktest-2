@@ -828,3 +828,9 @@
 - **Fix**: 新增 `computeStrategyCompositeScore` 與 `computeFinalOfiScore`，缺失子分數時改以 0 分處理並保留原權重，並回傳 Flow/Strategy 貢獻拆解；同步更新文件、CSV 與版本碼對齊最新邏輯。
 - **Diagnostics**: 以缺少 IslandScore 的策略驗證 `R^{Strategy}` 會扣除 0.25 權重且 `components.finalOfiFlowContribution`、`finalOfiStrategyContribution` 正確反映 0.30/0.70 的加總，CSV 與說明書描述與實作一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-12-10 — Patch LB-OFI-ISLANDTIP-20251014A
+- **Issue recap**: IslandScore 對於僅有一個參數或進出場使用相同名稱的組合，僅回傳 0 分無法告知原因，使用者難以判斷如何調整參數。
+- **Fix**: 將 OFI 模組升級為 `LB-OFI-ISLANDTIP-20251014A`，記錄參數軸診斷並在 UI 顯示「參數名稱重複會導致熱島為 0」提醒，同步更新文件版本。
+- **Diagnostics**: 以僅有單一 `length` 參數的策略驗證 `meta.island.reason = 'duplicate_param_names'`，結果表與 tooltip 皆顯示提醒，並保留其他組合的原始島嶼分數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/overfit-score.js','js/batch-optimization.js','js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

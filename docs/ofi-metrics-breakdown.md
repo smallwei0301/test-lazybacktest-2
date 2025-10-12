@@ -1,6 +1,6 @@
-# OFI 指標拆解與規格對照（LB-OFI-DOCS-20251013A）
+# OFI 指標拆解與規格對照（LB-OFI-DOCS-20251014A）
 
-> 適用模組：`LB-OFI-STRATWEIGHT-20251013A`
+> 適用模組：`LB-OFI-ISLANDTIP-20251014A`
 
 本文件將批量優化流程中每一個 OFI 構面、子分數與實作細節完整展開，並與原始規格比對差異與影響，方便前後端工程師與產品夥伴追蹤。
 
@@ -86,7 +86,8 @@
 **差異 & 影響**
 - 新增 `max S_j` 步驟，確保最佳島嶼分數被拉到 1，與原規格完全一致並維持相對排序。【F:js/overfit-score.js†L914-L958】
 - 修正 `normaliseWithQuantiles` 在分位範圍塌縮時回傳 1 的問題，現在平坦邊緣會維持 0 懲罰，符合 Lopez de Prado 對平坦島嶼給出最高分的定義。【F:js/overfit-score.js†L1267-L1283】
-- 若無法建構島嶼（參數軸不足或僅有尖峰）會主動回傳 `R^{Island}_k = 0` 與「未取得完整參數熱圖」訊息，避免 UI 顯示空白。【F:js/overfit-score.js†L1107-L1119】
+- 若無法建構島嶼（參數軸不足或僅有尖峰）會主動回傳 `R^{Island}_k = 0` 與提示訊息，避免 UI 顯示空白。【F:js/overfit-score.js†L1202-L1224】
+- 針對「僅有一個數值參數」或「進出場參數名稱重複」等情境，額外回傳 `duplicate_param_names` 等診斷，UI 會顯示「參數名稱重複會導致熱島為 0」提醒。【F:js/overfit-score.js†L815-L905】【F:js/overfit-score.js†L922-L1035】【F:js/batch-optimization.js†L2084-L2119】
 - `meta` 會回傳面積、分布、原始分數等資訊，供 UI/診斷使用。【F:js/overfit-score.js†L880-L893】
 
 ### 2.4 DSR／PSR（顯著性）
