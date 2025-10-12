@@ -14,6 +14,8 @@
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 
+const STRATEGY_COMPARE_VERSION = 'LB-STRATEGY-COMPARE-20260120A';
+
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart object:', typeof Chart);
@@ -8833,26 +8835,165 @@ function setDefaultFees(stockNo) {
         console.log(`[Fees] Stock 預設費率 for ${stockCode} -> Buy: ${buyFeeInput.value}%, Sell+Tax: ${sellFeeInput.value}%`);
     }
 }
-function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY); try { const parsed = strategies ? JSON.parse(strategies) : {}; // 清理損壞的數據
+function getSavedStrategies() {
+    const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY);
+    try {
+        const parsed = strategies ? JSON.parse(strategies) : {};
         const cleaned = {};
         for (const [name, data] of Object.entries(parsed)) {
             if (data && typeof data === 'object' && data.settings) {
-                cleaned[name] = data;
+                const normalised = { ...data };
+                if (!normalised.metrics || typeof normalised.metrics !== 'object') {
+                    normalised.metrics = {};
+                }
+                if (!normalised.insights || typeof normalised.insights !== 'object') {
+                    normalised.insights = null;
+                }
+                if (!normalised.version) {
+                    normalised.version = STRATEGY_COMPARE_VERSION;
+                }
+                cleaned[name] = normalised;
             } else {
                 console.warn(`[Storage] Removing corrupted strategy: ${name}`, data);
             }
         }
-        // 如果有損壞數據被清理，更新 localStorage
         if (Object.keys(cleaned).length !== Object.keys(parsed).length) {
             localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(cleaned));
         }
-        return cleaned; } catch (e) { console.error("讀取策略時解析JSON錯誤:", e); return {}; } }
-function saveStrategyToLocalStorage(name, settings, metrics) { 
-    try { 
-        const strategies = getSavedStrategies(); 
-        strategies[name] = { 
-            settings: { 
-                stockNo: settings.stockNo, 
+        return cleaned;
+    } catch (e) {
+        console.error('讀取策略時解析JSON錯誤:', e);
+        return {};
+    }
+}
+function buildStrategySignature(settings) {
+    if (!settings || typeof settings !== 'object') return null;
+    const components = [
+        settings.stockNo || '',
+        settings.startDate || '',
+        settings.endDate || '',
+        settings.entryStrategy || '',
+        settings.exitStrategy || '',
+        settings.enableShorting ? '1' : '0',
+        settings.shortEntryStrategy || '',
+        settings.shortExitStrategy || '',
+        settings.positionBasis || '',
+        settings.tradeTiming || '',
+    ];
+    return components.join('|');
+}
+
+function collectResultMetrics(result) {
+    const payload = {
+        annualizedReturn: null,
+        totalReturn: null,
+        maxDrawdown: null,
+        winRate: null,
+        sharpeRatio: null,
+        sortinoRatio: null,
+        totalTrades: null,
+        buyHoldAnnualizedReturn: null,
+        version: STRATEGY_COMPARE_VERSION,
+        recordedAt: Date.now(),
+    };
+    if (!result || typeof result !== 'object') {
+        return payload;
+    }
+    if (Number.isFinite(result.annualizedReturn)) payload.annualizedReturn = result.annualizedReturn;
+    if (Number.isFinite(result.totalReturn)) {
+        payload.totalReturn = result.totalReturn;
+    } else if (Number.isFinite(result.returnRate)) {
+        payload.totalReturn = result.returnRate;
+    }
+    if (Number.isFinite(result.maxDrawdown)) payload.maxDrawdown = result.maxDrawdown;
+    if (Number.isFinite(result.winRate)) payload.winRate = result.winRate;
+    if (Number.isFinite(result.sharpeRatio)) payload.sharpeRatio = result.sharpeRatio;
+    if (Number.isFinite(result.sortinoRatio)) payload.sortinoRatio = result.sortinoRatio;
+    if (Number.isFinite(result.totalTrades)) {
+        payload.totalTrades = result.totalTrades;
+    } else if (Number.isFinite(result.tradesCount)) {
+        payload.totalTrades = result.tradesCount;
+    } else if (Number.isFinite(result.tradeCount)) {
+        payload.totalTrades = result.tradeCount;
+    }
+    if (Number.isFinite(result.buyHoldAnnualizedReturn)) {
+        payload.buyHoldAnnualizedReturn = result.buyHoldAnnualizedReturn;
+    }
+    return payload;
+}
+
+function collectStrategyInsights(signature, metrics = null) {
+    const insights = {
+        version: STRATEGY_COMPARE_VERSION,
+        recordedAt: Date.now(),
+        signature: signature || null,
+        metricsSnapshot: metrics || null,
+    };
+    try {
+        if (typeof window !== 'undefined' && window.rollingTest && window.rollingTest.state) {
+            const aggregate = window.rollingTest.state.lastAggregate;
+            if (aggregate && Number.isFinite(aggregate.score)) {
+                insights.rollingTest = {
+                    score: Number.isFinite(aggregate.score) ? aggregate.score : null,
+                    gradeLabel: aggregate.gradeLabel || null,
+                    passRate: Number.isFinite(aggregate.passRate) ? aggregate.passRate : null,
+                    passCount: Number.isFinite(aggregate.passCount) ? aggregate.passCount : null,
+                    totalWindows: Number.isFinite(aggregate.totalWindows) ? aggregate.totalWindows : null,
+                    averageAnnualizedReturn: Number.isFinite(aggregate.averageAnnualizedReturn)
+                        ? aggregate.averageAnnualizedReturn
+                        : null,
+                    medianSharpe: Number.isFinite(aggregate.medianSharpe) ? aggregate.medianSharpe : null,
+                    medianSortino: Number.isFinite(aggregate.medianSortino) ? aggregate.medianSortino : null,
+                    thresholds: aggregate.thresholds || null,
+                    summaryText: aggregate.summaryText || null,
+                    capturedAt: Date.now(),
+                };
+            }
+        }
+    } catch (error) {
+        console.warn('[Strategy Compare] Failed to capture rolling insights:', error);
+    }
+
+    try {
+        if (trendAnalysisState && trendAnalysisState.summary) {
+            const summary = trendAnalysisState.summary;
+            const latestLabel = summary?.latest?.label || null;
+            const aggregatedByType = {};
+            if (summary?.aggregatedByType && typeof summary.aggregatedByType === 'object') {
+                Object.entries(summary.aggregatedByType).forEach(([key, stats]) => {
+                    aggregatedByType[key] = {
+                        returnPct: Number.isFinite(stats?.returnPct) ? stats.returnPct : null,
+                        coveragePct: Number.isFinite(stats?.coveragePct) ? stats.coveragePct : null,
+                        segments: Number.isFinite(stats?.segments) ? stats.segments : null,
+                        days: Number.isFinite(stats?.days) ? stats.days : null,
+                    };
+                });
+            }
+            const latestStats = latestLabel ? aggregatedByType[latestLabel] : null;
+            insights.trend = {
+                latestLabel,
+                latestLabelName: latestLabel ? (TREND_STYLE_MAP[latestLabel]?.label || latestLabel) : null,
+                latestDate: summary.latest?.date || null,
+                latestReturnPct: latestStats && Number.isFinite(latestStats.returnPct) ? latestStats.returnPct : null,
+                latestCoveragePct: latestStats && Number.isFinite(latestStats.coveragePct) ? latestStats.coveragePct : null,
+                sensitivity: trendAnalysisState.sensitivity ?? null,
+                averageConfidence: Number.isFinite(summary.averageConfidence) ? summary.averageConfidence : null,
+                aggregatedByType,
+            };
+        }
+    } catch (error) {
+        console.warn('[Strategy Compare] Failed to capture trend insights:', error);
+    }
+
+    return insights;
+}
+
+function saveStrategyToLocalStorage(name, settings, metrics, insights) {
+    try {
+        const strategies = getSavedStrategies();
+        strategies[name] = {
+            settings: {
+                stockNo: settings.stockNo,
                 startDate: settings.startDate, 
                 endDate: settings.endDate, 
                 initialCapital: settings.initialCapital, 
@@ -8877,12 +9018,14 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
                 buyFee: settings.buyFee, 
                 sellFee: settings.sellFee 
             }, 
-            metrics: metrics 
-        }; 
-        
-        localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); 
-        return true; 
-    } catch (e) { 
+            metrics: metrics,
+            insights: insights || null,
+            version: STRATEGY_COMPARE_VERSION,
+        };
+
+        localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+        return true;
+    } catch (e) {
         console.error("儲存策略到 localStorage 時發生錯誤:", e); 
         if (e.name === 'QuotaExceededError') { 
             showError("儲存失敗：localStorage 空間已滿。請刪除一些舊策略。"); 
@@ -8892,7 +9035,21 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
         return false; 
     } 
 }
-function deleteStrategyFromLocalStorage(name) { try { const strategies = getSavedStrategies(); if (strategies[name]) { delete strategies[name]; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); return true; } return false; } catch (e) { console.error("刪除策略時發生錯誤:", e); showError(`刪除策略失敗: ${e.message}`); return false; } }
+function deleteStrategyFromLocalStorage(name) {
+    try {
+        const strategies = getSavedStrategies();
+        if (strategies[name]) {
+            delete strategies[name];
+            localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error('刪除策略時發生錯誤:', e);
+        showError(`刪除策略失敗: ${e.message}`);
+        return false;
+    }
+}
 function populateSavedStrategiesDropdown() { 
     const selectElement = document.getElementById('loadStrategySelect'); 
     if (!selectElement) return;
@@ -8979,12 +9136,21 @@ function saveStrategy() {
             return; 
         } 
     } 
-    const currentSettings = getBacktestParams(); 
-    const currentMetrics = { annualizedReturn: lastOverallResult?.annualizedReturn, sharpeRatio: lastOverallResult?.sharpeRatio }; 
-    
-    if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) { 
-        populateSavedStrategiesDropdown(); 
-        showSuccess(`策略 "${trimmedName}" 已儲存！`); 
+    const currentSettings = getBacktestParams();
+    const strategySignature = buildStrategySignature(currentSettings);
+    const currentMetrics = collectResultMetrics(lastOverallResult);
+    const strategyInsights = collectStrategyInsights(strategySignature, currentMetrics);
+
+    if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics, strategyInsights)) {
+        populateSavedStrategiesDropdown();
+        showSuccess(`策略 "${trimmedName}" 已儲存！`);
+        document.dispatchEvent(new CustomEvent('lazybacktest:savedStrategiesUpdated', {
+            detail: {
+                name: trimmedName,
+                action: 'save',
+                timestamp: Date.now(),
+            },
+        }));
     }
 }
 function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
@@ -9016,7 +9182,27 @@ function loadStrategy() { const selectElement = document.getElementById('loadStr
     }
     
     lastOverallResult = null; lastSubPeriodResults = null; } catch (error) { console.error(`載入策略 "${strategyName}" 時發生錯誤:`, error); showError(`載入策略失敗: ${error.message}`); } }
-function deleteStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要刪除的策略。"); return; } if (confirm(`確定要刪除策略 "${strategyName}" 嗎？此操作無法復原。`)) { if (deleteStrategyFromLocalStorage(strategyName)) { populateSavedStrategiesDropdown(); showSuccess(`策略 "${strategyName}" 已刪除！`); } } }
+function deleteStrategy() {
+    const selectElement = document.getElementById('loadStrategySelect');
+    const strategyName = selectElement.value;
+    if (!strategyName) {
+        showInfo('請先從下拉選單選擇要刪除的策略。');
+        return;
+    }
+    if (confirm(`確定要刪除策略 "${strategyName}" 嗎？此操作無法復原。`)) {
+        if (deleteStrategyFromLocalStorage(strategyName)) {
+            populateSavedStrategiesDropdown();
+            showSuccess(`策略 "${strategyName}" 已刪除！`);
+            document.dispatchEvent(new CustomEvent('lazybacktest:savedStrategiesUpdated', {
+                detail: {
+                    name: strategyName,
+                    action: 'delete',
+                    timestamp: Date.now(),
+                },
+            }));
+        }
+    }
+}
 function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(Math.random() * arr.length)]; const getRandomValue = (min, max, step) => { if (step === undefined || step === 0) step = 1; const range = max - min; if (range <= 0 && step > 0) return min; if (step <= 0) return min; const steps = Math.max(0, Math.floor(range / step)); const randomStep = Math.floor(Math.random() * (steps + 1)); let value = min + randomStep * step; if (step.toString().includes('.')) { const precision = step.toString().split('.')[1].length; value = parseFloat(value.toFixed(precision)); } return Math.max(min, Math.min(max, value)); }; const allKeys = Object.keys(strategyDescriptions); const entryKeys = allKeys.filter(k => !k.startsWith('short_') && !k.startsWith('cover_') && !k.endsWith('_exit') && k !== 'fixed_stop_loss'); const exitKeysRaw = allKeys.filter(k => (k.endsWith('_exit') || ['ma_below', 'rsi_overbought', 'bollinger_reversal', 'trailing_stop', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss', 'fixed_stop_loss'].includes(k)) && !k.startsWith('short_') && !k.startsWith('cover_')); const exitKeys = exitKeysRaw.map(k => k.replace('_exit', '')).filter(k => k !== 'fixed_stop_loss'); const shortEntryKeys = allKeys.filter(k => k.startsWith('short_') && k !== 'short_fixed_stop_loss'); const coverKeys = allKeys.filter(k => k.startsWith('cover_') && k !== 'cover_fixed_stop_loss'); const setRandomParams = (type, strategyKey) => { let internalKey = strategyKey; if (type === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(strategyKey)) internalKey = `${strategyKey}_exit`; else if (type === 'shortEntry') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(strategyKey)) internalKey = `short_${strategyKey}`; } else if (type === 'shortExit') { if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(strategyKey)) internalKey = `cover_${strategyKey}`; } const config = strategyDescriptions[internalKey]; if (!config || !config.defaultParams) return; let params = {}; for (const pName in config.defaultParams) { const target = config.optimizeTargets?.find(t => t.name === pName); let randomVal; if (target?.range) { randomVal = getRandomValue(target.range.from, target.range.to, target.range.step); } else { if (pName.includes('Period') || pName.includes('period')) randomVal = getRandomValue(5, 100, 1); else if (pName === 'threshold' && internalKey.includes('rsi')) randomVal = getRandomValue(10, 90, 1); else if (pName === 'threshold' && internalKey.includes('williams')) randomVal = getRandomValue(-90, -10, 1); else if (pName === 'thresholdX' || pName === 'thresholdY') randomVal = getRandomValue(10, 90, 1); else if (pName === 'deviations') randomVal = getRandomValue(1, 3, 0.1); else if (pName === 'multiplier') randomVal = getRandomValue(1.5, 5, 0.1); else if (pName === 'percentage') randomVal = getRandomValue(1, 25, 0.5); else randomVal = config.defaultParams[pName]; } params[pName] = randomVal; } if (['ma_cross', 'ema_cross', 'short_ma_cross', 'short_ema_cross', 'cover_ma_cross', 'cover_ema_cross'].some(prefix => internalKey.startsWith(prefix))) { if (params.shortPeriod && params.longPeriod && params.shortPeriod >= params.longPeriod) { params.shortPeriod = getRandomValue(3, Math.max(4, params.longPeriod - 1), 1); console.log(`[Random] Adjusted ${type} shortPeriod to ${params.shortPeriod} (long: ${params.longPeriod})`); } } for (const pName in params) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const inputId = `${type}${idSfx}`; const inputEl = document.getElementById(inputId); if (inputEl) { inputEl.value = params[pName]; } else { console.warn(`[Random] Input element not found for ${type} - ${pName}: #${inputId}`); } } }; const randomEntryKey = getRandomElement(entryKeys); const randomExitKey = getRandomElement(exitKeys); document.getElementById('entryStrategy').value = randomEntryKey; document.getElementById('exitStrategy').value = randomExitKey; updateStrategyParams('entry'); updateStrategyParams('exit'); setRandomParams('entry', randomEntryKey); setRandomParams('exit', randomExitKey); if (document.getElementById('enableShortSelling').checked) { const randomShortEntryKey = getRandomElement(shortEntryKeys); const randomCoverKey = getRandomElement(coverKeys); document.getElementById('shortEntryStrategy').value = randomShortEntryKey; document.getElementById('shortExitStrategy').value = randomCoverKey; updateStrategyParams('shortEntry'); updateStrategyParams('shortExit'); setRandomParams('shortEntry', randomShortEntryKey.replace('short_', '')); setRandomParams('shortExit', randomCoverKey.replace('cover_', '')); } showSuccess("策略與參數已隨機設定！"); }
 
 // --- 市場切換和股票代碼智慧功能 ---
