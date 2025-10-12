@@ -144,13 +144,191 @@
     font-size: 0.75rem;
     color: var(--muted-foreground);
 }
+.lb-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.lb-logo__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff;
+    border-radius: 0.9rem;
+    box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    overflow: hidden;
+}
+.lb-logo__text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.lb-logo__brand {
+    display: inline-flex;
+    align-items: baseline;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    font-size: 1.125rem;
+}
+.lb-logo__brand-lazy {
+    color: #1f2937;
+    margin-right: 0.15rem;
+}
+.lb-logo__brand-rest {
+    color: var(--primary);
+}
+.lb-logo__subtitle {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+}
 
-.tooltip { position: relative; display: inline-block; vertical-align: middle; }
-.tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+.tooltip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    gap: 0.25rem;
+}
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: min(260px, calc(100vw - 48px));
+    background-color: rgba(17, 24, 39, 0.95);
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px 12px;
+    position: absolute;
+    z-index: 50;
+    bottom: calc(100% + 0.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+    backdrop-filter: blur(4px);
+}
+.tooltip .tooltiptext::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 6px;
+    border-style: solid;
+    border-color: rgba(17, 24, 39, 0.95) transparent transparent transparent;
+}
+.tooltip:hover .tooltiptext,
+.tooltip:focus-within .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+    transform: translate(-50%, -2px);
+}
 #backtest-result .tooltiptext { z-index: 10000; }
+.info-circle {
+    width: 0.95rem;
+    height: 0.95rem;
+    border-radius: 9999px;
+    border: 1.4px solid #111827;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1;
+    color: #111827;
+    background-color: transparent;
+    cursor: help;
+    user-select: none;
+}
+.info-circle--static {
+    cursor: default;
+}
+.info-circle--static:hover {
+    background-color: transparent;
+}
+.tooltip:hover .info-circle,
+.tooltip:focus-within .info-circle {
+    background-color: color-mix(in srgb, #111827 15%, transparent);
+}
+.tooltip:focus-within .info-circle {
+    outline: 2px solid color-mix(in srgb, #111827 45%, transparent);
+    outline-offset: 2px;
+}
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
+}
+.button-reset,
+button {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+button:not([disabled]) {
+    cursor: pointer;
+}
+button[disabled] {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+button.bg-primary:not([disabled]),
+.btn-primary {
+    will-change: filter;
+}
+.btn-primary {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    border: 1px solid var(--primary);
+}
+button.bg-primary:not([disabled]):hover,
+.btn-primary:hover {
+    filter: brightness(0.92);
+}
+button.btn-secondary,
+.btn-secondary {
+    background-color: var(--secondary);
+    color: var(--secondary-foreground);
+    border: 1px solid var(--secondary);
+}
+.btn-secondary:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--secondary) 85%, black);
+    border-color: color-mix(in srgb, var(--secondary) 90%, black);
+    color: var(--secondary-foreground);
+}
+.btn-outline {
+    background-color: transparent;
+    color: var(--foreground);
+    border: 1px solid var(--border);
+}
+.btn-outline:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent-foreground);
+}
+button:not([disabled]):not(.btn-primary):not(.btn-secondary):not(.btn-outline):hover {
+    background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: color-mix(in srgb, var(--foreground) 92%, black);
+}
+button.border.transition-colors:not([disabled]):hover {
+    background-color: color-mix(in srgb, currentColor 18%, transparent);
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
+    color: color-mix(in srgb, currentColor 92%, var(--foreground));
+}
+button.border.transition-colors:not([disabled]):focus-visible {
+    outline: 2px solid color-mix(in srgb, currentColor 55%, transparent);
+    outline-offset: 2px;
+}
+.trade-list .trade-signal {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.trade-list .trade-signal:hover {
+    background-color: color-mix(in srgb, var(--muted) 22%, var(--background));
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+input[type="radio"] {
+    accent-color: var(--accent);
 }
 .sensitivity-card {
     position: relative;

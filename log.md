@@ -8,6 +8,15 @@
   - 逐窗結果表加入參數摘要欄與更完整的多空／風控設定敘述，便於比對每個視窗採用的策略組合。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-01-20 — Patch LB-UI-DATAGAP-20260120A
+- **Scope**: 起始日資料缺口提醒、績效表格與摘要訊息優化。
+- **Updates**:
+  - Worker 偵測使用者起始日後連續 14 日無資料時，回傳第一筆有效日期與缺口天數，前端顯示提醒並在策略戰報加入調整建議。
+  - Summary 區塊新增期間績效表 `displayPerformanceTable`，補齊每段與總計的報酬、夏普、索提諾與最大回撤指標。
+  - 交易統計、策略設定卡全面改用 `renderInfoTooltip` 圓形提示，並補充勝率、停損停利等專業說明。
+  - 交易紀錄列表移除 inline hover，改以 CSS 控制背景/陰影過渡，統一 hover 色彩邏輯。
+- **Testing**: `npm run lint` (not available) — 以手動檢查前端渲染、確認回測流程無例外；Worker 靜態分析確保無語法錯誤。
+
 ## 2026-01-15 — Patch LB-ROLLING-TEST-AUTO-OPT-20260115A
 - **Scope**: Walk-Forward 訓練期參數優化。
 - **Updates**:

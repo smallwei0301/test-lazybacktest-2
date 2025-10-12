@@ -7491,6 +7491,27 @@ function runStrategy(data, params, options = {}) {
     dataStartDate: params.dataStartDate || null,
     endDate: params.endDate || null,
   });
+  let startDateGapWarning = null;
+  if (effectiveStartISO) {
+    const firstDataDate =
+      datasetSummary?.firstRowOnOrAfterEffectiveStart?.date ||
+      datasetSummary?.firstValidCloseOnOrAfterEffectiveStart?.date ||
+      datasetSummary?.firstDate ||
+      null;
+    if (firstDataDate) {
+      const gapDays = diffIsoDays(effectiveStartISO, firstDataDate);
+      if (Number.isFinite(gapDays) && gapDays >= 14) {
+        startDateGapWarning = {
+          gapDays,
+          firstAvailableDate: firstDataDate,
+          requestedStartDate: effectiveStartISO,
+        };
+        console.warn(
+          `[Worker] ${params.stockNo} 起始日後 ${gapDays} 日才出現資料，第一筆日期 ${firstDataDate}，請提醒使用者調整開始日期。`,
+        );
+      }
+    }
+  }
   if (
     Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective) &&
     datasetSummary.firstValidCloseGapFromEffective > 1
@@ -7930,7 +7951,27 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const primaryStage =
+        currentLongEntryBreakdown.find(
+          (stage) => stage && stage.stageTrigger === "signal",
+        ) || currentLongEntryBreakdown[0] || null;
+      const cloneIndicatorValues = (values) => {
+        if (!values || typeof values !== "object") return null;
+        const cloned = {};
+        Object.entries(values).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            cloned[key] = value.map((item) =>
+              Number.isFinite(item) ? Number(item) : item === null ? null : item,
+            );
+          } else if (value && typeof value === "object") {
+            cloned[key] = { ...value };
+          } else {
+            cloned[key] = Number.isFinite(value) ? Number(value) : value;
+          }
+        });
+        return cloned;
+      };
+      const aggregated = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -7942,7 +7983,19 @@ function runStrategy(data, params, options = {}) {
         cumulativeStagePercent: totalPercent,
         stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
         positionId: currentLongPositionId,
+        signalStageIndex: primaryStage?.stageIndex ?? null,
       };
+      if (primaryStage?.kdValues) {
+        aggregated.kdValues = { ...primaryStage.kdValues };
+      }
+      if (primaryStage?.macdValues) {
+        aggregated.macdValues = { ...primaryStage.macdValues };
+      }
+      const primaryIndicators = cloneIndicatorValues(primaryStage?.indicatorValues);
+      if (primaryIndicators) {
+        aggregated.indicatorValues = primaryIndicators;
+      }
+      return aggregated;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -10275,6 +10328,7 @@ function runStrategy(data, params, options = {}) {
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
     };
+    result.startDateGapWarning = startDateGapWarning;
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
     }
@@ -10318,9 +10372,14 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+  const baselineReturnRate = Number.isFinite(baselineMetrics?.returnRate)
     ? baselineMetrics.returnRate
-    : 0;
+    : null;
+  const baselineAnnualized = Number.isFinite(
+    baselineMetrics?.annualizedReturn,
+  )
+    ? baselineMetrics.annualizedReturn
+    : baselineReturnRate;
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
@@ -10340,7 +10399,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         context: ctx,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualized,
+        baselineReturnRate,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -10411,10 +10471,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
-      returnRate: baselineReturn,
-      annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
-        ? baselineMetrics.annualizedReturn
-        : null,
+      returnRate: baselineReturnRate,
+      annualizedReturn: baselineAnnualized,
       sharpeRatio: baselineSharpe,
     },
     groups,
@@ -10425,7 +10483,8 @@ function buildSensitivityGroup({
   context,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualized,
+  baselineReturnRate,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -10444,7 +10503,8 @@ function buildSensitivityGroup({
         baseValue: entry.value,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualized,
+        baselineReturnRate,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -10540,7 +10600,8 @@ function evaluateSensitivityParameter({
   baseValue,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualized,
+  baselineReturnRate,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -10580,12 +10641,32 @@ function evaluateSensitivityParameter({
       const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
         ? scenarioResult.returnRate
         : null;
-      const deltaReturn =
-        Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
-          ? scenarioReturn - baselineReturn
-          : null;
-      const driftPercent =
-        Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
+      const scenarioAnnualized = Number.isFinite(
+        scenarioResult.annualizedReturn,
+      )
+        ? scenarioResult.annualizedReturn
+        : Number.isFinite(scenarioReturn)
+        ? scenarioReturn
+        : null;
+      const deltaAnnualized = Number.isFinite(scenarioAnnualized)
+        ? Number.isFinite(baselineAnnualized)
+          ? scenarioAnnualized - baselineAnnualized
+          : baselineAnnualized === null
+          ? scenarioAnnualized
+          : null
+        : null;
+      const deltaReturn = Number.isFinite(scenarioReturn)
+        ? Number.isFinite(baselineReturnRate)
+          ? scenarioReturn - baselineReturnRate
+          : baselineReturnRate === null
+          ? scenarioReturn
+          : null
+        : null;
+      const driftPercent = Number.isFinite(deltaAnnualized)
+        ? Math.abs(deltaAnnualized)
+        : Number.isFinite(deltaReturn)
+        ? Math.abs(deltaReturn)
+        : null;
       const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
         ? scenarioResult.sharpeRatio
         : null;
@@ -10606,13 +10687,13 @@ function evaluateSensitivityParameter({
         summaryAccumulator.driftValues.push(driftPercent);
         summaryAccumulator.scenarioCount += 1;
       }
-      if (Number.isFinite(deltaReturn)) {
-        if (deltaReturn >= 0) {
-          positiveDeltas.push(deltaReturn);
-          summaryAccumulator.positive.push(deltaReturn);
+      if (Number.isFinite(deltaAnnualized)) {
+        if (deltaAnnualized >= 0) {
+          positiveDeltas.push(deltaAnnualized);
+          summaryAccumulator.positive.push(deltaAnnualized);
         } else {
-          negativeDeltas.push(deltaReturn);
-          summaryAccumulator.negative.push(deltaReturn);
+          negativeDeltas.push(deltaAnnualized);
+          summaryAccumulator.negative.push(deltaAnnualized);
         }
       }
       if (Number.isFinite(deltaSharpe)) {
@@ -10631,16 +10712,13 @@ function evaluateSensitivityParameter({
         type: adjustment.type,
         direction: adjustment.direction,
         value: adjustment.value,
+        deltaAnnualized,
         deltaReturn,
         driftPercent,
         deltaSharpe,
         run: {
           returnRate: scenarioReturn,
-          annualizedReturn: Number.isFinite(
-            scenarioResult.annualizedReturn
-          )
-            ? scenarioResult.annualizedReturn
-            : null,
+          annualizedReturn: scenarioAnnualized,
           sharpeRatio: scenarioSharpe,
         },
       });
