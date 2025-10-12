@@ -692,7 +692,7 @@
                                             <button id="applyYearsBtn" title="設定開始日期" class="px-3 py-2 bg-primary hover:bg-primary text-white text-xs rounded-md transition duration-150 ease-in-out whitespace-nowrap" style="background-color: var(--primary);">套用</button>
                                         </div>
                                         <div>
-                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金 (元)</label>
+                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金-固定金額買入 (元)</label>
                                             <input 
                                                 type="number" 
                                                 id="initialCapital" 
@@ -765,16 +765,16 @@
                                         <div class="space-y-2">
                                             <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
                                                 部位大小計算基準
-                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金-固定金額買入：固定使用最開始設定的本金計算部位大小。<br>- 總資金-獲利再投入：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
+                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金-固定金額買入</label>
                                                 </div>
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
+                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金-獲利再投入</label>
                                                 </div>
                                             </div>
                                         </div>
@@ -1250,6 +1250,13 @@
                                                 data-tab="batch-optimization"
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="strategy-comparison"
+                                            >
+                                                <i data-lucide="table" class="lucide-sm inline mr-1"></i>策略比較
                                             </button>
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
@@ -1904,6 +1911,53 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="tab-content hidden" id="strategy-comparison-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header pb-4">
+                                        <div class="space-y-2">
+                                            <h3 class="card-title flex items-center gap-2">
+                                                <i data-lucide="table" class="lucide-sm" aria-hidden="true"></i>
+                                                <span>策略比較控制台</span>
+                                            </h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                從左側儲存的策略中挑選多個組合，並依照想分析的指標自訂比較表格。系統會同步顯示年化表現、風險指標、Walk-Forward 滾動測試評分與趨勢區間的最新狀態，協助你快速找出在不同市況下仍具穩定性的候選方案。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <section class="space-y-2">
+                                            <div class="flex items-center justify-between gap-3 flex-wrap">
+                                                <h4 class="text-sm font-semibold" style="color: var(--foreground);">選擇要比較的策略</h4>
+                                                <button type="button" id="comparison-select-all" class="text-[11px] px-2 py-1 rounded-md border" style="border-color: var(--border); color: var(--muted-foreground); background-color: var(--background);">
+                                                    全選/全不選
+                                                </button>
+                                            </div>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">此處會列出已儲存的策略（名稱｜年化｜Sharpe）。若尚未儲存，請先於「策略管理」卡片建立策略後再回來比較。</p>
+                                            <div id="comparison-strategy-list" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
+                                            <p id="comparison-strategy-empty" class="text-xs text-center py-4 rounded-md border border-dashed" style="color: var(--muted-foreground); border-color: color-mix(in srgb, var(--muted) 45%, transparent);">目前沒有儲存的策略。完成回測後可使用「儲存策略」功能建立候選清單。</p>
+                                        </section>
+
+                                        <section class="space-y-2">
+                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">選擇比較項目</h4>
+                                            <p class="text-xs" style="color: var(--muted-foreground);">勾選想要呈現的評估指標；新增功能推出時也會出現在下方模組中，維持相同操作體驗。</p>
+                                            <div id="comparison-metric-options" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
+                                            <div id="comparison-future-hooks" class="mt-1 border border-dashed rounded-md px-3 py-2 text-[11px]" style="border-color: color-mix(in srgb, var(--muted) 45%, transparent); color: var(--muted-foreground);">
+                                                🔧 預留模組：未來若新增其他評估面向（例如資金曲線穩定度、敏感度分析結果等），會以相同的勾選區塊呈現。
+                                            </div>
+                                        </section>
+
+                                        <section class="space-y-2">
+                                            <h4 class="text-sm font-semibold" style="color: var(--foreground);">比較結果</h4>
+                                            <div id="comparison-table-container" class="border border-dashed rounded-lg overflow-x-auto" style="border-color: color-mix(in srgb, var(--muted) 40%, transparent);">
+                                                <div id="comparison-table-empty" class="py-8 text-center text-xs" style="color: var(--muted-foreground);">請至少勾選一個策略與一項指標，系統會即時生成比較表格。</div>
+                                            </div>
+                                            <p class="text-[11px]" style="color: var(--muted-foreground);">提示：滾動測試評分與趨勢區間資料會沿用最近一次測試或回測結果，若尚未執行過對應功能將顯示 N/A。</p>
+                                        </section>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="tab-content hidden" id="rolling-test-tab">
                                 <div class="space-y-6">
                                     <div class="card">
@@ -2443,7 +2497,8 @@
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
-    
+    <script src="js/strategy-comparison.js"></script>
+
     <script>
         // Initialize Lucide icons
         document.addEventListener('DOMContentLoaded', function() {

@@ -228,7 +228,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
+                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。<br>資金基準為「初始本金-固定金額買入」。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
@@ -250,7 +250,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
+                                <span class="tooltiptext">策略最終總資產相對於「初始本金-固定金額買入」的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
@@ -279,7 +279,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
+                                <span class="tooltiptext">策略**總資金-獲利再投入**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
@@ -451,7 +451,7 @@ function displayBacktestResult(result) {
                 </div>
                 <div class="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金</p>
+                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金-固定金額買入</p>
                         <p class="text-base font-semibold text-gray-800">${result.initialCapital.toLocaleString()}元</p>
                     </div>
                 </div>

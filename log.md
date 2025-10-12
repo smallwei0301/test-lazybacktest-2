@@ -1016,3 +1016,13 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-15 — Patch LB-STRATEGY-COMPARISON-20250919A
+- **Issue recap**: 已儲存策略缺乏集中化比較介面，也未保留滾動測試與趨勢區間快照，使用者需自行記錄各策略評分與市況狀態，造成決策流程繁瑣；同時「初始本金」「總資金」標籤未凸顯資金運用模式。
+- **Fix**:
+  - `index.html` 新增「策略比較」分頁，提供策略多選、指標勾選以及比較表格，並預留模組以支援後續擴充的指標篩選。
+  - `js/backtest.js` 建立 `collectStrategyComparisonSnapshot`（版本碼 LB-STRATEGY-COMPARISON-20250919A），於儲存策略時同步封存年化/風險指標、滾動測試評分與趨勢區間摘要；更新快取管理與下拉清單顯示邏輯並暴露刷新事件給新分頁使用。
+  - `js/rolling-test.js` 維護最新 Walk-Forward 彙總結果，供策略比較模組直接取用；`js/strategy-comparison.js` 新增策略比較控制台 UI 與資料格式化工具。
+  - `index.html`、`js/backtest.js`、`js/backtest_corrupted.js`、`js/rolling-test.js` 調整「初始本金」「總資金」字樣為「初始本金-固定金額買入」「總資金-獲利再投入」。
+- **Diagnostics**: 本地以假資料驗證儲存策略後比較分頁能即時勾選與更新表格，確認滾動測試評分、趨勢區間回報率在快照存在時顯示數值、缺少資料時顯示 `N/A`；多次切換與刪除策略後，確認勾選狀態與空列表提示正常。
+- **Testing**: 未執行自動化測試（前端專案無既有測試腳本）；後續需於具備代理 API 的環境手動回測 2330/0050/2412 並確認 console 無錯誤。
+
