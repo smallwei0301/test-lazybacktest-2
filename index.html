@@ -765,16 +765,16 @@
                                         <div class="space-y-2">
                                             <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
                                                 部位大小計算基準
-                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金-固定金額買入：固定使用最開始設定的本金計算部位大小。<br>- 總資金-獲利再投入：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
+                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金-固定金額買入</label>
                                                 </div>
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
+                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金-獲利再投入</label>
                                                 </div>
                                             </div>
                                         </div>
@@ -1257,6 +1257,13 @@
                                                 data-tab="rolling-test"
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="strategy-compare"
+                                            >
+                                                <i data-lucide="table" class="lucide-sm inline mr-1"></i>策略比較
                                             </button>
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
@@ -2122,6 +2129,80 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="tab-content hidden space-y-6" id="strategy-compare-tab">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="card-title">策略比較指南</h3>
+                                    </div>
+                                    <div class="card-content space-y-3 text-sm" style="color: var(--muted-foreground);">
+                                        <p>
+                                            將已儲存的策略一次放入同一張表格比對，快速辨識哪些策略在滾動測試、趨勢區間或傳統績效指標上較為穩健。
+                                            建議在執行比較前，先確認每個策略都完成一次最新回測與滾動測試。
+                                        </p>
+                                        <p>
+                                            目前支援比較年化報酬率、Sharpe、Walk-Forward 評分與「目前所處趨勢狀態」的回報表現，未來可以在下方模組中勾選更多欄位。
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="card" id="strategy-compare-control-card">
+                                    <div class="card-header">
+                                        <h3 class="card-title">選擇策略與分析指標</h3>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div class="grid gap-6 lg:grid-cols-2">
+                                            <div>
+                                                <h4 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">策略清單</h4>
+                                                <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+                                                    勾選需要比較的策略；若資料尚未更新，可回到主分頁重新儲存策略後刷新。
+                                                </p>
+                                                <div id="strategy-compare-strategy-list" class="mt-3 space-y-2"></div>
+                                                <div class="flex flex-wrap items-center gap-2 mt-3">
+                                                    <button id="strategy-compare-select-all" type="button" class="px-3 py-1.5 text-xs rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: var(--background);">全部勾選</button>
+                                                    <button id="strategy-compare-clear" type="button" class="px-3 py-1.5 text-xs rounded-md border" style="border-color: var(--border); color: var(--muted-foreground); background-color: var(--background);">清除選取</button>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h4 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">分析維度</h4>
+                                                <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+                                                    可勾選要呈現的欄位，「預留模組」會在未來擴充時啟用，現在預設關閉供您保留版面。
+                                                </p>
+                                                <div id="strategy-compare-metric-list" class="mt-3 grid gap-2 sm:grid-cols-2"></div>
+                                            </div>
+                                        </div>
+                                        <div class="flex flex-wrap items-center justify-between gap-3">
+                                            <span class="text-[11px] font-medium" style="color: var(--muted-foreground);">模組版本：LB-STRATEGY-COMPARE-20260120A</span>
+                                            <div class="flex items-center gap-2">
+                                                <button id="strategy-compare-refresh" type="button" class="btn-primary px-4 py-2 rounded-md font-semibold flex items-center gap-2">
+                                                    <i data-lucide="refresh-cw" class="lucide w-4 h-4"></i>
+                                                    更新比較表
+                                                </button>
+                                                <button id="strategy-compare-export" type="button" class="px-4 py-2 rounded-md border text-xs font-semibold opacity-60 cursor-not-allowed" style="border-color: var(--border); color: var(--muted-foreground); background-color: var(--background);" disabled>
+                                                    預留：匯出報告
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card" id="strategy-compare-result-card">
+                                    <div class="card-header flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                        <h3 class="card-title">策略比較結果</h3>
+                                        <span id="strategy-compare-updatedAt" class="text-xs" style="color: var(--muted-foreground);"></span>
+                                    </div>
+                                    <div class="card-content">
+                                        <div id="strategy-compare-empty" class="rounded-md border border-dashed p-4 text-sm" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: var(--muted-foreground);">
+                                            尚未選取策略。請在上方勾選至少一個已儲存策略並點擊「更新比較表」。
+                                        </div>
+                                        <div id="strategy-compare-table-wrapper" class="overflow-x-auto hidden mt-2">
+                                            <table id="strategy-compare-table" class="min-w-full divide-y divide-border text-sm" style="border-color: var(--border);">
+                                                <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
+                                                    <tr id="strategy-compare-header-row"></tr>
+                                                </thead>
+                                                <tbody id="strategy-compare-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="tab-content hidden" id="ai-prediction-tab">
                                 <div class="space-y-6">
                                     <div class="card">
@@ -2443,6 +2524,7 @@
     <script src="js/loader.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
+    <script src="js/strategy-compare.js"></script>
     
     <script>
         // Initialize Lucide icons

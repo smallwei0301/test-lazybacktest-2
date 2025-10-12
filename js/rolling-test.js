@@ -19,6 +19,7 @@
             stage: '',
         },
         version: 'LB-ROLLING-TEST-20250918A',
+        lastAggregate: null,
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -240,26 +241,26 @@
                 testingResult = { error: error?.message || '測試期回測失敗' };
             }
 
-            state.results.push({
-                window: win,
-                training: trainingResult,
-                testing: testingResult,
-                optimization: optimizationSummary,
-                params: deepClone(windowParams),
-            });
-        }
+        state.results.push({
+            window: win,
+            training: trainingResult,
+            testing: testingResult,
+            optimization: optimizationSummary,
+            params: deepClone(windowParams),
+        });
     }
+}
 
-    function finalizeRollingRun() {
-        toggleRollingControls(false);
-        state.running = false;
-        ensureProgressPanelVisible(state.results.length > 0);
-        if (state.cancelled) {
-            setAlert('滾動測試已中止，可重新調整參數後再試。', 'warning');
-        } else if (state.results.length > 0) {
-            setAlert('滾動測試完成，以下提供綜合評分與逐窗細節。', 'success');
-        }
-        renderRollingReport();
+function finalizeRollingRun() {
+    toggleRollingControls(false);
+    state.running = false;
+    ensureProgressPanelVisible(state.results.length > 0);
+    if (state.cancelled) {
+        setAlert('滾動測試已中止，可重新調整參數後再試。', 'warning');
+    } else if (state.results.length > 0) {
+        setAlert('滾動測試完成，以下提供綜合評分與逐窗細節。', 'success');
+    }
+    renderRollingReport();
         updateRollingPlanPreview();
         if (typeof lucide !== 'undefined') {
             lucide.createIcons();
@@ -381,6 +382,8 @@
         if (summary) summary.textContent = '';
         const intro = document.getElementById('rolling-report-intro');
         if (intro) intro.textContent = '';
+        state.lastAggregate = null;
+        document.dispatchEvent(new CustomEvent('lazybacktest:rollingSummaryUpdated', { detail: null }));
     }
 
     function renderRollingReport() {
@@ -401,6 +404,13 @@
         }));
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        state.lastAggregate = aggregate;
+        document.dispatchEvent(new CustomEvent('lazybacktest:rollingSummaryUpdated', {
+            detail: {
+                aggregate,
+                timestamp: Date.now(),
+            },
+        }));
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -655,8 +665,8 @@
     }
 
     function resolvePositionBasisLabel(value) {
-        if (value === 'initialCapital') return '初始本金';
-        if (value === 'totalCapital') return '總資金';
+        if (value === 'initialCapital') return '初始本金-固定金額買入';
+        if (value === 'totalCapital') return '總資金-獲利再投入';
         return '';
     }
 
