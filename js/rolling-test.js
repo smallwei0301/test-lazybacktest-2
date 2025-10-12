@@ -383,13 +383,9 @@
         if (intro) intro.textContent = '';
     }
 
-    function renderRollingReport() {
-        if (!state.results || state.results.length === 0) {
-            clearRollingReport();
-            return;
-        }
-
-        const analysisEntries = state.results.map((entry, index) => ({
+    function buildAnalysisEntriesFromState() {
+        if (!Array.isArray(state.results)) return [];
+        return state.results.map((entry, index) => ({
             index,
             window: entry.window,
             training: extractMetrics(entry.training),
@@ -399,6 +395,15 @@
             optimization: entry.optimization || null,
             paramsSnapshot: entry.params || null,
         }));
+    }
+
+    function renderRollingReport() {
+        if (!state.results || state.results.length === 0) {
+            clearRollingReport();
+            return;
+        }
+
+        const analysisEntries = buildAnalysisEntriesFromState();
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
 
@@ -655,8 +660,8 @@
     }
 
     function resolvePositionBasisLabel(value) {
-        if (value === 'initialCapital') return '初始本金';
-        if (value === 'totalCapital') return '總資金';
+        if (value === 'initialCapital') return '初始本金-固定金額買入';
+        if (value === 'totalCapital') return '總資金-獲利再投入';
         return '';
     }
 
@@ -1716,9 +1721,20 @@
         return `${seconds} 秒`;
     }
 
+    function getLatestAggregateSummary() {
+        const analysisEntries = buildAnalysisEntriesFromState();
+        if (!analysisEntries || analysisEntries.length === 0) {
+            return null;
+        }
+        const thresholds = state?.config?.thresholds || DEFAULT_THRESHOLDS;
+        const minTrades = Number.isFinite(state?.config?.minTrades) ? state.config.minTrades : 0;
+        return computeAggregateReport(analysisEntries, thresholds, minTrades);
+    }
+
     window.rollingTest = {
         init: initRollingTest,
         refreshPlan: updateRollingPlanPreview,
         state,
+        getLatestAggregateSummary,
     };
 })();
