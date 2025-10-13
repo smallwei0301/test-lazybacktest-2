@@ -282,27 +282,64 @@
         background-color: var(--primary);
         color: var(--primary-foreground);
         border: 1px solid var(--primary);
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       }
-      
+
       .btn-primary:hover {
-        background-color: color-mix(in srgb, var(--primary) 90%, black);
+        background-color: color-mix(in srgb, var(--primary) 82%, #111827);
+        border-color: color-mix(in srgb, var(--primary) 90%, #0f172a);
       }
-      
+
       .btn-secondary {
         background-color: var(--secondary);
         color: var(--secondary-foreground);
         border: 1px solid var(--secondary);
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       }
-      
+
+      .btn-secondary:hover {
+        background-color: color-mix(in srgb, var(--secondary) 82%, #78350f);
+        border-color: color-mix(in srgb, var(--secondary) 88%, #78350f);
+      }
+
       .btn-outline {
         background-color: transparent;
         color: var(--foreground);
         border: 1px solid var(--border);
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       }
-      
+
       .btn-outline:hover {
         background-color: var(--accent);
         color: var(--accent-foreground);
+        border-color: color-mix(in srgb, var(--accent) 80%, transparent);
+      }
+
+      button {
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+      }
+
+      button:not([disabled]):hover {
+        filter: brightness(0.97);
+      }
+
+      button.border:not([disabled]):hover {
+        background-color: color-mix(in srgb, var(--accent) 18%, var(--background));
+        border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+        color: color-mix(in srgb, var(--accent) 70%, var(--foreground));
+      }
+
+      input[type="radio"] {
+        accent-color: var(--secondary);
+      }
+
+      .brand-title {
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .brand-title .brand-title-lazy {
+        color: #4b5563;
       }
       
       .text-primary { color: var(--primary); }
@@ -338,22 +375,15 @@
             <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
                 <div class="container mx-auto px-4 h-16 flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-                            <div class="w-5 h-5 flex flex-col justify-between">
-                                <div class="flex justify-between">
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                                <div class="flex justify-between items-end">
-                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                            </div>
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                            </svg>
                         </div>
                         <div>
-                                    <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
+                            <span class="brand-title text-lg">
+                                <span class="brand-title-lazy">Lazy</span>Backtest
+                            </span>
                             <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
                         </div>
                     </div>
@@ -597,8 +627,9 @@
                                     <div class="card-header">
                                         <h3 class="card-title flex items-center gap-2">
                                             <i data-lucide="settings" class="lucide text-primary" style="color: var(--primary);"></i>
-                                            <span class="tooltip">
-                                                基本設定
+                                            <span>基本設定</span>
+                                            <span class="tooltip" tabindex="0" aria-label="更改代碼或日期範圍會觸發重新獲取數據。">
+                                                <span class="tooltip-icon" aria-hidden="true">i</span>
                                                 <span class="tooltiptext">更改代碼或日期範圍會觸發重新獲取數據。</span>
                                             </span>
                                         </h3>
@@ -718,16 +749,22 @@
                                             <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">買賣時間點</p>
                                             <div class="flex items-center">
                                                 <input type="radio" id="tradeTimingClose" name="tradeTiming" value="close" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
-                                                <label for="tradeTimingClose" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
+                                                <label for="tradeTimingClose" class="text-xs text-foreground flex items-center gap-1" style="color: var(--foreground);">
                                                     當日 (N) 收盤價
-                                                    <span class="tooltiptext">使用信號產生當日的收盤價交易。</span>
+                                                    <span class="tooltip" tabindex="0" aria-label="使用信號產生當日的收盤價交易。">
+                                                        <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                        <span class="tooltiptext">使用信號產生當日的收盤價交易。</span>
+                                                    </span>
                                                 </label>
                                             </div>
                                             <div class="flex items-center">
                                                 <input type="radio" id="tradeTimingOpen" name="tradeTiming" value="open" class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
-                                                <label for="tradeTimingOpen" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
+                                                <label for="tradeTimingOpen" class="text-xs text-foreground flex items-center gap-1" style="color: var(--foreground);">
                                                     隔日 (N+1) 開盤價
-                                                    <span class="tooltiptext">使用信號產生次日的開盤價交易。</span>
+                                                    <span class="tooltip" tabindex="0" aria-label="使用信號產生次日的開盤價交易。">
+                                                        <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                        <span class="tooltiptext">使用信號產生次日的開盤價交易。</span>
+                                                    </span>
                                                 </label>
                                             </div>
                                         </div>
@@ -735,16 +772,22 @@
                                             <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">交易成本設定 (%)</p>
                                             <div class="grid grid-cols-2 gap-3">
                                                 <div>
-                                                    <label for="buyFee" class="tooltip block text-xs font-medium text-muted mb-1" style="color: var(--muted-foreground);">
+                                                    <label for="buyFee" class="block text-xs font-medium text-muted mb-1 flex items-center gap-1" style="color: var(--muted-foreground);">
                                                         買入手續費 (%)
-                                                        <span class="tooltiptext">預設會根據股票/ETF代碼自動判斷。一般股票為0.1425%，ETF 通常為 0.1% (但依券商可能不同)。可自行修改。</span>
+                                                        <span class="tooltip" tabindex="0" aria-label="預設會根據股票/ETF代碼自動判斷。一般股票為0.1425%，ETF 通常為 0.1% (但依券商可能不同)。可自行修改。">
+                                                            <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                            <span class="tooltiptext">預設會根據股票/ETF代碼自動判斷。一般股票為0.1425%，ETF 通常為 0.1% (但依券商可能不同)。可自行修改。</span>
+                                                        </span>
                                                     </label>
                                                     <input type="number" id="buyFee" value="0.1425" min="0" max="5" step="0.0001" class="w-full px-2 py-1 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                                 </div>
                                                 <div>
-                                                    <label for="sellFee" class="tooltip block text-xs font-medium text-muted mb-1" style="color: var(--muted-foreground);">
+                                                    <label for="sellFee" class="block text-xs font-medium text-muted mb-1 flex items-center gap-1" style="color: var(--muted-foreground);">
                                                         賣出手續費+稅 (%)
-                                                        <span class="tooltiptext">預設會根據代碼自動判斷。一般股票為 0.1425% 手續費 + 0.3% 交易稅 = 0.4425%。ETF 為 0.1% 手續費 + 0.1% 交易稅 = 0.2%。可自行修改。</span>
+                                                        <span class="tooltip" tabindex="0" aria-label="預設會根據代碼自動判斷。一般股票為 0.1425% 手續費 + 0.3% 交易稅 = 0.4425%。ETF 為 0.1% 手續費 + 0.1% 交易稅 = 0.2%。可自行修改。">
+                                                            <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                            <span class="tooltiptext">預設會根據代碼自動判斷。一般股票為 0.1425% 手續費 + 0.3% 交易稅 = 0.4425%。ETF 為 0.1% 手續費 + 0.1% 交易稅 = 0.2%。可自行修改。</span>
+                                                        </span>
                                                     </label>
                                                     <input type="number" id="sellFee" value="0.4425" min="0" max="5" step="0.0001" class="w-full px-2 py-1 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                                 </div>
@@ -763,9 +806,12 @@
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div class="space-y-2">
-                                            <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
+                                            <label class="block text-xs font-medium text-foreground flex items-center gap-1" style="color: var(--foreground);">
                                                 部位大小計算基準
-                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                <span class="tooltip" tabindex="0" aria-label="選擇每次進場時，用於計算投入金額的基準：初始本金固定使用最開始設定的本金計算部位大小；總資金使用當下模擬帳戶的總資產計算部位大小，部位會隨著獲利放大或虧損縮小。">
+                                                    <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                    <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                </span>
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
@@ -779,9 +825,12 @@
                                             </div>
                                         </div>
                                         <div>
-                                            <label for="positionSize" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                            <label for="positionSize" class="block text-xs font-medium text-foreground mb-1 flex items-center gap-1" style="color: var(--foreground);">
                                                 部位大小 (%)
-                                                <span class="tooltiptext">單次進場使用的 **計算基準** (上方選擇) 的百分比 (多空獨立計算)。</span>
+                                                <span class="tooltip" tabindex="0" aria-label="單次進場會依照上方設定的計算基準，獨立計算多空部位的投入百分比。">
+                                                    <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                    <span class="tooltiptext">單次進場使用的 **計算基準** (上方選擇) 的百分比 (多空獨立計算)。</span>
+                                                </span>
                                             </label>
                                             <input type="number" id="positionSize" value="100" min="1" max="100" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                         </div>
@@ -873,16 +922,22 @@
                                             </div>
                                         </div>
                                         <div>
-                                            <label for="stopLoss" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                            <label for="stopLoss" class="block text-xs font-medium text-foreground mb-1 flex items-center gap-1" style="color: var(--foreground);">
                                                 固定停損 (%)
-                                                <span class="tooltiptext">虧損達此%強制出場(多單停損/空單回補),優先於策略信號。0=不啟用。</span>
+                                                <span class="tooltip" tabindex="0" aria-label="當浮動虧損達到設定百分比時會強制出場（多單停損或空單回補），優先於策略信號；輸入 0 代表不啟用。">
+                                                    <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                    <span class="tooltiptext">虧損達此%強制出場(多單停損/空單回補),優先於策略信號。0=不啟用。</span>
+                                                </span>
                                             </label>
                                             <input type="number" id="stopLoss" value="0" min="0" max="100" step="0.5" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                         </div>
                                         <div>
-                                            <label for="takeProfit" class="tooltip block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">
+                                            <label for="takeProfit" class="block text-xs font-medium text-foreground mb-1 flex items-center gap-1" style="color: var(--foreground);">
                                                 固定停利 (%)
-                                                <span class="tooltiptext">獲利達此%強制出場(多單停利/空單回補),優先於策略信號。0=不啟用。</span>
+                                                <span class="tooltip" tabindex="0" aria-label="當獲利達到設定百分比時會強制出場（多單停利或空單回補），優先於策略信號；輸入 0 代表不啟用。">
+                                                    <span class="tooltip-icon" aria-hidden="true">i</span>
+                                                    <span class="tooltiptext">獲利達此%強制出場(多單停利/空單回補),優先於策略信號。0=不啟用。</span>
+                                                </span>
                                             </label>
                                             <input type="number" id="takeProfit" value="0" min="0" max="1000" step="0.5" class="w-full px-3 py-2 border border-border rounded-md shadow-sm text-sm focus:ring-accent focus:border-accent bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
                                         </div>
@@ -1015,8 +1070,9 @@
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2">
                                         <i data-lucide="file-text" class="lucide text-accent" style="color: var(--accent);"></i>
-                                        <span class="tooltip">
-                                            策略管理
+                                        <span>策略管理</span>
+                                        <span class="tooltip" tabindex="0" aria-label="儲存、載入或刪除回測策略設定（包含風險管理），會保留最後一次回測的指標。">
+                                            <span class="tooltip-icon" aria-hidden="true">i</span>
                                             <span class="tooltiptext">儲存、載入、刪除您的回測策略設定 (包含風險管理)。指標會儲存最後回測結果。</span>
                                         </span>
                                     </h3>
@@ -2388,7 +2444,7 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                    <span class="brand-title text-lg"><span class="brand-title-lazy">Lazy</span>Backtest</span>
                                     <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
                                 </div>
                             </div>

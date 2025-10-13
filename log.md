@@ -1016,3 +1016,12 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-18 — Patch LB-BACKTEST-SENS-20260218A
+- **Issue recap**: 前端敏感度評分仍以總報酬差異衡量，策略戰報語句過度口語化；交易紀錄缺乏指標前/中/後資訊，且策略設定與績效卡片的 tooltip 樣式不一致。使用者起始日若晚於可用資料 14 日以上也未即時提醒。
+- **Fix**:
+  - `js/backtest.js` 導入年化報酬評分、補齊敏感度統計卡片與 tooltip，並改寫策略戰報提示語氣；新增起始日資料落差偵測與輸入欄位醒目標示，擴充交易紀錄指標值格式化（含均線/MACD/KD 前中後）。
+  - `index.html` 統一頂部與底部 LOGO、調整 LazyBacktest 標識配色，並將表單/策略設定等靜態 tooltip 改為 i 圓形圖示；更新按鈕 hover 與單選 accent 配色。
+  - `css/style.css` 新增 tooltip 圓形樣式、敏感度卡片網格與起始日警示樣式，確保 hover 狀態具視覺反饋。
+- **Diagnostics**: 本地以無資料起始區間測試，確認 `maybeWarnAboutStartGap` 將建議起始日寫入輸入欄位；以含多策略敏感度資料的結果檢視分數、卡片與 tooltip 呈現。
+- **Testing**: `node --check js/backtest.js`
+
