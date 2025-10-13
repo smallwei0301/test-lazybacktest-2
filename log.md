@@ -1,4 +1,10 @@
 
+## 2025-07-30 — Patch LB-PERF-ANNUAL-20250730A
+- **Issue recap**: 績效分析卡片僅顯示占位符、敏感度年化分數仍採累積報酬，加總結果與買入持有年化不一致；開始日期與資料首筆落差超過十四天時也缺乏明確提醒。
+- **Fix**: `js/backtest.js` 補齊 `renderPerformanceBreakdown` 以渲染期間績效表格、整合新狀態提示並在 `notifyStartDateGap` 判斷資料缺口後改以警示訊息提示；Tooltip 補上無障礙標籤並維持新版指示樣式。
+- **Worker update**: `js/worker.js` 新增 `extractValidSlice`，將策略與買入持有的整體與分段績效皆改用 `computeAnnualizedPercent` 年化計算，並輸出 `annualizedReturn`／`buyHoldAnnualizedReturn` 供前端表格使用，同步保留 gap tolerance 降級邏輯。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/backtest.js','utf8'),{filename:'js/backtest.js'});console.log('backtest.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/main.js','utf8'),{filename:'js/main.js'});console.log('main.js compiles');NODE`、`node - <<'NODE' const fs=require('fs');const vm=require('vm');new vm.Script(fs.readFileSync('js/worker.js','utf8'),{filename:'js/worker.js'});console.log('worker.js compiles');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:

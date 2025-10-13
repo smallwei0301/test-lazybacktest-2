@@ -35,6 +35,100 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+// Patch Tag: LB-UX-20250730A
+function showWarning(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-exclamation-triangle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-amber-100 border-l-4 border-amber-500 text-amber-700 rounded-md'; }
+
+const STATUS_ALERT_TONES = {
+    warning: { icon: '⚠️', tone: 'warning', role: 'alert' },
+    info: { icon: 'ℹ️', tone: 'info', role: 'status' },
+    success: { icon: '✅', tone: 'success', role: 'status' },
+    danger: { icon: '⛔', tone: 'danger', role: 'alert' },
+};
+
+const statusAlertRegistry = new Map();
+
+function ensureStatusAlertContainer() {
+    if (typeof document === 'undefined') return null;
+    return document.getElementById('result-alerts');
+}
+
+function applyStatusAlertTone(element, toneKey) {
+    const tone = STATUS_ALERT_TONES[toneKey] ? toneKey : 'info';
+    element.className = `status-alert status-alert--${tone}`;
+    const toneMeta = STATUS_ALERT_TONES[tone];
+    element.setAttribute('role', toneMeta.role);
+    return toneMeta;
+}
+
+function upsertStatusAlert(key, config = {}) {
+    if (!key) return;
+    const container = ensureStatusAlertContainer();
+    if (!container) return;
+    const toneKey = config.tone || 'info';
+    const titleText = typeof config.title === 'string' ? config.title.trim() : '';
+    const messageText = typeof config.message === 'string' ? config.message.trim() : '';
+    let alertEl = container.querySelector(`[data-alert-key="${key}"]`);
+    if (!alertEl) {
+        alertEl = document.createElement('div');
+        alertEl.dataset.alertKey = key;
+        const iconEl = document.createElement('span');
+        iconEl.className = 'status-alert__icon';
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'status-alert__body';
+        const titleEl = document.createElement('p');
+        titleEl.className = 'status-alert__title';
+        const messageEl = document.createElement('p');
+        messageEl.className = 'status-alert__message';
+        bodyEl.append(titleEl, messageEl);
+        alertEl.append(iconEl, bodyEl);
+        container.appendChild(alertEl);
+    }
+    const toneMeta = applyStatusAlertTone(alertEl, toneKey);
+    const iconNode = alertEl.querySelector('.status-alert__icon');
+    const titleNode = alertEl.querySelector('.status-alert__title');
+    const messageNode = alertEl.querySelector('.status-alert__message');
+    if (iconNode) {
+        iconNode.textContent = toneMeta.icon;
+    }
+    if (titleNode) {
+        if (titleText) {
+            titleNode.textContent = titleText;
+            titleNode.style.display = '';
+        } else {
+            titleNode.textContent = '';
+            titleNode.style.display = 'none';
+        }
+    }
+    if (messageNode) {
+        messageNode.textContent = messageText;
+    }
+    statusAlertRegistry.set(key, { tone: toneKey, title: titleText, message: messageText });
+}
+
+function removeStatusAlert(key) {
+    if (!key) return;
+    const container = ensureStatusAlertContainer();
+    if (!container) return;
+    const node = container.querySelector(`[data-alert-key="${key}"]`);
+    if (node && node.parentNode === container) {
+        container.removeChild(node);
+    }
+    statusAlertRegistry.delete(key);
+}
+
+function clearStatusAlerts() {
+    const container = ensureStatusAlertContainer();
+    if (container) {
+        container.innerHTML = '';
+    }
+    statusAlertRegistry.clear();
+}
+
+window.lazybacktestStatusAlerts = {
+    upsert: upsertStatusAlert,
+    remove: removeStatusAlert,
+    clear: clearStatusAlerts,
+};
 
 // Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
 const stagedEntryControls = (() => {

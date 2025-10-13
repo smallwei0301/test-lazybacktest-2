@@ -1,4 +1,6 @@
 /* --- 自訂 CSS --- */
+/* Patch Tag: LB-UX-20250730A */
+/* Patch Tag: LB-UI-ACCESSIBILITY-20260125A */
 .loading-mascot-wrapper {
     background: none;
     background-color: transparent !important;
@@ -145,9 +147,180 @@
     color: var(--muted-foreground);
 }
 
-.tooltip { position: relative; display: inline-block; vertical-align: middle; }
-.tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+input[type="radio"],
+input[type="checkbox"] {
+    accent-color: var(--accent);
+}
+
+.tooltip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    color: inherit;
+}
+.tooltip::after {
+    content: 'i';
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    margin-left: 0.35rem;
+    border-radius: 9999px;
+    border: 1px solid #111827;
+    color: #111827;
+    font-size: 0.625rem;
+    font-weight: 600;
+    line-height: 1;
+    background-color: transparent;
+    pointer-events: none;
+}
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 250px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 50;
+    bottom: 135%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+.tooltip:hover .tooltiptext,
+.tooltip:focus-within .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+.tooltip.tooltip--inline-icon::after {
+    margin-left: 0;
+}
+.tooltip.tooltip--no-indicator::after {
+    content: none;
+}
+
+.table-header-with-tooltip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.status-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-radius: 0.85rem;
+    border-width: 1px;
+    border-style: solid;
+    background: color-mix(in srgb, var(--muted) 12%, var(--background));
+    color: var(--foreground);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.status-alert__icon {
+    font-size: 1rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.1rem;
+}
+
+.status-alert__body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.status-alert__title {
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+    color: var(--foreground);
+}
+
+.status-alert__message {
+    margin: 0;
+    color: var(--muted-foreground);
+}
+
+.status-alert--warning {
+    background: color-mix(in srgb, var(--accent) 15%, var(--background));
+    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.status-alert--warning .status-alert__icon {
+    color: color-mix(in srgb, var(--accent) 85%, #92400e);
+}
+
+.status-alert--warning .status-alert__title {
+    color: color-mix(in srgb, var(--accent) 75%, #92400e);
+}
+
+.status-alert--warning .status-alert__message {
+    color: color-mix(in srgb, var(--accent) 32%, var(--muted-foreground));
+}
+
+.status-alert--info {
+    background: color-mix(in srgb, var(--primary) 12%, var(--background));
+    border-color: color-mix(in srgb, var(--primary) 42%, transparent);
+}
+
+.status-alert--info .status-alert__icon {
+    color: color-mix(in srgb, var(--primary) 90%, #0f172a);
+}
+
+.status-alert--info .status-alert__title {
+    color: color-mix(in srgb, var(--primary) 80%, #0f172a);
+}
+
+.status-alert--info .status-alert__message {
+    color: color-mix(in srgb, var(--primary) 28%, var(--muted-foreground));
+}
+
+.status-alert--success {
+    background: color-mix(in srgb, #10b981 14%, var(--background));
+    border-color: color-mix(in srgb, #10b981 45%, transparent);
+}
+
+.status-alert--success .status-alert__icon {
+    color: color-mix(in srgb, #047857 85%, #064e3b);
+}
+
+.status-alert--success .status-alert__title {
+    color: color-mix(in srgb, #047857 80%, #064e3b);
+}
+
+.status-alert--success .status-alert__message {
+    color: color-mix(in srgb, #10b981 30%, var(--muted-foreground));
+}
+
+.status-alert--danger {
+    background: color-mix(in srgb, var(--destructive) 14%, var(--background));
+    border-color: color-mix(in srgb, var(--destructive) 46%, transparent);
+}
+
+.status-alert--danger .status-alert__icon {
+    color: color-mix(in srgb, var(--destructive) 85%, #7f1d1d);
+}
+
+.status-alert--danger .status-alert__title {
+    color: color-mix(in srgb, var(--destructive) 80%, #7f1d1d);
+}
+
+.status-alert--danger .status-alert__message {
+    color: color-mix(in srgb, var(--destructive) 30%, var(--muted-foreground));
+}
 #backtest-result .tooltiptext { z-index: 10000; }
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
@@ -267,6 +440,75 @@
 }
 
 .sensitivity-scenario-chip.tooltip { display: grid; }
+
+button {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+button:not([disabled]):not(.btn-primary):not(.btn-secondary):not(.btn-outline):hover {
+    background-color: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: color-mix(in srgb, var(--accent) 75%, var(--foreground));
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.btn-secondary:hover {
+    background-color: color-mix(in srgb, var(--secondary) 85%, #000000);
+}
+
+.performance-breakdown {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.performance-breakdown__table-wrapper {
+    overflow-x: auto;
+}
+
+.performance-breakdown__table {
+    width: 100%;
+    min-width: 680px;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.875rem;
+}
+
+.performance-breakdown__table thead th {
+    background: color-mix(in srgb, var(--muted) 18%, var(--background));
+    color: color-mix(in srgb, var(--foreground) 85%, var(--muted-foreground));
+    font-weight: 600;
+    padding: 0.75rem 0.85rem;
+    text-align: left;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.performance-breakdown__table tbody td {
+    padding: 0.7rem 0.85rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    color: var(--foreground);
+}
+
+.performance-breakdown__table tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--muted) 6%, transparent);
+}
+
+.performance-breakdown__table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.performance-breakdown__row--overall {
+    background: color-mix(in srgb, var(--primary) 8%, var(--background));
+    color: color-mix(in srgb, var(--primary) 40%, var(--foreground));
+}
+
+.performance-breakdown__row--overall td {
+    font-weight: 600;
+}
+
+.performance-breakdown__note {
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    line-height: 1.6;
+}
 
 .sensitivity-scenario-chip__header {
     display: flex;
