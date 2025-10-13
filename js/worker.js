@@ -6208,6 +6208,43 @@ function calculateDailyReturns(portfolioValues) {
   return returns;
 }
 
+const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+const MIN_ANNUALIZATION_YEARS = 1 / 365.25;
+
+function computeAnnualizedPercent({
+  startValue,
+  endValue,
+  startDateISO,
+  endDateISO,
+  fallbackPercent,
+}) {
+  const fallback = Number.isFinite(fallbackPercent) ? fallbackPercent : 0;
+  if (!Number.isFinite(startValue) || !Number.isFinite(endValue) || startValue <= 0) {
+    return { annualized: fallback, years: null };
+  }
+  if (!startDateISO || !endDateISO) {
+    return { annualized: fallback, years: null };
+  }
+  const startDate = new Date(startDateISO);
+  const endDate = new Date(endDateISO);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
+    return { annualized: fallback, years: null };
+  }
+  const years = (endDate.getTime() - startDate.getTime()) / MS_PER_YEAR;
+  if (!Number.isFinite(years) || years <= MIN_ANNUALIZATION_YEARS) {
+    return { annualized: fallback, years };
+  }
+  const growthFactor = endValue / startValue;
+  if (!(growthFactor > 0)) {
+    return { annualized: fallback, years };
+  }
+  const annualized = (Math.pow(growthFactor, 1 / years) - 1) * 100;
+  if (!Number.isFinite(annualized)) {
+    return { annualized: fallback, years };
+  }
+  return { annualized, years };
+}
+
 function calculateSharpeRatio(dailyReturns, annualReturnPct) {
   if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
   const riskFreeRate = 0.01;
@@ -6666,6 +6703,20 @@ function makeIndicatorColumn(label, values, options = {}) {
     format: options.format,
     decimals: options.decimals,
   };
+}
+
+function cloneStructuredData(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneStructuredData(item));
+  }
+  if (value && typeof value === "object") {
+    const copy = {};
+    Object.entries(value).forEach(([key, val]) => {
+      copy[key] = cloneStructuredData(val);
+    });
+    return copy;
+  }
+  return value;
 }
 
 function getIndicatorArray(ctx, key) {
@@ -7930,7 +7981,10 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const stageSnapshots = currentLongEntryBreakdown.map((info) =>
+        cloneStructuredData(info),
+      );
+      const aggregated = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -7940,9 +7994,30 @@ function runStrategy(data, params, options = {}) {
         averageEntryPrice,
         stageCount: currentLongEntryBreakdown.length,
         cumulativeStagePercent: totalPercent,
-        stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
+        stages: stageSnapshots,
         positionId: currentLongPositionId,
       };
+      const latestIndicatorStage = [...stageSnapshots]
+        .reverse()
+        .find((stage) => stage && stage.indicatorValues);
+      if (latestIndicatorStage?.indicatorValues) {
+        aggregated.indicatorValues = cloneStructuredData(
+          latestIndicatorStage.indicatorValues,
+        );
+      }
+      const latestKDStage = [...stageSnapshots]
+        .reverse()
+        .find((stage) => stage && stage.kdValues);
+      if (latestKDStage?.kdValues) {
+        aggregated.kdValues = cloneStructuredData(latestKDStage.kdValues);
+      }
+      const latestMACDStage = [...stageSnapshots]
+        .reverse()
+        .find((stage) => stage && stage.macdValues);
+      if (latestMACDStage?.macdValues) {
+        aggregated.macdValues = cloneStructuredData(latestMACDStage.macdValues);
+      }
+      return aggregated;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -9740,154 +9815,219 @@ function runStrategy(data, params, options = {}) {
     gapToleranceDays: CRITICAL_START_GAP_TOLERANCE_DAYS,
     exceedsGapTolerance: false,
   };
-  // 使用使用者設定的日期範圍來計算年化報酬
-  const firstDateStr = params.startDate;
-  const lastDateStr = params.endDate;
-    if (firstDateStr && lastDateStr) {
-      const firstD = new Date(firstDateStr);
-      const lastD = new Date(lastDateStr);
-      const years =
-        (lastD.getTime() - firstD.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      console.log(
-        `[Worker] Strategy date range: ${firstDateStr} to ${lastDateStr} (startIdx: ${startIdx}, lastIdx: ${lastIdx})`,
-      );
-      console.log(
-        `[Worker] Annualization Years (Strategy): ${years.toFixed(4)} (from ${firstDateStr} to ${lastDateStr})`,
-      );
-      if (years > 1 / (365.25 * 2)) {
-        if (initialCapital > 0 && check(finalV) && finalV > 0) {
-          try {
-            annualR = (Math.pow(finalV / initialCapital, 1 / years) - 1) * 100;
-          } catch {
-            annualR = 0;
-          }
-        } else if (finalV <= 0 && initialCapital > 0) {
-          annualR = -100;
-        }
-      } else if (initialCapital > 0) {
-        annualR = returnR;
-        console.warn(
-          `[Worker] Backtest duration (${years.toFixed(4)} years) too short for meaningful annualization. Using total return rate.`,
-        );
-      }
 
-      // 使用設定的日期範圍找出對應的價格
-      const startDate = new Date(params.startDate);
-      const endDate = new Date(params.endDate);
-      firstValidPriceIdxBH = closes.findIndex(
-        (p, i) => check(p) && p > 0 && new Date(dates[i]) >= startDate,
-      );
-      lastValidPriceIdxBH = closes
-        .map((p, i) => check(p) && p > 0 && new Date(dates[i]) <= endDate)
-        .lastIndexOf(true);
-      if (
-        firstValidPriceIdxBH !== -1 &&
-        lastValidPriceIdxBH !== -1 &&
-        lastValidPriceIdxBH >= firstValidPriceIdxBH
-      ) {
-        const firstValidPriceBH = closes[firstValidPriceIdxBH];
-        const lastValidPriceBH = closes[lastValidPriceIdxBH];
-        const firstValidDateBH = new Date(dates[firstValidPriceIdxBH]);
-        const lastValidDateBH = new Date(dates[lastValidPriceIdxBH]);
-        buyHoldSummary.firstValidPriceIdx = firstValidPriceIdxBH;
-        buyHoldSummary.firstValidPriceDate = dates[firstValidPriceIdxBH] || null;
-        buyHoldSummary.firstValidPriceGapFromEffective = diffIsoDays(
-          effectiveStartISO,
-          dates[firstValidPriceIdxBH],
-        );
-        buyHoldSummary.firstValidPriceGapFromRequested = diffIsoDays(
-          userStartISO,
-          dates[firstValidPriceIdxBH],
-        );
-        let invalidBeforeCount = 0;
-        const invalidBeforeSamples = [];
-        if (firstValidPriceIdxBH > effectiveStartIdx) {
-          for (let i = effectiveStartIdx; i < firstValidPriceIdxBH; i += 1) {
-            if (!check(closes[i]) || closes[i] <= 0) {
-              invalidBeforeCount += 1;
-              if (invalidBeforeSamples.length < 5) {
-                invalidBeforeSamples.push({
-                  index: i,
-                  date: dates[i],
-                  close: closes[i],
-                  volume: volumes[i],
-                });
-              }
-            }
+  const extractValidSlice = (
+    series,
+    startIdx,
+    endIdx,
+    { positiveOnly = false } = {},
+  ) => {
+    const slice = {
+      values: [],
+      dates: [],
+      firstValue: null,
+      lastValue: null,
+      firstDate: null,
+      lastDate: null,
+    };
+    if (!Array.isArray(series) || series.length === 0) {
+      return slice;
+    }
+    const clampedStart = Math.max(0, startIdx);
+    const clampedEnd = Math.min(series.length - 1, endIdx);
+    if (clampedEnd < clampedStart) {
+      return slice;
+    }
+    for (let idx = clampedStart; idx <= clampedEnd; idx += 1) {
+      const rawValue = series[idx];
+      if (!check(rawValue)) continue;
+      if (positiveOnly && !(rawValue > 0)) continue;
+      const date = dates[idx] || null;
+      if (slice.firstValue === null) {
+        slice.firstValue = rawValue;
+        slice.firstDate = date;
+      }
+      slice.lastValue = rawValue;
+      slice.lastDate = date;
+      slice.values.push(rawValue);
+      slice.dates.push(date);
+    }
+    return slice;
+  };
+
+  const firstValidPortfolioIdx = (() => {
+    for (let idx = startIdx; idx < n; idx += 1) {
+      if (Number.isFinite(portfolioVal[idx]) && portfolioVal[idx] > 0) {
+        return idx;
+      }
+    }
+    return startIdx;
+  })();
+  const strategyStartValue =
+    Number.isFinite(portfolioVal[firstValidPortfolioIdx]) &&
+    portfolioVal[firstValidPortfolioIdx] > 0
+      ? portfolioVal[firstValidPortfolioIdx]
+      : initialCapital;
+  const strategyStartDateISO =
+    dates[firstValidPortfolioIdx] ||
+    dates[Math.min(Math.max(effectiveStartIdx, 0), n - 1)] ||
+    effectiveStartISO ||
+    userStartISO ||
+    params.startDate ||
+    null;
+  const strategyEndDateISO = dates[lastIdx] || params.endDate || null;
+  const { annualized: strategyAnnualized, years: strategyYears } =
+    computeAnnualizedPercent({
+      startValue: strategyStartValue,
+      endValue:
+        Number.isFinite(finalV) && finalV > 0 ? finalV : strategyStartValue,
+      startDateISO: strategyStartDateISO,
+      endDateISO: strategyEndDateISO,
+      fallbackPercent: returnR,
+    });
+  annualR = strategyAnnualized;
+  if (
+    strategyStartDateISO &&
+    strategyEndDateISO &&
+    Number.isFinite(strategyYears)
+  ) {
+    console.log(
+      `[Worker] Strategy annualization: ${strategyStartDateISO} → ${strategyEndDateISO} (${strategyYears.toFixed(4)} 年)`,
+    );
+  } else {
+    console.log(
+      `[Worker] Strategy annualization fallback applied (start=${strategyStartDateISO ?? 'N/A'}, end=${strategyEndDateISO ?? 'N/A'})`,
+    );
+  }
+
+  const startDate = params.startDate ? new Date(params.startDate) : null;
+  const endDate = params.endDate ? new Date(params.endDate) : null;
+  const isValidDate = (date) =>
+    date instanceof Date && !Number.isNaN(date.getTime());
+
+  firstValidPriceIdxBH = closes.findIndex((price, idx) => {
+    if (!check(price) || price <= 0) return false;
+    if (isValidDate(startDate) && new Date(dates[idx]) < startDate) {
+      return false;
+    }
+    return true;
+  });
+  lastValidPriceIdxBH = closes
+    .map((price, idx) => {
+      if (!check(price) || price <= 0) return false;
+      if (isValidDate(endDate) && new Date(dates[idx]) > endDate) {
+        return false;
+      }
+      return true;
+    })
+    .lastIndexOf(true);
+  if (
+    firstValidPriceIdxBH !== -1 &&
+    lastValidPriceIdxBH !== -1 &&
+    lastValidPriceIdxBH >= firstValidPriceIdxBH
+  ) {
+    const firstValidPriceBH = closes[firstValidPriceIdxBH];
+    const lastValidPriceBH = closes[lastValidPriceIdxBH];
+    const firstValidDateBH = dates[firstValidPriceIdxBH] || null;
+    const lastValidDateBH = dates[lastValidPriceIdxBH] || null;
+    buyHoldSummary.firstValidPriceIdx = firstValidPriceIdxBH;
+    buyHoldSummary.firstValidPriceDate = firstValidDateBH;
+    buyHoldSummary.firstValidPriceGapFromEffective = diffIsoDays(
+      effectiveStartISO,
+      dates[firstValidPriceIdxBH],
+    );
+    buyHoldSummary.firstValidPriceGapFromRequested = diffIsoDays(
+      userStartISO,
+      dates[firstValidPriceIdxBH],
+    );
+    let invalidBeforeCount = 0;
+    const invalidBeforeSamples = [];
+    if (firstValidPriceIdxBH > effectiveStartIdx) {
+      for (let i = effectiveStartIdx; i < firstValidPriceIdxBH; i += 1) {
+        if (!check(closes[i]) || closes[i] <= 0) {
+          invalidBeforeCount += 1;
+          if (invalidBeforeSamples.length < 5) {
+            invalidBeforeSamples.push({
+              index: i,
+              date: dates[i],
+              close: closes[i],
+              volume: volumes[i],
+            });
           }
-        }
-        buyHoldSummary.invalidBarsBeforeFirstValid = {
-          count: invalidBeforeCount,
-          samples: invalidBeforeSamples,
-        };
-        if (
-          Number.isFinite(
-            buyHoldSummary.firstValidPriceGapFromEffective,
-          ) &&
-          buyHoldSummary.firstValidPriceGapFromEffective > 1
-        ) {
-          console.warn(
-            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
-          );
-        }
-        if (
-          Number.isFinite(
-            buyHoldSummary.firstValidPriceGapFromRequested,
-          ) &&
-          buyHoldSummary.firstValidPriceGapFromRequested >
-            CRITICAL_START_GAP_TOLERANCE_DAYS
-        ) {
-          buyHoldSummary.exceedsGapTolerance = true;
-          console.warn(
-            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後使用者起點 ${buyHoldSummary.firstValidPriceGapFromRequested} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。`,
-          );
-        }
-        if (invalidBeforeCount > 0) {
-          const invalidPreview = invalidBeforeSamples.map((sample) =>
-            `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
-          );
-          console.warn(
-            `[Worker] ${params.stockNo} 暖身期內共有 ${invalidBeforeCount} 筆收盤價無效資料，樣本：${invalidPreview
-              .slice(0, 3)
-              .join("；")}`,
-          );
-        }
-        const bhYears =
-          (lastValidDateBH.getTime() - firstValidDateBH.getTime()) /
-          (1000 * 60 * 60 * 24 * 365.25);
-        console.log(
-          `[Worker] B&H date range: ${dates[firstValidPriceIdxBH]} to ${dates[lastValidPriceIdxBH]} (firstValidPriceIdxBH: ${firstValidPriceIdxBH}, lastValidPriceIdxBH: ${lastValidPriceIdxBH})`,
-        );
-        console.log(
-          `[Worker] Annualization Years (B&H): ${bhYears.toFixed(4)} (from ${dates[firstValidPriceIdxBH]} to ${dates[lastValidPriceIdxBH]})`,
-        );
-        let bhTotalReturn =
-          firstValidPriceBH !== 0
-            ? ((lastValidPriceBH - firstValidPriceBH) / firstValidPriceBH) * 100
-            : 0;
-        if (buyHoldSummary.exceedsGapTolerance) {
-          bhTotalReturn = 0;
-        }
-        if (bhYears > 1 / (365.25 * 2) && firstValidPriceBH > 0) {
-          try {
-            buyHoldAnnualizedReturn =
-              (Math.pow(lastValidPriceBH / firstValidPriceBH, 1 / bhYears) -
-                1) *
-              100;
-          } catch {
-            buyHoldAnnualizedReturn = bhTotalReturn;
-          }
-        } else {
-          buyHoldAnnualizedReturn = bhTotalReturn;
-          console.warn(
-            `[Worker] B&H duration (${bhYears.toFixed(4)} years) too short for meaningful annualization. Using total B&H return rate.`,
-          );
-        }
-        if (buyHoldSummary.exceedsGapTolerance) {
-          buyHoldAnnualizedReturn = 0;
         }
       }
     }
+    buyHoldSummary.invalidBarsBeforeFirstValid = {
+      count: invalidBeforeCount,
+      samples: invalidBeforeSamples,
+    };
+    if (
+      Number.isFinite(buyHoldSummary.firstValidPriceGapFromEffective) &&
+      buyHoldSummary.firstValidPriceGapFromEffective > 1
+    ) {
+      console.warn(
+        `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
+      );
+    }
+    if (
+      Number.isFinite(buyHoldSummary.firstValidPriceGapFromRequested) &&
+      buyHoldSummary.firstValidPriceGapFromRequested >
+        CRITICAL_START_GAP_TOLERANCE_DAYS
+    ) {
+      buyHoldSummary.exceedsGapTolerance = true;
+      console.warn(
+        `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後使用者起點 ${buyHoldSummary.firstValidPriceGapFromRequested} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。`,
+      );
+    }
+    if (invalidBeforeCount > 0) {
+      const invalidPreview = invalidBeforeSamples.map(
+        (sample) =>
+          `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
+      );
+      console.warn(
+        `[Worker] ${params.stockNo} 暖身期內共有 ${invalidBeforeCount} 筆收盤價無效資料，樣本：${invalidPreview
+          .slice(0, 3)
+          .join("；")}`,
+      );
+    }
+    console.log(
+      `[Worker] B&H date range: ${dates[firstValidPriceIdxBH]} to ${dates[lastValidPriceIdxBH]} (firstValidPriceIdxBH: ${firstValidPriceIdxBH}, lastValidPriceIdxBH: ${lastValidPriceIdxBH})`,
+    );
+    let bhTotalReturn =
+      firstValidPriceBH !== 0
+        ? ((lastValidPriceBH - firstValidPriceBH) / firstValidPriceBH) * 100
+        : 0;
+    if (buyHoldSummary.exceedsGapTolerance) {
+      bhTotalReturn = 0;
+    }
+    const { annualized: bhAnnualized, years: bhYears } =
+      computeAnnualizedPercent({
+        startValue: firstValidPriceBH,
+        endValue: lastValidPriceBH,
+        startDateISO: firstValidDateBH,
+        endDateISO: lastValidDateBH,
+        fallbackPercent: bhTotalReturn,
+      });
+    if (
+      firstValidDateBH &&
+      lastValidDateBH &&
+      Number.isFinite(bhYears)
+    ) {
+      console.log(
+        `[Worker] B&H annualization: ${firstValidDateBH} → ${lastValidDateBH} (${bhYears.toFixed(4)} 年)`,
+      );
+    } else {
+      console.log(
+        `[Worker] B&H annualization fallback applied (start=${firstValidDateBH ?? 'N/A'}, end=${lastValidDateBH ?? 'N/A'})`,
+      );
+    }
+    buyHoldAnnualizedReturn = buyHoldSummary.exceedsGapTolerance
+      ? 0
+      : bhAnnualized;
+  }
+  if (buyHoldSummary.exceedsGapTolerance) {
+    buyHoldAnnualizedReturn = 0;
+  }
     const validPortfolioSlice = portfolioVal
       .slice(startIdx)
       .filter((v) => check(v));
@@ -10035,54 +10175,92 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
-        const subPortfolioVals = portfolioVal
-          .slice(subStartIdx, subEndIdx + 1)
-          .filter((v) => check(v));
-        const subBHRawPrices = closes
-          .slice(subStartIdx, subEndIdx + 1)
-          .filter((v) => check(v));
-        const subDates = dates.slice(subStartIdx, subEndIdx + 1);
-        if (
-          subPortfolioVals.length > 1 &&
-          subDates.length > 1 &&
-          subBHRawPrices.length > 1
-        ) {
-          const subStartVal = subPortfolioVals[0];
-          const subEndVal = subPortfolioVals[subPortfolioVals.length - 1];
-          const subTotalReturn =
-            subStartVal !== 0
-              ? ((subEndVal - subStartVal) / subStartVal) * 100
-              : 0;
-          const subStartBHPrice = subBHRawPrices[0];
-          const subEndBHPrice = subBHRawPrices[subBHRawPrices.length - 1];
-          const subBHTotalReturn =
-            subStartBHPrice !== 0
-              ? ((subEndBHPrice - subStartBHPrice) / subStartBHPrice) * 100
-              : 0;
-          const subDailyReturns = calculateDailyReturns(
-            subPortfolioVals,
-            subDates,
-          );
-          const subAnnualizedReturn = 0;
-          const subSharpe = calculateSharpeRatio(
-            subDailyReturns,
-            subAnnualizedReturn,
-          );
-          const subSortino = calculateSortinoRatio(
-            subDailyReturns,
-            subAnnualizedReturn,
-          );
-          const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
-          subPeriodResults[label] = {
-            totalReturn: subTotalReturn,
-            totalBuyHoldReturn: subBHTotalReturn,
-            sharpeRatio: subSharpe,
-            sortinoRatio: subSortino,
-            maxDrawdown: subMaxDD,
-          };
-        } else {
+        const strategySlice = extractValidSlice(
+          portfolioVal,
+          subStartIdx,
+          subEndIdx,
+          { positiveOnly: true },
+        );
+        const hasStrategyWindow =
+          strategySlice.values.length >= 2 &&
+          Number.isFinite(strategySlice.firstValue) &&
+          Number.isFinite(strategySlice.lastValue) &&
+          strategySlice.firstValue > 0;
+        if (!hasStrategyWindow) {
           subPeriodResults[label] = null;
+          continue;
         }
+
+        const subResult = {
+          totalReturn: null,
+          annualizedReturn: null,
+          totalBuyHoldReturn: null,
+          buyHoldAnnualizedReturn: null,
+          sharpeRatio: null,
+          sortinoRatio: null,
+          maxDrawdown: null,
+        };
+
+        const subTotalReturn =
+          strategySlice.firstValue !== 0
+            ? ((strategySlice.lastValue - strategySlice.firstValue) /
+                strategySlice.firstValue) *
+              100
+            : 0;
+        const { annualized: subAnnualized } = computeAnnualizedPercent({
+          startValue: strategySlice.firstValue,
+          endValue: strategySlice.lastValue,
+          startDateISO: strategySlice.firstDate,
+          endDateISO: strategySlice.lastDate,
+          fallbackPercent: subTotalReturn,
+        });
+        const subDailyReturns = calculateDailyReturns(strategySlice.values);
+        const subSharpe = calculateSharpeRatio(subDailyReturns, subAnnualized);
+        const subSortino = calculateSortinoRatio(
+          subDailyReturns,
+          subAnnualized,
+        );
+        const subMaxDD = calculateMaxDrawdown(strategySlice.values);
+
+        subResult.totalReturn = subTotalReturn;
+        subResult.annualizedReturn = subAnnualized;
+        subResult.sharpeRatio = subSharpe;
+        subResult.sortinoRatio = subSortino;
+        subResult.maxDrawdown = subMaxDD;
+
+        if (buyHoldSummary.exceedsGapTolerance) {
+          subResult.totalBuyHoldReturn = 0;
+          subResult.buyHoldAnnualizedReturn = 0;
+        } else {
+          const bhSlice = extractValidSlice(
+            closes,
+            subStartIdx,
+            subEndIdx,
+            { positiveOnly: true },
+          );
+          const hasBHSlice =
+            bhSlice.values.length >= 2 &&
+            Number.isFinite(bhSlice.firstValue) &&
+            Number.isFinite(bhSlice.lastValue) &&
+            bhSlice.firstValue > 0;
+          if (hasBHSlice) {
+            const subBHTotalReturn =
+              ((bhSlice.lastValue - bhSlice.firstValue) / bhSlice.firstValue) *
+              100;
+            const { annualized: subBHAnnualized } =
+              computeAnnualizedPercent({
+                startValue: bhSlice.firstValue,
+                endValue: bhSlice.lastValue,
+                startDateISO: bhSlice.firstDate,
+                endDateISO: bhSlice.lastDate,
+                fallbackPercent: subBHTotalReturn,
+              });
+            subResult.totalBuyHoldReturn = subBHTotalReturn;
+            subResult.buyHoldAnnualizedReturn = subBHAnnualized;
+          }
+        }
+
+        subPeriodResults[label] = subResult;
       } else {
         subPeriodResults[label] = null;
       }
@@ -10318,8 +10496,14 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+  const baselineReturnRate = Number.isFinite(baselineMetrics?.returnRate)
     ? baselineMetrics.returnRate
+    : null;
+  const baselineAnnualReturn = Number.isFinite(baselineMetrics?.annualizedReturn)
+    ? baselineMetrics.annualizedReturn
+    : baselineReturnRate;
+  const baselineReturn = Number.isFinite(baselineAnnualReturn)
+    ? baselineAnnualReturn
     : 0;
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
@@ -10411,10 +10595,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
-      returnRate: baselineReturn,
-      annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
-        ? baselineMetrics.annualizedReturn
-        : null,
+      returnRate: baselineReturnRate,
+      annualizedReturn: baselineAnnualReturn,
       sharpeRatio: baselineSharpe,
     },
     groups,
@@ -10577,12 +10759,15 @@ function evaluateSensitivityParameter({
     }
 
     if (scenarioResult && typeof scenarioResult === "object") {
-      const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
+      const scenarioReturnRate = Number.isFinite(scenarioResult.returnRate)
         ? scenarioResult.returnRate
         : null;
+      const scenarioAnnual = Number.isFinite(scenarioResult.annualizedReturn)
+        ? scenarioResult.annualizedReturn
+        : scenarioReturnRate;
       const deltaReturn =
-        Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
-          ? scenarioReturn - baselineReturn
+        Number.isFinite(scenarioAnnual) && Number.isFinite(baselineReturn)
+          ? scenarioAnnual - baselineReturn
           : null;
       const driftPercent =
         Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
@@ -10635,11 +10820,9 @@ function evaluateSensitivityParameter({
         driftPercent,
         deltaSharpe,
         run: {
-          returnRate: scenarioReturn,
-          annualizedReturn: Number.isFinite(
-            scenarioResult.annualizedReturn
-          )
-            ? scenarioResult.annualizedReturn
+          returnRate: scenarioReturnRate,
+          annualizedReturn: Number.isFinite(scenarioAnnual)
+            ? scenarioAnnual
             : null,
           sharpeRatio: scenarioSharpe,
         },
