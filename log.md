@@ -1016,3 +1016,11 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-15 — Patch LB-SENSITIVITY-ANNUAL-20251006A / LB-PERF-TABLE-20251006A
+- **Issue recap**: 敏感度分析的分數仍以總報酬差異計算，回測期間過長時會被稀釋到 0 分；績效分析的期間表在資料缺漏時不會顯示提示，百分比欄位遇到字串值時也無法正常格式化。
+- **Fix**:
+  - `js/worker.js` 以年化報酬差值計算敏感度偏移，新增 `deltaAnnualized`／`annualizedDriftPercent` 欄位並同步更新穩定度評分版本（`LB-SENSITIVITY-METRIC-20251006A`）。
+  - `js/backtest.js` 調整敏感度 UI 讀取新的年化欄位，增補交易紀錄出場參數顯示、期間績效表的資料正規化與空資料提醒，同步更新表格版本碼（`LB-PERF-TABLE-20251006A`）。
+  - `css/style.css` 讓 tooltip 圓形 `i` 圖示使用 `inline-flex`，避免在 block label 中造成斷行或尺寸錯位。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});console.log(file+': ok');});NODE`
+

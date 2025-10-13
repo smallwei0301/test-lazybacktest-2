@@ -338,22 +338,16 @@
             <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
                 <div class="container mx-auto px-4 h-16 flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-                            <div class="w-5 h-5 flex flex-col justify-between">
-                                <div class="flex justify-between">
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                                <div class="flex justify-between items-end">
-                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: var(--primary-foreground);"></div>
-                                </div>
-                            </div>
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                            </svg>
                         </div>
                         <div>
-                                    <span class="text-lg font-bold text-foreground" style="color: var(--foreground);">LazyBacktest</span>
+                            <span class="text-lg font-bold">
+                                <span style="color: #374151;">Lazy</span>
+                                <span style="color: #0EA5A4;">Backtest</span>
+                            </span>
                             <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
                         </div>
                     </div>
@@ -647,11 +641,11 @@
                                         <!-- Patch Tag: LB-ADJ-SPLIT-20250518A -->
                                         <div class="flex items-center gap-4">
                                             <div class="flex items-center">
-                                                <input type="checkbox" id="adjustedPriceCheckbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2" />
+                                                <input type="checkbox" id="adjustedPriceCheckbox" class="h-4 w-4 border border-border rounded mr-2" style="border-color: var(--border);" />
                                                 <label for="adjustedPriceCheckbox" class="text-xs text-muted" style="color: var(--muted-foreground);">除權息還原股價</label>
                                             </div>
                                             <div class="flex items-center">
-                                                <input type="checkbox" id="splitAdjustmentCheckbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2" />
+                                                <input type="checkbox" id="splitAdjustmentCheckbox" class="h-4 w-4 border border-border rounded mr-2" style="border-color: var(--border);" />
                                                 <label for="splitAdjustmentCheckbox" class="text-xs text-muted" style="color: var(--muted-foreground);">股票拆分還原</label>
                                             </div>
                                         </div>
@@ -717,14 +711,14 @@
                                         <div class="space-y-3 mb-4 pb-3 border-b" style="border-color: var(--border);">
                                             <p class="text-xs font-medium text-foreground" style="color: var(--foreground);">買賣時間點</p>
                                             <div class="flex items-center">
-                                                <input type="radio" id="tradeTimingClose" name="tradeTiming" value="close" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
+                                                <input type="radio" id="tradeTimingClose" name="tradeTiming" value="close" checked class="h-4 w-4 border border-border focus:ring-accent mr-2" style="border-color: var(--border);">
                                                 <label for="tradeTimingClose" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
                                                     當日 (N) 收盤價
                                                     <span class="tooltiptext">使用信號產生當日的收盤價交易。</span>
                                                 </label>
                                             </div>
                                             <div class="flex items-center">
-                                                <input type="radio" id="tradeTimingOpen" name="tradeTiming" value="open" class="h-4 w-4 text-accent border-border focus:ring-accent mr-2" style="border-color: var(--border); color: var(--accent);">
+                                                <input type="radio" id="tradeTimingOpen" name="tradeTiming" value="open" class="h-4 w-4 border border-border focus:ring-accent mr-2" style="border-color: var(--border);">
                                                 <label for="tradeTimingOpen" class="tooltip text-xs text-foreground" style="color: var(--foreground);">
                                                     隔日 (N+1) 開盤價
                                                     <span class="tooltiptext">使用信號產生次日的開盤價交易。</span>
@@ -769,11 +763,11 @@
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
-                                                    <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
+                                                    <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 border border-border focus:ring-accent mr-1" style="border-color: var(--border);">
                                                     <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
                                                 </div>
                                                 <div class="flex items-center">
-                                                    <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
+                                                    <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 border border-border focus:ring-accent mr-1" style="border-color: var(--border);">
                                                     <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
                                                 </div>
                                             </div>
@@ -953,7 +947,7 @@
                                         <!-- Short Selling Option -->
                                         <div class="border-t pt-4" style="border-color: var(--border);">
                                             <label class="flex items-center mb-4">
-                                                <input type="checkbox" id="enableShortSelling" class="mr-2" />
+                                                <input type="checkbox" id="enableShortSelling" class="mr-2 border border-border rounded" style="border-color: var(--border);" />
                                                 <span class="text-xs font-medium text-foreground" style="color: var(--foreground);">
                                                     <i data-lucide="trending-down" class="lucide-sm inline mr-1 text-red-600"></i>
                                                     啟用做空交易
@@ -1971,7 +1965,7 @@
                                                     </div>
                                                 </div>
                                                 <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" />
+                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border border-border focus:ring-ring" style="border-color: var(--border);" />
                                                     <span>啟用訓練期自動優化</span>
                                                 </label>
                                                 <div id="rolling-optimize-settings" class="hidden space-y-3">
@@ -1996,23 +1990,23 @@
                                                         <p class="text-xs font-medium mb-2" style="color: var(--foreground);">優化範圍</p>
                                                         <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                                                             <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                                <input type="checkbox" id="rolling-optimize-entry" data-rolling-input checked />
+                                                                <input type="checkbox" id="rolling-optimize-entry" data-rolling-input checked class="border border-border rounded" style="border-color: var(--border);" />
                                                                 <span>做多進場參數</span>
                                                             </label>
                                                             <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                                <input type="checkbox" id="rolling-optimize-exit" data-rolling-input checked />
+                                                                <input type="checkbox" id="rolling-optimize-exit" data-rolling-input checked class="border border-border rounded" style="border-color: var(--border);" />
                                                                 <span>做多出場參數</span>
                                                             </label>
                                                             <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
-                                                                <input type="checkbox" id="rolling-optimize-short-entry" data-rolling-input />
+                                                                <input type="checkbox" id="rolling-optimize-short-entry" data-rolling-input class="border border-border rounded" style="border-color: var(--border);" />
                                                                 <span>做空進場參數</span>
                                                             </label>
                                                             <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
-                                                                <input type="checkbox" id="rolling-optimize-short-exit" data-rolling-input />
+                                                                <input type="checkbox" id="rolling-optimize-short-exit" data-rolling-input class="border border-border rounded" style="border-color: var(--border);" />
                                                                 <span>回補出場參數</span>
                                                             </label>
                                                             <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                                <input type="checkbox" id="rolling-optimize-risk" data-rolling-input />
+                                                                <input type="checkbox" id="rolling-optimize-risk" data-rolling-input class="border border-border rounded" style="border-color: var(--border);" />
                                                                 <span>風險管理（停損 / 停利）</span>
                                                             </label>
                                                         </div>
@@ -2388,7 +2382,10 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                    <span class="text-lg font-bold">
+                                        <span style="color: #374151;">Lazy</span>
+                                        <span style="color: #0EA5A4;">Backtest</span>
+                                    </span>
                                     <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
                                 </div>
                             </div>

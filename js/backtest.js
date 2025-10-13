@@ -1116,71 +1116,72 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250920A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20251005A';
+const PERFORMANCE_TABLE_VERSION = 'LB-PERF-TABLE-20251006A';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
-        badgeText: '等待開局',
+        badgeText: '待執行',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
             color: 'var(--muted-foreground)',
         },
-        title: '戰況房間尚未開啟',
-        subtitle: '回測一跑完就會推送戰術戰報，先在大廳補給一下。',
+        title: '尚未開始回測',
+        subtitle: '設定完成後請執行回測以產生策略戰報。',
     },
     loading: {
-        badgeText: '戰況載入中',
+        badgeText: '運算中',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
             color: 'var(--accent)',
         },
-        title: '策略戰況加載進度條...',
-        subtitle: '資料正在背景練等，馬上就能看到策略對上買入持有的實況。',
+        title: '策略戰報產生中',
+        subtitle: '系統正在整理績效與風控指標，請稍候。',
     },
     leading: {
-        badgeText: '策略超神',
+        badgeText: '策略領先',
         badgeStyle: {
             backgroundColor: 'rgba(16, 185, 129, 0.18)',
             color: 'rgb(5, 122, 85)',
         },
-        title: '策略暫時打爆買入持有',
-        subtitle: '恭喜這局先搶下 MVP，記得補好防禦別被逆轉。',
+        title: '策略績效領先買入持有',
+        subtitle: '目前超越基準，建議檢視風控並持續追蹤。',
     },
     tie: {
-        badgeText: '僵持對決',
+        badgeText: '表現接近',
         badgeStyle: {
             backgroundColor: 'rgba(251, 191, 36, 0.18)',
             color: 'rgb(180, 83, 9)',
         },
-        title: '策略與買入持有互卡血條',
-        subtitle: '雙方血量貼著走，先看下一波波段再決定要不要衝。',
+        title: '策略與基準表現相近',
+        subtitle: '績效差距不大，可搭配參數調整或延長觀察。',
     },
     behind: {
-        badgeText: '策略逆風',
+        badgeText: '策略落後',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.18)',
             color: 'rgb(220, 38, 38)',
         },
-        title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
+        title: '策略暫時落後買入持有',
+        subtitle: '建議檢查風控、參數與樣本期間，評估調整方向。',
     },
     missing: {
-        badgeText: '資料載入',
+        badgeText: '等待資料',
         badgeStyle: {
             backgroundColor: 'rgba(148, 163, 184, 0.2)',
             color: 'rgb(71, 85, 105)',
         },
-        title: '戰報還在整理',
-        subtitle: '買入持有基準尚未回傳，請先跑完一次回測再回來看戰況。',
+        title: '戰報資料尚未就緒',
+        subtitle: '請先完成一次回測以取得買入持有基準。',
     },
     error: {
-        badgeText: '戰況當機',
+        badgeText: '運算異常',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.24)',
             color: 'rgb(185, 28, 28)',
         },
-        title: '策略戰況暫停更新',
-        subtitle: '剛剛算戰況時跳出例外，重跑回測或調整參數再挑戰。',
+        title: '策略戰報產生失敗',
+        subtitle: '計算過程發生錯誤，請重新執行回測或調整參數。',
     },
 };
 
@@ -1301,8 +1302,8 @@ function resetStrategyStatusCard(stateKey = 'idle') {
     applyStrategyStatusState(stateKey, {
         detail: {
             bulletLines: [
-                '等你按下回測鍵，戰況小組就會開串直播策略對決買入持有。',
-                '回測結束後會送上懶人包條列，滑手機也能秒懂重點。',
+                '點擊「開始回測」後，系統會建立策略對比報告。',
+                '回測完成後將提供績效摘要、風控檢查與參數調整建議。',
             ],
         },
     });
@@ -1313,8 +1314,8 @@ function showStrategyStatusLoading() {
     applyStrategyStatusState('loading', {
         detail: {
             bulletLines: [
-                '策略戰況火速運算中，先泡杯咖啡等資料上線。',
-                '稍後就把策略差距與指標重點用條列送上版面。',
+                '正在整理策略與買入持有的績效差距與指標。',
+                '計算完成後會列出關鍵指標與後續調整建議。',
             ],
         },
     });
@@ -1337,11 +1338,11 @@ function buildStrategyComparisonSummary(result) {
         const diffValue = Number.isFinite(diff) ? diff : 0;
         const diffText = Math.abs(diffValue).toFixed(2);
         if (diffValue >= 1.5) {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前領先 ${diffText} 個百分點，這局暫時吃雞但別忘記補裝備。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前領先 ${diffText} 個百分點。請確認風險控管並持續追蹤績效變化。`;
         } else if (diffValue <= -1.5) {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前落後 ${diffText} 個百分點，被買入持有打成殘血，快調整戰術。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前落後 ${diffText} 個百分點。建議檢視停損、倉位與參數設定，評估是否需要調整。`;
         } else {
-            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，目前差距壓在 ${diffText} 個百分點內，雙方血條黏著走先觀察盤勢。`;
+            line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，差距落在 ${diffText} 個百分點內。可搭配不同期間或參數組合再做比較。`;
         }
     }
     return {
@@ -1373,50 +1374,50 @@ function buildStrategyHealthSummary(result) {
     const positives = [];
 
     if (!Number.isFinite(annualizedReturn)) {
-        warnings.push('年化報酬資料缺席，像副本沒存檔，先確認回測區間有沒有跑滿交易日。');
+        warnings.push('年化報酬無法計算，請確認回測期間內有足夠的有效收盤價。');
     } else if (annualizedReturn >= 12) {
         positives.push(`年化報酬 ${formatPercentSigned(annualizedReturn, 2)}`);
     } else {
-        warnings.push(`年化報酬只有 ${formatPercentSigned(annualizedReturn, 2)}，輸出速度像被拖慢的練等，節奏要再加速。`);
+        warnings.push(`年化報酬僅 ${formatPercentSigned(annualizedReturn, 2)}，建議檢視進出場條件或延長樣本以提升效率。`);
     }
 
     if (!Number.isFinite(sharpe)) {
-        warnings.push('夏普值缺資料，像團隊沒有補師，暫時看不出風險調整後報酬。');
+        warnings.push('夏普值無法計算，請確認資料期間與價格欄位完整。');
     } else if (sharpe >= 1) {
         positives.push(`夏普值 ${sharpe.toFixed(2)}`);
     } else {
-        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動換來的報酬像狂按換線，請先把防禦裝備穿好。`);
+        warnings.push(`夏普值僅 ${sharpe.toFixed(2)}，波動相對收益偏低，建議檢查倉位上限與停損設定。`);
     }
 
     if (!Number.isFinite(sortino)) {
-        warnings.push('索提諾比率缺資料，像副本沒有仇恨條，無法判斷下檔風險。');
+        warnings.push('索提諾比率無法計算，無法評估下檔風險，請確認資料品質。');
     } else if (sortino >= 1) {
         positives.push(`索提諾比率 ${sortino.toFixed(2)}`);
     } else {
-        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，遇到回檔可能直接被打斷連段，記得留好防守技能。`);
+        warnings.push(`索提諾比率僅 ${sortino.toFixed(2)}，下檔風險偏高，建議調整停損或部位分配。`);
     }
 
     if (!Number.isFinite(maxDrawdown)) {
-        warnings.push('最大回撤資料缺漏，像戰報沒錄影，請再檢查結果。');
+        warnings.push('最大回撤資料缺漏，請確認回測結果是否完整。');
     } else if (maxDrawdown <= 15) {
         positives.push(`最大回撤僅 ${maxDrawdown.toFixed(2)}%`);
     } else {
-        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，一旦回檔就會掉裝備，資金控管務必先排好。`);
+        warnings.push(`最大回撤達 ${maxDrawdown.toFixed(2)}%，建議強化風控、調整停損或降低單筆曝險。`);
     }
 
     if (Number.isFinite(returnRatio)) {
         if (returnRatio >= 0.5 && returnRatio <= 1.5) {
-            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，節奏穩得像自動掛機。`);
+            positives.push(`前後段報酬比 ${returnRatio.toFixed(2)}，兩段期間表現趨於一致。`);
         } else {
-            warnings.push(`前後段報酬比僅 ${returnRatio.toFixed(2)}，不同場景就卡手，記得多做滾動驗證免得翻車。`);
+            warnings.push(`前後段報酬比 ${returnRatio.toFixed(2)}，不同市場環境差異大，建議執行滾動驗證。`);
         }
     }
 
     if (Number.isFinite(sharpeHalfRatio)) {
         if (sharpeHalfRatio >= 0.5 && sharpeHalfRatio <= 1.5) {
-            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，體感穩如常駐 buff。`);
+            positives.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，波動調整後的效率相近。`);
         } else {
-            warnings.push(`前後段夏普比只有 ${sharpeHalfRatio.toFixed(2)}，可能存在過擬合，驗證樣本要再補一輪。`);
+            warnings.push(`前後段夏普比 ${sharpeHalfRatio.toFixed(2)}，可能存在過度擬合，建議延伸樣本或調整參數。`);
         }
     }
 
@@ -1433,9 +1434,9 @@ function buildStrategyHealthSummary(result) {
     if (positives.length > 0) {
         const unique = Array.from(new Set(positives));
         if (allGood) {
-            positiveLine = `體檢結論：${unique.join('、')} 全面滿 Buff，策略狀態神勇請維持輸出。`;
+            positiveLine = `亮點摘要：${unique.join('、')}，目前指標表現穩健。`;
         } else {
-            positiveLine = `${unique.join('、')} 表現還算有料，記得顧好核心裝備並調整倉位避免被反打。`;
+            positiveLine = `亮點摘要：${unique.join('、')}。`;
         }
     }
 
@@ -1453,37 +1454,42 @@ function buildSensitivityScoreAdvice(result) {
         return null;
     }
 
+    const resolveDriftValue = (...values) => {
+        for (const value of values) {
+            if (Number.isFinite(value)) {
+                return Number(value);
+            }
+        }
+        return null;
+    };
     const rawScore = Number.isFinite(summary.stabilityScore) ? Number(summary.stabilityScore) : null;
-    const averageDrift = Number.isFinite(summary.averageDriftPercent)
-        ? Math.abs(Number(summary.averageDriftPercent))
-        : null;
-    const positiveDrift = Number.isFinite(summary.positiveDriftPercent)
-        ? Math.abs(Number(summary.positiveDriftPercent))
-        : null;
-    const negativeDrift = Number.isFinite(summary.negativeDriftPercent)
-        ? Math.abs(Number(summary.negativeDriftPercent))
-        : null;
+    const averageDriftRaw = resolveDriftValue(summary.averageAnnualizedOffset, summary.averageDriftPercent);
+    const positiveDriftRaw = resolveDriftValue(summary.positiveAnnualizedOffset, summary.positiveDriftPercent);
+    const negativeDriftRaw = resolveDriftValue(summary.negativeAnnualizedOffset, summary.negativeDriftPercent);
+    const averageDrift = averageDriftRaw !== null ? Math.abs(averageDriftRaw) : null;
+    const positiveDrift = positiveDriftRaw !== null ? Math.abs(positiveDriftRaw) : null;
+    const negativeDrift = negativeDriftRaw !== null ? Math.abs(negativeDriftRaw) : null;
     const sampleCount = Number.isFinite(summary.scenarioCount) ? Number(summary.scenarioCount) : null;
 
     const segments = [];
 
     if (rawScore === null) {
-        segments.push('敏感度總分失聯，像存檔壞軌，請重跑擾動測試確認穩定度');
+        segments.push('敏感度總分缺少資料，請重新執行參數擾動測試。');
     } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，參數調校像滿級裝備`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健區間，可維持目前參數並定期複查。`);
     } else if (rawScore >= 40) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調參時請像打副本一樣小心`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，建議延長樣本或調整風控設定。`);
     } else {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超敏感，碰一下就暴擊先開保護`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，參數變動對績效影響顯著，請優先調整關鍵參數與資金控管。`);
     }
 
     if (averageDrift !== null) {
         if (averageDrift <= 20) {
-            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
+            segments.push('平均年化報酬偏移控制在 ±20pp 內，參數穩定度良好。');
         } else if (averageDrift <= 40) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
+            segments.push(`平均年化報酬偏移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整部位上限。`);
         } else {
-            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
+            segments.push(`平均年化報酬偏移達 ${averageDrift.toFixed(1)}pp，請縮小部位並重新檢視參數設定。`);
         }
     }
 
@@ -1495,19 +1501,19 @@ function buildSensitivityScoreAdvice(result) {
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
             if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
+                segments.push(`${dominantDirection}方向平均偏移超過 15pp，請優先針對該方向進行優化或加強風控。`);
             } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
+                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證以確認穩定度。`);
             } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+                segments.push('調高與調低方向平均偏移皆在 10pp 內，方向風險可接受。');
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，建議持續觀察並保留風控緩衝。`);
             }
         }
     }
 
     if (sampleCount !== null) {
-        segments.push(`擾動樣本 ${sampleCount} 組，資料量夠組團分析`);
+        segments.push(`擾動樣本 ${sampleCount} 組，資料量足以評估參數穩定度。`);
     }
 
     if (segments.length === 0) {
@@ -4970,6 +4976,17 @@ function runBacktestInternal() {
                     if (runtimeDataset && Number.isFinite(runtimeDataset.firstValidCloseGapFromEffective) && runtimeDataset.firstValidCloseGapFromEffective > 1) {
                         console.warn(`[Main] ${params?.stockNo || ''} 第一筆有效收盤價落後暖身起點 ${runtimeDataset.firstValidCloseGapFromEffective} 天。`);
                     }
+                    if (
+                        runtimeDataset &&
+                        Number.isFinite(runtimeDataset.firstValidCloseGapFromRequested) &&
+                        runtimeDataset.firstValidCloseGapFromRequested >= 14 &&
+                        runtimeDataset.firstValidCloseOnOrAfterRequestedStart?.date
+                    ) {
+                        const gapDays = runtimeDataset.firstValidCloseGapFromRequested;
+                        const firstValidDate = runtimeDataset.firstValidCloseOnOrAfterRequestedStart.date;
+                        const stockLabel = params?.stockNo || curSettings.stockNo || '該標的';
+                        showWarning(`${stockLabel} 在開始日期後連續 ${gapDays} 天沒有有效價格資料。系統偵測到的第一筆有效收盤價為 ${firstValidDate}，請將開始日期調整至該日或更晚再試一次。`);
+                    }
                     if (runtimeDataset?.invalidRowsInRange?.count > 0) {
                         const reasonSummary = formatDiagnosticsReasonCounts(runtimeDataset.invalidRowsInRange.reasons);
                         console.warn(`[Main] ${params?.stockNo || ''} 區間內偵測到 ${runtimeDataset.invalidRowsInRange.count} 筆無效資料，原因統計: ${reasonSummary}`);
@@ -6390,7 +6407,7 @@ function displayBacktestResult(result) {
                 ? sensitivityData
                 : null;
         const tooltipContent =
-            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的報酬漂移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
+            '參考 QuantConnect、Portfolio123 等回測平臺的參數敏感度規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的年化報酬偏移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議延長樣本或搭配優化驗證。<br>3. < 40：代表策略對參數高度敏感，需優先調整。<br><br>PP（百分點）代表年化報酬差值：調整後年化報酬 − 基準年化報酬。';
         const headerHtml = `
         <div class="flex items-center mb-6">
             <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
@@ -6433,6 +6450,14 @@ function displayBacktestResult(result) {
             if (Number.isInteger(value)) return value.toString();
             return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
         };
+        const resolveFirstFinite = (...values) => {
+            for (const candidate of values) {
+                if (Number.isFinite(candidate)) {
+                    return candidate;
+                }
+            }
+            return null;
+        };
         const scoreClass = (value) => {
             if (!Number.isFinite(value)) return 'text-muted-foreground';
             if (value >= 80) return 'text-emerald-600';
@@ -6448,6 +6473,7 @@ function displayBacktestResult(result) {
         };
         const baselineMetrics = {
             returnRate: Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null,
+            annualizedReturn: Number.isFinite(data?.baseline?.annualizedReturn) ? data.baseline.annualizedReturn : null,
             sharpeRatio: Number.isFinite(data?.baseline?.sharpeRatio) ? data.baseline.sharpeRatio : null,
         };
         const renderScenarioChip = (scenario) => {
@@ -6466,24 +6492,30 @@ function displayBacktestResult(result) {
                     <p class="sensitivity-scenario-chip__empty">${status}</p>
                 </div>`;
             }
-            const deltaText = formatDelta(scenario.deltaReturn);
-            const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
+            const deltaValue = resolveFirstFinite(scenario.deltaAnnualized, scenario.deltaReturn);
+            const driftValue = resolveFirstFinite(
+                scenario.annualizedDriftPercent,
+                scenario.driftPercent,
+                Number.isFinite(deltaValue) ? Math.abs(deltaValue) : null
+            );
+            const deltaText = formatDelta(deltaValue);
+            const driftText = formatPercentMagnitude(driftValue, 1);
             const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
-            const deltaCls = Number.isFinite(scenario.deltaReturn)
-                ? (scenario.deltaReturn >= 0 ? 'text-emerald-600' : 'text-rose-600')
+            const deltaCls = Number.isFinite(deltaValue)
+                ? (deltaValue >= 0 ? 'text-emerald-600' : 'text-rose-600')
                 : 'text-muted-foreground';
-            const driftCls = driftClass(scenario.driftPercent);
-            const returnText = formatPercentSigned(scenario.run?.returnRate ?? NaN, 2);
-            const baselineReturnText = formatPercentSigned(baselineMetrics.returnRate, 2);
-            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${baselineReturnText})。`;
+            const driftCls = driftClass(driftValue);
+            const scenarioAnnualText = formatPercentSigned(scenario.run?.annualizedReturn ?? NaN, 2);
+            const baselineAnnualText = formatPercentSigned(baselineMetrics.annualizedReturn, 2);
+            const ppTooltip = `PP（百分點）= 調整後年化報酬 (${scenarioAnnualText}) − 基準年化報酬 (${baselineAnnualText})。`;
             const sharpeBase = Number.isFinite(baselineMetrics.sharpeRatio)
                 ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
                 : '';
             const tooltipContent = [
                 `調整值：${formatParamValue(scenario.value)}`,
-                `回報：${returnText}`,
+                `年化報酬：${scenarioAnnualText}`,
                 ppTooltip,
-                `漂移：${driftText}`,
+                `年化偏移：${driftText}`,
                 `Sharpe Δ：${sharpeText}${sharpeBase}`
             ].join('<br>');
             return `<div class="sensitivity-scenario-chip tooltip">
@@ -6492,17 +6524,19 @@ function displayBacktestResult(result) {
                     <span class="sensitivity-scenario-chip__delta ${deltaCls}">${deltaText}</span>
                 </div>
                 <div class="sensitivity-scenario-chip__metrics">
-                    <span class="${driftCls}">漂移 ${driftText}</span>
+                    <span class="${driftCls}">年化偏移 ${driftText}</span>
                     <span class="text-[11px]" style="color: var(--muted-foreground);">Sharpe ${sharpeText}</span>
                 </div>
                 <span class="tooltiptext tooltiptext--sensitivity">${tooltipContent}</span>
             </div>`;
         };
         const renderDirectionalCell = (param) => {
-            const positiveText = formatDelta(param.positiveDriftPercent);
-            const negativeText = formatDelta(param.negativeDriftPercent);
-            const positiveCls = Number.isFinite(param.positiveDriftPercent) ? 'text-emerald-600' : 'text-muted-foreground';
-            const negativeCls = Number.isFinite(param.negativeDriftPercent) ? 'text-rose-600' : 'text-muted-foreground';
+            const positiveValue = resolveFirstFinite(param.positiveAnnualizedOffset, param.positiveDriftPercent);
+            const negativeValue = resolveFirstFinite(param.negativeAnnualizedOffset, param.negativeDriftPercent);
+            const positiveText = formatDelta(positiveValue);
+            const negativeText = formatDelta(negativeValue);
+            const positiveCls = Number.isFinite(positiveValue) ? 'text-emerald-600' : 'text-muted-foreground';
+            const negativeCls = Number.isFinite(negativeValue) ? 'text-rose-600' : 'text-muted-foreground';
             return `<div class="sensitivity-direction-cell">
                 <div class="sensitivity-direction-cell__item">
                     <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--up">▲</span>
@@ -6518,7 +6552,7 @@ function displayBacktestResult(result) {
             const params = Array.isArray(group.parameters) ? group.parameters : [];
             if (params.length === 0) return '';
             const groupAvgDriftValues = params
-                .map((item) => (Number.isFinite(item.averageDriftPercent) ? item.averageDriftPercent : null))
+                .map((item) => resolveFirstFinite(item.averageAnnualizedOffset, item.averageDriftPercent))
                 .filter((value) => value !== null);
             const computedGroupAvgDrift = groupAvgDriftValues.length > 0
                 ? groupAvgDriftValues.reduce((sum, cur) => sum + cur, 0) / groupAvgDriftValues.length
@@ -6530,43 +6564,53 @@ function displayBacktestResult(result) {
                 ? groupScoreValues.reduce((sum, cur) => sum + cur, 0) / groupScoreValues.length
                 : null;
             const groupMaxValues = params
-                .map((item) => (Number.isFinite(item.maxDriftPercent) ? item.maxDriftPercent : null))
+                .map((item) => resolveFirstFinite(item.maxAnnualizedOffset, item.maxDriftPercent))
                 .filter((value) => value !== null);
             const computedGroupMaxDrift = groupMaxValues.length > 0 ? Math.max(...groupMaxValues) : null;
             const groupPositiveValues = params
-                .map((item) => (Number.isFinite(item.positiveDriftPercent) ? item.positiveDriftPercent : null))
+                .map((item) => resolveFirstFinite(item.positiveAnnualizedOffset, item.positiveDriftPercent))
                 .filter((value) => value !== null);
             const computedGroupPositive = groupPositiveValues.length > 0
                 ? groupPositiveValues.reduce((sum, cur) => sum + cur, 0) / groupPositiveValues.length
                 : null;
             const groupNegativeValues = params
-                .map((item) => (Number.isFinite(item.negativeDriftPercent) ? item.negativeDriftPercent : null))
+                .map((item) => resolveFirstFinite(item.negativeAnnualizedOffset, item.negativeDriftPercent))
                 .filter((value) => value !== null);
             const computedGroupNegative = groupNegativeValues.length > 0
                 ? groupNegativeValues.reduce((sum, cur) => sum + cur, 0) / groupNegativeValues.length
                 : null;
-            const groupAvgDrift = Number.isFinite(group.averageDriftPercent)
-                ? group.averageDriftPercent
-                : computedGroupAvgDrift;
+            const groupAvgDrift = resolveFirstFinite(
+                group.averageAnnualizedOffset,
+                group.averageDriftPercent,
+                computedGroupAvgDrift
+            );
             const groupScore = Number.isFinite(group.stabilityScore)
                 ? group.stabilityScore
                 : computedGroupScore;
-            const groupMaxDrift = Number.isFinite(group.maxDriftPercent)
-                ? group.maxDriftPercent
-                : computedGroupMaxDrift;
-            const groupPositive = Number.isFinite(group.positiveDriftPercent)
-                ? group.positiveDriftPercent
-                : computedGroupPositive;
-            const groupNegative = Number.isFinite(group.negativeDriftPercent)
-                ? group.negativeDriftPercent
-                : computedGroupNegative;
+            const groupMaxDrift = resolveFirstFinite(
+                group.maxAnnualizedOffset,
+                group.maxDriftPercent,
+                computedGroupMaxDrift
+            );
+            const groupPositive = resolveFirstFinite(
+                group.positiveAnnualizedOffset,
+                group.positiveDriftPercent,
+                computedGroupPositive
+            );
+            const groupNegative = resolveFirstFinite(
+                group.negativeAnnualizedOffset,
+                group.negativeDriftPercent,
+                computedGroupNegative
+            );
             const scenarioSamples = params.reduce((sum, param) => sum + (param.scenarioCount || 0), 0);
             const strategyKey = group.strategy || '';
             const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
             const rowPairs = params.map((param) => {
-                const driftCls = driftClass(param.averageDriftPercent);
-                const driftValue = formatPercentMagnitude(param.averageDriftPercent, 1);
-                const maxValue = formatPercentMagnitude(param.maxDriftPercent, 1);
+                const averageOffset = resolveFirstFinite(param.averageAnnualizedOffset, param.averageDriftPercent);
+                const maxOffset = resolveFirstFinite(param.maxAnnualizedOffset, param.maxDriftPercent);
+                const driftCls = driftClass(averageOffset);
+                const driftValue = formatPercentMagnitude(averageOffset, 1);
+                const maxValue = formatPercentMagnitude(maxOffset, 1);
                 const scoreCls = scoreClass(param.stabilityScore);
                 const scoreValue = formatScore(param.stabilityScore);
                 const baseValueText = formatParamValue(param.baseValue);
@@ -6588,7 +6632,7 @@ function displayBacktestResult(result) {
                     </td>
                     <td class="px-3 py-2 text-center">
                         <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均年化偏移</p>
                     </td>
                     <td class="px-3 py-2 text-center">
                         <span class="text-sm font-semibold ${driftClass(param.maxDriftPercent)}">${maxValue}</span>
@@ -6612,7 +6656,7 @@ function displayBacktestResult(result) {
                     </div>
                     <div class="sensitivity-mobile-metrics sensitivity-mobile-metrics--grid">
                         <div>
-                            <p class="sensitivity-mobile-label">平均漂移</p>
+                            <p class="sensitivity-mobile-label">平均年化偏移</p>
                             <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
                         </div>
                         <div>
@@ -6642,7 +6686,7 @@ function displayBacktestResult(result) {
                     </div>
                     <div class="flex items-center gap-4 flex-wrap">
                         <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
+                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均年化偏移</p>
                             <p class="text-base font-semibold ${driftClass(groupAvgDrift)}">${formatPercentMagnitude(groupAvgDrift, 1)}</p>
                         </div>
                         <div class="text-right">
@@ -6678,7 +6722,7 @@ function displayBacktestResult(result) {
                                         </span>
                                     </span>
                                 </th>
-                                <th class="px-3 py-2 text-center font-medium">平均漂移</th>
+                                <th class="px-3 py-2 text-center font-medium">平均年化偏移</th>
                                 <th class="px-3 py-2 text-center font-medium">最大偏移</th>
                                 <th class="px-3 py-2 text-center font-medium">方向偏移</th>
                                 <th class="px-3 py-2 text-center font-medium">穩定度</th>
@@ -6693,10 +6737,22 @@ function displayBacktestResult(result) {
             </div>`;
         };
         const overallScore = data?.summary?.stabilityScore ?? null;
-        const overallDrift = data?.summary?.averageDriftPercent ?? null;
-        const overallMaxDrift = data?.summary?.maxDriftPercent ?? null;
-        const overallPositive = data?.summary?.positiveDriftPercent ?? null;
-        const overallNegative = data?.summary?.negativeDriftPercent ?? null;
+        const overallDrift = resolveFirstFinite(
+            data?.summary?.averageAnnualizedOffset,
+            data?.summary?.averageDriftPercent
+        );
+        const overallMaxDrift = resolveFirstFinite(
+            data?.summary?.maxAnnualizedOffset,
+            data?.summary?.maxDriftPercent
+        );
+        const overallPositive = resolveFirstFinite(
+            data?.summary?.positiveAnnualizedOffset,
+            data?.summary?.positiveDriftPercent
+        );
+        const overallNegative = resolveFirstFinite(
+            data?.summary?.negativeAnnualizedOffset,
+            data?.summary?.negativeDriftPercent
+        );
         const overallSamples = data?.summary?.scenarioCount ?? null;
         const summarySharpeDrop = Number.isFinite(data?.summary?.averageSharpeDrop)
             ? data.summary.averageSharpeDrop
@@ -6712,9 +6768,9 @@ function displayBacktestResult(result) {
             ? stabilityComponents.sharpePenalty
             : null;
         const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            '穩定度分數 = 100 − 平均年化偏移（pp） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
             Number.isFinite(stabilityDriftPenalty)
-                ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
+                ? `年化偏移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
                 : null,
             Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
                 ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
@@ -6731,7 +6787,7 @@ function displayBacktestResult(result) {
             const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
             const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
             if (positiveAbs === null && negativeAbs === null) {
-                return '需更多樣本才能評估調高／調低方向的敏感度。';
+                return '需更多樣本才能評估調高／調低方向的年化偏移。';
             }
             const dominantDirection = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs)
                 ? '調高'
@@ -6740,13 +6796,13 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
-                return '方向偏移穩健，維持現行節奏即可。';
+                directionSafeTooltip = '調高與調低的年化偏移皆在 ±10pp 內，方向風險可接受。';
+                return '方向偏移穩健，可維持現行設定並定期檢查。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
+                return `${dominantDirection}方向平均偏移已超過 15pp，建議針對該方向進行批量優化或調整風控。`;
             }
-            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
+            return `${dominantDirection}方向平均偏移介於 10～15pp，建議延伸樣本或調整倉位檢驗穩定度。`;
         })();
         const summarySentence = (() => {
             const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
@@ -6756,15 +6812,15 @@ function displayBacktestResult(result) {
                 return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
             }
             if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
-                return '整體擾動反應平穩，可照現有參數持續觀察。';
+                return '整體年化偏移與穩定度表現平穩，可維持現行參數並持續監控。';
             }
             if (stabilityScore !== null && stabilityScore >= 55) {
                 return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
             }
-            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
+            return '敏感度偏高，建議縮小部位並重新檢視參數與風控設定。';
         })();
         const directionTooltipHtml = directionSafeTooltip
-            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
+            ? `<span class="tooltip"><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
             : '';
         const summaryCards = `
             <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
@@ -6784,15 +6840,14 @@ function displayBacktestResult(result) {
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
                     <div class="flex flex-col items-center text-center gap-3">
                         <div class="flex items-center gap-2">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均年化偏移</p>
                             <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均年化偏移 = 所有擾動樣本（比例與步階）的年化報酬偏移絕對值平均。<br><strong>&le; 20pp</strong>：多數量化平臺視為穩健。<br><strong>20～40pp</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40pp</strong>：策略對參數高度敏感，需調整部位與風控。</span>
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
                         <div class="text-xs text-muted-foreground leading-relaxed flex flex-col items-center gap-1">
-                            <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
+                            <span>最大年化偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
                             <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
                         </div>
                     </div>
@@ -6824,12 +6879,12 @@ function displayBacktestResult(result) {
                     <div>
                         <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
                         <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
-                            <li><strong>PP（百分點）</strong>：調整後報酬率與原始回測報酬率的差異，正值代表績效提升，負值代表下滑。</li>
+                            <li><strong>PP（百分點）</strong>：調整後年化報酬與原始回測年化報酬的差異，正值代表績效提升，負值代表下滑。</li>
                             <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
-                            <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
-                            <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
+                            <li><strong>平均年化偏移</strong>：所有擾動樣本的年化報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
+                            <li><strong>最大年化偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
+                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均年化偏移，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均年化偏移（pp） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
                             <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
                         </ul>
                     </div>
@@ -7005,6 +7060,7 @@ function displayBacktestResult(result) {
         `;
 
         initSensitivityCollapse(el);
+        renderPerformanceTable(result.subPeriodResults || null, result);
 
         console.log("[Main] displayBacktestResult finished.");
     }
@@ -7051,12 +7107,12 @@ const formatKDParams = (kdVals) => {
     } 
 }; 
 
-const formatMACDParams = (macdValues) => { 
-    try { 
-        if (!macdValues || typeof macdValues !== 'object') { 
-            console.warn("[Main] Invalid macdValues passed to formatMACDParams:", macdValues); 
-            return ''; 
-        } 
+const formatMACDParams = (macdValues) => {
+    try {
+        if (!macdValues || typeof macdValues !== 'object') {
+            console.warn("[Main] Invalid macdValues passed to formatMACDParams:", macdValues);
+            return '';
+        }
         const formatV = (v) => checkDisplay(v) ? v.toFixed(2) : '--'; 
         const difPrev = macdValues?.difPrev; 
         const deaPrev = macdValues?.deaPrev; 
@@ -7068,7 +7124,42 @@ const formatMACDParams = (macdValues) => {
     } catch (e) { 
         console.error("[Main] Error in formatMACDParams:", e, macdValues); 
         return '<div class="mt-1 text-xs" style="color: #dc2626;">(MACD值格式錯誤)</div>'; 
-    } 
+    }
+};
+
+const buildTradeIndicatorMarkup = (source) => {
+    if (!source || typeof source !== 'object') {
+        return '';
+    }
+    const sections = [];
+    if (source.kdValues) sections.push(formatKDParams(source.kdValues));
+    if (source.macdValues) sections.push(formatMACDParams(source.macdValues));
+    if (source.indicatorValues) sections.push(formatIndicatorValues(source.indicatorValues));
+    return sections.filter(Boolean).join('');
+};
+
+const buildEntryStageMarkup = (entryTrade) => {
+    if (!entryTrade) return '';
+    if (Array.isArray(entryTrade.stages) && entryTrade.stages.length > 0) {
+        const stageCards = entryTrade.stages.map((stage, index) => {
+            const triggerLabel = stage.stageTrigger === 'price_pullback'
+                ? '價格回落觸發'
+                : stage.stageTrigger === 'signal'
+                    ? '策略訊號'
+                    : stage.stageTrigger || '策略訊號';
+            const allocation = Number.isFinite(stage.allocationPercent)
+                ? `${stage.allocationPercent.toFixed(1)}%`
+                : '—';
+            const indicatorMarkup = buildTradeIndicatorMarkup(stage) || '<div class="text-[11px]" style="color: var(--muted-foreground);">（未回傳參數快照）</div>';
+            return `<div class="mt-2 rounded-md border px-3 py-2" style="border-color: color-mix(in srgb, var(--border) 60%, transparent); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                <div class="text-xs font-semibold" style="color: var(--foreground);">第 ${index + 1} 段</div>
+                <div class="text-[11px]" style="color: var(--muted-foreground);">觸發：${escapeHtml(triggerLabel)}・分段占比 ${escapeHtml(allocation)}</div>
+                ${indicatorMarkup}
+            </div>`;
+        }).join('');
+        return `<div class="mt-2 space-y-2">${stageCards}</div>`;
+    }
+    return buildTradeIndicatorMarkup(entryTrade);
 };
 function displayTradeResults(result) { 
     console.log("[Main] displayTradeResults called"); 
@@ -7120,22 +7211,23 @@ function displayTradeResults(result) {
                     entryParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(進場信息格式錯誤)</span>'; 
                 }
                 
-                let exitParamsDisplay = ''; 
-                const sl = exitTrade?.triggeredByStopLoss || false; 
-                const tp = exitTrade?.triggeredByTakeProfit || false; 
-                let trigger = ''; 
-                if(sl) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #fee2e2; color: #dc2626;">🛑停損</span>'; 
-                else if(tp) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #dcfce7; color: #16a34a;">✅停利</span>'; 
-                
-                try { 
-                    if (exitTrade?.kdValues) exitParamsDisplay = formatKDParams(exitTrade.kdValues); 
-                    else if (exitTrade?.macdValues) exitParamsDisplay = formatMACDParams(exitTrade.macdValues); 
-                    else if (exitTrade?.indicatorValues) exitParamsDisplay = formatIndicatorValues(exitTrade.indicatorValues); 
-                } catch (exitFormatError) { 
-                    console.error(`[Main] Error formatting exit display for trade index ${index}:`, exitFormatError, exitTrade); 
-                    exitParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(出場信息格式錯誤)</span>'; 
+                const sl = exitTrade?.triggeredByStopLoss || false;
+                const tp = exitTrade?.triggeredByTakeProfit || false;
+                let trigger = '';
+                if(sl) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #fee2e2; color: #dc2626;">🛑停損</span>';
+                else if(tp) trigger='<span class="ml-2 text-xs font-medium px-2 py-0.5 rounded" style="background-color: #dcfce7; color: #16a34a;">✅停利</span>';
+
+                let exitParamsDisplay = '';
+                try {
+                    const exitMarkup = buildTradeIndicatorMarkup(exitTrade);
+                    exitParamsDisplay = exitMarkup
+                        ? exitMarkup
+                        : '<div class="mt-1 text-xs" style="color: var(--muted-foreground);">（未回傳出場參數快照）</div>';
+                } catch (exitFormatError) {
+                    console.error(`[Main] Error formatting exit display for trade index ${index}:`, exitFormatError, exitTrade);
+                    exitParamsDisplay = '<span class="block text-xs text-red-500 mt-1">(出場信息格式錯誤)</span>';
                 }
-                
+
                 const entryDate = entryTrade.date || 'N/A'; 
                 const entryPrice = typeof entryTrade.price === 'number' ? entryTrade.price.toFixed(2) : 'N/A'; 
                 const entryShares = entryTrade.shares || 'N/A'; 
@@ -7200,6 +7292,132 @@ function displayTradeResults(result) {
         tradeResultsEl.innerHTML = `<p class="text-xs text-red-600 text-center py-8">顯示交易記錄列表時發生錯誤。</p>`; 
         showError("顯示交易記錄時出錯，請檢查控制台。"); 
     } 
+}
+
+function renderPerformanceTable(subPeriodResults, overallResult) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) return;
+    container.dataset.lbPerformanceTableVersion = PERFORMANCE_TABLE_VERSION;
+
+    if (!overallResult) {
+        container.innerHTML = `<p class="text-muted" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>`;
+        return;
+    }
+
+    const periodOrder = {
+        '1M': 1,
+        '3M': 2,
+        '6M': 3,
+        '1Y': 4,
+        '2Y': 5,
+        '3Y': 6,
+        '4Y': 7,
+        '5Y': 8,
+        '6Y': 9,
+        '7Y': 10,
+        '8Y': 11,
+        '9Y': 12,
+        '10Y': 13,
+    };
+
+    const periods = subPeriodResults && typeof subPeriodResults === 'object'
+        ? Object.keys(subPeriodResults).filter(Boolean)
+        : [];
+    periods.sort((a, b) => (periodOrder[a] || 99) - (periodOrder[b] || 99));
+
+    const normalizeNumber = (value) => {
+        if (Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const trimmed = value.replace(/,/g, '').trim();
+            if (trimmed === '') return null;
+            const parsed = Number.parseFloat(trimmed);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+    };
+    const resolvePercentCell = (value) => {
+        const numeric = normalizeNumber(value);
+        if (!Number.isFinite(numeric)) return { text: '—', cls: 'text-muted-foreground' };
+        const cls = numeric >= 0 ? 'text-emerald-600' : 'text-rose-600';
+        return { text: `${numeric.toFixed(2)}%`, cls };
+    };
+    const resolveNumberCell = (value, digits = 2) => {
+        const numeric = normalizeNumber(value);
+        if (!Number.isFinite(numeric)) return { text: '—', cls: 'text-muted-foreground' };
+        return { text: numeric.toFixed(digits), cls: 'text-foreground' };
+    };
+
+    const periodRows = periods.map((period) => {
+        const data = subPeriodResults?.[period] || null;
+        if (!data || typeof data !== 'object') {
+            return `<tr class="border-t" style="border-color: var(--border);">
+                <td class="px-4 py-3 font-medium" style="color: var(--foreground);">${escapeHtml(period)}</td>
+                <td class="px-4 py-3 text-sm italic" colspan="5" style="color: var(--muted-foreground);">資料不足</td>
+            </tr>`;
+        }
+        const totalReturn = resolvePercentCell(data.totalReturn);
+        const buyHoldReturn = resolvePercentCell(data.totalBuyHoldReturn);
+        const sharpeCell = resolveNumberCell(data.sharpeRatio);
+        const sortinoCell = resolveNumberCell(data.sortinoRatio);
+        const maxDdCell = resolvePercentCell(data.maxDrawdown);
+        return `<tr class="border-t" style="border-color: var(--border);">
+            <td class="px-4 py-3 font-medium" style="color: var(--foreground);">${escapeHtml(period)}</td>
+            <td class="px-4 py-3 ${totalReturn.cls}">${totalReturn.text}</td>
+            <td class="px-4 py-3 ${buyHoldReturn.cls}">${buyHoldReturn.text}</td>
+            <td class="px-4 py-3 ${sharpeCell.cls}">${sharpeCell.text}</td>
+            <td class="px-4 py-3 ${sortinoCell.cls}">${sortinoCell.text}</td>
+            <td class="px-4 py-3 ${maxDdCell.cls}">${maxDdCell.text}</td>
+        </tr>`;
+    }).join('');
+
+    const overallReturnCell = resolvePercentCell(overallResult.returnRate);
+    const overallBhReturnCell = (() => {
+        const bhSeries = Array.isArray(overallResult.buyHoldReturns) ? overallResult.buyHoldReturns : [];
+        const last = bhSeries.length > 0
+            ? normalizeNumber(bhSeries[bhSeries.length - 1])
+            : normalizeNumber(overallResult.buyHoldReturn);
+        return resolvePercentCell(last);
+    })();
+    const overallSharpeCell = resolveNumberCell(overallResult.sharpeRatio);
+    const overallSortinoCell = resolveNumberCell(overallResult.sortinoRatio);
+    const overallMaxDdCell = resolvePercentCell(overallResult.maxDrawdown);
+
+    const periodRowsHtml = periodRows && periodRows.length > 0
+        ? periodRows
+        : `<tr class="border-t" style="border-color: var(--border);">
+            <td class="px-4 py-3 text-sm italic" colspan="6" style="color: var(--muted-foreground);">目前尚無可拆解的期間績效資料。</td>
+        </tr>`;
+
+    const tableHtml = `
+        <div class="space-y-3">
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm border" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                    <thead style="background-color: color-mix(in srgb, var(--muted) 12%, var(--background)); color: var(--muted-foreground);">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-semibold">期間</th>
+                            <th class="px-4 py-3 text-right font-semibold">策略累積報酬</th>
+                            <th class="px-4 py-3 text-right font-semibold">買入持有累積報酬</th>
+                            <th class="px-4 py-3 text-right font-semibold">夏普值</th>
+                            <th class="px-4 py-3 text-right font-semibold">索提諾比率</th>
+                            <th class="px-4 py-3 text-right font-semibold">最大回撤</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color: var(--foreground);">
+                        ${periodRowsHtml}
+                        <tr class="border-t" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); background-color: color-mix(in srgb, var(--muted) 8%, var(--background));">
+                            <td class="px-4 py-3 font-semibold" style="color: var(--foreground);">總計</td>
+                            <td class="px-4 py-3 font-semibold ${overallReturnCell.cls}">${overallReturnCell.text}</td>
+                            <td class="px-4 py-3 font-semibold ${overallBhReturnCell.cls}">${overallBhReturnCell.text}</td>
+                            <td class="px-4 py-3 font-semibold ${overallSharpeCell.cls}">${overallSharpeCell.text}</td>
+                            <td class="px-4 py-3 font-semibold ${overallSortinoCell.cls}">${overallSortinoCell.text}</td>
+                            <td class="px-4 py-3 font-semibold ${overallMaxDdCell.cls}">${overallMaxDdCell.text}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+    container.innerHTML = tableHtml;
 }
 function renderChart(result) {
     const chartContainer = document.getElementById('chart-container');

@@ -235,7 +235,7 @@ function generateStrategyOptions() {
                 const div = document.createElement('div');
                 div.className = 'flex items-center';
                 div.innerHTML = `
-                    <input type="checkbox" id="buy-${strategy}" value="${strategy}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
+                    <input type="checkbox" id="buy-${strategy}" value="${strategy}" class="h-4 w-4 border border-border rounded mr-2" style="border-color: var(--border);">
                     <label for="buy-${strategy}" class="text-sm text-gray-700 cursor-pointer">
                         ${strategyInfo.name}
                     </label>
@@ -251,7 +251,7 @@ function generateStrategyOptions() {
                 const div = document.createElement('div');
                 div.className = 'flex items-center';
                 div.innerHTML = `
-                    <input type="checkbox" id="sell-${strategy}" value="${strategy}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
+                    <input type="checkbox" id="sell-${strategy}" value="${strategy}" class="h-4 w-4 border border-border rounded mr-2" style="border-color: var(--border);">
                     <label for="sell-${strategy}" class="text-sm text-gray-700 cursor-pointer">
                         ${strategyInfo.name}
                     </label>

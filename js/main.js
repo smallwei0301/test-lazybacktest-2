@@ -35,6 +35,7 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+function showWarning(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-exclamation-triangle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-amber-100 border-l-4 border-amber-500 text-amber-700 rounded-md'; }
 
 // Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
 const stagedEntryControls = (() => {
