@@ -1446,75 +1446,81 @@ function buildStrategyHealthSummary(result) {
     };
 }
 
-function buildSensitivityScoreAdvice(result) {
-    const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
-    const summary = data?.summary || null;
+function buildSensitivityScoreAdvice(result, computedSummary = null) {
+    let summary = computedSummary || null;
+    if (!summary) {
+        const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
+        const prepared = computeSensitivitySummary(result, data);
+        summary = prepared?.summary || null;
+    }
     if (!summary) {
         return null;
     }
 
-    const rawScore = Number.isFinite(summary.stabilityScore) ? Number(summary.stabilityScore) : null;
-    const averageDrift = Number.isFinite(summary.averageDriftPercent)
-        ? Math.abs(Number(summary.averageDriftPercent))
+    const score = Number.isFinite(summary.score) ? Math.round(summary.score) : null;
+    const averageDiff = Number.isFinite(summary.averageAnnualisedDiff)
+        ? Math.abs(summary.averageAnnualisedDiff)
         : null;
-    const positiveDrift = Number.isFinite(summary.positiveDriftPercent)
-        ? Math.abs(Number(summary.positiveDriftPercent))
+    const maxDiff = Number.isFinite(summary.maxAnnualisedDiff)
+        ? Math.abs(summary.maxAnnualisedDiff)
         : null;
-    const negativeDrift = Number.isFinite(summary.negativeDriftPercent)
-        ? Math.abs(Number(summary.negativeDriftPercent))
+    const positiveDiff = Number.isFinite(summary.positiveAnnualisedDiff)
+        ? Math.abs(summary.positiveAnnualisedDiff)
         : null;
-    const sampleCount = Number.isFinite(summary.scenarioCount) ? Number(summary.scenarioCount) : null;
+    const negativeDiff = Number.isFinite(summary.negativeAnnualisedDiff)
+        ? Math.abs(summary.negativeAnnualisedDiff)
+        : null;
+    const sampleCount = Number.isFinite(summary.sampleCount) ? summary.sampleCount : null;
 
-    const segments = [];
+    const advice = [];
 
-    if (rawScore === null) {
-        segments.push('敏感度總分失聯，像存檔壞軌，請重跑擾動測試確認穩定度');
-    } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬穩健等級，參數調校像滿級裝備`);
-    } else if (rawScore >= 40) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，列入觀察名單，調參時請像打副本一樣小心`);
+    if (score === null) {
+        advice.push('敏感度分數無法計算，建議重新執行擾動測試確認資料完整性');
+    } else if (score >= 70) {
+        advice.push(`敏感度分數 ${score} 分，參數調整對年化報酬影響有限，可維持現有設定並定期復查`);
+    } else if (score >= 40) {
+        advice.push(`敏感度分數 ${score} 分，建議延長樣本區間或搭配滾動驗證觀察穩定性`);
     } else {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數超敏感，碰一下就暴擊先開保護`);
+        advice.push(`敏感度分數 ${score} 分，策略對參數高度敏感，請縮小部位並重新檢視指標與風控配置`);
     }
 
-    if (averageDrift !== null) {
-        if (averageDrift <= 20) {
-            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
-        } else if (averageDrift <= 40) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
+    if (averageDiff !== null) {
+        if (averageDiff <= 2) {
+            advice.push('平均年化差異低於 2%，調參後的長期報酬變動幅度有限');
+        } else if (averageDiff <= 4) {
+            advice.push(`平均年化差異約 ${averageDiff.toFixed(1)}%，建議先以分批調整或滾動視窗驗證穩定度`);
         } else {
-            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
+            advice.push(`平均年化差異約 ${averageDiff.toFixed(1)}%，需檢查是否過度貼合特定樣本或缺乏風險緩衝`);
         }
     }
 
-    if (positiveDrift !== null || negativeDrift !== null) {
-        const positiveValue = positiveDrift ?? -Infinity;
-        const negativeValue = negativeDrift ?? -Infinity;
+    if (maxDiff !== null && maxDiff > 0) {
+        advice.push(`部分擾動樣本的最大年化差異達 ${maxDiff.toFixed(1)}%，調整參數時請先評估可承受的績效落差`);
+    }
+
+    if (positiveDiff !== null || negativeDiff !== null) {
+        const positiveValue = positiveDiff ?? 0;
+        const negativeValue = negativeDiff ?? 0;
         const dominantDirection = positiveValue >= negativeValue ? '調高' : '調低';
-        const dominantMagnitude = dominantDirection === '調高' ? positiveDrift : negativeDrift;
-        const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
-        if (Number.isFinite(dominantMagnitude)) {
-            if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
-            } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
-            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+        const dominantMagnitude = dominantDirection === '調高' ? positiveValue : negativeValue;
+        if (dominantMagnitude > 0) {
+            if (dominantMagnitude > 3) {
+                advice.push(`${dominantDirection}參數時年化差異平均超過 ${dominantMagnitude.toFixed(1)}%，建議優先針對該方向做滾動驗證`);
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
+                advice.push(`${dominantDirection}參數時年化差異約 ${dominantMagnitude.toFixed(1)}%，維持調整紀律即可`);
             }
         }
     }
 
     if (sampleCount !== null) {
-        segments.push(`擾動樣本 ${sampleCount} 組，資料量夠組團分析`);
+        advice.push(`擾動樣本共 ${sampleCount} 組，後續調整請維持相近的資料量以利比較`);
     }
 
-    if (segments.length === 0) {
+    if (advice.length === 0) {
         return null;
     }
 
-    return `${segments.join('，')}。`;
+    return `${advice.join('。')}。`;
 }
 
 function determineStrategyStatusState(diff, comparisonAvailable) {
@@ -1533,14 +1539,14 @@ function determineStrategyStatusState(diff, comparisonAvailable) {
     return 'behind';
 }
 
-function updateStrategyStatusCard(result) {
+function updateStrategyStatusCard(result, options = {}) {
     if (!strategyStatusElements.card) return;
     const comparison = buildStrategyComparisonSummary(result || {});
     const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
     const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
     const diffText = '';
     const health = buildStrategyHealthSummary(result || {});
-    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {});
+    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {}, options.sensitivitySummary || null);
 
     const detailLines = [];
     if (comparison.line) {
@@ -5132,6 +5138,693 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+function normaliseTooltipLabel(content) {
+    if (content === null || content === undefined) return '';
+    return String(content)
+        .replace(/<br\s*\/?>(\s)*/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildTooltip(content, options = {}) {
+    const className = options.className ? ` ${options.className}` : '';
+    const textClass = options.textClass ? ` ${options.textClass}` : '';
+    const labelSource = options.ariaLabel !== undefined && options.ariaLabel !== null
+        ? options.ariaLabel
+        : normaliseTooltipLabel(content);
+    const ariaAttr = labelSource
+        ? ` aria-label="${escapeHtml(labelSource)}"`
+        : ' aria-hidden="true"';
+    const tabIndexAttr = options.tabIndex === -1 ? '' : ' tabindex="0"';
+    return `<span class="tooltip${className}"${tabIndexAttr}${ariaAttr}><span class="tooltip-icon" aria-hidden="true">i</span><span class="tooltiptext${textClass}">${content}</span></span>`;
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MIN_ANNUALISATION_YEARS = 1 / 365;
+
+function normaliseIsoDateToUTC(dateInput) {
+    if (!dateInput) return NaN;
+    const value = String(dateInput).trim();
+    if (!value) return NaN;
+    const normalised = value.length <= 10 ? `${value}T00:00:00Z` : value;
+    const parsed = Date.parse(normalised);
+    return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function computeDurationYearsBetween(startDate, endDate) {
+    const startMs = normaliseIsoDateToUTC(startDate);
+    const endMs = normaliseIsoDateToUTC(endDate);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        return null;
+    }
+    const diffDays = (endMs - startMs) / MS_PER_DAY;
+    const years = diffDays / 365.25;
+    if (!Number.isFinite(years) || years <= 0) return null;
+    return Math.max(years, MIN_ANNUALISATION_YEARS);
+}
+
+function computeResultDurationYears(result) {
+    if (!result) return null;
+    const dates = Array.isArray(result.dates) ? result.dates : [];
+    let startDate = dates.length > 0 ? dates[0] : null;
+    let endDate = dates.length > 0 ? dates[dates.length - 1] : null;
+    if (!startDate) {
+        startDate = result.effectiveStartDate || result.startDate || result.dataStartDate || null;
+    }
+    if (!endDate) {
+        endDate = result.endDate || result.lastDate || result.finalDate || null;
+    }
+    if (!startDate || !endDate) return null;
+    return computeDurationYearsBetween(startDate, endDate);
+}
+
+function convertReturnToAnnualised(totalReturnPercent, years) {
+    if (!Number.isFinite(totalReturnPercent)) return null;
+    const durationYears = Number.isFinite(years) ? years : null;
+    if (!durationYears || durationYears <= 0) return null;
+    const multiplier = 1 + totalReturnPercent / 100;
+    if (multiplier <= 0) return null;
+    const annualised = Math.pow(multiplier, 1 / durationYears) - 1;
+    return Number.isFinite(annualised) ? annualised * 100 : null;
+}
+
+function computeAnnualisedScenarioDelta(baselineReturnPercent, deltaReturnPercent, years, baselineAnnualised) {
+    if (!Number.isFinite(deltaReturnPercent)) {
+        return { annualised: null, deltaAnnualised: null };
+    }
+    if (!Number.isFinite(baselineReturnPercent)) {
+        return { annualised: null, deltaAnnualised: null };
+    }
+    const scenarioReturn = baselineReturnPercent + deltaReturnPercent;
+    const annualised = convertReturnToAnnualised(scenarioReturn, years);
+    if (annualised === null) {
+        return { annualised: null, deltaAnnualised: null };
+    }
+    if (!Number.isFinite(baselineAnnualised)) {
+        return { annualised, deltaAnnualised: null };
+    }
+    return { annualised, deltaAnnualised: annualised - baselineAnnualised };
+}
+
+let lastStartGapAlertKey = null;
+
+function formatPercentMagnitude(value, digits = 1) {
+    if (!Number.isFinite(value)) return '—';
+    return `${Math.abs(value).toFixed(digits)}%`;
+}
+
+function computeAnnualizedStabilityScore(stats) {
+    const { averageDiff = null, maxDiff = null, sharpeDeltas = [] } = stats || {};
+    const averagePenalty = Number.isFinite(averageDiff) ? Math.min(60, Math.abs(averageDiff) * 3.4) : 0;
+    const maxPenalty = Number.isFinite(maxDiff) ? Math.max(0, (Math.abs(maxDiff) - 5) * 1.6) : 0;
+    const negativeSharpe = Array.isArray(sharpeDeltas)
+        ? sharpeDeltas.filter((value) => Number.isFinite(value) && value < 0).map((value) => Math.abs(value))
+        : [];
+    const averageSharpeDrop = negativeSharpe.length > 0
+        ? negativeSharpe.reduce((sum, value) => sum + value, 0) / negativeSharpe.length
+        : 0;
+    const sharpePenalty = Math.min(30, averageSharpeDrop * 12);
+    const rawScore = 100 - averagePenalty - maxPenalty - sharpePenalty;
+    if (!Number.isFinite(rawScore)) return null;
+    return Math.max(0, Math.min(100, rawScore));
+}
+
+function formatSharpeDelta(value) {
+    if (!Number.isFinite(value)) return '—';
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function formatParamValue(value) {
+    if (!Number.isFinite(value)) return '—';
+    if (Number.isInteger(value)) return value.toString();
+    return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
+}
+
+function scoreClass(value) {
+    if (!Number.isFinite(value)) return 'text-muted-foreground';
+    if (value >= 80) return 'text-emerald-600';
+    if (value >= 60) return 'text-amber-500';
+    return 'text-rose-600';
+}
+
+function driftClass(value) {
+    if (!Number.isFinite(value)) return 'text-muted-foreground';
+    const abs = Math.abs(value);
+    if (abs <= 2.5) return 'text-emerald-600';
+    if (abs <= 5) return 'text-amber-500';
+    return 'text-rose-600';
+}
+
+function computeSensitivitySummary(result, sensitivityData) {
+    const data = sensitivityData && Array.isArray(sensitivityData.groups) && sensitivityData.groups.length > 0
+        ? sensitivityData
+        : null;
+    if (!data) return null;
+
+    const durationYears = computeResultDurationYears(result);
+    const baselineReturnFromData = Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null;
+    const baselineReturnPercent = Number.isFinite(result?.returnRate)
+        ? result.returnRate
+        : baselineReturnFromData;
+    const baselineAnnualised = Number.isFinite(result?.annualizedReturn)
+        ? result.annualizedReturn
+        : convertReturnToAnnualised(baselineReturnPercent, durationYears);
+
+    const preparedGroups = [];
+    const aggregated = {
+        diffs: [],
+        maxDiffs: [],
+        positiveDiffs: [],
+        negativeDiffs: [],
+        scores: [],
+        scenarioCount: 0,
+        sampleCount: 0,
+    };
+
+    data.groups.forEach((group) => {
+        const params = Array.isArray(group.parameters) ? group.parameters : [];
+        const strategyKey = group.strategy || '';
+        const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
+        const preparedParams = params.map((param) => {
+            const scenarios = Array.isArray(param.scenarios) ? param.scenarios : [];
+            const scenarioDetails = scenarios.map((scenario) => {
+                const scenarioRunReturn = Number.isFinite(scenario.run?.returnRate)
+                    ? scenario.run.returnRate
+                    : Number.isFinite(scenario.returnRate)
+                        ? scenario.returnRate
+                        : null;
+                const baselineForScenario = Number.isFinite(baselineReturnPercent)
+                    ? baselineReturnPercent
+                    : baselineReturnFromData;
+                const derivedScenarioReturn = Number.isFinite(baselineForScenario) && Number.isFinite(scenario.deltaReturn)
+                    ? baselineForScenario + scenario.deltaReturn
+                    : scenarioRunReturn;
+                let deltaReturnPercent = null;
+                if (Number.isFinite(scenario.deltaReturn)) {
+                    deltaReturnPercent = scenario.deltaReturn;
+                } else if (Number.isFinite(derivedScenarioReturn) && Number.isFinite(baselineForScenario)) {
+                    deltaReturnPercent = derivedScenarioReturn - baselineForScenario;
+                }
+
+                const annualisedInfo = Number.isFinite(baselineForScenario) && Number.isFinite(deltaReturnPercent)
+                    ? computeAnnualisedScenarioDelta(baselineForScenario, deltaReturnPercent, durationYears, baselineAnnualised)
+                    : (() => {
+                        if (!Number.isFinite(derivedScenarioReturn)) {
+                            return { annualised: null, deltaAnnualised: null };
+                        }
+                        const annualised = convertReturnToAnnualised(derivedScenarioReturn, durationYears);
+                        if (!Number.isFinite(annualised)) {
+                            return { annualised: null, deltaAnnualised: null };
+                        }
+                        return {
+                            annualised,
+                            deltaAnnualised: Number.isFinite(baselineAnnualised) ? annualised - baselineAnnualised : null,
+                        };
+                    })();
+
+                return {
+                    scenario,
+                    annualisedReturn: annualisedInfo.annualised,
+                    annualisedDiff: annualisedInfo.deltaAnnualised,
+                    totalReturn: Number.isFinite(derivedScenarioReturn) ? derivedScenarioReturn : scenarioRunReturn,
+                    deltaReturn: Number.isFinite(deltaReturnPercent) ? deltaReturnPercent : null,
+                    driftPercent: Number.isFinite(scenario.driftPercent) ? scenario.driftPercent : null,
+                    deltaSharpe: Number.isFinite(scenario.deltaSharpe) ? scenario.deltaSharpe : null,
+                };
+            });
+
+            const diffAbsList = scenarioDetails
+                .map((detail) => Number.isFinite(detail.annualisedDiff) ? Math.abs(detail.annualisedDiff) : null)
+                .filter((value) => value !== null);
+            const averageDiff = diffAbsList.length > 0
+                ? diffAbsList.reduce((sum, value) => sum + value, 0) / diffAbsList.length
+                : null;
+            const maxDiff = diffAbsList.length > 0 ? Math.max(...diffAbsList) : null;
+            const positiveDiffList = scenarioDetails
+                .filter((detail) => (detail.scenario?.direction === 'increase' || detail.scenario?.direction === 'up') && Number.isFinite(detail.annualisedDiff))
+                .map((detail) => Math.abs(detail.annualisedDiff));
+            const negativeDiffList = scenarioDetails
+                .filter((detail) => (detail.scenario?.direction === 'decrease' || detail.scenario?.direction === 'down') && Number.isFinite(detail.annualisedDiff))
+                .map((detail) => Math.abs(detail.annualisedDiff));
+            const positiveAvg = positiveDiffList.length > 0
+                ? positiveDiffList.reduce((sum, value) => sum + value, 0) / positiveDiffList.length
+                : null;
+            const negativeAvg = negativeDiffList.length > 0
+                ? negativeDiffList.reduce((sum, value) => sum + value, 0) / negativeDiffList.length
+                : null;
+            const sharpeDeltas = scenarioDetails
+                .map((detail) => detail.deltaSharpe)
+                .filter((value) => Number.isFinite(value));
+            const score = computeAnnualizedStabilityScore({
+                averageDiff,
+                maxDiff,
+                sharpeDeltas,
+            });
+
+            if (Number.isFinite(averageDiff)) aggregated.diffs.push(averageDiff);
+            if (Number.isFinite(maxDiff)) aggregated.maxDiffs.push(maxDiff);
+            if (Number.isFinite(positiveAvg)) aggregated.positiveDiffs.push(positiveAvg);
+            if (Number.isFinite(negativeAvg)) aggregated.negativeDiffs.push(negativeAvg);
+            if (Number.isFinite(score)) aggregated.scores.push(score);
+            aggregated.scenarioCount += scenarioDetails.length;
+            aggregated.sampleCount += Number.isFinite(param.scenarioCount) ? param.scenarioCount : scenarioDetails.length;
+
+            return {
+                name: param.name || '',
+                baseValue: param.baseValue,
+                scenarioCount: Number.isFinite(param.scenarioCount) ? param.scenarioCount : scenarioDetails.length,
+                statistics: {
+                    averageAnnualisedDiff: averageDiff,
+                    maxAnnualisedDiff: maxDiff,
+                    positiveAnnualisedDiff: positiveAvg,
+                    negativeAnnualisedDiff: negativeAvg,
+                    score,
+                },
+                scenarios: scenarioDetails,
+            };
+        });
+
+        const averageDiffs = preparedParams
+            .map((param) => param.statistics.averageAnnualisedDiff)
+            .filter((value) => Number.isFinite(value));
+        const groupAverageDiff = averageDiffs.length > 0
+            ? averageDiffs.reduce((sum, value) => sum + value, 0) / averageDiffs.length
+            : null;
+        const maxDiffs = preparedParams
+            .map((param) => param.statistics.maxAnnualisedDiff)
+            .filter((value) => Number.isFinite(value));
+        const groupMaxDiff = maxDiffs.length > 0 ? Math.max(...maxDiffs) : null;
+        const positiveDiffs = preparedParams
+            .map((param) => param.statistics.positiveAnnualisedDiff)
+            .filter((value) => Number.isFinite(value));
+        const negativeDiffs = preparedParams
+            .map((param) => param.statistics.negativeAnnualisedDiff)
+            .filter((value) => Number.isFinite(value));
+        const groupPositive = positiveDiffs.length > 0
+            ? positiveDiffs.reduce((sum, value) => sum + value, 0) / positiveDiffs.length
+            : null;
+        const groupNegative = negativeDiffs.length > 0
+            ? negativeDiffs.reduce((sum, value) => sum + value, 0) / negativeDiffs.length
+            : null;
+        const groupScores = preparedParams
+            .map((param) => param.statistics.score)
+            .filter((value) => Number.isFinite(value));
+        const groupScore = groupScores.length > 0
+            ? groupScores.reduce((sum, value) => sum + value, 0) / groupScores.length
+            : null;
+        const scenarioSamples = preparedParams.reduce((sum, param) => sum + (Number.isFinite(param.scenarioCount) ? param.scenarioCount : 0), 0);
+
+        preparedGroups.push({
+            label: group.label || '參數群組',
+            strategyKey,
+            strategyName: strategyInfo.name || strategyKey,
+            parameters: preparedParams,
+            statistics: {
+                averageAnnualisedDiff: groupAverageDiff,
+                maxAnnualisedDiff: groupMaxDiff,
+                positiveAnnualisedDiff: groupPositive,
+                negativeAnnualisedDiff: groupNegative,
+                score: groupScore,
+                scenarioSamples,
+            },
+        });
+    });
+
+    const summaryScore = aggregated.scores.length > 0
+        ? aggregated.scores.reduce((sum, value) => sum + value, 0) / aggregated.scores.length
+        : null;
+    const summaryAverageDiff = aggregated.diffs.length > 0
+        ? aggregated.diffs.reduce((sum, value) => sum + value, 0) / aggregated.diffs.length
+        : null;
+    const summaryMaxDiff = aggregated.maxDiffs.length > 0 ? Math.max(...aggregated.maxDiffs) : null;
+    const summaryPositiveDiff = aggregated.positiveDiffs.length > 0
+        ? aggregated.positiveDiffs.reduce((sum, value) => sum + value, 0) / aggregated.positiveDiffs.length
+        : null;
+    const summaryNegativeDiff = aggregated.negativeDiffs.length > 0
+        ? aggregated.negativeDiffs.reduce((sum, value) => sum + value, 0) / aggregated.negativeDiffs.length
+        : null;
+
+    return {
+        summary: {
+            score: summaryScore,
+            averageAnnualisedDiff: summaryAverageDiff,
+            maxAnnualisedDiff: summaryMaxDiff,
+            positiveAnnualisedDiff: summaryPositiveDiff,
+            negativeAnnualisedDiff: summaryNegativeDiff,
+            scenarioCount: aggregated.scenarioCount,
+            sampleCount: aggregated.sampleCount,
+            baselineAnnualised: baselineAnnualised,
+            durationYears,
+        },
+        groups: preparedGroups,
+        baseline: {
+            annualised: baselineAnnualised,
+            returnRate: baselineReturnPercent,
+        },
+        durationYears,
+    };
+}
+
+function buildSensitivitySection(summaryData) {
+    const headerTooltip = buildTooltip(
+        '以參數擾動的年化報酬與 Sharpe 變化衡量穩定度：分數 ≥ 70 代表年化差異小於約 3%，40～69 建議加強驗證，低於 40 則須調整參數或風控。',
+        { className: ' ml-2', textClass: ' tooltiptext--sensitivity' },
+    );
+
+    if (!summaryData || !Array.isArray(summaryData.groups) || summaryData.groups.length === 0) {
+        return {
+            html: `
+        <div class="mb-10">
+            <div class="flex items-center gap-2 mb-4">
+                <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
+                ${headerTooltip}
+            </div>
+            <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <p class="text-sm" style="color: var(--muted-foreground);">此策略未回傳可用的敏感度資料，或目前的參數組合尚未產生擾動結果。</p>
+            </div>
+        </div>`,
+            summary: summaryData ? summaryData.summary : null,
+        };
+    }
+
+    const summary = summaryData.summary || {};
+    const stabilityTooltip = buildTooltip(
+        `穩定度分數 = 100 − (平均年化差異 × 3.4) − (超過 5% 的最大年化差異 × 1.6) − (平均 Sharpe 下滑 × 12)。建議：70 以上為穩健、40～69 需延長驗證、40 以下應優先調整參數。`,
+        { className: ' ml-2', textClass: ' tooltiptext--sensitivity' },
+    );
+    const averageTooltip = buildTooltip(
+        '平均年化差異為所有擾動樣本相對基準年化報酬的絕對值平均，反映參數變動對長期複利績效的敏感度。',
+        { className: ' ml-2', textClass: ' tooltiptext--sensitivity' },
+    );
+    const directionTooltip = buildTooltip(
+        '分別統計「調高」與「調低」參數時的年化報酬差異絕對值，快速判斷兩個方向是否對績效造成不對稱影響。',
+        { className: ' ml-2', textClass: ' tooltiptext--sensitivity' },
+    );
+
+    const summaryCards = `
+        <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
+            <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
+                <div class="flex flex-col items-center text-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
+                        ${stabilityTooltip}
+                    </div>
+                    <p class="text-3xl font-bold ${scoreClass(summary.score)}">${Number.isFinite(summary.score) ? Math.round(summary.score) : '—'}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">年化報酬差異與 Sharpe 下滑綜合評估的 0～100 分指標。</p>
+                </div>
+            </div>
+            <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
+                <div class="flex flex-col items-center text-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均年化差異</p>
+                        ${averageTooltip}
+                    </div>
+                    <p class="text-3xl font-bold ${driftClass(summary.averageAnnualisedDiff)}">${formatPercentMagnitude(summary.averageAnnualisedDiff, 2)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">所有擾動樣本的年化報酬差異絕對值平均，越低越穩定。</p>
+                </div>
+            </div>
+            <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
+                <div class="flex flex-col items-center text-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">方向年化差異</p>
+                        ${directionTooltip}
+                    </div>
+                    <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">調高：${formatPercentMagnitude(summary.positiveAnnualisedDiff, 2)}｜調低：${formatPercentMagnitude(summary.negativeAnnualisedDiff, 2)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">樣本 ${summary.sampleCount ?? '—'} 組</p>
+                </div>
+            </div>
+        </div>`;
+
+    const renderScenarioChip = (detail) => {
+        if (!detail || !detail.scenario) {
+            return `<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>`;
+        }
+        const scenario = detail.scenario;
+        const label = escapeHtml(scenario.label || '變動');
+        const directionIcon = scenario.direction === 'decrease' || scenario.direction === 'down' ? '▼' : '▲';
+        const badge = scenario.type === 'absolute' ? 'Δ' : '%';
+        const deltaText = Number.isFinite(detail.deltaReturn)
+            ? `${detail.deltaReturn >= 0 ? '+' : ''}${detail.deltaReturn.toFixed(2)}pp`
+            : '—';
+        const annualisedDiffText = Number.isFinite(detail.annualisedDiff)
+            ? formatPercentSigned(detail.annualisedDiff, 2)
+            : '—';
+        const annualisedReturnText = Number.isFinite(detail.annualisedReturn)
+            ? formatPercentSigned(detail.annualisedReturn, 2)
+            : '—';
+        const driftText = Number.isFinite(detail.driftPercent)
+            ? `${detail.driftPercent >= 0 ? '+' : ''}${detail.driftPercent.toFixed(2)}pp`
+            : '—';
+        const sharpeText = formatSharpeDelta(detail.deltaSharpe);
+        const returnText = Number.isFinite(detail.totalReturn)
+            ? formatPercentSigned(detail.totalReturn, 2)
+            : '—';
+        const tooltipLines = [
+            `調整值：${formatParamValue(scenario.value)}`,
+            `總報酬：${returnText}`,
+            `年化報酬：${annualisedReturnText}`,
+            `年化差異：${annualisedDiffText}`,
+            `漂移 (PP)：${driftText}`,
+            `Sharpe Δ：${sharpeText}`,
+        ].filter(Boolean).join('<br>');
+        const tooltipHtml = buildTooltip(tooltipLines, { className: 'sensitivity-scenario-chip__tooltip', textClass: 'tooltiptext--sensitivity' });
+
+        return `<div class="sensitivity-scenario-chip">
+            <div class="sensitivity-scenario-chip__header">
+                <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
+                ${tooltipHtml}
+                <span class="sensitivity-scenario-chip__delta ${detail.deltaReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${deltaText}</span>
+            </div>
+            <div class="sensitivity-scenario-chip__metrics">
+                <span class="${driftClass(detail.annualisedDiff)}">年化差異 ${annualisedDiffText}</span>
+                <span class="text-[11px]" style="color: var(--muted-foreground);">Sharpe ${sharpeText}</span>
+            </div>
+        </div>`;
+    };
+
+    const renderDirectionalCell = (stats) => {
+        const positiveText = Number.isFinite(stats.positiveAnnualisedDiff)
+            ? formatPercentMagnitude(stats.positiveAnnualisedDiff, 2)
+            : '—';
+        const negativeText = Number.isFinite(stats.negativeAnnualisedDiff)
+            ? formatPercentMagnitude(stats.negativeAnnualisedDiff, 2)
+            : '—';
+        return `<div class="sensitivity-direction-cell">
+            <div class="sensitivity-direction-cell__item">
+                <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--up">▲</span>
+                <span class="sensitivity-direction-cell__value ${driftClass(stats.positiveAnnualisedDiff)}">${positiveText}</span>
+            </div>
+            <div class="sensitivity-direction-cell__item">
+                <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--down">▼</span>
+                <span class="sensitivity-direction-cell__value ${driftClass(stats.negativeAnnualisedDiff)}">${negativeText}</span>
+            </div>
+        </div>`;
+    };
+
+    const groupsHtml = summaryData.groups.map((group) => {
+        const scenarioRows = group.parameters.map((param) => {
+            const scenarioHtml = param.scenarios.length > 0
+                ? param.scenarios.map((detail) => renderScenarioChip(detail)).join('')
+                : '<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>';
+            const scenarioCountText = param.scenarioCount > 0
+                ? `<p class="sensitivity-scenario-count">樣本 ${param.scenarioCount}</p>`
+                : '';
+            const tableRow = `<tr class="border-t" style="border-color: var(--border);">
+                <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(param.name)}</td>
+                <td class="px-3 py-2 text-center" style="color: var(--foreground);">${formatParamValue(param.baseValue)}</td>
+                <td class="px-3 py-2">
+                    <div class="sensitivity-scenario-cell">
+                        <div class="sensitivity-scenario-grid">${scenarioHtml}</div>
+                        ${scenarioCountText}
+                    </div>
+                </td>
+                <td class="px-3 py-2 text-center">
+                    <span class="text-sm font-semibold ${driftClass(param.statistics.averageAnnualisedDiff)}">${formatPercentMagnitude(param.statistics.averageAnnualisedDiff, 2)}</span>
+                    <p class="text-[11px]" style="color: var(--muted-foreground);">平均年化</p>
+                </td>
+                <td class="px-3 py-2 text-center">
+                    <span class="text-sm font-semibold ${driftClass(param.statistics.maxAnnualisedDiff)}">${formatPercentMagnitude(param.statistics.maxAnnualisedDiff, 2)}</span>
+                    <p class="text-[11px]" style="color: var(--muted-foreground);">最大年化</p>
+                </td>
+                <td class="px-3 py-2 text-center">${renderDirectionalCell(param.statistics)}</td>
+                <td class="px-3 py-2 text-center">
+                    <span class="text-sm font-semibold ${scoreClass(param.statistics.score)}">${Number.isFinite(param.statistics.score) ? Math.round(param.statistics.score) : '—'}</span>
+                    <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
+                </td>
+            </tr>`;
+
+            const mobileRow = `<div class="sensitivity-mobile-row">
+                <div class="sensitivity-mobile-header">
+                    <span class="sensitivity-mobile-param">${escapeHtml(param.name)}</span>
+                    <span class="sensitivity-mobile-base">基準值 ${formatParamValue(param.baseValue)}</span>
+                </div>
+                <div class="sensitivity-mobile-section">
+                    <p class="sensitivity-mobile-label">擾動網格</p>
+                    <div class="sensitivity-mobile-grid">${scenarioHtml}</div>
+                    ${scenarioCountText}
+                </div>
+                <div class="sensitivity-mobile-metrics sensitivity-mobile-metrics--grid">
+                    <div>
+                        <p class="sensitivity-mobile-label">平均年化</p>
+                        <span class="text-sm font-semibold ${driftClass(param.statistics.averageAnnualisedDiff)}">${formatPercentMagnitude(param.statistics.averageAnnualisedDiff, 2)}</span>
+                    </div>
+                    <div>
+                        <p class="sensitivity-mobile-label">最大年化</p>
+                        <span class="text-sm font-semibold ${driftClass(param.statistics.maxAnnualisedDiff)}">${formatPercentMagnitude(param.statistics.maxAnnualisedDiff, 2)}</span>
+                    </div>
+                    <div>
+                        <p class="sensitivity-mobile-label">方向差異</p>
+                        ${renderDirectionalCell(param.statistics)}
+                    </div>
+                    <div>
+                        <p class="sensitivity-mobile-label">穩定度</p>
+                        <span class="text-sm font-semibold ${scoreClass(param.statistics.score)}">${Number.isFinite(param.statistics.score) ? Math.round(param.statistics.score) : '—'}</span>
+                    </div>
+                </div>
+            </div>`;
+
+            return { tableRow, mobileRow };
+        });
+
+        const tableRows = scenarioRows.map((row) => row.tableRow).join('');
+        const mobileRows = scenarioRows.map((row) => row.mobileRow).join('');
+
+        return `<div class="sensitivity-card p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                <div>
+                    <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(group.label)}</p>
+                    <p class="text-xs" style="color: var(--muted-foreground);">策略：${escapeHtml(group.strategyName || group.strategyKey || 'N/A')}</p>
+                </div>
+                <div class="flex items-center gap-4 flex-wrap">
+                    <div class="text-right">
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均年化</p>
+                        <p class="text-base font-semibold ${driftClass(group.statistics.averageAnnualisedDiff)}">${formatPercentMagnitude(group.statistics.averageAnnualisedDiff, 2)}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">最大年化</p>
+                        <p class="text-base font-semibold ${driftClass(group.statistics.maxAnnualisedDiff)}">${formatPercentMagnitude(group.statistics.maxAnnualisedDiff, 2)}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均穩定度</p>
+                        <p class="text-base font-semibold ${scoreClass(group.statistics.score)}">${Number.isFinite(group.statistics.score) ? Math.round(group.statistics.score) : '—'}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">方向差異</p>
+                        <p class="text-sm font-semibold" style="color: var(--foreground);">▲ ${formatPercentMagnitude(group.statistics.positiveAnnualisedDiff, 2)}／▼ ${formatPercentMagnitude(group.statistics.negativeAnnualisedDiff, 2)}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[11px]" style="color: var(--muted-foreground);">擾動樣本</p>
+                        <p class="text-base font-semibold" style="color: var(--foreground);">${group.statistics.scenarioSamples}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="sensitivity-table-wrapper">
+                <table class="sensitivity-table-desktop w-full text-xs">
+                    <thead>
+                        <tr class="bg-white/40" style="color: var(--muted-foreground);">
+                            <th class="px-3 py-2 text-left font-medium">參數</th>
+                            <th class="px-3 py-2 text-center font-medium">基準值</th>
+                            <th class="px-3 py-2 text-center font-medium">
+                                <span class="inline-flex items-center justify-center gap-1">
+                                    擾動網格
+                                    ${buildTooltip('針對參數套用 ±5%、±10%、±20% 等多組擾動樣本，觀察年化報酬與 Sharpe 的變化。', { textClass: ' tooltiptext--sensitivity' })}
+                                </span>
+                            </th>
+                            <th class="px-3 py-2 text-center font-medium">平均年化</th>
+                            <th class="px-3 py-2 text-center font-medium">最大年化</th>
+                            <th class="px-3 py-2 text-center font-medium">方向差異</th>
+                            <th class="px-3 py-2 text-center font-medium">穩定度</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                </table>
+                <div class="sensitivity-table-mobile">
+                    ${mobileRows}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const collapseButton = `
+        <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
+            <span class="toggle-indicator">＋</span>
+            <span class="toggle-label">顯示完整表格</span>
+        </button>`;
+
+    return {
+        html: `
+        <div class="mb-10">
+            <div class="flex items-center gap-2 mb-4">
+                <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
+                ${headerTooltip}
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <p class="text-xs" style="color: var(--muted-foreground);">年化報酬與 Sharpe 指標用於量化參數穩定度，建議搭配滾動驗證確認穩健性。</p>
+                ${collapseButton}
+            </div>
+            <div data-sensitivity-body class="space-y-6">
+                ${summaryCards}
+                <div class="space-y-6">
+                    ${groupsHtml}
+                </div>
+            </div>
+        </div>`,
+        summary,
+    };
+}
+
+function maybeWarnAboutStartGap(result) {
+    const diagnostics = lastDatasetDiagnostics?.runtime?.dataset || null;
+    const effectiveStart = result?.effectiveStartDate || result?.startDate || null;
+    const firstAvailable = diagnostics?.firstValidCloseOnOrAfterEffectiveStart?.date
+        || diagnostics?.firstRowOnOrAfterEffectiveStart?.date
+        || diagnostics?.firstDate
+        || null;
+    const gapDays = Number.isFinite(diagnostics?.firstValidCloseGapFromEffective)
+        ? diagnostics.firstValidCloseGapFromEffective
+        : (effectiveStart && firstAvailable ? Math.round((normaliseIsoDateToUTC(firstAvailable) - normaliseIsoDateToUTC(effectiveStart)) / MS_PER_DAY) : null);
+
+    const input = document.getElementById('startDate');
+    if (input) {
+        input.classList.remove('input-gap-warning');
+        input.removeAttribute('data-recommended-start');
+    }
+
+    if (!Number.isFinite(gapDays) || gapDays <= 14) {
+        lastStartGapAlertKey = null;
+        return;
+    }
+
+    const alertKey = `${result?.stockNo || ''}|${effectiveStart || ''}|${firstAvailable || ''}`;
+    if (lastStartGapAlertKey === alertKey) {
+        if (input && firstAvailable) {
+            input.classList.add('input-gap-warning');
+            input.setAttribute('data-recommended-start', firstAvailable);
+        }
+        return;
+    }
+    lastStartGapAlertKey = alertKey;
+
+    const messageParts = [];
+    if (effectiveStart) {
+        messageParts.push(`起始日期 ${effectiveStart}`);
+    } else {
+        messageParts.push('設定的起始日期');
+    }
+    messageParts.push(`之後連續 ${gapDays} 日無交易資料`);
+    if (firstAvailable) {
+        messageParts.push(`。系統資料的第一筆有效日期為 ${firstAvailable}`);
+    }
+    messageParts.push('，請重新設定開始日期以涵蓋可用資料。');
+
+    showError(messageParts.join(''));
+    if (input && firstAvailable) {
+        input.classList.add('input-gap-warning');
+        input.setAttribute('data-recommended-start', firstAvailable);
+    }
+}
+
 function formatSkipReasons(skipReasons) {
     if (!skipReasons || typeof skipReasons !== 'object') return '';
     const entries = Object.entries(skipReasons);
@@ -6196,7 +6889,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         renderTrendSummary();
         updateChartTrendOverlay();
         if (suggestionArea) suggestionArea.classList.add('hidden');
-         hideLoading();
+        hideLoading();
         return;
     }
     try {
@@ -6222,6 +6915,7 @@ function handleBacktestResult(result, stockName, dataSource) {
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
+        maybeWarnAboutStartGap(result);
         displayTradeResults(result);
         renderChart(result);
         updateChartTrendOverlay();
@@ -6240,10 +6934,10 @@ function handleBacktestResult(result, stockName, dataSource) {
         }, 400);
 
     } catch (error) {
-         console.error("[Main] Error processing backtest result:", error);
-         showError(`處理回測結果時發生錯誤: ${error.message}`);
-         resetStrategyStatusCard('error');
-         if (suggestionArea) suggestionArea.classList.add('hidden');
+        console.error("[Main] Error processing backtest result:", error);
+        showError(`處理回測結果時發生錯誤: ${error.message}`);
+        resetStrategyStatusCard('error');
+        if (suggestionArea) suggestionArea.classList.add('hidden');
          hideLoading();
          if(backtestWorker) backtestWorker.terminate(); backtestWorker = null;
     }
@@ -6261,8 +6955,134 @@ function displayBacktestResult(result) {
         el.innerHTML = `<p class="text-gray-500">無效結果</p>`;
         return;
     }
-    updateStrategyStatusCard(result);
-    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
+    const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null;
+    const sensitivitySummary = computeSensitivitySummary(result, sensitivityData);
+    const sensitivitySection = buildSensitivitySection(sensitivitySummary);
+    const sensitivityHtml = sensitivitySection?.html ?? '';
+    const sensitivitySummaryForAdvice = sensitivitySection?.summary ?? sensitivitySummary?.summary ?? null;
+    updateStrategyStatusCard(result, { sensitivitySummary: sensitivitySummaryForAdvice });
+
+    const entryKey = result.entryStrategy;
+    const exitKeyRaw = result.exitStrategy;
+    const exitInternalKey = ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(exitKeyRaw)
+        ? `${exitKeyRaw}_exit`
+        : exitKeyRaw;
+    const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' };
+    const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' };
+
+    let shortEntryDesc = null;
+    let shortExitDesc = null;
+    if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) {
+        shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || {
+            name: result.shortEntryStrategy,
+            desc: 'N/A',
+        };
+        shortExitDesc = strategyDescriptions[result.shortExitStrategy] || {
+            name: result.shortExitStrategy,
+            desc: 'N/A',
+        };
+    }
+
+    const completedTrades = Array.isArray(result.completedTrades) ? result.completedTrades : [];
+    const averageProfit = completedTrades.length > 0
+        ? completedTrades.reduce((sum, trade) => sum + (trade?.profit || 0), 0) / completedTrades.length
+        : 0;
+    const maxConsecutiveLosses = Number.isFinite(result.maxConsecutiveLosses) ? result.maxConsecutiveLosses : 0;
+
+    const buyHoldReturnValue = Number.parseFloat(
+        Array.isArray(result.buyHoldReturns) && result.buyHoldReturns.length > 0
+            ? result.buyHoldReturns[result.buyHoldReturns.length - 1]
+            : result.buyHoldReturn ?? 0,
+    );
+    const buyHoldAnnualisedValue = Number.isFinite(result.buyHoldAnnualizedReturn)
+        ? result.buyHoldAnnualizedReturn
+        : 0;
+
+    const returnRateValue = Number.isFinite(result.returnRate) ? result.returnRate : 0;
+    const annualisedReturnValue = Number.isFinite(result.annualizedReturn) ? result.annualizedReturn : 0;
+    const finalValue = Number.isFinite(result.finalValue) ? result.finalValue : result.initialCapital;
+
+    const sharpeValue = Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null;
+    const sharpeText = sharpeValue !== null ? sharpeValue.toFixed(2) : 'N/A';
+    let sortinoText = 'N/A';
+    if (typeof result.sortinoRatio === 'number') {
+        sortinoText = Number.isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞';
+    }
+    const maxDrawdownValue = Number.isFinite(result.maxDrawdown) ? result.maxDrawdown : null;
+    const maxDrawdownText = maxDrawdownValue !== null ? maxDrawdownValue.toFixed(2) : 'N/A';
+
+    let annualisedHalfRatioText = 'N/A';
+    if (
+        Number.isFinite(result.annReturnHalf1)
+        && Number.isFinite(result.annReturnHalf2)
+        && Math.abs(result.annReturnHalf1) > 1e-6
+    ) {
+        annualisedHalfRatioText = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2);
+    }
+
+    let sharpeHalfRatioText = 'N/A';
+    if (
+        Number.isFinite(result.sharpeHalf1)
+        && Number.isFinite(result.sharpeHalf2)
+        && Math.abs(result.sharpeHalf1) > 1e-6
+    ) {
+        sharpeHalfRatioText = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2);
+    }
+
+    const totalTrades = Number.isFinite(result.tradesCount)
+        ? result.tradesCount
+        : completedTrades.length;
+    const winTrades = Number.isFinite(result.winTrades)
+        ? result.winTrades
+        : completedTrades.filter((trade) => (trade?.profit ?? 0) > 0).length;
+    const winRateValue = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
+
+    const overfittingTooltip =
+        '將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。';
+
+    const annualizedTooltipHtml = buildTooltip(
+        '將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。',
+        { className: ' ml-2' },
+    );
+    const buyHoldAnnualizedTooltipHtml = buildTooltip(
+        '在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。',
+        { className: ' ml-2' },
+    );
+    const totalReturnTooltipHtml = buildTooltip(
+        '策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。',
+        { className: ' ml-2' },
+    );
+    const buyHoldTooltipHtml = buildTooltip('買入持有總報酬率', { className: ' ml-2' });
+    const maxDrawdownTooltipHtml = buildTooltip(
+        '策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%',
+        { className: ' ml-2' },
+    );
+    const sharpeTooltipHtml = buildTooltip(
+        '衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。',
+        { className: ' ml-2' },
+    );
+    const sortinoTooltipHtml = buildTooltip(
+        "衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。",
+        { className: ' ml-2' },
+    );
+    const overfittingReturnTooltipHtml = buildTooltip(overfittingTooltip, { className: ' ml-2' });
+    const overfittingSharpeTooltipHtml = buildTooltip(overfittingTooltip, { className: ' ml-2' });
+
+    
+    const winRateTooltipHtml = buildTooltip('包含做多與做空交易', { className: ' ml-2' });
+    const tradeCountTooltipHtml = buildTooltip('包含做多與做空交易', { className: ' ml-2' });
+    const globalRiskTooltipHtml = buildTooltip('停損/停利設定 (多空共用)', { className: ' ml-2' });
+    const formatStrategyDescription = (desc) => escapeHtml(desc || '').replace(/\n/g, '<br>');
+    const entryStrategyTooltipHtml = buildTooltip(formatStrategyDescription(entryDesc.desc), { className: ' ml-2' });
+    const exitStrategyTooltipHtml = buildTooltip(formatStrategyDescription(exitDesc.desc), { className: ' ml-2' });
+    const shortEntryTooltipHtml = shortEntryDesc
+        ? buildTooltip(formatStrategyDescription(shortEntryDesc.desc), { className: ' ml-2' })
+        : '';
+    const shortExitTooltipHtml = shortExitDesc
+        ? buildTooltip(formatStrategyDescription(shortExitDesc.desc), { className: ' ml-2' })
+        : '';
+
+let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
             <div class="summary-metrics-grid summary-metrics-grid--performance">
@@ -6270,48 +7090,36 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
-                            </span>
+                            ${annualizedTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
+                        <p class="text-2xl font-bold ${annualisedReturnValue>=0 ? 'text-emerald-600' : 'text-rose-600'}">${annualisedReturnValue>=0 ? '+' : ''}${annualisedReturnValue.toFixed(2)}%</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 15%, var(--background)); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">買入持有年化</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">在相同實際回測期間內，單純買入並持有該股票的年化報酬率。公式同上，但使用股價計算。</span>
-                            </span>
+                            ${buyHoldAnnualizedTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold ${bhAnnR>=0?'text-emerald-600':'text-rose-600'}">${bhAnnR>=0?'+':''}${bhAnnR.toFixed(2)}%</p>
+                        <p class="text-2xl font-bold ${buyHoldAnnualisedValue>=0 ? 'text-emerald-600' : 'text-rose-600'}">${buyHoldAnnualisedValue>=0 ? '+' : ''}${buyHoldAnnualisedValue.toFixed(2)}%</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
-                            </span>
+                            ${totalReturnTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
+                        <p class="text-2xl font-bold ${returnRateValue>=0 ? 'text-emerald-600' : 'text-rose-600'}">${returnRateValue>=0 ? '+' : ''}${returnRateValue.toFixed(2)}%</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">Buy & Hold</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">買入持有總報酬率</span>
-                            </span>
+                            ${buyHoldTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold ${bhR>=0?'text-emerald-600':'text-rose-600'}">${bhR>=0?'+':''}${bhR.toFixed(2)}%</p>
+                        <p class="text-2xl font-bold ${buyHoldReturnValue>=0 ? 'text-emerald-600' : 'text-rose-600'}">${buyHoldReturnValue>=0 ? '+' : ''}${buyHoldReturnValue.toFixed(2)}%</p>
                     </div>
                 </div>
             </div>
@@ -6324,538 +7132,52 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
-                            </span>
+                            ${maxDrawdownTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
+                        <p class="text-2xl font-bold text-rose-600">${maxDrawdownText}${maxDrawdownText === 'N/A' ? '' : '%'}</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, var(--background)) 0%, color-mix(in srgb, var(--primary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--primary) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">夏普值</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">衡量每單位總風險(標準差)所獲得的超額報酬。通常 > 1 表示不錯，> 2 相當好，> 3 非常優秀 (相對於無風險利率)。</span>
-                            </span>
+                            ${sharpeTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold" style="color: var(--primary);">${sharpe}</p>
+                        <p class="text-2xl font-bold" style="color: var(--primary);">${sharpeText}</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background:  color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">索提諾比率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">衡量每單位 '下檔風險' 所獲得的超額報酬 (只考慮虧損的波動)。越高越好，通常用於比較不同策略承受虧損風險的能力。</span>
-                            </span>
+                            ${sortinoTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold" style="color: var(--muted-foreground);">${sortino}</p>
+                        <p class="text-2xl font-bold" style="color: var(--muted-foreground);">${sortinoText}</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">過擬合(報酬率比)</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${overfittingTooltip}</span>
-                            </span>
+                            ${overfittingReturnTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold" style="color: var(--accent);">${annReturnRatioStr}</p>
+                        <p class="text-2xl font-bold" style="color: var(--accent);">${annualisedHalfRatioText}</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--secondary) 6%, var(--background)); border-color: color-mix(in srgb, var(--secondary) 20%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--secondary);">過擬合(夏普值比)</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${overfittingTooltip}</span>
-                            </span>
+                            ${overfittingSharpeTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold" style="color: var(--secondary);">${sharpeRatioStr}</p>
+                        <p class="text-2xl font-bold" style="color: var(--secondary);">${sharpeHalfRatioText}</p>
                     </div>
                 </div>
             </div>
         </div>`;
 
-    // Patch Tag: LB-SENSITIVITY-RENDER-20250724A
-    const sensitivityHtml = (() => {
-        const data =
-            sensitivityData && Array.isArray(sensitivityData.groups) && sensitivityData.groups.length > 0
-                ? sensitivityData
-                : null;
-        const tooltipContent =
-            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的報酬漂移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
-        const headerHtml = `
-        <div class="flex items-center mb-6">
-            <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
-            <span class="tooltip ml-2">
-                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                <span class="tooltiptext">${tooltipContent}</span>
-            </span>
-        </div>`;
-        if (!data) {
-            return `
-        <div class="mb-8">
-            ${headerHtml}
-            <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                <p class="text-sm" style="color: var(--muted-foreground);">此策略的參數未提供可量化的敏感度資訊，或計算時發生例外，暫無結果可顯示。</p>
-            </div>
-        </div>`;
-        }
-        const formatPercentSigned = (value, digits = 2) => {
-            if (!Number.isFinite(value)) return '—';
-            return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}%`;
-        };
-        const formatPercentMagnitude = (value, digits = 1) => {
-            if (!Number.isFinite(value)) return '—';
-            return `${Math.abs(value).toFixed(digits)}%`;
-        };
-        const formatDelta = (value) => {
-            if (!Number.isFinite(value)) return '—';
-            return `${value >= 0 ? '+' : ''}${value.toFixed(2)}pp`;
-        };
-        const formatSharpeDelta = (value) => {
-            if (!Number.isFinite(value)) return '—';
-            return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
-        };
-        const formatScore = (value) => {
-            if (!Number.isFinite(value)) return '—';
-            return Math.round(value);
-        };
-        const formatParamValue = (value) => {
-            if (!Number.isFinite(value)) return '—';
-            if (Number.isInteger(value)) return value.toString();
-            return value.toFixed(Math.abs(value) >= 10 ? 1 : 2);
-        };
-        const scoreClass = (value) => {
-            if (!Number.isFinite(value)) return 'text-muted-foreground';
-            if (value >= 80) return 'text-emerald-600';
-            if (value >= 60) return 'text-amber-500';
-            return 'text-rose-600';
-        };
-        const driftClass = (value) => {
-            if (!Number.isFinite(value)) return 'text-muted-foreground';
-            const abs = Math.abs(value);
-            if (abs <= 20) return 'text-emerald-600';
-            if (abs <= 40) return 'text-amber-500';
-            return 'text-rose-600';
-        };
-        const baselineMetrics = {
-            returnRate: Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null,
-            sharpeRatio: Number.isFinite(data?.baseline?.sharpeRatio) ? data.baseline.sharpeRatio : null,
-        };
-        const renderScenarioChip = (scenario) => {
-            if (!scenario) {
-                return `<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>`;
-            }
-            const label = escapeHtml(scenario.label || '變動');
-            const directionIcon = scenario.direction === 'decrease' ? '▼' : '▲';
-            const badge = scenario.type === 'absolute' ? 'Δ' : '%';
-            if (!scenario.run) {
-                const status = scenario.error ? '計算失敗' : '無結果';
-                return `<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">
-                    <div class="sensitivity-scenario-chip__header">
-                        <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
-                    </div>
-                    <p class="sensitivity-scenario-chip__empty">${status}</p>
-                </div>`;
-            }
-            const deltaText = formatDelta(scenario.deltaReturn);
-            const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
-            const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
-            const deltaCls = Number.isFinite(scenario.deltaReturn)
-                ? (scenario.deltaReturn >= 0 ? 'text-emerald-600' : 'text-rose-600')
-                : 'text-muted-foreground';
-            const driftCls = driftClass(scenario.driftPercent);
-            const returnText = formatPercentSigned(scenario.run?.returnRate ?? NaN, 2);
-            const baselineReturnText = formatPercentSigned(baselineMetrics.returnRate, 2);
-            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${baselineReturnText})。`;
-            const sharpeBase = Number.isFinite(baselineMetrics.sharpeRatio)
-                ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
-                : '';
-            const tooltipContent = [
-                `調整值：${formatParamValue(scenario.value)}`,
-                `回報：${returnText}`,
-                ppTooltip,
-                `漂移：${driftText}`,
-                `Sharpe Δ：${sharpeText}${sharpeBase}`
-            ].join('<br>');
-            return `<div class="sensitivity-scenario-chip tooltip">
-                <div class="sensitivity-scenario-chip__header">
-                    <span class="sensitivity-scenario-chip__label">${directionIcon} ${label}<span class="sensitivity-scenario-chip__badge">${badge}</span></span>
-                    <span class="sensitivity-scenario-chip__delta ${deltaCls}">${deltaText}</span>
-                </div>
-                <div class="sensitivity-scenario-chip__metrics">
-                    <span class="${driftCls}">漂移 ${driftText}</span>
-                    <span class="text-[11px]" style="color: var(--muted-foreground);">Sharpe ${sharpeText}</span>
-                </div>
-                <span class="tooltiptext tooltiptext--sensitivity">${tooltipContent}</span>
-            </div>`;
-        };
-        const renderDirectionalCell = (param) => {
-            const positiveText = formatDelta(param.positiveDriftPercent);
-            const negativeText = formatDelta(param.negativeDriftPercent);
-            const positiveCls = Number.isFinite(param.positiveDriftPercent) ? 'text-emerald-600' : 'text-muted-foreground';
-            const negativeCls = Number.isFinite(param.negativeDriftPercent) ? 'text-rose-600' : 'text-muted-foreground';
-            return `<div class="sensitivity-direction-cell">
-                <div class="sensitivity-direction-cell__item">
-                    <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--up">▲</span>
-                    <span class="sensitivity-direction-cell__value ${positiveCls}">${positiveText}</span>
-                </div>
-                <div class="sensitivity-direction-cell__item">
-                    <span class="sensitivity-direction-cell__icon sensitivity-direction-cell__icon--down">▼</span>
-                    <span class="sensitivity-direction-cell__value ${negativeCls}">${negativeText}</span>
-                </div>
-            </div>`;
-        };
-        const renderGroup = (group) => {
-            const params = Array.isArray(group.parameters) ? group.parameters : [];
-            if (params.length === 0) return '';
-            const groupAvgDriftValues = params
-                .map((item) => (Number.isFinite(item.averageDriftPercent) ? item.averageDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupAvgDrift = groupAvgDriftValues.length > 0
-                ? groupAvgDriftValues.reduce((sum, cur) => sum + cur, 0) / groupAvgDriftValues.length
-                : null;
-            const groupScoreValues = params
-                .map((item) => (Number.isFinite(item.stabilityScore) ? item.stabilityScore : null))
-                .filter((value) => value !== null);
-            const computedGroupScore = groupScoreValues.length > 0
-                ? groupScoreValues.reduce((sum, cur) => sum + cur, 0) / groupScoreValues.length
-                : null;
-            const groupMaxValues = params
-                .map((item) => (Number.isFinite(item.maxDriftPercent) ? item.maxDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupMaxDrift = groupMaxValues.length > 0 ? Math.max(...groupMaxValues) : null;
-            const groupPositiveValues = params
-                .map((item) => (Number.isFinite(item.positiveDriftPercent) ? item.positiveDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupPositive = groupPositiveValues.length > 0
-                ? groupPositiveValues.reduce((sum, cur) => sum + cur, 0) / groupPositiveValues.length
-                : null;
-            const groupNegativeValues = params
-                .map((item) => (Number.isFinite(item.negativeDriftPercent) ? item.negativeDriftPercent : null))
-                .filter((value) => value !== null);
-            const computedGroupNegative = groupNegativeValues.length > 0
-                ? groupNegativeValues.reduce((sum, cur) => sum + cur, 0) / groupNegativeValues.length
-                : null;
-            const groupAvgDrift = Number.isFinite(group.averageDriftPercent)
-                ? group.averageDriftPercent
-                : computedGroupAvgDrift;
-            const groupScore = Number.isFinite(group.stabilityScore)
-                ? group.stabilityScore
-                : computedGroupScore;
-            const groupMaxDrift = Number.isFinite(group.maxDriftPercent)
-                ? group.maxDriftPercent
-                : computedGroupMaxDrift;
-            const groupPositive = Number.isFinite(group.positiveDriftPercent)
-                ? group.positiveDriftPercent
-                : computedGroupPositive;
-            const groupNegative = Number.isFinite(group.negativeDriftPercent)
-                ? group.negativeDriftPercent
-                : computedGroupNegative;
-            const scenarioSamples = params.reduce((sum, param) => sum + (param.scenarioCount || 0), 0);
-            const strategyKey = group.strategy || '';
-            const strategyInfo = strategyDescriptions[strategyKey] || { name: strategyKey };
-            const rowPairs = params.map((param) => {
-                const driftCls = driftClass(param.averageDriftPercent);
-                const driftValue = formatPercentMagnitude(param.averageDriftPercent, 1);
-                const maxValue = formatPercentMagnitude(param.maxDriftPercent, 1);
-                const scoreCls = scoreClass(param.stabilityScore);
-                const scoreValue = formatScore(param.stabilityScore);
-                const baseValueText = formatParamValue(param.baseValue);
-                const scenarioHtml = Array.isArray(param.scenarios)
-                    ? param.scenarios.map((scenario) => renderScenarioChip(scenario)).join('')
-                    : '';
-                const scenarioGrid = `<div class="sensitivity-scenario-grid">${scenarioHtml || '<div class="sensitivity-scenario-chip sensitivity-scenario-chip--empty">—</div>'}</div>`;
-                const scenarioCountText = Number.isFinite(param.scenarioCount) && param.scenarioCount > 0
-                    ? `<p class="sensitivity-scenario-count">樣本 ${param.scenarioCount}</p>`
-                    : '';
-                const tableRow = `<tr class="border-t" style="border-color: var(--border);">
-                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(param.name)}</td>
-                    <td class="px-3 py-2 text-center" style="color: var(--foreground);">${baseValueText}</td>
-                    <td class="px-3 py-2">
-                        <div class="sensitivity-scenario-cell">
-                            ${scenarioGrid}
-                            ${scenarioCountText}
-                        </div>
-                    </td>
-                    <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
-                    </td>
-                    <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${driftClass(param.maxDriftPercent)}">${maxValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">最大偏移</p>
-                    </td>
-                    <td class="px-3 py-2 text-center">${renderDirectionalCell(param)}</td>
-                    <td class="px-3 py-2 text-center">
-                        <span class="text-sm font-semibold ${scoreCls}">${scoreValue}</span>
-                        <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
-                    </td>
-                </tr>`;
-                const mobileRow = `<div class="sensitivity-mobile-row">
-                    <div class="sensitivity-mobile-header">
-                        <span class="sensitivity-mobile-param">${escapeHtml(param.name)}</span>
-                        <span class="sensitivity-mobile-base">基準值 ${baseValueText}</span>
-                    </div>
-                    <div class="sensitivity-mobile-section">
-                        <p class="sensitivity-mobile-label">擾動網格</p>
-                        <div class="sensitivity-mobile-grid">${scenarioGrid}</div>
-                        ${scenarioCountText}
-                    </div>
-                    <div class="sensitivity-mobile-metrics sensitivity-mobile-metrics--grid">
-                        <div>
-                            <p class="sensitivity-mobile-label">平均漂移</p>
-                            <span class="text-sm font-semibold ${driftCls}">${driftValue}</span>
-                        </div>
-                        <div>
-                            <p class="sensitivity-mobile-label">最大偏移</p>
-                            <span class="text-sm font-semibold ${driftClass(param.maxDriftPercent)}">${maxValue}</span>
-                        </div>
-                        <div>
-                            <p class="sensitivity-mobile-label">方向偏移</p>
-                            ${renderDirectionalCell(param)}
-                        </div>
-                        <div>
-                            <p class="sensitivity-mobile-label">穩定度</p>
-                            <span class="text-sm font-semibold ${scoreCls}">${scoreValue}</span>
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">滿分 100</p>
-                        </div>
-                    </div>
-                </div>`;
-                return { tableRow, mobileRow };
-            });
-            const tableRows = rowPairs.map((row) => row.tableRow).join('');
-            const mobileRows = rowPairs.map((row) => row.mobileRow).join('');
-            return `<div class="sensitivity-card p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 8%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                    <div>
-                        <p class="text-sm font-semibold" style="color: var(--foreground);">${escapeHtml(group.label)}</p>
-                        <p class="text-xs" style="color: var(--muted-foreground);">策略：${escapeHtml(strategyInfo.name || String(strategyKey || 'N/A'))}</p>
-                    </div>
-                    <div class="flex items-center gap-4 flex-wrap">
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均漂移</p>
-                            <p class="text-base font-semibold ${driftClass(groupAvgDrift)}">${formatPercentMagnitude(groupAvgDrift, 1)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">最大偏移</p>
-                            <p class="text-base font-semibold ${driftClass(groupMaxDrift)}">${formatPercentMagnitude(groupMaxDrift, 1)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">平均穩定度</p>
-                            <p class="text-base font-semibold ${scoreClass(groupScore)}">${formatScore(groupScore)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">偏移方向</p>
-                            <p class="text-sm font-semibold" style="color: var(--foreground);">▲ ${formatDelta(groupPositive)}／▼ ${formatDelta(groupNegative)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-[11px]" style="color: var(--muted-foreground);">擾動樣本</p>
-                            <p class="text-base font-semibold" style="color: var(--foreground);">${scenarioSamples}</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="sensitivity-table-wrapper">
-                    <table class="sensitivity-table-desktop w-full text-xs">
-                        <thead>
-                            <tr class="bg-white/40" style="color: var(--muted-foreground);">
-                                <th class="px-3 py-2 text-left font-medium">參數</th>
-                                <th class="px-3 py-2 text-center font-medium">基準值</th>
-                                <th class="px-3 py-2 text-center font-medium">
-                                    <span class="inline-flex items-center justify-center gap-1">
-                                        擾動網格
-                                        <span class="tooltip">
-                                            <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。</span>
-                                        </span>
-                                    </span>
-                                </th>
-                                <th class="px-3 py-2 text-center font-medium">平均漂移</th>
-                                <th class="px-3 py-2 text-center font-medium">最大偏移</th>
-                                <th class="px-3 py-2 text-center font-medium">方向偏移</th>
-                                <th class="px-3 py-2 text-center font-medium">穩定度</th>
-                            </tr>
-                        </thead>
-                        <tbody>${tableRows}</tbody>
-                    </table>
-                    <div class="sensitivity-table-mobile">
-                        ${mobileRows}
-                    </div>
-                </div>
-            </div>`;
-        };
-        const overallScore = data?.summary?.stabilityScore ?? null;
-        const overallDrift = data?.summary?.averageDriftPercent ?? null;
-        const overallMaxDrift = data?.summary?.maxDriftPercent ?? null;
-        const overallPositive = data?.summary?.positiveDriftPercent ?? null;
-        const overallNegative = data?.summary?.negativeDriftPercent ?? null;
-        const overallSamples = data?.summary?.scenarioCount ?? null;
-        const summarySharpeDrop = Number.isFinite(data?.summary?.averageSharpeDrop)
-            ? data.summary.averageSharpeDrop
-            : null;
-        const summarySharpeGain = Number.isFinite(data?.summary?.averageSharpeGain)
-            ? data.summary.averageSharpeGain
-            : null;
-        const stabilityComponents = data?.summary?.stabilityComponents || null;
-        const stabilityDriftPenalty = Number.isFinite(stabilityComponents?.driftPenalty)
-            ? stabilityComponents.driftPenalty
-            : null;
-        const stabilitySharpePenalty = Number.isFinite(stabilityComponents?.sharpePenalty)
-            ? stabilityComponents.sharpePenalty
-            : null;
-        const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
-            Number.isFinite(stabilityDriftPenalty)
-                ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
-                : null,
-            Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
-                ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
-                : Number.isFinite(summarySharpeDrop)
-                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
-                    : null,
-            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
-        ].filter(Boolean);
-        const stabilityTooltip = stabilityTooltipLines.join('<br>');
-        let directionSafeTooltip = null;
-        const directionAdvice = (() => {
-            const safeThreshold = 10;
-            const warnThreshold = 15;
-            const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
-            const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
-            if (positiveAbs === null && negativeAbs === null) {
-                return '需更多樣本才能評估調高／調低方向的敏感度。';
-            }
-            const dominantDirection = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs)
-                ? '調高'
-                : '調低';
-            const dominantAbs = dominantDirection === '調高' ? positiveAbs : negativeAbs;
-            if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
-                ? (negativeAbs === null || negativeAbs <= safeThreshold)
-                : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
-                return '方向偏移穩健，維持現行節奏即可。';
-            }
-            if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
-            }
-            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
-        })();
-        const summarySentence = (() => {
-            const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
-            const driftAbs = Number.isFinite(overallDrift) ? Math.abs(overallDrift) : null;
-            const maxAbs = Number.isFinite(overallMaxDrift) ? Math.abs(overallMaxDrift) : null;
-            if (stabilityScore === null && driftAbs === null && maxAbs === null) {
-                return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
-            }
-            if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
-                return '整體擾動反應平穩，可照現有參數持續觀察。';
-            }
-            if (stabilityScore !== null && stabilityScore >= 55) {
-                return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
-            }
-            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
-        })();
-        const directionTooltipHtml = directionSafeTooltip
-            ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
-            : '';
-        const summaryCards = `
-            <div class="summary-metrics-grid summary-metrics-grid--sensitivity mb-6">
-                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #10b981 8%, var(--background)) 0%, color-mix(in srgb, #10b981 4%, var(--background)) 100%); border-color: color-mix(in srgb, #10b981 25%, transparent);">
-                    <div class="flex flex-col items-center text-center gap-3">
-                        <div class="flex items-center gap-2">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">穩定度分數</p>
-                            <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">${stabilityTooltip}</span>
-                            </span>
-                        </div>
-                        <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
-                    </div>
-                </div>
-                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
-                    <div class="flex flex-col items-center text-center gap-3">
-                        <div class="flex items-center gap-2">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
-                            <span class="tooltip">
-                                <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
-                            </span>
-                        </div>
-                        <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
-                        <div class="text-xs text-muted-foreground leading-relaxed flex flex-col items-center gap-1">
-                            <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
-                            <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #60a5fa 10%, var(--background)) 0%, color-mix(in srgb, #3b82f6 4%, var(--background)) 100%); border-color: color-mix(in srgb, #3b82f6 20%, transparent);">
-                    <div class="flex flex-col items-center text-center gap-3">
-                        <div class="flex items-center gap-2">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
-                            ${directionTooltipHtml}
-                        </div>
-                        <div class="flex items-center justify-center gap-4 text-lg font-semibold">
-                            <span class="text-emerald-600">▲ ${formatDelta(overallPositive)}</span>
-                            <span class="text-rose-600">▼ ${formatDelta(overallNegative)}</span>
-                        </div>
-                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${directionAdvice}</p>
-                    </div>
-                </div>
-                <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                    <div class="flex flex-col items-center text-center gap-3">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
-                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
-                    </div>
-                </div>
-            </div>`;
-        const interpretationHint = `
-            <div class="p-4 rounded-xl border" style="background: color-mix(in srgb, var(--muted) 10%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
-                <div class="flex items-start gap-3">
-                    <span class="info-icon inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full" style="background-color: var(--primary); color: var(--primary-foreground);">i</span>
-                    <div>
-                        <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
-                        <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
-                            <li><strong>PP（百分點）</strong>：調整後報酬率與原始回測報酬率的差異，正值代表績效提升，負值代表下滑。</li>
-                            <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
-                            <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
-                            <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
-                            <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>`;
-        const groupsHtml = data.groups.map((group) => renderGroup(group)).filter(Boolean).join('');
-        const groupSection = groupsHtml || `<div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
-                <p class="text-sm" style="color: var(--muted-foreground);">偵測到的參數皆為非數值型或結果不完整，暫無敏感度表格可供顯示。</p>
-            </div>`;
-        return `
-        <div class="mb-8">
-            ${headerHtml}
-            ${summaryCards}
-            <div class="sensitivity-collapse-controls flex justify-end mt-4">
-                <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
-                    <span class="toggle-indicator">＋</span>
-                    <span class="toggle-label">展開敏感度表格</span>
-                </button>
-            </div>
-            <div class="space-y-4 sensitivity-collapse-body hidden" data-sensitivity-body aria-hidden="true">
-                ${interpretationHint}
-                ${groupSection}
-            </div>
-        </div>`;
-    })();
-    let tradeStatsHtml = `
+
+let tradeStatsHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">交易統計</h4>
             <div class="summary-metrics-grid summary-metrics-grid--trade">
@@ -6863,12 +7185,9 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">勝率</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">包含做多與做空交易</span>
-                            </span>
+                            ${winRateTooltipHtml}
                         </div>
-                        <p class="text-2xl font-bold" style="color: var(--foreground);">${winR}%</p>
+                        <p class="text-2xl font-bold" style="color: var(--foreground);">${winRateValue.toFixed(1)}%</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">(${winTrades}/${totalTrades})</p>
                     </div>
                 </div>
@@ -6876,10 +7195,7 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">總交易次數</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">包含做多與做空交易</span>
-                            </span>
+                            ${tradeCountTooltipHtml}
                         </div>
                         <p class="text-2xl font-bold" style="color: var(--foreground);">${totalTrades}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
@@ -6888,20 +7204,21 @@ function displayBacktestResult(result) {
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">平均交易盈虧</p>
-                        <p class="text-2xl font-bold ${avgP>=0?'text-emerald-600':'text-rose-600'}">${avgP>=0?'+':''}${Math.round(avgP).toLocaleString()}</p>
+                        <p class="text-2xl font-bold ${averageProfit>=0 ? 'text-emerald-600' : 'text-rose-600'}">${averageProfit>=0 ? '+' : ''}${Math.round(averageProfit).toLocaleString()}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">元</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: color-mix(in srgb, var(--muted) 12%, var(--background)); border-color: color-mix(in srgb, var(--border) 60%, transparent);">
                     <div class="text-center">
                         <p class="text-sm font-medium mb-3" style="color: var(--muted-foreground);">最大連虧次數</p>
-                        <p class="text-2xl font-bold" style="color: var(--foreground);">${maxCL}</p>
+                        <p class="text-2xl font-bold" style="color: var(--foreground);">${maxConsecutiveLosses}</p>
                         <p class="text-sm mt-1" style="color: var(--muted-foreground);">次</p>
                     </div>
                 </div>
             </div>
         </div>`;
-    let strategySettingsHtml = `
+
+let strategySettingsHtml = `
         <div>
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">策略設定</h4>
             <div class="summary-metrics-grid summary-metrics-grid--strategy">
@@ -6909,33 +7226,26 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-emerald-600">📈 進場策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${entryDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${entryStrategyTooltipHtml}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${entryDesc.name}</p>
                     </div>
-                </div>                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #ef4444 8%, var(--background)) 0%, color-mix(in srgb, #ef4444 4%, var(--background)) 100%); border-color: color-mix(in srgb, #ef4444 25%, transparent);">
+                </div>
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, #ef4444 8%, var(--background)) 0%, color-mix(in srgb, #ef4444 4%, var(--background)) 100%); border-color: color-mix(in srgb, #ef4444 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium text-rose-600">📉 出場策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${exitDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${exitStrategyTooltipHtml}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${exitDesc.name}</p>
                     </div>
                 </div>
-                ${ result.enableShorting && shortEntryDesc && shortExitDesc ? `                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
+                ${ result.enableShorting && shortEntryDesc && shortExitDesc ? `
+                <div class="p-6 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--background)) 0%, color-mix(in srgb, var(--accent) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--accent) 25%, transparent);">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--accent);">📉 做空策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${shortEntryDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${shortEntryTooltipHtml || ''}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${shortEntryDesc.name}</p>
                     </div>
@@ -6944,14 +7254,13 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm font-medium" style="color: var(--primary);">📈 回補策略</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">${shortExitDesc.desc.replace(/\n/g,'<br>')}</span>
-                            </span>
+                            ${shortExitTooltipHtml || ''}
                         </div>
                         <p class="text-base font-semibold" style="color: var(--foreground);">${shortExitDesc.name}</p>
                     </div>
-                </div>` : `                <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 15%, var(--background)); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                </div>
+                ` : `
+                <div class="p-6 rounded-xl border shadow-sm" style="background: color-mix(in srgb, var(--muted) 15%, var(--background)); border-color: color-mix(in srgb, var(--border) 80%, transparent);">
                     <div class="text-center">
                         <p class="text-sm font-medium" style="color: var(--muted-foreground);">📉 做空策略未啟用</p>
                     </div>
@@ -6960,14 +7269,13 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <p class="text-sm text-gray-500 font-medium">📈 回補策略未啟用</p>
                     </div>
-                </div> `}                <div class="bg-orange-50 p-6 rounded-xl border border-orange-200 shadow-sm">
+                </div>
+                `}
+                <div class="bg-orange-50 p-6 rounded-xl border border-orange-200 shadow-sm">
                     <div class="text-center">
                         <div class="flex items-center justify-center mb-3">
                             <p class="text-sm text-orange-600 font-medium">⚠️ 全局風控</p>
-                            <span class="tooltip ml-2">
-                                <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs bg-blue-600 text-white rounded-full cursor-help">?</span>
-                                <span class="tooltiptext">停損/停利設定 (多空共用)</span>
-                            </span>
+                            ${globalRiskTooltipHtml}
                         </div>
                         <p class="text-base font-semibold text-gray-800">損:${result.stopLoss>0?result.stopLoss+'%':'N/A'} / 利:${result.takeProfit>0?result.takeProfit+'%':'N/A'}</p>
                     </div>
@@ -6992,8 +7300,7 @@ function displayBacktestResult(result) {
                 </div>
             </div>
         </div>`;
-
-        // 將四個區塊垂直排列，並添加適當的間距
+// 將四個區塊垂直排列，並添加適當的間距
         el.innerHTML = `
             <div class="space-y-8">
                 ${performanceHtml}

@@ -145,9 +145,79 @@
     color: var(--muted-foreground);
 }
 
-.tooltip { position: relative; display: inline-block; vertical-align: middle; }
-.tooltip .tooltiptext { visibility: hidden; width: 250px; background-color: #333; color: #fff; text-align: left; border-radius: 6px; padding: 10px; position: absolute; z-index: 50; bottom: 135%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 13px; line-height: 1.5; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
-.tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+.tooltip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.tooltip .tooltip-icon {
+    width: 1rem;
+    height: 1rem;
+    border: 1px solid #111827;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.625rem;
+    font-weight: 600;
+    line-height: 1;
+    color: #111827;
+    background-color: transparent;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 250px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 50;
+    bottom: 135%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+.tooltip:hover .tooltiptext,
+.tooltip:focus .tooltiptext,
+.tooltip:focus-visible .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+.sensitivity-scenario-chip__tooltip {
+    display: inline-flex;
+    justify-content: flex-end;
+}
+
+.sensitivity-scenario-chip__tooltip .tooltiptext {
+    bottom: auto;
+    top: calc(100% + 0.35rem);
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
+.input-gap-warning {
+    border-color: color-mix(in srgb, var(--secondary) 65%, #b91c1c) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--secondary) 55%, transparent) !important;
+}
+
+.input-gap-warning:focus {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 45%, transparent) !important;
+}
 #backtest-result .tooltiptext { z-index: 10000; }
 .tooltiptext--sensitivity {
     max-width: min(300px, calc(100vw - 48px));
