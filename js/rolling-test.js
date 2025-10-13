@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.5 ---
-// Patch Tag: LB-ROLLING-TEST-20250925A
+// --- 滾動測試模組 - v1.6 ---
+// Patch Tag: LB-ROLLING-TEST-20250926A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250925A',
+        version: 'LB-ROLLING-TEST-20250926A',
         batchOptimizerInitialized: false,
     };
 
@@ -1344,59 +1344,113 @@
         workingParams.startDate = windowInfo.trainingStart;
         workingParams.endDate = windowInfo.trainingEnd;
 
-        const iterationLimit = Math.max(1, Number(plan?.config?.iterationLimit) || DEFAULT_OPTIMIZATION_ITERATIONS);
         const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
-        const scopeLastResult = new Map();
-        const scopeMetricHistory = new Map();
+        const scopeResults = [];
+        const handledScopes = new Set();
 
-        for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
-            let iterationChanged = false;
+        const combinationScopes = Array.isArray(plan.scopes)
+            ? plan.scopes.filter((scope) => scope === 'entry' || scope === 'exit')
+            : [];
 
-            for (let i = 0; i < plan.scopes.length; i += 1) {
-                const scope = plan.scopes[i];
-                let result = null;
-                if (scope === 'risk') {
-                    result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
-                } else {
-                    result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+        if (combinationScopes.length > 0 && typeof window.batchOptimization?.runCombinationOptimization === 'function') {
+            try {
+                const combinationOutcome = await runCombinationOptimizationForWindow({
+                    baseParams: workingParams,
+                    plan,
+                    windowInfo,
+                    combinationScopes,
+                    baselineSnapshots,
+                });
+                if (combinationOutcome) {
+                    if (combinationOutcome.params) {
+                        if (combinationOutcome.params.entryParams) {
+                            outputParams.entryParams = { ...combinationOutcome.params.entryParams };
+                            workingParams.entryParams = { ...combinationOutcome.params.entryParams };
+                        }
+                        if (combinationOutcome.params.exitParams) {
+                            outputParams.exitParams = { ...combinationOutcome.params.exitParams };
+                            workingParams.exitParams = { ...combinationOutcome.params.exitParams };
+                        }
+                    }
+                    if (Array.isArray(combinationOutcome.scopeResults)) {
+                        combinationOutcome.scopeResults.forEach((result) => {
+                            if (result.error && !summary.error) summary.error = result.error;
+                            scopeResults.push(result);
+                            if (result.scope) handledScopes.add(result.scope);
+                        });
+                    }
                 }
-                if (!result) continue;
-
-                scopeLastResult.set(scope, result);
-
-                if (Number.isFinite(result.metricValue)) {
-                    const history = scopeMetricHistory.get(scope) || [];
-                    history.push(result.metricValue);
-                    scopeMetricHistory.set(scope, history);
-                }
-
-                if (Array.isArray(result.changedKeys) && result.changedKeys.length > 0) {
-                    iterationChanged = true;
-                }
-
-                if (result.error && !summary.error) {
-                    summary.error = result.error;
-                }
-            }
-
-            if (!iterationChanged) {
-                break;
+            } catch (error) {
+                console.warn('[Rolling Test] Combination optimization failed:', error);
+                const message = `批量優化組合失敗：${error?.message || error}`;
+                summary.messages.push(message);
+                if (!summary.error) summary.error = error?.message || '批量優化組合失敗';
             }
         }
 
-        summary.scopeResults = collectFinalScopeResults(
-            plan.scopes,
-            scopeLastResult,
-            scopeMetricHistory,
-            baselineSnapshots,
-            outputParams,
-            plan.config.targetMetric,
-        );
+        const remainingScopes = Array.isArray(plan.scopes)
+            ? plan.scopes.filter((scope) => !handledScopes.has(scope))
+            : [];
+
+        if (remainingScopes.length > 0) {
+            const iterationLimit = Math.max(1, Number(plan?.config?.iterationLimit) || DEFAULT_OPTIMIZATION_ITERATIONS);
+            const scopeLastResult = new Map();
+            const scopeMetricHistory = new Map();
+
+            for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
+                let iterationChanged = false;
+
+                for (let i = 0; i < remainingScopes.length; i += 1) {
+                    const scope = remainingScopes[i];
+                    let result = null;
+                    if (scope === 'risk') {
+                        result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
+                    } else {
+                        result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+                    }
+                    if (!result) continue;
+
+                    scopeLastResult.set(scope, result);
+
+                    if (Number.isFinite(result.metricValue)) {
+                        const history = scopeMetricHistory.get(scope) || [];
+                        history.push(result.metricValue);
+                        scopeMetricHistory.set(scope, history);
+                    }
+
+                    if (Array.isArray(result.changedKeys) && result.changedKeys.length > 0) {
+                        iterationChanged = true;
+                    }
+
+                    if (result.error && !summary.error) {
+                        summary.error = result.error;
+                    }
+                }
+
+                if (!iterationChanged) {
+                    break;
+                }
+            }
+
+            const remainingResults = collectFinalScopeResults(
+                remainingScopes,
+                scopeLastResult,
+                scopeMetricHistory,
+                baselineSnapshots,
+                outputParams,
+                plan.config.targetMetric,
+            );
+
+            remainingResults.forEach((result) => {
+                scopeResults.push(result);
+            });
+        }
+
+        summary.scopeResults = scopeResults;
 
         summary.scopeResults.forEach((result) => {
             const message = buildOptimizationMessage(result);
             if (message) summary.messages.push(message);
-            if (result.error && !summary.error) summary.error = result.error;
         });
 
         if (summary.messages.length > 0) {
@@ -1406,6 +1460,115 @@
         }
 
         return { params: outputParams, summary };
+    }
+
+    function buildCombinationFromParams(params) {
+        if (!params || typeof params !== 'object') return null;
+        const buyStrategy = params.entryStrategy;
+        const sellStrategy = params.exitStrategy;
+        if (!buyStrategy || !sellStrategy) return null;
+
+        const combination = {
+            buyStrategy,
+            sellStrategy,
+            buyParams: deepClone(params.entryParams || {}),
+            sellParams: deepClone(params.exitParams || {}),
+        };
+
+        const riskSnapshot = buildRiskParamsSnapshot(params);
+        if (riskSnapshot && Object.keys(riskSnapshot).length > 0) {
+            combination.riskManagement = { ...riskSnapshot };
+        }
+
+        return combination;
+    }
+
+    function buildStrategyLabelMap(strategyInfo) {
+        const labelMap = {};
+        if (strategyInfo && Array.isArray(strategyInfo.optimizeTargets)) {
+            strategyInfo.optimizeTargets.forEach((target) => {
+                labelMap[target.name] = target.label || target.name;
+            });
+        }
+        return labelMap;
+    }
+
+    function buildCombinationScopeResult(scope, optimizedCombination, baselineSnapshots, plan) {
+        const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+        if (!definition) return null;
+
+        const strategyName = scope === 'entry'
+            ? optimizedCombination.buyStrategy
+            : optimizedCombination.sellStrategy;
+        const configKey = resolveStrategyConfigKey(strategyName, scope);
+        const strategyInfo = strategyDescriptions?.[configKey];
+        const finalParams = scope === 'entry'
+            ? deepClone(optimizedCombination.buyParams || {})
+            : deepClone(optimizedCombination.sellParams || {});
+        const baseParams = baselineSnapshots?.[scope]
+            ? deepClone(baselineSnapshots[scope])
+            : {};
+        const changedKeys = resolveChangedKeysFromSnapshots(baseParams, finalParams);
+        const metricValue = Number.isFinite(optimizedCombination?.__finalMetric)
+            ? optimizedCombination.__finalMetric
+            : null;
+
+        return {
+            scope,
+            label: definition.label,
+            params: finalParams,
+            baseParams,
+            changedKeys,
+            labelMap: buildStrategyLabelMap(strategyInfo),
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue,
+        };
+    }
+
+    async function runCombinationOptimizationForWindow({ baseParams, plan, windowInfo, combinationScopes, baselineSnapshots }) {
+        const combination = buildCombinationFromParams(baseParams);
+        if (!combination) return null;
+
+        const overrideParams = deepClone(baseParams);
+        overrideParams.startDate = windowInfo.trainingStart;
+        overrideParams.endDate = windowInfo.trainingEnd;
+
+        const optimizationConfig = {
+            targetMetric: plan.config.targetMetric,
+            parameterTrials: plan.config.trials,
+            iterationLimit: plan.config.iterationLimit,
+        };
+
+        const optimizedCombination = await window.batchOptimization.runCombinationOptimization(
+            combination,
+            optimizationConfig,
+            {
+                baseParamsOverride: overrideParams,
+                enabledScopes: combinationScopes,
+            },
+        );
+
+        if (!optimizedCombination || typeof optimizedCombination !== 'object') {
+            return null;
+        }
+
+        const scopeResults = [];
+        if (combinationScopes.includes('entry')) {
+            const entryResult = buildCombinationScopeResult('entry', optimizedCombination, baselineSnapshots, plan);
+            if (entryResult) scopeResults.push(entryResult);
+        }
+        if (combinationScopes.includes('exit')) {
+            const exitResult = buildCombinationScopeResult('exit', optimizedCombination, baselineSnapshots, plan);
+            if (exitResult) scopeResults.push(exitResult);
+        }
+
+        return {
+            params: {
+                entryParams: optimizedCombination.buyParams ? { ...optimizedCombination.buyParams } : undefined,
+                exitParams: optimizedCombination.sellParams ? { ...optimizedCombination.sellParams } : undefined,
+            },
+            scopeResults,
+        };
     }
 
     async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams) {
