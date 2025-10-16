@@ -1056,3 +1056,15 @@
   - 更新模組版本碼至 `LB-ROLLING-TEST-20250928A`，並於滾動測試流程中統一以正規化後的參數驅動訓練與測試回測。
 - **Diagnostics**: 針對第二與第三個視窗分別在批量優化面板及 Walk-Forward 訓練期執行一次回測，確認最佳參數（含停損/停利與買進時點設定）完全一致，測試期亦沿用相同設定。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-28 — Patch LB-ROLLING-TEST-20250929A
+- **Issue recap**: Walk-Forward 第二輪起的訓練視窗仍與批量優化結果不符，排查後確認滾動測試固定使用 4 輪交替迭代，與批量優化面板的 6 輪（或使用者自訂值）不同，導致部分視窗未收斂或出現與面板不一致的最佳參數。
+- **Fix**:
+  - `index.html` 為滾動測試優化面板新增「組合迭代上限」欄位，預設 6 並支援同步調整交替優化輪數。
+  - `js/rolling-test.js` 讀取滾動面板或批量優化面板的迭代上限，若未設定則回退至預設 6，並更新模組版號為 `LB-ROLLING-TEST-20250929A`。
+- **Diagnostics**: 以相同訓練視窗分別在批量優化面板與滾動測試啟動優化，確認 `plan.config.iterationLimit` 與面板設定一致，且交替迭代輪數相同時最佳參數完全重合。
+- **Debug log**:
+  - 交叉比對 `batch-optimize-iteration-limit` 與滾動模組紀錄，確定批量面板預設 6、滾動模組僅執行 4 輪是差異來源。
+  - 逐窗列印 `plan.config.iterationLimit` 驗證覆寫順序：先讀滾動面板、再回退批量面板、最後採預設值。
+  - 若未來仍有差異，建議檢查 `optimizeCombinationIterative` 的迭代收斂紀錄與 Worker 回傳的最佳指標，以確認是否需要同步 trials 或風控迭代策略。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

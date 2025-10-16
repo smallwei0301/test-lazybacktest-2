@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.8 ---
-// Patch Tag: LB-ROLLING-TEST-20250928A
+// --- 滾動測試模組 - v1.9 ---
+// Patch Tag: LB-ROLLING-TEST-20250929A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250928A',
+        version: 'LB-ROLLING-TEST-20250929A',
         batchOptimizerInitialized: false,
     };
 
@@ -40,7 +40,7 @@
     };
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
-    const DEFAULT_OPTIMIZATION_ITERATIONS = 4;
+    const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -1196,6 +1196,27 @@
         const optimizeShortEntry = Boolean(document.getElementById('rolling-optimize-short-entry')?.checked);
         const optimizeShortExit = Boolean(document.getElementById('rolling-optimize-short-exit')?.checked);
         const optimizeRisk = Boolean(document.getElementById('rolling-optimize-risk')?.checked);
+        let iterationLimit = Number.NaN;
+
+        const rollingIterationEl = document.getElementById('rolling-optimize-iteration-limit');
+        if (rollingIterationEl && rollingIterationEl.value !== '') {
+            const parsed = parseFloat(rollingIterationEl.value);
+            if (Number.isFinite(parsed)) iterationLimit = parsed;
+        }
+
+        if (!Number.isFinite(iterationLimit)) {
+            const batchIterationEl = document.getElementById('batch-optimize-iteration-limit');
+            if (batchIterationEl && batchIterationEl.value !== '') {
+                const parsed = parseFloat(batchIterationEl.value);
+                if (Number.isFinite(parsed)) iterationLimit = parsed;
+            }
+        }
+
+        if (!Number.isFinite(iterationLimit)) {
+            iterationLimit = DEFAULT_OPTIMIZATION_ITERATIONS;
+        }
+
+        iterationLimit = clampNumber(Math.round(iterationLimit), 1, 100);
 
         return {
             enabled,
@@ -1206,6 +1227,7 @@
             optimizeShortEntry,
             optimizeShortExit,
             optimizeRisk,
+            iterationLimit,
         };
     }
 
