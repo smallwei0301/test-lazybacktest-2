@@ -1047,3 +1047,12 @@
 - **Fix**: `js/rolling-test.js` 於建立組合時改用 `resolveStrategyConfigKey` 轉換做多/做空出場策略對應的批量優化鍵值，並更新模組版本碼至 `LB-ROLLING-TEST-20250927A`，確保批量優化與 Walk-Forward 共用相同策略範圍。
 - **Diagnostics**: 重新於訓練視窗內分別執行批量優化與滾動測試，確認兩者的出場參數完全一致，並比對報告摘要所列優化訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-27 — Patch LB-ROLLING-TEST-20250928A
+- **Issue recap**: 第二個視窗起的 Walk-Forward 測試期採用的訓練參數仍與批量優化面板對同一訓練期間的最佳解不一致，推查發現訓練視窗仍沿用前一輪的相對期間旗標與 staging 陣列，導致批量優化覆寫的日期與資金配置未完全同步。
+- **Fix**:
+  - `js/rolling-test.js` 新增 `buildTrainingWindowBaseParams`、`normalizeWindowBaseParams` 等工具，於每個訓練視窗重新清除 `recent*` 相對期間設定、暖身欄位與 staging 預設值，並依視窗日期重建回測參數後再交由批量優化引擎處理。
+  - 批量組合優化回傳時同步帶入停損/停利調整，讓測試期確實沿用批量優化產出的完整參數組合。
+  - 更新模組版本碼至 `LB-ROLLING-TEST-20250928A`，並於滾動測試流程中統一以正規化後的參數驅動訓練與測試回測。
+- **Diagnostics**: 針對第二與第三個視窗分別在批量優化面板及 Walk-Forward 訓練期執行一次回測，確認最佳參數（含停損/停利與買進時點設定）完全一致，測試期亦沿用相同設定。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

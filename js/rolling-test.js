@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.7 ---
-// Patch Tag: LB-ROLLING-TEST-20250927A
+// --- 滾動測試模組 - v1.8 ---
+// Patch Tag: LB-ROLLING-TEST-20250928A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250927A',
+        version: 'LB-ROLLING-TEST-20250928A',
         batchOptimizerInitialized: false,
     };
 
@@ -199,16 +199,19 @@
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
-            let windowParams = deepClone(baseParams);
+            const trainingBaseParams = buildTrainingWindowBaseParams(baseParams, win);
+            let windowParams = deepClone(trainingBaseParams);
             let optimizationSummary = null;
 
             if (optimizationPlan.enabled) {
                 try {
                     state.progress.stage = '參數優化';
                     updateProgressUI(`視窗 ${state.progress.windowIndex}/${state.windows.length} · 參數優化`);
-                    const optimizationResult = await optimizeParametersForWindow(windowParams, win, optimizationPlan);
+                    const optimizationResult = await optimizeParametersForWindow(trainingBaseParams, win, optimizationPlan);
                     if (optimizationResult?.params) {
-                        windowParams = optimizationResult.params;
+                        windowParams = deepClone(optimizationResult.params);
+                    } else {
+                        windowParams = deepClone(trainingBaseParams);
                     }
                     optimizationSummary = optimizationResult?.summary || null;
                 } catch (error) {
@@ -1302,6 +1305,59 @@
         return scopes;
     }
 
+    function buildTrainingWindowBaseParams(baseParams, windowInfo) {
+        const clone = deepClone(baseParams || {});
+        normalizeWindowBaseParams(clone, windowInfo);
+        return clone;
+    }
+
+    function normalizeWindowBaseParams(target, windowInfo) {
+        if (!target || typeof target !== 'object') return;
+        if (windowInfo?.trainingStart) target.startDate = windowInfo.trainingStart;
+        if (windowInfo?.trainingEnd) target.endDate = windowInfo.trainingEnd;
+        stripRelativeRangeControls(target);
+        clearWindowDerivedFields(target);
+        target.entryStages = normalizeStageArray(target.entryStages, target.positionSize, 100);
+        target.exitStages = normalizeStageArray(target.exitStages, 100, 100);
+    }
+
+    function stripRelativeRangeControls(target) {
+        const keys = [
+            'recentYears',
+            'recentMonths',
+            'recentQuarters',
+            'recentWeeks',
+            'recentDays',
+            'recentRange',
+            'useRecentYears',
+            'useRecentRange',
+        ];
+        keys.forEach((key) => {
+            if (key in target) delete target[key];
+        });
+    }
+
+    function clearWindowDerivedFields(target) {
+        ['dataStartDate', 'effectiveStartDate', 'lookbackDays'].forEach((key) => {
+            if (key in target) delete target[key];
+        });
+    }
+
+    function normalizeStageArray(values, fallbackPrimary, fallbackDefault) {
+        const resolved = Array.isArray(values)
+            ? values
+                .map((val) => {
+                    const num = Number(val);
+                    return Number.isFinite(num) && num > 0 ? num : null;
+                })
+                .filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        if (resolved.length > 0) return resolved;
+        if (Number.isFinite(fallbackPrimary) && fallbackPrimary > 0) return [Number(fallbackPrimary)];
+        if (Number.isFinite(fallbackDefault) && fallbackDefault > 0) return [Number(fallbackDefault)];
+        return [];
+    }
+
     async function optimizeParametersForWindow(baseWindowParams, windowInfo, plan) {
         const targetMetric = plan?.config?.targetMetric || 'annualizedReturn';
         const metricLabel = resolveMetricLabel(targetMetric);
@@ -1314,6 +1370,7 @@
         };
 
         const outputParams = deepClone(baseWindowParams);
+        normalizeWindowBaseParams(outputParams, windowInfo);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
@@ -1341,8 +1398,7 @@
         }
 
         const workingParams = deepClone(baseWindowParams);
-        workingParams.startDate = windowInfo.trainingStart;
-        workingParams.endDate = windowInfo.trainingEnd;
+        normalizeWindowBaseParams(workingParams, windowInfo);
 
         const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
         const scopeResults = [];
@@ -1361,17 +1417,25 @@
                     combinationScopes,
                     baselineSnapshots,
                 });
-                if (combinationOutcome) {
-                    if (combinationOutcome.params) {
-                        if (combinationOutcome.params.entryParams) {
-                            outputParams.entryParams = { ...combinationOutcome.params.entryParams };
-                            workingParams.entryParams = { ...combinationOutcome.params.entryParams };
+                    if (combinationOutcome) {
+                        if (combinationOutcome.params) {
+                            if (combinationOutcome.params.entryParams) {
+                                outputParams.entryParams = { ...combinationOutcome.params.entryParams };
+                                workingParams.entryParams = { ...combinationOutcome.params.entryParams };
+                            }
+                            if (combinationOutcome.params.exitParams) {
+                                outputParams.exitParams = { ...combinationOutcome.params.exitParams };
+                                workingParams.exitParams = { ...combinationOutcome.params.exitParams };
+                            }
+                            if ('stopLoss' in combinationOutcome.params) {
+                                outputParams.stopLoss = combinationOutcome.params.stopLoss;
+                                workingParams.stopLoss = combinationOutcome.params.stopLoss;
+                            }
+                            if ('takeProfit' in combinationOutcome.params) {
+                                outputParams.takeProfit = combinationOutcome.params.takeProfit;
+                                workingParams.takeProfit = combinationOutcome.params.takeProfit;
+                            }
                         }
-                        if (combinationOutcome.params.exitParams) {
-                            outputParams.exitParams = { ...combinationOutcome.params.exitParams };
-                            workingParams.exitParams = { ...combinationOutcome.params.exitParams };
-                        }
-                    }
                     if (Array.isArray(combinationOutcome.scopeResults)) {
                         combinationOutcome.scopeResults.forEach((result) => {
                             if (result.error && !summary.error) summary.error = result.error;
@@ -1530,8 +1594,7 @@
         if (!combination) return null;
 
         const overrideParams = deepClone(baseParams);
-        overrideParams.startDate = windowInfo.trainingStart;
-        overrideParams.endDate = windowInfo.trainingEnd;
+        normalizeWindowBaseParams(overrideParams, windowInfo);
 
         const optimizationConfig = {
             targetMetric: plan.config.targetMetric,
@@ -1562,11 +1625,21 @@
             if (exitResult) scopeResults.push(exitResult);
         }
 
+        const params = {};
+        if (optimizedCombination.buyParams) {
+            params.entryParams = { ...optimizedCombination.buyParams };
+        }
+        if (optimizedCombination.sellParams) {
+            params.exitParams = { ...optimizedCombination.sellParams };
+        }
+        if (optimizedCombination.riskManagement && typeof optimizedCombination.riskManagement === 'object') {
+            const { stopLoss, takeProfit } = optimizedCombination.riskManagement;
+            if (Number.isFinite(stopLoss)) params.stopLoss = stopLoss;
+            if (Number.isFinite(takeProfit)) params.takeProfit = takeProfit;
+        }
+
         return {
-            params: {
-                entryParams: optimizedCombination.buyParams ? { ...optimizedCombination.buyParams } : undefined,
-                exitParams: optimizedCombination.sellParams ? { ...optimizedCombination.sellParams } : undefined,
-            },
+            params,
             scopeResults,
         };
     }
