@@ -1755,6 +1755,82 @@
                                                                 <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制每個組合在 "交替優化" 流程中的最大迭代次數。預設 6。</p>
                                                             </div>
                                                         </div>
+                                                        <div class="grid md:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label for="batch-optimization-mode" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">優化模式</label>
+                                                                <select id="batch-optimization-mode" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    <option value="grid">網格式搜尋 (預設)</option>
+                                                                    <option value="iterate">交替微調</option>
+                                                                    <option value="random">隨機搜尋</option>
+                                                                    <option value="ga">遺傳演算法</option>
+                                                                    <option value="hyperband">Hyperband/ASHA</option>
+                                                                    <option value="surrogate-ga">Surrogate-GA</option>
+                                                                </select>
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">不同模式會決定參數探索的策略，請依照回測時間與效率需求選擇。</p>
+                                                            </div>
+                                                            <div id="batch-mode-status" class="rounded-md border border-dashed px-3 py-2 text-xs" style="border-color: color-mix(in srgb, var(--primary) 35%, transparent); background-color: color-mix(in srgb, var(--primary) 6%, transparent); color: var(--primary);">
+                                                                Hyperband 會利用預算逐輪淘汰表現較差的組合，Surrogate-GA 則透過輕量預測器加速淘汰劣勢族群。
+                                                            </div>
+                                                        </div>
+                                                        <div id="hyperband-mode-panel" class="grid md:grid-cols-3 gap-4 hidden" data-mode-panel="hyperband">
+                                                            <div>
+                                                                <label for="hyperband-min-budget" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最低預算比例</label>
+                                                                <input type="number" id="hyperband-min-budget" value="0.2" min="0.05" max="1" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">第一輪回測的資料比例 (0~1)。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-max-budget" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最高預算比例</label>
+                                                                <input type="number" id="hyperband-max-budget" value="1" min="0.2" max="1" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">最後一輪回測的資料比例 (通常設為 1)。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-eta" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">淘汰倍率 (η)</label>
+                                                                <input type="number" id="hyperband-eta" value="3" min="2" max="6" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">每輪保留 1/η 的候選組合。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-rounds" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最大輪數</label>
+                                                                <input type="number" id="hyperband-rounds" value="4" min="2" max="8" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">越多輪會使用更多預算，但能留下更穩健的組合。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-init-candidates" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">起始候選數</label>
+                                                                <input type="number" id="hyperband-init-candidates" value="18" min="6" max="120" step="3" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">首輪評估的隨機策略組合數量。</p>
+                                                            </div>
+                                                        </div>
+                                                        <div id="surrogate-mode-panel" class="grid md:grid-cols-3 gap-4 hidden" data-mode-panel="surrogate-ga">
+                                                            <div>
+                                                                <label for="surrogate-population" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">族群大小</label>
+                                                                <input type="number" id="surrogate-population" value="24" min="8" max="120" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">每代保留的候選策略數量。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-generations" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">演化代數</label>
+                                                                <input type="number" id="surrogate-generations" value="8" min="3" max="30" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">世代越多，探索越充分但也更耗時。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-topk" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">每代真實回測 Top-K</label>
+                                                                <input type="number" id="surrogate-topk" value="6" min="2" max="60" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">每一代要進行真實回測的候選數量。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-mutation" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">突變機率</label>
+                                                                <input type="number" id="surrogate-mutation" value="0.2" min="0.05" max="0.6" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">較高的突變可以避免陷入局部最佳。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-crossover" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">交配比例</label>
+                                                                <input type="number" id="surrogate-crossover" value="0.6" min="0.2" max="0.9" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制父母染色體交叉產生新個體的比例。</p>
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-warmup" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始真實回測數</label>
+                                                                <input type="number" id="surrogate-warmup" value="8" min="2" max="60" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">用於訓練 Surrogate 的暖身樣本數。</p>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2441,6 +2517,9 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/hyperband-runner.js"></script>
+    <script src="js/surrogate.js"></script>
+    <script src="js/surrogate-ga.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
