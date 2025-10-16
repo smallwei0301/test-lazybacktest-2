@@ -169,3 +169,24 @@ Lazybacktest 部署於 Netlify，主要服務台灣上市櫃與 ETF 回測，每
   2. 調整單元/整合測試，新增「資料齊備但仍回傳 `no_data`」案例，確認主執行緒與 Worker 最終都能取得 `finalEvaluation`。
   3. 進行敏感度分析或批次模擬時，統一使用 `buildResult()` 類的工廠函式建立結果物件，避免重複利用舊引用；若需改動核心流程，需在 `log.md` 與本文件同步記錄影響模組與回歸風險。
 
+## 10. Walk-Forward 與批量優化對齊經驗（LB-ROLLING-KNOWLEDGE-20260305A）
+
+- **曾遇到的症狀**：滾動測試自第二視窗起產出的最佳參數與單獨於批量優化面板執行時不同，甚至偶爾優於面板最佳解，導致報告無法交叉驗證。
+- **根因拆解**：
+  1. 訓練視窗沿用全域 `cachedStockData`，Worker 在優化時讀到超出視窗的資料，造成提前曝光未來行情。
+  2. 迭代輪數預設 4 與批量面板 6 輪不一致，使部分視窗尚未收斂即提前終止。
+  3. 視窗基礎參數延續 `recent*` 旗標與 staging 快取，造成 `startDate/endDate`、總資金、隔日買入等設定未完全覆寫。
+- **有效處置**：
+  - 每個訓練視窗呼叫 `prepareWorkerPayload`，依 `dataStartDate` 裁切 `cachedStockData`，並透過 `cachedDataOverride` 注入批量優化、風險優化與驗證回測，確保僅使用視窗資料。
+  - 滾動測試優化面板新增「組合迭代上限」設定，預設回落批量面板（目前為 6），兩側同步覆蓋 `plan.config.iterationLimit`。
+  - 正規化訓練視窗參數：重建日期、資金、隔日買入等基礎設定，清除 `recent*` 旗標與 staging 陣列後再交給批量優化。
+- **驗證流程**：
+  1. 於同一訓練視窗分別執行批量優化面板與滾動測試，列印 `bestParams`、`riskParams`、`tradeConfig` 確認完全一致。
+  2. 確認 `trainingPayload.cachedWindowData` 首末日期落在暖身＋訓練期間內，並於 Worker 紀錄 `rawDataUsed.fetchRange` 對照。
+  3. 交叉比對迭代日誌，確認 `iterationLimit` 與 `convergenceHistory` 長度相同。
+- **下次遇到相同行為時的排查順序**：
+  1. 檢查 `log.md` 中最新的 `LB-ROLLING-TEST-DEBUG-*` 是否已有相同案例與排除清單。
+  2. 於訓練視窗列印 `plan.config.iterationLimit`、`cachedDataOverride` 長度、`baseParams.startDate/endDate`，確認資料與設定同步。
+  3. 若資料無誤仍出現差異，抓取 Worker 端 `optimizeCombinationIterative` 的指標收斂紀錄，與批量面板的 `diagnostics` 比對，以判斷是否需統一 trials 或風控流程。
+- **追蹤建議**：每次修改滾動測試或批量優化流程後，更新對應版本碼並在 `log.md` 記錄觀察到的視窗資料範圍、迭代紀錄與比對結果，避免重複排查。
+
