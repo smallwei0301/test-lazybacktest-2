@@ -1,4 +1,12 @@
 
+## 2025-07-15 — Patch LB-BATCH-MULTIMODE-20250715A
+- **Scope**: 批量優化多模式化與早停資源分配。
+- **Updates**:
+  - 新增 Hyperband（ASHA）模式，可設定最小/最大預算、η 值與輪數，逐輪縮減候選並沿用既有批量結果表格與套用最佳參數流程。
+  - 引入 Surrogate-GA 模式，使用 RBF 代理模型預估族群分數、僅對每代 Top-K 執行真實回測，兼顧效率與結果品質。
+  - 建立 `hyperband-runner.js`、`surrogate.js`、`surrogate-ga.js` 三個模組，並調整主控 UI 切換面板、結果進度與 Worker 以支援 budget hint。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/hyperband-runner.js','js/surrogate.js','js/surrogate-ga.js','js/batch-optimization.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:

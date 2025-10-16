@@ -2,6 +2,8 @@
 // Patch note: small harmless edit to refresh editor diagnostics
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
+const BATCH_OPTIMIZER_VERSION = 'LB-BATCH-MULTIMODE-20250715A';
+
 function getWorkerStrategyName(batchStrategyName) {
     const strategyNameMap = {
         // 出場策略映射
@@ -154,23 +156,285 @@ function renderBatchWorkerStatus() {
     }
 }
 
+let optimizerCandidateCounter = 0;
+
+function createSeededRandom(seed) {
+    if (!Number.isFinite(seed)) {
+        return () => Math.random();
+    }
+    let state = Math.floor(Math.abs(seed)) % 2147483647;
+    if (state === 0) state = 1;
+    return () => {
+        state = (state * 48271) % 2147483647;
+        return (state - 1) / 2147483646;
+    };
+}
+
+function cloneParams(params) {
+    if (!params || typeof params !== 'object') return {};
+    try {
+        return JSON.parse(JSON.stringify(params));
+    } catch (error) {
+        const clone = {};
+        for (const key of Object.keys(params)) {
+            clone[key] = params[key];
+        }
+        return clone;
+    }
+}
+
+function cloneCombination(combination) {
+    if (!combination) return null;
+    return {
+        buyStrategy: combination.buyStrategy,
+        sellStrategy: combination.sellStrategy,
+        buyParams: cloneParams(combination.buyParams),
+        sellParams: cloneParams(combination.sellParams),
+        riskManagement: combination.riskManagement ? cloneParams(combination.riskManagement) : undefined,
+    };
+}
+
+function assignCandidateId(candidate) {
+    if (!candidate) return candidate;
+    optimizerCandidateCounter += 1;
+    candidate.__candidateId = `cand-${optimizerCandidateCounter}`;
+    return candidate;
+}
+
+function sampleRangeValue(range, randomFn) {
+    if (!range) return 0;
+    const min = Number(range.from ?? 0);
+    const max = Number(range.to ?? min);
+    const step = Number(range.step ?? 1) || 1;
+    if (max <= min) return min;
+    const steps = Math.max(1, Math.round((max - min) / step));
+    const idx = Math.min(steps, Math.max(0, Math.round(randomFn() * steps)));
+    return min + idx * step;
+}
+
+function mutateStrategyParams(strategyKey, params, intensity, randomFn) {
+    const info = strategyDescriptions[strategyKey];
+    if (!info || !Array.isArray(info.optimizeTargets) || info.optimizeTargets.length === 0) {
+        return cloneParams(params);
+    }
+    const result = cloneParams(params);
+    const amount = Number.isFinite(intensity) ? Math.max(0.05, Math.min(1, intensity)) : 0.5;
+    info.optimizeTargets.forEach((target) => {
+        if (!target || !target.range) return;
+        const min = Number(target.range.from ?? 0);
+        const max = Number(target.range.to ?? min);
+        const step = Number(target.range.step ?? 1) || 1;
+        if (max <= min) {
+            result[target.name] = min;
+            return;
+        }
+        const current = Number(result[target.name]);
+        const span = max - min;
+        let next;
+        if (Number.isFinite(current)) {
+            const delta = (randomFn() * 2 - 1) * span * amount;
+            next = current + delta;
+        } else {
+            next = sampleRangeValue(target.range, randomFn);
+        }
+        next = Math.min(max, Math.max(min, next));
+        if (step > 0) {
+            const steps = Math.round((next - min) / step);
+            next = min + steps * step;
+        }
+        result[target.name] = Number.isFinite(next) ? Number(next.toFixed(6)) : min;
+    });
+    return result;
+}
+
+function mutateRiskManagement(params, intensity, randomFn) {
+    if (!params) return null;
+    const mutated = cloneParams(params);
+    const amount = Number.isFinite(intensity) ? Math.max(0.05, Math.min(1, intensity)) : 0.5;
+    const stopLossRange = globalOptimizeTargets?.stopLoss?.range;
+    const takeProfitRange = globalOptimizeTargets?.takeProfit?.range;
+    if (stopLossRange) {
+        const current = Number(mutated.stopLoss);
+        const base = Number.isFinite(current) ? current : sampleRangeValue(stopLossRange, randomFn);
+        const span = (stopLossRange.to ?? base) - (stopLossRange.from ?? base);
+        let next = base + (randomFn() * 2 - 1) * span * amount;
+        next = Math.min(stopLossRange.to ?? next, Math.max(stopLossRange.from ?? next, next));
+        if (stopLossRange.step) {
+            const steps = Math.round((next - stopLossRange.from) / stopLossRange.step);
+            next = stopLossRange.from + steps * stopLossRange.step;
+        }
+        mutated.stopLoss = Number(next.toFixed(4));
+    }
+    if (takeProfitRange) {
+        const current = Number(mutated.takeProfit);
+        const base = Number.isFinite(current) ? current : sampleRangeValue(takeProfitRange, randomFn);
+        const span = (takeProfitRange.to ?? base) - (takeProfitRange.from ?? base);
+        let next = base + (randomFn() * 2 - 1) * span * amount;
+        next = Math.min(takeProfitRange.to ?? next, Math.max(takeProfitRange.from ?? next, next));
+        if (takeProfitRange.step) {
+            const steps = Math.round((next - takeProfitRange.from) / takeProfitRange.step);
+            next = takeProfitRange.from + steps * takeProfitRange.step;
+        }
+        mutated.takeProfit = Number(next.toFixed(4));
+    }
+    return mutated;
+}
+
+function randomizeCombination(baseCombination, options = {}) {
+    if (!baseCombination) return null;
+    const randomFn = typeof options.random === 'function' ? options.random : Math.random;
+    const intensity = Number.isFinite(options.intensity) ? options.intensity : 0.5;
+    const candidate = cloneCombination(baseCombination);
+    if (!candidate) return null;
+    candidate.buyParams = mutateStrategyParams(candidate.buyStrategy, candidate.buyParams, intensity, randomFn);
+    candidate.sellParams = mutateStrategyParams(candidate.sellStrategy, candidate.sellParams, intensity, randomFn);
+    if (candidate.riskManagement) {
+        candidate.riskManagement = mutateRiskManagement(candidate.riskManagement, intensity, randomFn);
+    }
+    return assignCandidateId(candidate);
+}
+
+function combinationToVector(combination) {
+    const vector = [];
+    if (!combination) return vector;
+    const appendParams = (params) => {
+        if (!params || typeof params !== 'object') return;
+        Object.keys(params).sort().forEach((key) => {
+            const value = params[key];
+            if (Array.isArray(value)) {
+                value.forEach((item) => appendParams({ [key]: item }));
+            } else if (typeof value === 'number') {
+                vector.push(value);
+            } else if (typeof value === 'boolean') {
+                vector.push(value ? 1 : 0);
+            } else if (typeof value === 'string' && value.trim() !== '') {
+                const numeric = Number(value);
+                vector.push(Number.isFinite(numeric) ? numeric : value.length % 17);
+            }
+        });
+    };
+    appendParams(combination.buyParams);
+    appendParams(combination.sellParams);
+    appendParams(combination.riskManagement);
+    return vector;
+}
+
+function computeFitnessScore(value, metric) {
+    if (!Number.isFinite(value)) return -Infinity;
+    if (metric === 'maxDrawdown') {
+        return -Math.abs(value);
+    }
+    return value;
+}
+
+async function evaluateCombinationCandidate(candidate, config, meta = {}) {
+    const raw = await executeBacktestForCombination(candidate, { budget: meta?.budget });
+    if (!raw) return null;
+    const metricValue = getMetricFromResult(raw, config.targetMetric);
+    const scoreValue = computeFitnessScore(metricValue, config.targetMetric);
+    const result = { ...raw };
+    result.__optimizerMetric = metricValue;
+    result.__optimizerScore = scoreValue;
+    if (typeof result.score !== 'number') {
+        result.score = scoreValue;
+    }
+    return result;
+}
+
+function prepareCombinationResult(combination, rawResult) {
+    if (!combination || !rawResult) return null;
+    const combinedResult = {
+        ...rawResult,
+        buyStrategy: combination.buyStrategy,
+        sellStrategy: combination.sellStrategy,
+        buyParams: cloneParams(combination.buyParams),
+        sellParams: cloneParams(combination.sellParams)
+    };
+    if (combination.riskManagement) {
+        combinedResult.riskManagement = cloneParams(combination.riskManagement);
+    }
+    delete combinedResult.entryStrategy;
+    delete combinedResult.exitStrategy;
+    delete combinedResult.entryParams;
+    delete combinedResult.exitParams;
+    return combinedResult;
+}
+
+function pushBatchResult(combination, rawResult) {
+    const combined = prepareCombinationResult(combination, rawResult);
+    if (!combined) return null;
+    batchOptimizationResults.push(combined);
+    return combined;
+}
+
+function notifyOptimizerProgress(current, total, message) {
+    currentBatchProgress.current = current;
+    currentBatchProgress.total = Math.max(total, 1);
+    currentBatchProgress.phase = 'optimizing';
+    const percentage = currentBatchProgress.total > 0
+        ? Math.min(100, Math.max(0, (current / currentBatchProgress.total) * 100))
+        : 0;
+    updateBatchProgress(percentage, message);
+}
+
+function estimateHyperbandEvaluations(initialCount, eta, rounds) {
+    let total = 0;
+    let remaining = Math.max(1, initialCount);
+    const factor = Math.max(2, eta || 3);
+    for (let i = 0; i < Math.max(1, rounds || 1); i++) {
+        total += Math.max(1, Math.round(remaining));
+        remaining = remaining / factor;
+        if (remaining < 1) {
+            break;
+        }
+    }
+    return Math.max(total, initialCount);
+}
+
+function estimateSurrogateEvaluations(populationSize, generations, topK, warmup) {
+    const warmupCount = Math.max(1, warmup || 1);
+    const perGeneration = Math.max(1, topK || 1);
+    return warmupCount + Math.max(0, generations || 0) * perGeneration;
+}
+
+async function runOptimizer(mode, options = {}) {
+    const normalized = (mode || 'legacy').toLowerCase();
+    if (normalized === 'hyperband') {
+        if (!window.lazybacktestHyperbandRunner || typeof window.lazybacktestHyperbandRunner.run !== 'function') {
+            throw new Error('Hyperband 模組尚未載入');
+        }
+        return window.lazybacktestHyperbandRunner.run(options.hyperband || {});
+    }
+    if (normalized === 'surrogate-ga') {
+        if (!window.lazybacktestSurrogateGA || typeof window.lazybacktestSurrogateGA.run !== 'function') {
+            throw new Error('Surrogate-GA 模組尚未載入');
+        }
+        return window.lazybacktestSurrogateGA.run(options.surrogateGA || {});
+    }
+    if (typeof options.legacy === 'function') {
+        return options.legacy();
+    }
+    throw new Error(`未知的優化模式：${mode}`);
+}
+
 // 初始化批量優化功能
 function initBatchOptimization() {
     console.log('[Batch Optimization] Initializing...');
-    
+
     try {
         // 檢查必要的依賴是否存在
         if (typeof strategyDescriptions === 'undefined') {
             console.error('[Batch Optimization] strategyDescriptions not found');
             return;
         }
-        
+
         // 生成策略選項
         generateStrategyOptions();
-        
+
         // 綁定事件
         bindBatchOptimizationEvents();
-        
+        setupOptimizerModeUI();
+
         // 添加測試按鈕（僅在開發模式）
         if (window.location.hostname === 'localhost') {
             addTestButton();
@@ -493,6 +757,10 @@ function getBatchOptimizationConfig() {
             optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
         };
         
+        // 獲取模式
+        const modeElement = document.getElementById('batch-optimization-mode');
+        config.mode = modeElement ? modeElement.value : 'legacy';
+
         // 獲取參數優化次數
         const parameterTrialsElement = document.getElementById('batch-optimize-parameter-trials');
         if (parameterTrialsElement && parameterTrialsElement.value) {
@@ -527,10 +795,42 @@ function getBatchOptimizationConfig() {
             config.optimizeTargets.push('sharpeRatio');
         }
         
+        // Hyperband 設定
+        config.hyperband = {
+            minBudget: Math.max(0.05, Math.min(1, parseFloat(document.getElementById('hyperband-min-budget')?.value || '0.25'))),
+            maxBudget: Math.max(0.1, Math.min(1, parseFloat(document.getElementById('hyperband-max-budget')?.value || '1'))),
+            eta: Math.max(2, parseInt(document.getElementById('hyperband-eta')?.value || '3', 10)),
+            rounds: Math.max(1, parseInt(document.getElementById('hyperband-rounds')?.value || '4', 10)),
+            initCandidates: Math.max(1, parseInt(document.getElementById('hyperband-init-candidates')?.value || String(Math.max(6, config.parameterTrials / 4)), 10)),
+        };
+        if (config.hyperband.maxBudget < config.hyperband.minBudget) {
+            config.hyperband.maxBudget = config.hyperband.minBudget;
+        }
+
+        // Surrogate-GA 設定
+        const populationSize = Math.max(4, parseInt(document.getElementById('surrogate-ga-population')?.value || '24', 10));
+        const topK = Math.max(1, parseInt(document.getElementById('surrogate-ga-topk')?.value || '6', 10));
+        config.surrogateGA = {
+            populationSize,
+            generations: Math.max(1, parseInt(document.getElementById('surrogate-ga-generations')?.value || '8', 10)),
+            topK: Math.min(populationSize, topK),
+            mutationRate: Math.max(0, Math.min(1, parseFloat(document.getElementById('surrogate-ga-mutation')?.value || '0.3'))),
+            surrogateWarmup: Math.max(1, parseInt(document.getElementById('surrogate-ga-warmup')?.value || String(Math.ceil(populationSize / 3)), 10)),
+        };
+
         // 設定排序鍵值為選擇的目標指標
         config.sortKey = config.targetMetric;
         config.sortDirection = 'desc';
-        
+
+        // 隨機種子
+        const seedInput = document.getElementById('batch-optimize-seed');
+        if (seedInput && seedInput.value !== '') {
+            const parsedSeed = parseInt(seedInput.value, 10);
+            if (!Number.isNaN(parsedSeed)) {
+                config.seed = parsedSeed;
+            }
+        }
+
         return config;
     } catch (error) {
         console.error('[Batch Optimization] Error getting config:', error);
@@ -731,12 +1031,13 @@ function updateBatchProgress(currentCombination = null) {
 // 執行批量優化
 async function executeBatchOptimization(config) {
     console.log('[Batch Optimization] executeBatchOptimization called with config:', config);
-    
+
     try {
+        batchOptimizationConfig = { ...batchOptimizationConfig, ...config };
         // 步驟1：取得策略列表
         let buyStrategies = getSelectedStrategies('batch-buy-strategies');
         let sellStrategies = getSelectedStrategies('batch-sell-strategies');
-        
+
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
         
         updateBatchProgress(5, '準備策略參數優化...');
@@ -757,7 +1058,20 @@ async function executeBatchOptimization(config) {
 
         // 限制組合數量
         const limitedCombinations = optimizedCombinations.slice(0, config.maxCombinations);
-        
+
+        const randomFn = createSeededRandom(config.seed);
+        const mode = (config.mode || 'legacy').toLowerCase();
+
+        if (mode === 'hyperband') {
+            await runHyperbandMode(limitedCombinations, config, randomFn);
+            return;
+        }
+
+        if (mode === 'surrogate-ga') {
+            await runSurrogateGAMode(limitedCombinations, config, randomFn);
+            return;
+        }
+
         // 重置進度狀態，接著分批處理
         currentBatchProgress = {
             current: 0,
@@ -1187,51 +1501,56 @@ async function processStrategyCombinations(combinations, config) {
             // 執行回測
             const result = await executeBacktestForCombination(combination);
             if (result) {
-                // 確保保留原始的策略 ID，不被 worker 結果覆蓋
-                const combinedResult = {
-                    ...result,
-                    // 強制保留原始的策略 ID 和參數，覆蓋任何從 worker 來的值
-                    buyStrategy: combination.buyStrategy,
-                    sellStrategy: combination.sellStrategy,
-                    buyParams: combination.buyParams,
-                    sellParams: combination.sellParams
-                };
-                
-                // 保留風險管理參數（如果有的話）
-                if (combination.riskManagement) {
-                    combinedResult.riskManagement = combination.riskManagement;
-                    console.log(`[Batch Debug] Preserved risk management:`, combination.riskManagement);
+                const combinedResult = pushBatchResult(combination, result);
+                if (combinedResult) {
+                    console.log(`[Batch Debug] Strategy preserved: ${combination.buyStrategy} -> ${combination.sellStrategy}`);
+                    console.log(`[Batch Debug] Final result sellStrategy:`, combinedResult.sellStrategy);
+                    results.push(combinedResult);
                 }
-                
-                // 移除可能會造成混淆的字段
-                delete combinedResult.entryStrategy;
-                delete combinedResult.exitStrategy;
-                delete combinedResult.entryParams;
-                delete combinedResult.exitParams;
-                
-                console.log(`[Batch Debug] Strategy preserved: ${combination.buyStrategy} -> ${combination.sellStrategy}`);
-                console.log(`[Batch Debug] Final result sellStrategy:`, combinedResult.sellStrategy);
-                results.push(combinedResult);
             }
         } catch (error) {
             console.error(`[Batch Optimization] Error processing combination:`, error);
         }
-        
+
         // 更新進度
         currentBatchProgress.current++;
         if (currentBatchProgress.current % 10 === 0) { // 每10個更新一次進度
-            updateBatchProgress(combinationInfo);
+            const message = `處理組合 ${combinationInfo.current}/${combinationInfo.total}`;
+            notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, message);
         }
     }
-    
+
     // 將結果添加到全局結果中
-    batchOptimizationResults.push(...results);
-    
+    if (results.length > 0) {
+        console.log('[Batch Optimization] Appended sequential results:', results.length);
+    }
+
     console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
 }
 
+function setupOptimizerModeUI() {
+    const modeSelect = document.getElementById('batch-optimization-mode');
+    const hyperbandPanel = document.getElementById('hyperband-options-panel');
+    const surrogatePanel = document.getElementById('surrogate-ga-options-panel');
+
+    const togglePanels = () => {
+        const mode = (modeSelect ? modeSelect.value : 'legacy').toLowerCase();
+        if (hyperbandPanel) {
+            hyperbandPanel.classList.toggle('hidden', mode !== 'hyperband');
+        }
+        if (surrogatePanel) {
+            surrogatePanel.classList.toggle('hidden', mode !== 'surrogate-ga');
+        }
+    };
+
+    if (modeSelect) {
+        modeSelect.addEventListener('change', togglePanels);
+    }
+    togglePanels();
+}
+
 // 執行單個策略組合的回測
-async function executeBacktestForCombination(combination) {
+async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
         try {
             // 使用現有的回測邏輯
@@ -1285,12 +1604,16 @@ async function executeBacktestForCombination(combination) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
-                tempWorker.postMessage({
+                const workerMessage = {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData: true,
                     cachedData: cachedStockData
-                });
+                };
+                if (options && typeof options.budget === 'number') {
+                    workerMessage.budget = options.budget;
+                }
+                tempWorker.postMessage(workerMessage);
 
                 // 設定超時
                 setTimeout(() => {
@@ -1306,6 +1629,188 @@ async function executeBacktestForCombination(combination) {
             resolve(null);
         }
     });
+}
+
+function createCandidatePool(baseCombinations, desiredSize, randomFn) {
+    if (!Array.isArray(baseCombinations) || baseCombinations.length === 0) {
+        return [];
+    }
+    const random = typeof randomFn === 'function' ? randomFn : Math.random;
+    const pool = [];
+    const baseCount = baseCombinations.length;
+    const targetSize = Math.max(1, desiredSize || baseCount);
+    for (let i = 0; i < baseCount && pool.length < targetSize; i++) {
+        const candidate = cloneCombination(baseCombinations[i]);
+        if (candidate) {
+            assignCandidateId(candidate);
+            pool.push(candidate);
+        }
+    }
+    let safety = 0;
+    while (pool.length < targetSize && safety < targetSize * 4) {
+        const base = baseCombinations[safety % baseCount];
+        const mutated = randomizeCombination(base, {
+            random,
+            intensity: 0.5 + (pool.length / targetSize) * 0.3,
+        });
+        if (mutated) {
+            pool.push(mutated);
+        }
+        safety++;
+    }
+    return pool;
+}
+
+function buildInitialPopulation(baseCombinations, populationSize, randomFn) {
+    const pool = createCandidatePool(baseCombinations, populationSize, randomFn);
+    return pool.map((candidate) => ({
+        candidate,
+        evaluated: false,
+        score: null,
+        predictedScore: null,
+    }));
+}
+
+async function runHyperbandMode(combinations, config, randomFn) {
+    const hyperbandConfig = config.hyperband || {};
+    const minBudget = Math.max(0.05, Math.min(1, Number(hyperbandConfig.minBudget) || 0.25));
+    const maxBudget = Math.max(minBudget, Math.min(1, Number(hyperbandConfig.maxBudget) || 1));
+    const eta = Math.max(2, parseInt(hyperbandConfig.eta, 10) || 3);
+    const rounds = Math.max(1, parseInt(hyperbandConfig.rounds, 10) || 4);
+    const initCandidates = Math.max(1, parseInt(hyperbandConfig.initCandidates, 10) || combinations.length);
+    const random = typeof randomFn === 'function' ? randomFn : Math.random;
+
+    const candidatePool = createCandidatePool(combinations, initCandidates, random);
+    if (candidatePool.length === 0) {
+        throw new Error('Hyperband 無可用的候選策略');
+    }
+
+    const estimate = estimateHyperbandEvaluations(candidatePool.length, eta, rounds);
+    currentBatchProgress.startTime = Date.now();
+    currentBatchProgress.current = 0;
+    currentBatchProgress.total = estimate;
+    currentBatchProgress.phase = 'optimizing';
+    updateBatchProgress(5, 'Hyperband：初始化候選中...');
+
+    const evaluationMap = new Map();
+
+    await runOptimizer('hyperband', {
+        hyperband: {
+            candidates: candidatePool,
+            scoreKey: '__optimizerScore',
+            minBudget,
+            maxBudget,
+            eta,
+            rounds,
+            initCandidates: candidatePool.length,
+            randomizeCandidate: (candidate, ctx) => randomizeCombination(candidate, {
+                random,
+                intensity: 0.45 + (ctx?.round || 1) * 0.12,
+            }),
+            evaluate: async (candidate, meta) => {
+                return evaluateCombinationCandidate(candidate, config, meta);
+            },
+            onRoundStart: ({ round, totalRounds, budget }) => {
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, `Hyperband 第 ${round}/${totalRounds} 輪（預算 ${(budget * 100).toFixed(0)}%）開始`);
+            },
+            onRoundComplete: ({ round, survivors }) => {
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, `Hyperband 第 ${round} 輪完成，保留 ${survivors} 組候選`);
+            },
+            onCandidateEvaluated: ({ candidate, result, round, budget }) => {
+                if (!result) return;
+                const combined = prepareCombinationResult(candidate, result);
+                if (!combined) return;
+                combined.__optimizerRound = round;
+                combined.__optimizerBudget = budget;
+                combined.__optimizerScore = result.__optimizerScore;
+                evaluationMap.set(candidate.__candidateId || `${round}-${Date.now()}-${Math.random()}`, combined);
+                currentBatchProgress.current += 1;
+                const message = `Hyperband 第 ${round} 輪已完成 ${currentBatchProgress.current}/${currentBatchProgress.total}`;
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, message);
+            }
+        }
+    });
+
+    const finalResults = Array.from(evaluationMap.values());
+    if (finalResults.length === 0) {
+        showError('Hyperband 未產生有效結果');
+        restoreBatchOptimizationUI();
+        return;
+    }
+
+    batchOptimizationResults = finalResults;
+    showBatchResults();
+    notifyOptimizerProgress(currentBatchProgress.total, currentBatchProgress.total, 'Hyperband 完成');
+}
+
+async function runSurrogateGAMode(combinations, config, randomFn) {
+    const gaConfig = config.surrogateGA || {};
+    const populationSize = Math.max(4, parseInt(gaConfig.populationSize, 10) || 24);
+    const generations = Math.max(1, parseInt(gaConfig.generations, 10) || 8);
+    const topK = Math.max(1, parseInt(gaConfig.topK, 10) || 6);
+    const mutationRate = Math.max(0, Math.min(1, Number(gaConfig.mutationRate) || 0.3));
+    const surrogateWarmup = Math.max(1, parseInt(gaConfig.surrogateWarmup, 10) || Math.ceil(populationSize / 3));
+    const random = typeof randomFn === 'function' ? randomFn : Math.random;
+
+    const population = buildInitialPopulation(combinations, populationSize, random);
+    if (population.length === 0) {
+        throw new Error('Surrogate-GA 無可用的候選策略');
+    }
+
+    const estimate = estimateSurrogateEvaluations(population.length, generations, topK, surrogateWarmup);
+    currentBatchProgress.startTime = Date.now();
+    currentBatchProgress.current = 0;
+    currentBatchProgress.total = estimate;
+    currentBatchProgress.phase = 'optimizing';
+    updateBatchProgress(5, 'Surrogate-GA：建立族群...');
+
+    const evaluationMap = new Map();
+
+    await runOptimizer('surrogate-ga', {
+        surrogateGA: {
+            population,
+            evaluate: async (candidate, meta) => evaluateCombinationCandidate(candidate, config, meta),
+            scoreKey: '__optimizerScore',
+            generations,
+            topK,
+            mutationRate,
+            surrogateWarmup,
+            randomFn: random,
+            randomizeCandidate: (candidate, ctx) => randomizeCombination(candidate, {
+                random,
+                intensity: 0.5 + (ctx?.generation || 0) * 0.12,
+            }),
+            toVector: (candidate) => combinationToVector(candidate),
+            onGenerationStart: ({ generation, totalGenerations }) => {
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, `Surrogate-GA 第 ${generation}/${totalGenerations} 代開始`);
+            },
+            onGenerationComplete: ({ generation, evaluatedCount }) => {
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, `Surrogate-GA 第 ${generation} 代完成，累積 ${evaluatedCount} 次真實回測`);
+            },
+            onEvaluation: ({ individual, result, generation }) => {
+                if (!result) return;
+                const combined = prepareCombinationResult(individual.candidate, result);
+                if (!combined) return;
+                combined.__optimizerGeneration = generation;
+                combined.__optimizerScore = result.__optimizerScore;
+                evaluationMap.set(individual.candidate.__candidateId || `${generation}-${Date.now()}-${Math.random()}`, combined);
+                currentBatchProgress.current += 1;
+                const message = `Surrogate-GA 已完成 ${currentBatchProgress.current}/${currentBatchProgress.total} 次真實回測`;
+                notifyOptimizerProgress(currentBatchProgress.current, currentBatchProgress.total, message);
+            }
+        }
+    });
+
+    const finalResults = Array.from(evaluationMap.values());
+    if (finalResults.length === 0) {
+        showError('Surrogate-GA 未產生有效結果');
+        restoreBatchOptimizationUI();
+        return;
+    }
+
+    batchOptimizationResults = finalResults;
+    showBatchResults();
+    notifyOptimizerProgress(currentBatchProgress.total, currentBatchProgress.total, 'Surrogate-GA 完成');
 }
 
 // 優化策略參數

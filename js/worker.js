@@ -11487,6 +11487,29 @@ self.onmessage = async function (e) {
   if (resolvedDataStart) {
     e.data.dataStartDate = resolvedDataStart;
   }
+  let budgetHint = null;
+  if (type === "runBacktest") {
+    const rawBudget = Number(e.data?.budget);
+    if (Number.isFinite(rawBudget) && rawBudget > 0 && rawBudget <= 1) {
+      budgetHint = Math.max(0.05, Math.min(1, rawBudget));
+      if (params && params.startDate && params.endDate) {
+        const startMs = Date.parse(params.startDate);
+        const endMs = Date.parse(params.endDate);
+        if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+          const clippedMs = startMs + (endMs - startMs) * budgetHint;
+          const clippedDate = new Date(clippedMs);
+          if (!Number.isNaN(clippedDate.getTime())) {
+            params = {
+              ...params,
+              budgetHint,
+              __budgetOriginalEndDate: params.endDate,
+              endDate: clippedDate.toISOString().slice(0, 10),
+            };
+          }
+        }
+      }
+    }
+  }
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
