@@ -11489,6 +11489,9 @@ self.onmessage = async function (e) {
   }
   try {
     if (type === "runBacktest") {
+      const budgetHint = typeof e.data?.budget === "number"
+        ? Math.min(1, Math.max(0.05, e.data.budget))
+        : null;
       let dataToUse = null;
       let fetched = false;
       let outcome = null;
@@ -11660,10 +11663,17 @@ self.onmessage = async function (e) {
       const strategyData = Array.isArray(dataToUse)
         ? filterDatasetForWindow(dataToUse, warmupStartISO, params.endDate || null)
         : [];
+      let evaluationData = strategyData;
+      if (Array.isArray(strategyData) && strategyData.length > 0 && budgetHint !== null && budgetHint < 0.999) {
+        const sliceLength = Math.max(60, Math.floor(strategyData.length * budgetHint));
+        if (sliceLength > 0 && sliceLength < strategyData.length) {
+          evaluationData = strategyData.slice(0, sliceLength);
+        }
+      }
       const startISO = effectiveStartDate || params.startDate || null;
       const endISO = params.endDate || null;
-      const visibleStrategyData = Array.isArray(strategyData)
-        ? strategyData.filter((row) => {
+      const visibleStrategyData = Array.isArray(evaluationData)
+        ? evaluationData.filter((row) => {
             if (!row || !row.date) return false;
             if (startISO && row.date < startISO) return false;
             if (endISO && row.date > endISO) return false;
@@ -11696,13 +11706,16 @@ self.onmessage = async function (e) {
         effectiveStartDate: effectiveStartDate || params.startDate,
         lookbackDays,
       };
-      const backtestResult = runStrategy(strategyData, strategyParams);
+      const backtestResult = runStrategy(evaluationData, strategyParams);
       backtestResult.rawDataUsed = visibleStrategyData;
       if (useCachedData || !fetched) {
         backtestResult.rawData = null;
       } // Don't send back data if it wasn't fetched by this worker call
       if (!useCachedData && fetched) {
         backtestResult.rawData = dataToUse;
+      }
+      if (budgetHint !== null) {
+        backtestResult.evaluationBudget = budgetHint;
       }
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
