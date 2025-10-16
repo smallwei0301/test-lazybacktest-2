@@ -978,6 +978,16 @@
 - **Diagnostics**: 以相同資料集重訓 ANNS/LSTM，多分類下立即顯示勝率門檻 0%，交易表中的大漲預測可直接觸發「收盤價買入」策略；切換門檻或載入舊種子後，Worker 回傳的 threshold 與 UI 顯示保持一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-15 — Patch LB-BATCH-ADV-20260215A
+- **Issue recap**: 既有批量優化僅支援固定搜尋策略，缺乏預算控制與輕量化族群評估，無法在大量參數空間中快速找出高分策略。
+- **Fix**:
+  - 新增 Hyperband/ASHA 與 Surrogate-GA 模式，延伸批量優化 UI 與進度顯示，支援預算比率、淘汰倍率、族群與代數設定。
+  - 建立 `hyperband-runner.js`、`surrogate.js`、`surrogate-ga.js` 三個模組，提供逐輪淘汰與 RBF Surrogate 輔助遺傳演算法。
+  - 調整 `batch-optimization.js` 增加 `runOptimizer` 入口、參數亂數化／向量化輔助工具與併發評估器，並支援 budget hint。
+  - 擴充 `index.html` 模式選單與專屬設定面板，更新初始化流程以保持既有模式相容。
+- **Diagnostics**: 以瀏覽器控制台檢查 Hyperband/S-GA 進度訊息更新狀態，驗證模式面板切換與參數驗證提示。
+- **Testing**: 待後續於 Netlify 模擬實際回測流程確認 worker 評估無誤（目前僅進行靜態邏輯檢查）。
+
 ## 2026-01-24 — Patch LB-AI-THRESHOLD-20260124A
 - **Issue recap**: 二分類模式仍沿用 60% 預設勝率門檻，與最新需求的 50% 不符，導致預設情境下仍須手動下調門檻才能觸發交易並與多分類邏輯對齊。
 - **Fix**:
