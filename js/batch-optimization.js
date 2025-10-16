@@ -49,6 +49,52 @@ let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 
+function clonePlainObject(value) {
+    if (!value || typeof value !== 'object') return {};
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            console.warn('[Batch Optimization] structuredClone failed, falling back to JSON clone:', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
+        return { ...value };
+    }
+}
+
+function prepareBaseParamsForOptimization(source) {
+    const clone = clonePlainObject(source || {});
+    if (!clone || typeof clone !== 'object') return {};
+    clone.entryParams = clone.entryParams && typeof clone.entryParams === 'object' ? { ...clone.entryParams } : {};
+    clone.exitParams = clone.exitParams && typeof clone.exitParams === 'object' ? { ...clone.exitParams } : {};
+    clone.shortEntryParams = clone.shortEntryParams && typeof clone.shortEntryParams === 'object' ? { ...clone.shortEntryParams } : {};
+    clone.shortExitParams = clone.shortExitParams && typeof clone.shortExitParams === 'object' ? { ...clone.shortExitParams } : {};
+    clone.entryStages = Array.isArray(clone.entryStages) ? [...clone.entryStages] : [];
+    clone.exitStages = Array.isArray(clone.exitStages) ? [...clone.exitStages] : [];
+    stripDateRangeArtifacts(clone);
+    return clone;
+}
+
+function stripDateRangeArtifacts(target) {
+    if (!target || typeof target !== 'object') return;
+    delete target.recentYears;
+    delete target.recentMonths;
+    delete target.useRecentYears;
+    delete target.datePreset;
+    delete target.rangePreset;
+    delete target.rangeSelection;
+    if (typeof target.rangeMode === 'string' && target.rangeMode !== 'custom') {
+        target.rangeMode = 'custom';
+    }
+    if (typeof target.dateRangeMode === 'string' && target.dateRangeMode !== 'custom') {
+        target.dateRangeMode = 'custom';
+    }
+}
+
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
     concurrencyLimit: 0,
@@ -813,11 +859,17 @@ function paramsEqual(a, b) {
 
 // 修復：實現真正的交替迭代優化直到收斂
 // 模擬用戶手動操作：進場優化 ↔ 出場優化 直到參數不再改變
-async function optimizeCombinationIterative(combination, config) {
+async function optimizeCombinationIterative(combination, config, options = {}) {
     console.log(`[Batch Optimization] Starting iterative combination optimization for ${combination.buyStrategy} + ${combination.sellStrategy}`);
-    
+
     const maxIterations = (config && typeof config.iterationLimit !== 'undefined') ? (parseInt(config.iterationLimit, 10) || 6) : 6;
-    
+
+    const enabledScopes = Array.isArray(options?.enabledScopes) && options.enabledScopes.length > 0
+        ? new Set(options.enabledScopes)
+        : null;
+    const allowEntryOptimization = !enabledScopes || enabledScopes.has('entry');
+    const allowExitOptimization = !enabledScopes || enabledScopes.has('exit');
+
     let currentCombo = {
         buyStrategy: combination.buyStrategy,
         sellStrategy: combination.sellStrategy,
@@ -846,36 +898,42 @@ async function optimizeCombinationIterative(combination, config) {
             
             // Phase 1: 優化進場策略的所有參數直到內部收斂
             console.log(`[Batch Optimization] Phase 1: Optimizing entry strategy ${currentCombo.buyStrategy}`);
-            if (currentCombo.buyStrategy && strategyDescriptions[currentCombo.buyStrategy]) {
+            if (allowEntryOptimization && currentCombo.buyStrategy && strategyDescriptions[currentCombo.buyStrategy]) {
                 const optimizedEntryParams = await optimizeStrategyWithInternalConvergence(
                     currentCombo.buyStrategy,
                     'entry',
                     strategyDescriptions[currentCombo.buyStrategy],
                     config.targetMetric,
                     config.parameterTrials,
-                    currentCombo // 包含當前出場參數的完整上下文
+                    currentCombo, // 包含當前出場參數的完整上下文
+                    options
                 );
-                
+
                 // 更新進場參數
                 currentCombo.buyParams = { ...optimizedEntryParams };
                 console.log(`[Batch Optimization] Updated entry params:`, optimizedEntryParams);
+            } else if (!allowEntryOptimization) {
+                console.log('[Batch Optimization] Entry optimization skipped by scope configuration');
             }
 
             // Phase 2: 基於最新進場參數，優化出場策略的所有參數直到內部收斂
             console.log(`[Batch Optimization] Phase 2: Optimizing exit strategy ${currentCombo.sellStrategy}`);
-            if (currentCombo.sellStrategy && strategyDescriptions[currentCombo.sellStrategy]) {
+            if (allowExitOptimization && currentCombo.sellStrategy && strategyDescriptions[currentCombo.sellStrategy]) {
                 const optimizedExitParams = await optimizeStrategyWithInternalConvergence(
                     currentCombo.sellStrategy,
                     'exit',
                     strategyDescriptions[currentCombo.sellStrategy],
                     config.targetMetric,
                     config.parameterTrials,
-                    currentCombo // 包含已更新的進場參數
+                    currentCombo, // 包含已更新的進場參數
+                    options
                 );
-                
+
                 // 更新出場參數
                 currentCombo.sellParams = { ...optimizedExitParams };
                 console.log(`[Batch Optimization] Updated exit params:`, optimizedExitParams);
+            } else if (!allowExitOptimization) {
+                console.log('[Batch Optimization] Exit optimization skipped by scope configuration');
             }
 
             // Phase 3: 檢查策略間是否收斂
@@ -905,12 +963,16 @@ async function optimizeCombinationIterative(combination, config) {
         }
 
         // 最終驗證：執行完整回測確認結果
-        const finalResult = await executeBacktestForCombination(currentCombo);
+        const finalResult = await executeBacktestForCombination(currentCombo, options);
         const finalMetric = getMetricFromResult(finalResult, config.targetMetric);
         console.log(`[Batch Optimization] Final combination metric (${config.targetMetric}): ${finalMetric.toFixed(4)}`);
-        
+
+        currentCombo.__finalResult = finalResult || null;
+        currentCombo.__finalMetric = Number.isFinite(finalMetric) ? finalMetric : null;
+        currentCombo.__metricLabel = config.targetMetric;
+
         return currentCombo;
-        
+
     } catch (error) {
         console.error(`[Batch Optimization] Error in iterative optimization for ${combination.buyStrategy} + ${combination.sellStrategy}:`, error);
         // 返回原始組合作為備用
@@ -920,12 +982,13 @@ async function optimizeCombinationIterative(combination, config) {
 
 // 新增：策略內參數迭代優化直到內部收斂
 // 這模擬了用戶在單一策略內反覆優化參數的過程
-async function optimizeStrategyWithInternalConvergence(strategy, strategyType, strategyInfo, targetMetric, trials, baseCombo) {
+async function optimizeStrategyWithInternalConvergence(strategy, strategyType, strategyInfo, targetMetric, trials, baseCombo, options = {}) {
     console.log(`[Batch Optimization] Starting internal convergence optimization for ${strategy}`);
-    
+
     const maxInternalIterations = 5; // 策略內參數迭代次數限制
     const optimizeTargets = strategyInfo.optimizeTargets;
-    
+    const baseParamsOverride = options?.baseParamsOverride;
+
     if (!optimizeTargets || optimizeTargets.length === 0) {
         console.log(`[Batch Optimization] No parameters to optimize for ${strategy}`);
         return strategyInfo.defaultParams || {};
@@ -955,8 +1018,22 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
             console.log(`[Batch Optimization] Optimizing ${strategy}.${optimizeTarget.name}...`);
             
             // 構建完整的 baseParams
-            const baseParams = getBacktestParams();
-            
+            const baseParams = baseParamsOverride
+                ? prepareBaseParamsForOptimization(baseParamsOverride)
+                : getBacktestParams();
+
+            stripDateRangeArtifacts(baseParams);
+
+            if (baseParamsOverride) {
+                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                    if (baseParamsOverride[key] !== undefined) {
+                        baseParams[key] = Array.isArray(baseParamsOverride[key])
+                            ? [...baseParamsOverride[key]]
+                            : baseParamsOverride[key];
+                    }
+                });
+            }
+
             // 設定當前策略的參數
             if (strategyType === 'entry') {
                 baseParams.entryStrategy = getWorkerStrategyName(strategy);
@@ -1231,18 +1308,32 @@ async function processStrategyCombinations(combinations, config) {
 }
 
 // 執行單個策略組合的回測
-async function executeBacktestForCombination(combination) {
+async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
         try {
             // 使用現有的回測邏輯
-            const params = getBacktestParams();
-            
+            const baseParamsOverride = options?.baseParamsOverride;
+            const params = baseParamsOverride
+                ? prepareBaseParamsForOptimization(baseParamsOverride)
+                : getBacktestParams();
+
+            if (baseParamsOverride) {
+                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                    if (baseParamsOverride[key] !== undefined) {
+                        params[key] = Array.isArray(baseParamsOverride[key])
+                            ? [...baseParamsOverride[key]]
+                            : baseParamsOverride[key];
+                    }
+                });
+                stripDateRangeArtifacts(params);
+            }
+
             // 更新策略設定（使用 worker 能理解的策略名稱）
             params.entryStrategy = getWorkerStrategyName(combination.buyStrategy);
             params.exitStrategy = getWorkerStrategyName(combination.sellStrategy);
-            params.entryParams = combination.buyParams;
-            params.exitParams = combination.sellParams;
-            
+            params.entryParams = combination.buyParams ? { ...combination.buyParams } : {};
+            params.exitParams = combination.sellParams ? { ...combination.sellParams } : {};
+
             // 如果有風險管理參數，則應用到全局設定中
             if (combination.riskManagement) {
                 if (combination.riskManagement.stopLoss !== undefined) {
@@ -1253,7 +1344,9 @@ async function executeBacktestForCombination(combination) {
                 }
                 console.log(`[Batch Optimization] Applied risk management:`, combination.riskManagement);
             }
-            
+
+            stripDateRangeArtifacts(params);
+
             // 創建臨時worker執行回測
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
@@ -3119,7 +3212,8 @@ window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
-    getWorkerStrategyName: getWorkerStrategyName
+    getWorkerStrategyName: getWorkerStrategyName,
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
 };
 
 // 測試風險管理優化功能
