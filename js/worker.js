@@ -11489,6 +11489,15 @@ self.onmessage = async function (e) {
   }
   try {
     if (type === "runBacktest") {
+      const budgetFraction =
+        typeof e.data.budget === "number"
+          ? Math.max(0, Math.min(1, e.data.budget))
+          : 1;
+      if (budgetFraction < 1) {
+        console.info(
+          `[Worker] Received budget=${budgetFraction}, 暫以完整資料執行回測`
+        );
+      }
       let dataToUse = null;
       let fetched = false;
       let outcome = null;

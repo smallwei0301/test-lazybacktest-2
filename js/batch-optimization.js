@@ -1,4 +1,5 @@
 // --- 批量策略優化功能 - v1.0 ---
+// Patch Tag: LB-BATCH-HYBRID-20250215A
 // Patch note: small harmless edit to refresh editor diagnostics
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
@@ -55,6 +56,374 @@ let batchWorkerStatus = {
     inFlightCount: 0,
     entries: [] // { index, buyStrategy, sellStrategy, status: 'queued'|'running'|'done'|'error', startTime, endTime }
 };
+
+const riskManagementStrategies = new Set(['fixed_stop_loss', 'cover_fixed_stop_loss']);
+let hyperbandBudgetWarningShown = false;
+
+function createBatchCandidateFactory(combinations) {
+    const schemas = combinations.map((combo, index) => {
+        const schema = [];
+        const entryInfo = strategyDescriptions[combo.buyStrategy] || null;
+        const exitInfo = strategyDescriptions[combo.sellStrategy] || null;
+
+        if (entryInfo && Array.isArray(entryInfo.optimizeTargets)) {
+            entryInfo.optimizeTargets.forEach(target => {
+                if (!target || !target.range) return;
+                schema.push(buildParamDescriptor('entry', target));
+            });
+        }
+
+        if (exitInfo && Array.isArray(exitInfo.optimizeTargets)) {
+            exitInfo.optimizeTargets.forEach(target => {
+                if (!target || !target.range) return;
+                schema.push(buildParamDescriptor('exit', target));
+            });
+        }
+
+        if (riskManagementStrategies.has(combo.sellStrategy)) {
+            schema.push({
+                key: 'risk.stopLoss',
+                min: globalOptimizeTargets.stopLoss.range.from,
+                max: globalOptimizeTargets.stopLoss.range.to,
+                step: globalOptimizeTargets.stopLoss.range.step || 0.5,
+                isInteger: false
+            });
+            schema.push({
+                key: 'risk.takeProfit',
+                min: globalOptimizeTargets.takeProfit.range.from,
+                max: globalOptimizeTargets.takeProfit.range.to,
+                step: globalOptimizeTargets.takeProfit.range.step || 1,
+                isInteger: false
+            });
+        }
+
+        return {
+            comboIndex: index,
+            base: cloneCombination(combo),
+            schema
+        };
+    });
+
+    const metaMap = new Map();
+    schemas.forEach(meta => {
+        meta.schema.forEach(param => {
+            if (!metaMap.has(param.key)) {
+                metaMap.set(param.key, { min: param.min, max: param.max });
+            } else {
+                const info = metaMap.get(param.key);
+                info.min = Math.min(info.min, param.min);
+                info.max = Math.max(info.max, param.max);
+            }
+        });
+    });
+
+    const paramOrder = Array.from(metaMap.keys());
+    const bounds = paramOrder.map(key => ({ key, min: metaMap.get(key).min, max: metaMap.get(key).max }));
+
+    function createInitialCandidates(count, options = {}) {
+        const rng = createSeededRandom(options.seed);
+        const population = [];
+        const limit = Math.max(1, count);
+        for (let i = 0; i < limit; i++) {
+            const meta = schemas[Math.floor(rng() * schemas.length)] || schemas[0];
+            if (!meta) break;
+            population.push(buildRandomCandidate(meta, rng));
+        }
+        return population;
+    }
+
+    function randomCandidate() {
+        if (schemas.length === 0) return null;
+        const meta = schemas[Math.floor(Math.random() * schemas.length)];
+        return buildRandomCandidate(meta, Math.random);
+    }
+
+    function cloneCandidate(candidate) {
+        return {
+            comboIndex: candidate.comboIndex,
+            buyStrategy: candidate.buyStrategy,
+            sellStrategy: candidate.sellStrategy,
+            buyParams: JSON.parse(JSON.stringify(candidate.buyParams || {})),
+            sellParams: JSON.parse(JSON.stringify(candidate.sellParams || {})),
+            riskManagement: candidate.riskManagement ? { ...candidate.riskManagement } : undefined
+        };
+    }
+
+    function ensureBounds(candidate) {
+        const meta = schemas[candidate.comboIndex];
+        if (!meta) return candidate;
+        const next = cloneCandidate(candidate);
+        meta.schema.forEach(param => {
+            const value = getCandidateValue(next, param.key);
+            if (value === undefined) return;
+            const clamped = clampValue(value, param.min, param.max, param.isInteger);
+            setCandidateValue(next, param.key, clamped);
+        });
+        return next;
+    }
+
+    function mutateCandidate(candidate, rate = 0.1) {
+        const meta = schemas[candidate.comboIndex];
+        if (!meta) return candidate;
+        const rng = Math.random;
+        const mutated = cloneCandidate(candidate);
+        meta.schema.forEach(param => {
+            if (rng() > rate) return;
+            const current = getCandidateValue(mutated, param.key);
+            const step = param.step || (param.isInteger ? 1 : (param.max - param.min) / 20);
+            const delta = (rng() * 2 - 1) * step;
+            const nextValue = current !== undefined ? current + delta : randomValueFromRange({ from: param.min, to: param.max, step: param.step }, rng);
+            const clamped = clampValue(nextValue, param.min, param.max, param.isInteger);
+            setCandidateValue(mutated, param.key, clamped);
+        });
+        return mutated;
+    }
+
+    function crossoverCandidates(parentA, parentB) {
+        if (parentA.comboIndex !== parentB.comboIndex) {
+            return cloneCandidate(Math.random() < 0.5 ? parentA : parentB);
+        }
+        const meta = schemas[parentA.comboIndex];
+        const child = cloneCandidate(parentA);
+        if (!meta) return child;
+        meta.schema.forEach(param => {
+            const valueA = getCandidateValue(parentA, param.key);
+            const valueB = getCandidateValue(parentB, param.key);
+            if (valueA === undefined && valueB === undefined) return;
+            const picked = Math.random() < 0.5 ? valueA : valueB;
+            const fallback = valueA !== undefined ? valueA : valueB;
+            const chosen = picked !== undefined ? picked : fallback;
+            const clamped = clampValue(chosen, param.min, param.max, param.isInteger);
+            setCandidateValue(child, param.key, clamped);
+        });
+        return child;
+    }
+
+    function encodeCandidate(candidate) {
+        const vector = new Array(paramOrder.length + 1).fill(0);
+        const denominator = combinations.length > 1 ? combinations.length - 1 : 1;
+        vector[0] = combinations.length > 1 ? candidate.comboIndex / denominator : 0;
+        paramOrder.forEach((key, idx) => {
+            const meta = metaMap.get(key);
+            const value = getCandidateValue(candidate, key);
+            if (meta && Number.isFinite(value) && meta.max > meta.min) {
+                vector[idx + 1] = (value - meta.min) / (meta.max - meta.min);
+            } else if (Number.isFinite(value)) {
+                vector[idx + 1] = value;
+            } else {
+                vector[idx + 1] = 0;
+            }
+        });
+        return vector;
+    }
+
+    function buildRandomCandidate(meta, rng) {
+        const candidate = cloneCombination(meta.base);
+        candidate.comboIndex = meta.comboIndex;
+        meta.schema.forEach(param => {
+            const value = randomValueFromRange({ from: param.min, to: param.max, step: param.step }, rng);
+            setCandidateValue(candidate, param.key, value);
+        });
+        return candidate;
+    }
+
+    return {
+        schemas,
+        bounds,
+        paramOrder,
+        createInitialCandidates,
+        randomCandidate,
+        cloneCandidate,
+        mutateCandidate,
+        crossover: crossoverCandidates,
+        ensureBounds,
+        encodeCandidate
+    };
+}
+
+function buildParamDescriptor(scope, target) {
+    const min = Number(target.range.from);
+    const max = Number(target.range.to);
+    const step = Number(target.range.step || 0);
+    const isInteger = Number.isInteger(min) && Number.isInteger(max) && (!target.range.step || Number.isInteger(target.range.step));
+    return {
+        key: `${scope}.${target.name}`,
+        min,
+        max,
+        step,
+        isInteger
+    };
+}
+
+function cloneCombination(combination) {
+    return {
+        comboIndex: combination.comboIndex ?? 0,
+        buyStrategy: combination.buyStrategy,
+        sellStrategy: combination.sellStrategy,
+        buyParams: JSON.parse(JSON.stringify(combination.buyParams || {})),
+        sellParams: JSON.parse(JSON.stringify(combination.sellParams || {})),
+        riskManagement: combination.riskManagement ? { ...combination.riskManagement } : undefined
+    };
+}
+
+function createSeededRandom(seed) {
+    if (!Number.isFinite(seed)) {
+        return Math.random;
+    }
+    let value = Math.abs(Math.floor(seed)) % 2147483647;
+    if (value === 0) value = 1;
+    return function () {
+        value = (value * 16807) % 2147483647;
+        return (value - 1) / 2147483646;
+    };
+}
+
+function randomValueFromRange(range, rng) {
+    const min = Number(range.from);
+    const max = Number(range.to);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return 0;
+    const step = Number(range.step || 0) || (Number.isInteger(min) && Number.isInteger(max) ? 1 : (max - min) / 20 || 0.1);
+    const totalSteps = Math.max(1, Math.floor((max - min) / step));
+    const randomIndex = Math.floor((rng() || Math.random()) * (totalSteps + 1));
+    const value = min + randomIndex * step;
+    return clampValue(value, min, max, Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(step));
+}
+
+function clampValue(value, min, max, isInteger) {
+    let next = Math.min(max, Math.max(min, value));
+    if (isInteger) {
+        next = Math.round(next);
+    }
+    return Number.isFinite(next) ? Number(next.toFixed(6)) : next;
+}
+
+function getCandidateValue(candidate, key) {
+    const [scope, name] = key.split('.');
+    if (scope === 'entry') {
+        return candidate.buyParams ? candidate.buyParams[name] : undefined;
+    }
+    if (scope === 'exit') {
+        return candidate.sellParams ? candidate.sellParams[name] : undefined;
+    }
+    if (scope === 'risk') {
+        return candidate.riskManagement ? candidate.riskManagement[name] : undefined;
+    }
+    return undefined;
+}
+
+function setCandidateValue(candidate, key, value) {
+    const [scope, name] = key.split('.');
+    if (scope === 'entry') {
+        if (!candidate.buyParams) candidate.buyParams = {};
+        candidate.buyParams[name] = value;
+        return;
+    }
+    if (scope === 'exit') {
+        if (!candidate.sellParams) candidate.sellParams = {};
+        candidate.sellParams[name] = value;
+        return;
+    }
+    if (scope === 'risk') {
+        if (!candidate.riskManagement) candidate.riskManagement = {};
+        candidate.riskManagement[name] = value;
+    }
+}
+
+function createEvaluationStore(targetMetric) {
+    const resultsMap = new Map();
+    let bestRecord = null;
+
+    function register(record) {
+        if (!record) return;
+        const key = JSON.stringify({
+            combo: record.comboIndex ?? record.candidate?.comboIndex,
+            buy: record.buyStrategy,
+            sell: record.sellStrategy,
+            buyParams: record.buyParams,
+            sellParams: record.sellParams,
+            risk: record.riskManagement
+        });
+        const score = computeObjectiveValue(record, targetMetric);
+        record.score = score;
+        const existing = resultsMap.get(key);
+        if (!existing || score > computeObjectiveValue(existing, targetMetric)) {
+            resultsMap.set(key, record);
+        }
+        if (!bestRecord || score > computeObjectiveValue(bestRecord, targetMetric)) {
+            bestRecord = record;
+        }
+    }
+
+    function getAll() {
+        return Array.from(resultsMap.values()).sort((a, b) => computeObjectiveValue(b, targetMetric) - computeObjectiveValue(a, targetMetric));
+    }
+
+    function getBest() {
+        return bestRecord;
+    }
+
+    return { register, getAll, getBest };
+}
+
+function computeObjectiveValue(result, targetMetric) {
+    if (!result) return -Infinity;
+    if (result.score !== undefined && result.score !== null && !Number.isNaN(result.score)) {
+        return result.score;
+    }
+    const value = result[targetMetric];
+    if (targetMetric === 'maxDrawdown') {
+        return Number.isFinite(value) ? -Math.abs(value) : -Infinity;
+    }
+    return Number.isFinite(value) ? value : -Infinity;
+}
+
+function formatBudgetDisplay(budget) {
+    if (!Number.isFinite(budget)) return '';
+    return `${Math.round(budget * 100)}%`;
+}
+
+function createProgressHandler(mode, config) {
+    return function handleProgress(event) {
+        if (!event) return;
+        if (mode === 'hyperband') {
+            const message = `Hyperband 第 ${event.round || 1}/${event.totalRounds || config.rounds || 1} 回合・階段 ${event.stage || 1}/${event.stageCount || 1}・預算 ${formatBudgetDisplay(event.budget || config.maxBudget || 1)}`;
+            updateBatchProgress(Math.min(event.progress ?? 95, 98), message);
+        } else if (mode === 'surrogate-ga') {
+            const generation = event.gen || 1;
+            const total = event.gens || config.gens || 1;
+            const bestScore = Number.isFinite(event.bestScore) ? event.bestScore.toFixed(4) : 'N/A';
+            const message = `Surrogate-GA 第 ${generation}/${total} 代・代理樣本 ${event.surrogateSize || 0}・估計分數 ${bestScore}`;
+            updateBatchProgress(Math.min(event.progress ?? Math.round((generation / total) * 100), 98), message);
+        }
+    };
+}
+
+function candidateKeyForStore(candidate) {
+    return JSON.stringify({
+        combo: candidate.comboIndex,
+        buy: candidate.buyStrategy,
+        sell: candidate.sellStrategy,
+        buyParams: candidate.buyParams,
+        sellParams: candidate.sellParams,
+        risk: candidate.riskManagement
+    });
+}
+
+function buildEvaluationRecord(candidate, result, mode, targetMetric) {
+    const record = {
+        ...result,
+        buyStrategy: candidate.buyStrategy,
+        sellStrategy: candidate.sellStrategy,
+        buyParams: JSON.parse(JSON.stringify(candidate.buyParams || {})),
+        sellParams: JSON.parse(JSON.stringify(candidate.sellParams || {})),
+        riskManagement: candidate.riskManagement ? { ...candidate.riskManagement } : undefined,
+        optimizationType: mode,
+        optimizationTypes: [mode],
+        candidate
+    };
+    record.score = computeObjectiveValue(record, targetMetric);
+    return record;
+}
 
 function enrichParamsWithLookback(params) {
     if (!params || typeof params !== 'object') return params;
@@ -329,7 +698,26 @@ function bindBatchOptimizationEvents() {
                 sortBatchResults();
             });
         }
-        
+
+        const modeSelect = document.getElementById('batch-optimization-mode');
+        const hyperbandSettings = document.getElementById('hyperband-settings');
+        const surrogateSettings = document.getElementById('surrogate-ga-settings');
+
+        const updateModeSections = () => {
+            const mode = modeSelect ? modeSelect.value : 'legacy';
+            if (hyperbandSettings) {
+                hyperbandSettings.classList.toggle('hidden', mode !== 'hyperband');
+            }
+            if (surrogateSettings) {
+                surrogateSettings.classList.toggle('hidden', mode !== 'surrogate-ga');
+            }
+        };
+
+        if (modeSelect) {
+            modeSelect.addEventListener('change', updateModeSections);
+            updateModeSections();
+        }
+
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
@@ -337,7 +725,7 @@ function bindBatchOptimizationEvents() {
 }
 
 // 開始批量優化
-function startBatchOptimization() {
+async function startBatchOptimization() {
     console.log('[Batch Optimization] Starting batch optimization...');
     
     // 防止重複執行
@@ -387,26 +775,142 @@ function startBatchOptimization() {
     }
     
     try {
-        // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
-        // 重置結果
+        batchOptimizationConfig = config;
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
-    resetBatchWorkerStatus();
-    const panel = document.getElementById('batch-worker-status-panel');
-    if (panel) panel.classList.remove('hidden');
-        
-        // 顯示進度
+        hyperbandBudgetWarningShown = false;
+
         showBatchProgress();
-        
-        // 執行批量優化
-        executeBatchOptimization(config);
+
+        const buyStrategies = getSelectedStrategies('batch-buy-strategies');
+        const sellStrategies = getSelectedStrategies('batch-sell-strategies');
+        const mode = config.mode || 'legacy';
+
+        resetBatchWorkerStatus();
+        const panel = document.getElementById('batch-worker-status-panel');
+        if (panel) {
+            if (mode === 'legacy') {
+                panel.classList.remove('hidden');
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        if (mode === 'legacy') {
+            await runOptimizer('legacy', { config });
+            return;
+        }
+
+        await runModernBatchOptimizer(mode, config, buyStrategies, sellStrategies);
     } catch (error) {
         console.error('[Batch Optimization] Error starting batch optimization:', error);
         showError('批量優化啟動失敗：' + error.message);
         restoreBatchOptimizationUI();
     }
+}
+
+async function runModernBatchOptimizer(mode, config, buyStrategies, sellStrategies) {
+    try {
+        const combinations = generateStrategyCombinations(buyStrategies, sellStrategies);
+        if (!Array.isArray(combinations) || combinations.length === 0) {
+            showError('沒有可用的策略組合，請調整策略選項後重試');
+            restoreBatchOptimizationUI();
+            return;
+        }
+
+        const factory = createBatchCandidateFactory(combinations);
+        const evaluationStore = createEvaluationStore(config.targetMetric);
+        const evaluatedMap = new Map();
+        const progressHandler = createProgressHandler(mode, config);
+
+        const evaluator = {
+            evaluate: async (candidates, context = {}) => {
+                if (!Array.isArray(candidates) || candidates.length === 0) return [];
+                const results = [];
+                for (let i = 0; i < candidates.length; i++) {
+                    if (isBatchOptimizationStopped) break;
+                    const candidate = candidates[i];
+                    const key = candidateKeyForStore(candidate);
+                    if (evaluatedMap.has(key)) {
+                        const cachedRecord = evaluatedMap.get(key);
+                        const reuse = { ...cachedRecord, candidate: factory.cloneCandidate(candidate) };
+                        results.push(reuse);
+                        continue;
+                    }
+                    const candidateClone = factory.cloneCandidate(candidate);
+                    const evaluation = await executeBacktestForCombination(candidateClone, { budget: context.budget });
+                    if (!evaluation) continue;
+                    const record = buildEvaluationRecord(candidateClone, evaluation, mode, config.targetMetric);
+                    evaluationStore.register(record);
+                    evaluatedMap.set(key, record);
+                    results.push({ ...record, candidate: factory.cloneCandidate(candidateClone) });
+                }
+                return results;
+            }
+        };
+
+        const generator = {
+            createInitialCandidates: (count, options) => factory.createInitialCandidates(count, options),
+            randomCandidate: factory.randomCandidate,
+            cloneCandidate: factory.cloneCandidate,
+            mutate: (candidate, rate) => factory.mutateCandidate(candidate, rate),
+            crossover: factory.crossover,
+            ensureBounds: factory.ensureBounds
+        };
+
+        const optimizerOptions = {
+            ...config,
+            evaluator,
+            generator,
+            bounds: factory.bounds,
+            encodeVec: factory.encodeCandidate,
+            onProgress: progressHandler,
+            uiProgress: progressHandler,
+            objective: (record) => computeObjectiveValue(record, config.targetMetric),
+            shouldStop: () => isBatchOptimizationStopped
+        };
+
+        await runOptimizer(mode, optimizerOptions);
+
+        if (isBatchOptimizationStopped) {
+            showInfo('批量優化已停止');
+            restoreBatchOptimizationUI();
+            return;
+        }
+
+        batchOptimizationResults = evaluationStore.getAll();
+        if (!batchOptimizationResults || batchOptimizationResults.length === 0) {
+            showError('本次批量優化沒有獲得有效的結果，請調整參數後再試');
+            restoreBatchOptimizationUI();
+            return;
+        }
+
+        updateBatchProgress(100, '批量優化完成');
+        showBatchResults();
+    } catch (error) {
+        console.error('[Batch Optimization] Error in modern optimizer:', error);
+        showError('批量優化失敗：' + error.message);
+        restoreBatchOptimizationUI();
+    }
+}
+
+async function runOptimizer(mode, options) {
+    const optimizers = (typeof window !== 'undefined' ? window.lazybacktestOptimizers : (typeof self !== 'undefined' ? self.lazybacktestOptimizers : null)) || {};
+    if (mode === 'hyperband' && typeof optimizers.runHyperband === 'function') {
+        const onProgress = options.onProgress || options.uiProgress || (() => {});
+        return await optimizers.runHyperband({ ...options, onProgress });
+    }
+    if (mode === 'surrogate-ga' && typeof optimizers.runSurrogateGA === 'function') {
+        const onProgress = options.onProgress || options.uiProgress || (() => {});
+        return await optimizers.runSurrogateGA({ ...options, onProgress });
+    }
+    return await runLegacyOptimizer(mode, options);
+}
+
+async function runLegacyOptimizer(mode, options) {
+    console.log('[Batch Optimization] Fallback to legacy optimizer mode:', mode);
+    const config = options?.config || getBatchOptimizationConfig();
+    await executeBatchOptimization(config);
 }
 
 // 驗證批量優化策略設定
@@ -493,6 +997,9 @@ function getBatchOptimizationConfig() {
             optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
         };
         
+        const modeSelect = document.getElementById('batch-optimization-mode');
+        config.mode = modeSelect ? modeSelect.value : 'legacy';
+
         // 獲取參數優化次數
         const parameterTrialsElement = document.getElementById('batch-optimize-parameter-trials');
         if (parameterTrialsElement && parameterTrialsElement.value) {
@@ -516,7 +1023,26 @@ function getBatchOptimizationConfig() {
         if (iterationLimitElement && iterationLimitElement.value) {
             config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
         }
-        
+
+        if (config.mode === 'hyperband') {
+            config.minBudget = parseFloat(document.getElementById('hyperband-min-budget')?.value ?? '0.125') || 0.125;
+            config.maxBudget = parseFloat(document.getElementById('hyperband-max-budget')?.value ?? '1') || 1;
+            config.eta = parseInt(document.getElementById('hyperband-eta')?.value ?? '3', 10) || 3;
+            config.initCandidates = parseInt(document.getElementById('hyperband-init-candidates')?.value ?? '60', 10) || 60;
+            config.rounds = parseInt(document.getElementById('hyperband-rounds')?.value ?? '3', 10) || 3;
+        }
+
+        if (config.mode === 'surrogate-ga') {
+            config.popSize = parseInt(document.getElementById('surrogate-ga-pop')?.value ?? '48', 10) || 48;
+            config.gens = parseInt(document.getElementById('surrogate-ga-gens')?.value ?? '15', 10) || 15;
+            config.topK = parseInt(document.getElementById('surrogate-ga-topk')?.value ?? '12', 10) || 12;
+            config.elitism = parseInt(document.getElementById('surrogate-ga-elitism')?.value ?? '2', 10) || 2;
+            config.crossoverRate = parseFloat(document.getElementById('surrogate-ga-crossover')?.value ?? '0.9') || 0.9;
+            config.mutationRate = parseFloat(document.getElementById('surrogate-ga-mutation')?.value ?? '0.15') || 0.15;
+            const seedValue = document.getElementById('surrogate-ga-seed')?.value;
+            config.seed = seedValue ? parseInt(seedValue, 10) : undefined;
+        }
+
         // 安全檢查優化目標
         const annualReturnElement = document.getElementById('optimize-annual-return');
         if (annualReturnElement && annualReturnElement.checked) {
@@ -1231,7 +1757,7 @@ async function processStrategyCombinations(combinations, config) {
 }
 
 // 執行單個策略組合的回測
-async function executeBacktestForCombination(combination) {
+async function executeBacktestForCombination(combination, extraOptions = {}) {
     return new Promise((resolve) => {
         try {
             // 使用現有的回測邏輯
@@ -1285,12 +1811,20 @@ async function executeBacktestForCombination(combination) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
-                tempWorker.postMessage({
+                const workerMessage = {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData: true,
                     cachedData: cachedStockData
-                });
+                };
+                if (extraOptions && typeof extraOptions.budget === 'number') {
+                    workerMessage.budget = Math.max(0, Math.min(1, extraOptions.budget));
+                    if (workerMessage.budget < 1 && !hyperbandBudgetWarningShown) {
+                        console.info('[Batch Optimization] 目前 Worker 未針對 budget 裁剪資料，將以完整回測流程執行。');
+                        hyperbandBudgetWarningShown = true;
+                    }
+                }
+                tempWorker.postMessage(workerMessage);
 
                 // 設定超時
                 setTimeout(() => {
@@ -1812,7 +2346,7 @@ function renderBatchResultsTable() {
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
-        
+
         if (result.optimizationTypes && result.optimizationTypes.length > 1) {
             // 多重結果，顯示合併標籤
             const typeMap = {
@@ -1831,6 +2365,12 @@ function renderBatchResultsTable() {
                 optimizationType = '出場固定';
                 typeClass = 'bg-blue-100 text-blue-700';
             }
+        } else if (result.optimizationType === 'hyperband') {
+            optimizationType = 'Hyperband';
+            typeClass = 'bg-cyan-100 text-cyan-700';
+        } else if (result.optimizationType === 'surrogate-ga') {
+            optimizationType = 'Surrogate-GA';
+            typeClass = 'bg-emerald-100 text-emerald-700';
         }
         
         // 顯示風險管理參數（如果有的話）
@@ -3119,7 +3659,8 @@ window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
-    getWorkerStrategyName: getWorkerStrategyName
+    getWorkerStrategyName: getWorkerStrategyName,
+    runOptimizer
 };
 
 // 測試風險管理優化功能

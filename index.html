@@ -1718,6 +1718,71 @@
                                                     </div>
                                                     <div class="card-content space-y-4">
                                                         <div>
+                                                            <label for="batch-optimization-mode" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">批量優化模式</label>
+                                                            <select
+                                                                id="batch-optimization-mode"
+                                                                class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                                style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                            >
+                                                                <option value="legacy">經典交替優化</option>
+                                                                <option value="hyperband">Hyperband</option>
+                                                                <option value="surrogate-ga">Surrogate-GA</option>
+                                                            </select>
+                                                            <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">選擇適合的批量優化策略以平衡探索範圍與回測時間。</p>
+                                                        </div>
+                                                        <div id="hyperband-settings" class="grid md:grid-cols-5 gap-4 hidden">
+                                                            <div>
+                                                                <label for="hyperband-min-budget" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最小預算 (minBudget)</label>
+                                                                <input type="number" id="hyperband-min-budget" value="0.125" min="0.01" max="1" step="0.005" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-max-budget" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">最大預算 (maxBudget)</label>
+                                                                <input type="number" id="hyperband-max-budget" value="1" min="0.05" max="1" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-eta" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">淘汰率 (η)</label>
+                                                                <input type="number" id="hyperband-eta" value="3" min="2" max="6" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-init-candidates" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始候選數</label>
+                                                                <input type="number" id="hyperband-init-candidates" value="60" min="12" max="200" step="6" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="hyperband-rounds" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">回合數</label>
+                                                                <input type="number" id="hyperband-rounds" value="3" min="1" max="10" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                        </div>
+                                                        <div id="surrogate-ga-settings" class="grid md:grid-cols-7 gap-4 hidden">
+                                                            <div>
+                                                                <label for="surrogate-ga-pop" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">族群大小</label>
+                                                                <input type="number" id="surrogate-ga-pop" value="48" min="12" max="240" step="6" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-gens" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">世代數</label>
+                                                                <input type="number" id="surrogate-ga-gens" value="15" min="5" max="60" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-topk" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">真實回測 Top-K</label>
+                                                                <input type="number" id="surrogate-ga-topk" value="12" min="4" max="48" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-elitism" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">菁英保留</label>
+                                                                <input type="number" id="surrogate-ga-elitism" value="2" min="1" max="10" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-crossover" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">交配率</label>
+                                                                <input type="number" id="surrogate-ga-crossover" value="0.9" min="0" max="1" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-mutation" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">突變率</label>
+                                                                <input type="number" id="surrogate-ga-mutation" value="0.15" min="0" max="1" step="0.01" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </div>
+                                                            <div>
+                                                                <label for="surrogate-ga-seed" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">隨機種子 (選填)</label>
+                                                                <input type="number" id="surrogate-ga-seed" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" placeholder="例如 20250215" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
                                                             <h4 class="font-medium text-foreground mb-3" style="color: var(--foreground);">優化目標指標</h4>
                                                             <div class="flex flex-wrap gap-4">
                                                                 <label class="flex items-center">
@@ -2437,6 +2502,9 @@
 
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/surrogate.js"></script>
+    <script src="js/hyperband-runner.js"></script>
+    <script src="js/surrogate-ga.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
