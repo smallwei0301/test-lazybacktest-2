@@ -52,6 +52,32 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 
+if (typeof window !== 'undefined' && typeof window.lazybacktestLastExecutedParams === 'undefined') {
+    window.lazybacktestLastExecutedParams = null;
+}
+
+function cloneExecutedParams(params) {
+    if (!params || typeof params !== 'object') return null;
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(params);
+        } catch (error) {
+            console.warn('[Main] structuredClone for executed params failed, falling back to JSON clone:', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(params));
+    } catch (error) {
+        console.warn('[Main] JSON clone for executed params failed, returning shallow copy:', error);
+        return { ...params };
+    }
+}
+
+function setLastExecutedBacktestParams(params) {
+    if (typeof window === 'undefined') return;
+    window.lazybacktestLastExecutedParams = cloneExecutedParams(params);
+}
+
 const ensureAIBridge = () => {
     if (typeof window === 'undefined') return null;
     if (!window.lazybacktestAIBridge || typeof window.lazybacktestAIBridge !== 'object') {
@@ -4627,6 +4653,8 @@ function runBacktestInternal() {
         params.dataStartDate = dataStartDate;
         params.lookbackDays = lookbackDays;
 
+        setLastExecutedBacktestParams(params);
+
         const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
         const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
         const curSettings={
@@ -5068,6 +5096,7 @@ function runBacktestInternal() {
         } else {
             console.log("[Main] Fetching new data for backtest.");
         }
+        setLastExecutedBacktestParams(workerMsg.params);
         backtestWorker.postMessage(workerMsg);
 
     } catch (error) {
@@ -8754,6 +8783,9 @@ function resetSettings() {
     cachedStockData = null;
     cachedDataStore.clear();
     lastFetchSettings = null;
+    if (typeof window !== 'undefined') {
+        window.lazybacktestLastExecutedParams = null;
+    }
     refreshPriceInspectorControls();
     clearPreviousResults();
     showSuccess("設定已重置");
