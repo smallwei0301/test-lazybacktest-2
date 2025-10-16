@@ -1677,6 +1677,123 @@
                                     <div class="card-content space-y-6">
                                         <div id="batch-optimization-content">
                                             <div class="space-y-6">
+                                                <!-- 批量優化模式切換 -->
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <h4 class="card-title flex items-center gap-2">
+                                                            <i data-lucide="toggle-left" class="lucide text-primary" style="color: var(--primary);"></i>
+                                                            優化模式
+                                                        </h4>
+                                                    </div>
+                                                    <div class="card-content">
+                                                        <div class="flex flex-col gap-4">
+                                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3" role="radiogroup" aria-labelledby="batch-mode-label">
+                                                                <label id="batch-mode-label" class="sr-only">批量優化模式</label>
+                                                                <label class="flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors" style="border-color: var(--border);">
+                                                                    <input type="radio" name="batch-mode" value="grid" class="text-primary focus:ring-primary" checked>
+                                                                    <span class="text-sm font-medium" style="color: var(--foreground);">格點搜尋</span>
+                                                                </label>
+                                                                <label class="flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors" style="border-color: var(--border);">
+                                                                    <input type="radio" name="batch-mode" value="random" class="text-primary focus:ring-primary">
+                                                                    <span class="text-sm font-medium" style="color: var(--foreground);">隨機搜尋</span>
+                                                                </label>
+                                                                <label class="flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors" style="border-color: var(--border);">
+                                                                    <input type="radio" name="batch-mode" value="ga" class="text-primary focus:ring-primary">
+                                                                    <span class="text-sm font-medium" style="color: var(--foreground);">基因演算法 GA</span>
+                                                                </label>
+                                                            </div>
+                                                            <p class="text-xs" style="color: var(--muted-foreground);">基因演算法透過族群演化探索最佳策略參數，適合高維度或非線性指標。切換模式後會更新下方設定。</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <!-- GA 參數設定 -->
+                                                <div id="ga-control-panel" class="card bg-background border border-border hidden" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header">
+                                                        <h4 class="card-title flex items-center gap-2">
+                                                            <i data-lucide="dna" class="lucide text-accent" style="color: var(--accent);"></i>
+                                                            GA 控制面板
+                                                        </h4>
+                                                        <p class="text-xs" style="color: var(--muted-foreground);">設定族群大小、世代數與突變率，可在優化過程中暫停或停止。</p>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="grid gap-3 md:grid-cols-3">
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                族群數量 (Population)
+                                                                <input id="ga-population" type="number" min="10" max="200" step="1" value="60" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                演化代數 (Generations)
+                                                                <input id="ga-generations" type="number" min="5" max="120" step="1" value="30" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                菁英保留 (Elitism)
+                                                                <input id="ga-elitism" type="number" min="1" max="10" step="1" value="2" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                        </div>
+                                                        <div class="grid gap-3 md:grid-cols-3">
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                交配率 (Crossover)
+                                                                <input id="ga-crossover-rate" type="number" min="0.1" max="1" step="0.05" value="0.9" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                初始突變率 (Mutation)
+                                                                <input id="ga-mutation-rate" type="number" min="0.01" max="0.8" step="0.01" value="0.18" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                Early Stop (連續代數)
+                                                                <input id="ga-early-stop" type="number" min="2" max="20" step="1" value="6" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                        </div>
+                                                        <div class="grid gap-3 md:grid-cols-3">
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                亂數種子 (Seed)
+                                                                <input id="ga-seed" type="text" placeholder="預設使用時間戳" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs" style="color: var(--muted-foreground);">
+                                                                時間上限 (毫秒，選填)
+                                                                <input id="ga-time-budget" type="number" min="1000" step="500" placeholder="例如 180000" class="px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground focus:ring-2 focus:ring-primary" style="border-color: var(--border); background-color: var(--input);">
+                                                            </label>
+                                                            <div class="flex items-center gap-3">
+                                                                <button id="ga-pause-btn" type="button" class="px-3 py-2 rounded-md border border-border text-xs font-medium bg-muted/40 text-foreground hover:bg-muted/60 transition-colors" style="border-color: var(--border);">暫停 GA</button>
+                                                                <button id="ga-resume-btn" type="button" class="px-3 py-2 rounded-md border border-border text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors hidden" style="border-color: var(--border);">繼續 GA</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <!-- GA Progress -->
+                                                <div id="ga-progress-card" class="card bg-accent/5 border border-accent/30 hidden" style="background-color: color-mix(in srgb, var(--accent) 6%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent);">
+                                                    <div class="card-header">
+                                                        <h4 class="card-title flex items-center gap-2">
+                                                            <i data-lucide="activity" class="lucide text-accent animate-pulse" style="color: var(--accent);"></i>
+                                                            GA 演化進度
+                                                        </h4>
+                                                    </div>
+                                                    <div class="card-content space-y-4 text-xs" style="color: var(--foreground);">
+                                                        <div class="flex items-center justify-between">
+                                                            <span>當前代數</span>
+                                                            <span id="ga-current-generation" class="font-semibold">—</span>
+                                                        </div>
+                                                        <div class="flex items-center justify-between">
+                                                            <span>最佳分數</span>
+                                                            <span id="ga-best-score" class="font-semibold text-accent" style="color: var(--accent);">—</span>
+                                                        </div>
+                                                        <div class="w-full bg-muted rounded-full h-3" style="background-color: var(--muted);">
+                                                            <div id="ga-progress-bar" class="bg-accent h-3 rounded-full transition-all duration-500" style="width: 0%; background-color: var(--accent);"></div>
+                                                        </div>
+                                                        <div class="grid gap-2 md:grid-cols-2">
+                                                            <div>
+                                                                <p class="text-[11px] uppercase tracking-wide" style="color: var(--muted-foreground);">最佳策略摘要</p>
+                                                                <div id="ga-best-summary" class="text-xs leading-relaxed"></div>
+                                                            </div>
+                                                            <div>
+                                                                <p class="text-[11px] uppercase tracking-wide" style="color: var(--muted-foreground);">世代記錄</p>
+                                                                <ul id="ga-history-list" class="space-y-1 max-h-40 overflow-y-auto pr-1"></ul>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                                 <!-- 策略選擇區域 -->
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
@@ -2441,6 +2558,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
+    <script type="module" src="js/gaRunner.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
