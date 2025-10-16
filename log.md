@@ -1081,3 +1081,20 @@
   - 逐窗列印 `plan.config.iterationLimit` 驗證覆寫順序：先讀滾動面板、再回退批量面板、最後採預設值。
   - 若未來仍有差異，建議檢查 `optimizeCombinationIterative` 的迭代收斂紀錄與 Worker 回傳的最佳指標，以確認是否需要同步 trials 或風控迭代策略。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-03-02 — Patch LB-ROLLING-TEST-20250930A / LB-BATCH-OPT-20250930A
+- **Issue recap**: 第二視窗後的訓練最佳解仍優於批量優化面板，確認交替輪數一致後，推定為滾動模組在優化時沿用整體 `cachedStockData`，導致 Worker 可能取用超出訓練窗的資料。
+- **Fix**:
+  - `js/rolling-test.js` 於訓練視窗建置 `prepareWorkerPayload`，依回傳的 `dataStartDate` 裁切 `cachedStockData`，並透過 `cachedDataOverride` 傳入批量優化與風險優化流程。
+  - `js/batch-optimization.js` 的 `runCombinationOptimization`、單參數／風險優化與驗證回測均支援 `cachedDataOverride`，遇到覆寫時改以視窗限定的快取取代全域資料。
+  - 模組版號更新為 `LB-ROLLING-TEST-20250930A`、`LB-BATCH-OPT-20250930A` 以追蹤視窗資料裁切改動。
+- **Diagnostics**: 準備針對第二、第三視窗記錄 `cachedWindowData.length` 與原始快取長度，並比對批量優化單跑的 `rawDataUsed.fetchRange`，確認 Worker 僅接收到對應訓練期間的資料。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
+- **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
+- **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。
+- **Next checks**:
+  1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
+  2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
+  3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。

@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.0 ---
-// Patch note: small harmless edit to refresh editor diagnostics
+// --- 批量策略優化功能 - v1.1 ---
+// Patch Tag: LB-BATCH-OPT-20250930A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -1046,7 +1046,8 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 optimizeTarget,
                 strategyType,
                 targetMetric,
-                Math.max(1, parseInt(trials, 10) || 1)
+                Math.max(1, parseInt(trials, 10) || 1),
+                { cachedDataOverride: options?.cachedDataOverride }
             );
             
             if (bestParam.value !== undefined) {
@@ -1329,6 +1330,13 @@ async function executeBacktestForCombination(combination, options = {}) {
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
 
+                const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                    ? options.cachedDataOverride
+                    : null;
+                const cachedPayload = overrideData
+                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
                         const result = e.data.data;
@@ -1359,8 +1367,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
-                    useCachedData: true,
-                    cachedData: cachedStockData
+                    useCachedData,
+                    cachedData: cachedPayload
                 });
 
                 // 設定超時
@@ -1564,15 +1572,22 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
 }
 
 // 優化單一策略參數
-async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials) {
+async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials, options = {}) {
     return new Promise((resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
             resolve({ value: undefined, metric: -Infinity });
             return;
         }
-        
+
         const optimizeWorker = new Worker(workerUrl);
+
+        const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+            ? options.cachedDataOverride
+            : null;
+        const cachedPayload = overrideData
+            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1654,8 +1669,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
-            useCachedData: true,
-            cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
+            useCachedData,
+            cachedData: cachedPayload
         });
         
         // 設定超時
@@ -1667,7 +1682,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
 }
 
 // 優化風險管理參數（停損和停利）
-async function optimizeRiskManagementParameters(baseParams, optimizeTargets, targetMetric, trials) {
+async function optimizeRiskManagementParameters(baseParams, optimizeTargets, targetMetric, trials, options = {}) {
     console.log('[Batch Optimization] Starting multi-parameter risk management optimization...');
     
     try {
@@ -1675,7 +1690,13 @@ async function optimizeRiskManagementParameters(baseParams, optimizeTargets, tar
         const stopLossTarget = optimizeTargets.find(t => t.name === 'stopLoss');
         console.log('[Batch Optimization] Phase 1: Optimizing stopLoss...', stopLossTarget);
         
-        const bestStopLoss = await optimizeSingleRiskParameter(baseParams, stopLossTarget, targetMetric, Math.floor(trials / 2));
+        const bestStopLoss = await optimizeSingleRiskParameter(
+            baseParams,
+            stopLossTarget,
+            targetMetric,
+            Math.floor(trials / 2),
+            options,
+        );
         console.log('[Batch Optimization] Best stopLoss result:', bestStopLoss);
         
         // 第二階段：基於最佳停損值優化停利參數
@@ -1686,7 +1707,13 @@ async function optimizeRiskManagementParameters(baseParams, optimizeTargets, tar
         }
         
         console.log('[Batch Optimization] Phase 2: Optimizing takeProfit with stopLoss =', bestStopLoss.value);
-        const bestTakeProfit = await optimizeSingleRiskParameter(paramsWithBestStopLoss, takeProfitTarget, targetMetric, Math.floor(trials / 2));
+        const bestTakeProfit = await optimizeSingleRiskParameter(
+            paramsWithBestStopLoss,
+            takeProfitTarget,
+            targetMetric,
+            Math.floor(trials / 2),
+            options,
+        );
         console.log('[Batch Optimization] Best takeProfit result:', bestTakeProfit);
         
         // 組合最佳參數
@@ -1708,15 +1735,22 @@ async function optimizeRiskManagementParameters(baseParams, optimizeTargets, tar
 }
 
 // 優化單一風險管理參數
-async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric, trials) {
+async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric, trials, options = {}) {
     return new Promise((resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
             resolve({ value: undefined, metric: -Infinity });
             return;
         }
-        
+
         const optimizeWorker = new Worker(workerUrl);
+
+        const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+            ? options.cachedDataOverride
+            : null;
+        const cachedPayload = overrideData
+            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1772,8 +1806,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
-            useCachedData: true,
-            cachedData: (typeof cachedStockData !== 'undefined') ? cachedStockData : null
+            useCachedData,
+            cachedData: cachedPayload
         });
     });
 }

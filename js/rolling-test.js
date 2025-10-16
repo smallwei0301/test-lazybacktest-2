@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.9 ---
-// Patch Tag: LB-ROLLING-TEST-20250929A
+// --- 滾動測試模組 - v2.0 ---
+// Patch Tag: LB-ROLLING-TEST-20250930A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250929A',
+        version: 'LB-ROLLING-TEST-20250930A',
         batchOptimizerInitialized: false,
     };
 
@@ -1422,6 +1422,9 @@
         const workingParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(workingParams, windowInfo);
 
+        const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
+        const cachedWindowData = selectCachedDataForWindow(trainingPayload?.dataStartDate, windowInfo.trainingEnd);
+
         const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
         const scopeResults = [];
         const handledScopes = new Set();
@@ -1429,6 +1432,10 @@
         const combinationScopes = Array.isArray(plan.scopes)
             ? plan.scopes.filter((scope) => scope === 'entry' || scope === 'exit')
             : [];
+
+        const optimizationOptions = {
+            cachedDataOverride: cachedWindowData,
+        };
 
         if (combinationScopes.length > 0 && typeof window.batchOptimization?.runCombinationOptimization === 'function') {
             try {
@@ -1438,6 +1445,7 @@
                     windowInfo,
                     combinationScopes,
                     baselineSnapshots,
+                    cachedData: cachedWindowData,
                 });
                     if (combinationOutcome) {
                         if (combinationOutcome.params) {
@@ -1490,9 +1498,9 @@
                     const scope = remainingScopes[i];
                     let result = null;
                     if (scope === 'risk') {
-                        result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
+                        result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams, optimizationOptions);
                     } else {
-                        result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+                        result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams, optimizationOptions);
                     }
                     if (!result) continue;
 
@@ -1611,7 +1619,7 @@
         };
     }
 
-    async function runCombinationOptimizationForWindow({ baseParams, plan, windowInfo, combinationScopes, baselineSnapshots }) {
+    async function runCombinationOptimizationForWindow({ baseParams, plan, windowInfo, combinationScopes, baselineSnapshots, cachedData }) {
         const combination = buildCombinationFromParams(baseParams);
         if (!combination) return null;
 
@@ -1630,6 +1638,7 @@
             {
                 baseParamsOverride: overrideParams,
                 enabledScopes: combinationScopes,
+                cachedDataOverride: cachedData,
             },
         );
 
@@ -1666,7 +1675,7 @@
         };
     }
 
-    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams) {
+    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams, options = {}) {
         const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
         if (!definition) return null;
 
@@ -1693,7 +1702,14 @@
         for (let i = 0; i < strategyInfo.optimizeTargets.length; i += 1) {
             const target = strategyInfo.optimizeTargets[i];
             workingParams[definition.paramsKey] = { ...optimizedParams };
-            const result = await optimizeSingleStrategyParameter(workingParams, target, scope, plan.config.targetMetric, plan.config.trials);
+            const result = await optimizeSingleStrategyParameter(
+                workingParams,
+                target,
+                scope,
+                plan.config.targetMetric,
+                plan.config.trials,
+                { cachedDataOverride: options.cachedDataOverride },
+            );
             if (result && result.value !== undefined) {
                 optimizedParams[target.name] = result.value;
                 if (!areValuesClose(result.value, baseParams[target.name])) {
@@ -1720,7 +1736,7 @@
         };
     }
 
-    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams) {
+    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams, options = {}) {
         if (typeof optimizeRiskManagementParameters !== 'function') {
             return { scope: 'risk', label: '風險管理', error: '缺少風險優化模組', changedKeys: [] };
         }
@@ -1746,7 +1762,13 @@
         let optimizedResult = {};
         try {
             const riskParams = deepClone(workingParams);
-            optimizedResult = await optimizeRiskManagementParameters(riskParams, optimizeTargets, plan.config.targetMetric, plan.config.trials);
+            optimizedResult = await optimizeRiskManagementParameters(
+                riskParams,
+                optimizeTargets,
+                plan.config.targetMetric,
+                plan.config.trials,
+                { cachedDataOverride: options.cachedDataOverride },
+            );
         } catch (error) {
             return { scope: 'risk', label: '風險管理', error: error?.message || '優化失敗', changedKeys: [] };
         }
@@ -1779,6 +1801,48 @@
             metricLabel: resolveMetricLabel(plan.config.targetMetric),
             metricValue: null,
         };
+    }
+
+    function selectCachedDataForWindow(startIso, endIso) {
+        if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) return null;
+        const startTime = resolveIsoTimestamp(startIso);
+        const endTime = resolveIsoTimestamp(endIso);
+        if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+        const inclusiveEnd = endTime + (24 * 60 * 60 * 1000) - 1;
+        const filtered = cachedStockData.filter((row) => {
+            const rowTime = resolveRowTimestamp(row);
+            return Number.isFinite(rowTime) && rowTime >= startTime && rowTime <= inclusiveEnd;
+        });
+        return filtered.length > 0 ? filtered : null;
+    }
+
+    function resolveRowTimestamp(row) {
+        if (!row || typeof row !== 'object') return Number.NaN;
+        const candidates = [
+            row.date,
+            row.Date,
+            row.tradeDate,
+            row.trade_date,
+            row.timestamp,
+            row.time,
+            row.t,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const ts = resolveIsoTimestamp(candidates[i]);
+            if (Number.isFinite(ts)) return ts;
+        }
+        return Number.NaN;
+    }
+
+    function resolveIsoTimestamp(value) {
+        if (!value) return Number.NaN;
+        if (value instanceof Date) return value.getTime();
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const parsed = Date.parse(value);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return Number.NaN;
     }
 
     function captureOptimizationBaselines(scopes, params) {
