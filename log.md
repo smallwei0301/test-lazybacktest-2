@@ -1,4 +1,13 @@
 
+## 2025-09-22 — Patch LB-ROLLING-TEST-20250922B
+- **Scope**: Walk-Forward 評分與滾動測試批量優化整合。
+- **Updates**:
+  - 導入 Pardo (2014) Walk-Forward Efficiency 與 QuantConnect／TradeStation 門檻，重寫評分公式並公開權重與分段換算規則。
+  - 總結卡片新增 Walk-Forward Efficiency 指標，並在報告說明具體門檻與評級標準。
+  - 精簡參數摘要文字，聚合多空流程與風控設定，提升逐窗表格的可讀性。
+  - 訓練期優化自動初始化批量優化 Worker，保證滾動測試使用與批量優化一致的搜尋範圍與最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
@@ -1016,3 +1025,33 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-18 — Patch LB-ROLLING-TEST-20250925A
+- **Issue recap**: Walk-Forward 訓練期僅逐參數掃描一次，未套用批量優化的交替迭代流程，導致滾動測試未能收斂到批量優化挑選的最佳參數組合。
+- **Fix**:
+  - `js/rolling-test.js` 導入批量優化迭代上限設定，於訓練視窗對做多/做空進出場與風險管理重複交替優化，並以原始參數快照計算實際調整鍵值。
+  - 同步收集各迭代指標並整合訊息摘要，確保最終報告揭露批量優化引擎選出的參數與指標成效，版本碼更新為 `LB-ROLLING-TEST-20250925A`。
+- **Diagnostics**: 於本地以滾動測試啟用訓練期優化，確認多輪迭代後的參數與批量優化面板載入結果一致，並檢視報告訊息顯示迭代後的調整明細。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-24 — Patch LB-ROLLING-TEST-20250926A
+- **Issue recap**: Walk-Forward 訓練期雖已循序掃描參數，但仍與批量優化面板獨立執行時的最佳解不符，原因在於滾動測試未真正復用批量優化的組合交替流程與資料視窗設定。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `clonePlainObject`/`prepareBaseParamsForOptimization`，並擴充 `optimizeCombinationIterative`、`optimizeStrategyWithInternalConvergence`、`executeBacktestForCombination` 支援外部覆寫訓練區間與啟用範圍，同步公開 `runCombinationOptimization` 以便模組外重用。
+  - `js/rolling-test.js` 建立 `runCombinationOptimizationForWindow`，於訓練期直接呼叫批量優化組合迭代並以原始參數快照產生摘要，保留對風險與做空參數的交替迭代，版本碼更新為 `LB-ROLLING-TEST-20250926A`。
+- **Diagnostics**: 以單視窗訓練期手動執行批量優化與滾動測試，自比對進/出場參數與最終指標，確認兩者一致並在報告中顯示批量優化目標指標；同時驗證做空與風險參數仍能在剩餘迭代中收斂。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+
+## 2026-02-26 — Patch LB-ROLLING-TEST-20250927A
+- **Issue recap**: Walk-Forward 訓練期雖已導入批量優化引擎，但在組合優化階段仍以做多配置的鍵值查詢出場策略設定，造成滾動測試與批量優化面板在同一訓練視窗下產生不同的最佳出場參數。
+- **Fix**: `js/rolling-test.js` 於建立組合時改用 `resolveStrategyConfigKey` 轉換做多/做空出場策略對應的批量優化鍵值，並更新模組版本碼至 `LB-ROLLING-TEST-20250927A`，確保批量優化與 Walk-Forward 共用相同策略範圍。
+- **Diagnostics**: 重新於訓練視窗內分別執行批量優化與滾動測試，確認兩者的出場參數完全一致，並比對報告摘要所列優化訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-28 — Patch LB-ROLLING-TEST-20250928A
+- **Issue recap**: 第二輪以上的 Walk-Forward 訓練期仍與批量優化結果不一致，推查為滾動測試未完整套用使用者的交易執行設定（例如隔日開盤、總資金部位）至訓練視窗，導致批量優化時採用的配置與實際測試期套用的參數不同。
+- **Fix**:
+  - `js/rolling-test.js` 新增 `buildWindowTrainingParams` 與 `mergeGlobalExecutionSettings`，在每個訓練視窗建立統一的訓練基礎參數（含資金、部位基準、手續費、分批等），並於批量優化與回測階段共用；同時於結果儲存 `trainingParams` 以利追蹤。
+  - `js/batch-optimization.js` 於覆寫批量優化的基礎參數時同步帶入 `positionBasis` 與費用設定，確保迭代引擎與滾動測試的訓練環境一致。
+- **Diagnostics**: 針對第二、第三個訓練視窗，分別手動以批量優化面板與滾動測試執行比較，確認進出場與風控參數完全一致；檢視 Walk-Forward 報告中的風險摘要，確認隔日開盤／總資金等設定正確顯示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
