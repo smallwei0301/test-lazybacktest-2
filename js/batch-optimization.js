@@ -1,6 +1,9 @@
 // --- 批量策略優化功能 - v1.0 ---
 // Patch note: small harmless edit to refresh editor diagnostics
 
+const GA_INTEGRATION_VERSION = 'LB-GA-OPT-20250214A';
+const GA_UI_VERSION = 'LB-GA-UI-20250214A';
+
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
     const strategyNameMap = {
@@ -48,6 +51,12 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+
+let gaControlSignal = null;
+let gaLatestRun = null;
+let gaConvergenceChart = null;
+let gaProgressStartTime = null;
+let currentGAPlan = null;
 
 // Worker / per-combination 狀態追蹤
 let batchWorkerStatus = {
@@ -167,9 +176,12 @@ function initBatchOptimization() {
         
         // 生成策略選項
         generateStrategyOptions();
-        
+
         // 綁定事件
         bindBatchOptimizationEvents();
+
+        // 初始化 GA 控制面板
+        initGeneticAlgorithmPanel();
         
         // 添加測試按鈕（僅在開發模式）
         if (window.location.hostname === 'localhost') {
@@ -311,7 +323,42 @@ function bindBatchOptimizationEvents() {
             // 添加新的事件監聽器
             stopBtn.addEventListener('click', stopBatchOptimization);
         }
-        
+
+        const modeInputs = document.querySelectorAll('input[name="batch-optimization-mode"]');
+        modeInputs.forEach(input => {
+            input.addEventListener('change', () => handleOptimizationModeChange(input.value));
+        });
+
+        const pauseBtn = document.getElementById('pause-ga');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', () => {
+                if (gaControlSignal && !gaControlSignal.isPaused) {
+                    gaControlSignal.isPaused = true;
+                    pauseBtn.classList.add('hidden');
+                    const resumeBtn = document.getElementById('resume-ga');
+                    if (resumeBtn) resumeBtn.classList.remove('hidden');
+                }
+            });
+        }
+
+        const resumeBtn = document.getElementById('resume-ga');
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', () => {
+                if (gaControlSignal && gaControlSignal.isPaused) {
+                    gaControlSignal.isPaused = false;
+                    gaControlSignal.resume?.();
+                    resumeBtn.classList.add('hidden');
+                    const pauseButton = document.getElementById('pause-ga');
+                    if (pauseButton) pauseButton.classList.remove('hidden');
+                }
+            });
+        }
+
+        const exportBtn = document.getElementById('export-ga-json');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', exportGALatestResult);
+        }
+
         // 排序相關
         const sortKeySelect = document.getElementById('batch-sort-key');
         if (sortKeySelect) {
@@ -333,6 +380,589 @@ function bindBatchOptimizationEvents() {
         console.log('[Batch Optimization] Events bound successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error binding events:', error);
+    }
+}
+
+function initGeneticAlgorithmPanel() {
+    try {
+        handleOptimizationModeChange(getSelectedOptimizationMode());
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to initialize GA panel:', error);
+    }
+}
+
+function getSelectedOptimizationMode() {
+    const modeInput = document.querySelector('input[name="batch-optimization-mode"]:checked');
+    return modeInput ? modeInput.value : 'grid';
+}
+
+function handleOptimizationModeChange(mode) {
+    const gaPanel = document.getElementById('ga-control-panel');
+    if (gaPanel) {
+        if (mode === 'ga') {
+            gaPanel.classList.remove('hidden');
+        } else {
+            gaPanel.classList.add('hidden');
+        }
+    }
+
+    if (mode !== 'ga' && !gaLatestRun) {
+        resetGAUI();
+    }
+}
+
+function createGAControlSignal() {
+    const signal = {
+        isPaused: false,
+        isStopped: false,
+        _resumeResolvers: [],
+        waitForResume() {
+            if (!this.isPaused) {
+                return Promise.resolve();
+            }
+            return new Promise(resolve => {
+                this._resumeResolvers.push(resolve);
+            });
+        },
+        resume() {
+            this.isPaused = false;
+            while (this._resumeResolvers.length > 0) {
+                const resolver = this._resumeResolvers.shift();
+                try {
+                    resolver();
+                } catch (err) {
+                    console.error('[Batch Optimization] Failed to resume GA pause:', err);
+                }
+            }
+        }
+    };
+    return signal;
+}
+
+function resetGAUI() {
+    const container = document.getElementById('ga-progress-container');
+    if (container) container.classList.add('hidden');
+
+    const percent = document.getElementById('ga-progress-percentage');
+    if (percent) {
+        percent.textContent = '0%';
+        percent.style.color = 'var(--accent)';
+    }
+
+    const bar = document.getElementById('ga-progress-bar');
+    if (bar) bar.style.width = '0%';
+
+    const genEl = document.getElementById('ga-progress-gen');
+    if (genEl) genEl.textContent = '-';
+    const bestEl = document.getElementById('ga-best-score');
+    if (bestEl) bestEl.textContent = '-';
+    const avgEl = document.getElementById('ga-avg-score');
+    if (avgEl) avgEl.textContent = '-';
+    const runtimeEl = document.getElementById('ga-runtime');
+    if (runtimeEl) runtimeEl.textContent = '-';
+    const paramsEl = document.getElementById('ga-current-best-params');
+    if (paramsEl) paramsEl.textContent = '尚無資料';
+    const metricsList = document.getElementById('ga-best-metrics');
+    if (metricsList) metricsList.innerHTML = '';
+    const versionEl = document.getElementById('ga-best-version');
+    if (versionEl) versionEl.textContent = '-';
+
+    if (gaConvergenceChart) {
+        try {
+            gaConvergenceChart.destroy();
+        } catch (err) {
+            console.error('[Batch Optimization] Failed to destroy GA chart:', err);
+        }
+        gaConvergenceChart = null;
+    }
+}
+
+function formatNumber(value, digits = 2) {
+    if (!Number.isFinite(value)) return '-';
+    return Number(value).toFixed(digits);
+}
+
+function formatPercentage(value) {
+    if (!Number.isFinite(value)) return '-';
+    return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return '0:00';
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function updateGAProgressUI(progress) {
+    if (!progress) return;
+    const container = document.getElementById('ga-progress-container');
+    if (container) container.classList.remove('hidden');
+
+    const generations = currentGAPlan?.generations || currentGAPlan?.gens || Math.max(progress.history?.length || 0, 1);
+    const currentGen = (progress.generation ?? (progress.history?.length || 0) - 1) + 1;
+    const percentage = Math.min(100, Math.max(0, Math.round((currentGen / generations) * 100)));
+
+    const percentEl = document.getElementById('ga-progress-percentage');
+    if (percentEl) percentEl.textContent = `${percentage}%`;
+    const bar = document.getElementById('ga-progress-bar');
+    if (bar) bar.style.width = `${percentage}%`;
+
+    const genEl = document.getElementById('ga-progress-gen');
+    if (genEl) genEl.textContent = `${currentGen}/${generations}`;
+
+    const bestEl = document.getElementById('ga-best-score');
+    if (bestEl) bestEl.textContent = Number.isFinite(progress.bestScore) ? formatNumber(progress.bestScore, 4) : '-';
+
+    const avgEl = document.getElementById('ga-avg-score');
+    if (avgEl) avgEl.textContent = Number.isFinite(progress.avgScore) ? formatNumber(progress.avgScore, 4) : '-';
+
+    const runtimeEl = document.getElementById('ga-runtime');
+    if (runtimeEl) runtimeEl.textContent = formatDuration(progress.elapsedMs);
+
+    if (progress.bestChromosome) {
+        const paramsEl = document.getElementById('ga-current-best-params');
+        if (paramsEl) {
+            try {
+                paramsEl.textContent = JSON.stringify({
+                    entry: {
+                        strategy: progress.bestChromosome.buyStrategy,
+                        params: progress.bestChromosome.buyParams
+                    },
+                    exit: {
+                        strategy: progress.bestChromosome.sellStrategy,
+                        params: progress.bestChromosome.sellParams
+                    },
+                    risk: progress.bestChromosome.riskManagement || {}
+                }, null, 2);
+            } catch (err) {
+                paramsEl.textContent = '無法序列化最佳參數';
+            }
+        }
+    }
+
+    updateGABestSummary(progress.bestMetrics);
+    updateGAConvergenceChart(progress.history || []);
+}
+
+function updateGAConvergenceChart(history) {
+    if (!Array.isArray(history)) return;
+    const canvas = document.getElementById('ga-convergence-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const labels = history.map(item => `Gen ${item.gen + 1}`);
+    const bestData = history.map(item => Number.isFinite(item.bestScore) ? item.bestScore : null);
+    const avgData = history.map(item => Number.isFinite(item.avgScore) ? item.avgScore : null);
+
+    if (!gaConvergenceChart) {
+        gaConvergenceChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Best',
+                        data: bestData,
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        tension: 0.2,
+                        fill: true,
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Average',
+                        data: avgData,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.2,
+                        fill: false,
+                        borderDash: [4, 4],
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: { color: 'var(--muted-foreground)' },
+                        grid: { color: 'rgba(148, 163, 184, 0.2)' }
+                    },
+                    y: {
+                        ticks: { color: 'var(--muted-foreground)' },
+                        grid: { color: 'rgba(148, 163, 184, 0.2)' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: 'var(--foreground)' }
+                    }
+                }
+            }
+        });
+    } else {
+        gaConvergenceChart.data.labels = labels;
+        gaConvergenceChart.data.datasets[0].data = bestData;
+        gaConvergenceChart.data.datasets[1].data = avgData;
+        gaConvergenceChart.update('none');
+    }
+}
+
+function updateGABestSummary(metrics) {
+    const list = document.getElementById('ga-best-metrics');
+    if (!list) return;
+    if (!metrics) {
+        list.innerHTML = '<li class="text-sm text-muted-foreground">尚無資料</li>';
+        return;
+    }
+
+    const fields = [
+        { label: '年化報酬率', value: metrics.annualizedReturn, formatter: formatPercentage },
+        { label: '夏普比率', value: metrics.sharpeRatio, formatter: (v) => formatNumber(v, 3) },
+        { label: '索提諾比率', value: metrics.sortinoRatio, formatter: (v) => formatNumber(v, 3) },
+        { label: '最大回撤', value: metrics.maxDrawdown, formatter: formatPercentage },
+        { label: '交易次數', value: metrics.tradeCount, formatter: (v) => Number.isFinite(v) ? Math.round(v) : '-' },
+        { label: '勝率', value: metrics.winRate, formatter: formatPercentage }
+    ];
+
+    list.innerHTML = fields.map(field => {
+        const formatted = field.formatter(field.value);
+        return `<li class="flex justify-between items-center bg-muted/30 px-3 py-2 rounded">` +
+            `<span class="text-xs text-muted-foreground">${field.label}</span>` +
+            `<span class="text-sm font-semibold" style="color: var(--foreground);">${formatted}</span>` +
+            `</li>`;
+    }).join('');
+}
+
+function cloneParams(params) {
+    try {
+        return JSON.parse(JSON.stringify(params || {}));
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to clone params:', error);
+        return { ...(params || {}) };
+    }
+}
+
+function buildGABounds(buyStrategies, sellStrategies) {
+    const entryParamBounds = {};
+    const exitParamBounds = {};
+
+    buyStrategies.forEach(strategy => {
+        const info = strategyDescriptions?.[strategy];
+        if (!info) return;
+        entryParamBounds[strategy] = (info.optimizeTargets || []).map(target => ({
+            name: target.name,
+            range: target.range ? { ...target.range } : undefined,
+            values: Array.isArray(target.values) ? target.values.slice() : undefined,
+            type: target.type || (target.range ? 'number' : Array.isArray(target.values) ? 'enum' : undefined)
+        }));
+    });
+
+    sellStrategies.forEach(strategy => {
+        const info = strategyDescriptions?.[strategy];
+        if (!info) return;
+        exitParamBounds[strategy] = (info.optimizeTargets || []).map(target => ({
+            name: target.name,
+            range: target.range ? { ...target.range } : undefined,
+            values: Array.isArray(target.values) ? target.values.slice() : undefined,
+            type: target.type || (target.range ? 'number' : Array.isArray(target.values) ? 'enum' : undefined)
+        }));
+    });
+
+    const riskParamBounds = {};
+    if (typeof globalOptimizeTargets === 'object' && globalOptimizeTargets) {
+        Object.keys(globalOptimizeTargets).forEach(key => {
+            const cfg = globalOptimizeTargets[key];
+            if (cfg?.range || Array.isArray(cfg?.values)) {
+                riskParamBounds[key] = {
+                    range: cfg.range ? { ...cfg.range } : undefined,
+                    values: Array.isArray(cfg.values) ? cfg.values.slice() : undefined,
+                    type: cfg.type || (cfg.range ? 'number' : Array.isArray(cfg.values) ? 'enum' : undefined)
+                };
+            }
+        });
+    }
+
+    const constraintFns = [
+        (chromosome) => {
+            if (!chromosome) return;
+            const entry = chromosome.buyParams || {};
+            const exit = chromosome.sellParams || {};
+            if (Number.isFinite(entry.maShort) && Number.isFinite(entry.maLong) && entry.maShort >= entry.maLong) {
+                entry.maShort = Math.max(entry.maLong - 1, entry.maShort - 1);
+            }
+            if (Number.isFinite(exit.maShort) && Number.isFinite(exit.maLong) && exit.maShort >= exit.maLong) {
+                exit.maShort = Math.max(exit.maLong - 1, exit.maShort - 1);
+            }
+        }
+    ];
+
+    return {
+        entryStrategies: buyStrategies,
+        exitStrategies: sellStrategies,
+        entryParamBounds,
+        exitParamBounds,
+        riskParamBounds,
+        constraintFns
+    };
+}
+
+function hashChromosomeForGA(chromosome) {
+    if (window.lazybacktestGA && typeof window.lazybacktestGA.defaultHashChromosome === 'function') {
+        return window.lazybacktestGA.defaultHashChromosome(chromosome);
+    }
+    return JSON.stringify({
+        buyStrategy: chromosome?.buyStrategy,
+        sellStrategy: chromosome?.sellStrategy,
+        buyParams: chromosome?.buyParams || {},
+        sellParams: chromosome?.sellParams || {},
+        riskManagement: chromosome?.riskManagement || {}
+    });
+}
+
+function convertChromosomeToCombination(chromosome) {
+    if (!chromosome) return null;
+    const entryDefaults = strategyDescriptions?.[chromosome.buyStrategy]?.defaultParams || {};
+    const exitDefaults = strategyDescriptions?.[chromosome.sellStrategy]?.defaultParams || {};
+    return {
+        buyStrategy: chromosome.buyStrategy,
+        sellStrategy: chromosome.sellStrategy,
+        buyParams: { ...entryDefaults, ...(chromosome.buyParams || {}) },
+        sellParams: { ...exitDefaults, ...(chromosome.sellParams || {}) },
+        riskManagement: cloneParams(chromosome.riskManagement)
+    };
+}
+
+function createGAEvaluator(targetMetric, hashFn) {
+    const memoryCache = new Map();
+    return {
+        async evaluate(population) {
+            const results = [];
+            for (const chromosome of population) {
+                const key = hashFn(chromosome);
+                if (memoryCache.has(key)) {
+                    results.push(memoryCache.get(key));
+                    continue;
+                }
+
+                if (isBatchOptimizationStopped || gaControlSignal?.isStopped) {
+                    const stoppedResult = { score: -Infinity, metrics: {} };
+                    memoryCache.set(key, stoppedResult);
+                    results.push(stoppedResult);
+                    continue;
+                }
+
+                const combination = convertChromosomeToCombination(chromosome);
+                const evaluation = await executeBacktestForCombination(combination);
+                const metrics = evaluation || {};
+                const score = Number.isFinite(metrics[targetMetric]) ? metrics[targetMetric] : null;
+                const packed = { score, metrics, raw: evaluation };
+                memoryCache.set(key, packed);
+                results.push(packed);
+            }
+            return results;
+        }
+    };
+}
+
+function collectHistoricalSeeds(bounds, previousResults) {
+    const seeds = [];
+    const candidates = Array.isArray(previousResults) ? previousResults : [];
+    const seen = new Set();
+
+    candidates.forEach(result => {
+        const buy = result.buyStrategy;
+        const sell = result.sellStrategy || result.exitStrategy;
+        if (!buy || !sell) return;
+        if (!bounds.entryStrategies.includes(buy) || !bounds.exitStrategies.includes(sell)) return;
+
+        const chromosome = {
+            buyStrategy: buy,
+            sellStrategy: sell,
+            buyParams: cloneParams(result.buyParams || result.entryParams),
+            sellParams: cloneParams(result.sellParams || result.exitParams),
+            riskManagement: cloneParams(result.riskManagement || {
+                stopLoss: result.usedStopLoss,
+                takeProfit: result.usedTakeProfit
+            })
+        };
+
+        const key = hashChromosomeForGA(chromosome);
+        if (!seen.has(key)) {
+            seeds.push(chromosome);
+            seen.add(key);
+        }
+    });
+
+    return seeds.slice(0, 20);
+}
+
+function prepareGAObjectives(config) {
+    const target = config?.targetMetric || 'annualizedReturn';
+    return {
+        targetMetric: target,
+        weights: {
+            annualizedReturn: target === 'annualizedReturn' ? 0.6 : 0.35,
+            sharpeRatio: target === 'sharpeRatio' ? 0.45 : 0.25,
+            sortinoRatio: target === 'sortinoRatio' ? 0.35 : 0.15
+        },
+        penalties: {
+            maxDrawdown: 0.2,
+            tradeCount: 0.05
+        }
+    };
+}
+
+async function startGeneticOptimization(config, previousResults) {
+    try {
+        if (!window.lazybacktestGA || typeof window.lazybacktestGA.runGA !== 'function') {
+            throw new Error('GA 模組尚未載入，請重新整理頁面後再試');
+        }
+
+        const buyStrategies = getSelectedStrategies('batch-buy-strategies');
+        const sellStrategies = getSelectedStrategies('batch-sell-strategies');
+
+        if (!buyStrategies.length) {
+            showError('請至少選擇一個進場策略');
+            restoreBatchOptimizationUI();
+            return;
+        }
+        if (!sellStrategies.length) {
+            showError('請至少選擇一個出場策略');
+            restoreBatchOptimizationUI();
+            return;
+        }
+
+        const bounds = buildGABounds(buyStrategies, sellStrategies);
+        const seeds = collectHistoricalSeeds(bounds, previousResults);
+
+        gaControlSignal = createGAControlSignal();
+        gaProgressStartTime = Date.now();
+        currentGAPlan = { ...config.ga };
+        gaLatestRun = null;
+        resetGAUI();
+
+        const pauseBtn = document.getElementById('pause-ga');
+        if (pauseBtn) pauseBtn.classList.remove('hidden');
+        const resumeBtn = document.getElementById('resume-ga');
+        if (resumeBtn) resumeBtn.classList.add('hidden');
+        const exportBtn = document.getElementById('export-ga-json');
+        if (exportBtn) exportBtn.classList.add('hidden');
+
+        const versionEl = document.getElementById('ga-best-version');
+        if (versionEl) {
+            const moduleVersion = window.lazybacktestGA?.version || 'unknown';
+            versionEl.textContent = `${GA_UI_VERSION} · ${GA_INTEGRATION_VERSION} · ${moduleVersion}`;
+        }
+
+        const objectives = prepareGAObjectives(config);
+        const hashFn = (chromosome) => hashChromosomeForGA(chromosome);
+        const evaluator = createGAEvaluator(config.targetMetric, hashFn);
+
+        const runResult = await window.lazybacktestGA.runGA({
+            seed: config.ga.seed,
+            popSize: config.ga.population,
+            gens: config.ga.generations,
+            crossoverRate: config.ga.crossoverRate,
+            mutationRate: config.ga.mutationRate,
+            elitism: config.ga.elitism,
+            bounds,
+            objectives,
+            evaluator,
+            earlyStop: config.ga.earlyStop,
+            timeBudgetMs: config.ga.timeBudgetMs,
+            postProgressToUI: updateGAProgressUI,
+            controlSignal: gaControlSignal,
+            hashChromosome: hashFn,
+            initialPopulation: seeds
+        });
+
+        gaLatestRun = {
+            ...runResult,
+            completedAt: new Date().toISOString(),
+            config: {
+                ga: { ...config.ga },
+                targetMetric: config.targetMetric,
+                integrationVersion: GA_INTEGRATION_VERSION,
+                uiVersion: GA_UI_VERSION
+            }
+        };
+
+        if (runResult?.best) {
+            applyGABestResult(runResult.best);
+        } else {
+            showError('GA 未產生有效的最佳解');
+        }
+
+        if (gaControlSignal?.isStopped) {
+            console.warn('[Batch Optimization] GA stopped by user');
+        }
+    } catch (error) {
+        console.error('[Batch Optimization] GA execution error:', error);
+        showError('GA 優化執行失敗：' + (error?.message || error));
+    } finally {
+        window.batchOptimizationRunning = false;
+        restoreBatchOptimizationUI();
+    }
+}
+
+function applyGABestResult(best) {
+    if (!best) return;
+    const combination = convertChromosomeToCombination(best.chromosome);
+    if (!combination) {
+        showError('GA 最佳結果缺少有效的策略參數');
+        return;
+    }
+
+    const metrics = best.metrics || best.raw || {};
+    const result = {
+        ...metrics,
+        buyStrategy: combination.buyStrategy,
+        sellStrategy: combination.sellStrategy,
+        buyParams: combination.buyParams,
+        sellParams: combination.sellParams,
+        riskManagement: combination.riskManagement,
+        gaScore: best.score,
+        gaGeneration: best.generation,
+        gaIntegrationVersion: GA_INTEGRATION_VERSION,
+        gaUiVersion: GA_UI_VERSION,
+        gaRunnerVersion: window.lazybacktestGA?.version || 'unknown'
+    };
+
+    if (metrics.usedStopLoss !== undefined || metrics.usedTakeProfit !== undefined) {
+        result.usedStopLoss = metrics.usedStopLoss;
+        result.usedTakeProfit = metrics.usedTakeProfit;
+    }
+
+    batchOptimizationResults.unshift(result);
+    showBatchResults();
+    updateGABestSummary(metrics);
+
+    const exportBtn = document.getElementById('export-ga-json');
+    if (exportBtn) exportBtn.classList.remove('hidden');
+}
+
+function exportGALatestResult() {
+    if (!gaLatestRun) {
+        showError?.('目前沒有可匯出的 GA 結果');
+        return;
+    }
+
+    try {
+        const blob = new Blob([JSON.stringify(gaLatestRun, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `lazybacktest-ga-${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to export GA result:', error);
+        showError?.('匯出 GA 結果時發生錯誤');
     }
 }
 
@@ -389,17 +1019,26 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
-        // 重置結果
+
+        const previousResults = Array.isArray(batchOptimizationResults) ? batchOptimizationResults.slice() : [];
+
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
-    resetBatchWorkerStatus();
-    const panel = document.getElementById('batch-worker-status-panel');
-    if (panel) panel.classList.remove('hidden');
-        
+        resetBatchWorkerStatus();
+
+        if (config.mode === 'ga') {
+            const panel = document.getElementById('batch-worker-status-panel');
+            if (panel) panel.classList.add('hidden');
+            hideBatchProgress();
+            startGeneticOptimization(config, previousResults);
+            return;
+        }
+
+        const panel = document.getElementById('batch-worker-status-panel');
+        if (panel) panel.classList.remove('hidden');
+
         // 顯示進度
         showBatchProgress();
-        
+
         // 執行批量優化
         executeBatchOptimization(config);
     } catch (error) {
@@ -485,14 +1124,21 @@ function getBatchOptimizationConfig() {
         // 初始化配置，設定預設值
         const config = {
             batchSize: 100,        // 預設批次大小
-            maxCombinations: 10000, // 預設最大組合數  
+            maxCombinations: 10000, // 預設最大組合數
             parameterTrials: 100,   // 預設參數優化次數
             targetMetric: 'annualizedReturn', // 預設優化目標指標
             concurrency: 4,         // 預設併發數
             iterationLimit: 6,      // 預設迭代上限
-            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'] // 顯示所有指標
+            optimizeTargets: ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'sortinoRatio'], // 顯示所有指標
+            mode: 'grid',
+            ga: {}
         };
-        
+
+        const modeInput = document.querySelector('input[name="batch-optimization-mode"]:checked');
+        if (modeInput) {
+            config.mode = modeInput.value;
+        }
+
         // 獲取參數優化次數
         const parameterTrialsElement = document.getElementById('batch-optimize-parameter-trials');
         if (parameterTrialsElement && parameterTrialsElement.value) {
@@ -516,21 +1162,39 @@ function getBatchOptimizationConfig() {
         if (iterationLimitElement && iterationLimitElement.value) {
             config.iterationLimit = parseInt(iterationLimitElement.value) || 6;
         }
-        
+
         // 安全檢查優化目標
         const annualReturnElement = document.getElementById('optimize-annual-return');
         if (annualReturnElement && annualReturnElement.checked) {
         }
-        
+
         const sharpeElement = document.getElementById('optimize-sharpe');
         if (sharpeElement && sharpeElement.checked) {
             config.optimizeTargets.push('sharpeRatio');
         }
-        
+
+        config.ga = {
+            population: parseInt(document.getElementById('ga-population')?.value, 10) || 50,
+            generations: parseInt(document.getElementById('ga-generations')?.value, 10) || 20,
+            elitism: parseInt(document.getElementById('ga-elitism')?.value, 10) || 2,
+            crossoverRate: parseFloat(document.getElementById('ga-crossover-rate')?.value) || 0.9,
+            mutationRate: parseFloat(document.getElementById('ga-mutation-rate')?.value) || 0.15,
+            earlyStop: parseInt(document.getElementById('ga-early-stop')?.value, 10) || 5,
+            seed: (() => {
+                const value = document.getElementById('ga-seed')?.value?.trim();
+                return value ? value : undefined;
+            })(),
+            timeBudgetMs: (() => {
+                const minutes = parseFloat(document.getElementById('ga-time-budget')?.value);
+                if (!Number.isFinite(minutes) || minutes <= 0) return undefined;
+                return minutes * 60 * 1000;
+            })()
+        };
+
         // 設定排序鍵值為選擇的目標指標
         config.sortKey = config.targetMetric;
         config.sortDirection = 'desc';
-        
+
         return config;
     } catch (error) {
         console.error('[Batch Optimization] Error getting config:', error);
@@ -3119,7 +3783,8 @@ window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
-    getWorkerStrategyName: getWorkerStrategyName
+    getWorkerStrategyName: getWorkerStrategyName,
+    gaVersion: GA_INTEGRATION_VERSION
 };
 
 // 測試風險管理優化功能
@@ -3387,8 +4052,25 @@ function restoreBatchOptimizationUI() {
     if (stopBtn) {
         stopBtn.classList.add('hidden');
     }
-    
+
     window.batchOptimizationRunning = false;
+
+    const pauseBtn = document.getElementById('pause-ga');
+    if (pauseBtn) pauseBtn.classList.add('hidden');
+    const resumeBtn = document.getElementById('resume-ga');
+    if (resumeBtn) resumeBtn.classList.add('hidden');
+
+    if (!gaLatestRun) {
+        const exportBtn = document.getElementById('export-ga-json');
+        if (exportBtn) exportBtn.classList.add('hidden');
+    }
+
+    if (gaControlSignal && typeof gaControlSignal.resume === 'function') {
+        gaControlSignal.resume();
+    }
+    gaControlSignal = null;
+    currentGAPlan = null;
+    gaProgressStartTime = null;
 
     // 隱藏並重置 worker 狀態面板
     try {
@@ -3404,7 +4086,14 @@ function stopBatchOptimization() {
     
     // 設置停止標誌
     isBatchOptimizationStopped = true;
-    
+
+    if (gaControlSignal) {
+        gaControlSignal.isStopped = true;
+        if (typeof gaControlSignal.resume === 'function') {
+            gaControlSignal.resume();
+        }
+    }
+
     // 終止 worker
     if (batchOptimizationWorker) {
         batchOptimizationWorker.terminate();
@@ -3429,7 +4118,13 @@ function stopBatchOptimization() {
             statusDiv.className = 'text-sm text-red-600 font-medium';
         }
     }
-    
+
+    const gaPercentage = document.getElementById('ga-progress-percentage');
+    if (gaPercentage) {
+        gaPercentage.textContent = '已停止';
+        gaPercentage.style.color = '#dc2626';
+    }
+
     console.log('[Batch Optimization] Stopped successfully');
 }
 
