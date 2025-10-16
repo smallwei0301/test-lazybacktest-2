@@ -1,5 +1,9 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-STAGE4-REFINE-20251005A
+
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -48,6 +52,478 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+
+// --- Stage4 Helper Utilities ---
+
+const STAGE4_DEFAULT_KEY_PREFIX_ENTRY = 'entry.';
+const STAGE4_DEFAULT_KEY_PREFIX_EXIT = 'exit.';
+const STAGE4_DEFAULT_KEY_PREFIX_RISK = 'risk.';
+
+function getStrategyMetaMap() {
+    if (typeof strategyDescriptions !== 'undefined') {
+        return strategyDescriptions;
+    }
+    if (typeof window !== 'undefined' && window.strategyDescriptions) {
+        return window.strategyDescriptions;
+    }
+    return {};
+}
+
+function getGlobalRiskTargets() {
+    if (typeof globalOptimizeTargets !== 'undefined') {
+        return globalOptimizeTargets;
+    }
+    if (typeof window !== 'undefined' && window.globalOptimizeTargets) {
+        return window.globalOptimizeTargets;
+    }
+    return {};
+}
+
+function serialiseParamValue(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => serialiseParamValue(item));
+    }
+    if (value && typeof value === 'object') {
+        return Object.entries(value)
+            .map(([key, val]) => [key, serialiseParamValue(val)])
+            .sort(([a], [b]) => a.localeCompare(b));
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return value;
+        return Number(value.toFixed(8));
+    }
+    return value;
+}
+
+export function paramKey(params) {
+    if (!params || typeof params !== 'object') return '';
+    const entries = Object.entries(params)
+        .map(([key, value]) => [key, serialiseParamValue(value)])
+        .sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify(entries);
+}
+
+function flattenStage4ParamsFromRow(row) {
+    const flat = {};
+    if (!row || typeof row !== 'object') return flat;
+
+    const baseEntry = (row.params && row.params.entry) || row.buyParams || {};
+    Object.entries(baseEntry || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            flat[`${STAGE4_DEFAULT_KEY_PREFIX_ENTRY}${key}`] = value;
+        }
+    });
+
+    const baseExit = (row.params && row.params.exit) || row.sellParams || {};
+    Object.entries(baseExit || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            flat[`${STAGE4_DEFAULT_KEY_PREFIX_EXIT}${key}`] = value;
+        }
+    });
+
+    const riskSource = (row.params && row.params.risk) || row.riskManagement || {};
+    const riskSeed = { ...riskSource };
+    if (row.stopLoss !== undefined && riskSeed.stopLoss === undefined) {
+        riskSeed.stopLoss = row.stopLoss;
+    }
+    if (row.takeProfit !== undefined && riskSeed.takeProfit === undefined) {
+        riskSeed.takeProfit = row.takeProfit;
+    }
+    Object.entries(riskSeed || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            flat[`${STAGE4_DEFAULT_KEY_PREFIX_RISK}${key}`] = value;
+        }
+    });
+
+    return flat;
+}
+
+function expandStage4Params(flat) {
+    const entry = {};
+    const exit = {};
+    const risk = {};
+    if (!flat || typeof flat !== 'object') {
+        return { entry, exit, risk };
+    }
+
+    Object.entries(flat).forEach(([key, value]) => {
+        if (key.startsWith(STAGE4_DEFAULT_KEY_PREFIX_ENTRY)) {
+            entry[key.replace(STAGE4_DEFAULT_KEY_PREFIX_ENTRY, '')] = value;
+        } else if (key.startsWith(STAGE4_DEFAULT_KEY_PREFIX_EXIT)) {
+            exit[key.replace(STAGE4_DEFAULT_KEY_PREFIX_EXIT, '')] = value;
+        } else if (key.startsWith(STAGE4_DEFAULT_KEY_PREFIX_RISK)) {
+            risk[key.replace(STAGE4_DEFAULT_KEY_PREFIX_RISK, '')] = value;
+        } else {
+            risk[key] = value;
+        }
+    });
+
+    return { entry, exit, risk };
+}
+
+function resolveRangeFromTarget(target, fallbackValue) {
+    const range = target?.range || {};
+    const min = Number.isFinite(range.from) ? range.from : fallbackValue;
+    const max = Number.isFinite(range.to) ? range.to : fallbackValue;
+    const type = range.step && Math.abs(range.step - Math.round(range.step)) < 1e-9 ? 'int' : 'float';
+    return {
+        min,
+        max,
+        step: range.step,
+        type,
+    };
+}
+
+function ensureMonotonicConstraint(bounds, shortKey, longKey) {
+    return (params) => {
+        const copy = { ...params };
+        const shortVal = copy[shortKey];
+        const longVal = copy[longKey];
+        const shortMeta = bounds[shortKey];
+        const longMeta = bounds[longKey];
+        if (Number.isFinite(shortVal) && Number.isFinite(longVal) && shortVal >= longVal) {
+            const mid = (shortVal + longVal) / 2;
+            const shortMin = Number.isFinite(shortMeta?.min) ? shortMeta.min : shortVal;
+            const longMax = Number.isFinite(longMeta?.max) ? longMeta.max : longVal;
+            copy[shortKey] = Math.max(shortMin, mid - (shortMeta?.step || 1));
+            copy[longKey] = Math.min(longMax, mid + (longMeta?.step || 1));
+        }
+        return copy;
+    };
+}
+
+function createStage4Bounds(currentBest, startFlat) {
+    const bounds = {};
+    const strategies = getStrategyMetaMap();
+    const riskTargets = getGlobalRiskTargets();
+
+    const entryMeta = strategies?.[currentBest?.buyStrategy]?.optimizeTargets || [];
+    entryMeta.forEach((target) => {
+        const key = `${STAGE4_DEFAULT_KEY_PREFIX_ENTRY}${target.name}`;
+        const resolved = resolveRangeFromTarget(target, startFlat[key]);
+        bounds[key] = {
+            ...resolved,
+            label: target.label,
+        };
+    });
+
+    const exitMeta = strategies?.[currentBest?.sellStrategy]?.optimizeTargets || [];
+    exitMeta.forEach((target) => {
+        const key = `${STAGE4_DEFAULT_KEY_PREFIX_EXIT}${target.name}`;
+        const resolved = resolveRangeFromTarget(target, startFlat[key]);
+        bounds[key] = {
+            ...resolved,
+            label: target.label,
+        };
+    });
+
+    Object.entries(riskTargets).forEach(([riskKey, target]) => {
+        const flatKey = `${STAGE4_DEFAULT_KEY_PREFIX_RISK}${riskKey}`;
+        if (startFlat[flatKey] === undefined) return;
+        const resolved = resolveRangeFromTarget(target, startFlat[flatKey]);
+        bounds[flatKey] = {
+            ...resolved,
+            label: target.label,
+        };
+    });
+
+    const constraintFixers = [];
+    if (bounds['entry.shortPeriod'] && bounds['entry.longPeriod']) {
+        constraintFixers.push(ensureMonotonicConstraint(bounds, 'entry.shortPeriod', 'entry.longPeriod'));
+    }
+    if (bounds['exit.shortPeriod'] && bounds['exit.longPeriod']) {
+        constraintFixers.push(ensureMonotonicConstraint(bounds, 'exit.shortPeriod', 'exit.longPeriod'));
+    }
+
+    if (constraintFixers.length > 0) {
+        bounds.constraintFix = (params) => constraintFixers.reduce((acc, fixer) => fixer(acc), params);
+    }
+
+    return bounds;
+}
+
+function buildStage4Objective() {
+    const metric = batchOptimizationConfig?.targetMetric || batchOptimizationConfig?.sortKey || 'annualizedReturn';
+    return (result) => {
+        if (!result) return -Infinity;
+        const value = result?.[metric];
+        if (!Number.isFinite(value)) return -Infinity;
+        if (metric === 'maxDrawdown') {
+            return -Math.abs(value);
+        }
+        return value;
+    };
+}
+
+function extractMetricsFromResult(result) {
+    if (!result || typeof result !== 'object') return {};
+    const tradeCount = result.tradeCount ?? result.tradesCount ?? result.totalTrades ?? null;
+    return {
+        annualizedReturn: Number.isFinite(result.annualizedReturn) ? result.annualizedReturn : null,
+        sharpeRatio: Number.isFinite(result.sharpeRatio) ? result.sharpeRatio : null,
+        sortinoRatio: Number.isFinite(result.sortinoRatio) ? result.sortinoRatio : null,
+        maxDrawdown: Number.isFinite(result.maxDrawdown) ? result.maxDrawdown : null,
+        winRate: Number.isFinite(result.winRate) ? result.winRate : null,
+        tradeCount: Number.isFinite(tradeCount) ? tradeCount : null,
+    };
+}
+
+async function evaluateStage4Candidate(flatParams, context) {
+    if (!flatParams) return null;
+    const { currentBest, objective } = context;
+    const expanded = expandStage4Params(flatParams);
+    const params = getBacktestParams();
+    if (!params) {
+        throw new Error('Stage4: 無法建立回測參數');
+    }
+
+    params.entryStrategy = getWorkerStrategyName(currentBest?.buyStrategy);
+    params.exitStrategy = getWorkerStrategyName(currentBest?.sellStrategy);
+
+    const entryParams = { ...(currentBest?.buyParams || {}), ...(expanded.entry || {}) };
+    const exitParams = { ...(currentBest?.sellParams || {}), ...(expanded.exit || {}) };
+
+    params.entryParams = entryParams;
+    params.exitParams = exitParams;
+
+    const riskSource = { ...(currentBest?.riskManagement || {}) };
+    Object.assign(riskSource, expanded.risk || {});
+    if (riskSource.stopLoss !== undefined) params.stopLoss = riskSource.stopLoss;
+    if (riskSource.takeProfit !== undefined) params.takeProfit = riskSource.takeProfit;
+
+    if (Array.isArray(currentBest?.entryStages)) {
+        params.entryStages = [...currentBest.entryStages];
+    }
+    if (Array.isArray(currentBest?.exitStages)) {
+        params.exitStages = [...currentBest.exitStages];
+    }
+
+    if (typeof currentBest?.enableShorting === 'boolean') {
+        params.enableShorting = currentBest.enableShorting;
+    }
+
+    const result = await performSingleBacktestFast(params);
+    if (!result) {
+        return {
+            params: flatParams,
+            fullParams: expanded,
+            metrics: {},
+            raw: null,
+            score: -Infinity,
+        };
+    }
+
+    const metrics = extractMetricsFromResult(result);
+    const objectiveValue = objective(result);
+    const score = Number.isFinite(objectiveValue) ? objectiveValue : -Infinity;
+
+    return {
+        params: flatParams,
+        fullParams: expanded,
+        metrics,
+        raw: result,
+        score,
+    };
+}
+
+function buildStage4Row({ method, currentBest, evaluation, bestScore }) {
+    if (!evaluation) return null;
+    const { fullParams, metrics, raw } = evaluation;
+    const risk = { ...(currentBest?.riskManagement || {}) };
+    Object.assign(risk, fullParams?.risk || {});
+
+    const row = {
+        buyStrategy: currentBest?.buyStrategy,
+        sellStrategy: currentBest?.sellStrategy,
+        buyParams: { ...(currentBest?.buyParams || {}), ...(fullParams?.entry || {}) },
+        sellParams: { ...(currentBest?.sellParams || {}), ...(fullParams?.exit || {}) },
+        riskManagement: Object.keys(risk).length > 0 ? risk : undefined,
+        params: {
+            entry: { ...(fullParams?.entry || {}) },
+            exit: { ...(fullParams?.exit || {}) },
+            risk: Object.keys(risk).length > 0 ? { ...risk } : {},
+        },
+        metrics: {
+            ...metrics,
+            raw,
+        },
+        score: Number.isFinite(bestScore) ? bestScore : evaluation.score ?? -Infinity,
+        source: `stage4-${method}`,
+        createdAt: Date.now(),
+    };
+
+    if (metrics) {
+        if (metrics.annualizedReturn !== undefined) row.annualizedReturn = metrics.annualizedReturn;
+        if (metrics.sharpeRatio !== undefined) row.sharpeRatio = metrics.sharpeRatio;
+        if (metrics.sortinoRatio !== undefined) row.sortinoRatio = metrics.sortinoRatio;
+        if (metrics.maxDrawdown !== undefined) row.maxDrawdown = metrics.maxDrawdown;
+        if (metrics.tradeCount !== undefined) {
+            row.tradeCount = metrics.tradeCount;
+            row.totalTrades = metrics.tradeCount;
+        }
+        if (metrics.winRate !== undefined) row.winRate = metrics.winRate;
+    }
+
+    if (risk.stopLoss !== undefined) row.usedStopLoss = risk.stopLoss;
+    if (risk.takeProfit !== undefined) row.usedTakeProfit = risk.takeProfit;
+
+    if (Array.isArray(currentBest?.optimizationTypes)) {
+        row.optimizationTypes = [...currentBest.optimizationTypes];
+    } else if (currentBest?.optimizationType) {
+        row.optimizationType = currentBest.optimizationType;
+    }
+    if (currentBest?.crossOptimization) {
+        row.crossOptimization = currentBest.crossOptimization;
+    }
+
+    row._paramKey = paramKey(row.params);
+    return row;
+}
+
+function getStage4BaseRow() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) return null;
+    return batchOptimizationResults[0];
+}
+
+export function prepareStage4Context({ currentBest = null, uiProgress = null } = {}) {
+    const baseRow = currentBest || getStage4BaseRow();
+    if (!baseRow) {
+        throw new Error('Stage4: 尚未有可用的優化結果');
+    }
+
+    const startParams = flattenStage4ParamsFromRow(baseRow);
+    if (Object.keys(startParams).length === 0) {
+        throw new Error('Stage4: 找不到可微調的參數');
+    }
+
+    const bounds = createStage4Bounds(baseRow, startParams);
+    const keyOrder = Object.keys(bounds).filter((key) => key !== 'constraintFix');
+
+    const encodeVec = (chrom) => keyOrder.map((key) => {
+        const value = chrom && Object.prototype.hasOwnProperty.call(chrom, key) ? chrom[key] : startParams[key];
+        return value;
+    });
+
+    const decodeVec = (vec) => {
+        const result = {};
+        keyOrder.forEach((key, index) => {
+            result[key] = vec[index];
+        });
+        return result;
+    };
+
+    const objective = buildStage4Objective();
+
+    const evaluator = async (flatCandidate) => {
+        const evaluation = await evaluateStage4Candidate(flatCandidate, { currentBest: baseRow, objective, uiProgress });
+        return evaluation;
+    };
+
+    return {
+        currentBest: baseRow,
+        startParams,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress,
+    };
+}
+
+function upsertStage4Row(row) {
+    if (!row) return { status: 'skipped', row: null };
+    const key = row._paramKey || (row.params ? paramKey(row.params) : null);
+    if (!key) {
+        batchOptimizationResults.unshift(row);
+        return { status: 'inserted', row };
+    }
+
+    let status = 'inserted';
+    const existingIndex = batchOptimizationResults.findIndex((item) => {
+        const existingKey = item?._paramKey || (item?.params ? paramKey(item.params) : null);
+        return existingKey === key;
+    });
+
+    if (existingIndex >= 0) {
+        const existingScore = batchOptimizationResults[existingIndex]?.score ?? -Infinity;
+        if (row.score > existingScore) {
+            batchOptimizationResults[existingIndex] = row;
+            status = 'updated';
+        } else {
+            status = 'skipped';
+        }
+    } else {
+        batchOptimizationResults.unshift(row);
+        status = 'inserted';
+    }
+
+    return { status, row };
+}
+
+export function applyStage4Result(row) {
+    const result = upsertStage4Row(row);
+    const resultsDiv = document.getElementById('batch-optimization-results');
+    if (resultsDiv) {
+        resultsDiv.classList.remove('hidden');
+    }
+
+    if (typeof sortBatchResults === 'function') {
+        sortBatchResults();
+    } else if (typeof renderBatchResultsTable === 'function') {
+        renderBatchResultsTable();
+    }
+
+    return result;
+}
+
+export async function runStage4(method, ctx) {
+    if (!ctx || typeof ctx !== 'object') {
+        throw new Error('Stage4: 缺少執行上下文');
+    }
+
+    const { currentBest, startParams, bounds, encodeVec, decodeVec, evaluator, objective, uiProgress } = ctx;
+    if (!currentBest || !currentBest.params && !currentBest.buyParams) {
+        throw new Error('Stage4: currentBest 缺少參數資訊');
+    }
+
+    const baseOptions = {
+        start: startParams,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        onProgress: (payload) => {
+            try {
+                if (uiProgress) {
+                    uiProgress({ stage4: method, ...payload });
+                }
+            } catch (progressError) {
+                console.warn('[Stage4] uiProgress callback error:', progressError);
+            }
+        }
+    };
+
+    let refined = null;
+    if (method === 'spsa') {
+        refined = await runSPSA({ ...baseOptions, ...ctx.spsaOptions });
+    } else if (method === 'cem') {
+        refined = await runCEM({ ...baseOptions, ...ctx.cemOptions });
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    const bestEvaluation = refined?.bestEvaluation || await evaluator(refined?.bestParams || startParams);
+    const row = buildStage4Row({
+        method,
+        currentBest,
+        evaluation: bestEvaluation,
+        bestScore: refined?.bestScore ?? bestEvaluation?.score ?? -Infinity,
+    });
+
+    return row;
+}
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -3225,7 +3701,12 @@ window.batchOptimization = {
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    prepareStage4Context: (options = {}) => prepareStage4Context(options),
+    runStage4: (method, ctx) => runStage4(method, ctx),
+    applyStage4Result: (row) => applyStage4Result(row),
+    paramKey: (params) => paramKey(params),
+    getStage4BaseRow: () => getStage4BaseRow()
 };
 
 // 測試風險管理優化功能

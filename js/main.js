@@ -2682,6 +2682,144 @@ function initRollingTestFeature() {
     }
 }
 
+function initStage4RefinementPanel() {
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressText = document.getElementById('stage4-progress-text');
+    const advancedSections = document.querySelectorAll('[data-stage4-advanced]');
+
+    if (!methodSelect || !runButton) return;
+
+    const toggleAdvancedVisibility = () => {
+        const method = (methodSelect.value || 'spsa').toLowerCase();
+        advancedSections.forEach((section) => {
+            const target = section.getAttribute('data-stage4-advanced');
+            if (!target) return;
+            if (target === method) {
+                section.classList.remove('hidden');
+            } else {
+                section.classList.add('hidden');
+            }
+        });
+    };
+
+    const parseNumberInput = (input, fallback) => {
+        if (!input) return fallback;
+        const value = parseFloat(input.value);
+        return Number.isFinite(value) ? value : fallback;
+    };
+
+    const getSpsaOptions = () => {
+        return {
+            steps: parseInt(document.getElementById('stage4-spsa-steps')?.value, 10) || 30,
+            a0: parseNumberInput(document.getElementById('stage4-spsa-a0'), 0.2),
+            c0: parseNumberInput(document.getElementById('stage4-spsa-c0'), 0.1),
+            alpha: parseNumberInput(document.getElementById('stage4-spsa-alpha'), 0.602),
+            gamma: parseNumberInput(document.getElementById('stage4-spsa-gamma'), 0.101),
+        };
+    };
+
+    const getCemOptions = () => {
+        return {
+            iters: parseInt(document.getElementById('stage4-cem-iters')?.value, 10) || 10,
+            popSize: parseInt(document.getElementById('stage4-cem-popsize')?.value, 10) || 40,
+            eliteRatio: parseNumberInput(document.getElementById('stage4-cem-elite') , 0.2),
+            initSigma: parseNumberInput(document.getElementById('stage4-cem-sigma'), 0.15),
+        };
+    };
+
+    const formatScore = (score) => {
+        if (!Number.isFinite(score)) return 'N/A';
+        return score.toFixed(4);
+    };
+
+    const updateProgressUI = (payload) => {
+        if (!progressText) return;
+        if (!payload) {
+            progressText.textContent = '尚未開始';
+            return;
+        }
+        const method = payload.stage4 || (methodSelect.value || '').toLowerCase();
+        if (method === 'spsa') {
+            const step = payload.step ?? '-';
+            progressText.textContent = `SPSA 第 ${step} 步，最佳分數 ${formatScore(payload.bestScore)}`;
+        } else if (method === 'cem') {
+            const iter = payload.iter ?? '-';
+            progressText.textContent = `CEM 第 ${iter} 回合，最佳分數 ${formatScore(payload.bestScore)}`;
+        } else {
+            progressText.textContent = `最佳分數 ${formatScore(payload.bestScore)}`;
+        }
+    };
+
+    let running = false;
+
+    methodSelect.addEventListener('change', () => {
+        toggleAdvancedVisibility();
+        updateProgressUI(null);
+    });
+
+    runButton.addEventListener('click', async () => {
+        if (running) return;
+        running = true;
+
+        const method = (methodSelect.value || 'spsa').toLowerCase();
+        const originalLabel = runButton.dataset.originalLabel || runButton.textContent;
+        runButton.dataset.originalLabel = originalLabel;
+        runButton.textContent = '執行中…';
+        runButton.disabled = true;
+        updateProgressUI({ stage4: method, bestScore: null, step: 0, iter: 0 });
+
+        try {
+            if (!window.batchOptimization || typeof window.batchOptimization.prepareStage4Context !== 'function' || typeof window.batchOptimization.runStage4 !== 'function') {
+                throw new Error('Stage4 模組尚未就緒');
+            }
+
+            const currentBest = typeof window.batchOptimization.getStage4BaseRow === 'function'
+                ? window.batchOptimization.getStage4BaseRow()
+                : null;
+            if (!currentBest) {
+                throw new Error('請先完成批量優化以產生參考結果');
+            }
+
+            const baseContext = window.batchOptimization.prepareStage4Context({
+                currentBest,
+                uiProgress: (payload) => updateProgressUI({ ...payload, stage4: method }),
+            });
+
+            if (method === 'spsa') {
+                baseContext.spsaOptions = getSpsaOptions();
+            } else if (method === 'cem') {
+                baseContext.cemOptions = getCemOptions();
+            }
+
+            const row = await window.batchOptimization.runStage4(method, baseContext);
+            if (!row) {
+                throw new Error('Stage4 未回傳有效結果');
+            }
+
+            const result = window.batchOptimization.applyStage4Result(row);
+            if (result.status === 'updated') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (result.status === 'inserted') {
+                showSuccess('第四階段完成：已新增最佳結果');
+            } else {
+                showInfo('第四階段完成：已有更佳結果，保留原解');
+            }
+        } catch (error) {
+            console.error('[Stage4] 執行失敗:', error);
+            showError(error?.message || '第四階段微調失敗');
+        } finally {
+            running = false;
+            runButton.disabled = false;
+            runButton.textContent = runButton.dataset.originalLabel || '執行微調';
+            updateProgressUI(null);
+        }
+    });
+
+    toggleAdvancedVisibility();
+    updateProgressUI(null);
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -2717,6 +2855,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             initBatchOptimizationFeature();
             initRollingTestFeature();
+            initStage4RefinementPanel();
         }, 100);
 
         console.log('[Main] Initialization completed');
