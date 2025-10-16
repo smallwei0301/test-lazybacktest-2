@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.6 ---
-// Patch Tag: LB-ROLLING-TEST-20250926A
+// --- 滾動測試模組 - v1.7 ---
+// Patch Tag: LB-ROLLING-TEST-20250927A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250926A',
+        version: 'LB-ROLLING-TEST-20250927A',
         batchOptimizerInitialized: false,
     };
 
@@ -1464,8 +1464,8 @@
 
     function buildCombinationFromParams(params) {
         if (!params || typeof params !== 'object') return null;
-        const buyStrategy = params.entryStrategy;
-        const sellStrategy = params.exitStrategy;
+        const buyStrategy = resolveStrategyConfigKey(params.entryStrategy, 'entry') || params.entryStrategy;
+        const sellStrategy = resolveStrategyConfigKey(params.exitStrategy, 'exit') || params.exitStrategy;
         if (!buyStrategy || !sellStrategy) return null;
 
         const combination = {

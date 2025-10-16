@@ -1041,3 +1041,9 @@
 - **Diagnostics**: 以單視窗訓練期手動執行批量優化與滾動測試，自比對進/出場參數與最終指標，確認兩者一致並在報告中顯示批量優化目標指標；同時驗證做空與風險參數仍能在剩餘迭代中收斂。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-02-26 — Patch LB-ROLLING-TEST-20250927A
+- **Issue recap**: Walk-Forward 訓練期雖已導入批量優化引擎，但在組合優化階段仍以做多配置的鍵值查詢出場策略設定，造成滾動測試與批量優化面板在同一訓練視窗下產生不同的最佳出場參數。
+- **Fix**: `js/rolling-test.js` 於建立組合時改用 `resolveStrategyConfigKey` 轉換做多/做空出場策略對應的批量優化鍵值，並更新模組版本碼至 `LB-ROLLING-TEST-20250927A`，確保批量優化與 Walk-Forward 共用相同策略範圍。
+- **Diagnostics**: 重新於訓練視窗內分別執行批量優化與滾動測試，確認兩者的出場參數完全一致，並比對報告摘要所列優化訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
