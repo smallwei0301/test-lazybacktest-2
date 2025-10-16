@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-BATCH-ADVANCED-20260130A — Hyperband/Surrogate-GA UI 與驗證。
 
 // 全局變量
 let stockChart = null;
@@ -2653,19 +2654,251 @@ function initTabs() {
     console.log("[Main] Tab initialization - handled by HTML event listeners");
 }
 
-// --- 新增：初始化批量優化功能 ---
-function initBatchOptimizationFeature() {
-    // 等待DOM加載完成後初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.batchOptimization && window.batchOptimization.init) {
-                window.batchOptimization.init();
+const batchModeUI = (() => {
+    const state = {
+        initialized: false,
+        modeSelect: null,
+        panels: new Map(),
+        currentMode: 'sequential',
+    };
+
+    const getPanels = () => Array.from(document.querySelectorAll('[data-batch-mode-panel]'));
+
+    const normaliseBudget = (value, fallback) => {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+        let numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+        if (numeric > 1.5) {
+            numeric = numeric / 100;
+        }
+        if (numeric <= 0) {
+            return null;
+        }
+        if (numeric > 1) {
+            numeric = 1;
+        }
+        return Math.round(numeric * 1000) / 1000;
+    };
+
+    const readNumericValue = (input, options = {}) => {
+        const opts = options || {};
+        if (!input) {
+            return opts.optional ? (opts.defaultValue ?? null) : null;
+        }
+        const raw = input.value;
+        if (raw === '' || raw === undefined) {
+            if (opts.optional) {
+                return opts.defaultValue ?? null;
+            }
+            return null;
+        }
+        let numeric = Number(raw);
+        if (!Number.isFinite(numeric)) {
+            return null;
+        }
+        if (!opts.allowFloat) {
+            numeric = Math.round(numeric);
+        }
+        if (opts.min !== undefined && numeric < opts.min) {
+            return null;
+        }
+        if (opts.max !== undefined && numeric > opts.max) {
+            numeric = opts.max;
+        }
+        if (opts.decimals !== undefined) {
+            const factor = 10 ** opts.decimals;
+            numeric = Math.round(numeric * factor) / factor;
+        }
+        return numeric;
+    };
+
+    const updateVisibility = (mode) => {
+        const targetMode = mode || 'sequential';
+        state.panels.forEach((panel, panelMode) => {
+            if (panelMode === targetMode) {
+                panel.classList.remove('hidden');
+            } else {
+                panel.classList.add('hidden');
             }
         });
-    } else {
-        if (window.batchOptimization && window.batchOptimization.init) {
+        state.currentMode = targetMode;
+    };
+
+    const ensurePanelsRegistered = () => {
+        if (state.panels.size > 0) return;
+        getPanels().forEach((panel) => {
+            const mode = panel?.dataset?.batchModePanel;
+            if (mode) {
+                state.panels.set(mode, panel);
+            }
+        });
+    };
+
+    const init = () => {
+        if (state.initialized) {
+            updateVisibility(state.currentMode);
+            return;
+        }
+        state.modeSelect = document.getElementById('batch-mode');
+        ensurePanelsRegistered();
+        const initialMode = state.modeSelect?.value || state.currentMode;
+        updateVisibility(initialMode);
+        if (state.modeSelect) {
+            state.modeSelect.addEventListener('change', (event) => {
+                updateVisibility(event.target.value || 'sequential');
+            });
+        }
+        state.initialized = true;
+    };
+
+    const collectModeOptions = (baseConfig = {}) => {
+        const mode = state.modeSelect?.value || 'sequential';
+        if (mode === 'hyperband') {
+            const minBudgetInput = document.getElementById('batch-hyperband-min-budget');
+            const maxBudgetInput = document.getElementById('batch-hyperband-max-budget');
+            const etaInput = document.getElementById('batch-hyperband-eta');
+            const roundsInput = document.getElementById('batch-hyperband-rounds');
+            const initInput = document.getElementById('batch-hyperband-init-candidates');
+
+            const minBudget = normaliseBudget(minBudgetInput?.value, 0.2);
+            const maxBudget = normaliseBudget(maxBudgetInput?.value, 1);
+            const eta = readNumericValue(etaInput, { min: 2, max: 10, allowFloat: false });
+            const rounds = readNumericValue(roundsInput, { min: 1, max: 10, allowFloat: false });
+            const initCandidates = readNumericValue(initInput, { min: 4, max: 200, allowFloat: false });
+
+            if (!(minBudget && maxBudget && minBudget <= maxBudget)) {
+                showError('Hyperband 預算比例需介於 0 與 1 之間，且最小值不可大於最大值');
+                return null;
+            }
+            if (!Number.isFinite(eta) || eta < 2) {
+                showError('請輸入有效的 Hyperband 淘汰倍率 (eta)');
+                return null;
+            }
+            if (!Number.isFinite(rounds) || rounds < 1) {
+                showError('請輸入 Hyperband 的最大輪數');
+                return null;
+            }
+            if (!Number.isFinite(initCandidates) || initCandidates < eta) {
+                showError('初始候選數需大於等於淘汰倍率');
+                return null;
+            }
+
+            return {
+                mode,
+                options: {
+                    minBudget,
+                    maxBudget,
+                    eta,
+                    rounds,
+                    initCandidates,
+                },
+            };
+        }
+
+        if (mode === 'surrogate-ga') {
+            const populationInput = document.getElementById('batch-surrogate-population');
+            const generationsInput = document.getElementById('batch-surrogate-generations');
+            const topkInput = document.getElementById('batch-surrogate-topk');
+            const warmupInput = document.getElementById('batch-surrogate-warmup');
+            const warmupBudgetInput = document.getElementById('batch-surrogate-warmup-budget');
+            const mainBudgetInput = document.getElementById('batch-surrogate-main-budget');
+            const mutationInput = document.getElementById('batch-surrogate-mutation');
+            const crossoverInput = document.getElementById('batch-surrogate-crossover');
+            const elitismInput = document.getElementById('batch-surrogate-elitism');
+
+            const populationSize = readNumericValue(populationInput, { min: 6, max: 300, allowFloat: false });
+            const generations = readNumericValue(generationsInput, { min: 2, max: 60, allowFloat: false });
+            const topK = readNumericValue(topkInput, { min: 2, max: 100, allowFloat: false });
+            const warmupEvaluations = readNumericValue(warmupInput, { min: 4, max: 200, allowFloat: false });
+            const warmupBudget = normaliseBudget(warmupBudgetInput?.value, 0.4);
+            const mainBudget = normaliseBudget(mainBudgetInput?.value, 1);
+            const mutationRate = readNumericValue(mutationInput, { min: 0, max: 1, allowFloat: true, decimals: 3 });
+            const crossoverRate = readNumericValue(crossoverInput, { min: 0, max: 1, allowFloat: true, decimals: 3 });
+            const elitism = readNumericValue(elitismInput, { min: 1, max: 50, allowFloat: false, optional: true, defaultValue: 3 });
+
+            if (!Number.isFinite(populationSize)) {
+                showError('請輸入有效的族群大小');
+                return null;
+            }
+            if (!Number.isFinite(generations)) {
+                showError('請輸入有效的演化代數');
+                return null;
+            }
+            if (!Number.isFinite(topK) || topK > populationSize) {
+                showError('Top-K 真實回測數需小於或等於族群大小');
+                return null;
+            }
+            if (!Number.isFinite(warmupEvaluations) || warmupEvaluations < topK) {
+                showError('暖身評估數需大於或等於 Top-K');
+                return null;
+            }
+            if (!(warmupBudget && mainBudget)) {
+                showError('請輸入有效的 surrogate 預算比例');
+                return null;
+            }
+            if (warmupBudget > mainBudget) {
+                showError('暖身預算比例不可大於完整預算比例');
+                return null;
+            }
+            if (!Number.isFinite(mutationRate)) {
+                showError('請輸入有效的突變率 (0~1)');
+                return null;
+            }
+            if (!Number.isFinite(crossoverRate)) {
+                showError('請輸入有效的交配率 (0~1)');
+                return null;
+            }
+            const elitismCount = Number.isFinite(elitism) ? Math.min(topK, Math.max(1, elitism)) : Math.max(1, Math.floor(topK / 2));
+
+            return {
+                mode,
+                options: {
+                    populationSize,
+                    generations,
+                    topK,
+                    warmupEvaluations,
+                    warmupBudget,
+                    mainBudget,
+                    mutationRate,
+                    crossoverRate,
+                    elitism: elitismCount,
+                    tournamentSize: Math.max(2, Math.round(Math.sqrt(populationSize))),
+                    maxStagnation: Math.max(3, generations + 2),
+                },
+            };
+        }
+
+        return { mode, options: {} };
+    };
+
+    return {
+        init,
+        collectModeOptions,
+        getMode: () => state.currentMode,
+    };
+})();
+
+window.lazybacktestBatchUI = batchModeUI;
+
+// --- 新增：初始化批量優化功能 ---
+function initBatchOptimizationFeature() {
+    const initHandler = () => {
+        if (window.batchOptimization && typeof window.batchOptimization.init === 'function') {
             window.batchOptimization.init();
         }
+        if (window.lazybacktestBatchUI && typeof window.lazybacktestBatchUI.init === 'function') {
+            window.lazybacktestBatchUI.init();
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initHandler);
+    } else {
+        initHandler();
     }
 }
 
