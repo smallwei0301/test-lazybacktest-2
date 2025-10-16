@@ -1738,6 +1738,99 @@
                                                                 </label>
                                                             </div>
                                                         </div>
+                                                        <div>
+                                                            <h4 class="font-medium text-foreground mb-3" style="color: var(--foreground);">搜尋模式</h4>
+                                                            <div class="flex flex-wrap gap-4 text-sm">
+                                                                <label class="inline-flex items-center gap-2">
+                                                                    <input type="radio" name="batch-search-mode" value="grid" checked />
+                                                                    <span style="color: var(--foreground);">格點搜尋</span>
+                                                                </label>
+                                                                <label class="inline-flex items-center gap-2">
+                                                                    <input type="radio" name="batch-search-mode" value="random" />
+                                                                    <span style="color: var(--foreground);">隨機搜尋</span>
+                                                                </label>
+                                                                <label class="inline-flex items-center gap-2">
+                                                                    <input type="radio" name="batch-search-mode" value="ga" />
+                                                                    <span style="color: var(--foreground);">基因演算法 (GA)</span>
+                                                                </label>
+                                                            </div>
+                                                            <p class="text-xs text-muted-foreground mt-2" style="color: var(--muted-foreground);">選 GA 後，系統會以族群演化方式產生參數組合並復用既有回測流程。</p>
+                                                        </div>
+                                                        <div id="ga-settings-panel" class="hidden border border-dashed rounded-lg p-4 space-y-4" style="border-color: color-mix(in srgb, var(--accent) 35%, transparent); background-color: color-mix(in srgb, var(--accent) 5%, transparent);">
+                                                            <div class="grid md:grid-cols-3 gap-4">
+                                                                <div>
+                                                                    <label for="ga-population" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">族群大小</label>
+                                                                    <input type="number" id="ga-population" value="50" min="20" max="300" step="10" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">每一代評估的參數組合數量</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-generations" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">演化代數</label>
+                                                                    <input type="number" id="ga-generations" value="20" min="5" max="200" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">總演化代數，代數越高越有機會收斂</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-elitism" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">菁英保留數</label>
+                                                                    <input type="number" id="ga-elitism" value="2" min="1" max="10" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">每代直接保留的最佳個體數量</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-crossover-rate" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">交配率</label>
+                                                                    <input type="number" id="ga-crossover-rate" value="0.9" min="0" max="1" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">控制父代交配產生新解的比例</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-mutation-rate" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始突變率</label>
+                                                                    <input type="number" id="ga-mutation-rate" value="0.15" min="0" max="1" step="0.01" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">突變率會隨代數自動下降</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-early-stop" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">提早停止 (代)</label>
+                                                                    <input type="number" id="ga-early-stop" value="5" min="0" max="50" step="1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">連續 N 代未改善即自動結束，0 代表關閉</p>
+                                                                </div>
+                                                            </div>
+                                                            <div class="grid md:grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label for="ga-seed" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">亂數種子</label>
+                                                                    <input type="text" id="ga-seed" placeholder="如需重現結果可填入自訂種子" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">相同種子 + 相同資料可重播同一套結果</p>
+                                                                </div>
+                                                                <div>
+                                                                    <label for="ga-time-budget" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">時間上限 (分鐘)</label>
+                                                                    <input type="number" id="ga-time-budget" min="0" max="180" step="1" placeholder="預設不限" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    <p class="text-xs text-muted-foreground mt-1" style="color: var(--muted-foreground);">達到時間上限會保留當前最佳解並提前結束</p>
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <h5 class="text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">適應度權重</h5>
+                                                                <div class="grid md:grid-cols-4 gap-4 text-xs">
+                                                                    <div>
+                                                                        <label for="ga-weight-annualized" class="block text-[11px] font-medium mb-1" style="color: var(--foreground);">年化報酬權重</label>
+                                                                        <input type="number" id="ga-weight-annualized" value="1" step="0.1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label for="ga-weight-sharpe" class="block text-[11px] font-medium mb-1" style="color: var(--foreground);">夏普比率權重</label>
+                                                                        <input type="number" id="ga-weight-sharpe" value="0.6" step="0.1" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label for="ga-weight-drawdown" class="block text-[11px] font-medium mb-1" style="color: var(--foreground);">回撤懲罰</label>
+                                                                        <input type="number" id="ga-weight-drawdown" value="0.4" step="0.05" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label for="ga-weight-trades" class="block text-[11px] font-medium mb-1" style="color: var(--foreground);">交易次數懲罰</label>
+                                                                        <input type="number" id="ga-weight-trades" value="0.05" step="0.01" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </div>
+                                                                </div>
+                                                                <p class="text-[11px] text-muted-foreground mt-2" style="color: var(--muted-foreground);">GA 會以「年化報酬 × 權重 + 夏普 × 權重 - 回撤 × 懲罰 - 交易次數 × 懲罰」計算適應度，可依需求微調。</p>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
+                                                                <label class="inline-flex items-center gap-2">
+                                                                    <input type="checkbox" id="ga-optimize-risk" />
+                                                                    <span>同時優化停損 / 停利參數</span>
+                                                                </label>
+                                                                <span>若勾選，會將全局停損與停利範圍納入基因序列。</span>
+                                                            </div>
+                                                        </div>
                                                         <div class="grid md:grid-cols-3 gap-4">
                                                             <div>
                                                                 <label for="batch-optimize-parameter-trials" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">參數優化次數</label>
@@ -1796,6 +1889,46 @@
                                                                 由於測試次數與選擇策略較多，預估需要較長等待時間，請耐心等候...
                                                             </div>
                                                         </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div id="ga-progress-panel" class="hidden mb-6 space-y-4">
+                                                <div class="card" style="background-color: color-mix(in srgb, var(--primary) 6%, transparent); border-color: color-mix(in srgb, var(--primary) 30%, transparent);">
+                                                    <div class="card-header pb-3">
+                                                        <div class="flex items-center justify-between">
+                                                            <h5 class="card-title text-sm font-medium flex items-center" style="color: color-mix(in srgb, var(--primary) 75%, var(--foreground) 25%);">
+                                                                <i data-lucide="dna" class="lucide mr-2" style="color: var(--primary);"></i>
+                                                                GA 演化進度
+                                                            </h5>
+                                                            <span id="ga-progress-percent" class="text-sm font-semibold" style="color: var(--primary);">0%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="w-full bg-primary/20 rounded-full h-3" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent);">
+                                                            <div id="ga-progress-bar" class="h-3 rounded-full" style="width: 0%; background: linear-gradient(135deg, var(--primary), var(--accent));"></div>
+                                                        </div>
+                                                        <div class="grid md:grid-cols-2 gap-2 text-xs" style="color: color-mix(in srgb, var(--primary) 65%, var(--foreground) 35%);">
+                                                            <div id="ga-progress-status">尚未開始</div>
+                                                            <div id="ga-progress-mutation">突變率：-</div>
+                                                            <div id="ga-progress-time">耗時：0 秒</div>
+                                                            <div id="ga-progress-evals">評估次數：0</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="card border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header pb-2">
+                                                        <h6 class="card-title text-sm font-semibold" style="color: var(--foreground);">當前最佳解</h6>
+                                                    </div>
+                                                    <div id="ga-best-summary" class="card-content text-xs leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                                        尚未開始演化。
+                                                    </div>
+                                                </div>
+                                                <div class="card border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header pb-2">
+                                                        <h6 class="card-title text-sm font-semibold" style="color: var(--foreground);">收斂趨勢</h6>
+                                                    </div>
+                                                    <div class="card-content">
+                                                        <canvas id="ga-convergence-chart" height="180"></canvas>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2441,6 +2574,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
+    <script type="module" src="js/gaRunner.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
