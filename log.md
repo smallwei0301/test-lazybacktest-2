@@ -1,4 +1,14 @@
 
+## 2026-02-10 — Patch LB-GA-FLOW-20250712A
+- **Scope**: 批量優化新增基因演算法（GA）模式，整合既有 Worker 管線。
+- **Updates**:
+  - 新增 `js/gaRunner.js` 以模組化 GA 流程，支援族群演化、輪盤選擇、雙點交配、突變衰減與 IndexedDB 快取。
+  - 批量優化面板加入「格點搜尋／隨機搜尋／GA」模式切換，並提供族群、代數、突變率、早停與種子等控制項與暫停/續跑按鈕。
+  - GA 透過現有 Evaluator 回測族群，進度面板即時顯示最佳分數、參數摘要與世代歷史，完成後可直接載入最佳組合。
+- **Testing**:
+  - `node --input-type=module -e "import path from 'path'; await import(path.toNamespacedPath('file://'+path.join(process.cwd(),'js/gaRunner.js'))); console.log('ga ok');"`
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');const code=fs.readFileSync('js/batch-optimization.js','utf8');new vm.Script(code,{filename:'js/batch-optimization.js'});console.log('batch ok');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
