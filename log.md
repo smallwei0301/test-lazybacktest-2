@@ -1,4 +1,20 @@
 
+## 2025-09-27 — Patch LB-ROLLING-TEST-20250927A
+- **Scope**: Walk-Forward 批量優化覆寫一致性與摘要標籤調整。
+- **Updates**:
+  - 新增訓練視窗覆寫工具，於每個視窗優化前套用與批量優化相同的日期、資金與交易設定，確保訓練集最佳參數與單獨批量優化結果一致。
+  - 滾動測試摘要恢復顯示「隔日開盤」「總資金買入」等字樣，對齊主回測與批量優化頁面用語，避免誤判參數不一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2025-09-22 — Patch LB-ROLLING-TEST-20250922B
+- **Scope**: Walk-Forward 評分與滾動測試批量優化整合。
+- **Updates**:
+  - 導入 Pardo (2014) Walk-Forward Efficiency 與 QuantConnect／TradeStation 門檻，重寫評分公式並公開權重與分段換算規則。
+  - 總結卡片新增 Walk-Forward Efficiency 指標，並在報告說明具體門檻與評級標準。
+  - 精簡參數摘要文字，聚合多空流程與風控設定，提升逐窗表格的可讀性。
+  - 訓練期優化自動初始化批量優化 Worker，保證滾動測試使用與批量優化一致的搜尋範圍與最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
@@ -1015,4 +1031,20 @@
   - `js/ai-prediction.js` 移除預估漲跌幅的門檻 fallback，僅顯示模型期望值；若無平均報酬可用則顯示破折號，避免與門檻數值混淆，並更新版本標記供前端診斷。
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-18 — Patch LB-ROLLING-TEST-20250925A
+- **Issue recap**: Walk-Forward 訓練期僅逐參數掃描一次，未套用批量優化的交替迭代流程，導致滾動測試未能收斂到批量優化挑選的最佳參數組合。
+- **Fix**:
+  - `js/rolling-test.js` 導入批量優化迭代上限設定，於訓練視窗對做多/做空進出場與風險管理重複交替優化，並以原始參數快照計算實際調整鍵值。
+  - 同步收集各迭代指標並整合訊息摘要，確保最終報告揭露批量優化引擎選出的參數與指標成效，版本碼更新為 `LB-ROLLING-TEST-20250925A`。
+- **Diagnostics**: 於本地以滾動測試啟用訓練期優化，確認多輪迭代後的參數與批量優化面板載入結果一致，並檢視報告訊息顯示迭代後的調整明細。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-02-24 — Patch LB-ROLLING-TEST-20250926A
+- **Issue recap**: Walk-Forward 訓練期雖已循序掃描參數，但仍與批量優化面板獨立執行時的最佳解不符，原因在於滾動測試未真正復用批量優化的組合交替流程與資料視窗設定。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `clonePlainObject`/`prepareBaseParamsForOptimization`，並擴充 `optimizeCombinationIterative`、`optimizeStrategyWithInternalConvergence`、`executeBacktestForCombination` 支援外部覆寫訓練區間與啟用範圍，同步公開 `runCombinationOptimization` 以便模組外重用。
+  - `js/rolling-test.js` 建立 `runCombinationOptimizationForWindow`，於訓練期直接呼叫批量優化組合迭代並以原始參數快照產生摘要，保留對風險與做空參數的交替迭代，版本碼更新為 `LB-ROLLING-TEST-20250926A`。
+- **Diagnostics**: 以單視窗訓練期手動執行批量優化與滾動測試，自比對進/出場參數與最終指標，確認兩者一致並在報告中顯示批量優化目標指標；同時驗證做空與風險參數仍能在剩餘迭代中收斂。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
