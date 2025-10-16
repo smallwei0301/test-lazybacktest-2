@@ -1016,3 +1016,12 @@
 - **Diagnostics**: 以樣本較少的大漲資料集重訓 ANN，確認預測表中的預估漲跌幅僅在有類別平均報酬時顯示數值；於無足夠樣本的情境下顯示 `—` 而非門檻百分比，並檢查 ANN 診斷版號更新。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-02-14 — Patch LB-GA-RUNNER-20250214A / LB-GA-OPT-20250214A / LB-GA-UI-20250214A
+- **Issue recap**: 批量優化僅支援格點與隨機搜尋，對於參數維度較高的策略耗時且易陷入局部最佳，缺乏智慧化搜尋與進度回饋，也無法重現結果或暫停恢復。
+- **Fix**:
+  - 新增 `js/gaRunner.js` 封裝 GA 主流程，支援亂數種子、IndexedDB 快取、動態突變與早停，同時保留進化歷程。
+  - `js/batch-optimization.js` 導入 GA 模式切換、控制訊號、快照初始種群、Chart.js 收斂圖與 JSON 匯出，並整合現有 Worker evaluator。
+  - `index.html` 擴充批量優化介面，加入模式選擇、GA 參數面板、即時狀態與最佳績效摘要。
+- **Diagnostics**: 本地以多組策略切換 GA 模式，觀察即時進度、暫停/續跑與結果表格套用最佳參數皆正常；IndexedDB 不可用時自動退回記憶體快取並輸出警示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/gaRunner.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
