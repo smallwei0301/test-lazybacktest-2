@@ -1,5 +1,9 @@
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Stage4 Tag: LB-STAGE4-20250930A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -3211,6 +3215,543 @@ function hideBatchProgress() {
     }
 }
 
+// --- Stage4 Local Refinement Helpers (LB-STAGE4-20250930A) ---
+const STAGE4_VERSION_CODE = 'LB-STAGE4-20250930A';
+
+function stage4DeepClone(value) {
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            console.warn('[Stage4] structuredClone failed, fallback to JSON clone.', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        console.warn('[Stage4] JSON clone failed, returning shallow copy.', error);
+        if (Array.isArray(value)) return [...value];
+        return value && typeof value === 'object' ? { ...value } : value;
+    }
+}
+
+function stage4SortObject(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => stage4SortObject(item));
+    }
+    if (value && typeof value === 'object') {
+        const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+        const sorted = {};
+        entries.forEach(([key, val]) => {
+            sorted[key] = stage4SortObject(val);
+        });
+        return sorted;
+    }
+    return value;
+}
+
+export function paramKey(params) {
+    const safeParams = params && typeof params === 'object' ? params : {};
+    return JSON.stringify(stage4SortObject(safeParams));
+}
+
+function extractStage4ParamStructure(row) {
+    if (!row || typeof row !== 'object') return {};
+    if (row.params && typeof row.params === 'object') {
+        return stage4DeepClone(row.params);
+    }
+    const structure = {};
+    if (row.buyParams && typeof row.buyParams === 'object') {
+        structure.buy = stage4DeepClone(row.buyParams);
+    }
+    if (row.sellParams && typeof row.sellParams === 'object') {
+        structure.sell = stage4DeepClone(row.sellParams);
+    }
+    const risk = {};
+    if (row.stopLoss !== undefined) risk.stopLoss = row.stopLoss;
+    if (row.takeProfit !== undefined) risk.takeProfit = row.takeProfit;
+    if (Object.keys(risk).length > 0) structure.risk = risk;
+    return structure;
+}
+
+function getMetricValue(source, metricKey) {
+    if (!source || !metricKey) return NaN;
+    if (source.metrics && source.metrics[metricKey] !== undefined) {
+        return source.metrics[metricKey];
+    }
+    if (source[metricKey] !== undefined) {
+        return source[metricKey];
+    }
+    return NaN;
+}
+
+function computeStage4Score(metrics, metricKey) {
+    if (!metricKey) return Number.NEGATIVE_INFINITY;
+    const value = getMetricValue(metrics, metricKey);
+    if (!Number.isFinite(value)) return Number.NEGATIVE_INFINITY;
+    if (metricKey === 'maxDrawdown') {
+        return -Math.abs(value);
+    }
+    return value;
+}
+
+function buildStage4StartParams(currentBest) {
+    const start = {
+        buy: stage4DeepClone(currentBest?.buyParams || currentBest?.entryParams || {}),
+        sell: stage4DeepClone(currentBest?.sellParams || currentBest?.exitParams || {}),
+        risk: {}
+    };
+    if (currentBest && typeof currentBest === 'object') {
+        if (currentBest.stopLoss !== undefined) start.risk.stopLoss = currentBest.stopLoss;
+        if (currentBest.takeProfit !== undefined) start.risk.takeProfit = currentBest.takeProfit;
+    }
+    if (Object.keys(start.risk).length === 0) delete start.risk;
+    return start;
+}
+
+function determineDescriptorType(range) {
+    const from = range?.from;
+    const to = range?.to;
+    const step = range?.step;
+    if ([from, to, step].every((val) => Number.isInteger(val))) {
+        return 'int';
+    }
+    return 'float';
+}
+
+function createStage4Descriptors(currentBest) {
+    const descriptors = [];
+    if (!currentBest) return descriptors;
+
+    const entryStrategy = currentBest.buyStrategy;
+    const entryInfo = strategyDescriptions?.[entryStrategy];
+    if (entryInfo && Array.isArray(entryInfo.optimizeTargets)) {
+        entryInfo.optimizeTargets.forEach((target) => {
+            descriptors.push({
+                id: `buy.${target.name}`,
+                scope: 'buy',
+                key: target.name,
+                min: target.range?.from ?? 0,
+                max: target.range?.to ?? 1,
+                step: target.range?.step,
+                type: determineDescriptorType(target.range)
+            });
+        });
+    }
+
+    const exitStrategy = currentBest.sellStrategy;
+    const exitInfo = exitStrategy ? strategyDescriptions?.[exitStrategy] : null;
+    if (exitInfo && Array.isArray(exitInfo.optimizeTargets)) {
+        exitInfo.optimizeTargets.forEach((target) => {
+            descriptors.push({
+                id: `sell.${target.name}`,
+                scope: 'sell',
+                key: target.name,
+                min: target.range?.from ?? 0,
+                max: target.range?.to ?? 1,
+                step: target.range?.step,
+                type: determineDescriptorType(target.range)
+            });
+        });
+    }
+
+    const riskTargets = typeof globalOptimizeTargets === 'object' ? globalOptimizeTargets : {};
+    const includeStopLoss = currentBest && currentBest.stopLoss !== undefined && riskTargets.stopLoss;
+    const includeTakeProfit = currentBest && currentBest.takeProfit !== undefined && riskTargets.takeProfit;
+
+    if (includeStopLoss) {
+        const target = riskTargets.stopLoss;
+        descriptors.push({
+            id: 'risk.stopLoss',
+            scope: 'risk',
+            key: 'stopLoss',
+            min: target.range?.from ?? 0,
+            max: target.range?.to ?? 100,
+            step: target.range?.step,
+            type: determineDescriptorType(target.range)
+        });
+    }
+    if (includeTakeProfit) {
+        const target = riskTargets.takeProfit;
+        descriptors.push({
+            id: 'risk.takeProfit',
+            scope: 'risk',
+            key: 'takeProfit',
+            min: target.range?.from ?? 0,
+            max: target.range?.to ?? 100,
+            step: target.range?.step,
+            type: determineDescriptorType(target.range)
+        });
+    }
+
+    return descriptors;
+}
+
+function clampByDescriptor(value, descriptor) {
+    const min = descriptor.min ?? Number.NEGATIVE_INFINITY;
+    const max = descriptor.max ?? Number.POSITIVE_INFINITY;
+    let clamped = Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+    if (descriptor.type === 'int' || descriptor.type === 'integer') {
+        const step = Number.isFinite(descriptor.step) && descriptor.step > 0 ? descriptor.step : 1;
+        clamped = Math.round(clamped / step) * step;
+        clamped = Math.min(max, Math.max(min, clamped));
+    }
+    return clamped;
+}
+
+function stage4ConstraintFixFactory(descriptors) {
+    const descriptorMap = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]));
+    return (params) => {
+        const fixed = stage4DeepClone(params || {});
+        const applyClamp = (scopeKey, paramKey) => {
+            const descriptor = descriptorMap.get(`${scopeKey}.${paramKey}`);
+            if (!descriptor) return;
+            if (!fixed[scopeKey]) fixed[scopeKey] = {};
+            fixed[scopeKey][paramKey] = clampByDescriptor(fixed[scopeKey][paramKey], descriptor);
+        };
+
+        descriptors.forEach((descriptor) => {
+            const scope = descriptor.scope;
+            const key = descriptor.key;
+            if (!fixed[scope]) fixed[scope] = {};
+            fixed[scope][key] = clampByDescriptor(fixed[scope][key], descriptor);
+        });
+
+        const enforceOrder = (scope) => {
+            if (!fixed[scope]) return;
+            const shortKey = 'shortPeriod';
+            const longKey = 'longPeriod';
+            if (fixed[scope][shortKey] !== undefined && fixed[scope][longKey] !== undefined) {
+                const shortDescriptor = descriptorMap.get(`${scope}.${shortKey}`);
+                const longDescriptor = descriptorMap.get(`${scope}.${longKey}`);
+                if (shortDescriptor && longDescriptor) {
+                    const minGap = Number.isFinite(shortDescriptor.step) ? shortDescriptor.step : 1;
+                    if (fixed[scope][shortKey] >= fixed[scope][longKey]) {
+                        fixed[scope][shortKey] = clampByDescriptor(fixed[scope][longKey] - minGap, shortDescriptor);
+                        if (fixed[scope][shortKey] >= fixed[scope][longKey]) {
+                            fixed[scope][longKey] = clampByDescriptor(fixed[scope][shortKey] + minGap, longDescriptor);
+                        }
+                    }
+                }
+            }
+        };
+
+        enforceOrder('buy');
+        enforceOrder('sell');
+
+        if (fixed.risk) {
+            ['stopLoss', 'takeProfit'].forEach((key) => applyClamp('risk', key));
+            if (Object.keys(fixed.risk).length === 0) {
+                delete fixed.risk;
+            }
+        }
+
+        return fixed;
+    };
+}
+
+function ensureStage4Params(candidate, template) {
+    const base = stage4DeepClone(template || {});
+    if (!base.buy) base.buy = {};
+    if (!base.sell) base.sell = {};
+    if (candidate && typeof candidate === 'object') {
+        if (candidate.buy && typeof candidate.buy === 'object') {
+            base.buy = { ...base.buy, ...candidate.buy };
+        }
+        if (candidate.sell && typeof candidate.sell === 'object') {
+            base.sell = { ...base.sell, ...candidate.sell };
+        }
+        if (candidate.risk && typeof candidate.risk === 'object') {
+            base.risk = { ...(base.risk || {}), ...candidate.risk };
+        }
+    }
+    if (base.risk && Object.keys(base.risk).length === 0) {
+        delete base.risk;
+    }
+    return base;
+}
+
+function createStage4EncodingTools(descriptors, template) {
+    const encodeVec = (chrom) => {
+        const source = ensureStage4Params(chrom, template);
+        return descriptors.map((descriptor) => {
+            const scope = descriptor.scope;
+            const key = descriptor.key;
+            const container = source[scope] || {};
+            const value = container[key];
+            if (Number.isFinite(value)) return value;
+            return clampByDescriptor(value, descriptor);
+        });
+    };
+
+    const decodeVec = (vector) => {
+        const result = { buy: {}, sell: {} };
+        descriptors.forEach((descriptor, index) => {
+            const scope = descriptor.scope;
+            const key = descriptor.key;
+            if (!result[scope]) result[scope] = {};
+            result[scope][key] = clampByDescriptor(vector[index], descriptor);
+        });
+        if (!result.risk || Object.keys(result.risk).length === 0) {
+            delete result.risk;
+        }
+        return ensureStage4Params(result, template);
+    };
+
+    return { encodeVec, decodeVec };
+}
+
+async function evaluateStage4Candidate(candidate, context) {
+    const params = ensureStage4Params(candidate, context.template);
+    const base = prepareBaseParamsForOptimization(getBacktestParams());
+    base.entryStrategy = getWorkerStrategyName(context.currentBest.buyStrategy);
+    base.exitStrategy = getWorkerStrategyName(context.currentBest.sellStrategy);
+    base.entryParams = stage4DeepClone(params.buy || {});
+    base.exitParams = stage4DeepClone(params.sell || {});
+    if (params.risk) {
+        if (params.risk.stopLoss !== undefined) base.stopLoss = params.risk.stopLoss;
+        if (params.risk.takeProfit !== undefined) base.takeProfit = params.risk.takeProfit;
+    }
+    return performSingleBacktestFast(base);
+}
+
+function stage4EvaluatorFactory(context) {
+    return async (population) => {
+        const results = [];
+        for (const candidate of population) {
+            const params = ensureStage4Params(candidate, context.template);
+            try {
+                const metrics = await evaluateStage4Candidate(params, context);
+                const score = computeStage4Score(metrics, context.objectiveKey);
+                results.push({ params, metrics, score });
+            } catch (error) {
+                console.error('[Stage4] Evaluator error:', error);
+                results.push({ params, metrics: null, score: Number.NEGATIVE_INFINITY, error });
+            }
+        }
+        return results;
+    };
+}
+
+function getStage4ObjectiveKey() {
+    return batchOptimizationConfig?.targetMetric || 'annualizedReturn';
+}
+
+function createStage4Row({ method, currentBest, evaluation, score }) {
+    const params = ensureStage4Params(evaluation?.params, buildStage4StartParams(currentBest));
+    const metrics = evaluation?.metrics && typeof evaluation.metrics === 'object'
+        ? evaluation.metrics
+        : (evaluation && typeof evaluation === 'object' ? evaluation : {});
+    const row = {
+        ...metrics,
+        buyStrategy: currentBest.buyStrategy,
+        sellStrategy: currentBest.sellStrategy,
+        buyParams: stage4DeepClone(params.buy || {}),
+        sellParams: stage4DeepClone(params.sell || {}),
+        params: stage4DeepClone(params),
+        metrics: stage4DeepClone(metrics),
+        score: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY,
+        source: `stage4-${method}`,
+        createdAt: Date.now(),
+        optimizationType: `stage4-${method}`,
+        optimizationTypes: [`stage4-${method}`],
+        stage4Version: STAGE4_VERSION_CODE
+    };
+    if (params.risk) {
+        if (params.risk.stopLoss !== undefined) row.stopLoss = params.risk.stopLoss;
+        if (params.risk.takeProfit !== undefined) row.takeProfit = params.risk.takeProfit;
+    }
+    return row;
+}
+
+function upsertByParamKey(row) {
+    const structure = extractStage4ParamStructure(row);
+    const key = paramKey(structure);
+    let action = 'inserted';
+    let existingIndex = -1;
+    for (let index = 0; index < batchOptimizationResults.length; index++) {
+        const existingStructure = extractStage4ParamStructure(batchOptimizationResults[index]);
+        if (paramKey(existingStructure) === key) {
+            existingIndex = index;
+            break;
+        }
+    }
+
+    if (existingIndex >= 0) {
+        const existing = batchOptimizationResults[existingIndex];
+        const existingScore = Number.isFinite(existing.score)
+            ? existing.score
+            : computeStage4Score(existing, getStage4ObjectiveKey());
+        if (row.score > (Number.isFinite(existingScore) ? existingScore : Number.NEGATIVE_INFINITY)) {
+            batchOptimizationResults[existingIndex] = { ...existing, ...row };
+            action = 'replaced';
+        } else {
+            action = 'ignored';
+        }
+    } else {
+        batchOptimizationResults.push(row);
+    }
+
+    if (action !== 'ignored') {
+        sortBatchResults();
+    }
+
+    return { action, row };
+}
+
+function getCurrentBestResultForStage4() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return null;
+    }
+    const metricKey = getStage4ObjectiveKey();
+    let best = batchOptimizationResults[0];
+    let bestScore = computeStage4Score(best, metricKey);
+    batchOptimizationResults.forEach((result) => {
+        const score = computeStage4Score(result, metricKey);
+        if (score > bestScore) {
+            bestScore = score;
+            best = result;
+        }
+    });
+    return best;
+}
+
+function buildStage4Context(currentBest, options = {}) {
+    if (!currentBest || !currentBest.params && !currentBest.buyStrategy) {
+        throw new Error('Stage4: currentBest missing');
+    }
+    const descriptors = createStage4Descriptors(currentBest);
+    if (descriptors.length === 0) {
+        throw new Error('Stage4: No tunable parameters for the selected result');
+    }
+    const template = ensureStage4Params(options.start || buildStage4StartParams(currentBest));
+    const bounds = descriptors.reduce((acc, descriptor) => {
+        acc[descriptor.id] = {
+            min: descriptor.min,
+            max: descriptor.max,
+            step: descriptor.step,
+            type: descriptor.type
+        };
+        return acc;
+    }, {});
+    bounds.constraintFix = stage4ConstraintFixFactory(descriptors);
+    const { encodeVec, decodeVec } = createStage4EncodingTools(descriptors, template);
+    const objectiveKey = options.objectiveKey || getStage4ObjectiveKey();
+    const evaluator = options.evaluator || stage4EvaluatorFactory({
+        currentBest,
+        descriptors,
+        template,
+        objectiveKey
+    });
+    const objective = options.objective || ((evaluation) => computeStage4Score(evaluation, objectiveKey));
+    return {
+        currentBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        template,
+        objectiveKey,
+        start: template
+    };
+}
+
+export async function runStage4(method, ctx) {
+    if (!ctx || !ctx.currentBest) {
+        throw new Error('Stage4: currentBest missing');
+    }
+    const context = {
+        ...ctx,
+        bounds: ctx.bounds || {},
+        encodeVec: ctx.encodeVec,
+        decodeVec: ctx.decodeVec,
+        evaluator: ctx.evaluator,
+        objective: ctx.objective || ((evaluation) => computeStage4Score(evaluation, ctx.objectiveKey || getStage4ObjectiveKey())),
+        template: ctx.template || buildStage4StartParams(ctx.currentBest)
+    };
+
+    if (typeof context.encodeVec !== 'function' || typeof context.decodeVec !== 'function') {
+        throw new Error('Stage4: encodeVec/decodeVec are required');
+    }
+    if (typeof context.evaluator !== 'function') {
+        throw new Error('Stage4: evaluator is required');
+    }
+    if (!context.bounds || Object.keys(context.bounds).length === 0) {
+        throw new Error('Stage4: bounds missing');
+    }
+
+    const start = ctx.start || context.start || buildStage4StartParams(ctx.currentBest);
+    let refined = null;
+    const progressHandler = (payload) => ctx.uiProgress?.({ stage4: method, ...payload });
+
+    if (method === 'spsa') {
+        const options = ctx.methodOptions || ctx.options || {};
+        refined = await runSPSA({
+            start,
+            bounds: context.bounds,
+            encodeVec: context.encodeVec,
+            decodeVec: context.decodeVec,
+            evaluator: context.evaluator,
+            objective: context.objective,
+            steps: options.steps,
+            a0: options.a0,
+            c0: options.c0,
+            alpha: options.alpha,
+            gamma: options.gamma,
+            onProgress: progressHandler
+        });
+    } else if (method === 'cem') {
+        const options = ctx.methodOptions || ctx.options || {};
+        refined = await runCEM({
+            start,
+            bounds: context.bounds,
+            encodeVec: context.encodeVec,
+            decodeVec: context.decodeVec,
+            evaluator: context.evaluator,
+            objective: context.objective,
+            iters: options.iters,
+            popSize: options.popSize,
+            eliteRatio: options.eliteRatio,
+            initSigma: options.initSigma,
+            onProgress: progressHandler
+        });
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    if (!refined || !refined.bestParams) {
+        throw new Error('Stage4: Refinement did not produce a valid result');
+    }
+
+    const bestEvaluation = refined.bestEvaluation
+        || (await context.evaluator([refined.bestParams]))?.[0];
+    if (!bestEvaluation) {
+        throw new Error('Stage4: Unable to evaluate refined parameters');
+    }
+
+    const bestScore = Number.isFinite(refined.bestScore)
+        ? refined.bestScore
+        : context.objective(bestEvaluation);
+
+    const row = createStage4Row({
+        method,
+        currentBest: ctx.currentBest,
+        evaluation: bestEvaluation,
+        score: bestScore
+    });
+
+    const { action } = upsertByParamKey(row);
+    row.stage4Action = action;
+    return row;
+}
+
+function getResultsSnapshot() {
+    return Array.isArray(batchOptimizationResults)
+        ? batchOptimizationResults.map((result) => stage4DeepClone(result))
+        : [];
+}
+
 // 隱藏批量進度
 function hideBatchProgress() {
     const progressElement = document.getElementById('batch-optimization-progress');
@@ -3225,7 +3766,14 @@ window.batchOptimization = {
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    runStage4,
+    paramKey,
+    buildStage4Context,
+    getCurrentBestResult: getCurrentBestResultForStage4,
+    getResultsSnapshot,
+    upsertByParamKey,
+    getStage4ObjectiveKey
 };
 
 // 測試風險管理優化功能
