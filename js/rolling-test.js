@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v1.3 ---
-// Patch Tag: LB-ROLLING-TEST-20250918A
+// --- 滾動測試模組 - v2.0 ---
+// Patch Tag: LB-ROLLING-TEST-20250930A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,8 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250918A',
+        version: 'LB-ROLLING-TEST-20250930A',
+        batchOptimizerInitialized: false,
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -30,12 +31,16 @@
     };
 
     const SCORE_WEIGHTS = {
-        annualizedReturn: 0.35,
-        sharpeRatio: 0.3,
-        sortinoRatio: 0.2,
-        maxDrawdown: 0.1,
-        winRate: 0.05,
+        annualizedReturn: 0.28,
+        sharpeRatio: 0.24,
+        sortinoRatio: 0.16,
+        maxDrawdown: 0.12,
+        winRate: 0.1,
+        walkForwardEfficiency: 0.1,
     };
+
+    const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
+    const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -194,16 +199,19 @@
             const win = state.windows[i];
             state.progress.windowIndex = i + 1;
 
-            let windowParams = deepClone(baseParams);
+            const trainingBaseParams = buildTrainingWindowBaseParams(baseParams, win);
+            let windowParams = deepClone(trainingBaseParams);
             let optimizationSummary = null;
 
             if (optimizationPlan.enabled) {
                 try {
                     state.progress.stage = '參數優化';
                     updateProgressUI(`視窗 ${state.progress.windowIndex}/${state.windows.length} · 參數優化`);
-                    const optimizationResult = await optimizeParametersForWindow(windowParams, win, optimizationPlan);
+                    const optimizationResult = await optimizeParametersForWindow(trainingBaseParams, win, optimizationPlan);
                     if (optimizationResult?.params) {
-                        windowParams = optimizationResult.params;
+                        windowParams = deepClone(optimizationResult.params);
+                    } else {
+                        windowParams = deepClone(trainingBaseParams);
                     }
                     optimizationSummary = optimizationResult?.summary || null;
                 } catch (error) {
@@ -389,16 +397,25 @@
             return;
         }
 
-        const analysisEntries = state.results.map((entry, index) => ({
-            index,
-            window: entry.window,
-            training: extractMetrics(entry.training),
-            testing: extractMetrics(entry.testing),
-            rawTraining: entry.training,
-            rawTesting: entry.testing,
-            optimization: entry.optimization || null,
-            paramsSnapshot: entry.params || null,
-        }));
+        const analysisEntries = state.results.map((entry, index) => {
+            const trainingMetrics = extractMetrics(entry.training);
+            const testingMetrics = extractMetrics(entry.testing);
+            const walkForwardEfficiency = computeWalkForwardEfficiency(trainingMetrics, testingMetrics);
+            if (Number.isFinite(walkForwardEfficiency)) {
+                testingMetrics.walkForwardEfficiency = walkForwardEfficiency;
+            }
+            return {
+                index,
+                window: entry.window,
+                training: trainingMetrics,
+                testing: testingMetrics,
+                walkForwardEfficiency,
+                rawTraining: entry.training,
+                rawTesting: entry.testing,
+                optimization: entry.optimization || null,
+                paramsSnapshot: entry.params || null,
+            };
+        });
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
 
@@ -429,7 +446,7 @@
                 accent: aggregate.gradeColor,
                 description: [
                     `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
-                    '（達門檻約 70 分，超標越多加分）',
+                    '（含 Walk-Forward Efficiency 及風險門檻加權）',
                 ].join(''),
             },
             {
@@ -441,6 +458,11 @@
                 title: 'Sharpe / Sortino 中位數',
                 value: `${formatNumber(aggregate.medianSharpe)} / ${formatNumber(aggregate.medianSortino)}`,
                 description: 'Sharpe 與 Sortino 比率中位數',
+            },
+            {
+                title: 'Walk-Forward Efficiency',
+                value: formatPercent(aggregate.averageWalkForwardEfficiency),
+                description: `Pardo 定義的 OOS/訓練報酬比率（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`,
             },
             {
                 title: '通過視窗比例',
@@ -541,41 +563,52 @@
 
     function buildParameterSummary(params) {
         if (!params || typeof params !== 'object') return '—';
-        const blocks = [];
+        const segments = [];
 
-        const longEntry = describeStrategyBlock('做多進場', params.entryStrategy, params.entryParams, params.entryStages, 'entry');
-        if (longEntry) blocks.push(longEntry);
-
-        const longExit = describeStrategyBlock('做多出場', params.exitStrategy, params.exitParams, params.exitStages, 'exit');
-        if (longExit) blocks.push(longExit);
+        const longSegment = describeTradingSide('多頭', {
+            entryStrategy: params.entryStrategy,
+            entryParams: params.entryParams,
+            entryStages: params.entryStages,
+            exitStrategy: params.exitStrategy,
+            exitParams: params.exitParams,
+            exitStages: params.exitStages,
+        });
+        if (longSegment) segments.push(longSegment);
 
         if (params.enableShorting) {
-            const shortEntry = describeStrategyBlock('做空進場', params.shortEntryStrategy, params.shortEntryParams, params.shortEntryStages, 'shortEntry');
-            if (shortEntry) blocks.push(shortEntry);
-            const shortExit = describeStrategyBlock('回補出場', params.shortExitStrategy, params.shortExitParams, params.shortExitStages, 'shortExit');
-            if (shortExit) blocks.push(shortExit);
+            const shortSegment = describeTradingSide('空頭', {
+                entryStrategy: params.shortEntryStrategy,
+                entryParams: params.shortEntryParams,
+                entryStages: params.shortEntryStages,
+                exitStrategy: params.shortExitStrategy,
+                exitParams: params.shortExitParams,
+                exitStages: params.shortExitStages,
+                scopePrefix: 'short',
+            });
+            if (shortSegment) segments.push(shortSegment);
         }
 
         const risk = buildRiskSummary(params);
-        if (risk) blocks.push(risk);
+        if (risk) segments.push(`風控：${risk}`);
 
-        return blocks.length > 0 ? blocks.join('｜') : '—';
+        return segments.length > 0 ? segments.join('｜') : '—';
     }
 
-    function describeStrategyBlock(label, strategyKey, paramObj, stages, scope) {
-        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
-        const details = [];
-        const paramText = formatParamEntries(paramObj);
-        if (paramText) details.push(paramText);
-        const stageText = formatStageSummary(stages);
-        if (stageText) details.push(stageText);
+    function describeTradingSide(label, config) {
+        const entrySummary = describeStrategyFlow('入', config.entryStrategy, config.entryParams, config.entryStages, config.scopePrefix ? `${config.scopePrefix}Entry` : 'entry');
+        const exitSummary = describeStrategyFlow('出', config.exitStrategy, config.exitParams, config.exitStages, config.scopePrefix ? `${config.scopePrefix}Exit` : 'exit');
+        const parts = [entrySummary, exitSummary].filter(Boolean);
+        if (parts.length === 0) return '';
+        return `${label} ${parts.join(' → ')}`;
+    }
 
-        if (!strategyName && details.length === 0) return '';
-        let summary = `${label}：${strategyName || '—'}`;
-        if (details.length > 0) {
-            summary += `（${details.join('、')}）`;
-        }
-        return summary;
+    function describeStrategyFlow(prefix, strategyKey, paramObj, stages, scope) {
+        const strategyName = resolveStrategyDisplayName(strategyKey, scope);
+        if (!strategyName) return '';
+        const paramText = formatParamEntries(paramObj);
+        const stageText = formatStageSummary(stages);
+        const details = [paramText, stageText].filter(Boolean).join('、');
+        return `${prefix}:${strategyName}${details ? `（${details}）` : ''}`;
     }
 
     function resolveStrategyDisplayName(strategyKey, scope) {
@@ -601,7 +634,10 @@
                 return `${label}=${formatted}`;
             })
             .filter((entry) => entry);
-        return entries.length > 0 ? entries.join('、') : '';
+        if (entries.length === 0) return '';
+        const compact = entries.slice(0, 2);
+        if (entries.length > 2) compact.push('…');
+        return compact.join('、');
     }
 
     function formatParamValue(value) {
@@ -645,7 +681,7 @@
         if (timing) parts.push(`執行點 ${timing}`);
         const basis = resolvePositionBasisLabel(params.positionBasis);
         if (basis) parts.push(`部位基準 ${basis}`);
-        return parts.length > 0 ? `風控：${parts.join('、')}` : '';
+        return parts.join('、');
     }
 
     function resolveTradeTimingLabel(value) {
@@ -716,7 +752,7 @@
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
-        const score = computeCompositeScore(validMetrics, thresholds);
+        const score = computeCompositeScore(entries, thresholds);
         const gradeInfo = resolveGrade(score, passRate, passCount, evaluations.length);
 
         const summaryText = buildSummaryText({
@@ -728,6 +764,7 @@
             medianSharpe,
             medianSortino,
             averageMaxDrawdown,
+            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
         });
 
@@ -746,6 +783,7 @@
             averageMaxDrawdown,
             medianSharpe,
             medianSortino,
+            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
         };
     }
@@ -754,16 +792,20 @@
         const parts = [];
         parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
         parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
+        if (Number.isFinite(context.averageWalkForwardEfficiency)) {
+            parts.push(`Walk-Forward Efficiency 平均 ${formatPercent(context.averageWalkForwardEfficiency)}（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`);
+        }
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
         return parts.join('；');
     }
 
-    function computeCompositeScore(metricsList, thresholds) {
-        if (!Array.isArray(metricsList) || metricsList.length === 0) return 0;
+    function computeCompositeScore(entries, thresholds) {
+        if (!Array.isArray(entries) || entries.length === 0) return 0;
         let weightedScore = 0;
         let weightSum = 0;
 
-        metricsList.forEach((metrics) => {
+        entries.forEach((entry) => {
+            const metrics = entry?.testing;
             if (!metrics || metrics.error) return;
             const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
             if (annScore !== null) {
@@ -789,6 +831,11 @@
             if (winRateScore !== null) {
                 weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
                 weightSum += SCORE_WEIGHTS.winRate;
+            }
+            const wfeScore = scorePositiveMetric(metrics.walkForwardEfficiency, WALK_FORWARD_EFFICIENCY_BASELINE);
+            if (wfeScore !== null) {
+                weightedScore += SCORE_WEIGHTS.walkForwardEfficiency * wfeScore;
+                weightSum += SCORE_WEIGHTS.walkForwardEfficiency;
             }
         });
 
@@ -1149,6 +1196,27 @@
         const optimizeShortEntry = Boolean(document.getElementById('rolling-optimize-short-entry')?.checked);
         const optimizeShortExit = Boolean(document.getElementById('rolling-optimize-short-exit')?.checked);
         const optimizeRisk = Boolean(document.getElementById('rolling-optimize-risk')?.checked);
+        let iterationLimit = Number.NaN;
+
+        const rollingIterationEl = document.getElementById('rolling-optimize-iteration-limit');
+        if (rollingIterationEl && rollingIterationEl.value !== '') {
+            const parsed = parseFloat(rollingIterationEl.value);
+            if (Number.isFinite(parsed)) iterationLimit = parsed;
+        }
+
+        if (!Number.isFinite(iterationLimit)) {
+            const batchIterationEl = document.getElementById('batch-optimize-iteration-limit');
+            if (batchIterationEl && batchIterationEl.value !== '') {
+                const parsed = parseFloat(batchIterationEl.value);
+                if (Number.isFinite(parsed)) iterationLimit = parsed;
+            }
+        }
+
+        if (!Number.isFinite(iterationLimit)) {
+            iterationLimit = DEFAULT_OPTIMIZATION_ITERATIONS;
+        }
+
+        iterationLimit = clampNumber(Math.round(iterationLimit), 1, 100);
 
         return {
             enabled,
@@ -1159,6 +1227,7 @@
             optimizeShortEntry,
             optimizeShortExit,
             optimizeRisk,
+            iterationLimit,
         };
     }
 
@@ -1205,6 +1274,9 @@
             optimizeShortEntry: Boolean(optConfig?.optimizeShortEntry),
             optimizeShortExit: Boolean(optConfig?.optimizeShortExit),
             optimizeRisk: Boolean(optConfig?.optimizeRisk),
+            iterationLimit: Number.isFinite(optConfig?.iterationLimit)
+                ? Math.max(1, Math.round(optConfig.iterationLimit))
+                : DEFAULT_OPTIMIZATION_ITERATIONS,
         };
 
         const plan = {
@@ -1255,6 +1327,59 @@
         return scopes;
     }
 
+    function buildTrainingWindowBaseParams(baseParams, windowInfo) {
+        const clone = deepClone(baseParams || {});
+        normalizeWindowBaseParams(clone, windowInfo);
+        return clone;
+    }
+
+    function normalizeWindowBaseParams(target, windowInfo) {
+        if (!target || typeof target !== 'object') return;
+        if (windowInfo?.trainingStart) target.startDate = windowInfo.trainingStart;
+        if (windowInfo?.trainingEnd) target.endDate = windowInfo.trainingEnd;
+        stripRelativeRangeControls(target);
+        clearWindowDerivedFields(target);
+        target.entryStages = normalizeStageArray(target.entryStages, target.positionSize, 100);
+        target.exitStages = normalizeStageArray(target.exitStages, 100, 100);
+    }
+
+    function stripRelativeRangeControls(target) {
+        const keys = [
+            'recentYears',
+            'recentMonths',
+            'recentQuarters',
+            'recentWeeks',
+            'recentDays',
+            'recentRange',
+            'useRecentYears',
+            'useRecentRange',
+        ];
+        keys.forEach((key) => {
+            if (key in target) delete target[key];
+        });
+    }
+
+    function clearWindowDerivedFields(target) {
+        ['dataStartDate', 'effectiveStartDate', 'lookbackDays'].forEach((key) => {
+            if (key in target) delete target[key];
+        });
+    }
+
+    function normalizeStageArray(values, fallbackPrimary, fallbackDefault) {
+        const resolved = Array.isArray(values)
+            ? values
+                .map((val) => {
+                    const num = Number(val);
+                    return Number.isFinite(num) && num > 0 ? num : null;
+                })
+                .filter((val) => Number.isFinite(val) && val > 0)
+            : [];
+        if (resolved.length > 0) return resolved;
+        if (Number.isFinite(fallbackPrimary) && fallbackPrimary > 0) return [Number(fallbackPrimary)];
+        if (Number.isFinite(fallbackDefault) && fallbackDefault > 0) return [Number(fallbackDefault)];
+        return [];
+    }
+
     async function optimizeParametersForWindow(baseWindowParams, windowInfo, plan) {
         const targetMetric = plan?.config?.targetMetric || 'annualizedReturn';
         const metricLabel = resolveMetricLabel(targetMetric);
@@ -1263,12 +1388,23 @@
             metricLabel,
             messages: [],
             scopeResults: [],
+            engine: 'batchOptimizationWorker',
         };
 
         const outputParams = deepClone(baseWindowParams);
+        normalizeWindowBaseParams(outputParams, windowInfo);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
+        }
+
+        if (!state.batchOptimizerInitialized && window.batchOptimization && typeof window.batchOptimization.init === 'function') {
+            try {
+                window.batchOptimization.init();
+                state.batchOptimizerInitialized = true;
+            } catch (error) {
+                console.warn('[Rolling Test] Failed to initialize batch optimization module:', error);
+            }
         }
 
         if (typeof optimizeSingleStrategyParameter !== 'function') {
@@ -1284,23 +1420,132 @@
         }
 
         const workingParams = deepClone(baseWindowParams);
-        workingParams.startDate = windowInfo.trainingStart;
-        workingParams.endDate = windowInfo.trainingEnd;
+        normalizeWindowBaseParams(workingParams, windowInfo);
 
-        for (let i = 0; i < plan.scopes.length; i += 1) {
-            const scope = plan.scopes[i];
-            let result = null;
-            if (scope === 'risk') {
-                result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams);
-            } else {
-                result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams);
+        const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
+        const cachedWindowData = selectCachedDataForWindow(trainingPayload?.dataStartDate, windowInfo.trainingEnd);
+
+        const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
+        const scopeResults = [];
+        const handledScopes = new Set();
+
+        const combinationScopes = Array.isArray(plan.scopes)
+            ? plan.scopes.filter((scope) => scope === 'entry' || scope === 'exit')
+            : [];
+
+        const optimizationOptions = {
+            cachedDataOverride: cachedWindowData,
+        };
+
+        if (combinationScopes.length > 0 && typeof window.batchOptimization?.runCombinationOptimization === 'function') {
+            try {
+                const combinationOutcome = await runCombinationOptimizationForWindow({
+                    baseParams: workingParams,
+                    plan,
+                    windowInfo,
+                    combinationScopes,
+                    baselineSnapshots,
+                    cachedData: cachedWindowData,
+                });
+                    if (combinationOutcome) {
+                        if (combinationOutcome.params) {
+                            if (combinationOutcome.params.entryParams) {
+                                outputParams.entryParams = { ...combinationOutcome.params.entryParams };
+                                workingParams.entryParams = { ...combinationOutcome.params.entryParams };
+                            }
+                            if (combinationOutcome.params.exitParams) {
+                                outputParams.exitParams = { ...combinationOutcome.params.exitParams };
+                                workingParams.exitParams = { ...combinationOutcome.params.exitParams };
+                            }
+                            if ('stopLoss' in combinationOutcome.params) {
+                                outputParams.stopLoss = combinationOutcome.params.stopLoss;
+                                workingParams.stopLoss = combinationOutcome.params.stopLoss;
+                            }
+                            if ('takeProfit' in combinationOutcome.params) {
+                                outputParams.takeProfit = combinationOutcome.params.takeProfit;
+                                workingParams.takeProfit = combinationOutcome.params.takeProfit;
+                            }
+                        }
+                    if (Array.isArray(combinationOutcome.scopeResults)) {
+                        combinationOutcome.scopeResults.forEach((result) => {
+                            if (result.error && !summary.error) summary.error = result.error;
+                            scopeResults.push(result);
+                            if (result.scope) handledScopes.add(result.scope);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.warn('[Rolling Test] Combination optimization failed:', error);
+                const message = `批量優化組合失敗：${error?.message || error}`;
+                summary.messages.push(message);
+                if (!summary.error) summary.error = error?.message || '批量優化組合失敗';
             }
-            if (!result) continue;
-            summary.scopeResults.push(result);
+        }
+
+        const remainingScopes = Array.isArray(plan.scopes)
+            ? plan.scopes.filter((scope) => !handledScopes.has(scope))
+            : [];
+
+        if (remainingScopes.length > 0) {
+            const iterationLimit = Math.max(1, Number(plan?.config?.iterationLimit) || DEFAULT_OPTIMIZATION_ITERATIONS);
+            const scopeLastResult = new Map();
+            const scopeMetricHistory = new Map();
+
+            for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
+                let iterationChanged = false;
+
+                for (let i = 0; i < remainingScopes.length; i += 1) {
+                    const scope = remainingScopes[i];
+                    let result = null;
+                    if (scope === 'risk') {
+                        result = await optimizeRiskScopeForWindow(plan, workingParams, outputParams, optimizationOptions);
+                    } else {
+                        result = await optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams, optimizationOptions);
+                    }
+                    if (!result) continue;
+
+                    scopeLastResult.set(scope, result);
+
+                    if (Number.isFinite(result.metricValue)) {
+                        const history = scopeMetricHistory.get(scope) || [];
+                        history.push(result.metricValue);
+                        scopeMetricHistory.set(scope, history);
+                    }
+
+                    if (Array.isArray(result.changedKeys) && result.changedKeys.length > 0) {
+                        iterationChanged = true;
+                    }
+
+                    if (result.error && !summary.error) {
+                        summary.error = result.error;
+                    }
+                }
+
+                if (!iterationChanged) {
+                    break;
+                }
+            }
+
+            const remainingResults = collectFinalScopeResults(
+                remainingScopes,
+                scopeLastResult,
+                scopeMetricHistory,
+                baselineSnapshots,
+                outputParams,
+                plan.config.targetMetric,
+            );
+
+            remainingResults.forEach((result) => {
+                scopeResults.push(result);
+            });
+        }
+
+        summary.scopeResults = scopeResults;
+
+        summary.scopeResults.forEach((result) => {
             const message = buildOptimizationMessage(result);
             if (message) summary.messages.push(message);
-            if (result.error) summary.error = result.error;
-        }
+        });
 
         if (summary.messages.length > 0) {
             summary.messages.unshift(`優化目標：${metricLabel}`);
@@ -1311,7 +1556,126 @@
         return { params: outputParams, summary };
     }
 
-    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams) {
+    function buildCombinationFromParams(params) {
+        if (!params || typeof params !== 'object') return null;
+        const buyStrategy = resolveStrategyConfigKey(params.entryStrategy, 'entry') || params.entryStrategy;
+        const sellStrategy = resolveStrategyConfigKey(params.exitStrategy, 'exit') || params.exitStrategy;
+        if (!buyStrategy || !sellStrategy) return null;
+
+        const combination = {
+            buyStrategy,
+            sellStrategy,
+            buyParams: deepClone(params.entryParams || {}),
+            sellParams: deepClone(params.exitParams || {}),
+        };
+
+        const riskSnapshot = buildRiskParamsSnapshot(params);
+        if (riskSnapshot && Object.keys(riskSnapshot).length > 0) {
+            combination.riskManagement = { ...riskSnapshot };
+        }
+
+        return combination;
+    }
+
+    function buildStrategyLabelMap(strategyInfo) {
+        const labelMap = {};
+        if (strategyInfo && Array.isArray(strategyInfo.optimizeTargets)) {
+            strategyInfo.optimizeTargets.forEach((target) => {
+                labelMap[target.name] = target.label || target.name;
+            });
+        }
+        return labelMap;
+    }
+
+    function buildCombinationScopeResult(scope, optimizedCombination, baselineSnapshots, plan) {
+        const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+        if (!definition) return null;
+
+        const strategyName = scope === 'entry'
+            ? optimizedCombination.buyStrategy
+            : optimizedCombination.sellStrategy;
+        const configKey = resolveStrategyConfigKey(strategyName, scope);
+        const strategyInfo = strategyDescriptions?.[configKey];
+        const finalParams = scope === 'entry'
+            ? deepClone(optimizedCombination.buyParams || {})
+            : deepClone(optimizedCombination.sellParams || {});
+        const baseParams = baselineSnapshots?.[scope]
+            ? deepClone(baselineSnapshots[scope])
+            : {};
+        const changedKeys = resolveChangedKeysFromSnapshots(baseParams, finalParams);
+        const metricValue = Number.isFinite(optimizedCombination?.__finalMetric)
+            ? optimizedCombination.__finalMetric
+            : null;
+
+        return {
+            scope,
+            label: definition.label,
+            params: finalParams,
+            baseParams,
+            changedKeys,
+            labelMap: buildStrategyLabelMap(strategyInfo),
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue,
+        };
+    }
+
+    async function runCombinationOptimizationForWindow({ baseParams, plan, windowInfo, combinationScopes, baselineSnapshots, cachedData }) {
+        const combination = buildCombinationFromParams(baseParams);
+        if (!combination) return null;
+
+        const overrideParams = deepClone(baseParams);
+        normalizeWindowBaseParams(overrideParams, windowInfo);
+
+        const optimizationConfig = {
+            targetMetric: plan.config.targetMetric,
+            parameterTrials: plan.config.trials,
+            iterationLimit: plan.config.iterationLimit,
+        };
+
+        const optimizedCombination = await window.batchOptimization.runCombinationOptimization(
+            combination,
+            optimizationConfig,
+            {
+                baseParamsOverride: overrideParams,
+                enabledScopes: combinationScopes,
+                cachedDataOverride: cachedData,
+            },
+        );
+
+        if (!optimizedCombination || typeof optimizedCombination !== 'object') {
+            return null;
+        }
+
+        const scopeResults = [];
+        if (combinationScopes.includes('entry')) {
+            const entryResult = buildCombinationScopeResult('entry', optimizedCombination, baselineSnapshots, plan);
+            if (entryResult) scopeResults.push(entryResult);
+        }
+        if (combinationScopes.includes('exit')) {
+            const exitResult = buildCombinationScopeResult('exit', optimizedCombination, baselineSnapshots, plan);
+            if (exitResult) scopeResults.push(exitResult);
+        }
+
+        const params = {};
+        if (optimizedCombination.buyParams) {
+            params.entryParams = { ...optimizedCombination.buyParams };
+        }
+        if (optimizedCombination.sellParams) {
+            params.exitParams = { ...optimizedCombination.sellParams };
+        }
+        if (optimizedCombination.riskManagement && typeof optimizedCombination.riskManagement === 'object') {
+            const { stopLoss, takeProfit } = optimizedCombination.riskManagement;
+            if (Number.isFinite(stopLoss)) params.stopLoss = stopLoss;
+            if (Number.isFinite(takeProfit)) params.takeProfit = takeProfit;
+        }
+
+        return {
+            params,
+            scopeResults,
+        };
+    }
+
+    async function optimizeStrategyScopeForWindow(scope, plan, workingParams, outputParams, options = {}) {
         const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
         if (!definition) return null;
 
@@ -1333,15 +1697,26 @@
 
         let optimizedParams = { ...baseParams };
         const changedKeys = new Set();
+        const metricSnapshots = [];
 
         for (let i = 0; i < strategyInfo.optimizeTargets.length; i += 1) {
             const target = strategyInfo.optimizeTargets[i];
             workingParams[definition.paramsKey] = { ...optimizedParams };
-            const result = await optimizeSingleStrategyParameter(workingParams, target, scope, plan.config.targetMetric, plan.config.trials);
+            const result = await optimizeSingleStrategyParameter(
+                workingParams,
+                target,
+                scope,
+                plan.config.targetMetric,
+                plan.config.trials,
+                { cachedDataOverride: options.cachedDataOverride },
+            );
             if (result && result.value !== undefined) {
                 optimizedParams[target.name] = result.value;
                 if (!areValuesClose(result.value, baseParams[target.name])) {
                     changedKeys.add(target.name);
+                }
+                if (Number.isFinite(result.metric)) {
+                    metricSnapshots.push(result.metric);
                 }
             }
         }
@@ -1356,10 +1731,12 @@
             baseParams,
             changedKeys: Array.from(changedKeys),
             labelMap,
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue: resolveScopeMetricValue(metricSnapshots, plan.config.targetMetric),
         };
     }
 
-    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams) {
+    async function optimizeRiskScopeForWindow(plan, workingParams, outputParams, options = {}) {
         if (typeof optimizeRiskManagementParameters !== 'function') {
             return { scope: 'risk', label: '風險管理', error: '缺少風險優化模組', changedKeys: [] };
         }
@@ -1385,7 +1762,13 @@
         let optimizedResult = {};
         try {
             const riskParams = deepClone(workingParams);
-            optimizedResult = await optimizeRiskManagementParameters(riskParams, optimizeTargets, plan.config.targetMetric, plan.config.trials);
+            optimizedResult = await optimizeRiskManagementParameters(
+                riskParams,
+                optimizeTargets,
+                plan.config.targetMetric,
+                plan.config.trials,
+                { cachedDataOverride: options.cachedDataOverride },
+            );
         } catch (error) {
             return { scope: 'risk', label: '風險管理', error: error?.message || '優化失敗', changedKeys: [] };
         }
@@ -1415,7 +1798,119 @@
             baseParams: { stopLoss: baseStopLoss, takeProfit: baseTakeProfit },
             changedKeys,
             labelMap,
+            metricLabel: resolveMetricLabel(plan.config.targetMetric),
+            metricValue: null,
         };
+    }
+
+    function selectCachedDataForWindow(startIso, endIso) {
+        if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) return null;
+        const startTime = resolveIsoTimestamp(startIso);
+        const endTime = resolveIsoTimestamp(endIso);
+        if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+        const inclusiveEnd = endTime + (24 * 60 * 60 * 1000) - 1;
+        const filtered = cachedStockData.filter((row) => {
+            const rowTime = resolveRowTimestamp(row);
+            return Number.isFinite(rowTime) && rowTime >= startTime && rowTime <= inclusiveEnd;
+        });
+        return filtered.length > 0 ? filtered : null;
+    }
+
+    function resolveRowTimestamp(row) {
+        if (!row || typeof row !== 'object') return Number.NaN;
+        const candidates = [
+            row.date,
+            row.Date,
+            row.tradeDate,
+            row.trade_date,
+            row.timestamp,
+            row.time,
+            row.t,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const ts = resolveIsoTimestamp(candidates[i]);
+            if (Number.isFinite(ts)) return ts;
+        }
+        return Number.NaN;
+    }
+
+    function resolveIsoTimestamp(value) {
+        if (!value) return Number.NaN;
+        if (value instanceof Date) return value.getTime();
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const parsed = Date.parse(value);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+        return Number.NaN;
+    }
+
+    function captureOptimizationBaselines(scopes, params) {
+        const snapshot = {};
+        if (!Array.isArray(scopes)) return snapshot;
+        scopes.forEach((scope) => {
+            if (scope === 'risk') {
+                snapshot.risk = buildRiskParamsSnapshot(params);
+                return;
+            }
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+            snapshot[scope] = deepClone(params[definition.paramsKey] || {});
+        });
+        return snapshot;
+    }
+
+    function collectFinalScopeResults(scopes, scopeLastResult, scopeMetricHistory, baselines, params, targetMetric) {
+        if (!Array.isArray(scopes) || scopes.length === 0) return [];
+        const results = [];
+        scopes.forEach((scope) => {
+            const last = scopeLastResult.get(scope);
+            if (!last) return;
+
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            let finalParams;
+            if (scope === 'risk') {
+                finalParams = buildRiskParamsSnapshot(params);
+            } else if (definition) {
+                finalParams = deepClone(params[definition.paramsKey] || {});
+            } else {
+                finalParams = deepClone(last.params || {});
+            }
+
+            const baseParams = baselines?.[scope] ? deepClone(baselines[scope]) : {};
+            const changedKeys = resolveChangedKeysFromSnapshots(baseParams, finalParams);
+            const history = scopeMetricHistory.get(scope) || [];
+            const metricValue = resolveScopeMetricValue(
+                history.length > 0
+                    ? history
+                    : (Number.isFinite(last.metricValue) ? [last.metricValue] : []),
+                targetMetric,
+            );
+
+            results.push({
+                ...last,
+                params: finalParams,
+                baseParams,
+                changedKeys,
+                metricValue,
+                metricLabel: resolveMetricLabel(targetMetric),
+            });
+        });
+        return results;
+    }
+
+    function buildRiskParamsSnapshot(params) {
+        const snapshot = {};
+        if (Number.isFinite(params?.stopLoss)) snapshot.stopLoss = params.stopLoss;
+        if (Number.isFinite(params?.takeProfit)) snapshot.takeProfit = params.takeProfit;
+        return snapshot;
+    }
+
+    function resolveChangedKeysFromSnapshots(baseParams, finalParams) {
+        const base = baseParams || {};
+        const current = finalParams || {};
+        const keys = new Set([...Object.keys(base), ...Object.keys(current)]);
+        return Array.from(keys).filter((key) => !areValuesClose(base[key], current[key]));
     }
 
     function resolveStrategyConfigKey(strategyName, scope) {
@@ -1445,7 +1940,10 @@
             const value = formatOptimizationParamValue(result.params?.[key]);
             return `${label}=${value}`;
         });
-        return `${result.label}優化：${formatted.join('、')}`;
+        const metricText = Number.isFinite(result.metricValue)
+            ? `（${result.metricLabel || '目標值'}=${formatNumber(result.metricValue)}）`
+            : '';
+        return `${result.label}優化：${formatted.join('、')}${metricText}`;
     }
 
     function formatOptimizationParamValue(value) {
@@ -1472,6 +1970,30 @@
 
     function resolveMetricLabel(metric) {
         return METRIC_LABELS[metric] || metric;
+    }
+
+    function resolveScopeMetricValue(metrics, targetMetric) {
+        if (!Array.isArray(metrics) || metrics.length === 0) return null;
+        if (targetMetric === 'maxDrawdown') {
+            return metrics.reduce((best, current) => {
+                if (!Number.isFinite(current)) return best;
+                if (!Number.isFinite(best)) return current;
+                return Math.min(best, current);
+            }, null);
+        }
+        return metrics.reduce((best, current) => {
+            if (!Number.isFinite(current)) return best;
+            if (!Number.isFinite(best)) return current;
+            return Math.max(best, current);
+        }, null);
+    }
+
+    function computeWalkForwardEfficiency(trainingMetrics, testingMetrics) {
+        if (!trainingMetrics || !testingMetrics) return null;
+        const trainReturn = toFiniteNumber(trainingMetrics.annualizedReturn);
+        const testReturn = toFiniteNumber(testingMetrics.annualizedReturn);
+        if (!Number.isFinite(trainReturn) || trainReturn <= 0 || !Number.isFinite(testReturn)) return null;
+        return (testReturn / trainReturn) * 100;
     }
 
     function readInputValue(id, fallback) {

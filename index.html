@@ -1960,7 +1960,7 @@
                                                             <input id="rolling-threshold-win" data-rolling-input type="number" min="0" max="100" step="0.1" value="45" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
                                                         </label>
                                                     </div>
-                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
+                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">門檻值沿用 QuantConnect Walkforward 指南（Sharpe ≥ 1、Sortino ≥ 1.2、勝率 ≥ 45%、年化報酬 ≥ 8%），並採納 CME Group 管理期貨顧問對 CTA Walk-Forward 稽核常用的最大回撤 ≤ 25%；Walk-Forward Efficiency 以 Pardo (2014)《The Evaluation and Optimization of Trading Strategies》建議的 67% 作為合格基準。</p>
                                                 </fieldset>
                                             </div>
                                             <div class="mt-6 border-t pt-4 space-y-3" id="rolling-optimize-panel">
@@ -1991,6 +1991,11 @@
                                                             <input id="rolling-optimize-trials" data-rolling-input type="number" min="10" max="400" step="1" value="60" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                             <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議維持 40~80，可平衡探索密度與運算時間。</span>
                                                         </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            組合迭代上限
+                                                            <input id="rolling-optimize-iteration-limit" data-rolling-input type="number" min="1" max="100" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預設與批量優化一致，必要時可調整交替優化輪數。</span>
+                                                        </label>
                                                     </div>
                                                     <div>
                                                         <p class="text-xs font-medium mb-2" style="color: var(--foreground);">優化範圍</p>
@@ -2018,6 +2023,7 @@
                                                         </div>
                                                     </div>
                                                     <p class="text-[11px]" style="color: var(--muted-foreground);">優化會沿用主回測的暖身推算與快取資料，不會額外觸發 Proxy 抓價，確保 Walk-Forward 過程可快速重播。</p>
+                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">啟用後會直接呼叫批量優化 Batch Optimization Worker，逐一掃描各策略的 <code>optimizeTargets</code> 範圍並套用最佳參數，再重跑訓練與測試期，確保結果與批量優化模組一致。</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -2115,8 +2121,14 @@
                                                     </table>
                                                 </div>
                                             </div>
-                                            <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。各指標達到門檻大約可取得 70 分，超標幅度愈大愈接近 100 分，若落後門檻則迅速扣分。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                            <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                                <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
+                                                <ol class="list-decimal pl-4 space-y-1">
+                                                    <li>先計算測試期的年化報酬、Sharpe、Sortino、勝率與最大回撤相對門檻的比率；門檻分別為 8%、1、1.2、45% 與 25%。比率轉換為分數時套用分段函數：ratio ≥ 2 給 95 分起跳並以每增加 0.1 再加 1 分；1 ≤ ratio &lt; 2 時在 70~95 分間線性插值；ratio &lt; 1 時以 70 × ratio 換算。</li>
+                                                    <li>計算 WFE = (測試期年化報酬 ÷ 訓練期年化報酬) × 100%，並以 67% 作為基準，同樣透過上述分段函數換算分數，以對應 Pardo (2014) 建議的 Walk-Forward 檢核。</li>
+                                                    <li>依權重 28%（年化報酬）、24%（Sharpe）、16%（Sortino）、12%（最大回撤）、10%（勝率）、10%（WFE）加總分數後除以權重總和並四捨五入，即得 0~100 分的 Walk-Forward 評分。</li>
+                                                    <li>評級門檻沿用 TradeStation 與資產管理機構常用標準：總分 ≥ 85 且合格視窗 ≥ 70% 為「專業合格」，70~84 分為「可進一步驗證」，55~69 分建議調整或加風控，低於 55 分視為未通過。</li>
+                                                </ol>
                                             </div>
                                         </div>
                                     </div>
