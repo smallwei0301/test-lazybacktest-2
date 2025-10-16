@@ -1,4 +1,12 @@
 
+## 2026-02-15 — Patch LB-GA-OPT-20250216A
+- **Scope**: 批量優化新增基因演算法模式與 UI 控制面板。
+- **Updates**:
+  - 新增 `js/gaRunner.js` 以模組化 GA 主流程（支援菁英保留、IndexedDB 快取、進度回報與暫停）。
+  - 批量優化介面加入搜尋模式切換（格點/隨機/GA）、GA 參數表單、暫停/續跑按鈕與收斂圖表。
+  - `batch-optimization.js` 整合 GA 產生的參數組合，沿用現有 Evaluator/Worker 流程並於結果表保留 GA 摘要。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});console.log(file+': ok');});NODE`
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
