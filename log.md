@@ -1,4 +1,12 @@
 
+## 2025-02-15 — Patch LB-BATCH-HYBRID-20250215A
+- **Scope**: 批量優化新增 Hyperband 與 Surrogate-Assisted GA 模式。
+- **Updates**:
+  - 於批量優化設定新增模式選單與專屬參數面板，支援 Hyperband (minBudget/eta/rounds 等) 與 Surrogate-GA (族群大小、topK、突變率等)。
+  - 建立共用候選工廠、RBF 代理模型與 GA 外層流程，所有評估仍透過既有 Web Worker 與結果渲染機制。
+  - 進度條新增階段/世代資訊，結果表格標示 Hyperband、Surrogate-GA 標籤並沿用匯出與「套用最佳參數」功能。
+- **Testing**: 未於容器內執行瀏覽器測試，待上線前以 Netlify 測試站實測兩種模式之回測流程。
+
 ## 2025-09-18 — Patch LB-ROLLING-TEST-20250918A
 - **Scope**: Walk-Forward 測試報告與資料驗證。
 - **Updates**:
