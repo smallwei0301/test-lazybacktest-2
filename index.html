@@ -1149,21 +1149,39 @@
                                                 class="loading-mascot-wrapper square"
                                                 aria-hidden="true"
                                             >
-                                                <div
-                                                    id="loadingGif"
-                                                    class="loading-mascot-canvas"
-                                                    data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
+                                            <div
+                                                id="loadingGif"
+                                                class="loading-mascot-canvas"
+                                                data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
+                                                data-lb-mascot-mode="image"
+                                                data-lb-mascot-hidden="false"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    class="loading-mascot-toggle"
+                                                    data-lb-mascot-toggle="true"
+                                                    aria-label="隱藏進度吉祥物圖片"
+                                                    aria-pressed="false"
                                                 >
-                                                    <img
-                                                        class="loading-mascot-image"
-                                                        src="https://i.imgur.com/zwj3cZQ.gif"
-                                                        alt="LazyBacktest 進度吉祥物動畫"
-                                                        decoding="async"
-                                                        loading="eager"
-                                                        referrerpolicy="no-referrer"
-                                                        aria-hidden="true"
-                                                    />
+                                                    -
+                                                </button>
+                                                <div
+                                                    class="loading-mascot-fallback-visual"
+                                                    data-lb-mascot-fallback="true"
+                                                    aria-hidden="true"
+                                                >
+                                                    ⌛
                                                 </div>
+                                                <img
+                                                    class="loading-mascot-image"
+                                                    src="https://i.imgur.com/zwj3cZQ.gif"
+                                                    alt="LazyBacktest 進度吉祥物動畫"
+                                                    decoding="async"
+                                                    loading="eager"
+                                                    referrerpolicy="no-referrer"
+                                                    aria-hidden="false"
+                                                />
+                                            </div>
                                             </div>
                                         </div>
                                     </div>

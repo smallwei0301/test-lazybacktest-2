@@ -1152,3 +1152,36 @@
 - **Diagnostics**: 於本地檢視載入中的卡片，確認隨視窗縮放時吉祥物與進度條維持相同寬度且無裁切變形。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-03 — Patch LB-PROGRESS-MASCOT-20260703A
+- **Issue recap**: 進度吉祥物在長時間載入時可能停留於同一張圖片，缺乏輪播節奏且會在單輪隨機尚未走完時重複素材。
+- **Fix**:
+  - `js/main.js` 建立輪播序列與 4 秒自動換圖計時器，確保同輪所有來源皆顯示後才重新洗牌，並於載入失敗時自動改試下一張。
+  - 新增排程治理：手動或自動換圖時會重置計時器、重新安排下一次刷新，確保長時間載入不會停滯。
+- **Diagnostics**: 人工調整來源清單與瀏覽器 devtools 人為延遲，驗證單輪顯示順序不重複且換輪時不會立即重覆上一張，並確認時鐘限制生效。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-05 — Patch LB-PROGRESS-MASCOT-20260705A
+- **Issue recap**: 載入吉祥物無法由使用者自行關閉，長時間回測時可能造成視覺干擾，亦缺乏顯示狀態的可及性標示。
+- **Fix**:
+  - `index.html` 注入位於圖片左上角的顯示/隱藏按鈕與 fallback 容器，並預設開啟、符合 `aria-pressed` 無障礙語意。
+  - `css/style.css` 調整畫布指標事件與最小高度，新增 `loading-mascot-toggle`、隱藏狀態提示與 fallback 顯示動畫，確保響應式排版穩定。
+  - `js/main.js` 導入 `ensureLoadingMascotInfrastructure`、`applyLoadingMascotHiddenState` 等輔助函式，記錄顯示狀態並在隱藏時停止輪播、維持來源隊列。
+- **Diagnostics**: 透過 DevTools 手動觸發 `refreshLoadingMascotImage`、輪播逾時與 fallback 情境，確認隱藏狀態可持續、重開時重取新圖且沙漏備援不會移除控制鈕。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-08 — Patch LB-PROGRESS-MASCOT-20260708A
+- **Issue recap**: 現有頁面預先渲染控制鈕，導致 `ensureLoadingMascotInfrastructure` 跳過事件綁定，使用者按下無法切換顯示狀態。
+- **Fix**:
+  - `js/main.js` 新增 `handleLoadingMascotToggle` 與 `bindLoadingMascotToggle`，不論按鈕是否為既有節點皆綁定點擊事件並同步類別、ARIA 屬性。
+  - 更新進度吉祥物版本碼至 `LB-PROGRESS-MASCOT-20260708A`，並在綁定流程中維持 fallback 屬性完整。
+- **Diagnostics**: 本地以 DOMContentLoaded 後直接點擊預設控制鈕，確認立即進入隱藏狀態並停止輪播，再次點擊可正常顯示並重新排程換圖。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-09 — Patch LB-PROGRESS-MASCOT-20260709A
+- **Issue recap**: 使用者切換至隱藏模式時仍殘留圖片容器與「圖片已隱藏」提示，視覺上占位過大且與需求不符。
+- **Fix**:
+  - `css/style.css` 將隱藏狀態改為完全收合畫布，只保留「+」控制鈕並關閉提示文字與多餘高度。
+  - `js/main.js` 更新 `applyLoadingMascotHiddenState` 配合新樣式維持顯示狀態與 aria 屬性，同步提升版本碼至 `LB-PROGRESS-MASCOT-20260709A`。
+- **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

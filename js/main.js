@@ -10,6 +10,8 @@
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
+// Patch Tag: LB-PROGRESS-MASCOT-20260703A
+// Patch Tag: LB-PROGRESS-MASCOT-20260705A
 
 // 全局變量
 let stockChart = null;
@@ -19,8 +21,20 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260310A';
-const loadingMascotState = { lastSource: null };
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
+const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const loadingMascotState = {
+    lastSource: null,
+    rotation: {
+        fingerprint: '',
+        queue: [],
+        timerId: null,
+        lastTotalSources: 0,
+    },
+    visibility: {
+        hidden: false,
+    },
+};
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -1622,6 +1636,127 @@ function getLoadingMascotContainer() {
     return document.getElementById('loadingGif');
 }
 
+function getLoadingMascotVisibilityState() {
+    if (!loadingMascotState.visibility) {
+        loadingMascotState.visibility = { hidden: false };
+    }
+    return loadingMascotState.visibility;
+}
+
+function isLoadingMascotHidden() {
+    return Boolean(getLoadingMascotVisibilityState().hidden);
+}
+
+function setLoadingMascotHiddenFlag(hidden) {
+    const visibility = getLoadingMascotVisibilityState();
+    visibility.hidden = Boolean(hidden);
+}
+
+function handleLoadingMascotToggle(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const sourceButton = event?.currentTarget || event?.target || null;
+    const containerEl =
+        (sourceButton && sourceButton.closest && sourceButton.closest('.loading-mascot-canvas')) ||
+        getLoadingMascotContainer();
+
+    if (!containerEl) return;
+
+    const nextHidden = !isLoadingMascotHidden();
+    setLoadingMascotHiddenFlag(nextHidden);
+    applyLoadingMascotHiddenState(containerEl, nextHidden);
+
+    if (nextHidden) {
+        cancelLoadingMascotRotation();
+    } else {
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }
+}
+
+function bindLoadingMascotToggle(toggle) {
+    if (!toggle || toggle.dataset.lbMascotToggleBound === 'true') {
+        return;
+    }
+
+    toggle.type = 'button';
+    toggle.classList.add('loading-mascot-toggle');
+    toggle.dataset.lbMascotToggle = 'true';
+    toggle.addEventListener('click', handleLoadingMascotToggle);
+    toggle.dataset.lbMascotToggleBound = 'true';
+}
+
+function ensureLoadingMascotInfrastructure(container) {
+    if (!container) return {};
+
+    let toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (!toggle) {
+        toggle = document.createElement('button');
+        toggle.type = 'button';
+        container.insertBefore(toggle, container.firstChild);
+    }
+
+    bindLoadingMascotToggle(toggle);
+    toggle.setAttribute('aria-label', '隱藏進度吉祥物圖片');
+    toggle.setAttribute('aria-pressed', 'false');
+    if (!toggle.textContent || !toggle.textContent.trim()) {
+        toggle.textContent = '-';
+    }
+
+    let fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = 'loading-mascot-fallback-visual';
+        fallback.textContent = '⌛';
+        container.appendChild(fallback);
+    }
+    fallback.dataset.lbMascotFallback = 'true';
+    if (!fallback.hasAttribute('aria-hidden')) {
+        fallback.setAttribute('aria-hidden', 'true');
+    }
+
+    if (typeof container.dataset.lbMascotMode !== 'string' || !container.dataset.lbMascotMode) {
+        container.dataset.lbMascotMode = 'image';
+    }
+
+    if (container.dataset.lbMascotHidden === 'true') {
+        setLoadingMascotHiddenFlag(true);
+    } else if (container.dataset.lbMascotHidden === 'false') {
+        setLoadingMascotHiddenFlag(false);
+    }
+
+    return { toggle, fallback };
+}
+
+function applyLoadingMascotHiddenState(container, hidden) {
+    if (!container) return;
+    const flag = hidden ? 'true' : 'false';
+    container.dataset.lbMascotHidden = flag;
+    container.classList.toggle('loading-mascot-collapsed', hidden);
+
+    const toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (toggle) {
+        toggle.dataset.state = hidden ? 'hidden' : 'visible';
+        toggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        toggle.setAttribute('aria-label', hidden ? '顯示進度吉祥物圖片' : '隱藏進度吉祥物圖片');
+        toggle.textContent = hidden ? '+' : '-';
+    }
+
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        const fallbackVisible = container.dataset.lbMascotMode === 'fallback' && !hidden;
+        fallback.setAttribute('aria-hidden', fallbackVisible ? 'false' : 'true');
+    }
+
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        const imageVisible = container.dataset.lbMascotMode !== 'fallback' && !hidden;
+        img.setAttribute('aria-hidden', imageVisible ? 'false' : 'true');
+    }
+}
+
 function computeLoadingMascotSources(container) {
     const externalSources = Array.isArray(window.LAZYBACKTEST_LOADING_MASCOT_SOURCES)
         ? window.LAZYBACKTEST_LOADING_MASCOT_SOURCES
@@ -1646,46 +1781,140 @@ function computeLoadingMascotSources(container) {
     return unique;
 }
 
+function getLoadingMascotRotationState() {
+    return loadingMascotState.rotation;
+}
+
+function shuffleMascotSources(sources) {
+    const list = Array.isArray(sources) ? sources.slice() : [];
+    for (let i = list.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = list[i];
+        list[i] = list[j];
+        list[j] = temp;
+    }
+    return list;
+}
+
+function cancelLoadingMascotRotation() {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    if (rotation.timerId) {
+        clearTimeout(rotation.timerId);
+        rotation.timerId = null;
+    }
+}
+
+function scheduleLoadingMascotRotation(totalSources) {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    cancelLoadingMascotRotation();
+
+    rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+
+    if (isLoadingMascotHidden()) {
+        return;
+    }
+
+    if (!Number.isFinite(LOADING_MASCOT_ROTATION_INTERVAL) || LOADING_MASCOT_ROTATION_INTERVAL <= 0) {
+        return;
+    }
+
+    if (rotation.lastTotalSources <= 0) {
+        return;
+    }
+
+    rotation.timerId = setTimeout(() => {
+        rotation.timerId = null;
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }, LOADING_MASCOT_ROTATION_INTERVAL);
+}
+
+function handleLoadingMascotDisplayed(source, totalSources) {
+    loadingMascotState.lastSource = source || null;
+    const rotation = getLoadingMascotRotationState();
+    if (rotation) {
+        rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+    }
+    if (isLoadingMascotHidden()) {
+        cancelLoadingMascotRotation();
+        return;
+    }
+    scheduleLoadingMascotRotation(totalSources);
+}
+
 function ensureLoadingMascotImageElement(container) {
     if (!container) return null;
+    ensureLoadingMascotInfrastructure(container);
     let img = container.querySelector('img.loading-mascot-image');
     if (!img) {
-        container.innerHTML = '';
         img = document.createElement('img');
         img.className = 'loading-mascot-image';
         img.alt = 'LazyBacktest 進度吉祥物動畫';
         img.decoding = 'async';
         img.loading = 'eager';
         img.referrerPolicy = 'no-referrer';
-        img.setAttribute('aria-hidden', 'true');
+        img.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
         container.appendChild(img);
-    } else {
-        container.classList.remove('loading-mascot-fallback');
     }
+    container.classList.remove('loading-mascot-fallback');
+    container.dataset.lbMascotMode = 'image';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.setAttribute('aria-hidden', 'true');
+    }
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
     return img;
 }
 
 function showMascotHourglassFallback(container) {
     if (!container) return;
-    container.innerHTML = '';
+    ensureLoadingMascotInfrastructure(container);
     container.classList.add('loading-mascot-fallback');
-    container.textContent = '⌛';
     container.dataset.lbMascotSource = 'hourglass';
     container.dataset.lbMascotCurrent = 'hourglass';
+    container.dataset.lbMascotMode = 'fallback';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.textContent = '⌛';
+        fallback.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
+    }
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        img.setAttribute('aria-hidden', 'true');
+        img.removeAttribute('src');
+    }
     loadingMascotState.lastSource = null;
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
+    cancelLoadingMascotRotation();
 }
 
 function refreshLoadingMascotImage(options = {}) {
     const container = getLoadingMascotContainer();
-    if (!container) return;
+    if (!container) {
+        cancelLoadingMascotRotation();
+        return;
+    }
+
+    ensureLoadingMascotInfrastructure(container);
+
+    const hidden = isLoadingMascotHidden();
+    applyLoadingMascotHiddenState(container, hidden);
 
     const sources = computeLoadingMascotSources(container);
+    const poolSize = Array.isArray(sources) ? sources.length : 0;
     container.dataset.lbMascotSanitiser = LOADING_MASCOT_VERSION;
-    container.dataset.lbMascotPoolSize = String(sources.length);
+    container.dataset.lbMascotPoolSize = String(poolSize);
     container.dataset.lbMascotVersion = LOADING_MASCOT_VERSION;
 
-    if (!Array.isArray(sources) || sources.length === 0) {
+    cancelLoadingMascotRotation();
+
+    if (!Array.isArray(sources) || poolSize === 0) {
         showMascotHourglassFallback(container);
+        return;
+    }
+
+    if (hidden) {
         return;
     }
 
@@ -1693,36 +1922,63 @@ function refreshLoadingMascotImage(options = {}) {
     const allowSameWhenSingle = options.allowSameWhenSingle !== false;
 
     const previous = loadingMascotState.lastSource || container.dataset.lbMascotCurrent || null;
-    const pool = sources.slice();
+    const rotation = getLoadingMascotRotationState();
+    const fingerprint = sources.join('|');
 
-    if (forceNew && pool.length > 1 && previous) {
-        const index = pool.indexOf(previous);
-        if (index >= 0) {
-            pool.splice(index, 1);
+    if (rotation) {
+        if (rotation.fingerprint !== fingerprint) {
+            rotation.fingerprint = fingerprint;
+            rotation.queue = [];
         }
+        rotation.lastTotalSources = sources.length;
     }
 
-    if (pool.length === 0) {
-        if (allowSameWhenSingle && previous) {
-            pool.push(previous);
-        } else {
-            showMascotHourglassFallback(container);
-            return;
-        }
-    }
+    const getNextCandidate = (avoidPreviousFirst = false) => {
+        if (!rotation) return null;
 
-    const candidates = pool.slice();
-
-    const attemptNext = () => {
-        if (candidates.length === 0) {
-            showMascotHourglassFallback(container);
-            return;
+        let refilled = false;
+        if (!Array.isArray(rotation.queue)) {
+            rotation.queue = [];
         }
 
-        const pickIndex = Math.floor(Math.random() * candidates.length);
-        const [candidate] = candidates.splice(pickIndex, 1);
+        if (rotation.queue.length === 0) {
+            rotation.queue = shuffleMascotSources(sources);
+            refilled = true;
+        }
+
+        if (rotation.queue.length === 0) {
+            return null;
+        }
+
+        const shouldAvoidPrevious = Boolean(previous) && rotation.queue.length > 1 && (avoidPreviousFirst || refilled);
+        if (shouldAvoidPrevious && rotation.queue[0] === previous) {
+            const altIndex = rotation.queue.findIndex((src) => src !== previous);
+            if (altIndex > 0) {
+                const [replacement] = rotation.queue.splice(altIndex, 1);
+                rotation.queue.unshift(replacement);
+            }
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && rotation.queue[0] === previous) {
+            return null;
+        }
+
+        const candidate = rotation.queue.shift();
         if (!candidate) {
-            attemptNext();
+            return null;
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && candidate === previous) {
+            return null;
+        }
+
+        return candidate;
+    };
+
+    const attemptNext = (avoidPreviousFirst = false) => {
+        const candidate = getNextCandidate(avoidPreviousFirst);
+        if (!candidate) {
+            showMascotHourglassFallback(container);
             return;
         }
 
@@ -1736,7 +1992,7 @@ function refreshLoadingMascotImage(options = {}) {
             container.classList.remove('loading-mascot-fallback');
             container.dataset.lbMascotSource = candidate;
             container.dataset.lbMascotCurrent = candidate;
-            loadingMascotState.lastSource = candidate;
+            handleLoadingMascotDisplayed(candidate, sources.length);
         };
 
         if (img.src === candidate && img.complete && img.naturalWidth > 0) {
@@ -1751,7 +2007,7 @@ function refreshLoadingMascotImage(options = {}) {
 
         const handleError = () => {
             cleanup();
-            attemptNext();
+            attemptNext(false);
         };
 
         const cleanup = () => {
@@ -1776,7 +2032,7 @@ function refreshLoadingMascotImage(options = {}) {
         }
     };
 
-    attemptNext();
+    attemptNext(forceNew);
 }
 
 function initLoadingMascotSanitiser() {
