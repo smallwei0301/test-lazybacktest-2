@@ -45,6 +45,8 @@ let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
+const STAGE4_PANEL_VERSION = 'LB-STAGE4-REFINE-20250930A';
+
 // --- Utility Functions ---
 function initDates() { const eD=new Date(); const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-5); document.getElementById('endDate').value=formatDate(eD); document.getElementById('startDate').value=formatDate(sD); document.getElementById('recentYears').value=5; }
 function applyRecentYears() { const nYI=document.getElementById('recentYears'); const eDI=document.getElementById('endDate'); const sDI=document.getElementById('startDate'); const nY=parseInt(nYI.value); const eDS=eDI.value; if(isNaN(nY)||nY<1){showError("請輸入有效年數");return;} if(!eDS){showError("請先選結束日期");return;} const eD=new Date(eDS); if(isNaN(eD)){showError("結束日期格式無效");return;} const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-nY); const eY=1992; if(sD.getFullYear()<eY){sD.setFullYear(eY,0,1); const aY=eD.getFullYear()-eY; nYI.value=aY; showInfo(`資料最早至 ${eY} 年，已調整`);} else {showInfo(`已設定開始日期 ${formatDate(sD)}`);} sDI.value=formatDate(sD); }
@@ -2785,6 +2787,103 @@ function initBatchOptimizationFeature() {
     }
 }
 
+function formatStage4Score(value) {
+    if (!Number.isFinite(value)) return '—';
+    const metric = (window.batchOptimization && typeof window.batchOptimization.getStage4Metric === 'function')
+        ? window.batchOptimization.getStage4Metric()
+        : 'annualizedReturn';
+    const lower = typeof metric === 'string' ? metric.toLowerCase() : '';
+    if (lower.includes('return') || lower.includes('drawdown')) {
+        return `${value.toFixed(2)}%`;
+    }
+    return value.toFixed(4);
+}
+
+function initStage4RefinementPanel() {
+    const section = document.getElementById('stage4-refine');
+    if (!section) return;
+
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressEl = document.getElementById('stage4-progress');
+    const statusEl = document.getElementById('stage4-status');
+
+    if (!runButton) return;
+
+    const resetProgress = () => {
+        if (progressEl) {
+            progressEl.classList.add('hidden');
+            progressEl.textContent = '';
+        }
+    };
+
+    const updateProgress = (payload = {}) => {
+        if (!progressEl) return;
+        const methodLabel = payload.stage4 === 'cem' ? 'CEM' : 'SPSA';
+        const stepInfo = Number.isFinite(payload.step)
+            ? `第 ${payload.step} 步`
+            : Number.isFinite(payload.iter)
+                ? `第 ${payload.iter} 回合`
+                : '';
+        const scoreText = Number.isFinite(payload.bestScore)
+            ? `最佳：${formatStage4Score(payload.bestScore)}`
+            : '';
+
+        const fragments = [methodLabel];
+        if (stepInfo) fragments.push(stepInfo);
+        if (scoreText) fragments.push(scoreText);
+
+        progressEl.textContent = fragments.join(' · ');
+        progressEl.classList.remove('hidden');
+    };
+
+    runButton.addEventListener('click', async () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.stage4Refine !== 'function') {
+            showError('批量優化模組尚未載入完成，請稍候再試');
+            return;
+        }
+
+        const method = methodSelect?.value || 'spsa';
+        runButton.disabled = true;
+        const originalLabel = runButton.textContent;
+        runButton.dataset.originalText = originalLabel || '執行微調';
+        runButton.textContent = '執行中…';
+        if (progressEl) {
+            progressEl.classList.remove('hidden');
+            progressEl.textContent = '準備中…';
+        }
+        if (statusEl) {
+            statusEl.classList.add('hidden');
+        }
+
+        try {
+            const row = await window.batchOptimization.stage4Refine(method, {
+                uiProgress: updateProgress
+            });
+            const status = row?.__stage4Status || 'inserted';
+            if (status === 'updated') {
+                showSuccess('第四階段完成：已覆蓋同參數組合的既有結果');
+            } else if (status === 'ignored') {
+                showInfo('第四階段完成：原有結果表現更佳，未覆寫表格');
+            } else {
+                showSuccess('第四階段完成：新增一筆微調結果');
+            }
+            if (statusEl) {
+                statusEl.textContent = `版本 ${STAGE4_PANEL_VERSION} · ${status === 'updated' ? '覆蓋結果' : status === 'ignored' ? '保留原結果' : '新增結果'}`;
+                statusEl.classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('[Stage4] refine error:', error);
+            showError(error?.message || '第四階段微調失敗');
+        } finally {
+            runButton.disabled = false;
+            runButton.textContent = runButton.dataset.originalText || '執行微調';
+            delete runButton.dataset.originalText;
+            resetProgress();
+        }
+    });
+}
+
 function initRollingTestFeature() {
     const initHandler = () => {
         if (window.rollingTest && typeof window.rollingTest.init === 'function') {
@@ -2828,7 +2927,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        initStage4RefinementPanel();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
