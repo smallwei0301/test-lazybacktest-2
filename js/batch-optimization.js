@@ -3,8 +3,8 @@ import { runCEM } from './cem-runner.js';
 
 // Patch Tag: LB-BATCH-OPT-FIX-20251001A - re-bind global strategy metadata for module scope
 const strategyDescriptions =
-    (typeof window !== 'undefined' && window.strategyDescriptions)
-        ? window.strategyDescriptions
+    (typeof globalThis !== 'undefined' && globalThis.strategyDescriptions)
+        ? globalThis.strategyDescriptions
         : {};
 
 // --- 批量策略優化功能 - v1.1 ---

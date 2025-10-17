@@ -1106,3 +1106,11 @@
   - 強化初始化時的依賴檢查，若策略描述仍缺失即中止載入並輸出錯誤，避免產生空白清單。
 - **Diagnostics**: 重新載入批量優化面板，確認買入／賣出策略清單恢復顯示，勾選狀態與全選/清除按鈕皆可正常運作。
 - **Testing**: 未執行自動化測試（前端介面修復）。
+
+## 2026-03-04 — Patch LB-CONFIG-GLOBAL-20251002A / LB-BATCH-OPT-FIX-20251002A
+- **Issue recap**: Stage4 模組化後僅將策略資料寫入模組區域變數，未同步掛載至 `window`/`globalThis`，導致批量優化面板仍無法讀到策略清單。
+- **Fix**:
+  - `js/config.js` 以 `LB-CONFIG-GLOBAL-20251002A` 將核心設定（含 `strategyDescriptions` 等）掛載到 `globalThis`，供 ES module 存取。
+  - `js/batch-optimization.js` 更新為透過 `globalThis.strategyDescriptions` 讀取策略描述，確保載入順序調整後仍可取得資料。
+- **Diagnostics**: 重新載入批量優化頁籤，確認買賣策略清單恢復顯示；切換至 Stage4 模組亦能正常共用策略資料。
+- **Testing**: 未執行自動化測試（前端介面修復）。
