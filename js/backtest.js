@@ -6179,6 +6179,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
+document.addEventListener('DOMContentLoaded', setupStrategyComparisonPanel);
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
@@ -6272,7 +6273,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
+                            <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金-固定金額買入)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
@@ -6296,7 +6297,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
+                            <span class="tooltiptext">策略最終總資產相對於初始本金-固定金額買入的報酬率。<br>公式：(最終價值 - 初始本金-固定金額買入) / 初始本金-固定金額買入 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
@@ -6326,7 +6327,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
+                            <span class="tooltiptext">策略**總資金-獲利再投入**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
@@ -6980,7 +6981,7 @@ function displayBacktestResult(result) {
                 </div>
                 <div class="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金</p>
+                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金-固定金額買入</p>
                         <p class="text-base font-semibold text-gray-800">${result.initialCapital.toLocaleString()}元</p>
                     </div>
                 </div>
@@ -8847,7 +8848,331 @@ function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_ST
             localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(cleaned));
         }
         return cleaned; } catch (e) { console.error("讀取策略時解析JSON錯誤:", e); return {}; } }
-function saveStrategyToLocalStorage(name, settings, metrics) { 
+const STRATEGY_COMPARISON_DEFAULT_METRICS = ['annualizedReturn', 'sharpeRatio', 'maxDrawdown', 'totalTrades'];
+
+function collectCurrentStrategyMetrics() {
+    const baseMetrics = {
+        annualizedReturn: null,
+        sharpeRatio: null,
+        maxDrawdown: null,
+        totalTrades: null,
+        sensitivityScore: null,
+        rollingScore: null,
+        trendRangeReturn: null,
+        trendLabel: null,
+        trendDate: null,
+    };
+
+    if (!lastOverallResult || typeof lastOverallResult !== 'object') {
+        return baseMetrics;
+    }
+
+    const annualized = Number(lastOverallResult.annualizedReturn);
+    baseMetrics.annualizedReturn = Number.isFinite(annualized) ? annualized : null;
+
+    const sharpe = Number(lastOverallResult.sharpeRatio);
+    baseMetrics.sharpeRatio = Number.isFinite(sharpe) ? sharpe : null;
+
+    const drawdown = Number(lastOverallResult.maxDrawdown ?? lastOverallResult.maxDrawdownPct);
+    baseMetrics.maxDrawdown = Number.isFinite(drawdown) ? drawdown : null;
+
+    const trades = Number(
+        lastOverallResult.totalTrades ??
+        lastOverallResult.tradesCount ??
+        lastOverallResult.tradeCount ??
+        lastOverallResult.completedTrades?.length ??
+        null,
+    );
+    baseMetrics.totalTrades = Number.isFinite(trades) ? trades : null;
+
+    const sensitivitySummary =
+        lastOverallResult.sensitivityAnalysis?.summary ||
+        lastOverallResult.parameterSensitivity?.summary ||
+        lastOverallResult.sensitivityData?.summary ||
+        null;
+    const stabilityScore = Number(sensitivitySummary?.stabilityScore ?? sensitivitySummary?.score ?? null);
+    baseMetrics.sensitivityScore = Number.isFinite(stabilityScore) ? stabilityScore : null;
+
+    const rollingScore = Number(
+        lastOverallResult.walkForwardScore ??
+        lastOverallResult.walkForwardEfficiency ??
+        lastOverallResult.walkForwardRating ??
+        null,
+    );
+    baseMetrics.rollingScore = Number.isFinite(rollingScore) ? rollingScore : null;
+
+    const latestTrend = trendAnalysisState?.summary?.latest || null;
+    if (latestTrend) {
+        const latestReturn = Number(latestTrend.returnPct ?? latestTrend.returnPctMean ?? latestTrend.return ?? null);
+        baseMetrics.trendRangeReturn = Number.isFinite(latestReturn) ? latestReturn : null;
+        if (typeof latestTrend.label === 'string') {
+            baseMetrics.trendLabel = latestTrend.label;
+        }
+        if (latestTrend.date) {
+            baseMetrics.trendDate = latestTrend.date;
+        }
+    }
+
+    return baseMetrics;
+}
+
+function getStrategyComparisonMetricDefinitions() {
+    const percentText = (value, digits = 2) => {
+        if (!Number.isFinite(value)) return 'N/A';
+        const sign = value >= 0 ? '+' : '';
+        return `${sign}${value.toFixed(digits)}%`;
+    };
+
+    return {
+        annualizedReturn: {
+            label: '年化報酬率',
+            format(metrics) {
+                const value = Number(metrics?.annualizedReturn);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                return {
+                    text: percentText(value),
+                    className: value >= 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold',
+                };
+            },
+        },
+        sharpeRatio: {
+            label: '夏普值',
+            format(metrics) {
+                const value = Number(metrics?.sharpeRatio);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                const cls = value >= 1 ? 'text-emerald-600 font-semibold' : value >= 0 ? 'text-foreground' : 'text-rose-600 font-semibold';
+                return { text: value.toFixed(2), className: cls };
+            },
+        },
+        maxDrawdown: {
+            label: '最大回撤',
+            format(metrics) {
+                const value = Number(metrics?.maxDrawdown);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                return {
+                    text: percentText(value),
+                    className: 'text-rose-600 font-semibold',
+                };
+            },
+        },
+        totalTrades: {
+            label: '交易次數',
+            format(metrics) {
+                const value = Number(metrics?.totalTrades);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                return { text: value.toFixed(0), className: 'text-foreground' };
+            },
+        },
+        sensitivityScore: {
+            label: '敏感度測試',
+            format(metrics) {
+                const value = Number(metrics?.sensitivityScore);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                return { text: `${value.toFixed(0)} 分`, className: value >= 75 ? 'text-emerald-600 font-semibold' : 'text-foreground' };
+            },
+        },
+        rollingScore: {
+            label: '滾動測試評分',
+            format(metrics) {
+                const value = Number(metrics?.rollingScore);
+                if (!Number.isFinite(value)) return { text: 'N/A', className: 'text-muted-foreground' };
+                return { text: value.toFixed(1), className: value >= 70 ? 'text-emerald-600 font-semibold' : 'text-foreground' };
+            },
+        },
+        trendRangeReturn: {
+            label: '趨勢區間評估',
+            format(metrics) {
+                const labelKey = metrics?.trendLabel;
+                const style = labelKey && TREND_STYLE_MAP ? TREND_STYLE_MAP[labelKey] || null : null;
+                const labelText = style?.label || (typeof labelKey === 'string' ? labelKey : null);
+                const value = Number(metrics?.trendRangeReturn);
+                if (!Number.isFinite(value)) {
+                    return { text: labelText || 'N/A', className: labelText ? 'text-foreground' : 'text-muted-foreground' };
+                }
+                const returnText = percentText(value, 2);
+                const combined = labelText ? `${labelText}｜${returnText}` : returnText;
+                const cls = value >= 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold';
+                return { text: combined, className: cls };
+            },
+        },
+    };
+}
+
+function populateStrategyComparisonSelect(strategiesOverride = null) {
+    if (typeof document === 'undefined') return;
+    const selectEl = document.getElementById('strategyComparisonSelect');
+    if (!selectEl) return;
+
+    const previousSelection = new Set(Array.from(selectEl.selectedOptions || []).map((option) => option.value));
+    const strategies = strategiesOverride || getSavedStrategies();
+
+    selectEl.innerHTML = '';
+    const names = Object.keys(strategies).sort();
+
+    if (names.length === 0) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.disabled = true;
+        placeholder.textContent = '尚未儲存策略';
+        selectEl.appendChild(placeholder);
+        return;
+    }
+
+    names.forEach((name) => {
+        const strategyData = strategies[name] || {};
+        const metrics = strategyData.metrics || {};
+        const option = document.createElement('option');
+        option.value = name;
+        const annReturn = Number.isFinite(Number(metrics.annualizedReturn)) ? `${Number(metrics.annualizedReturn).toFixed(2)}%` : 'N/A';
+        const sharpe = Number.isFinite(Number(metrics.sharpeRatio)) ? Number(metrics.sharpeRatio).toFixed(2) : 'N/A';
+        option.textContent = `${name}｜年化 ${annReturn}｜Sharpe ${sharpe}`;
+        if (previousSelection.has(name)) {
+            option.selected = true;
+        }
+        selectEl.appendChild(option);
+    });
+}
+
+function renderStrategyComparisonTable(options = {}) {
+    if (typeof document === 'undefined') return;
+    const selectEl = document.getElementById('strategyComparisonSelect');
+    const messageEl = document.getElementById('strategyComparisonMessage');
+    const wrapperEl = document.getElementById('strategyComparisonTableWrapper');
+    const headRow = document.getElementById('strategyComparisonTableHead');
+    const bodyEl = document.getElementById('strategyComparisonTableBody');
+    if (!selectEl || !messageEl || !wrapperEl || !headRow || !bodyEl) return;
+
+    const selectedStrategyNames = Array.from(selectEl.selectedOptions || [])
+        .map((option) => option.value)
+        .filter(Boolean);
+    const selectedMetricKeys = Array.from(document.querySelectorAll('.strategy-compare-metric:checked'))
+        .map((checkbox) => checkbox.value)
+        .filter(Boolean);
+
+    const definitions = getStrategyComparisonMetricDefinitions();
+    const metricKeys = selectedMetricKeys.filter((key) => Boolean(definitions[key]));
+
+    const strategies = getSavedStrategies();
+
+    const setMessage = (text, tone = 'muted') => {
+        messageEl.textContent = text;
+        messageEl.style.color = tone === 'error' ? 'var(--destructive)' : 'var(--muted-foreground)';
+    };
+
+    if (Object.keys(strategies).length === 0) {
+        wrapperEl.classList.add('hidden');
+        headRow.innerHTML = '';
+        bodyEl.innerHTML = '';
+        setMessage('目前沒有已儲存的策略，請先透過策略管理卡片儲存設定。');
+        return;
+    }
+
+    if (selectedStrategyNames.length === 0) {
+        wrapperEl.classList.add('hidden');
+        headRow.innerHTML = '';
+        bodyEl.innerHTML = '';
+        setMessage('請至少選擇一個策略。');
+        return;
+    }
+
+    if (metricKeys.length === 0) {
+        wrapperEl.classList.add('hidden');
+        headRow.innerHTML = '';
+        bodyEl.innerHTML = '';
+        setMessage('請至少勾選一個比較項目。');
+        return;
+    }
+
+    headRow.innerHTML = '';
+    bodyEl.innerHTML = '';
+
+    const nameHeader = document.createElement('th');
+    nameHeader.className = 'px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide';
+    nameHeader.style.color = 'var(--muted-foreground)';
+    nameHeader.textContent = '策略名稱';
+    headRow.appendChild(nameHeader);
+
+    metricKeys.forEach((key) => {
+        const def = definitions[key];
+        const th = document.createElement('th');
+        th.className = 'px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide';
+        th.style.color = 'var(--muted-foreground)';
+        th.textContent = def.label;
+        headRow.appendChild(th);
+    });
+
+    selectedStrategyNames.forEach((name) => {
+        const strategyData = strategies[name] || {};
+        const metrics = strategyData.metrics || {};
+        const tr = document.createElement('tr');
+        tr.className = 'border-b';
+        tr.style.borderColor = 'color-mix(in srgb, var(--border) 65%, transparent)';
+
+        const nameCell = document.createElement('td');
+        nameCell.className = 'px-4 py-2 text-sm font-medium';
+        nameCell.style.color = 'var(--foreground)';
+        nameCell.textContent = name;
+        tr.appendChild(nameCell);
+
+        metricKeys.forEach((key) => {
+            const def = definitions[key];
+            const td = document.createElement('td');
+            td.className = 'px-4 py-2 text-sm';
+            const formatted = def.format(metrics, strategyData);
+            const text = typeof formatted === 'object' && formatted !== null ? formatted.text : String(formatted ?? 'N/A');
+            const className = typeof formatted === 'object' && formatted !== null ? formatted.className : '';
+            if (className) {
+                td.className += ` ${className}`;
+            } else {
+                td.style.color = 'var(--foreground)';
+            }
+            td.textContent = text;
+            tr.appendChild(td);
+        });
+
+        bodyEl.appendChild(tr);
+    });
+
+    wrapperEl.classList.remove('hidden');
+    setMessage(`已列出 ${selectedStrategyNames.length} 策略，包含 ${metricKeys.length} 項指標。`);
+}
+
+function setupStrategyComparisonPanel() {
+    if (typeof document === 'undefined') return;
+    const selectEl = document.getElementById('strategyComparisonSelect');
+    const generateBtn = document.getElementById('strategyComparisonGenerate');
+    const clearBtn = document.getElementById('strategyComparisonClear');
+    if (!selectEl || !generateBtn || !clearBtn) return;
+
+    populateStrategyComparisonSelect();
+
+    const handleAutoUpdate = () => renderStrategyComparisonTable({ silent: true });
+
+    selectEl.addEventListener('change', handleAutoUpdate);
+    Array.from(document.querySelectorAll('.strategy-compare-metric')).forEach((checkbox) => {
+        checkbox.addEventListener('change', handleAutoUpdate);
+    });
+
+    generateBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        renderStrategyComparisonTable({ forceMessage: true });
+    });
+
+    clearBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        Array.from(selectEl.options || []).forEach((option) => {
+            option.selected = false;
+        });
+        Array.from(document.querySelectorAll('.strategy-compare-metric')).forEach((checkbox) => {
+            checkbox.checked = STRATEGY_COMPARISON_DEFAULT_METRICS.includes(checkbox.value);
+        });
+        renderStrategyComparisonTable({ forceMessage: true });
+    });
+
+    renderStrategyComparisonTable({ silent: true });
+}
+
+function saveStrategyToLocalStorage(name, settings, metrics) {
     try { 
         const strategies = getSavedStrategies(); 
         strategies[name] = { 
@@ -8901,19 +9226,20 @@ function populateSavedStrategiesDropdown() {
     const strategies = getSavedStrategies(); 
     const strategyNames = Object.keys(strategies).sort(); 
     
-    strategyNames.forEach(name => { 
-        const strategyData = strategies[name]; 
-        if (!strategyData) return; // 跳過 null 或 undefined 的策略資料 
-        
+    strategyNames.forEach(name => {
+        const strategyData = strategies[name];
+        if (!strategyData) return; // 跳過 null 或 undefined 的策略資料
+
         const metrics = strategyData.metrics || {}; // 修正：年化報酬率已經是百分比格式，不需要再乘以100
-        const annReturn = (metrics.annualizedReturn !== null && !isNaN(metrics.annualizedReturn)) ? metrics.annualizedReturn.toFixed(2) + '%' : 'N/A'; 
-        const sharpe = (metrics.sharpeRatio !== null && !isNaN(metrics.sharpeRatio)) ? metrics.sharpeRatio.toFixed(2) : 'N/A'; 
-        const displayText = `${name} (年化:${annReturn} | Sharpe:${sharpe})`; 
-        const option = document.createElement('option'); 
-        option.value = name; 
-        option.textContent = displayText; 
-        selectElement.appendChild(option); 
-    }); 
+        const annReturn = (metrics.annualizedReturn !== null && !isNaN(metrics.annualizedReturn)) ? metrics.annualizedReturn.toFixed(2) + '%' : 'N/A';
+        const sharpe = (metrics.sharpeRatio !== null && !isNaN(metrics.sharpeRatio)) ? metrics.sharpeRatio.toFixed(2) : 'N/A';
+        const displayText = `${name} (年化:${annReturn} | Sharpe:${sharpe})`;
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = displayText;
+        selectElement.appendChild(option);
+    });
+    populateStrategyComparisonSelect(strategies);
 }
 function saveStrategy() { 
     // 生成預設策略名稱（使用中文名稱）
@@ -8980,7 +9306,7 @@ function saveStrategy() {
         } 
     } 
     const currentSettings = getBacktestParams(); 
-    const currentMetrics = { annualizedReturn: lastOverallResult?.annualizedReturn, sharpeRatio: lastOverallResult?.sharpeRatio }; 
+    const currentMetrics = collectCurrentStrategyMetrics();
     
     if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) { 
         populateSavedStrategiesDropdown(); 
