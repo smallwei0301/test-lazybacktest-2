@@ -1120,3 +1120,11 @@
 - **Diagnostics**: 於本地檢視載入中的卡片，確認隨視窗縮放時吉祥物與進度條維持相同寬度且無裁切變形。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-03 — Patch LB-PROGRESS-MASCOT-20260703A
+- **Issue recap**: 進度吉祥物在長時間載入時可能停留於同一張圖片，缺乏輪播節奏且會在單輪隨機尚未走完時重複素材。
+- **Fix**:
+  - `js/main.js` 建立輪播序列與 4 秒自動換圖計時器，確保同輪所有來源皆顯示後才重新洗牌，並於載入失敗時自動改試下一張。
+  - 新增排程治理：手動或自動換圖時會重置計時器、重新安排下一次刷新，確保長時間載入不會停滯。
+- **Diagnostics**: 人工調整來源清單與瀏覽器 devtools 人為延遲，驗證單輪顯示順序不重複且換輪時不會立即重覆上一張，並確認時鐘限制生效。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

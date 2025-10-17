@@ -10,6 +10,7 @@
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
+// Patch Tag: LB-PROGRESS-MASCOT-20260703A
 
 // 全局變量
 let stockChart = null;
@@ -19,8 +20,17 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260310A';
-const loadingMascotState = { lastSource: null };
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260703A';
+const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const loadingMascotState = {
+    lastSource: null,
+    rotation: {
+        fingerprint: '',
+        queue: [],
+        timerId: null,
+        lastTotalSources: 0,
+    },
+};
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -1646,6 +1656,60 @@ function computeLoadingMascotSources(container) {
     return unique;
 }
 
+function getLoadingMascotRotationState() {
+    return loadingMascotState.rotation;
+}
+
+function shuffleMascotSources(sources) {
+    const list = Array.isArray(sources) ? sources.slice() : [];
+    for (let i = list.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = list[i];
+        list[i] = list[j];
+        list[j] = temp;
+    }
+    return list;
+}
+
+function cancelLoadingMascotRotation() {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    if (rotation.timerId) {
+        clearTimeout(rotation.timerId);
+        rotation.timerId = null;
+    }
+}
+
+function scheduleLoadingMascotRotation(totalSources) {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    cancelLoadingMascotRotation();
+
+    rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+
+    if (!Number.isFinite(LOADING_MASCOT_ROTATION_INTERVAL) || LOADING_MASCOT_ROTATION_INTERVAL <= 0) {
+        return;
+    }
+
+    if (rotation.lastTotalSources <= 0) {
+        return;
+    }
+
+    rotation.timerId = setTimeout(() => {
+        rotation.timerId = null;
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }, LOADING_MASCOT_ROTATION_INTERVAL);
+}
+
+function handleLoadingMascotDisplayed(source, totalSources) {
+    loadingMascotState.lastSource = source || null;
+    const rotation = getLoadingMascotRotationState();
+    if (rotation) {
+        rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+    }
+    scheduleLoadingMascotRotation(totalSources);
+}
+
 function ensureLoadingMascotImageElement(container) {
     if (!container) return null;
     let img = container.querySelector('img.loading-mascot-image');
@@ -1673,11 +1737,17 @@ function showMascotHourglassFallback(container) {
     container.dataset.lbMascotSource = 'hourglass';
     container.dataset.lbMascotCurrent = 'hourglass';
     loadingMascotState.lastSource = null;
+    cancelLoadingMascotRotation();
 }
 
 function refreshLoadingMascotImage(options = {}) {
     const container = getLoadingMascotContainer();
-    if (!container) return;
+    if (!container) {
+        cancelLoadingMascotRotation();
+        return;
+    }
+
+    cancelLoadingMascotRotation();
 
     const sources = computeLoadingMascotSources(container);
     container.dataset.lbMascotSanitiser = LOADING_MASCOT_VERSION;
@@ -1693,36 +1763,63 @@ function refreshLoadingMascotImage(options = {}) {
     const allowSameWhenSingle = options.allowSameWhenSingle !== false;
 
     const previous = loadingMascotState.lastSource || container.dataset.lbMascotCurrent || null;
-    const pool = sources.slice();
+    const rotation = getLoadingMascotRotationState();
+    const fingerprint = sources.join('|');
 
-    if (forceNew && pool.length > 1 && previous) {
-        const index = pool.indexOf(previous);
-        if (index >= 0) {
-            pool.splice(index, 1);
+    if (rotation) {
+        if (rotation.fingerprint !== fingerprint) {
+            rotation.fingerprint = fingerprint;
+            rotation.queue = [];
         }
+        rotation.lastTotalSources = sources.length;
     }
 
-    if (pool.length === 0) {
-        if (allowSameWhenSingle && previous) {
-            pool.push(previous);
-        } else {
-            showMascotHourglassFallback(container);
-            return;
-        }
-    }
+    const getNextCandidate = (avoidPreviousFirst = false) => {
+        if (!rotation) return null;
 
-    const candidates = pool.slice();
-
-    const attemptNext = () => {
-        if (candidates.length === 0) {
-            showMascotHourglassFallback(container);
-            return;
+        let refilled = false;
+        if (!Array.isArray(rotation.queue)) {
+            rotation.queue = [];
         }
 
-        const pickIndex = Math.floor(Math.random() * candidates.length);
-        const [candidate] = candidates.splice(pickIndex, 1);
+        if (rotation.queue.length === 0) {
+            rotation.queue = shuffleMascotSources(sources);
+            refilled = true;
+        }
+
+        if (rotation.queue.length === 0) {
+            return null;
+        }
+
+        const shouldAvoidPrevious = Boolean(previous) && rotation.queue.length > 1 && (avoidPreviousFirst || refilled);
+        if (shouldAvoidPrevious && rotation.queue[0] === previous) {
+            const altIndex = rotation.queue.findIndex((src) => src !== previous);
+            if (altIndex > 0) {
+                const [replacement] = rotation.queue.splice(altIndex, 1);
+                rotation.queue.unshift(replacement);
+            }
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && rotation.queue[0] === previous) {
+            return null;
+        }
+
+        const candidate = rotation.queue.shift();
         if (!candidate) {
-            attemptNext();
+            return null;
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && candidate === previous) {
+            return null;
+        }
+
+        return candidate;
+    };
+
+    const attemptNext = (avoidPreviousFirst = false) => {
+        const candidate = getNextCandidate(avoidPreviousFirst);
+        if (!candidate) {
+            showMascotHourglassFallback(container);
             return;
         }
 
@@ -1736,7 +1833,7 @@ function refreshLoadingMascotImage(options = {}) {
             container.classList.remove('loading-mascot-fallback');
             container.dataset.lbMascotSource = candidate;
             container.dataset.lbMascotCurrent = candidate;
-            loadingMascotState.lastSource = candidate;
+            handleLoadingMascotDisplayed(candidate, sources.length);
         };
 
         if (img.src === candidate && img.complete && img.naturalWidth > 0) {
@@ -1751,7 +1848,7 @@ function refreshLoadingMascotImage(options = {}) {
 
         const handleError = () => {
             cleanup();
-            attemptNext();
+            attemptNext(false);
         };
 
         const cleanup = () => {
@@ -1776,7 +1873,7 @@ function refreshLoadingMascotImage(options = {}) {
         }
     };
 
-    attemptNext();
+    attemptNext(forceNew);
 }
 
 function initLoadingMascotSanitiser() {
