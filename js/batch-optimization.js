@@ -3798,3 +3798,233 @@ function performSingleBacktestFast(params) {
         }
     });
 }
+
+// --- 第四階段局部微調公共 API ---
+// Patch Tag: LB-STAGE4-REFINE-20251005A
+const stage4Namespace = (typeof window !== 'undefined') ? (window.Stage4Modules || (window.Stage4Modules = {})) : {};
+
+function stage4Clone(value) {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'object') return value;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        console.warn('[Stage4] clone fallback', error);
+        return Array.isArray(value) ? [...value] : { ...value };
+    }
+}
+
+function normalizeValueForKey(value) {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'number') {
+        return Number(Number(value).toFixed(6));
+    }
+    if (Array.isArray(value)) {
+        return value.map(normalizeValueForKey);
+    }
+    if (typeof value === 'object') {
+        const sortedKeys = Object.keys(value).sort();
+        const out = {};
+        sortedKeys.forEach((key) => {
+            out[key] = normalizeValueForKey(value[key]);
+        });
+        return out;
+    }
+    return value;
+}
+
+function paramKeyFromCombo(combo) {
+    if (!combo || typeof combo !== 'object') return '';
+    const keyPayload = {
+        buyStrategy: combo.buyStrategy || '',
+        sellStrategy: combo.sellStrategy || '',
+        buyParams: normalizeValueForKey(combo.buyParams || {}),
+        sellParams: normalizeValueForKey(combo.sellParams || {})
+    };
+    return JSON.stringify(keyPayload);
+}
+
+function toBatchResultRow({ combo, result, source }) {
+    if (!combo || typeof combo !== 'object' || !result || typeof result !== 'object') {
+        return null;
+    }
+    const row = {
+        ...result,
+        buyStrategy: combo.buyStrategy,
+        sellStrategy: combo.sellStrategy,
+        buyParams: stage4Clone(combo.buyParams || {}),
+        sellParams: stage4Clone(combo.sellParams || {}),
+        source,
+        optimizationType: source,
+        optimizationTypes: [source],
+        timestamp: Date.now()
+    };
+
+    if (combo.riskManagement) {
+        row.riskManagement = stage4Clone(combo.riskManagement);
+    } else if (result.riskManagement) {
+        row.riskManagement = stage4Clone(result.riskManagement);
+    }
+
+    delete row.entryStrategy;
+    delete row.exitStrategy;
+    delete row.entryParams;
+    delete row.exitParams;
+
+    if (!Number.isFinite(row.annualizedReturn) && Number.isFinite(result.finalAnnualReturn)) {
+        row.annualizedReturn = result.finalAnnualReturn;
+    }
+    if (!Number.isFinite(row.sharpeRatio) && Number.isFinite(result.sharpe)) {
+        row.sharpeRatio = result.sharpe;
+    }
+    if (!Number.isFinite(row.sortinoRatio) && Number.isFinite(result.sortino)) {
+        row.sortinoRatio = result.sortino;
+    }
+    if (!Number.isFinite(row.maxDrawdown) && Number.isFinite(result.maxDrawdownPct)) {
+        row.maxDrawdown = result.maxDrawdownPct;
+    }
+
+    if (!row.tradesCount) {
+        row.tradesCount = result.totalTrades || result.tradeCount || 0;
+    }
+    if (!row.totalTrades) {
+        row.totalTrades = row.tradesCount;
+    }
+
+    if (row.usedStopLoss === undefined && (result.usedStopLoss !== undefined || combo?.riskManagement?.stopLoss !== undefined)) {
+        row.usedStopLoss = result.usedStopLoss !== undefined ? result.usedStopLoss : combo?.riskManagement?.stopLoss;
+    }
+    if (row.usedTakeProfit === undefined && (result.usedTakeProfit !== undefined || combo?.riskManagement?.takeProfit !== undefined)) {
+        row.usedTakeProfit = result.usedTakeProfit !== undefined ? result.usedTakeProfit : combo?.riskManagement?.takeProfit;
+    }
+
+    row.fullResult = result;
+    return row;
+}
+
+function upsertBatchResultRow(row) {
+    if (!row) return;
+    const keyNew = paramKeyFromCombo({
+        buyStrategy: row.buyStrategy,
+        sellStrategy: row.sellStrategy,
+        buyParams: row.buyParams,
+        sellParams: row.sellParams
+    });
+    const existingIndex = batchOptimizationResults.findIndex((item) => {
+        const keyOld = paramKeyFromCombo({
+            buyStrategy: item.buyStrategy,
+            sellStrategy: item.sellStrategy,
+            buyParams: item.buyParams,
+            sellParams: item.sellParams
+        });
+        return keyOld === keyNew;
+    });
+
+    if (existingIndex >= 0) {
+        const oldScore = Number.isFinite(batchOptimizationResults[existingIndex]?.annualizedReturn)
+            ? batchOptimizationResults[existingIndex].annualizedReturn
+            : -Infinity;
+        const newScore = Number.isFinite(row?.annualizedReturn) ? row.annualizedReturn : -Infinity;
+        if (newScore > oldScore) {
+            batchOptimizationResults[existingIndex] = row;
+        }
+    } else {
+        batchOptimizationResults.push(row);
+    }
+
+    if (typeof sortBatchResults === 'function') {
+        sortBatchResults();
+    } else if (typeof renderBatchResultsTable === 'function') {
+        renderBatchResultsTable();
+    }
+    if (typeof showBatchResults === 'function') {
+        showBatchResults();
+    }
+}
+
+function getCurrentBestComboForStage4() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return null;
+    }
+
+    let candidate = null;
+    let bestScore = -Infinity;
+
+    batchOptimizationResults.forEach((row) => {
+        if (!row || typeof row !== 'object') return;
+        const score = Number.isFinite(row.annualizedReturn) ? row.annualizedReturn : -Infinity;
+        if (score > bestScore) {
+            bestScore = score;
+            candidate = row;
+        }
+    });
+
+    if (!candidate) {
+        candidate = batchOptimizationResults[0];
+    }
+
+    if (!candidate) return null;
+
+    const startCombo = {
+        buyStrategy: candidate.buyStrategy,
+        sellStrategy: candidate.sellStrategy,
+        buyParams: stage4Clone(candidate.buyParams || {}),
+        sellParams: stage4Clone(candidate.sellParams || {})
+    };
+
+    const risk = candidate.riskManagement ? stage4Clone(candidate.riskManagement) : {};
+    if (!risk.stopLoss && Number.isFinite(candidate.usedStopLoss)) {
+        risk.stopLoss = candidate.usedStopLoss;
+    }
+    if (!risk.takeProfit && Number.isFinite(candidate.usedTakeProfit)) {
+        risk.takeProfit = candidate.usedTakeProfit;
+    }
+    if (risk && Object.keys(risk).length > 0) {
+        startCombo.riskManagement = risk;
+    }
+
+    return startCombo;
+}
+
+async function runStage4(method, { onProgress } = {}) {
+    const startCombo = getCurrentBestComboForStage4();
+    if (!startCombo) {
+        console.warn('Stage4: no current best');
+        return null;
+    }
+
+    let runnerResult = null;
+    const methodKey = String(method || '').toLowerCase();
+    if (methodKey === 'spsa' && typeof stage4Namespace.runStage4SPSA === 'function') {
+        runnerResult = await stage4Namespace.runStage4SPSA({ startCombo, onProgress });
+    } else if (methodKey === 'cem' && typeof stage4Namespace.runStage4CEM === 'function') {
+        runnerResult = await stage4Namespace.runStage4CEM({ startCombo, onProgress });
+    } else {
+        console.warn('Stage4: unknown method', method);
+        return null;
+    }
+
+    if (!runnerResult || !runnerResult.bestResult) {
+        return null;
+    }
+
+    const bestCombo = runnerResult.bestCombo || startCombo;
+    const row = toBatchResultRow({ combo: bestCombo, result: runnerResult.bestResult, source: `stage4-${methodKey}` });
+    if (!row) return null;
+    upsertBatchResultRow(row);
+    return row;
+}
+
+if (typeof window !== 'undefined') {
+    window.batchOptimizationStage4 = window.batchOptimizationStage4 || {};
+    window.batchOptimizationStage4.executeBacktestForCombination = executeBacktestForCombination;
+    window.batchOptimizationStage4.paramKeyFromCombo = paramKeyFromCombo;
+    window.batchOptimizationStage4.toBatchResultRow = toBatchResultRow;
+    window.batchOptimizationStage4.upsertBatchResultRow = upsertBatchResultRow;
+    window.batchOptimizationStage4.getCurrentBestComboForStage4 = getCurrentBestComboForStage4;
+    window.batchOptimizationStage4.runStage4 = runStage4;
+
+    if (window.batchOptimization) {
+        window.batchOptimization.runStage4 = runStage4;
+    }
+}

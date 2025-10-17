@@ -2719,6 +2719,31 @@ document.addEventListener('DOMContentLoaded', function() {
             initRollingTestFeature();
         }, 100);
 
+        const stage4Button = document.getElementById('stage4-run');
+        if (stage4Button) {
+            stage4Button.addEventListener('click', async () => {
+                const btn = stage4Button;
+                const methodSelect = document.getElementById('stage4-method');
+                const method = methodSelect?.value || 'spsa';
+                btn.disabled = true;
+                btn.textContent = '執行中…';
+                try {
+                    const stage4Api = window.batchOptimizationStage4 || {};
+                    const runner = typeof stage4Api.runStage4 === 'function' ? stage4Api.runStage4 : null;
+                    if (runner) {
+                        await runner(method, { onProgress: () => {} });
+                    } else {
+                        console.warn('[Stage4] runStage4 API not available');
+                    }
+                } catch (e) {
+                    console.error('Stage4 run error:', e);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '執行微調';
+                }
+            });
+        }
+
         console.log('[Main] Initialization completed');
     } catch (error) {
         console.error('[Main] Initialization failed:', error);
