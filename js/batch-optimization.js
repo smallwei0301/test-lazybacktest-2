@@ -1,5 +1,9 @@
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-STAGE4-REFINE-20250701A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -48,6 +52,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+const STAGE4_VERSION = 'LB-STAGE4-REFINE-20250701A';
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -3225,7 +3230,13 @@ window.batchOptimization = {
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    runStage4,
+    paramKey,
+    upsertStage4Row: (row, objectiveFn) => upsertStage4Row(row, objectiveFn),
+    getResults: () => batchOptimizationResults,
+    getBestResult: () => getBestBatchResult(),
+    getStage4Toolkit: (currentBest) => createStage4Toolkit(currentBest)
 };
 
 // 測試風險管理優化功能
@@ -3797,4 +3808,436 @@ function performSingleBacktestFast(params) {
             resolve(null);
         }
     });
+}
+
+function stage4DeepClone(value) {
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map((item) => stage4DeepClone(item));
+    const cloned = {};
+    Object.keys(value).forEach((key) => {
+        cloned[key] = stage4DeepClone(value[key]);
+    });
+    return cloned;
+}
+
+function stage4GetValueByPath(source, path) {
+    if (!source || typeof source !== 'object' || !path) return undefined;
+    const segments = path.split('.');
+    let cursor = source;
+    for (let i = 0; i < segments.length; i += 1) {
+        if (cursor == null) return undefined;
+        cursor = cursor[segments[i]];
+    }
+    return cursor;
+}
+
+function stage4SetValueByPath(target, path, value) {
+    if (!path) return target;
+    const segments = path.split('.');
+    let cursor = target;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+        const key = segments[i];
+        if (!cursor[key] || typeof cursor[key] !== 'object') {
+            cursor[key] = {};
+        }
+        cursor = cursor[key];
+    }
+    cursor[segments[segments.length - 1]] = value;
+    return target;
+}
+
+function stableStringify(value) {
+    if (value === null || value === undefined) return 'null';
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return JSON.stringify(value);
+    }
+    if (typeof value === 'string') {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+    }
+    if (typeof value === 'object') {
+        const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+        const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+        return `{${entries.join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+export function paramKey(params) {
+    if (!params || typeof params !== 'object') return '';
+    try {
+        return stableStringify(params);
+    } catch (error) {
+        console.warn('[Stage4] Failed to build param key:', error);
+        return JSON.stringify(params);
+    }
+}
+
+function extractParamSnapshot(row) {
+    if (!row || typeof row !== 'object') return null;
+    if (row.params && typeof row.params === 'object') return row.params;
+    const snapshot = {};
+    if (row.buyStrategy) snapshot.buyStrategy = row.buyStrategy;
+    if (row.sellStrategy) snapshot.sellStrategy = row.sellStrategy;
+    if (row.entryStrategy && !snapshot.buyStrategy) snapshot.entryStrategy = row.entryStrategy;
+    if (row.exitStrategy && !snapshot.sellStrategy) snapshot.exitStrategy = row.exitStrategy;
+    if (row.buyParams) snapshot.buyParams = row.buyParams;
+    if (row.sellParams) snapshot.sellParams = row.sellParams;
+    return snapshot;
+}
+
+function computeRowMetric(row, objectiveFn, metricKey) {
+    if (!row || typeof row !== 'object') return NaN;
+    if (Number.isFinite(row.score)) return Number(row.score);
+    if (typeof objectiveFn === 'function') {
+        try {
+            const source = (row.metrics && typeof row.metrics === 'object') ? row.metrics : row;
+            const computed = objectiveFn(source);
+            if (Number.isFinite(computed)) return computed;
+        } catch (error) {
+            console.warn('[Stage4] objective function error:', error);
+        }
+    }
+    const metricsSource = (row.metrics && typeof row.metrics === 'object') ? row.metrics : row;
+    const metricVal = getMetricFromResult(metricsSource, metricKey);
+    return Number.isFinite(metricVal) ? metricVal : NaN;
+}
+
+function upsertStage4Row(row, objectiveFn) {
+    if (!row || typeof row !== 'object') {
+        return { action: 'skipped', index: -1 };
+    }
+    const snapshot = extractParamSnapshot(row);
+    const key = paramKey(snapshot);
+    if (!key) {
+        return { action: 'skipped', index: -1 };
+    }
+
+    const metricKey = batchOptimizationConfig.targetMetric || 'annualizedReturn';
+    const newMetric = computeRowMetric(row, objectiveFn, metricKey);
+
+    const existingIndex = batchOptimizationResults.findIndex((existing) => {
+        const existingKey = paramKey(extractParamSnapshot(existing));
+        return existingKey === key;
+    });
+
+    if (existingIndex >= 0) {
+        const existing = batchOptimizationResults[existingIndex];
+        const existingMetric = computeRowMetric(existing, objectiveFn, metricKey);
+        if (isBetterMetric(newMetric, existingMetric, metricKey)) {
+            batchOptimizationResults[existingIndex] = { ...existing, ...row };
+            sortBatchResults();
+            return { action: 'updated', index: existingIndex };
+        }
+        return { action: 'skipped', index: existingIndex };
+    }
+
+    batchOptimizationResults.unshift(row);
+    sortBatchResults();
+    return { action: 'inserted', index: 0 };
+}
+
+function getBestBatchResult() {
+    const metricKey = batchOptimizationConfig.targetMetric || 'annualizedReturn';
+    let best = null;
+    let bestMetric = null;
+    batchOptimizationResults.forEach((result) => {
+        const value = computeRowMetric(result, null, metricKey);
+        if (!Number.isFinite(value)) return;
+        if (!best || isBetterMetric(value, bestMetric, metricKey)) {
+            best = result;
+            bestMetric = value;
+        }
+    });
+    return best;
+}
+
+function addStrategyTargetsToDefs(strategyKey, prefix, defs) {
+    if (!strategyKey || !strategyDescriptions) return;
+    const info = strategyDescriptions[strategyKey];
+    if (!info || !Array.isArray(info.optimizeTargets)) return;
+    info.optimizeTargets.forEach((target) => {
+        if (!target || !target.name) return;
+        const range = target.range || {};
+        const min = Number.isFinite(range.from) ? Number(range.from) : 0;
+        const max = Number.isFinite(range.to) ? Number(range.to) : min;
+        const stepRaw = Number.isFinite(range.step) ? Number(range.step) : null;
+        const type = (Number.isInteger(min) && Number.isInteger(max) && (!stepRaw || Number.isInteger(stepRaw))) ? 'int' : 'float';
+        const step = stepRaw || (type === 'int' ? 1 : Math.max((max - min) / 20, 0.1));
+        defs.push({
+            key: `${prefix}.${target.name}`,
+            min,
+            max,
+            step,
+            type
+        });
+    });
+}
+
+function stage4ClampValue(value, def) {
+    if (!def) return value;
+    let next = value;
+    if (!Number.isFinite(next)) {
+        next = (def.min + def.max) / 2;
+    }
+    if (next < def.min) next = def.min;
+    if (next > def.max) next = def.max;
+    if (def.type === 'int') {
+        next = Math.round(next);
+        if (next < def.min) next = def.min;
+        if (next > def.max) next = def.max;
+    }
+    return next;
+}
+
+function clampCandidateUsingDefs(candidate, defMap) {
+    const adjusted = stage4DeepClone(candidate);
+    Object.keys(defMap).forEach((key) => {
+        const def = defMap[key];
+        const current = stage4GetValueByPath(adjusted, key);
+        if (current === undefined) return;
+        const clamped = stage4ClampValue(current, def);
+        stage4SetValueByPath(adjusted, key, clamped);
+    });
+    return adjusted;
+}
+
+function enforceOrderedPair(candidate, shortKey, longKey, defMap) {
+    const shortDef = defMap[shortKey];
+    const longDef = defMap[longKey];
+    if (!shortDef || !longDef) return candidate;
+    const shortVal = stage4GetValueByPath(candidate, shortKey);
+    const longVal = stage4GetValueByPath(candidate, longKey);
+    if (!Number.isFinite(shortVal) || !Number.isFinite(longVal)) return candidate;
+    if (shortVal < longVal) return candidate;
+
+    let adjustedShort = stage4ClampValue(longVal - (shortDef.type === 'int' ? Math.max(shortDef.step || 1, 1) : (shortDef.step || 0.5)), shortDef);
+    let adjustedLong = stage4ClampValue(shortVal + (longDef.type === 'int' ? Math.max(longDef.step || 1, 1) : (longDef.step || 0.5)), longDef);
+
+    if (adjustedShort >= adjustedLong) {
+        adjustedShort = stage4ClampValue(shortDef.min, shortDef);
+        adjustedLong = stage4ClampValue(longDef.max, longDef);
+        if (adjustedShort >= adjustedLong) {
+            adjustedShort = stage4ClampValue(shortDef.min, shortDef);
+            adjustedLong = stage4ClampValue(shortDef.min + (longDef.step || 1), longDef);
+        }
+    }
+
+    stage4SetValueByPath(candidate, shortKey, adjustedShort);
+    stage4SetValueByPath(candidate, longKey, adjustedLong);
+    return candidate;
+}
+
+function applyStage4Constraints(candidate, defMap) {
+    let adjusted = stage4DeepClone(candidate);
+    adjusted = enforceOrderedPair(adjusted, 'entryParams.shortPeriod', 'entryParams.longPeriod', defMap);
+    adjusted = enforceOrderedPair(adjusted, 'exitParams.shortPeriod', 'exitParams.longPeriod', defMap);
+    adjusted = clampCandidateUsingDefs(adjusted, defMap);
+    return adjusted;
+}
+
+function createStage4Toolkit(currentBest) {
+    if (!currentBest || typeof currentBest !== 'object') return null;
+    const entryStrategy = currentBest.buyStrategy || currentBest.entryStrategy;
+    const exitStrategy = currentBest.sellStrategy || currentBest.exitStrategy;
+    if (!entryStrategy || !exitStrategy) return null;
+
+    const entryParams = clonePlainObject(currentBest.buyParams || currentBest.entryParams || getDefaultStrategyParams(entryStrategy) || {});
+    const exitParams = clonePlainObject(currentBest.sellParams || currentBest.exitParams || getDefaultStrategyParams(exitStrategy) || {});
+
+    const defs = [];
+    addStrategyTargetsToDefs(entryStrategy, 'entryParams', defs);
+    addStrategyTargetsToDefs(exitStrategy, 'exitParams', defs);
+    if (defs.length === 0) return null;
+
+    const defMap = {};
+    defs.forEach((def) => {
+        defMap[def.key] = def;
+    });
+
+    const bounds = {};
+    defs.forEach((def) => {
+        bounds[def.key] = {
+            min: def.min,
+            max: def.max,
+            step: def.step,
+            type: def.type,
+            constraintFix: (candidate) => applyStage4Constraints(candidate, defMap)
+        };
+    });
+
+    const order = defs.map((def) => def.key);
+    const template = {
+        entryStrategy,
+        exitStrategy,
+        entryParams: stage4DeepClone(entryParams),
+        exitParams: stage4DeepClone(exitParams)
+    };
+
+    const startTemplate = applyStage4Constraints(template, defMap);
+
+    function encodeVec(params) {
+        return order.map((key) => stage4GetValueByPath(params, key));
+    }
+
+    function decodeVec(vector) {
+        const next = stage4DeepClone(startTemplate);
+        vector.forEach((value, index) => {
+            stage4SetValueByPath(next, order[index], value);
+        });
+        return applyStage4Constraints(next, defMap);
+    }
+
+    const metricKey = batchOptimizationConfig.targetMetric || 'annualizedReturn';
+
+    const evaluator = async (population) => {
+        const results = [];
+        for (const params of population) {
+            const base = prepareBaseParamsForOptimization(getBacktestParams());
+            base.entryStrategy = getWorkerStrategyName(entryStrategy);
+            base.exitStrategy = getWorkerStrategyName(exitStrategy);
+            base.entryParams = clonePlainObject(params.entryParams || {});
+            base.exitParams = clonePlainObject(params.exitParams || {});
+            const evaluation = await performSingleBacktestFast(base);
+            if (evaluation) {
+                evaluation.buyStrategy = entryStrategy;
+                evaluation.sellStrategy = exitStrategy;
+                evaluation.buyParams = clonePlainObject(base.entryParams);
+                evaluation.sellParams = clonePlainObject(base.exitParams);
+                evaluation.params = {
+                    entryStrategy,
+                    exitStrategy,
+                    entryParams: clonePlainObject(base.entryParams),
+                    exitParams: clonePlainObject(base.exitParams)
+                };
+            }
+            results.push(evaluation);
+        }
+        return results;
+    };
+
+    const objective = (result) => {
+        const source = (result && typeof result === 'object' && result.metrics && typeof result.metrics === 'object')
+            ? result.metrics
+            : result;
+        return getMetricFromResult(source, metricKey);
+    };
+
+    return {
+        start: startTemplate,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective
+    };
+}
+
+export async function runStage4(method, ctx) {
+    if (!ctx || typeof ctx !== 'object') {
+        throw new Error('Stage4: context missing');
+    }
+    const {
+        currentBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress,
+        methodOptions = {}
+    } = ctx;
+
+    if (!currentBest || !currentBest.params) {
+        throw new Error('Stage4: currentBest missing');
+    }
+    if (!bounds || typeof encodeVec !== 'function' || typeof decodeVec !== 'function') {
+        throw new Error('Stage4: bounds or encoder missing');
+    }
+    if (typeof evaluator !== 'function') {
+        throw new Error('Stage4: evaluator missing');
+    }
+
+    const runnerObjective = (evaluation) => {
+        const source = (evaluation && typeof evaluation === 'object' && evaluation.metrics && typeof evaluation.metrics === 'object')
+            ? evaluation.metrics
+            : evaluation;
+        if (typeof objective === 'function') {
+            try {
+                const val = objective(source);
+                if (Number.isFinite(val)) return val;
+            } catch (error) {
+                console.warn('[Stage4] objective evaluation failed:', error);
+            }
+        }
+        const metricKey = batchOptimizationConfig.targetMetric || 'annualizedReturn';
+        return getMetricFromResult(source, metricKey);
+    };
+
+    const commonOptions = {
+        start: currentBest.params,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective: runnerObjective,
+        onProgress: (payload) => {
+            uiProgress?.({ stage4: method, ...payload });
+        }
+    };
+
+    if (methodOptions && typeof methodOptions === 'object') {
+        Object.assign(commonOptions, methodOptions);
+    }
+
+    let refined = null;
+    if (method === 'spsa') {
+        refined = await runSPSA(commonOptions);
+    } else if (method === 'cem') {
+        refined = await runCEM(commonOptions);
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    const evaluations = refined?.bestEvaluation
+        ? [refined.bestEvaluation]
+        : await evaluator([refined.bestParams]);
+    const evaluation = Array.isArray(evaluations) ? evaluations[0] : evaluations;
+    const metricsSource = (evaluation && typeof evaluation === 'object' && evaluation.metrics && typeof evaluation.metrics === 'object')
+        ? evaluation.metrics
+        : evaluation;
+    const finalScore = Number.isFinite(refined?.bestScore)
+        ? refined.bestScore
+        : runnerObjective(metricsSource);
+
+    const paramsSnapshot = {
+        ...refined.bestParams,
+        entryParams: clonePlainObject(refined.bestParams.entryParams || {}),
+        exitParams: clonePlainObject(refined.bestParams.exitParams || {})
+    };
+
+    const row = {
+        ...(evaluation && typeof evaluation === 'object' ? evaluation : {}),
+        params: {
+            entryStrategy: currentBest.params.entryStrategy || currentBest.buyStrategy || currentBest.entryStrategy,
+            exitStrategy: currentBest.params.exitStrategy || currentBest.sellStrategy || currentBest.exitStrategy,
+            entryParams: paramsSnapshot.entryParams,
+            exitParams: paramsSnapshot.exitParams
+        },
+        metrics: metricsSource,
+        score: Number.isFinite(finalScore) ? finalScore : null,
+        source: `stage4-${method}`,
+        stage4Version: STAGE4_VERSION,
+        createdAt: Date.now()
+    };
+
+    row.buyStrategy = row.params.entryStrategy;
+    row.sellStrategy = row.params.exitStrategy;
+    row.buyParams = paramsSnapshot.entryParams;
+    row.sellParams = paramsSnapshot.exitParams;
+
+    uiProgress?.({ stage4: method, status: 'completed', bestScore: finalScore });
+    return row;
 }
