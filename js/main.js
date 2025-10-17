@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-REFINE-20250705A
 
 // 全局變量
 let stockChart = null;
@@ -2669,6 +2670,154 @@ function initBatchOptimizationFeature() {
     }
 }
 
+function initStage4RefinementPanel() {
+    const container = document.getElementById('stage4-refine');
+    const runButton = document.getElementById('stage4-run');
+    const methodSelect = document.getElementById('stage4-method');
+    const progressText = document.getElementById('stage4-progress-text');
+    const statusText = document.getElementById('stage4-status');
+    if (!container || !runButton || !methodSelect) return;
+
+    const spsaControls = {
+        steps: document.getElementById('stage4-spsa-steps'),
+        a0: document.getElementById('stage4-spsa-a0'),
+        c0: document.getElementById('stage4-spsa-c0'),
+        alpha: document.getElementById('stage4-spsa-alpha'),
+        gamma: document.getElementById('stage4-spsa-gamma')
+    };
+
+    const cemControls = {
+        iters: document.getElementById('stage4-cem-iters'),
+        popSize: document.getElementById('stage4-cem-pop'),
+        eliteRatio: document.getElementById('stage4-cem-elite'),
+        initSigma: document.getElementById('stage4-cem-sigma')
+    };
+
+    const parseNumber = (input) => {
+        if (!input) return undefined;
+        const value = parseFloat(input.value);
+        return Number.isFinite(value) ? value : undefined;
+    };
+
+    const getMethodOptions = (method) => {
+        if (method === 'spsa') {
+            return {
+                steps: parseNumber(spsaControls.steps),
+                a0: parseNumber(spsaControls.a0),
+                c0: parseNumber(spsaControls.c0),
+                alpha: parseNumber(spsaControls.alpha),
+                gamma: parseNumber(spsaControls.gamma)
+            };
+        }
+        return {
+            iters: parseNumber(cemControls.iters),
+            popSize: parseNumber(cemControls.popSize),
+            eliteRatio: parseNumber(cemControls.eliteRatio),
+            initSigma: parseNumber(cemControls.initSigma)
+        };
+    };
+
+    const formatPercentage = (value) => {
+        if (!Number.isFinite(value)) return '-';
+        return `${value.toFixed(2)}%`;
+    };
+
+    const formatNumber = (value) => {
+        if (!Number.isFinite(value)) return '-';
+        return value.toFixed(2);
+    };
+
+    const describeMetric = (row) => {
+        if (!row) return '';
+        const config = typeof window.batchOptimization?.getConfig === 'function'
+            ? window.batchOptimization.getConfig()
+            : null;
+        const sortKey = config?.sortKey || config?.targetMetric || 'annualizedReturn';
+        const metrics = row.metrics || row;
+        const value = metrics ? metrics[sortKey] : undefined;
+        if (!Number.isFinite(value)) return '';
+        if (sortKey === 'annualizedReturn') return `年化報酬率 ${formatPercentage(value)}`;
+        if (sortKey === 'maxDrawdown') return `最大回撤 ${formatPercentage(value)}`;
+        if (sortKey === 'sharpeRatio') return `夏普比率 ${formatNumber(value)}`;
+        if (sortKey === 'sortinoRatio') return `索提諾比率 ${formatNumber(value)}`;
+        return `${sortKey}: ${formatNumber(value)}`;
+    };
+
+    const setButtonState = (running) => {
+        if (running) {
+            runButton.disabled = true;
+            runButton.dataset.originalLabel = runButton.dataset.originalLabel || runButton.textContent;
+            runButton.textContent = '執行中…';
+            runButton.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+            runButton.disabled = false;
+            if (runButton.dataset.originalLabel) {
+                runButton.textContent = runButton.dataset.originalLabel;
+            }
+            runButton.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    };
+
+    const updateProgress = (payload) => {
+        if (!payload || typeof payload.bestScore !== 'number' || !progressText) return;
+        progressText.textContent = `最佳分數：${payload.bestScore.toFixed(4)}`;
+    };
+
+    runButton.addEventListener('click', async () => {
+        try {
+            if (!window.batchOptimization || typeof window.batchOptimization.runStage4 !== 'function') {
+                showError('第四階段功能尚未就緒，請稍後再試');
+                return;
+            }
+
+            const method = methodSelect.value || 'spsa';
+            const best = typeof window.batchOptimization.getBestResult === 'function'
+                ? window.batchOptimization.getBestResult()
+                : null;
+            if (!best) {
+                showError('請先完成批量優化或交叉優化，取得初始結果');
+                return;
+            }
+
+            setButtonState(true);
+            if (progressText) progressText.textContent = '準備中…';
+            if (statusText) statusText.textContent = method === 'spsa' ? 'SPSA 微調執行中' : 'CEM 微調執行中';
+
+            const row = await window.batchOptimization.runStage4(method, {
+                currentBest: best,
+                methodOptions: getMethodOptions(method),
+                uiProgress: updateProgress
+            });
+
+            const action = typeof window.batchOptimization.getLastStage4Action === 'function'
+                ? window.batchOptimization.getLastStage4Action()
+                : null;
+            if (statusText) {
+                if (action === 'replaced') {
+                    statusText.textContent = '微調完成：已覆蓋更佳結果';
+                } else if (action === 'inserted') {
+                    statusText.textContent = '微調完成：新增結果列';
+                } else if (action === 'ignored') {
+                    statusText.textContent = '微調完成：原結果更佳，保留既有資料';
+                } else {
+                    statusText.textContent = '微調完成';
+                }
+            }
+            if (progressText) {
+                const metricText = describeMetric(row);
+                progressText.textContent = metricText || `最佳分數：${Number.isFinite(row?.score) ? row.score.toFixed(4) : '-'}`;
+            }
+            showSuccess('第四階段完成：已更新最佳結果');
+        } catch (error) {
+            console.error('[Stage4] refinement failed:', error);
+            showError(error?.message || '第四階段微調失敗，請稍後再試');
+            if (statusText) statusText.textContent = '微調失敗';
+        } finally {
+            setButtonState(false);
+        }
+    });
+}
+
 function initRollingTestFeature() {
     const initHandler = () => {
         if (window.rollingTest && typeof window.rollingTest.init === 'function') {
@@ -2717,6 +2866,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             initBatchOptimizationFeature();
             initRollingTestFeature();
+            initStage4RefinementPanel();
         }, 100);
 
         console.log('[Main] Initialization completed');
