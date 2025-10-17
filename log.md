@@ -1082,6 +1082,15 @@
   - 若未來仍有差異，建議檢查 `optimizeCombinationIterative` 的迭代收斂紀錄與 Worker 回傳的最佳指標，以確認是否需要同步 trials 或風控迭代策略。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-10 — Patch LB-STAGE4-REFINE-20260310A
+- **Issue recap**: 批量優化面板缺少局部微調流程，無法在第二／第三階段結果上延伸使用 SPSA 或 CEM 進行參數微調並去重。
+- **Fix**:
+  - 新增 `js/spsa-runner.js` 與 `js/cem-runner.js`，提供正規化、約束修正與進度回報的局部微調演算法。
+  - `js/batch-optimization.js` 建立第四階段上下文、去重邏輯與 UI 橋接 API（`runStage4`、`paramKey`、`buildStage4Context` 等）。
+  - `js/main.js`、`index.html` 加入「第四階段：局部微調」面板、進階參數與執行流程；`js/batch-optimization.js` 以 ES module 載入。
+- **Diagnostics**: 於 Stage4 UI 顯示進度資訊並透過 `stage4ProgressReporter` 驗證步數／迭代更新；確認結果表重新渲染後無重複列。
+- **Testing**: 未執行（需於瀏覽器實際操作微調流程）。
+
 ## 2026-03-02 — Patch LB-ROLLING-TEST-20250930A / LB-BATCH-OPT-20250930A
 - **Issue recap**: 第二視窗後的訓練最佳解仍優於批量優化面板，確認交替輪數一致後，推定為滾動模組在優化時沿用整體 `cachedStockData`，導致 Worker 可能取用超出訓練窗的資料。
 - **Fix**:

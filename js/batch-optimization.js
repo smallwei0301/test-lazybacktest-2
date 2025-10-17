@@ -1,5 +1,9 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-BATCH-OPT-STAGE4-20260310A
+
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -3219,13 +3223,641 @@ function hideBatchProgress() {
     }
 }
 
+// --- 第四階段：局部微調工具 ---
+const stage4UiBridge = {
+    handler: null,
+};
+
+function stage4SetUiProgressHandler(handler) {
+    stage4UiBridge.handler = typeof handler === 'function' ? handler : null;
+}
+
+function stage4DispatchProgress(payload) {
+    if (typeof stage4UiBridge.handler === 'function') {
+        try {
+            stage4UiBridge.handler(payload);
+        } catch (error) {
+            console.warn('[Stage4] UI progress handler error:', error);
+        }
+    }
+}
+
+function stage4Clone(value) {
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            // fall back below
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        return value;
+    }
+}
+
+function stage4OrderValue(value) {
+    if (Array.isArray(value)) {
+        return value.map(stage4OrderValue);
+    }
+    if (value && typeof value === 'object') {
+        return Object.keys(value)
+            .sort((a, b) => a.localeCompare(b))
+            .reduce((acc, key) => {
+                acc[key] = stage4OrderValue(value[key]);
+                return acc;
+            }, {});
+    }
+    return value;
+}
+
+export function paramKey(params) {
+    if (!params || typeof params !== 'object') return '';
+    try {
+        return JSON.stringify(stage4OrderValue(params));
+    } catch (error) {
+        return '';
+    }
+}
+
+function stage4RequiresShortLong(strategyKey) {
+    if (!strategyKey) return false;
+    const key = String(strategyKey);
+    return key.includes('ma_cross');
+}
+
+function stage4DescriptorKey(scope, name) {
+    return `${scope}.${name}`;
+}
+
+function stage4ClampWithin(value, descriptor) {
+    if (descriptor?.enum && Array.isArray(descriptor.enum) && descriptor.enum.length > 0) {
+        if (descriptor.enum.includes(value)) return value;
+        const min = descriptor.enum[0];
+        const max = descriptor.enum[descriptor.enum.length - 1];
+        const numeric = Number.isFinite(value) ? value : min;
+        const clamped = Math.min(max, Math.max(min, numeric));
+        const index = descriptor.enum.findIndex((entry) => entry === clamped);
+        return descriptor.enum[index >= 0 ? index : 0];
+    }
+    let next = Number.isFinite(value) ? value : descriptor?.min;
+    if (!Number.isFinite(next)) next = 0;
+    if (Number.isFinite(descriptor?.min)) next = Math.max(descriptor.min, next);
+    if (Number.isFinite(descriptor?.max)) next = Math.min(descriptor.max, next);
+    if (descriptor?.valueType === 'int' || descriptor?.valueType === 'integer') {
+        next = Math.round(next);
+    } else if (Number.isFinite(descriptor?.step) && descriptor.step > 0) {
+        next = Math.round(next / descriptor.step) * descriptor.step;
+    }
+    return next;
+}
+
+function stage4AdjustShortLong(container, scope, descriptorMap) {
+    if (!container) return;
+    const shortKey = 'shortPeriod';
+    const longKey = 'longPeriod';
+    if (!Number.isFinite(container[shortKey]) || !Number.isFinite(container[longKey])) return;
+    const shortDescriptor = descriptorMap.get(stage4DescriptorKey(scope, shortKey));
+    const longDescriptor = descriptorMap.get(stage4DescriptorKey(scope, longKey));
+    let shortValue = stage4ClampWithin(container[shortKey], shortDescriptor);
+    let longValue = stage4ClampWithin(container[longKey], longDescriptor);
+    if (shortValue >= longValue) {
+        longValue = stage4ClampWithin(longValue, longDescriptor);
+        shortValue = Math.min(shortValue, longValue - 1);
+        if (!Number.isFinite(shortValue)) {
+            shortValue = stage4ClampWithin(longValue - 1, shortDescriptor);
+        }
+        if (shortValue >= longValue) {
+            shortValue = longValue - 1;
+        }
+    }
+    container[shortKey] = stage4ClampWithin(shortValue, shortDescriptor);
+    container[longKey] = stage4ClampWithin(longValue, longDescriptor);
+}
+
+function stage4GetValue(source, path) {
+    return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), source);
+}
+
+function stage4SetValue(target, path, value) {
+    if (!Array.isArray(path) || path.length === 0) return;
+    let cursor = target;
+    for (let i = 0; i < path.length - 1; i += 1) {
+        const key = path[i];
+        if (!cursor[key] || typeof cursor[key] !== 'object') {
+            cursor[key] = {};
+        }
+        cursor = cursor[key];
+    }
+    cursor[path[path.length - 1]] = value;
+}
+
+function stage4NormaliseParams(params) {
+    const base = params && typeof params === 'object' ? params : {};
+    const next = {
+        entry: stage4Clone(base.entry) || {},
+        exit: stage4Clone(base.exit) || {},
+    };
+    if (base.risk && Object.keys(base.risk).length > 0) {
+        next.risk = stage4Clone(base.risk);
+    }
+    return next;
+}
+
+function stage4CreateDescriptor(scope, target, baseParams, strategyKey) {
+    if (!target || !target.name) return null;
+    const range = target.range || {};
+    let min = Number(range.from ?? range.min);
+    let max = Number(range.to ?? range.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    if (min > max) {
+        const tmp = min;
+        min = max;
+        max = tmp;
+    }
+    const step = Number(range.step);
+    const descriptor = {
+        id: stage4DescriptorKey(scope, target.name),
+        path: [scope, target.name],
+        min,
+        max,
+        step: Number.isFinite(step) && step > 0 ? step : null,
+        valueType: target.type || (Number.isInteger(step) && step > 0 ? 'int' : 'float'),
+        enum: Array.isArray(target.enum) ? [...target.enum] : null,
+        defaultValue: baseParams && Number.isFinite(baseParams[target.name])
+            ? baseParams[target.name]
+            : Number(range.default ?? min),
+        strategyKey,
+        label: target.label || target.name,
+    };
+    if (descriptor.enum && descriptor.enum.length > 0) {
+        descriptor.valueType = 'enum';
+    }
+    return descriptor;
+}
+
+function stage4CreateStrategyDescriptors(scope, strategyKey, baseParams) {
+    if (!strategyKey || !strategyDescriptions || !strategyDescriptions[strategyKey]) return [];
+    const info = strategyDescriptions[strategyKey];
+    const targets = Array.isArray(info.optimizeTargets) ? info.optimizeTargets : [];
+    return targets
+        .map((target) => stage4CreateDescriptor(scope, target, baseParams, strategyKey))
+        .filter(Boolean);
+}
+
+function stage4CreateRiskDescriptors(baseResult) {
+    const descriptors = [];
+    const risk = baseResult.riskManagement || {};
+    const mappings = [
+        { name: 'stopLoss', config: globalOptimizeTargets?.stopLoss },
+        { name: 'takeProfit', config: globalOptimizeTargets?.takeProfit },
+    ];
+    mappings.forEach(({ name, config }) => {
+        if (!config || !config.range) return;
+        const range = config.range;
+        let min = Number(range.from ?? range.min);
+        let max = Number(range.to ?? range.max);
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+        if (min > max) {
+            const tmp = min;
+            min = max;
+            max = tmp;
+        }
+        const step = Number(range.step);
+        const descriptor = {
+            id: stage4DescriptorKey('risk', name),
+            path: ['risk', name],
+            min,
+            max,
+            step: Number.isFinite(step) && step > 0 ? step : null,
+            valueType: Array.isArray(range.enum) && range.enum.length > 0
+                ? 'enum'
+                : (Number.isInteger(step) && step > 0 ? 'int' : 'float'),
+            enum: Array.isArray(range.enum) ? [...range.enum] : null,
+            defaultValue: Number.isFinite(risk[name]) ? risk[name] : Number(range.default ?? min),
+            strategyKey: 'risk',
+            label: config.label || name,
+        };
+        descriptors.push(descriptor);
+    });
+    return descriptors;
+}
+
+function stage4CreateDescriptors(baseResult) {
+    const descriptors = [];
+    descriptors.push(...stage4CreateStrategyDescriptors('entry', baseResult.buyStrategy, baseResult.buyParams || baseResult.entryParams || {}));
+    descriptors.push(...stage4CreateStrategyDescriptors('exit', baseResult.sellStrategy, baseResult.sellParams || baseResult.exitParams || {}));
+    descriptors.push(...stage4CreateRiskDescriptors(baseResult));
+    return descriptors;
+}
+
+function stage4BuildBounds(descriptors, context) {
+    const bounds = {};
+    const descriptorMap = new Map();
+    descriptors.forEach((descriptor) => {
+        bounds[descriptor.id] = {
+            min: descriptor.min,
+            max: descriptor.max,
+            type: descriptor.valueType,
+            enum: descriptor.enum ? [...descriptor.enum] : null,
+            step: descriptor.step,
+        };
+        descriptorMap.set(descriptor.id, descriptor);
+    });
+    bounds.constraintFix = (params) => {
+        const next = stage4NormaliseParams(params);
+        stage4CreateConstraints(next, context, descriptorMap);
+        return next;
+    };
+    return bounds;
+}
+
+function stage4CreateConstraints(params, context, descriptorMap) {
+    const entryStrategy = context?.entryStrategy;
+    const exitStrategy = context?.exitStrategy;
+    if (stage4RequiresShortLong(entryStrategy)) {
+        stage4AdjustShortLong(params.entry, 'entry', descriptorMap);
+    }
+    if (stage4RequiresShortLong(exitStrategy)) {
+        stage4AdjustShortLong(params.exit, 'exit', descriptorMap);
+    }
+    descriptorMap.forEach((descriptor) => {
+        const value = stage4GetValue(params, descriptor.path);
+        const clamped = stage4ClampWithin(value, descriptor);
+        stage4SetValue(params, descriptor.path, clamped);
+    });
+}
+
+function stage4Encode(descriptors, params) {
+    const normalised = stage4NormaliseParams(params);
+    return descriptors.map((descriptor) => {
+        const value = stage4GetValue(normalised, descriptor.path);
+        if (descriptor.enum && descriptor.enum.length > 0) {
+            if (descriptor.enum.includes(value)) return value;
+            return descriptor.enum[0];
+        }
+        if (Number.isFinite(value)) return value;
+        return Number.isFinite(descriptor.defaultValue) ? descriptor.defaultValue : descriptor.min;
+    });
+}
+
+function stage4Decode(descriptors, vector) {
+    const params = stage4NormaliseParams({});
+    descriptors.forEach((descriptor, index) => {
+        let raw = vector[index];
+        if (descriptor.enum && descriptor.enum.length > 0) {
+            if (!descriptor.enum.includes(raw)) {
+                const fallback = descriptor.enum[0];
+                raw = descriptor.enum.find((entry) => entry === raw) ?? fallback;
+            }
+        } else {
+            raw = stage4ClampWithin(raw, descriptor);
+        }
+        stage4SetValue(params, descriptor.path, raw);
+    });
+    return params;
+}
+
+function stage4BuildEvaluator(baseResult) {
+    return {
+        async evaluate(population) {
+            const results = [];
+            for (let i = 0; i < population.length; i += 1) {
+                try {
+                    const params = population[i];
+                    const combination = stage4ReconstructCombination(params, baseResult);
+                    const result = await executeBacktestForCombination(combination);
+                    if (result) {
+                        result.paramsSnapshot = stage4Clone(params);
+                        results.push(result);
+                    } else {
+                        results.push(null);
+                    }
+                } catch (error) {
+                    console.error('[Stage4] Evaluator error:', error);
+                    results.push(null);
+                }
+            }
+            return results;
+        }
+    };
+}
+
+function stage4BuildObjective(metricKey) {
+    const key = metricKey || 'annualizedReturn';
+    return (result) => {
+        if (!result) return -Infinity;
+        const metric = getMetricFromResult(result, key);
+        if (!Number.isFinite(metric)) return -Infinity;
+        if (key === 'maxDrawdown') {
+            return -Math.abs(metric);
+        }
+        return metric;
+    };
+}
+
+function stage4ResolveScore(result, objective) {
+    if (!result) return -Infinity;
+    try {
+        const value = objective ? objective(result) : result?.score;
+        return Number.isFinite(value) ? value : -Infinity;
+    } catch (error) {
+        return -Infinity;
+    }
+}
+
+function stage4ExtractMetrics(result) {
+    if (!result || typeof result !== 'object') return null;
+    if (result.metrics && typeof result.metrics === 'object') {
+        return stage4Clone(result.metrics);
+    }
+    const clone = stage4Clone(result);
+    if (clone && typeof clone === 'object') {
+        delete clone.metrics;
+    }
+    return clone;
+}
+
+function stage4InferParamsFromResult(result) {
+    if (!result || typeof result !== 'object') return null;
+    const entry = stage4Clone(result.buyParams || result.entryParams || {});
+    const exit = stage4Clone(result.sellParams || result.exitParams || {});
+    const risk = stage4Clone(result.riskManagement || {});
+    const params = { entry: entry || {}, exit: exit || {} };
+    if (risk && Object.keys(risk).length > 0) {
+        params.risk = risk;
+    }
+    return params;
+}
+
+function stage4ReconstructCombination(params, baseResult) {
+    const combination = {
+        buyStrategy: baseResult.buyStrategy,
+        sellStrategy: baseResult.sellStrategy,
+        buyParams: stage4Clone(params.entry) || {},
+        sellParams: stage4Clone(params.exit) || {},
+    };
+    if (baseResult.shortEntryStrategy) {
+        combination.shortEntryStrategy = baseResult.shortEntryStrategy;
+    }
+    if (baseResult.shortExitStrategy) {
+        combination.shortExitStrategy = baseResult.shortExitStrategy;
+    }
+    const riskParams = params.risk || baseResult.riskManagement;
+    if (riskParams && Object.keys(riskParams).length > 0) {
+        combination.riskManagement = stage4Clone(riskParams);
+    }
+    return combination;
+}
+
+function stage4MergeRowIntoResult(row, baseResult) {
+    const combination = stage4ReconstructCombination(row.params, baseResult || {});
+    const metrics = row.metrics && typeof row.metrics === 'object' ? stage4Clone(row.metrics) : {};
+    const merged = {
+        ...baseResult,
+        ...metrics,
+        buyStrategy: baseResult?.buyStrategy,
+        sellStrategy: baseResult?.sellStrategy,
+        buyParams: combination.buyParams,
+        sellParams: combination.sellParams,
+        params: stage4Clone(row.params),
+        score: row.score,
+        source: row.source,
+        createdAt: row.createdAt,
+    };
+    if (combination.riskManagement) {
+        merged.riskManagement = combination.riskManagement;
+    } else {
+        delete merged.riskManagement;
+    }
+    return merged;
+}
+
+function stage4ExtractParamsForKey(result) {
+    if (!result || typeof result !== 'object') return null;
+    if (result.params && typeof result.params === 'object') {
+        return stage4Clone(result.params);
+    }
+    const inferred = stage4InferParamsFromResult(result);
+    if (inferred) {
+        result.params = stage4Clone(inferred);
+    }
+    return inferred;
+}
+
+function stage4ResolveRowScore(result) {
+    if (!result) return -Infinity;
+    if (Number.isFinite(result.score)) return result.score;
+    const metricKey = batchOptimizationConfig?.targetMetric || 'annualizedReturn';
+    const metric = getMetricFromResult(result, metricKey);
+    if (!Number.isFinite(metric)) return -Infinity;
+    return metricKey === 'maxDrawdown' ? -Math.abs(metric) : metric;
+}
+
+function stage4UpsertRow(row, baseResult) {
+    if (!row || !row.params) return 'ignored';
+    const key = paramKey(row.params);
+    if (!key) return 'ignored';
+    const results = Array.isArray(batchOptimizationResults) ? batchOptimizationResults : [];
+    let existingIndex = -1;
+    for (let i = 0; i < results.length; i += 1) {
+        const candidateParams = stage4ExtractParamsForKey(results[i]);
+        if (!candidateParams) continue;
+        if (paramKey(candidateParams) === key) {
+            existingIndex = i;
+            break;
+        }
+    }
+    const merged = stage4MergeRowIntoResult(row, baseResult || row.__stage4Base || null);
+    if (existingIndex >= 0) {
+        const currentScore = stage4ResolveRowScore(results[existingIndex]);
+        if (row.score > currentScore) {
+            batchOptimizationResults[existingIndex] = merged;
+            sortBatchResults();
+            return 'updated';
+        }
+        return 'ignored';
+    }
+    batchOptimizationResults.unshift(merged);
+    sortBatchResults();
+    return 'inserted';
+}
+
+function stage4GetCurrentBest() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) return null;
+    const metricKey = batchOptimizationConfig?.targetMetric || 'annualizedReturn';
+    let bestIndex = -1;
+    let bestMetric = -Infinity;
+    for (let i = 0; i < batchOptimizationResults.length; i += 1) {
+        const candidate = batchOptimizationResults[i];
+        const metric = getMetricFromResult(candidate, metricKey);
+        const score = Number.isFinite(metric) ? (metricKey === 'maxDrawdown' ? -Math.abs(metric) : metric) : -Infinity;
+        if (score > bestMetric) {
+            bestMetric = score;
+            bestIndex = i;
+        }
+    }
+    if (bestIndex < 0) return null;
+    const bestResult = batchOptimizationResults[bestIndex];
+    const params = stage4InferParamsFromResult(bestResult);
+    return {
+        ...bestResult,
+        params,
+        __original: bestResult,
+    };
+}
+
+export function buildStage4Context(currentBest, options = {}) {
+    if (!currentBest || !currentBest.__original) {
+        throw new Error('Stage4: currentBest 缺少原始結果');
+    }
+    const baseResult = currentBest.__original;
+    const descriptors = stage4CreateDescriptors(baseResult);
+    if (!descriptors || descriptors.length === 0) {
+        throw new Error('Stage4: 找不到可微調的參數');
+    }
+    const bounds = stage4BuildBounds(descriptors, {
+        entryStrategy: baseResult.buyStrategy,
+        exitStrategy: baseResult.sellStrategy,
+    });
+    const encodeVec = (params) => stage4Encode(descriptors, params);
+    const decodeVec = (vector) => stage4Decode(descriptors, vector);
+    const evaluator = stage4BuildEvaluator(baseResult);
+    const objective = stage4BuildObjective(batchOptimizationConfig?.targetMetric || 'annualizedReturn');
+    const params = stage4InferParamsFromResult(baseResult);
+    const uiProgress = typeof options.uiProgress === 'function'
+        ? options.uiProgress
+        : (payload) => stage4DispatchProgress({ stage4: null, ...payload });
+    const context = {
+        currentBest: { params },
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress,
+        baseResult,
+    };
+    if (options.methodOptions) {
+        context.methodOptions = options.methodOptions;
+    }
+    return context;
+}
+
+export async function runStage4(method, ctx) {
+    if (!ctx) throw new Error('Stage4: 缺少上下文');
+    const {
+        currentBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress,
+        methodOptions,
+        baseResult,
+    } = ctx;
+    if (!currentBest || !currentBest.params) throw new Error('Stage4: currentBest missing');
+    if (!bounds || typeof encodeVec !== 'function' || typeof decodeVec !== 'function') {
+        throw new Error('Stage4: bounds 或 encodeVec/decodeVec 缺失');
+    }
+    const start = currentBest.params;
+    const progress = (payload) => {
+        const label = method === 'cem' ? 'cem' : 'spsa';
+        const nextPayload = { stage4: label, ...payload };
+        if (typeof uiProgress === 'function') {
+            uiProgress(nextPayload);
+        } else {
+            stage4DispatchProgress(nextPayload);
+        }
+    };
+
+    let refined;
+    if (method === 'spsa') {
+        const spsaOptions = methodOptions?.spsa || methodOptions?.spsaOptions || {};
+        refined = await runSPSA({
+            start,
+            bounds,
+            encodeVec,
+            decodeVec,
+            evaluator,
+            objective,
+            onProgress: progress,
+            ...spsaOptions,
+        });
+    } else if (method === 'cem') {
+        const cemOptions = methodOptions?.cem || methodOptions?.cemOptions || {};
+        refined = await runCEM({
+            start,
+            bounds,
+            encodeVec,
+            decodeVec,
+            evaluator,
+            objective,
+            onProgress: progress,
+            ...cemOptions,
+        });
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    let metrics = refined?.bestMetrics || null;
+    let score = refined?.bestScore;
+    if ((!metrics || typeof metrics !== 'object') || !Number.isFinite(score)) {
+        const evaluation = await evaluator.evaluate([refined.bestParams]);
+        const result = Array.isArray(evaluation) ? evaluation[0] : null;
+        metrics = metrics || stage4ExtractMetrics(result);
+        score = Number.isFinite(score) ? score : stage4ResolveScore(result, objective);
+    }
+
+    if (!Number.isFinite(score)) {
+        throw new Error('Stage4: 微調結果無效');
+    }
+
+    const row = {
+        params: refined.bestParams,
+        metrics: metrics || null,
+        score,
+        source: `stage4-${method}`,
+        createdAt: Date.now(),
+    };
+    if (metrics && typeof metrics === 'object') {
+        Object.keys(metrics).forEach((key) => {
+            if (row[key] === undefined) {
+                row[key] = metrics[key];
+            }
+        });
+    }
+    if (baseResult) {
+        Object.defineProperty(row, '__stage4Base', {
+            value: baseResult,
+            configurable: true,
+        });
+    }
+    return row;
+}
+
 // 導出函數供外部使用
 window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    buildStage4Context,
+    runStage4,
+    stage4ParamKey: paramKey,
+};
+
+window.batchOptimizationStage4 = {
+    runStage4,
+    paramKey,
+    upsertResult: (row, baseResult) => stage4UpsertRow(row, baseResult),
+    getCurrentBest: stage4GetCurrentBest,
+    buildContext: (currentBest, options) => buildStage4Context(currentBest, options || {}),
+    setUiProgressHandler: stage4SetUiProgressHandler,
+    getResults: () => batchOptimizationResults,
 };
 
 // 測試風險管理優化功能
