@@ -1,8 +1,15 @@
 
+## 2026-06-26 — Patch LB-PROGRESS-MASCOT-20250626A
+- **Scope**: 回測進度吉祥物隨機化與靜態資產切換。
+- **Updates**:
+  - 移除 Tenor API 嵌入流程，改以內建圖片池隨機抽換執行中吉祥物，支援 gif 與 jpeg 來源。
+  - 初始化與每次呼叫 `showLoading` 時都會重新抽選圖片，確保每輪回測有不同的視覺動態。
+- **Testing**: （待前端整合測試）
+
 ## 2025-09-30 — Patch LB-ROLLING-TEST-DEBUG-20250930A
 - **Issue recap**: Walk-Forward 第二個視窗起仍出現訓練期批量優化與滾動測試記錄的最佳參數不一致，有時甚至優於獨立批量優化結果。
 - **Confirmed non-issues**:
-  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。 
+  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。
   - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。 
   - 交易設定覆寫：Rolling Test 呼叫批量優化時以 `baseParamsOverride` 複製 `tradeTiming`、`initialCapital`、`positionSize`、多/空分段等控制，`prepareBaseParamsForOptimization()` 會保留這些欄位後再進行暖身推算，因此隔日買入與全額投入設定未被改寫。 
 - **Active hypotheses**:
