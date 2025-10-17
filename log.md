@@ -1,9 +1,17 @@
 
+## 2025-09-30 — Patch LB-STAGE4-REFINE-20250930A
+- **Scope**: 批量優化第四階段（局部微調）入口與演算法。
+- **Updates**:
+  - 新增 `spsa-runner.js`、`cem-runner.js` 兩個 ES module，實作 SPSA 與 CEM 的局部微調流程，並提供進度回報 hook。
+  - `batch-optimization.js` 匯出 `runStage4`/`paramKey` 與 Stage4 評估上下文，結果自動去重並沿用原始結果表呈現與匯出流程。
+  - `main.js` 加入「第四階段：局部微調」面板與按鈕事件，顯示進度與完成提示；`index.html` 補上對應 UI。
+- **Testing**: 前端本地載入檢查（需後續於實際回測流程驗證）。
+
 ## 2025-09-30 — Patch LB-ROLLING-TEST-DEBUG-20250930A
 - **Issue recap**: Walk-Forward 第二個視窗起仍出現訓練期批量優化與滾動測試記錄的最佳參數不一致，有時甚至優於獨立批量優化結果。
 - **Confirmed non-issues**:
-  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。 
-  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。 
+  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。
+  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。
   - 交易設定覆寫：Rolling Test 呼叫批量優化時以 `baseParamsOverride` 複製 `tradeTiming`、`initialCapital`、`positionSize`、多/空分段等控制，`prepareBaseParamsForOptimization()` 會保留這些欄位後再進行暖身推算，因此隔日買入與全額投入設定未被改寫。 
 - **Active hypotheses**:
   - 需確認 `prepareBaseParamsForOptimization()` 與後續 `optimizeStrategyWithInternalConvergence()` 是否在多輪視窗間殘留前一輪的 `currentCombo` 參數或 Worker 快取，導致後續視窗使用到不同於覆寫日期的資料切片。 

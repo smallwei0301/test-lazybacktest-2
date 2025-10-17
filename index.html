@@ -1900,6 +1900,37 @@
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            <section id="stage4-refine" class="mt-6">
+                                                <details class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <summary class="card-header cursor-pointer">
+                                                        <div>
+                                                            <h4 class="card-title text-base font-semibold">第四階段：局部微調</h4>
+                                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                                透過 SPSA 或 CEM 在最佳解附近做細部微調，只在按下「執行微調」後才會開始運算。
+                                                            </p>
+                                                        </div>
+                                                    </summary>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="grid gap-4 md:grid-cols-2">
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                微調方法
+                                                                <select id="stage4-method" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);">
+                                                                    <option value="spsa">SPSA（隨機近似梯度）</option>
+                                                                    <option value="cem">CEM（交叉熵方法）</option>
+                                                                </select>
+                                                            </label>
+                                                            <div class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                進度
+                                                                <span id="stage4-progress" class="text-sm text-muted-foreground hidden" style="color: var(--muted-foreground);"></span>
+                                                            </div>
+                                                        </div>
+                                                        <button id="stage4-run" class="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition-colors" style="background-color: #047857;">
+                                                            執行微調
+                                                        </button>
+                                                    </div>
+                                                </details>
+                                            </section>
                                         </div>
                                     </div>
                                 </div>
@@ -2453,7 +2484,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>
