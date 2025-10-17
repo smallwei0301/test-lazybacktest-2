@@ -859,6 +859,12 @@
 - **Diagnostics**: 對同一資料集連續啟動「啟動 AI 預測」取得固定種子結果，再按「新的預測」產生新 seed，確認測試勝率、混淆矩陣與交易摘要完全一致；重複啟動舊種子可 100% 重現前一次結果，IndexedDB 可見最新 `lstm_v1_model` 條目。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-10 — Patch LB-PROGRESS-MASCOT-20260310A
+- **Issue recap**: 回測時的吉祥物改為隨機來源後尺寸偏離原始設計，且仍位於進度列左側，使用者視線難以聚焦於進度狀態。
+- **Fix**: 建立 `--loading-mascot-size` 變數維持原本 3.5rem 尺寸並統一於樣式層置中；進度卡改為先顯示狀態文字與進度條，再於下方中央呈現吉祥物。
+- **Diagnostics**: 於桌機與行動裝置檢視執行卡，確認吉祥物固定方形尺寸、水平垂直皆置中且會在每次回測切換來源，進度文字仍與百分比同步更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
 - **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
 - **Fix**:
@@ -1098,3 +1104,19 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+  
+## 2026-03-05 — Patch LB-PROGRESS-MASCOT-20260305A
+- **Issue recap**: Tenor 進度吉祥物已無法符合授權需求，且新增素材須在每次執行回測時隨機顯示指定連結清單，避免重複出現同一張。
+- **Fix**:
+  - 新增 `js/loading-mascot-sources.js` 匯出完整素材清單並進行去重、前後端共用版本碼 `LB-PROGRESS-MASCOT-20260305A`。
+  - `index.html` 移除 Tenor 相關屬性，改以本地預設圖作為 fallback，並於腳本載入順序中注入來源清單模組。
+  - `js/main.js` 以 `refreshLoadingMascotImage` 取代舊有 Tenor 載入流程：在 `showLoading` 啟動與初始載入時隨機挑選來源、同時保留錯誤重試與沙漏備援，並透過 `window.lazybacktestMascot` 暴露除錯介面。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-03-06 — Patch LB-PROGRESS-MASCOT-20260306A
+- **Issue recap**: 進度吉祥物仍維持 3.5rem 正方形，無法與進度條等寬，導致寬螢幕時顯得過小且失去原始比例。
+- **Fix**:
+  - `css/style.css` 改為以 100% 寬度呈現吉祥物容器，移除固定尺寸變數並讓圖片依原始比例自適應高度。
+  - `index.html` 調整容器寬度類別，確保吉祥物隨卡片寬度拉伸並與進度條對齊。
+- **Diagnostics**: 於本地檢視載入中的卡片，確認隨視窗縮放時吉祥物與進度條維持相同寬度且無裁切變形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

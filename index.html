@@ -1127,23 +1127,36 @@
                                     <h3 class="card-title">執行中...</h3>
                                 </div>
                                 <div class="card-content">
-                                    <div class="space-y-3">
-                                        <div class="flex items-center gap-3">
+                                    <div class="space-y-4">
+                                        <div class="space-y-2">
+                                            <p
+                                                id="loadingText"
+                                                class="text-sm text-muted text-center"
+                                                style="color: var(--muted-foreground);"
+                                            >
+                                                準備中...
+                                            </p>
+                                            <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                                <div
+                                                    id="progressBar"
+                                                    class="bg-primary h-2 rounded-full transition-all duration-300"
+                                                    style="width: 0%; background-color: var(--primary);"
+                                                ></div>
+                                            </div>
+                                        </div>
+                                        <div class="flex justify-center w-full">
                                             <div
-                                                class="loading-mascot-wrapper square w-14 h-14 overflow-hidden flex items-center justify-center"
+                                                class="loading-mascot-wrapper square"
                                                 aria-hidden="true"
                                             >
                                                 <div
                                                     id="loadingGif"
                                                     class="loading-mascot-canvas"
-                                                    data-tenor-id="1718069610368761676"
-                                                    data-tenor-api-key="LIVDSRZULELA"
-                                                    data-tenor-client-key="lazybacktest-progress-mascot"
-                                                    data-tenor-fallback-src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media1.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media.tenor.com/ghm6KFFitx4AAAAd/hachiware.gif"
+                                                    data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
                                                 >
                                                     <img
                                                         class="loading-mascot-image"
-                                                        src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif"
+                                                        src="https://i.imgur.com/zwj3cZQ.gif"
                                                         alt="LazyBacktest 進度吉祥物動畫"
                                                         decoding="async"
                                                         loading="eager"
@@ -1152,20 +1165,6 @@
                                                     />
                                                 </div>
                                             </div>
-                                            <p
-                                                id="loadingText"
-                                                class="text-sm text-muted"
-                                                style="color: var(--muted-foreground);"
-                                            >
-                                                準備中...
-                                            </p>
-                                        </div>
-                                        <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
-                                            <div
-                                                id="progressBar"
-                                                class="bg-primary h-2 rounded-full transition-all duration-300"
-                                                style="width: 0%; background-color: var(--primary);"
-                                            ></div>
                                         </div>
                                     </div>
                                 </div>
@@ -2449,6 +2448,7 @@
 
     <script src="js/shared-lookback.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/loading-mascot-sources.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
