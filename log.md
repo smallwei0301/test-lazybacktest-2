@@ -1098,3 +1098,12 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+
+## 2026-03-05 — Patch LB-STAGE4-REFINE-20251005A
+- **Issue recap**: 批量優化僅提供三階段流程，缺乏按鈕觸發的局部微調工具，無法在不重跑批量優化的情況下快速針對最佳結果做 SPSA 或 CEM 微調，且新成果也無法回填現有結果表。
+- **Fix**:
+  - 新增 `js/spsa-stage4.js` 及 `js/cem-stage4.js`，實作基於 `executeBacktestForCombination` 的 SPSA 與 CEM 局部微調演算法，內建正規化、邊界修正與 Box–Muller 抽樣。
+  - `js/batch-optimization.js` 追加 Stage4 公共 API：`paramKeyFromCombo`、`toBatchResultRow`、`upsertBatchResultRow`、`getCurrentBestComboForStage4`、`runStage4`，並透過 `window.batchOptimizationStage4` 將結果回填既有結果表。
+  - `js/main.js` 綁定第四階段按鈕事件；`index.html` 於批量結果卡片下追加 Stage4 方法選單與執行按鈕，並註冊新腳本資源。
+- **Diagnostics**: 於開發者工具檢查 `window.batchOptimizationStage4` API、Stage4 導入的結果去重流程，以及結果表排序/渲染呼叫鏈是否觸發既有 UI 刷新。
+- **Testing**: 尚未執行自動化測試（前端 UI 變更，待本地回測實際驗證）。
