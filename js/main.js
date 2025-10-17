@@ -21,7 +21,7 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260705A';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260708A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
 const loadingMascotState = {
     lastSource: null,
@@ -1652,6 +1652,42 @@ function setLoadingMascotHiddenFlag(hidden) {
     visibility.hidden = Boolean(hidden);
 }
 
+function handleLoadingMascotToggle(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const sourceButton = event?.currentTarget || event?.target || null;
+    const containerEl =
+        (sourceButton && sourceButton.closest && sourceButton.closest('.loading-mascot-canvas')) ||
+        getLoadingMascotContainer();
+
+    if (!containerEl) return;
+
+    const nextHidden = !isLoadingMascotHidden();
+    setLoadingMascotHiddenFlag(nextHidden);
+    applyLoadingMascotHiddenState(containerEl, nextHidden);
+
+    if (nextHidden) {
+        cancelLoadingMascotRotation();
+    } else {
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }
+}
+
+function bindLoadingMascotToggle(toggle) {
+    if (!toggle || toggle.dataset.lbMascotToggleBound === 'true') {
+        return;
+    }
+
+    toggle.type = 'button';
+    toggle.classList.add('loading-mascot-toggle');
+    toggle.dataset.lbMascotToggle = 'true';
+    toggle.addEventListener('click', handleLoadingMascotToggle);
+    toggle.dataset.lbMascotToggleBound = 'true';
+}
+
 function ensureLoadingMascotInfrastructure(container) {
     if (!container) return {};
 
@@ -1659,36 +1695,26 @@ function ensureLoadingMascotInfrastructure(container) {
     if (!toggle) {
         toggle = document.createElement('button');
         toggle.type = 'button';
-        toggle.className = 'loading-mascot-toggle';
-        toggle.dataset.lbMascotToggle = 'true';
-        toggle.setAttribute('aria-label', '隱藏進度吉祥物圖片');
-        toggle.setAttribute('aria-pressed', 'false');
-        toggle.textContent = '-';
-        toggle.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const containerEl = getLoadingMascotContainer();
-            if (!containerEl) return;
-            const nextHidden = !isLoadingMascotHidden();
-            setLoadingMascotHiddenFlag(nextHidden);
-            applyLoadingMascotHiddenState(containerEl, nextHidden);
-            if (nextHidden) {
-                cancelLoadingMascotRotation();
-            } else {
-                refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
-            }
-        });
         container.insertBefore(toggle, container.firstChild);
+    }
+
+    bindLoadingMascotToggle(toggle);
+    toggle.setAttribute('aria-label', '隱藏進度吉祥物圖片');
+    toggle.setAttribute('aria-pressed', 'false');
+    if (!toggle.textContent || !toggle.textContent.trim()) {
+        toggle.textContent = '-';
     }
 
     let fallback = container.querySelector('[data-lb-mascot-fallback]');
     if (!fallback) {
         fallback = document.createElement('div');
         fallback.className = 'loading-mascot-fallback-visual';
-        fallback.dataset.lbMascotFallback = 'true';
-        fallback.setAttribute('aria-hidden', 'true');
         fallback.textContent = '⌛';
         container.appendChild(fallback);
+    }
+    fallback.dataset.lbMascotFallback = 'true';
+    if (!fallback.hasAttribute('aria-hidden')) {
+        fallback.setAttribute('aria-hidden', 'true');
     }
 
     if (typeof container.dataset.lbMascotMode !== 'string' || !container.dataset.lbMascotMode) {

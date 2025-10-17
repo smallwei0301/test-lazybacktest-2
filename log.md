@@ -1137,3 +1137,11 @@
 - **Diagnostics**: 透過 DevTools 手動觸發 `refreshLoadingMascotImage`、輪播逾時與 fallback 情境，確認隱藏狀態可持續、重開時重取新圖且沙漏備援不會移除控制鈕。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-08 — Patch LB-PROGRESS-MASCOT-20260708A
+- **Issue recap**: 現有頁面預先渲染控制鈕，導致 `ensureLoadingMascotInfrastructure` 跳過事件綁定，使用者按下無法切換顯示狀態。
+- **Fix**:
+  - `js/main.js` 新增 `handleLoadingMascotToggle` 與 `bindLoadingMascotToggle`，不論按鈕是否為既有節點皆綁定點擊事件並同步類別、ARIA 屬性。
+  - 更新進度吉祥物版本碼至 `LB-PROGRESS-MASCOT-20260708A`，並在綁定流程中維持 fallback 屬性完整。
+- **Diagnostics**: 本地以 DOMContentLoaded 後直接點擊預設控制鈕，確認立即進入隱藏狀態並停止輪播，再次點擊可正常顯示並重新排程換圖。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
