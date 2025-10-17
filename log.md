@@ -915,6 +915,10 @@
 - **Diagnostics**: 於本地載入頁面確認初始 `<img>` 即為指定 GIF，並觀察 `dataset.lbMascotSource` 會在 Tenor API 成功後更新為 `tenor:https://media.tenor.com/...`，確保不再回退到 SVG。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-06-24 — Patch LB-PROGRESS-MASCOT-20250624A
+- **Enhancement**: 改用 120 組靜態 GIF/JPEG 圖庫作為進度吉祥物來源，每次回測啟動時即時隨機挑選並套用，完全移除對 Tenor API 的依賴並補上沙漏字元回退。
+- **Tech Notes**: `initLoadingMascotSanitiser` 實作來源池隨機輪替、載入錯誤標記與版本註記，`showLoading` 在重啟進度條前觸發 `window.lazybacktestRefreshMascot` 以刷新素材，並維持 `data-lb-mascot-source` 供診斷追蹤。
+
 ## 2025-12-12 — Patch LB-AI-HYBRID-20251212A
 - **Issue recap**: 隔日 AI 模型僅支援 LSTM，預設訓練/測試比例為 2:1，無法切換 ANNS 或於 UI 調整 80/20 等比例，也缺乏背景執行緒的 ANNS 管線。
 - **Fix**: 於 `index.html` 新增模型與切分比例選項，`js/ai-prediction.js` 重構成多模型狀態管理，並整合 ANN 與 LSTM 共同的訓練流程、門檻/種子設定；`js/worker.js` 導入技術指標 ANN 資料管線、統一訓練比例預設 80/20、補上 ANN 訊息型別處理與 TensorFlow.js 4.20 載入。
