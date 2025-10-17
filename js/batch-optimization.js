@@ -1923,6 +1923,7 @@ function renderBatchResultsTable() {
             const typeMap = {
                 'entry-fixed': '進場固定',
                 'exit-fixed': '出場固定',
+                'local-refinement': '局部微調',
                 '基礎': '基礎'
             };
             const mappedTypes = result.optimizationTypes.map(type => typeMap[type] || type);
@@ -1935,6 +1936,9 @@ function renderBatchResultsTable() {
             } else if (result.optimizationType === 'exit-fixed') {
                 optimizationType = '出場固定';
                 typeClass = 'bg-blue-100 text-blue-700';
+            } else if (result.optimizationType === 'local-refinement') {
+                optimizationType = '局部微調';
+                typeClass = 'bg-emerald-100 text-emerald-700';
             }
         }
         
@@ -2024,31 +2028,41 @@ function addCrossOptimizationControls() {
             </h4>
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3">
             <div class="space-y-2">
                 <h5 class="font-medium text-purple-700">📈 第二階段：進場策略優化</h5>
                 <p class="text-sm text-gray-600">固定最佳進場參數，優化所有出場策略組合</p>
-                <button id="start-entry-cross-optimization" 
+                <button id="start-entry-cross-optimization"
                         class="w-full px-4 py-2 ${hasResults ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
                         ${!hasResults ? 'disabled' : ''}>
                     🚀 開始進場策略交叉優化
                 </button>
             </div>
-            
+
             <div class="space-y-2">
                 <h5 class="font-medium text-purple-700">📉 第三階段：出場策略優化</h5>
                 <p class="text-sm text-gray-600">固定最佳出場參數，優化所有進場策略組合</p>
-                <button id="start-exit-cross-optimization" 
+                <button id="start-exit-cross-optimization"
                         class="w-full px-4 py-2 ${hasResults ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
                         ${!hasResults ? 'disabled' : ''}>
                     🎯 開始出場策略交叉優化
                 </button>
             </div>
+
+            <div class="space-y-2">
+                <h5 class="font-medium text-purple-700">🧠 第四階段：局部微調 (SPSA/CEM)</h5>
+                <p class="text-sm text-gray-600">以 SPSA / CEM 對最佳策略組合進行局部搜尋與細部調整</p>
+                <button id="start-local-refinement"
+                        class="w-full px-4 py-2 ${hasResults ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
+                        ${!hasResults ? 'disabled' : ''}>
+                    ⚙️ 開始局部微調
+                </button>
+            </div>
         </div>
-        
+
         <div class="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-            ${hasResults 
-                ? '<strong>💡 優化流程：</strong> 1️⃣ 從當前結果中找出最佳進場策略參數 → 2️⃣ 套用到不同出場策略重新優化 → 3️⃣ 再找出最佳出場策略參數 → 4️⃣ 套用到不同進場策略最終優化'
+            ${hasResults
+                ? '<strong>💡 優化流程：</strong> 1️⃣ 從當前結果中找出最佳進場策略參數 → 2️⃣ 套用到不同出場策略重新優化 → 3️⃣ 再找出最佳出場策略參數 → 4️⃣ 執行 SPSA/CEM 局部微調以強化績效'
                 : '<strong>⚠️ 提示：</strong> 請先執行批量優化以獲得初始結果，然後才能進行交叉優化'
             }
         </div>
@@ -2060,23 +2074,31 @@ function addCrossOptimizationControls() {
     // 添加事件監聽器
     const entryButton = document.getElementById('start-entry-cross-optimization');
     const exitButton = document.getElementById('start-exit-cross-optimization');
-    
-    if (entryButton && exitButton) {
-        // 只在有結果時才添加事件監聽器
-        if (hasResults) {
+    const localButton = document.getElementById('start-local-refinement');
+
+    if (hasResults) {
+        if (entryButton) {
             entryButton.addEventListener('click', startEntryCrossOptimization);
-            exitButton.addEventListener('click', startExitCrossOptimization);
-            console.log('[Cross Optimization] Event listeners added successfully');
         }
-        
-        // 添加到全局作用域以便調試
-        window.startEntryCrossOptimization = startEntryCrossOptimization;
-        window.startExitCrossOptimization = startExitCrossOptimization;
-        
-    } else {
+        if (exitButton) {
+            exitButton.addEventListener('click', startExitCrossOptimization);
+        }
+        if (localButton) {
+            localButton.addEventListener('click', startLocalRefinementOptimization);
+        }
+        console.log('[Cross Optimization] Event listeners added successfully');
+    }
+
+    // 添加到全局作用域以便調試
+    window.startEntryCrossOptimization = startEntryCrossOptimization;
+    window.startExitCrossOptimization = startExitCrossOptimization;
+    window.startLocalRefinementOptimization = startLocalRefinementOptimization;
+
+    if (!entryButton || !exitButton || !localButton) {
         console.error('[Cross Optimization] Failed to find buttons:', {
             entryButton: !!entryButton,
-            exitButton: !!exitButton
+            exitButton: !!exitButton,
+            localButton: !!localButton
         });
     }
 }
@@ -2310,7 +2332,7 @@ async function startExitCrossOptimization() {
 async function executeCrossOptimizationTasksExit(tasks) {
     const results = [];
     const maxConcurrency = navigator.hardwareConcurrency || 4;
-    
+
     console.log(`[Cross Optimization] Running ${tasks.length} exit tasks with concurrency = ${maxConcurrency}`);
     
     // 設置交叉優化進度
@@ -2375,6 +2397,528 @@ async function executeCrossOptimizationTasksExit(tasks) {
         // 開始處理
         launchNext();
     });
+}
+
+// --- 第四階段：局部微調（SPSA/CEM） ---
+// Patch Tag: LB-BATCH-LOCAL-20250913A
+async function startLocalRefinementOptimization() {
+    console.log('[Local Refinement] startLocalRefinementOptimization called');
+
+    try {
+        if (!batchOptimizationResults || batchOptimizationResults.length === 0) {
+            showError('請先完成批量優化以取得初始結果');
+            return;
+        }
+
+        const config = getBatchOptimizationConfig();
+        const targetMetric = config.targetMetric || 'annualizedReturn';
+
+        const sorted = batchOptimizationResults
+            .filter(result => result && result.buyStrategy && result.sellStrategy)
+            .slice();
+
+        if (sorted.length === 0) {
+            showError('尚無可用於局部微調的策略組合');
+            return;
+        }
+
+        sorted.sort((a, b) => {
+            const metricA = getMetricFromResult(a, targetMetric);
+            const metricB = getMetricFromResult(b, targetMetric);
+            if (isBetterMetric(metricA, metricB, targetMetric)) return -1;
+            if (isBetterMetric(metricB, metricA, targetMetric)) return 1;
+            return 0;
+        });
+
+        const topLimit = Math.min(5, sorted.length);
+        const preparedCandidates = [];
+
+        for (let i = 0; i < sorted.length && preparedCandidates.length < topLimit; i++) {
+            const baseResult = sorted[i];
+            const parameterConfigs = getLocalRefinementParameterConfigs(baseResult.buyStrategy, baseResult.sellStrategy, baseResult);
+            if (parameterConfigs.length === 0) {
+                console.log('[Local Refinement] Skip result due to no optimizable parameters:', baseResult.buyStrategy, baseResult.sellStrategy);
+                continue;
+            }
+            preparedCandidates.push({ baseResult, parameterConfigs });
+        }
+
+        if (preparedCandidates.length === 0) {
+            showError('目前的最佳結果缺少可微調的參數，請先執行其他優化階段');
+            return;
+        }
+
+        const iterationLimit = Math.max(3, parseInt(config.iterationLimit || 6, 10));
+        const iterations = Math.min(10, iterationLimit * 2);
+        const parameterTrials = parseInt(config.parameterTrials || 100, 10);
+        const populationSize = Math.min(15, Math.max(6, Math.round(parameterTrials / 15)));
+        const totalEvaluations = preparedCandidates.length * iterations * populationSize;
+
+        if (totalEvaluations <= 0) {
+            showError('局部微調設定無效，請調整批量優化參數後再試');
+            return;
+        }
+
+        showCrossOptimizationProgress('local');
+        crossOptimizationProgress.total = totalEvaluations;
+        crossOptimizationProgress.current = 0;
+        crossOptimizationProgress.phase = 'local';
+        crossOptimizationProgress.startTime = Date.now();
+        updateCrossOptimizationProgress();
+
+        showInfo(`🧠 開始局部微調：針對 ${preparedCandidates.length} 組最佳策略進行 ${iterations} 輪 SPSA/CEM 探索`);
+
+        const refinedResults = [];
+
+        for (const candidate of preparedCandidates) {
+            const refined = await runLocalRefinementForResult(candidate.baseResult, {
+                iterations,
+                populationSize,
+                targetMetric,
+                parameterConfigs: candidate.parameterConfigs
+            });
+
+            if (refined) {
+                refinedResults.push(refined);
+            }
+        }
+
+        hideCrossOptimizationProgress();
+
+        if (refinedResults.length > 0) {
+            addCrossOptimizationResults(refinedResults);
+            sortBatchResults();
+            renderBatchResultsTable();
+            showSuccess(`✅ 局部微調完成！新增 ${refinedResults.length} 個精煉結果`);
+        } else {
+            showError('局部微調未找到更佳結果，建議調整參數後再試');
+        }
+    } catch (error) {
+        console.error('[Local Refinement] Error:', error);
+        hideCrossOptimizationProgress();
+        showError('局部微調執行失敗：' + error.message);
+    }
+}
+
+async function runLocalRefinementForResult(baseResult, options = {}) {
+    const entryStrategy = baseResult?.buyStrategy;
+    const exitStrategy = baseResult?.sellStrategy;
+
+    if (!entryStrategy || !exitStrategy) {
+        console.warn('[Local Refinement] Missing strategy information');
+        return null;
+    }
+
+    const targetMetric = options.targetMetric || 'annualizedReturn';
+    const iterations = Math.max(1, parseInt(options.iterations || 6, 10));
+    const populationSize = Math.max(2, parseInt(options.populationSize || 8, 10));
+
+    const parameterConfigsSource = Array.isArray(options.parameterConfigs)
+        ? options.parameterConfigs
+        : getLocalRefinementParameterConfigs(entryStrategy, exitStrategy, baseResult);
+
+    const parameterConfigs = parameterConfigsSource.map(cfg => ({
+        ...cfg,
+        range: { ...cfg.range }
+    }));
+
+    if (parameterConfigs.length === 0) {
+        console.log('[Local Refinement] No parameters to refine for', entryStrategy, exitStrategy);
+        return null;
+    }
+
+    const baseCandidate = createLocalRefinementCandidate(baseResult, parameterConfigs);
+    if (!baseCandidate) {
+        console.warn('[Local Refinement] Failed to build base candidate');
+        return null;
+    }
+
+    let bestMetric = getMetricFromResult(baseResult, targetMetric);
+    if (!Number.isFinite(bestMetric)) {
+        bestMetric = targetMetric === 'maxDrawdown' ? Infinity : -Infinity;
+    }
+    let bestResult = null;
+
+    const distribution = parameterConfigs.map(cfg => {
+        const span = Math.abs(cfg.range.to - cfg.range.from) || Math.abs(cfg.step) || 1;
+        const stepSize = cfg.step || cfg.range.step || 1;
+        const initialStd = span > 0 ? span / 6 : stepSize;
+        const minStd = Math.max(stepSize / 2, span / 100 || stepSize);
+        const currentValue = getLocalCandidateValue(baseCandidate, cfg);
+
+        return {
+            ...cfg,
+            mean: localQuantize(currentValue, stepSize, cfg.range.from, cfg.range.to),
+            std: Math.max(minStd, initialStd),
+            minStd
+        };
+    });
+
+    for (let iteration = 0; iteration < iterations; iteration++) {
+        const samples = [];
+
+        for (let i = 0; i < populationSize; i++) {
+            const candidate = sampleLocalRefinementCandidate(distribution, baseCandidate);
+            const evaluation = await evaluateLocalRefinementCandidate(entryStrategy, exitStrategy, candidate, targetMetric);
+
+            crossOptimizationProgress.current++;
+            updateCrossOptimizationProgress({ entryStrategy, exitStrategy });
+
+            if (evaluation) {
+                samples.push(evaluation);
+                if (isBetterMetric(evaluation.metric, bestMetric, targetMetric)) {
+                    bestMetric = evaluation.metric;
+                    bestResult = evaluation.result;
+                }
+            }
+        }
+
+        if (samples.length === 0) {
+            continue;
+        }
+
+        samples.sort((a, b) => {
+            if (isBetterMetric(a.metric, b.metric, targetMetric)) return -1;
+            if (isBetterMetric(b.metric, a.metric, targetMetric)) return 1;
+            return 0;
+        });
+
+        const eliteCount = Math.max(1, Math.floor(samples.length * 0.3));
+        const elites = samples.slice(0, eliteCount);
+
+        distribution.forEach(cfg => {
+            const values = elites
+                .map(elite => getLocalCandidateValue(elite.candidate, cfg))
+                .filter(value => Number.isFinite(value));
+
+            if (values.length === 0) {
+                return;
+            }
+
+            const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+            const variance = values.reduce((sum, value) => sum + Math.pow(value - average, 2), 0) / values.length;
+            const stepSize = cfg.step || cfg.range.step || 1;
+
+            cfg.mean = localQuantize(average, stepSize, cfg.range.from, cfg.range.to);
+
+            let newStd = Math.sqrt(Math.max(variance, 0));
+            if (!Number.isFinite(newStd) || newStd <= cfg.minStd) {
+                newStd = cfg.minStd;
+            } else {
+                newStd = Math.max(cfg.minStd, newStd * 0.85);
+            }
+            cfg.std = newStd;
+        });
+    }
+
+    return bestResult;
+}
+
+async function evaluateLocalRefinementCandidate(entryStrategy, exitStrategy, candidate, targetMetric) {
+    try {
+        const backtestResult = await runLocalRefinementBacktest(entryStrategy, exitStrategy, candidate);
+        if (!backtestResult) {
+            return null;
+        }
+
+        const metricValue = getMetricFromResult(backtestResult, targetMetric);
+        if (!Number.isFinite(metricValue)) {
+            return null;
+        }
+
+        const candidateSnapshot = {
+            entryParams: { ...candidate.entryParams },
+            exitParams: { ...candidate.exitParams },
+            riskManagement: candidate.riskManagement ? { ...candidate.riskManagement } : undefined
+        };
+
+        const enrichedResult = {
+            ...backtestResult,
+            crossOptimization: true,
+            optimizationType: 'local-refinement',
+            optimizationStage: 'phase4',
+            buyStrategy: entryStrategy,
+            sellStrategy: exitStrategy,
+            buyParams: { ...candidateSnapshot.entryParams },
+            sellParams: { ...candidateSnapshot.exitParams }
+        };
+
+        if (candidateSnapshot.riskManagement && Object.keys(candidateSnapshot.riskManagement).length > 0) {
+            enrichedResult.riskManagement = { ...candidateSnapshot.riskManagement };
+        }
+
+        return {
+            candidate: candidateSnapshot,
+            result: enrichedResult,
+            metric: metricValue
+        };
+    } catch (error) {
+        console.error('[Local Refinement] Failed to evaluate candidate:', error);
+        return null;
+    }
+}
+
+function runLocalRefinementBacktest(entryStrategy, exitStrategy, candidate) {
+    const baseParams = getBacktestParams();
+    baseParams.entryStrategy = getWorkerStrategyName(entryStrategy);
+    baseParams.exitStrategy = getWorkerStrategyName(exitStrategy);
+    baseParams.entryParams = { ...(candidate.entryParams || {}) };
+    baseParams.exitParams = { ...(candidate.exitParams || {}) };
+
+    if (candidate.riskManagement) {
+        if (Number.isFinite(localRefinementToNumber(candidate.riskManagement.stopLoss))) {
+            baseParams.stopLoss = localRefinementToNumber(candidate.riskManagement.stopLoss);
+        }
+        if (Number.isFinite(localRefinementToNumber(candidate.riskManagement.takeProfit))) {
+            baseParams.takeProfit = localRefinementToNumber(candidate.riskManagement.takeProfit);
+        }
+    }
+
+    return performSingleBacktestFast(baseParams);
+}
+
+function getLocalRefinementParameterConfigs(entryStrategy, exitStrategy, baseResult) {
+    const configs = [];
+
+    const entryInfo = strategyDescriptions[entryStrategy];
+    if (entryInfo && Array.isArray(entryInfo.optimizeTargets)) {
+        entryInfo.optimizeTargets.forEach(target => {
+            const range = normalizeLocalRefinementRange(target.range);
+            if (!range) return;
+            configs.push({
+                scope: 'entry',
+                strategy: entryStrategy,
+                name: target.name,
+                label: target.label,
+                range,
+                step: range.step
+            });
+        });
+    }
+
+    const exitInfo = strategyDescriptions[exitStrategy];
+    if (exitInfo && Array.isArray(exitInfo.optimizeTargets)) {
+        exitInfo.optimizeTargets.forEach(target => {
+            const range = normalizeLocalRefinementRange(target.range);
+            if (!range) return;
+            configs.push({
+                scope: 'exit',
+                strategy: exitStrategy,
+                name: target.name,
+                label: target.label,
+                range,
+                step: range.step
+            });
+        });
+    }
+
+    const stopLossRange = globalOptimizeTargets?.stopLoss?.range;
+    const takeProfitRange = globalOptimizeTargets?.takeProfit?.range;
+
+    const stopLossValue = localRefinementToNumber(
+        baseResult?.riskManagement?.stopLoss ??
+        baseResult?.usedStopLoss ??
+        baseResult?.stopLoss
+    );
+
+    if (stopLossRange && Number.isFinite(stopLossValue)) {
+        const range = normalizeLocalRefinementRange(stopLossRange);
+        if (range) {
+            configs.push({
+                scope: 'risk',
+                name: 'stopLoss',
+                label: globalOptimizeTargets.stopLoss.label,
+                range,
+                step: range.step,
+                defaultValue: stopLossValue
+            });
+        }
+    }
+
+    const takeProfitValue = localRefinementToNumber(
+        baseResult?.riskManagement?.takeProfit ??
+        baseResult?.usedTakeProfit ??
+        baseResult?.takeProfit
+    );
+
+    if (takeProfitRange && Number.isFinite(takeProfitValue)) {
+        const range = normalizeLocalRefinementRange(takeProfitRange);
+        if (range) {
+            configs.push({
+                scope: 'risk',
+                name: 'takeProfit',
+                label: globalOptimizeTargets.takeProfit.label,
+                range,
+                step: range.step,
+                defaultValue: takeProfitValue
+            });
+        }
+    }
+
+    return configs;
+}
+
+function createLocalRefinementCandidate(baseResult, parameterConfigs) {
+    const candidate = {
+        entryParams: { ...(baseResult.buyParams || baseResult.entryParams || {}) },
+        exitParams: { ...(baseResult.sellParams || baseResult.exitParams || {}) }
+    };
+
+    let hasRiskParameter = false;
+
+    parameterConfigs.forEach(cfg => {
+        const stepSize = cfg.step || cfg.range.step || 1;
+        let value;
+
+        if (cfg.scope === 'entry') {
+            value = localRefinementToNumber(candidate.entryParams[cfg.name]);
+            if (!Number.isFinite(value)) {
+                value = localRefinementToNumber(strategyDescriptions[cfg.strategy]?.defaultParams?.[cfg.name]);
+            }
+        } else if (cfg.scope === 'exit') {
+            value = localRefinementToNumber(candidate.exitParams[cfg.name]);
+            if (!Number.isFinite(value)) {
+                value = localRefinementToNumber(strategyDescriptions[cfg.strategy]?.defaultParams?.[cfg.name]);
+            }
+        } else if (cfg.scope === 'risk') {
+            if (!candidate.riskManagement) candidate.riskManagement = {};
+            hasRiskParameter = true;
+            value = localRefinementToNumber(candidate.riskManagement[cfg.name]);
+            if (!Number.isFinite(value)) {
+                value = localRefinementToNumber(cfg.defaultValue);
+            }
+        }
+
+        if (!Number.isFinite(value)) {
+            value = cfg.range.from;
+        }
+
+        value = localQuantize(value, stepSize, cfg.range.from, cfg.range.to);
+
+        if (cfg.scope === 'entry') {
+            candidate.entryParams[cfg.name] = value;
+        } else if (cfg.scope === 'exit') {
+            candidate.exitParams[cfg.name] = value;
+        } else if (cfg.scope === 'risk') {
+            candidate.riskManagement[cfg.name] = value;
+        }
+    });
+
+    if (!hasRiskParameter) {
+        delete candidate.riskManagement;
+    }
+
+    return candidate;
+}
+
+function sampleLocalRefinementCandidate(distribution, baseCandidate) {
+    const candidate = {
+        entryParams: { ...baseCandidate.entryParams },
+        exitParams: { ...baseCandidate.exitParams },
+        riskManagement: baseCandidate.riskManagement ? { ...baseCandidate.riskManagement } : undefined
+    };
+
+    distribution.forEach(cfg => {
+        const stepSize = cfg.step || cfg.range.step || 1;
+        const noise = localGaussianRandom();
+        let value = cfg.mean + noise * cfg.std;
+        value = localQuantize(value, stepSize, cfg.range.from, cfg.range.to);
+
+        if (cfg.scope === 'entry') {
+            candidate.entryParams[cfg.name] = value;
+        } else if (cfg.scope === 'exit') {
+            candidate.exitParams[cfg.name] = value;
+        } else if (cfg.scope === 'risk') {
+            if (!candidate.riskManagement) candidate.riskManagement = {};
+            candidate.riskManagement[cfg.name] = value;
+        }
+    });
+
+    return candidate;
+}
+
+function getLocalCandidateValue(candidate, config) {
+    if (!candidate || !config) return NaN;
+    if (config.scope === 'entry') {
+        return localRefinementToNumber(candidate.entryParams?.[config.name]);
+    }
+    if (config.scope === 'exit') {
+        return localRefinementToNumber(candidate.exitParams?.[config.name]);
+    }
+    if (config.scope === 'risk') {
+        return localRefinementToNumber(candidate.riskManagement?.[config.name]);
+    }
+    return NaN;
+}
+
+function normalizeLocalRefinementRange(range) {
+    if (!range) return null;
+    const from = localRefinementToNumber(range.from);
+    const to = localRefinementToNumber(range.to);
+    const step = localRefinementToNumber(range.step ?? 1);
+
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(step) || step === 0) {
+        return null;
+    }
+
+    const min = Math.min(from, to);
+    const max = Math.max(from, to);
+    return {
+        from: min,
+        to: max,
+        step: Math.abs(step)
+    };
+}
+
+function localRefinementToNumber(value) {
+    if (value === null || value === undefined) return NaN;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^0-9.+-eE]/g, '');
+        if (!cleaned) return NaN;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    return NaN;
+}
+
+function localQuantize(value, step, min, max) {
+    const clamped = localClamp(value, min, max);
+    if (!Number.isFinite(step) || step <= 0) return clamped;
+    const steps = Math.round((clamped - min) / step);
+    const quantized = min + steps * step;
+    const precision = getLocalStepPrecision(step);
+    const fixed = Number(quantized.toFixed(precision));
+    return localClamp(fixed, min, max);
+}
+
+function localClamp(value, min, max) {
+    const numericValue = localRefinementToNumber(value);
+    if (!Number.isFinite(numericValue)) return Number.isFinite(min) ? min : 0;
+    let result = numericValue;
+    if (Number.isFinite(min) && result < min) result = min;
+    if (Number.isFinite(max) && result > max) result = max;
+    return result;
+}
+
+function getLocalStepPrecision(step) {
+    const stepValue = Math.abs(step);
+    if (!Number.isFinite(stepValue)) return 0;
+    const stepString = stepValue.toString();
+    if (stepString.indexOf('e-') >= 0) {
+        const [, exponent] = stepString.split('e-');
+        return parseInt(exponent, 10) || 0;
+    }
+    const decimal = stepString.split('.')[1];
+    return decimal ? decimal.length : 0;
+}
+
+function localGaussianRandom() {
+    let u = 0;
+    let v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
 // 找到最佳進場策略
@@ -3565,9 +4109,21 @@ function showCrossOptimizationProgress(phase = 'entry') {
         
         if (progressDiv) progressDiv.classList.remove('hidden');
         if (progressIcon) progressIcon.classList.add('animate-pulse');
-        if (progressDetail) progressDetail.textContent = '正在初始化交叉優化...';
+        if (progressDetail) {
+            progressDetail.textContent = phase === 'local'
+                ? '正在初始化局部微調...'
+                : '正在初始化交叉優化...';
+        }
         if (progressStatus) {
-            progressStatus.textContent = phase === 'entry' ? '📈 第二階段：進場策略優化' : '📉 第三階段：出場策略優化';
+            if (phase === 'entry') {
+                progressStatus.textContent = '📈 第二階段：進場策略優化';
+            } else if (phase === 'exit') {
+                progressStatus.textContent = '📉 第三階段：出場策略優化';
+            } else if (phase === 'local') {
+                progressStatus.textContent = '🧠 第四階段：局部微調';
+            } else {
+                progressStatus.textContent = '';
+            }
         }
         
         // 重置進度
@@ -3616,7 +4172,8 @@ function updateCrossOptimizationProgress(currentTask = null) {
             const exitName = strategyDescriptions[currentTask.exitStrategy]?.name || currentTask.exitStrategy;
             progressDetail.textContent = `🔄 正在優化: ${entryName} + ${exitName} (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
         } else {
-            progressDetail.textContent = `處理中... (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
+            const baseLabel = crossOptimizationProgress.phase === 'local' ? '局部微調進行中' : '處理中...';
+            progressDetail.textContent = `${baseLabel} (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
         }
         
         // 時間估算

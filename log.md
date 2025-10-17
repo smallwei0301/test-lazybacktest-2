@@ -30,6 +30,14 @@
   - 逐窗結果表加入參數摘要欄與更完整的多空／風控設定敘述，便於比對每個視窗採用的策略組合。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-09-13 — Patch LB-BATCH-LOCAL-20250913A
+- **Scope**: 批量優化第四階段（局部微調）。
+- **Updates**:
+  - 批量優化結果面板新增「第四階段：局部微調 (SPSA/CEM)」按鈕與流程提示，沿用既有進度卡顯示執行狀態。
+  - 實作局部微調演算法：針對最佳組合執行 CEM/SPSA 混合取樣，結合交叉優化快取回測快速探索鄰域。
+  - 產出結果會自動併入批量優化表格，並以「局部微調」標籤標示階段來源，保留風控參數調整資訊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');const file='js/batch-optimization.js';const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});console.log('scripts compile');NODE`
+
 ## 2026-01-15 — Patch LB-ROLLING-TEST-AUTO-OPT-20260115A
 - **Scope**: Walk-Forward 訓練期參數優化。
 - **Updates**:
