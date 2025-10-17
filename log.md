@@ -1097,6 +1097,15 @@
 - **Diagnostics**: 準備針對第二、第三視窗記錄 `cachedWindowData.length` 與原始快取長度，並比對批量優化單跑的 `rawDataUsed.fetchRange`，確認 Worker 僅接收到對應訓練期間的資料。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-06 — Patch LB-BATCH-LOCAL-20251005A
+- **Issue recap**: 批量優化僅提供第二階段進場交叉與第三階段出場交叉，缺乏針對最佳組合的局部微調，使用者無法快速透過 SPSA/CEM 類型的演算法收斂到更佳參數，結果表也少了第四階段的對應標記。
+- **Fix**:
+  - `js/batch-optimization.js` 新增局部微調控制按鈕與事件，採用交錯的 SPSA/CEM 混合演算法針對前幾名組合進行多輪微調，並以 `LOCAL_FINE_TUNE_PATCH_TAG` 標記結果。
+  - 將交叉優化進度顯示擴充至第四階段，新增 `local-finetune` 標籤與琥珀色樣式，確保結果表可以辨識局部微調產出。
+  - 建立風險參數快照、範圍收斂與精度修正工具，讓微調過程沿用暖身與停損／停利設定且避免參數跳脫原始範圍。
+- **Diagnostics**: 以最佳化結果清單模擬多組進出場配置，檢查局部微調只在指標改善時寫入結果、且交叉優化進度文字會顯示第四階段狀態。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
 - **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
 - **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。
