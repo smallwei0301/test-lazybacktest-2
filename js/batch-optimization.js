@@ -2028,27 +2028,37 @@ function addCrossOptimizationControls() {
             <div class="space-y-2">
                 <h5 class="font-medium text-purple-700">📈 第二階段：進場策略優化</h5>
                 <p class="text-sm text-gray-600">固定最佳進場參數，優化所有出場策略組合</p>
-                <button id="start-entry-cross-optimization" 
+                <button id="start-entry-cross-optimization"
                         class="w-full px-4 py-2 ${hasResults ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
                         ${!hasResults ? 'disabled' : ''}>
                     🚀 開始進場策略交叉優化
                 </button>
             </div>
-            
+
             <div class="space-y-2">
                 <h5 class="font-medium text-purple-700">📉 第三階段：出場策略優化</h5>
                 <p class="text-sm text-gray-600">固定最佳出場參數，優化所有進場策略組合</p>
-                <button id="start-exit-cross-optimization" 
+                <button id="start-exit-cross-optimization"
                         class="w-full px-4 py-2 ${hasResults ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
                         ${!hasResults ? 'disabled' : ''}>
                     🎯 開始出場策略交叉優化
                 </button>
             </div>
+
+            <div class="space-y-2 md:col-span-2 lg:col-span-1">
+                <h5 class="font-medium text-purple-700">🔬 第四階段：局部微調（SPSA 或 CEM）</h5>
+                <p class="text-sm text-gray-600">鎖定前三優化組合，使用隨機微分或交叉熵演算法微調參數</p>
+                <button id="start-local-refinement"
+                        class="w-full px-4 py-2 ${hasResults ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
+                        ${!hasResults ? 'disabled' : ''}>
+                    🧪 啟動局部微調流程
+                </button>
+            </div>
         </div>
-        
+
         <div class="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-            ${hasResults 
-                ? '<strong>💡 優化流程：</strong> 1️⃣ 從當前結果中找出最佳進場策略參數 → 2️⃣ 套用到不同出場策略重新優化 → 3️⃣ 再找出最佳出場策略參數 → 4️⃣ 套用到不同進場策略最終優化'
+            ${hasResults
+                ? '<strong>💡 優化流程：</strong> 1️⃣ 從當前結果中找出最佳進場策略參數 → 2️⃣ 套用到不同出場策略重新優化 → 3️⃣ 再找出最佳出場策略參數 → 4️⃣ 套用到不同進場策略最終優化 → 5️⃣ 局部微調（SPSA／CEM）'
                 : '<strong>⚠️ 提示：</strong> 請先執行批量優化以獲得初始結果，然後才能進行交叉優化'
             }
         </div>
@@ -2060,23 +2070,27 @@ function addCrossOptimizationControls() {
     // 添加事件監聽器
     const entryButton = document.getElementById('start-entry-cross-optimization');
     const exitButton = document.getElementById('start-exit-cross-optimization');
-    
-    if (entryButton && exitButton) {
+    const refineButton = document.getElementById('start-local-refinement');
+
+    if (entryButton && exitButton && refineButton) {
         // 只在有結果時才添加事件監聽器
         if (hasResults) {
             entryButton.addEventListener('click', startEntryCrossOptimization);
             exitButton.addEventListener('click', startExitCrossOptimization);
+            refineButton.addEventListener('click', startLocalRefinementOptimization);
             console.log('[Cross Optimization] Event listeners added successfully');
         }
-        
+
         // 添加到全局作用域以便調試
         window.startEntryCrossOptimization = startEntryCrossOptimization;
         window.startExitCrossOptimization = startExitCrossOptimization;
-        
+        window.startLocalRefinementOptimization = startLocalRefinementOptimization;
+
     } else {
         console.error('[Cross Optimization] Failed to find buttons:', {
             entryButton: !!entryButton,
-            exitButton: !!exitButton
+            exitButton: !!exitButton,
+            refineButton: !!refineButton
         });
     }
 }
@@ -2310,7 +2324,7 @@ async function startExitCrossOptimization() {
 async function executeCrossOptimizationTasksExit(tasks) {
     const results = [];
     const maxConcurrency = navigator.hardwareConcurrency || 4;
-    
+
     console.log(`[Cross Optimization] Running ${tasks.length} exit tasks with concurrency = ${maxConcurrency}`);
     
     // 設置交叉優化進度
@@ -2375,6 +2389,539 @@ async function executeCrossOptimizationTasksExit(tasks) {
         // 開始處理
         launchNext();
     });
+}
+
+// 開始局部微調（SPSA / CEM）
+async function startLocalRefinementOptimization() {
+    console.log('[Cross Optimization] startLocalRefinementOptimization called');
+
+    try {
+        showCrossOptimizationProgress('refine');
+        showInfo('🔍 開始局部微調流程...');
+
+        const entryStrategies = getSelectedEntryStrategies();
+        const exitStrategies = getSelectedExitStrategies();
+
+        if (entryStrategies.length === 0) {
+            hideCrossOptimizationProgress();
+            showError('請先在批量優化設定中選擇進場策略');
+            return;
+        }
+
+        if (exitStrategies.length === 0) {
+            hideCrossOptimizationProgress();
+            showError('請先在批量優化設定中選擇出場策略');
+            return;
+        }
+
+        if (!batchOptimizationResults || batchOptimizationResults.length === 0) {
+            hideCrossOptimizationProgress();
+            showError('請先完成批量優化並產出初始結果');
+            return;
+        }
+
+        const config = getBatchOptimizationConfig() || {};
+        const targetMetric = config.targetMetric || 'annualizedReturn';
+
+        const candidates = batchOptimizationResults.filter(result =>
+            entryStrategies.includes(result.buyStrategy) &&
+            exitStrategies.includes(result.sellStrategy)
+        );
+
+        if (candidates.length === 0) {
+            hideCrossOptimizationProgress();
+            showError('當前勾選的策略尚無可進行局部微調的結果');
+            return;
+        }
+
+        const sortedCandidates = [...candidates].sort((a, b) => {
+            const metricA = getMetricFromResult(a, targetMetric);
+            const metricB = getMetricFromResult(b, targetMetric);
+
+            if (isBetterMetric(metricA, metricB, targetMetric)) return -1;
+            if (isBetterMetric(metricB, metricA, targetMetric)) return 1;
+            return 0;
+        });
+
+        const iterationLimit = Math.max(3, parseInt(config.iterationLimit, 10) || 6);
+        const topCount = Math.min(sortedCandidates.length, Math.max(1, Math.min(5, Math.ceil(iterationLimit / 2))));
+        const selectedCandidates = sortedCandidates.slice(0, topCount);
+
+        const tasks = selectedCandidates
+            .map(candidate => buildLocalRefinementTask(candidate, config, targetMetric))
+            .filter(Boolean);
+
+        if (tasks.length === 0) {
+            hideCrossOptimizationProgress();
+            showError('選定的策略缺少可調整參數，無法執行局部微調');
+            return;
+        }
+
+        const totalEvaluations = tasks.reduce((sum, task) => sum + (task.totalEvaluations || 0), 0);
+        crossOptimizationProgress.total = totalEvaluations > 0 ? totalEvaluations : tasks.length;
+        crossOptimizationProgress.current = 0;
+        crossOptimizationProgress.phase = 'refine';
+        crossOptimizationProgress.startTime = Date.now();
+        updateCrossOptimizationProgress();
+
+        const refinedResults = [];
+
+        for (const task of tasks) {
+            updateCrossOptimizationProgress(task.context);
+            const result = await runLocalRefinementTask(task);
+
+            if (Array.isArray(result)) {
+                result.forEach(item => { if (item) refinedResults.push(item); });
+            } else if (result) {
+                refinedResults.push(result);
+            }
+        }
+
+        crossOptimizationProgress.current = crossOptimizationProgress.total;
+        updateCrossOptimizationProgress();
+
+        if (refinedResults.length > 0) {
+            addCrossOptimizationResults(refinedResults);
+            sortBatchResults();
+            renderBatchResultsTable();
+            hideCrossOptimizationProgress();
+            showSuccess(`✅ 局部微調完成！新增 ${refinedResults.length} 個微調結果`);
+        } else {
+            hideCrossOptimizationProgress();
+            showError('局部微調未產生有效結果');
+        }
+
+    } catch (error) {
+        console.error('[Cross Optimization] Error in startLocalRefinementOptimization:', error);
+        hideCrossOptimizationProgress();
+        showError('局部微調執行失敗：' + error.message);
+    }
+}
+
+function buildLocalRefinementTask(candidate, config, targetMetric) {
+    if (!candidate || !candidate.buyStrategy || !candidate.sellStrategy) {
+        return null;
+    }
+
+    const entryInfo = strategyDescriptions[candidate.buyStrategy];
+    const exitInfo = strategyDescriptions[candidate.sellStrategy];
+
+    const entryTargets = Array.isArray(entryInfo?.optimizeTargets)
+        ? entryInfo.optimizeTargets.filter(target => target?.range && isFinite(target.range.from) && isFinite(target.range.to))
+            .map(target => ({ ...target, strategyType: 'entry' }))
+        : [];
+
+    const exitTargets = Array.isArray(exitInfo?.optimizeTargets)
+        ? exitInfo.optimizeTargets.filter(target => target?.range && isFinite(target.range.from) && isFinite(target.range.to))
+            .map(target => ({ ...target, strategyType: 'exit' }))
+        : [];
+
+    const totalTargets = entryTargets.length + exitTargets.length;
+    if (totalTargets === 0) {
+        return null;
+    }
+
+    const iterationLimit = Math.max(3, parseInt(config.iterationLimit, 10) || 6);
+    const algorithm = totalTargets > 2 ? 'cem' : 'spsa';
+    const population = algorithm === 'cem'
+        ? Math.max(4, Math.min(12, Math.round(Math.sqrt(config.parameterTrials || 30))))
+        : 2;
+
+    const initialEntryParams = ensureInitialParams(candidate.buyParams || candidate.entryParams || {}, candidate.buyStrategy);
+    const initialExitParams = ensureInitialParams(candidate.sellParams || candidate.exitParams || {}, candidate.sellStrategy);
+    const targetMap = buildRefinementTargetMap(entryTargets, exitTargets);
+
+    return {
+        candidate,
+        entryTargets,
+        exitTargets,
+        algorithm,
+        iterations: iterationLimit,
+        population,
+        totalEvaluations: algorithm === 'cem' ? iterationLimit * population : iterationLimit * 2,
+        initialEntryParams,
+        initialExitParams,
+        initialMetric: getMetricFromResult(candidate, targetMetric),
+        context: { entryStrategy: candidate.buyStrategy, exitStrategy: candidate.sellStrategy },
+        refinementLabel: algorithm === 'cem' ? 'refinement-cem' : 'refinement-spsa',
+        targetMetric,
+        targetMap
+    };
+}
+
+async function runLocalRefinementTask(task) {
+    if (!task) return null;
+
+    if (task.algorithm === 'cem') {
+        return runCEMRefinement(task);
+    }
+
+    return runSPSARefinement(task);
+}
+
+async function runSPSARefinement(task) {
+    try {
+        const baseTemplate = buildRefinementBaseTemplate(task.candidate);
+        const allTargets = [...task.entryTargets, ...task.exitTargets];
+
+        if (allTargets.length === 0) {
+            return cloneResultForRefinement(task.candidate, task);
+        }
+
+        const steps = allTargets.map(target => computeRefinementStep(target.range));
+        let bestEntryParams = { ...task.initialEntryParams };
+        let bestExitParams = { ...task.initialExitParams };
+        let bestMetric = task.initialMetric;
+
+        if (isNaN(bestMetric)) {
+            bestMetric = task.targetMetric === 'maxDrawdown' ? Infinity : -Infinity;
+        }
+
+        let bestResult = null;
+
+        for (let iteration = 0; iteration < task.iterations; iteration++) {
+            const directionVector = allTargets.map(() => (Math.random() < 0.5 ? 1 : -1));
+            const scaleFactor = Math.max(0.2, 1 - (iteration / (task.iterations + 1)));
+
+            const plusParams = applyParameterPerturbation(
+                bestEntryParams,
+                bestExitParams,
+                allTargets,
+                steps,
+                directionVector,
+                scaleFactor,
+                task.targetMap
+            );
+
+            const plusEvaluation = await evaluateLocalRefinementCandidate(baseTemplate, plusParams.entryParams, plusParams.exitParams, task);
+            incrementLocalRefinementProgress(task.context);
+
+            if (plusEvaluation && isBetterMetric(plusEvaluation.metric, bestMetric, task.targetMetric)) {
+                bestMetric = plusEvaluation.metric;
+                bestResult = plusEvaluation.result;
+                bestEntryParams = { ...plusParams.entryParams };
+                bestExitParams = { ...plusParams.exitParams };
+                continue;
+            }
+
+            const minusParams = applyParameterPerturbation(
+                bestEntryParams,
+                bestExitParams,
+                allTargets,
+                steps,
+                directionVector.map(value => -value),
+                scaleFactor,
+                task.targetMap
+            );
+
+            const minusEvaluation = await evaluateLocalRefinementCandidate(baseTemplate, minusParams.entryParams, minusParams.exitParams, task);
+            incrementLocalRefinementProgress(task.context);
+
+            if (minusEvaluation && isBetterMetric(minusEvaluation.metric, bestMetric, task.targetMetric)) {
+                bestMetric = minusEvaluation.metric;
+                bestResult = minusEvaluation.result;
+                bestEntryParams = { ...minusParams.entryParams };
+                bestExitParams = { ...minusParams.exitParams };
+            }
+        }
+
+        if (bestResult) {
+            return bestResult;
+        }
+
+        const fallback = cloneResultForRefinement(task.candidate, task);
+        fallback.buyParams = { ...bestEntryParams };
+        fallback.sellParams = { ...bestExitParams };
+        return fallback;
+
+    } catch (error) {
+        console.error('[Cross Optimization] SPSA refinement error:', error);
+        return cloneResultForRefinement(task.candidate, task);
+    }
+}
+
+async function runCEMRefinement(task) {
+    try {
+        const baseTemplate = buildRefinementBaseTemplate(task.candidate);
+        let centerEntry = { ...task.initialEntryParams };
+        let centerExit = { ...task.initialExitParams };
+        let bestMetric = task.initialMetric;
+
+        if (isNaN(bestMetric)) {
+            bestMetric = task.targetMetric === 'maxDrawdown' ? Infinity : -Infinity;
+        }
+
+        let bestResult = null;
+        let bestEntryParams = { ...centerEntry };
+        let bestExitParams = { ...centerExit };
+        let radius = 0.35;
+
+        for (let iteration = 0; iteration < task.iterations; iteration++) {
+            const population = Math.max(2, task.population || 4);
+            const samples = [];
+
+            for (let index = 0; index < population; index++) {
+                const sampled = sampleAroundCenter(centerEntry, centerExit, task, radius);
+                const evaluation = await evaluateLocalRefinementCandidate(baseTemplate, sampled.entryParams, sampled.exitParams, task);
+                incrementLocalRefinementProgress(task.context);
+
+                if (evaluation) {
+                    samples.push({ ...evaluation, params: sampled });
+
+                    if (isBetterMetric(evaluation.metric, bestMetric, task.targetMetric)) {
+                        bestMetric = evaluation.metric;
+                        bestResult = evaluation.result;
+                        bestEntryParams = { ...sampled.entryParams };
+                        bestExitParams = { ...sampled.exitParams };
+                    }
+                }
+            }
+
+            if (samples.length > 0) {
+                samples.sort((a, b) => {
+                    if (isBetterMetric(a.metric, b.metric, task.targetMetric)) return -1;
+                    if (isBetterMetric(b.metric, a.metric, task.targetMetric)) return 1;
+                    return 0;
+                });
+
+                const eliteCount = Math.max(1, Math.floor(samples.length / 3));
+                const elite = samples.slice(0, eliteCount);
+
+                centerEntry = averageParamsForType(elite.map(item => item.params.entryParams), task, 'entry', centerEntry);
+                centerExit = averageParamsForType(elite.map(item => item.params.exitParams), task, 'exit', centerExit);
+            }
+
+            radius = Math.max(0.05, radius * 0.6);
+        }
+
+        if (bestResult) {
+            return bestResult;
+        }
+
+        const fallback = cloneResultForRefinement(task.candidate, task);
+        fallback.buyParams = { ...bestEntryParams };
+        fallback.sellParams = { ...bestExitParams };
+        return fallback;
+
+    } catch (error) {
+        console.error('[Cross Optimization] CEM refinement error:', error);
+        return cloneResultForRefinement(task.candidate, task);
+    }
+}
+
+function buildRefinementBaseTemplate(candidate) {
+    const baseParams = getBacktestParams();
+    baseParams.entryStrategy = getWorkerStrategyName(candidate.buyStrategy);
+    baseParams.exitStrategy = getWorkerStrategyName(candidate.sellStrategy);
+    return baseParams;
+}
+
+async function evaluateLocalRefinementCandidate(baseTemplate, entryParams, exitParams, task) {
+    try {
+        const preparedParams = prepareBaseParamsForOptimization(baseTemplate);
+        preparedParams.entryStrategy = baseTemplate.entryStrategy;
+        preparedParams.exitStrategy = baseTemplate.exitStrategy;
+        preparedParams.entryParams = { ...entryParams };
+        preparedParams.exitParams = { ...exitParams };
+
+        const evaluation = await performSingleBacktestFast(preparedParams);
+        if (!evaluation) {
+            return null;
+        }
+
+        const enriched = prepareRefinementResult(evaluation, task, entryParams, exitParams);
+        return {
+            result: enriched,
+            metric: getMetricFromResult(enriched, task.targetMetric)
+        };
+
+    } catch (error) {
+        console.error('[Cross Optimization] Error evaluating refinement candidate:', error);
+        return null;
+    }
+}
+
+function prepareRefinementResult(result, task, entryParams, exitParams) {
+    const enriched = { ...result };
+    enriched.buyStrategy = task.candidate.buyStrategy;
+    enriched.sellStrategy = task.candidate.sellStrategy;
+    enriched.buyParams = { ...entryParams };
+    enriched.sellParams = { ...exitParams };
+    enriched.crossOptimization = true;
+    enriched.optimizationType = task.refinementLabel;
+    enriched.refinementAlgorithm = task.algorithm === 'cem' ? 'CEM' : 'SPSA';
+    enriched.refinedFrom = task.candidate.optimizationType || (Array.isArray(task.candidate.optimizationTypes) ? task.candidate.optimizationTypes.join(', ') : 'batch');
+    enriched.refinementIterations = task.iterations;
+    enriched.refinementMetric = task.targetMetric;
+    return enriched;
+}
+
+function cloneResultForRefinement(candidate, task) {
+    const clone = clonePlainObject(candidate);
+    clone.crossOptimization = true;
+    clone.optimizationType = task.refinementLabel;
+    clone.refinementAlgorithm = task.algorithm === 'cem' ? 'CEM' : 'SPSA';
+    clone.refinedFrom = candidate.optimizationType || (Array.isArray(candidate.optimizationTypes) ? candidate.optimizationTypes.join(', ') : 'batch');
+    clone.buyStrategy = candidate.buyStrategy;
+    clone.sellStrategy = candidate.sellStrategy;
+    clone.buyParams = { ...task.initialEntryParams };
+    clone.sellParams = { ...task.initialExitParams };
+    return clone;
+}
+
+function computeRefinementStep(range) {
+    if (!range) return 1;
+    const span = Math.abs(range.to - range.from);
+    const baseStep = (typeof range.step === 'number' && range.step > 0) ? range.step : (span > 0 ? span / 10 : 1);
+    return baseStep || 1;
+}
+
+function clampToRange(value, range) {
+    if (!range || typeof value !== 'number' || isNaN(value)) {
+        return range?.from ?? value;
+    }
+    return Math.max(range.from, Math.min(range.to, value));
+}
+
+function alignValueToStep(value, range) {
+    if (!range) return value;
+    if (typeof range.step !== 'number' || range.step <= 0) {
+        return value;
+    }
+
+    const steps = Math.round((value - range.from) / range.step);
+    const aligned = range.from + steps * range.step;
+    const clamped = clampToRange(aligned, range);
+    return Number.isInteger(range.step) ? Math.round(clamped) : parseFloat(clamped.toFixed(6));
+}
+
+function normalizeValueToRange(value, range) {
+    if (!range) return 0.5;
+    const clamped = clampToRange(typeof value === 'number' ? value : parseFloat(value), range);
+    const span = range.to - range.from;
+    if (!isFinite(span) || span === 0) {
+        return 0.5;
+    }
+    return (clamped - range.from) / span;
+}
+
+function denormalizeValueFromRange(normalized, range) {
+    if (!range) return normalized;
+    const span = range.to - range.from;
+    return range.from + normalized * span;
+}
+
+function clampNormalizedValue(value) {
+    if (typeof value !== 'number' || isNaN(value)) {
+        return 0.5;
+    }
+    return Math.max(0, Math.min(1, value));
+}
+
+function applyParameterPerturbation(entryParams, exitParams, targets, steps, directionVector, scaleFactor, targetMap) {
+    const updatedEntry = { ...entryParams };
+    const updatedExit = { ...exitParams };
+
+    targets.forEach((target, index) => {
+        const key = `${target.strategyType}:${target.name}`;
+        const meta = targetMap.get(key) || target;
+        const holder = meta.strategyType === 'entry' ? updatedEntry : updatedExit;
+        const currentValue = typeof holder[meta.name] === 'number' ? holder[meta.name] : parseFloat(holder[meta.name]);
+        const baseValue = isNaN(currentValue) ? denormalizeValueFromRange(0.5, meta.range) : currentValue;
+        const step = steps[index] * scaleFactor * directionVector[index];
+        const tentative = baseValue + step;
+        holder[meta.name] = alignValueToStep(clampToRange(tentative, meta.range), meta.range);
+    });
+
+    return { entryParams: updatedEntry, exitParams: updatedExit };
+}
+
+function sampleAroundCenter(entryCenter, exitCenter, task, radius) {
+    const entrySample = { ...entryCenter };
+    const exitSample = { ...exitCenter };
+
+    task.entryTargets.forEach(target => {
+        const normalized = normalizeValueToRange(entrySample[target.name], target.range);
+        const offset = (Math.random() * 2 - 1) * radius;
+        const candidate = denormalizeValueFromRange(clampNormalizedValue(normalized + offset), target.range);
+        entrySample[target.name] = alignValueToStep(candidate, target.range);
+    });
+
+    task.exitTargets.forEach(target => {
+        const normalized = normalizeValueToRange(exitSample[target.name], target.range);
+        const offset = (Math.random() * 2 - 1) * radius;
+        const candidate = denormalizeValueFromRange(clampNormalizedValue(normalized + offset), target.range);
+        exitSample[target.name] = alignValueToStep(candidate, target.range);
+    });
+
+    return { entryParams: entrySample, exitParams: exitSample };
+}
+
+function averageParamsForType(paramList, task, type, currentCenter) {
+    if (!paramList || paramList.length === 0) {
+        return { ...currentCenter };
+    }
+
+    const averaged = { ...currentCenter };
+    const targets = type === 'entry' ? task.entryTargets : task.exitTargets;
+
+    targets.forEach(target => {
+        let sum = 0;
+        let count = 0;
+
+        paramList.forEach(params => {
+            if (params && params[target.name] !== undefined) {
+                const value = typeof params[target.name] === 'number' ? params[target.name] : parseFloat(params[target.name]);
+                if (!isNaN(value)) {
+                    sum += value;
+                    count += 1;
+                }
+            }
+        });
+
+        if (count > 0) {
+            const average = sum / count;
+            averaged[target.name] = alignValueToStep(clampToRange(average, target.range), target.range);
+        }
+    });
+
+    return averaged;
+}
+
+function buildRefinementTargetMap(entryTargets, exitTargets) {
+    const map = new Map();
+    entryTargets.forEach(target => map.set(`entry:${target.name}`, target));
+    exitTargets.forEach(target => map.set(`exit:${target.name}`, target));
+    return map;
+}
+
+function incrementLocalRefinementProgress(context) {
+    const total = crossOptimizationProgress.total || 0;
+    if (total > 0) {
+        crossOptimizationProgress.current = Math.min(crossOptimizationProgress.current + 1, total);
+    } else {
+        crossOptimizationProgress.current += 1;
+    }
+    updateCrossOptimizationProgress(context);
+}
+
+function ensureInitialParams(params, strategyKey) {
+    const cloned = clonePlainObject(params);
+    const strategyInfo = strategyDescriptions[strategyKey];
+    const defaults = strategyInfo?.defaultParams ? { ...strategyInfo.defaultParams } : {};
+    const targets = Array.isArray(strategyInfo?.optimizeTargets) ? strategyInfo.optimizeTargets : [];
+
+    targets.forEach(target => {
+        if (cloned[target.name] === undefined) {
+            if (defaults[target.name] !== undefined) {
+                cloned[target.name] = defaults[target.name];
+            } else if (target.range) {
+                cloned[target.name] = (target.range.from + target.range.to) / 2;
+            }
+        }
+    });
+
+    return cloned;
 }
 
 // 找到最佳進場策略
@@ -3567,7 +4114,15 @@ function showCrossOptimizationProgress(phase = 'entry') {
         if (progressIcon) progressIcon.classList.add('animate-pulse');
         if (progressDetail) progressDetail.textContent = '正在初始化交叉優化...';
         if (progressStatus) {
-            progressStatus.textContent = phase === 'entry' ? '📈 第二階段：進場策略優化' : '📉 第三階段：出場策略優化';
+            if (phase === 'entry') {
+                progressStatus.textContent = '📈 第二階段：進場策略優化';
+            } else if (phase === 'exit') {
+                progressStatus.textContent = '📉 第三階段：出場策略優化';
+            } else if (phase === 'refine') {
+                progressStatus.textContent = '🔬 第四階段：局部微調（SPSA／CEM）';
+            } else {
+                progressStatus.textContent = '交叉優化';
+            }
         }
         
         // 重置進度
