@@ -1615,73 +1615,190 @@ function normaliseLoadingMessage(message) {
     return message.replace(/^⌛\s*/, '').trim() || '處理中...';
 }
 
-function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
-    const MAX_PRIMARY_ATTEMPTS = 3;
-    const MAX_LEGACY_ATTEMPTS = 2;
-    const RETRY_DELAY_MS = 1200;
+const LOADING_MASCOT_SOURCES = Object.freeze([
+    'https://i.imgur.com/zwj3cZQ.gif',
+    'https://i.imgur.com/Liobi96.gif',
+    'https://i.imgur.com/7Kx3ftq.gif',
+    'https://i.imgur.com/d2uUDHY.gif',
+    'https://i.imgur.com/SYHm5C2.gif',
+    'https://i.imgur.com/fyXuSMQ.gif',
+    'https://i.imgur.com/gTuPYWa.gif',
+    'https://i.imgur.com/jyauZ0b.gif',
+    'https://i.imgur.com/UIotNte.gif',
+    'https://i.imgur.com/ExOqpBa.gif',
+    'https://i.imgur.com/ewyHhJO.gif',
+    'https://i.imgur.com/u9F3UQF.gif',
+    'https://i.imgur.com/wZXf7ut.gif',
+    'https://i.imgur.com/QZP77HK.gif',
+    'https://i.imgur.com/cZKp8Al.gif',
+    'https://i.imgur.com/uGqcqbC.gif',
+    'https://i.imgur.com/VmmN4ji.gif',
+    'https://i.imgur.com/dN4hQup.gif',
+    'https://i.imgur.com/lKMBk96.gif',
+    'https://i.imgur.com/DgoExzA.gif',
+    'https://i.imgur.com/OT3Yjlh.gif',
+    'https://i.imgur.com/EG2915e.gif',
+    'https://i.imgur.com/8MqPDso.gif',
+    'https://i.imgur.com/dOO9NbB.gif',
+    'https://i.imgur.com/zT8YHtT.gif',
+    'https://i.imgur.com/Hp8BWfH.gif',
+    'https://i.imgur.com/fioDywR.gif',
+    'https://i.imgur.com/oEImsnX.gif',
+    'https://i.imgur.com/VBSGaVy.gif',
+    'https://i.imgur.com/66GACxm.gif',
+    'https://i.imgur.com/S43Wp4Q.gif',
+    'https://i.imgur.com/DoTwnE0.gif',
+    'https://i.imgur.com/2Bxrb3p.gif',
+    'https://i.imgur.com/mI6lBm6.gif',
+    'https://i.imgur.com/s3scnR1.gif',
+    'https://i.imgur.com/0nG4NeX.gif',
+    'https://i.imgur.com/1Pi29wj.gif',
+    'https://i.imgur.com/FBNoOrH.gif',
+    'https://i.imgur.com/U6P0cJU.gif',
+    'https://i.imgur.com/J3HQDju.gif',
+    'https://i.imgur.com/b0b144N.gif',
+    'https://i.imgur.com/9A91I5l.gif',
+    'https://i.imgur.com/3RooSC8.gif',
+    'https://i.imgur.com/xWkbFWg.gif',
+    'https://i.imgur.com/hiaVdCx.gif',
+    'https://i.imgur.com/LV1Dkkd.gif',
+    'https://i.imgur.com/egStbcR.gif',
+    'https://i.imgur.com/1EXwPav.gif',
+    'https://i.imgur.com/FCskmsJ.gif',
+    'https://i.imgur.com/eZ41Xz2.gif',
+    'https://i.imgur.com/m5DsriY.gif',
+    'https://i.imgur.com/89cvbJ3.gif',
+    'https://i.imgur.com/UoZtw3Q.gif',
+    'https://i.imgur.com/prsYrS7.gif',
+    'https://i.imgur.com/GjRXLNF.gif',
+    'https://i.imgur.com/FATOBDg.gif',
+    'https://i.imgur.com/kwX7ik7.gif',
+    'https://i.imgur.com/6jnUEMU.gif',
+    'https://i.imgur.com/NWoRvrt.gif',
+    'https://i.imgur.com/u3wT8Bb.gif',
+    'https://i.imgur.com/GKjeM7c.gif',
+    'https://i.imgur.com/6t1yfdX.gif',
+    'https://i.imgur.com/8VVGa7E.gif',
+    'https://i.imgur.com/w9PEPPw.gif',
+    'https://i.imgur.com/zJnZDac.gif',
+    'https://i.imgur.com/9RLtYi8.gif',
+    'https://i.imgur.com/hiLuhiJ.gif',
+    'https://i.imgur.com/3Vv8jww.gif',
+    'https://i.imgur.com/LnRMruw.gif',
+    'https://i.imgur.com/PiiizZy.gif',
+    'https://i.imgur.com/u0HbW8t.gif',
+    'https://i.imgur.com/CzTCziF.gif',
+    'https://i.imgur.com/vgy2I31.gif',
+    'https://i.imgur.com/sRwiao1.gif',
+    'https://i.imgur.com/QyX7Q3F.gif',
+    'https://i.imgur.com/uovwtx4.gif',
+    'https://i.imgur.com/eNpz6oP.gif',
+    'https://i.imgur.com/MUtmSbs.gif',
+    'https://i.imgur.com/2lBA3ps.gif',
+    'https://i.imgur.com/8Y48JIy.gif',
+    'https://i.imgur.com/nKzfWXi.gif',
+    'https://i.imgur.com/0ZPy05N.gif',
+    'https://i.imgur.com/36gjejp.gif',
+    'https://i.imgur.com/WgcpMEt.gif',
+    'https://i.imgur.com/WzD5npp.gif',
+    'https://i.imgur.com/pm3jZrU.gif',
+    'http://i.imgur.com/LpL90SA.jpg',
+    'https://i.imgur.com/53IkFUo.jpeg',
+    'https://i.imgur.com/sq9vcHR.jpeg',
+    'https://i.imgur.com/aGegdGJ.jpeg',
+    'https://i.imgur.com/3tUwPNi.jpeg',
+    'https://i.imgur.com/BHREASt.jpeg',
+    'https://i.imgur.com/7igOdgH.jpeg',
+    'https://i.imgur.com/u08FzUf.jpeg',
+    'https://i.imgur.com/jDe3Xxh.jpeg',
+    'https://i.imgur.com/lojGziG.jpeg',
+    'https://i.imgur.com/LvfV2cx.jpeg',
+    'http://i.imgur.com/WwqDUQS.jpg',
+    'http://i.imgur.com/dFFSiuc.jpg',
+    'http://i.imgur.com/wSBPwpT.jpg',
+    'https://i.imgur.com/ksrs40K.jpeg',
+    'https://i.imgur.com/xuGVtgj.jpeg',
+    'https://i.imgur.com/IM3btLl.jpeg',
+    'https://i.imgur.com/Gzp3GnX.jpeg',
+    'https://i.imgur.com/mtB8JNV.jpeg',
+    'https://i.imgur.com/5ek3oqa.jpeg',
+    'https://i.imgur.com/Xz521Xc.jpeg',
+    'https://i.imgur.com/WGijUaM.jpeg',
+    'https://i.imgur.com/zHmn0sq.jpeg',
+    'https://i.imgur.com/GynOWD9.jpeg',
+    'https://i.imgur.com/0aQGuKX.jpeg',
+    'https://i.imgur.com/s4O31sp.jpeg',
+    'https://i.imgur.com/otMFX6x.jpeg',
+    'http://i.imgur.com/au1XDbQ.jpg',
+    'https://i.imgur.com/vtrX0aU.jpeg',
+    'https://i.imgur.com/AVVKbhw.jpeg',
+    'https://i.imgur.com/NrISIsZ.jpeg',
+    'https://i.imgur.com/3BegQxE.jpeg',
+    'https://i.imgur.com/73endwG.jpeg',
+    'https://i.imgur.com/0mCJvIK.jpeg',
+    'https://i.imgur.com/8nKBF0N.jpeg',
+    'https://i.imgur.com/mQs5zC7.jpeg',
+    'https://i.imgur.com/E5Bij2h.jpeg',
+    'https://i.imgur.com/2D6yIyN.jpeg',
+    'https://i.imgur.com/AYwuslQ.jpeg',
+    'https://i.imgur.com/7FLFOvg.jpeg',
+    'https://i.imgur.com/y13LmCs.jpeg',
+    'https://i.imgur.com/VqDIN8m.jpeg',
+    'https://i.imgur.com/NNG3x3K.jpeg',
+    'https://i.imgur.com/mF5jBhG.jpeg',
+    'https://i.imgur.com/sCkJOxI.jpeg',
+    'https://i.imgur.com/sZsyvYc.jpeg',
+    'https://i.imgur.com/Pq6g32a.jpeg',
+    'https://i.imgur.com/p3PnQA8.jpeg',
+    'https://i.imgur.com/Y4AkBIA.jpeg',
+    'http://i.imgur.com/I0OQH4F.jpg',
+    'http://i.imgur.com/20TEsP5.jpg',
+    'http://i.imgur.com/KKD7VA9.jpg',
+    'http://i.imgur.com/ZCmvTy5.jpg',
+    'https://i.imgur.com/JdHXn7T.jpeg',
+    'https://i.imgur.com/fF5eMbK.jpeg',
+    'https://i.imgur.com/KUUgX58.jpeg',
+    'https://i.imgur.com/tXhSny5.jpeg',
+    'https://i.imgur.com/bxvNBRc.jpeg',
+    'https://i.imgur.com/5WdXGIf.jpeg',
+    'https://i.imgur.com/q043jiH.jpeg',
+    'https://i.imgur.com/53PGxfy.jpeg',
+    'http://i.imgur.com/7ubfKdr.jpg',
+    'http://i.imgur.com/eYkQbW9.jpg',
+    'http://i.imgur.com/EbbkyCX.jpg',
+    'https://i.imgur.com/J1MgSvF.jpeg',
+    'https://i.imgur.com/fSSp0tS.jpeg',
+]);
 
+
+function initLoadingMascotSanitiser() {
+    const VERSION = 'LB-PROGRESS-MASCOT-20250624A';
     const container = document.getElementById('loadingGif');
     if (!container) {
         return;
     }
 
-    if (container.dataset.lbMascotSanitiser === VERSION) {
+    const availableSources = Array.from(new Set(LOADING_MASCOT_SOURCES.filter(Boolean)));
+    if (!availableSources.length) {
+        container.classList.add('loading-mascot-fallback');
+        container.textContent = '⌛';
+        container.dataset.lbMascotSource = 'hourglass';
+        container.dataset.lbMascotSanitiser = VERSION;
         return;
     }
 
-    const postId = container.dataset.tenorId?.trim();
-    const apiKey = container.dataset.tenorApiKey?.trim();
-    const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
-    const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
-        .split(',')
-        .map((src) => src.trim())
-        .filter(Boolean);
-
-    const existingImage = container.querySelector('img.loading-mascot-image');
-    const inlineSrc = existingImage?.getAttribute('src')?.trim();
-    if (existingImage) {
-        existingImage.loading = 'eager';
-        existingImage.decoding = 'async';
-        existingImage.referrerPolicy = 'no-referrer';
-        existingImage.setAttribute('aria-hidden', 'true');
-        if (typeof existingImage.decode === 'function') {
-            existingImage
-                .decode()
-                .catch(() => {
-                    /* ignore decode failures – the fallback loader will retry */
-                });
+    const shuffleArray = (list) => {
+        const next = list.slice();
+        for (let i = next.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [next[i], next[j]] = [next[j], next[i]];
         }
-    }
-
-    const fallbackSources = [];
-    if (inlineSrc) {
-        fallbackSources.push(inlineSrc);
-    }
-    for (const src of declaredFallbacks) {
-        if (!fallbackSources.includes(src)) {
-            fallbackSources.push(src);
-        }
-    }
-    let fallbackIndex = 0;
-
-    let embedObserver = null;
-    let embedSanitiseScheduled = false;
-
-    const markInitialised = () => {
-        container.dataset.lbMascotSanitiser = VERSION;
-    };
-
-    const resetContainer = () => {
-        container.classList.remove('loading-mascot-fallback');
-        if (embedObserver) {
-            embedObserver.disconnect();
-            embedObserver = null;
-        }
+        return next;
     };
 
     const ensureImageElement = () => {
-        resetContainer();
+        container.classList.remove('loading-mascot-fallback');
+        container.textContent = '';
         let img = container.querySelector('img.loading-mascot-image');
         if (!img) {
             container.innerHTML = '';
@@ -1693,250 +1810,97 @@ function initLoadingMascotSanitiser() {
             img.referrerPolicy = 'no-referrer';
             img.setAttribute('aria-hidden', 'true');
             container.appendChild(img);
-        } else {
-            const embeds = container.querySelectorAll('.tenor-gif-embed');
-            embeds.forEach((node) => node.remove());
         }
         return img;
     };
 
-    const useFallbackImage = () => {
-        if (fallbackIndex >= fallbackSources.length) {
-            return false;
-        }
-        const img = ensureImageElement();
-        while (fallbackIndex < fallbackSources.length) {
-            const nextSrc = fallbackSources[fallbackIndex++];
-            if (!nextSrc) {
-                continue;
-            }
+    const failedSources = new Set();
+    let shuffledPool = [];
+    let lastSource = '';
 
-            const handleError = () => {
-                img.removeEventListener('error', handleError);
-                if (!useFallbackImage()) {
-                    mountTenorEmbedFallback();
+    const drawNextSource = () => {
+        const usable = availableSources.filter((src) => !failedSources.has(src));
+        if (!usable.length) {
+            return null;
+        }
+        if (!shuffledPool.length) {
+            shuffledPool = shuffleArray(usable);
+        }
+
+        let candidate = shuffledPool.shift();
+        if (usable.length > 1) {
+            let guard = usable.length + 2;
+            while (guard > 0 && candidate === lastSource) {
+                if (!shuffledPool.length) {
+                    shuffledPool = shuffleArray(usable);
                 }
-            };
-            img.addEventListener('error', handleError, { once: true });
-            if (img.src !== nextSrc) {
-                img.src = nextSrc;
-            } else {
-                // If the same src is reused, force a repaint so browsers retry the request.
-                img.removeAttribute('src');
-                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-                    ? window.requestAnimationFrame.bind(window)
-                    : (cb) => setTimeout(() => cb(), 16);
-                rerender(() => {
-                    img.src = nextSrc;
-                });
+                shuffledPool.push(candidate);
+                candidate = shuffledPool.shift();
+                guard -= 1;
             }
-            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
-            return true;
         }
-        return false;
+        lastSource = candidate;
+        return candidate;
     };
-
-    const scheduleEmbedSanitise = () => {
-        if (embedSanitiseScheduled) {
-            return;
-        }
-        embedSanitiseScheduled = true;
-        queueMicrotask(() => {
-            embedSanitiseScheduled = false;
-            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
-            anchors.forEach((anchor) => anchor.remove());
-
-            const iframe = container.querySelector('.tenor-gif-embed iframe');
-            if (iframe) {
-                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
-                iframe.setAttribute('aria-hidden', 'true');
-                iframe.setAttribute('tabindex', '-1');
-                iframe.style.pointerEvents = 'none';
-                iframe.style.background = 'transparent';
-            }
-        });
-    };
-
-    function mountTenorEmbedFallback() {
-        if (!postId) {
-            return false;
-        }
-
-        container.innerHTML = '';
-        const embed = document.createElement('div');
-        embed.className = 'tenor-gif-embed';
-        embed.dataset.postid = postId;
-        embed.dataset.shareMethod = 'basic';
-        embed.dataset.width = '100%';
-        embed.dataset.aspectRatio = '1';
-        container.appendChild(embed);
-
-        container.dataset.lbMascotSource = 'tenor-embed';
-
-        scheduleEmbedSanitise();
-        embedObserver = new MutationObserver(scheduleEmbedSanitise);
-        embedObserver.observe(container, { childList: true, subtree: true });
-
-        if (!document.querySelector('script[data-tenor-embed]')) {
-            const script = document.createElement('script');
-            script.src = 'https://tenor.com/embed.js';
-            script.async = true;
-            script.dataset.tenorEmbed = 'true';
-            script.referrerPolicy = 'no-referrer';
-            document.body.appendChild(script);
-        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
-            window.Tenor.refresh();
-        }
-
-        return true;
-    }
 
     const showHourglassFallback = () => {
         container.classList.add('loading-mascot-fallback');
         container.textContent = '⌛';
         container.dataset.lbMascotSource = 'hourglass';
+        container.dataset.lbMascotSanitiser = VERSION;
     };
 
-    const showFallback = () => {
-        if (useFallbackImage()) {
-            markInitialised();
-            return;
+    const applySource = (src) => {
+        const img = ensureImageElement();
+        const onError = () => {
+            failedSources.add(src);
+            container.dataset.lbMascotError = src;
+            refreshMascot();
+        };
+        const onLoad = () => {
+            failedSources.delete(src);
+            img.removeEventListener('load', onLoad);
+        };
+        img.addEventListener('error', onError, { once: true });
+        img.addEventListener('load', onLoad, { once: true });
+        if (img.src !== src) {
+            img.src = src;
+        } else {
+            img.dispatchEvent(new Event('load'));
         }
-        if (mountTenorEmbedFallback()) {
-            markInitialised();
-            return;
-        }
-        showHourglassFallback();
-        markInitialised();
+        container.dataset.lbMascotSource = `static:${src}`;
+        container.dataset.lbMascotSanitiser = VERSION;
+        container.dataset.lbMascotPoolSize = String(availableSources.length);
     };
 
-    if (!postId || !apiKey || typeof fetch !== 'function') {
-        showFallback();
-        return;
+    function refreshMascot(options = {}) {
+        if (options.resetFailures) {
+            failedSources.clear();
+            shuffledPool = [];
+        }
+
+        const next = drawNextSource();
+        if (!next) {
+            showHourglassFallback();
+            return;
+        }
+        applySource(next);
     }
 
-    const applyGifSource = (url) => {
-        const img = ensureImageElement();
-        if (img.src !== url) {
-            img.src = url;
-        }
-        container.dataset.lbMascotSource = `tenor:${url}`;
-        markInitialised();
-    };
+    refreshMascot({ resetFailures: true });
 
-    const resolveGifUrl = (payload) => {
-        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-        if (!result) {
-            throw new Error('Tenor API 回傳空集合');
-        }
-
-        const formats = result.media_formats || {};
-        const mediaList = Array.isArray(result.media) ? result.media : [];
-        const gifCandidate =
-            formats.gif?.url ||
-            formats.mediumgif?.url ||
-            formats.tinygif?.url ||
-            formats.nanogif?.url ||
-            mediaList.reduce((selected, item) => {
-                if (selected) return selected;
-                if (item?.gif?.url) return item.gif.url;
-                if (item?.mediumgif?.url) return item.mediumgif.url;
-                if (item?.tinygif?.url) return item.tinygif.url;
-                if (item?.nanogif?.url) return item.nanogif.url;
-                return null;
-            }, null);
-
-        if (!gifCandidate) {
-            throw new Error('Tenor API 缺少 GIF 連結');
-        }
-
-        return gifCandidate;
-    };
-
-    const requestLegacy = (attempt = 1) => {
-        const legacyUrl = new URL('https://g.tenor.com/v1/gifs');
-        legacyUrl.searchParams.set('ids', postId);
-        legacyUrl.searchParams.set('key', apiKey);
-        legacyUrl.searchParams.set('client_key', clientKey);
-
-        fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor Legacy API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => {
-                const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-                if (!result) {
-                    throw new Error('Tenor Legacy API 回傳空集合');
-                }
-
-                const media = result.media || {};
-                const gifCandidate =
-                    media.gif?.url ||
-                    media.mediumgif?.url ||
-                    media.tinygif?.url ||
-                    media.nanogif?.url;
-
-                if (!gifCandidate) {
-                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
-                }
-
-                applyGifSource(gifCandidate);
-            })
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_LEGACY_ATTEMPTS) {
-                    setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    showFallback();
-                }
-            });
-    };
-
-    const requestPrimary = (attempt = 1) => {
-        const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
-        requestUrl.searchParams.set('ids', postId);
-        requestUrl.searchParams.set('key', apiKey);
-        requestUrl.searchParams.set('client_key', clientKey);
-        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
-        requestUrl.searchParams.set('ar_range', 'all');
-
-        fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => resolveGifUrl(payload))
-            .then((gifUrl) => applyGifSource(gifUrl))
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_PRIMARY_ATTEMPTS) {
-                    setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    requestLegacy();
-                }
-            });
-    };
-
-    useFallbackImage();
-    requestPrimary();
+    if (typeof window !== 'undefined') {
+        window.lazybacktestRefreshMascot = (options) => {
+            try {
+                refreshMascot(options);
+            } catch (error) {
+                console.warn('[Mascot] refresh 失敗：', error);
+                showHourglassFallback();
+            }
+        };
+    }
 }
+
 
 function setLoadingBaseMessage(message) {
     const el = getLoadingTextElement();
@@ -1960,6 +1924,14 @@ function renderLoadingMessage(percent) {
 function showLoading(m = "處理中...") {
     const el = document.getElementById("loading");
     if (el) el.classList.remove("hidden");
+
+    if (typeof window !== 'undefined' && typeof window.lazybacktestRefreshMascot === 'function') {
+        try {
+            window.lazybacktestRefreshMascot({ resetFailures: true });
+        } catch (error) {
+            console.warn('[Mascot] 顯示進度動畫時更新失敗：', error);
+        }
+    }
 
     progressAnimator.reset();
     progressAnimator.start();
