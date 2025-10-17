@@ -1112,3 +1112,11 @@
   - `index.html` 移除 Tenor 相關屬性，改以本地預設圖作為 fallback，並於腳本載入順序中注入來源清單模組。
   - `js/main.js` 以 `refreshLoadingMascotImage` 取代舊有 Tenor 載入流程：在 `showLoading` 啟動與初始載入時隨機挑選來源、同時保留錯誤重試與沙漏備援，並透過 `window.lazybacktestMascot` 暴露除錯介面。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-03-06 — Patch LB-PROGRESS-MASCOT-20260306A
+- **Issue recap**: 進度吉祥物仍維持 3.5rem 正方形，無法與進度條等寬，導致寬螢幕時顯得過小且失去原始比例。
+- **Fix**:
+  - `css/style.css` 改為以 100% 寬度呈現吉祥物容器，移除固定尺寸變數並讓圖片依原始比例自適應高度。
+  - `index.html` 調整容器寬度類別，確保吉祥物隨卡片寬度拉伸並與進度條對齊。
+- **Diagnostics**: 於本地檢視載入中的卡片，確認隨視窗縮放時吉祥物與進度條維持相同寬度且無裁切變形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

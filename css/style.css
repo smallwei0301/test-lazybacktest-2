@@ -1,8 +1,4 @@
 /* --- 自訂 CSS --- */
-:root {
-    --loading-mascot-size: 3.5rem;
-}
-
 .loading-mascot-wrapper {
     background: none;
     background-color: transparent !important;
@@ -10,8 +6,9 @@
     box-shadow: none;
     padding: 0;
     margin: 0 auto;
-    width: var(--loading-mascot-size);
-    height: var(--loading-mascot-size);
+    width: 100%;
+    max-width: 100%;
+    height: auto;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -21,7 +18,7 @@
 .loading-mascot-canvas {
     position: relative;
     width: 100%;
-    height: 100%;
+    height: auto;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -64,9 +61,8 @@
 
 .loading-mascot-image {
     max-width: 100%;
-    max-height: 100%;
     width: 100%;
-    height: 100%;
+    height: auto;
     object-fit: contain;
     display: block;
     background: transparent;
