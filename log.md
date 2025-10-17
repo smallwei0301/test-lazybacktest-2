@@ -1145,3 +1145,11 @@
 - **Diagnostics**: 本地以 DOMContentLoaded 後直接點擊預設控制鈕，確認立即進入隱藏狀態並停止輪播，再次點擊可正常顯示並重新排程換圖。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-09 — Patch LB-PROGRESS-MASCOT-20260709A
+- **Issue recap**: 使用者切換至隱藏模式時仍殘留圖片容器與「圖片已隱藏」提示，視覺上占位過大且與需求不符。
+- **Fix**:
+  - `css/style.css` 將隱藏狀態改為完全收合畫布，只保留「+」控制鈕並關閉提示文字與多餘高度。
+  - `js/main.js` 更新 `applyLoadingMascotHiddenState` 配合新樣式維持顯示狀態與 aria 屬性，同步提升版本碼至 `LB-PROGRESS-MASCOT-20260709A`。
+- **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

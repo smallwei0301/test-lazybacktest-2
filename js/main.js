@@ -21,7 +21,7 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260708A';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
 const loadingMascotState = {
     lastSource: null,
@@ -1734,6 +1734,7 @@ function applyLoadingMascotHiddenState(container, hidden) {
     if (!container) return;
     const flag = hidden ? 'true' : 'false';
     container.dataset.lbMascotHidden = flag;
+    container.classList.toggle('loading-mascot-collapsed', hidden);
 
     const toggle = container.querySelector('[data-lb-mascot-toggle]');
     if (toggle) {

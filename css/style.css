@@ -142,31 +142,32 @@
     visibility: visible;
 }
 
-.loading-mascot-canvas[data-lb-mascot-hidden="true"] .loading-mascot-image,
-.loading-mascot-canvas[data-lb-mascot-hidden="true"] .loading-mascot-fallback-visual {
-    opacity: 0;
-    visibility: hidden;
-}
-
-.loading-mascot-canvas::after {
-    content: '';
-    position: absolute;
-    inset: 0.75rem;
-    border-radius: 0.75rem;
-    display: none;
+.loading-mascot-canvas[data-lb-mascot-hidden="true"],
+.loading-mascot-canvas.loading-mascot-collapsed {
+    min-height: 0;
+    width: auto;
+    height: auto;
+    padding: 0;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: color-mix(in srgb, var(--muted-foreground) 85%, transparent);
-    background-color: color-mix(in srgb, var(--muted) 28%, transparent);
-    pointer-events: none;
+    margin: 0 auto;
 }
 
-.loading-mascot-canvas[data-lb-mascot-hidden="true"]::after {
-    content: '圖片已隱藏';
-    display: flex;
+.loading-mascot-canvas[data-lb-mascot-hidden="true"] .loading-mascot-image,
+.loading-mascot-canvas[data-lb-mascot-hidden="true"] .loading-mascot-fallback-visual,
+.loading-mascot-canvas.loading-mascot-collapsed .loading-mascot-image,
+.loading-mascot-canvas.loading-mascot-collapsed .loading-mascot-fallback-visual {
+    display: none !important;
+}
+
+.loading-mascot-canvas[data-lb-mascot-hidden="true"] .loading-mascot-toggle,
+.loading-mascot-canvas.loading-mascot-collapsed .loading-mascot-toggle {
+    position: static;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0;
+    box-shadow: 0 6px 12px -6px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .quick-backtest-editable {
     position: relative;
