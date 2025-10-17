@@ -1,9 +1,17 @@
 
+## 2026-03-10 — Patch LB-PROGRESS-MASCOT-20260310B
+- **Scope**: 回測進度吉祥物自動輪播。
+- **Updates**:
+  - 將 loading 吉祥物版本升級為 `LB-PROGRESS-MASCOT-20260310B`，加入 3 秒輪播計時邏輯。
+  - 每次載入新圖片時重新排程定時器，確保回測進行期間持續隨機刷新來源，來源不足時維持沙漏保護。
+  - 停止 loading 或來源失效時即刻清除計時器，避免背景輪播殘留。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-30 — Patch LB-ROLLING-TEST-DEBUG-20250930A
 - **Issue recap**: Walk-Forward 第二個視窗起仍出現訓練期批量優化與滾動測試記錄的最佳參數不一致，有時甚至優於獨立批量優化結果。
 - **Confirmed non-issues**:
-  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。 
-  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。 
+  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。
+  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。
   - 交易設定覆寫：Rolling Test 呼叫批量優化時以 `baseParamsOverride` 複製 `tradeTiming`、`initialCapital`、`positionSize`、多/空分段等控制，`prepareBaseParamsForOptimization()` 會保留這些欄位後再進行暖身推算，因此隔日買入與全額投入設定未被改寫。 
 - **Active hypotheses**:
   - 需確認 `prepareBaseParamsForOptimization()` 與後續 `optimizeStrategyWithInternalConvergence()` 是否在多輪視窗間殘留前一輪的 `currentCombo` 參數或 Worker 快取，導致後續視窗使用到不同於覆寫日期的資料切片。 
@@ -859,6 +867,12 @@
 - **Diagnostics**: 對同一資料集連續啟動「啟動 AI 預測」取得固定種子結果，再按「新的預測」產生新 seed，確認測試勝率、混淆矩陣與交易摘要完全一致；重複啟動舊種子可 100% 重現前一次結果，IndexedDB 可見最新 `lstm_v1_model` 條目。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-10 — Patch LB-PROGRESS-MASCOT-20260310A
+- **Issue recap**: 回測時的吉祥物改為隨機來源後尺寸偏離原始設計，且仍位於進度列左側，使用者視線難以聚焦於進度狀態。
+- **Fix**: 建立 `--loading-mascot-size` 變數維持原本 3.5rem 尺寸並統一於樣式層置中；進度卡改為先顯示狀態文字與進度條，再於下方中央呈現吉祥物。
+- **Diagnostics**: 於桌機與行動裝置檢視執行卡，確認吉祥物固定方形尺寸、水平垂直皆置中且會在每次回測切換來源，進度文字仍與百分比同步更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
 - **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
 - **Fix**:
@@ -1098,3 +1112,19 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+  
+## 2026-03-05 — Patch LB-PROGRESS-MASCOT-20260305A
+- **Issue recap**: Tenor 進度吉祥物已無法符合授權需求，且新增素材須在每次執行回測時隨機顯示指定連結清單，避免重複出現同一張。
+- **Fix**:
+  - 新增 `js/loading-mascot-sources.js` 匯出完整素材清單並進行去重、前後端共用版本碼 `LB-PROGRESS-MASCOT-20260305A`。
+  - `index.html` 移除 Tenor 相關屬性，改以本地預設圖作為 fallback，並於腳本載入順序中注入來源清單模組。
+  - `js/main.js` 以 `refreshLoadingMascotImage` 取代舊有 Tenor 載入流程：在 `showLoading` 啟動與初始載入時隨機挑選來源、同時保留錯誤重試與沙漏備援，並透過 `window.lazybacktestMascot` 暴露除錯介面。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-03-06 — Patch LB-PROGRESS-MASCOT-20260306A
+- **Issue recap**: 進度吉祥物仍維持 3.5rem 正方形，無法與進度條等寬，導致寬螢幕時顯得過小且失去原始比例。
+- **Fix**:
+  - `css/style.css` 改為以 100% 寬度呈現吉祥物容器，移除固定尺寸變數並讓圖片依原始比例自適應高度。
+  - `index.html` 調整容器寬度類別，確保吉祥物隨卡片寬度拉伸並與進度條對齊。
+- **Diagnostics**: 於本地檢視載入中的卡片，確認隨視窗縮放時吉祥物與進度條維持相同寬度且無裁切變形。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
