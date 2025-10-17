@@ -1005,6 +1005,7 @@
                                                     </div>
                                                 </div>
                                             </div>
+
                                         </div>
                                     </div>
                                 </div>
@@ -1899,6 +1900,61 @@
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <section id="stage4-refine" class="mt-6">
+                                                    <details class="card bg-background border border-border" open style="background-color: var(--background); border-color: var(--border);">
+                                                        <summary class="card-header cursor-pointer">
+                                                            <div class="flex items-center justify-between w-full">
+                                                                <h4 class="card-title text-lg font-semibold">第四階段：局部微調</h4>
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">僅於按下按鈕時執行</span>
+                                                            </div>
+                                                        </summary>
+                                                        <div class="card-content space-y-4">
+                                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                <div class="space-y-2">
+                                                                    <label for="stage4-method" class="text-sm font-medium" style="color: var(--foreground);">微調方法</label>
+                                                                    <select id="stage4-method" class="w-full px-3 py-2 border border-border rounded-md text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                        <option value="spsa">SPSA（同時擾動隨機逼近）</option>
+                                                                        <option value="cem">CEM（交叉熵法）</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div class="flex items-end">
+                                                                    <button id="stage4-run" class="w-full md:w-auto px-4 py-2 btn-primary text-sm">
+                                                                        執行微調
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div id="stage4-progress" class="hidden text-sm space-y-1">
+                                                                <div id="stage4-status" class="font-medium" style="color: var(--accent);"></div>
+                                                                <div id="stage4-best" class="text-muted-foreground" style="color: var(--muted-foreground);"></div>
+                                                            </div>
+                                                            <details class="bg-muted/40 rounded-md p-4" style="background-color: color-mix(in srgb, var(--muted) 40%, transparent);">
+                                                                <summary class="text-sm font-medium cursor-pointer" style="color: var(--foreground);">進階設定（可選）</summary>
+                                                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-sm">
+                                                                    <div class="space-y-1">
+                                                                        <label for="stage4-spsa-steps" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">SPSA 步數</label>
+                                                                        <input id="stage4-spsa-steps" type="number" min="5" max="200" value="30" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    </div>
+                                                                    <div class="space-y-1">
+                                                                        <label for="stage4-cem-iters" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 迭代次數</label>
+                                                                        <input id="stage4-cem-iters" type="number" min="1" max="50" value="10" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    </div>
+                                                                    <div class="space-y-1">
+                                                                        <label for="stage4-cem-pop" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 母體大小</label>
+                                                                        <input id="stage4-cem-pop" type="number" min="10" max="200" value="40" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    </div>
+                                                                    <div class="space-y-1">
+                                                                        <label for="stage4-cem-elite" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 精英比例</label>
+                                                                        <input id="stage4-cem-elite" type="number" min="0.05" max="0.9" step="0.05" value="0.2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    </div>
+                                                                    <div class="space-y-1">
+                                                                        <label for="stage4-cem-sigma" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 初始標準差</label>
+                                                                        <input id="stage4-cem-sigma" type="number" min="0.01" max="0.5" step="0.01" value="0.15" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                    </div>
+                                                                </div>
+                                                            </details>
+                                                        </div>
+                                                    </details>
+                                                </section>
                                             </div>
                                         </div>
                                     </div>
@@ -2453,7 +2509,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>
