@@ -1900,6 +1900,18 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            <!-- Stage4: 局部微調（按鈕觸發） -->
+                                            <section id="stage4-refine" class="mt-4">
+                                                <div class="flex items-center gap-2">
+                                                    <label for="stage4-method">第四階段方法：</label>
+                                                    <select id="stage4-method">
+                                                        <option value="spsa">SPSA（低成本微調）</option>
+                                                        <option value="cem">CEM（族群化局部探索）</option>
+                                                    </select>
+                                                    <button id="stage4-run" class="btn btn-primary">執行微調</button>
+                                                </div>
+                                                <!-- 可選：進階參數（預設隱藏；不設定則使用 runner 預設值） -->
+                                            </section>
                                         </div>
                                     </div>
                                 </div>
