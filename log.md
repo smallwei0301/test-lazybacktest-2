@@ -1,9 +1,41 @@
 
+## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
+- **Scope**: 批量優化局部微調範圍與進度呈現調整。
+- **Updates**:
+  - 於局部微調卡片新增排名選擇與自訂區間輸入，支援前三名、四到六名、六到十名或自訂名次的批量微調範圍。
+  - 將交叉優化進度卡片移至階段卡片與結果表格之間，並顯示所屬排名資訊，強化進度脈絡。
+  - 微調產出在結果表格以「微調」標籤呈現，與進場／出場固定範圍並列，避免與基礎結果混淆。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-07 — Patch LB-LOCAL-REFINE-20260707A
+- **Scope**: 批量優化第四階段局部微調（SPSA／CEM）擾動放大。
+- **Updates**:
+  - 放大局部微調步長計算，依參數跨度增加額外範圍加權與最小步幅，確保 SPSA 擾動能跨越更大的鄰域。
+  - 提升範圍權重的探索倍率，使 SPSA 尺度上限達約 3 倍原步長，最低擾動亦維持在原設定以上。
+  - 擴大 CEM 採樣半徑初始值與衰減下限，讓多輪取樣仍能覆蓋超過半個參數區間，維持較慢衰減速度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-06 — Patch LB-LOCAL-REFINE-20260705B
+- **Scope**: 批量優化第四階段局部微調（SPSA／CEM）擾動調整。
+- **Updates**:
+  - 建立範圍權重估算與 SPSA 尺度設定，依策略參數跨度自動提升初始擾動並維持較高的最小步幅。
+  - CEM 採樣半徑改為依參數權重推算初始半徑與衰減速率，確保多輪取樣仍能離散探索較大的鄰域。
+  - 擴充局部微調步長計算，依範圍與離散步階動態放大擾動幅度，同時維持落在策略定義的合法範圍。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-05 — Patch LB-LOCAL-REFINE-20260705A
+- **Scope**: 批量優化第四階段（局部微調）
+- **Updates**:
+  - 在交叉優化控制面板新增「第四階段：局部微調（SPSA 或 CEM）」按鈕與說明，沿用既有表格產出流程。
+  - 導入自動挑選前三組最佳結果，根據參數維度自動選用 SPSA 或 CEM 進行微調，並將結果追加至優化表格。
+  - 顯示進度條狀態與演算法資訊，確保局部微調與第二、三階段共享去重、排序與渲染邏輯。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-09-30 — Patch LB-ROLLING-TEST-DEBUG-20250930A
 - **Issue recap**: Walk-Forward 第二個視窗起仍出現訓練期批量優化與滾動測試記錄的最佳參數不一致，有時甚至優於獨立批量優化結果。
 - **Confirmed non-issues**:
-  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。 
-  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。 
+  - 組合迭代上限：`plan.config.iterationLimit` 會透過 `runCombinationOptimizationForWindow()` 傳入 `window.batchOptimization.runCombinationOptimization()`，其後也用於剩餘範圍的交替優化回圈，確認與批量優化面板一致。
+  - 視窗日期與暖身：`buildTrainingWindowBaseParams()` 與 `normalizeWindowBaseParams()` 在進入優化與訓練/測試前，會逐窗覆寫 `startDate`、`endDate` 並移除 `recent*` 相對期間旗標，確保每輪優化與回測皆使用訓練期的實際日期與緩衝規則。
   - 交易設定覆寫：Rolling Test 呼叫批量優化時以 `baseParamsOverride` 複製 `tradeTiming`、`initialCapital`、`positionSize`、多/空分段等控制，`prepareBaseParamsForOptimization()` 會保留這些欄位後再進行暖身推算，因此隔日買入與全額投入設定未被改寫。 
 - **Active hypotheses**:
   - 需確認 `prepareBaseParamsForOptimization()` 與後續 `optimizeStrategyWithInternalConvergence()` 是否在多輪視窗間殘留前一輪的 `currentCombo` 參數或 Worker 快取，導致後續視窗使用到不同於覆寫日期的資料切片。 
