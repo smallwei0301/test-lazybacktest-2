@@ -1,4 +1,12 @@
 
+## 2026-07-07 — Patch LB-LOCAL-REFINE-20260707A
+- **Scope**: 批量優化第四階段局部微調（SPSA／CEM）擾動放大。
+- **Updates**:
+  - 放大局部微調步長計算，依參數跨度增加額外範圍加權與最小步幅，確保 SPSA 擾動能跨越更大的鄰域。
+  - 提升範圍權重的探索倍率，使 SPSA 尺度上限達約 3 倍原步長，最低擾動亦維持在原設定以上。
+  - 擴大 CEM 採樣半徑初始值與衰減下限，讓多輪取樣仍能覆蓋超過半個參數區間，維持較慢衰減速度。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-06 — Patch LB-LOCAL-REFINE-20260705B
 - **Scope**: 批量優化第四階段局部微調（SPSA／CEM）擾動調整。
 - **Updates**:

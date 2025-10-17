@@ -2782,7 +2782,7 @@ function cloneResultForRefinement(candidate, task) {
 }
 
 function computeRefinementStep(range) {
-    if (!range) return 1;
+    if (!range) return 1.2;
 
     const from = typeof range.from === 'number' ? range.from : parseFloat(range.from);
     const to = typeof range.to === 'number' ? range.to : parseFloat(range.to);
@@ -2793,43 +2793,44 @@ function computeRefinementStep(range) {
         : (span > 0 ? span / 10 : 1);
 
     const explorationWeight = computeRangeExplorationWeight(range);
-    const expandedStep = baseStep * (1 + explorationWeight);
+    const spanBoost = span > 0 ? span * 0.08 * explorationWeight : 0;
+    const expandedStep = baseStep * (1.75 + explorationWeight * 0.9) + spanBoost;
     const cappedStep = span > 0 ? Math.min(span, expandedStep) : expandedStep;
 
-    return cappedStep || baseStep || 1;
+    return Math.max(baseStep * 1.1, cappedStep || baseStep || 1);
 }
 
 function computeRangeExplorationWeight(range) {
     if (!range) {
-        return 0.75;
+        return 1.25;
     }
 
     const from = typeof range.from === 'number' ? range.from : parseFloat(range.from);
     const to = typeof range.to === 'number' ? range.to : parseFloat(range.to);
 
     if (!isFinite(from) || !isFinite(to)) {
-        return 0.75;
+        return 1.25;
     }
 
     const span = Math.abs(to - from);
     if (!isFinite(span) || span === 0) {
-        return 0.75;
+        return 1.25;
     }
 
     const rawStep = (typeof range.step === 'number' ? range.step : parseFloat(range.step));
     const baseStep = (isFinite(rawStep) && rawStep > 0) ? rawStep : span / 10;
     if (!isFinite(baseStep) || baseStep <= 0) {
-        return 0.75;
+        return 1.25;
     }
 
     const ratio = Math.max(1, span / baseStep);
     const normalized = clampNormalizedValue(Math.log(ratio + 1) / Math.log(32));
-    return 0.6 + normalized * 0.35;
+    return 1.1 + normalized * 0.75;
 }
 
 function deriveSPSAScaleSettings(targets) {
     if (!Array.isArray(targets) || targets.length === 0) {
-        return { initialScale: 1.45, minimumScale: 0.5 };
+        return { initialScale: 1.95, minimumScale: 0.8 };
     }
 
     const weights = targets
@@ -2837,14 +2838,14 @@ function deriveSPSAScaleSettings(targets) {
         .filter(weight => typeof weight === 'number' && !isNaN(weight));
 
     if (weights.length === 0) {
-        return { initialScale: 1.45, minimumScale: 0.5 };
+        return { initialScale: 1.95, minimumScale: 0.8 };
     }
 
     const averageWeight = weights.reduce((sum, weight) => sum + weight, 0) / weights.length;
-    const normalized = clampNormalizedValue((averageWeight - 0.55) / 0.45);
-    const initialScale = 1.4 + normalized * 0.6;
-    const minimumCandidate = 0.5 + normalized * 0.35;
-    const minimumScale = Math.max(0.45, Math.min(initialScale * 0.8, minimumCandidate));
+    const normalized = clampNormalizedValue((averageWeight - 1.1) / 0.75);
+    const initialScale = 1.9 + normalized * 1.1;
+    const minimumCandidate = 0.8 + normalized * 0.55;
+    const minimumScale = Math.max(0.75, Math.min(initialScale * 0.7, minimumCandidate));
 
     return { initialScale, minimumScale };
 }
@@ -2856,9 +2857,9 @@ function deriveCEMRadiusSettings(task) {
 
     if (combinedTargets.length === 0) {
         return {
-            initialRadius: 0.55,
-            decayRate: 0.7,
-            minimumRadius: 0.2
+            initialRadius: 0.78,
+            decayRate: 0.68,
+            minimumRadius: 0.38
         };
     }
 
@@ -2868,17 +2869,17 @@ function deriveCEMRadiusSettings(task) {
 
     if (weights.length === 0) {
         return {
-            initialRadius: 0.55,
-            decayRate: 0.7,
-            minimumRadius: 0.2
+            initialRadius: 0.78,
+            decayRate: 0.68,
+            minimumRadius: 0.38
         };
     }
 
     const averageWeight = weights.reduce((sum, weight) => sum + weight, 0) / weights.length;
-    const normalized = clampNormalizedValue((averageWeight - 0.55) / 0.45);
-    const initialRadius = Math.max(0.4, Math.min(0.85, 0.45 + normalized * 0.4));
-    const decayRate = Math.max(0.6, Math.min(0.8, 0.6 + normalized * 0.15));
-    const minimumRadius = Math.max(0.18, Math.min(0.35, 0.2 + normalized * 0.15));
+    const normalized = clampNormalizedValue((averageWeight - 1.1) / 0.75);
+    const initialRadius = Math.max(0.65, Math.min(1.15, 0.72 + normalized * 0.45));
+    const decayRate = Math.max(0.58, Math.min(0.8, 0.62 + normalized * 0.12));
+    const minimumRadius = Math.max(0.35, Math.min(0.55, 0.38 + normalized * 0.2));
 
     return {
         initialRadius,
