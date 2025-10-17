@@ -1098,3 +1098,11 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+  
+## 2026-03-05 — Patch LB-PROGRESS-MASCOT-20260305A
+- **Issue recap**: Tenor 進度吉祥物已無法符合授權需求，且新增素材須在每次執行回測時隨機顯示指定連結清單，避免重複出現同一張。
+- **Fix**:
+  - 新增 `js/loading-mascot-sources.js` 匯出完整素材清單並進行去重、前後端共用版本碼 `LB-PROGRESS-MASCOT-20260305A`。
+  - `index.html` 移除 Tenor 相關屬性，改以本地預設圖作為 fallback，並於腳本載入順序中注入來源清單模組。
+  - `js/main.js` 以 `refreshLoadingMascotImage` 取代舊有 Tenor 載入流程：在 `showLoading` 啟動與初始載入時隨機挑選來源、同時保留錯誤重試與沙漏備援，並透過 `window.lazybacktestMascot` 暴露除錯介面。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
