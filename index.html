@@ -692,7 +692,7 @@
                                             <button id="applyYearsBtn" title="設定開始日期" class="px-3 py-2 bg-primary hover:bg-primary text-white text-xs rounded-md transition duration-150 ease-in-out whitespace-nowrap" style="background-color: var(--primary);">套用</button>
                                         </div>
                                         <div>
-                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金 (元)</label>
+                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金-固定金額買入 (元)</label>
                                             <input 
                                                 type="number" 
                                                 id="initialCapital" 
@@ -765,16 +765,16 @@
                                         <div class="space-y-2">
                                             <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
                                                 部位大小計算基準
-                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金-固定金額買入：固定使用最開始設定的本金計算部位大小。<br>- 總資金-獲利再投入：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
+                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金-固定金額買入</label>
                                                 </div>
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
+                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金-獲利再投入</label>
                                                 </div>
                                             </div>
                                         </div>
@@ -1249,6 +1249,13 @@
                                                 data-tab="batch-optimization"
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
+                                                data-tab="strategy-compare"
+                                            >
+                                                <i data-lucide="layout-dashboard" class="lucide-sm inline mr-1"></i>策略比較
                                             </button>
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
@@ -1899,6 +1906,80 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-content hidden" id="strategy-compare-tab">
+                                <div class="card shadow-lg">
+                                    <div class="card-header">
+                                        <h3 class="card-title flex items-center gap-2">
+                                            <i data-lucide="layout-dashboard" class="lucide text-primary" style="color: var(--primary);"></i>
+                                            策略比較
+                                        </h3>
+                                        <p class="card-description">挑選多個已儲存策略，生成關鍵指標對照表</p>
+                                    </div>
+                                    <div class="card-content space-y-6">
+                                        <div class="grid gap-6 md:grid-cols-2">
+                                            <div>
+                                                <label for="strategyComparisonSelect" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">已儲存策略 (可多選)</label>
+                                                <select
+                                                    id="strategyComparisonSelect"
+                                                    multiple
+                                                    size="8"
+                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                ></select>
+                                                <p class="text-[11px] leading-snug mt-2" style="color: var(--muted-foreground);">按住 Ctrl 或 ⌘ 可一次選擇多個策略，會依儲存時的績效指標建立比較。</p>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">比較項目</p>
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="strategyComparisonMetricList">
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="annualizedReturn" checked />
+                                                        年化報酬率
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="sharpeRatio" checked />
+                                                        夏普值
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="maxDrawdown" checked />
+                                                        最大回撤
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="totalTrades" checked />
+                                                        交易次數
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="sensitivityScore" />
+                                                        敏感度測試
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="rollingScore" />
+                                                        滾動測試評分
+                                                    </label>
+                                                    <label class="flex items-center gap-2 text-xs px-3 py-2 rounded-md border" style="border-color: var(--border); color: var(--foreground); background-color: color-mix(in srgb, var(--muted) 6%, transparent);">
+                                                        <input type="checkbox" class="strategy-compare-metric" value="trendRangeReturn" />
+                                                        趨勢區間評估
+                                                    </label>
+                                                </div>
+                                                <p class="text-[11px] leading-snug mt-2" style="color: var(--muted-foreground);">保留勾選區塊，日後新增指標時可直接擴充，不需重寫整個表格。</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <button id="strategyComparisonGenerate" class="btn-primary px-4 py-2 rounded-md text-sm font-medium" style="background-color: var(--primary); color: var(--primary-foreground);">產生比較表</button>
+                                            <button id="strategyComparisonClear" class="btn-outline px-4 py-2 rounded-md text-sm font-medium" style="border-color: var(--border); color: var(--foreground);">清除選擇</button>
+                                            <span class="text-[11px]" style="color: var(--muted-foreground);">比較表會即時反映最新儲存的策略績效，若指標缺值會以 N/A 顯示。</span>
+                                        </div>
+                                        <div id="strategyComparisonMessage" class="text-sm" style="color: var(--muted-foreground);">請先選擇至少一個策略與一個比較項目。</div>
+                                        <div class="overflow-x-auto border border-dashed rounded-lg hidden" id="strategyComparisonTableWrapper" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                                            <table id="strategyComparisonTable" class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                <thead class="bg-muted" style="background-color: var(--muted); color: var(--foreground);">
+                                                    <tr id="strategyComparisonTableHead"></tr>
+                                                </thead>
+                                                <tbody id="strategyComparisonTableBody" class="divide-y divide-border" style="border-color: var(--border); background-color: var(--background);"></tbody>
+                                            </table>
                                         </div>
                                     </div>
                                 </div>
