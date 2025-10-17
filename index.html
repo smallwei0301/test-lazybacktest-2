@@ -1005,6 +1005,77 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            <section id="stage4-refine" class="mt-6">
+                                                <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                    <div class="card-header flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                                                        <div>
+                                                            <h4 class="card-title text-lg font-semibold">第四階段：局部微調</h4>
+                                                            <p class="text-xs" style="color: var(--muted-foreground);">選擇局部微調方法（SPSA 或 CEM），按下「執行微調」即可在既有最佳解附近尋找更佳參數組合。</p>
+                                                        </div>
+                                                        <div class="flex items-center gap-2 text-sm" style="color: var(--foreground);">
+                                                            <label for="stage4-method" class="font-medium">方法</label>
+                                                            <select id="stage4-method" class="px-3 py-2 border border-border rounded-md bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                <option value="spsa">SPSA（同時調整多參數）</option>
+                                                                <option value="cem">CEM（跨熵法）</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card-content space-y-4">
+                                                        <div class="flex flex-wrap items-center gap-3">
+                                                            <button id="stage4-run" class="px-4 py-2 rounded-md text-sm font-medium" style="background-color: var(--primary); color: var(--primary-foreground);">執行微調</button>
+                                                            <div id="stage4-progress" class="hidden text-xs" style="color: var(--muted-foreground);">
+                                                                <span id="stage4-progress-label" class="font-medium" style="color: var(--foreground);">準備中…</span>
+                                                                <span id="stage4-progress-score" class="ml-3"></span>
+                                                            </div>
+                                                        </div>
+                                                        <details class="rounded-md border border-border bg-muted/40 px-4 py-3 text-xs" style="border-color: var(--border); background-color: rgba(148, 163, 184, 0.12); color: var(--foreground);">
+                                                            <summary class="cursor-pointer font-medium">進階設定</summary>
+                                                            <div class="mt-3 space-y-4">
+                                                                <div id="stage4-spsa-options" class="grid gap-3 sm:grid-cols-2">
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        步數 (steps)
+                                                                        <input id="stage4-spsa-steps" type="number" min="1" placeholder="30" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        a₀（步長係數）
+                                                                        <input id="stage4-spsa-a0" type="number" step="0.01" min="0" placeholder="0.2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        c₀（擾動幅度）
+                                                                        <input id="stage4-spsa-c0" type="number" step="0.01" min="0" placeholder="0.1" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        α（步長遞減）
+                                                                        <input id="stage4-spsa-alpha" type="number" step="0.01" min="0" placeholder="0.602" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        γ（擾動遞減）
+                                                                        <input id="stage4-spsa-gamma" type="number" step="0.01" min="0" placeholder="0.101" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                </div>
+                                                                <div id="stage4-cem-options" class="grid gap-3 sm:grid-cols-2 hidden">
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        迭代次數 (iters)
+                                                                        <input id="stage4-cem-iters" type="number" min="1" placeholder="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        母體大小 (popSize)
+                                                                        <input id="stage4-cem-popsize" type="number" min="1" placeholder="40" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        精英比例 (eliteRatio)
+                                                                        <input id="stage4-cem-elite" type="number" min="0.05" max="1" step="0.05" placeholder="0.2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 font-medium" style="color: var(--foreground);">
+                                                                        初始 σ (initSigma)
+                                                                        <input id="stage4-cem-sigma" type="number" min="0.01" step="0.01" placeholder="0.15" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+                                                        </details>
+                                                    </div>
+                                                </div>
+                                            </section>
                                         </div>
                                     </div>
                                 </div>
@@ -2453,7 +2524,9 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/spsa-runner.js"></script>
+    <script type="module" src="js/cem-runner.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>

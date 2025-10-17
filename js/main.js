@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-REFINE-20250701A
 
 // 全局變量
 let stockChart = null;
@@ -429,6 +430,230 @@ window.lazybacktestMultiStagePanel = {
     toggle: () => multiStagePanelController.toggle(),
     isOpen: () => multiStagePanelController.isOpen(),
 };
+
+const stage4RefineController = (() => {
+    const state = {
+        running: false,
+        method: 'spsa'
+    };
+
+    const dom = {
+        section: null,
+        methodSelect: null,
+        runButton: null,
+        progress: null,
+        progressLabel: null,
+        progressScore: null,
+        spsaOptions: null,
+        cemOptions: null
+    };
+
+    const cloneParams = (value) => {
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                console.warn('[Stage4] structuredClone failed, fallback to JSON clone:', error);
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            console.warn('[Stage4] JSON clone failed, returning original reference:', error);
+            return value;
+        }
+    };
+
+    const ensureElements = () => {
+        if (dom.section) return true;
+        dom.section = document.getElementById('stage4-refine');
+        if (!dom.section) return false;
+        dom.methodSelect = dom.section.querySelector('#stage4-method');
+        dom.runButton = dom.section.querySelector('#stage4-run');
+        dom.progress = dom.section.querySelector('#stage4-progress');
+        dom.progressLabel = dom.section.querySelector('#stage4-progress-label');
+        dom.progressScore = dom.section.querySelector('#stage4-progress-score');
+        dom.spsaOptions = dom.section.querySelector('#stage4-spsa-options');
+        dom.cemOptions = dom.section.querySelector('#stage4-cem-options');
+        return Boolean(dom.methodSelect && dom.runButton);
+    };
+
+    const syncMethodPanel = (method) => {
+        if (dom.spsaOptions) {
+            dom.spsaOptions.classList.toggle('hidden', method !== 'spsa');
+        }
+        if (dom.cemOptions) {
+            dom.cemOptions.classList.toggle('hidden', method !== 'cem');
+        }
+    };
+
+    const setRunning = (running) => {
+        state.running = Boolean(running);
+        if (!dom.runButton) return;
+        if (state.running) {
+            dom.runButton.setAttribute('disabled', 'disabled');
+            dom.runButton.textContent = '執行中…';
+        } else {
+            dom.runButton.removeAttribute('disabled');
+            dom.runButton.textContent = '執行微調';
+        }
+    };
+
+    const formatScore = (value) => {
+        if (!Number.isFinite(value)) return '';
+        return `最佳分數：${value.toFixed(4)}`;
+    };
+
+    const updateProgress = (payload) => {
+        if (!dom.progress) return;
+        if (!payload) {
+            dom.progress.classList.add('hidden');
+            return;
+        }
+        dom.progress.classList.remove('hidden');
+        if (dom.progressLabel) {
+            if (typeof payload.step === 'number') {
+                dom.progressLabel.textContent = `SPSA 第 ${payload.step} 步`;
+            } else if (typeof payload.iter === 'number') {
+                dom.progressLabel.textContent = `CEM 第 ${payload.iter} 回合`;
+            } else if (payload.status === 'completed') {
+                dom.progressLabel.textContent = '第四階段完成';
+            } else {
+                dom.progressLabel.textContent = '局部微調進行中…';
+            }
+        }
+        if (dom.progressScore) {
+            dom.progressScore.textContent = formatScore(payload.bestScore);
+        }
+        if (payload.status === 'completed') {
+            setTimeout(() => {
+                dom.progress?.classList.add('hidden');
+            }, 1500);
+        }
+    };
+
+    const collectMethodOptions = (method) => {
+        const options = {};
+        if (method === 'spsa') {
+            const steps = parseInt(document.getElementById('stage4-spsa-steps')?.value, 10);
+            if (Number.isFinite(steps) && steps > 0) options.steps = steps;
+            const a0 = parseFloat(document.getElementById('stage4-spsa-a0')?.value);
+            if (Number.isFinite(a0) && a0 > 0) options.a0 = a0;
+            const c0 = parseFloat(document.getElementById('stage4-spsa-c0')?.value);
+            if (Number.isFinite(c0) && c0 > 0) options.c0 = c0;
+            const alpha = parseFloat(document.getElementById('stage4-spsa-alpha')?.value);
+            if (Number.isFinite(alpha) && alpha > 0) options.alpha = alpha;
+            const gamma = parseFloat(document.getElementById('stage4-spsa-gamma')?.value);
+            if (Number.isFinite(gamma) && gamma > 0) options.gamma = gamma;
+        } else if (method === 'cem') {
+            const iters = parseInt(document.getElementById('stage4-cem-iters')?.value, 10);
+            if (Number.isFinite(iters) && iters > 0) options.iters = iters;
+            const popSize = parseInt(document.getElementById('stage4-cem-popsize')?.value, 10);
+            if (Number.isFinite(popSize) && popSize > 0) options.popSize = popSize;
+            const eliteRatio = parseFloat(document.getElementById('stage4-cem-elite')?.value);
+            if (Number.isFinite(eliteRatio) && eliteRatio > 0 && eliteRatio <= 1) options.eliteRatio = eliteRatio;
+            const initSigma = parseFloat(document.getElementById('stage4-cem-sigma')?.value);
+            if (Number.isFinite(initSigma) && initSigma > 0) options.initSigma = initSigma;
+        }
+        return options;
+    };
+
+    const handleRun = async () => {
+        if (state.running) return;
+        if (!ensureElements()) {
+            showError('找不到第四階段面板，請重新整理頁面');
+            return;
+        }
+
+        const method = dom.methodSelect.value || 'spsa';
+        state.method = method;
+        const api = window.batchOptimization;
+        if (!api || typeof api.runStage4 !== 'function') {
+            showError('批量優化模組尚未載入，請稍後再試');
+            return;
+        }
+
+        const bestResult = typeof api.getBestResult === 'function' ? api.getBestResult() : null;
+        if (!bestResult) {
+            showError('請先執行批量優化並產生結果，再進行第四階段微調');
+            return;
+        }
+
+        const toolkit = typeof api.getStage4Toolkit === 'function' ? api.getStage4Toolkit(bestResult) : null;
+        if (!toolkit) {
+            showError('目前選擇的組合沒有可供微調的參數範圍');
+            return;
+        }
+
+        const currentBest = {
+            ...bestResult,
+            params: cloneParams(toolkit.start)
+        };
+
+        const methodOptions = collectMethodOptions(method);
+
+        try {
+            setRunning(true);
+            updateProgress({ stage4: method, status: 'start' });
+            const row = await api.runStage4(method, {
+                currentBest,
+                bounds: toolkit.bounds,
+                encodeVec: toolkit.encodeVec,
+                decodeVec: toolkit.decodeVec,
+                evaluator: toolkit.evaluator,
+                objective: toolkit.objective,
+                uiProgress: updateProgress,
+                methodOptions
+            });
+
+            if (!row || typeof row !== 'object') {
+                showError('第四階段未產生有效結果');
+                return;
+            }
+
+            const upsertResult = typeof api.upsertStage4Row === 'function'
+                ? api.upsertStage4Row(row, toolkit.objective)
+                : { action: 'inserted' };
+
+            if (upsertResult?.action === 'updated') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (upsertResult?.action === 'inserted') {
+                showSuccess('第四階段完成：已新增最佳結果');
+            } else {
+                showInfo('第四階段完成：新結果未優於現有最佳，已保持原有資料');
+            }
+        } catch (error) {
+            console.error('[Stage4] Refinement failed:', error);
+            showError(error?.message || '第四階段微調失敗，請稍後再試');
+        } finally {
+            setRunning(false);
+            updateProgress(null);
+        }
+    };
+
+    const bindEvents = () => {
+        if (!ensureElements()) return;
+        dom.methodSelect.addEventListener('change', () => {
+            state.method = dom.methodSelect.value || 'spsa';
+            syncMethodPanel(state.method);
+        });
+        dom.runButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            handleRun();
+        });
+    };
+
+    const init = () => {
+        if (!ensureElements()) return;
+        state.method = dom.methodSelect.value || 'spsa';
+        syncMethodPanel(state.method);
+        bindEvents();
+    };
+
+    return {
+        init
+    };
+})();
 
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
@@ -2660,11 +2885,13 @@ function initBatchOptimizationFeature() {
         document.addEventListener('DOMContentLoaded', () => {
             if (window.batchOptimization && window.batchOptimization.init) {
                 window.batchOptimization.init();
+                stage4RefineController.init();
             }
         });
     } else {
         if (window.batchOptimization && window.batchOptimization.init) {
             window.batchOptimization.init();
+            stage4RefineController.init();
         }
     }
 }

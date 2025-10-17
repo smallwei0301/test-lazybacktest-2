@@ -1091,6 +1091,15 @@
 - **Diagnostics**: 準備針對第二、第三視窗記錄 `cachedWindowData.length` 與原始快取長度，並比對批量優化單跑的 `rawDataUsed.fetchRange`，確認 Worker 僅接收到對應訓練期間的資料。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-05 — Patch LB-STAGE4-REFINE-20250701A
+- **Issue recap**: 批量優化缺乏可由最佳結果出發的局部微調流程，無法在取得 GA/交叉優化成果後再以更細緻的方法搜尋周遭解。
+- **Fix**:
+  - `js/spsa-runner.js` 與 `js/cem-runner.js` 新增局部微調演算法（SPSA/CEM），內建正規化、約束修正與進度回報。
+  - `js/batch-optimization.js` 提供 Stage4 toolkit、`paramKey` 去重與 `runStage4` 執行入口，結果與 Stage2/3 共用表格、卡片與匯出流程。
+  - `js/main.js` 與 `index.html` 新增第四階段面板、方法切換與按鈕事件，透過既有 UI/Toast 呈現執行狀態。
+- **Diagnostics**: 待前台實際回測驗證 Stage4 執行流程（含去重、結果表更新、CSV/JSON 匯出）後補充。
+- **Testing**: ⚠ 受限於容器環境無法啟動瀏覽器與 proxy，尚未執行手動回測；部署前需在 Netlify 預備站實機跑一次 Stage4 微調並確認 console 無錯誤。
+
 ### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
 - **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
 - **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。
