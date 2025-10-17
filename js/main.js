@@ -19,6 +19,14 @@ let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 
+let stage4ModulePromise = null;
+function loadStage4Module() {
+    if (!stage4ModulePromise) {
+        stage4ModulePromise = import('./batch-optimization.js');
+    }
+    return stage4ModulePromise;
+}
+
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
@@ -2685,7 +2693,30 @@ function initRollingTestFeature() {
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
+    const stage4Button = document.getElementById('stage4-run');
+    if (stage4Button) {
+        stage4Button.addEventListener('click', async () => {
+            const btn = stage4Button;
+            const sel = document.getElementById('stage4-method');
+            const method = sel?.value || 'spsa';
+            const previousLabel = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '執行中…';
+            try {
+                const module = await loadStage4Module();
+                if (module?.runStage4) {
+                    await module.runStage4(method, { onProgress: () => {} });
+                }
+            } catch (error) {
+                console.error('Stage4 run error:', error);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = previousLabel || '執行微調';
+            }
+        });
+    }
+
     try {
         // 初始化日期
         initDates();
