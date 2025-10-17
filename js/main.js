@@ -2798,10 +2798,111 @@ function initRollingTestFeature() {
     }
 }
 
+function initStage4RefinementControls() {
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressText = document.getElementById('stage4-progress-text');
+
+    if (!methodSelect || !runButton) {
+        return;
+    }
+
+    const readNumberValue = (id, fallback) => {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        const value = parseFloat(el.value);
+        return Number.isFinite(value) ? value : fallback;
+    };
+
+    const buildOptions = (method) => {
+        if (method === 'cem') {
+            const options = {};
+            const iters = Math.max(1, Math.floor(readNumberValue('stage4-cem-iters', 10)));
+            const popSize = Math.max(4, Math.floor(readNumberValue('stage4-cem-popSize', 40)));
+            const eliteRatio = readNumberValue('stage4-cem-eliteRatio', 0.2);
+            const initSigma = readNumberValue('stage4-cem-initSigma', 0.15);
+            options.iters = iters;
+            options.popSize = popSize;
+            if (Number.isFinite(eliteRatio) && eliteRatio > 0 && eliteRatio <= 0.5) {
+                options.eliteRatio = eliteRatio;
+            }
+            if (Number.isFinite(initSigma) && initSigma > 0) {
+                options.initSigma = initSigma;
+            }
+            return options;
+        }
+        const steps = Math.max(1, Math.floor(readNumberValue('stage4-spsa-steps', 30)));
+        return { steps };
+    };
+
+    const describeProgress = (payload) => {
+        if (!progressText) return;
+        if (payload?.stage4 === 'spsa') {
+            const step = payload.step || payload.iter;
+            const suffix = Number.isFinite(payload.bestScore) ? ` · 最佳 ${payload.bestScore.toFixed(4)}` : '';
+            progressText.textContent = `SPSA 第 ${step} 步${suffix}`;
+        } else if (payload?.stage4 === 'cem') {
+            const iter = payload.iter || payload.step;
+            const suffix = Number.isFinite(payload.bestScore) ? ` · 最佳 ${payload.bestScore.toFixed(4)}` : '';
+            progressText.textContent = `CEM 第 ${iter} 回合${suffix}`;
+        }
+    };
+
+    runButton.addEventListener('click', async () => {
+        const method = methodSelect.value || 'spsa';
+        const originalLabel = runButton.textContent;
+        runButton.disabled = true;
+        runButton.textContent = '執行中…';
+        if (progressText) {
+            progressText.textContent = '';
+        }
+
+        try {
+            if (!window.batchOptimization || typeof window.batchOptimization.runStage4 !== 'function') {
+                throw new Error('Stage4 模組尚未就緒');
+            }
+
+            const options = buildOptions(method);
+            const row = await window.batchOptimization.runStage4(method, {
+                options,
+                uiProgress: describeProgress
+            });
+
+            const action = row?.__action || 'inserted';
+            if (progressText) {
+                if (action === 'replaced') {
+                    progressText.textContent = '✅ 已覆蓋同參數的舊結果';
+                } else if (action === 'ignored') {
+                    progressText.textContent = 'ℹ️ 既有結果已較佳，維持原狀';
+                } else {
+                    progressText.textContent = '✅ 新增一筆微調結果';
+                }
+            }
+
+            if (action === 'replaced') {
+                showSuccess('第四階段完成：已覆蓋同參數的舊結果');
+            } else if (action === 'ignored') {
+                showInfo('第四階段完成：原有結果已較佳，維持原狀');
+            } else {
+                showSuccess('第四階段完成：新增一筆微調結果');
+            }
+        } catch (error) {
+            console.error('[Stage4] refine error:', error);
+            if (progressText) {
+                progressText.textContent = '⚠️ 微調失敗，請稍後再試';
+            }
+            showError(error?.message || '第四階段微調失敗，請稍後再試');
+        } finally {
+            runButton.disabled = false;
+            runButton.textContent = originalLabel;
+        }
+    });
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
-    
+
     try {
         // 初始化日期
         initDates();
@@ -2828,7 +2929,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        initStage4RefinementControls();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
