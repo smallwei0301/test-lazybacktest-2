@@ -1,4 +1,12 @@
 
+## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
+- **Scope**: 批量優化局部微調範圍與進度呈現調整。
+- **Updates**:
+  - 於局部微調卡片新增排名選擇與自訂區間輸入，支援前三名、四到六名、六到十名或自訂名次的批量微調範圍。
+  - 將交叉優化進度卡片移至階段卡片與結果表格之間，並顯示所屬排名資訊，強化進度脈絡。
+  - 微調產出在結果表格以「微調」標籤呈現，與進場／出場固定範圍並列，避免與基礎結果混淆。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-07 — Patch LB-LOCAL-REFINE-20260707A
 - **Scope**: 批量優化第四階段局部微調（SPSA／CEM）擾動放大。
 - **Updates**:

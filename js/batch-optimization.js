@@ -1917,15 +1917,17 @@ function renderBatchResultsTable() {
         // 判斷優化類型並處理合併的類型標籤
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
-        
+        const typeMap = {
+            'entry-fixed': '進場固定',
+            'exit-fixed': '出場固定',
+            '基礎': '基礎',
+            'refinement-spsa': '微調',
+            'refinement-cem': '微調'
+        };
+
         if (result.optimizationTypes && result.optimizationTypes.length > 1) {
             // 多重結果，顯示合併標籤
-            const typeMap = {
-                'entry-fixed': '進場固定',
-                'exit-fixed': '出場固定',
-                '基礎': '基礎'
-            };
-            const mappedTypes = result.optimizationTypes.map(type => typeMap[type] || type);
+            const mappedTypes = Array.from(new Set(result.optimizationTypes.map(type => typeMap[type] || type)));
             optimizationType = mappedTypes.join(',');
             typeClass = 'bg-yellow-100 text-yellow-700';
         } else if (result.crossOptimization) {
@@ -1935,7 +1937,13 @@ function renderBatchResultsTable() {
             } else if (result.optimizationType === 'exit-fixed') {
                 optimizationType = '出場固定';
                 typeClass = 'bg-blue-100 text-blue-700';
+            } else if (result.optimizationType === 'refinement-spsa' || result.optimizationType === 'refinement-cem') {
+                optimizationType = '微調';
+                typeClass = 'bg-emerald-100 text-emerald-700';
             }
+        } else if (result.optimizationType === 'refinement-spsa' || result.optimizationType === 'refinement-cem') {
+            optimizationType = '微調';
+            typeClass = 'bg-emerald-100 text-emerald-700';
         }
         
         // 顯示風險管理參數（如果有的話）
@@ -2045,9 +2053,31 @@ function addCrossOptimizationControls() {
                 </button>
             </div>
 
-            <div class="space-y-2 md:col-span-2 lg:col-span-1">
+            <div class="space-y-3 md:col-span-2 lg:col-span-1">
                 <h5 class="font-medium text-purple-700">🔬 第四階段：局部微調（SPSA 或 CEM）</h5>
-                <p class="text-sm text-gray-600">鎖定前三優化組合，使用隨機微分或交叉熵演算法微調參數</p>
+                <p class="text-sm text-gray-600">依結果排名選擇候選組合，使用隨機微分或交叉熵演算法微調參數</p>
+                <div class="space-y-2">
+                    <label for="local-refinement-target-range" class="text-xs font-medium text-gray-600">微調目標排名</label>
+                    <select id="local-refinement-target-range"
+                            class="w-full px-3 py-2 border border-purple-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-300">
+                        <option value="top3">前三名微調</option>
+                        <option value="4-6">四到六名微調</option>
+                        <option value="6-10">六到十名微調</option>
+                        <option value="custom">更多微調（自訂名次）</option>
+                    </select>
+                    <div id="local-refinement-custom-range" class="grid grid-cols-2 gap-2 hidden">
+                        <label class="text-xs text-gray-600">
+                            從第
+                            <input id="local-refinement-custom-start" type="number" min="1" step="1" value="1"
+                                   class="mt-1 w-full px-2 py-1 border border-purple-200 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                        </label>
+                        <label class="text-xs text-gray-600">
+                            到第
+                            <input id="local-refinement-custom-end" type="number" min="1" step="1" value="10"
+                                   class="mt-1 w-full px-2 py-1 border border-purple-200 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                        </label>
+                    </div>
+                </div>
                 <button id="start-local-refinement"
                         class="w-full px-4 py-2 ${hasResults ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'} text-white rounded-md transition-colors text-sm font-medium"
                         ${!hasResults ? 'disabled' : ''}>
@@ -2065,7 +2095,28 @@ function addCrossOptimizationControls() {
     `;
     
     // 插入到表格前面
-    table.parentNode.insertBefore(controlsDiv, table);
+    const tableWrapper = table.parentNode;
+    const contentWrapper = tableWrapper && tableWrapper.parentNode ? tableWrapper.parentNode : tableWrapper;
+
+    if (contentWrapper && tableWrapper) {
+        contentWrapper.insertBefore(controlsDiv, tableWrapper);
+
+        const progressCard = document.getElementById('cross-optimization-progress');
+        if (progressCard) {
+            progressCard.classList.remove('mb-6');
+            progressCard.classList.add('mb-4');
+            contentWrapper.insertBefore(progressCard, tableWrapper);
+        }
+    } else {
+        table.parentNode.insertBefore(controlsDiv, table);
+
+        const progressCard = document.getElementById('cross-optimization-progress');
+        if (progressCard) {
+            progressCard.classList.remove('mb-6');
+            progressCard.classList.add('mb-4');
+            table.parentNode.insertBefore(progressCard, table);
+        }
+    }
     
     // 添加事件監聽器
     const entryButton = document.getElementById('start-entry-cross-optimization');
@@ -2078,6 +2129,7 @@ function addCrossOptimizationControls() {
             entryButton.addEventListener('click', startEntryCrossOptimization);
             exitButton.addEventListener('click', startExitCrossOptimization);
             refineButton.addEventListener('click', startLocalRefinementOptimization);
+            setupLocalRefinementRangeControls();
             console.log('[Cross Optimization] Event listeners added successfully');
         }
 
@@ -2092,6 +2144,48 @@ function addCrossOptimizationControls() {
             exitButton: !!exitButton,
             refineButton: !!refineButton
         });
+    }
+}
+
+function setupLocalRefinementRangeControls() {
+    try {
+        const rangeSelector = document.getElementById('local-refinement-target-range');
+        const customContainer = document.getElementById('local-refinement-custom-range');
+        const startInput = document.getElementById('local-refinement-custom-start');
+        const endInput = document.getElementById('local-refinement-custom-end');
+
+        if (!rangeSelector || !customContainer) {
+            return;
+        }
+
+        const sanitizeInputValue = (input) => {
+            if (!input) return;
+            const numeric = parseInt(input.value, 10);
+            if (isNaN(numeric) || numeric < 1) {
+                input.value = '1';
+            } else {
+                input.value = `${numeric}`;
+            }
+        };
+
+        const toggleCustomInputs = () => {
+            if (rangeSelector.value === 'custom') {
+                customContainer.classList.remove('hidden');
+            } else {
+                customContainer.classList.add('hidden');
+            }
+        };
+
+        rangeSelector.addEventListener('change', toggleCustomInputs);
+        toggleCustomInputs();
+
+        [startInput, endInput].forEach(input => {
+            if (!input) return;
+            input.addEventListener('change', () => sanitizeInputValue(input));
+            input.addEventListener('blur', () => sanitizeInputValue(input));
+        });
+    } catch (error) {
+        console.error('[Cross Optimization] Error initializing local refinement controls:', error);
     }
 }
 
@@ -2392,6 +2486,90 @@ async function executeCrossOptimizationTasksExit(tasks) {
 }
 
 // 開始局部微調（SPSA / CEM）
+function resolveLocalRefinementRange(totalCandidates) {
+    if (!totalCandidates || totalCandidates <= 0) {
+        return null;
+    }
+
+    const rangeSelector = document.getElementById('local-refinement-target-range');
+    const startInput = document.getElementById('local-refinement-custom-start');
+    const endInput = document.getElementById('local-refinement-custom-end');
+
+    const defaultEnd = Math.min(3, totalCandidates);
+
+    if (!rangeSelector) {
+        return {
+            startRank: 1,
+            endRank: defaultEnd,
+            label: defaultEnd <= 1 ? '第1名' : `前${defaultEnd}名`
+        };
+    }
+
+    let startRank = 1;
+    let endRank = 3;
+
+    switch (rangeSelector.value) {
+        case '4-6':
+            startRank = 4;
+            endRank = 6;
+            break;
+        case '6-10':
+            startRank = 6;
+            endRank = 10;
+            break;
+        case 'custom': {
+            const startValue = parseInt(startInput?.value, 10);
+            const endValue = parseInt(endInput?.value, 10);
+
+            if (isNaN(startValue) || isNaN(endValue)) {
+                showError('請填寫完整的自訂微調名次範圍');
+                return null;
+            }
+
+            if (startValue < 1 || endValue < 1) {
+                showError('自訂名次需大於或等於 1');
+                return null;
+            }
+
+            if (endValue < startValue) {
+                showError('自訂名次的結束值需大於或等於開始值');
+                return null;
+            }
+
+            startRank = startValue;
+            endRank = endValue;
+            break;
+        }
+        case 'top3':
+        default:
+            startRank = 1;
+            endRank = 3;
+            break;
+    }
+
+    if (startRank > totalCandidates) {
+        showError(`目前僅有 ${totalCandidates} 筆優化結果，無法對第 ${startRank} 名之後的組合進行微調`);
+        return null;
+    }
+
+    const clampedEnd = Math.min(endRank, totalCandidates);
+
+    if (clampedEnd < startRank) {
+        showError('微調名次範圍無效，請重新調整設定');
+        return null;
+    }
+
+    const label = (rangeSelector.value === 'top3' && startRank === 1)
+        ? (clampedEnd <= 1 ? '第1名' : `前${clampedEnd}名`)
+        : (startRank === clampedEnd ? `第${startRank}名` : `第${startRank}至第${clampedEnd}名`);
+
+    return {
+        startRank,
+        endRank: clampedEnd,
+        label
+    };
+}
+
 async function startLocalRefinementOptimization() {
     console.log('[Cross Optimization] startLocalRefinementOptimization called');
 
@@ -2443,12 +2621,34 @@ async function startLocalRefinementOptimization() {
             return 0;
         });
 
-        const iterationLimit = Math.max(3, parseInt(config.iterationLimit, 10) || 6);
-        const topCount = Math.min(sortedCandidates.length, Math.max(1, Math.min(5, Math.ceil(iterationLimit / 2))));
-        const selectedCandidates = sortedCandidates.slice(0, topCount);
+        const rangeSelection = resolveLocalRefinementRange(sortedCandidates.length);
+        if (!rangeSelection) {
+            hideCrossOptimizationProgress();
+            return;
+        }
+
+        const selectedCandidates = sortedCandidates.slice(rangeSelection.startRank - 1, rangeSelection.endRank);
+
+        if (!selectedCandidates.length) {
+            hideCrossOptimizationProgress();
+            showError('選定的名次範圍內沒有可進行局部微調的結果');
+            return;
+        }
+
+        showInfo(`🧪 將針對排名 ${rangeSelection.label} 的 ${selectedCandidates.length} 個組合進行局部微調`);
 
         const tasks = selectedCandidates
-            .map(candidate => buildLocalRefinementTask(candidate, config, targetMetric))
+            .map((candidate, index) => {
+                const task = buildLocalRefinementTask(candidate, config, targetMetric);
+                if (task) {
+                    task.context = {
+                        ...task.context,
+                        rank: rangeSelection.startRank + index,
+                        rangeLabel: rangeSelection.label
+                    };
+                }
+                return task;
+            })
             .filter(Boolean);
 
         if (tasks.length === 0) {
@@ -4281,7 +4481,9 @@ function updateCrossOptimizationProgress(currentTask = null) {
         if (currentTask) {
             const entryName = strategyDescriptions[currentTask.entryStrategy]?.name || currentTask.entryStrategy;
             const exitName = strategyDescriptions[currentTask.exitStrategy]?.name || currentTask.exitStrategy;
-            progressDetail.textContent = `🔄 正在優化: ${entryName} + ${exitName} (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
+            const rankInfo = currentTask.rank ? `第${currentTask.rank}名 ` : '';
+            const rangeInfo = currentTask.rangeLabel ? `（${currentTask.rangeLabel}）` : '';
+            progressDetail.textContent = `🔄 正在優化: ${rankInfo}${entryName} + ${exitName}${rangeInfo} (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
         } else {
             progressDetail.textContent = `處理中... (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;
         }
