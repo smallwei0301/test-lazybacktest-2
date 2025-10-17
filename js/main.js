@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-REFINE-20250930A
 
 // 全局變量
 let stockChart = null;
@@ -27,6 +28,13 @@ let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
+
+const stage4State = {
+    running: false,
+    metric: 'annualizedReturn',
+    lastAction: null,
+    bestScore: null
+};
 
 // --- Utility Functions ---
 function initDates() { const eD=new Date(); const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-5); document.getElementById('endDate').value=formatDate(eD); document.getElementById('startDate').value=formatDate(sD); document.getElementById('recentYears').value=5; }
@@ -2653,6 +2661,123 @@ function initTabs() {
     console.log("[Main] Tab initialization - handled by HTML event listeners");
 }
 
+function translateStage4Metric(metricKey) {
+    const map = {
+        annualizedReturn: '年化報酬',
+        totalReturn: '總報酬',
+        winRate: '勝率',
+        maxDrawdown: '最大回撤',
+        sharpeRatio: 'Sharpe Ratio',
+        sortinoRatio: 'Sortino Ratio'
+    };
+    return map[metricKey] || metricKey;
+}
+
+function deriveStage4DisplayScore(score, metricKey) {
+    if (!Number.isFinite(score)) return score;
+    if (metricKey === 'maxDrawdown') {
+        return -score;
+    }
+    return score;
+}
+
+function formatStage4Score(value, metricKey) {
+    if (!Number.isFinite(value)) return 'N/A';
+    const percentageMetrics = new Set(['annualizedReturn', 'totalReturn', 'winRate', 'maxDrawdown']);
+    if (percentageMetrics.has(metricKey)) {
+        return `${(value * 100).toFixed(2)}%`;
+    }
+    return value.toFixed(4);
+}
+
+function updateStage4ProgressUI(payload = {}) {
+    const progressEl = document.getElementById('stage4-progress');
+    if (!progressEl) return;
+    progressEl.classList.remove('hidden');
+    const metricKey = stage4State.metric || 'annualizedReturn';
+    if (Number.isFinite(payload.bestScore)) {
+        stage4State.bestScore = deriveStage4DisplayScore(payload.bestScore, metricKey);
+    }
+    const scoreValue = Number.isFinite(stage4State.bestScore)
+        ? formatStage4Score(stage4State.bestScore, metricKey)
+        : 'N/A';
+    let prefix = '局部微調';
+    if (payload.step !== undefined) {
+        prefix = `SPSA 第 ${payload.step} 步`;
+    } else if (payload.iter !== undefined) {
+        prefix = `CEM 第 ${payload.iter} 輪`;
+    }
+    progressEl.textContent = `${prefix}｜最佳 ${translateStage4Metric(metricKey)}：${scoreValue}`;
+}
+
+async function handleStage4Run(methodSelect, runButton, progressEl) {
+    if (stage4State.running) return;
+    const api = window.batchOptimization;
+    if (!api || typeof api.runStage4 !== 'function') {
+        showError('Stage4 功能尚未載入');
+        return;
+    }
+
+    const method = methodSelect?.value || 'spsa';
+    stage4State.running = true;
+    const originalLabel = runButton.textContent;
+    runButton.disabled = true;
+    runButton.textContent = '執行中…';
+
+    try {
+        const seed = api.getStage4Seed?.();
+        if (!seed) {
+            throw new Error('尚無批量優化結果可供微調');
+        }
+        const ctx = api.prepareStage4Context(seed);
+        stage4State.metric = ctx.metric || 'annualizedReturn';
+        stage4State.bestScore = deriveStage4DisplayScore(seed.score, stage4State.metric);
+        if (progressEl) {
+            updateStage4ProgressUI({ stage4: method, bestScore: seed.score });
+        }
+        ctx.uiProgress = (payload) => updateStage4ProgressUI({ ...payload, stage4: method });
+
+        const row = await api.runStage4(method, ctx);
+        stage4State.bestScore = deriveStage4DisplayScore(row.score, stage4State.metric);
+        const result = api.applyStage4Row(row, { metric: stage4State.metric });
+        stage4State.lastAction = result?.action || null;
+        if (progressEl) {
+            updateStage4ProgressUI({ stage4: method, bestScore: stage4State.bestScore });
+        }
+
+        const actionLabel = stage4State.lastAction === 'replaced'
+            ? '覆蓋'
+            : stage4State.lastAction === 'added'
+                ? '新增'
+                : '保留';
+        const metricLabel = translateStage4Metric(stage4State.metric);
+        showSuccess(`第四階段完成：已${actionLabel}最佳結果（${metricLabel}）`);
+    } catch (error) {
+        console.error('[Stage4] refinement error:', error);
+        showError(`局部微調失敗：${error?.message || error}`);
+    } finally {
+        stage4State.running = false;
+        runButton.disabled = false;
+        runButton.textContent = originalLabel;
+    }
+}
+
+function initStage4RefinementPanel() {
+    const panel = document.getElementById('stage4-refine');
+    if (!panel) return;
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressEl = document.getElementById('stage4-progress');
+    if (progressEl) {
+        progressEl.textContent = '';
+        progressEl.classList.add('hidden');
+    }
+    if (!runButton) return;
+    runButton.addEventListener('click', () => {
+        handleStage4Run(methodSelect, runButton, progressEl);
+    });
+}
+
 // --- 新增：初始化批量優化功能 ---
 function initBatchOptimizationFeature() {
     // 等待DOM加載完成後初始化
@@ -2712,7 +2837,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        initStage4RefinementPanel();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
