@@ -2569,6 +2569,9 @@ async function runSPSARefinement(task) {
         }
 
         const steps = allTargets.map(target => computeRefinementStep(target.range));
+        const scaleSettings = deriveSPSAScaleSettings(allTargets);
+        const totalIterations = Math.max(1, task.iterations);
+
         let bestEntryParams = { ...task.initialEntryParams };
         let bestExitParams = { ...task.initialExitParams };
         let bestMetric = task.initialMetric;
@@ -2581,7 +2584,13 @@ async function runSPSARefinement(task) {
 
         for (let iteration = 0; iteration < task.iterations; iteration++) {
             const directionVector = allTargets.map(() => (Math.random() < 0.5 ? 1 : -1));
-            const scaleFactor = Math.max(0.2, 1 - (iteration / (task.iterations + 1)));
+            const denominator = totalIterations > 1 ? (totalIterations - 1) : totalIterations;
+            const progressRatio = denominator > 0 ? (iteration / denominator) : 1;
+            const scaleRange = scaleSettings.initialScale - scaleSettings.minimumScale;
+            const scaleFactor = Math.max(
+                scaleSettings.minimumScale,
+                scaleSettings.initialScale - (scaleRange * progressRatio)
+            );
 
             const plusParams = applyParameterPerturbation(
                 bestEntryParams,
@@ -2654,7 +2663,10 @@ async function runCEMRefinement(task) {
         let bestResult = null;
         let bestEntryParams = { ...centerEntry };
         let bestExitParams = { ...centerExit };
-        let radius = 0.35;
+
+        const radiusSettings = deriveCEMRadiusSettings(task);
+        let radius = radiusSettings.initialRadius;
+        const decayRate = radiusSettings.decayRate;
 
         for (let iteration = 0; iteration < task.iterations; iteration++) {
             const population = Math.max(2, task.population || 4);
@@ -2691,7 +2703,7 @@ async function runCEMRefinement(task) {
                 centerExit = averageParamsForType(elite.map(item => item.params.exitParams), task, 'exit', centerExit);
             }
 
-            radius = Math.max(0.05, radius * 0.6);
+            radius = Math.max(radiusSettings.minimumRadius, radius * decayRate);
         }
 
         if (bestResult) {
@@ -2771,9 +2783,108 @@ function cloneResultForRefinement(candidate, task) {
 
 function computeRefinementStep(range) {
     if (!range) return 1;
-    const span = Math.abs(range.to - range.from);
-    const baseStep = (typeof range.step === 'number' && range.step > 0) ? range.step : (span > 0 ? span / 10 : 1);
-    return baseStep || 1;
+
+    const from = typeof range.from === 'number' ? range.from : parseFloat(range.from);
+    const to = typeof range.to === 'number' ? range.to : parseFloat(range.to);
+    const span = (isFinite(from) && isFinite(to)) ? Math.abs(to - from) : 0;
+    const rawStep = (typeof range.step === 'number' ? range.step : parseFloat(range.step));
+    const baseStep = (isFinite(rawStep) && rawStep > 0)
+        ? rawStep
+        : (span > 0 ? span / 10 : 1);
+
+    const explorationWeight = computeRangeExplorationWeight(range);
+    const expandedStep = baseStep * (1 + explorationWeight);
+    const cappedStep = span > 0 ? Math.min(span, expandedStep) : expandedStep;
+
+    return cappedStep || baseStep || 1;
+}
+
+function computeRangeExplorationWeight(range) {
+    if (!range) {
+        return 0.75;
+    }
+
+    const from = typeof range.from === 'number' ? range.from : parseFloat(range.from);
+    const to = typeof range.to === 'number' ? range.to : parseFloat(range.to);
+
+    if (!isFinite(from) || !isFinite(to)) {
+        return 0.75;
+    }
+
+    const span = Math.abs(to - from);
+    if (!isFinite(span) || span === 0) {
+        return 0.75;
+    }
+
+    const rawStep = (typeof range.step === 'number' ? range.step : parseFloat(range.step));
+    const baseStep = (isFinite(rawStep) && rawStep > 0) ? rawStep : span / 10;
+    if (!isFinite(baseStep) || baseStep <= 0) {
+        return 0.75;
+    }
+
+    const ratio = Math.max(1, span / baseStep);
+    const normalized = clampNormalizedValue(Math.log(ratio + 1) / Math.log(32));
+    return 0.6 + normalized * 0.35;
+}
+
+function deriveSPSAScaleSettings(targets) {
+    if (!Array.isArray(targets) || targets.length === 0) {
+        return { initialScale: 1.45, minimumScale: 0.5 };
+    }
+
+    const weights = targets
+        .map(target => computeRangeExplorationWeight(target && target.range))
+        .filter(weight => typeof weight === 'number' && !isNaN(weight));
+
+    if (weights.length === 0) {
+        return { initialScale: 1.45, minimumScale: 0.5 };
+    }
+
+    const averageWeight = weights.reduce((sum, weight) => sum + weight, 0) / weights.length;
+    const normalized = clampNormalizedValue((averageWeight - 0.55) / 0.45);
+    const initialScale = 1.4 + normalized * 0.6;
+    const minimumCandidate = 0.5 + normalized * 0.35;
+    const minimumScale = Math.max(0.45, Math.min(initialScale * 0.8, minimumCandidate));
+
+    return { initialScale, minimumScale };
+}
+
+function deriveCEMRadiusSettings(task) {
+    const entryTargets = Array.isArray(task?.entryTargets) ? task.entryTargets : [];
+    const exitTargets = Array.isArray(task?.exitTargets) ? task.exitTargets : [];
+    const combinedTargets = [...entryTargets, ...exitTargets];
+
+    if (combinedTargets.length === 0) {
+        return {
+            initialRadius: 0.55,
+            decayRate: 0.7,
+            minimumRadius: 0.2
+        };
+    }
+
+    const weights = combinedTargets
+        .map(target => computeRangeExplorationWeight(target && target.range))
+        .filter(weight => typeof weight === 'number' && !isNaN(weight));
+
+    if (weights.length === 0) {
+        return {
+            initialRadius: 0.55,
+            decayRate: 0.7,
+            minimumRadius: 0.2
+        };
+    }
+
+    const averageWeight = weights.reduce((sum, weight) => sum + weight, 0) / weights.length;
+    const normalized = clampNormalizedValue((averageWeight - 0.55) / 0.45);
+    const initialRadius = Math.max(0.4, Math.min(0.85, 0.45 + normalized * 0.4));
+    const decayRate = Math.max(0.6, Math.min(0.8, 0.6 + normalized * 0.15));
+    const minimumRadius = Math.max(0.18, Math.min(0.35, 0.2 + normalized * 0.15));
+
+    return {
+        initialRadius,
+        decayRate,
+        minimumRadius
+    };
 }
 
 function clampToRange(value, range) {
