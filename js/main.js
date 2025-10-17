@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-REFINE-20251205A
 
 // 全局變量
 let stockChart = null;
@@ -26,6 +27,15 @@ let sortState = { key: 'annualizedReturn', direction: 'desc' };
 let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
+const stage4State = {
+    container: null,
+    toggle: null,
+    content: null,
+    methodSelect: null,
+    runButton: null,
+    status: null,
+    running: false
+};
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
@@ -35,6 +45,375 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+
+function cloneStage4Object(value) {
+    if (typeof structuredClone === 'function') {
+        try { return structuredClone(value); } catch (error) { /* ignore */ }
+    }
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(cloneStage4Object);
+    const copy = {};
+    Object.keys(value).forEach((key) => {
+        copy[key] = cloneStage4Object(value[key]);
+    });
+    return copy;
+}
+
+function clampStage4Value(value, bound) {
+    if (!bound) return value;
+    let next = Number(value);
+    if (!Number.isFinite(next)) {
+        next = Number.isFinite(bound.min) ? bound.min : 0;
+    }
+    if (Number.isFinite(bound.min) && next < bound.min) next = bound.min;
+    if (Number.isFinite(bound.max) && next > bound.max) next = bound.max;
+    return next;
+}
+
+function updateStage4Status(message, options = {}) {
+    if (!stage4State.status) return;
+    const text = typeof message === 'string' && message.trim().length > 0 ? message : '尚未開始';
+    stage4State.status.textContent = text;
+    const state = options.error ? 'error' : options.busy ? 'busy' : options.done ? 'done' : 'idle';
+    stage4State.status.dataset.stage4Status = state;
+}
+
+function updateStage4Progress(payload) {
+    if (!payload) return;
+    const parts = [];
+    if (payload.stage4 === 'cem') {
+        parts.push('CEM 微調');
+    } else {
+        parts.push('SPSA 微調');
+    }
+    if (typeof payload.step === 'number') {
+        parts.push(`第 ${payload.step} 步`);
+    }
+    if (typeof payload.iter === 'number') {
+        parts.push(`第 ${payload.iter} 輪`);
+    }
+    if (Number.isFinite(payload.bestScore)) {
+        parts.push(`最佳分數 ${Number(payload.bestScore).toFixed(4)}`);
+    }
+    updateStage4Status(parts.join(' · ') || '執行中…', { busy: true });
+}
+
+function getStage4MethodFromUI() {
+    if (!stage4State.methodSelect) return 'spsa';
+    const value = stage4State.methodSelect.value;
+    return value === 'cem' ? 'cem' : 'spsa';
+}
+
+function getCurrentBestFromResults() {
+    const api = window.batchOptimizationStage4;
+    if (!api || typeof api.getResults !== 'function') return null;
+    const results = api.getResults();
+    if (!Array.isArray(results) || results.length === 0) return null;
+    let best = null;
+    let bestScore = -Infinity;
+    results.forEach((result) => {
+        if (!result) return;
+        const score = Number.isFinite(result.score)
+            ? result.score
+            : (Number.isFinite(result.annualizedReturn) ? result.annualizedReturn : -Infinity);
+        if (score > bestScore) {
+            bestScore = score;
+            best = result;
+        }
+    });
+    if (!best) return null;
+    const baseParams = best.params ? cloneStage4Object(best.params) : {
+        buyStrategy: best.buyStrategy,
+        sellStrategy: best.sellStrategy,
+        buyParams: cloneStage4Object(best.buyParams || {}),
+        sellParams: cloneStage4Object(best.sellParams || {}),
+        riskManagement: cloneStage4Object(best.riskManagement || {})
+    };
+    if (baseParams && baseParams.riskManagement && Object.keys(baseParams.riskManagement).length === 0) {
+        delete baseParams.riskManagement;
+    }
+    return {
+        ...best,
+        params: baseParams,
+        score: bestScore,
+        metrics: best.metrics ? cloneStage4Object(best.metrics) : {}
+    };
+}
+
+function buildStage4Context(currentBest) {
+    if (!currentBest) return null;
+    const combination = currentBest.params ? cloneStage4Object(currentBest.params) : {};
+    combination.buyStrategy = combination.buyStrategy || currentBest.buyStrategy;
+    combination.sellStrategy = combination.sellStrategy || currentBest.sellStrategy;
+    combination.buyParams = cloneStage4Object(combination.buyParams || currentBest.buyParams || {});
+    combination.sellParams = cloneStage4Object(combination.sellParams || currentBest.sellParams || {});
+    const hasRisk = currentBest.riskManagement && Object.keys(currentBest.riskManagement).length > 0;
+    combination.riskManagement = cloneStage4Object(combination.riskManagement || (hasRisk ? currentBest.riskManagement : {}));
+    if (combination.riskManagement && Object.keys(combination.riskManagement).length === 0) {
+        delete combination.riskManagement;
+    }
+
+    const keyInfos = [];
+    const bounds = {};
+    const boundRefs = {};
+
+    const registerTarget = (prefix, targetName, targetConfig, params, defaults) => {
+        if (!targetConfig) return;
+        const key = `${prefix}.${targetName}`;
+        const range = targetConfig.range || {};
+        const min = Number(range.from ?? range.min ?? range.start ?? 0);
+        const max = Number(range.to ?? range.max ?? range.end ?? min);
+        const step = Number(range.step ?? 0);
+        const type = Number.isFinite(step) && step > 0 && Number.isInteger(step) ? 'int' : undefined;
+        if (params[targetName] === undefined && defaults && defaults[targetName] !== undefined) {
+            params[targetName] = defaults[targetName];
+        }
+        const entry = {
+            min,
+            max,
+            step: Number.isFinite(step) && step > 0 ? step : undefined,
+            type: type || (Number.isInteger(params[targetName]) ? 'int' : 'float')
+        };
+        bounds[key] = entry;
+        boundRefs[key] = entry;
+        keyInfos.push({ key, prefix, name: targetName });
+    };
+
+    const addStrategyTargets = (prefix, strategyKey, params) => {
+        if (!strategyKey || !strategyDescriptions || !strategyDescriptions[strategyKey]) return;
+        const desc = strategyDescriptions[strategyKey];
+        const defaults = desc.defaultParams || {};
+        if (!Array.isArray(desc.optimizeTargets)) return;
+        desc.optimizeTargets.forEach((target) => {
+            registerTarget(prefix, target.name, target, params, defaults);
+        });
+    };
+
+    addStrategyTargets('buy', combination.buyStrategy, combination.buyParams);
+    addStrategyTargets('sell', combination.sellStrategy, combination.sellParams);
+
+    if (combination.riskManagement || hasRisk) {
+        const riskParams = combination.riskManagement || {};
+        const riskTargets = globalOptimizeTargets || {};
+        if (riskTargets.stopLoss) {
+            registerTarget('risk', 'stopLoss', riskTargets.stopLoss, riskParams, { stopLoss: currentBest.usedStopLoss });
+        }
+        if (riskTargets.takeProfit) {
+            registerTarget('risk', 'takeProfit', riskTargets.takeProfit, riskParams, { takeProfit: currentBest.usedTakeProfit });
+        }
+        if (Object.keys(riskParams).length > 0) {
+            combination.riskManagement = riskParams;
+        } else if (combination.riskManagement) {
+            delete combination.riskManagement;
+        }
+    }
+
+    if (keyInfos.length === 0) {
+        return null;
+    }
+
+    const encodeVec = (combo) => {
+        const source = combo && combo.buyParams ? combo : combination;
+        return keyInfos.map((info) => {
+            const group = info.prefix === 'buy'
+                ? source.buyParams
+                : info.prefix === 'sell'
+                    ? source.sellParams
+                    : (source.riskManagement || {});
+            const bound = boundRefs[info.key];
+            let value = group ? group[info.name] : undefined;
+            if (value === undefined) {
+                const fallback = info.prefix === 'buy'
+                    ? combination.buyParams
+                    : info.prefix === 'sell'
+                        ? combination.sellParams
+                        : (combination.riskManagement || {});
+                value = fallback ? fallback[info.name] : undefined;
+            }
+            return clampStage4Value(value, bound);
+        });
+    };
+
+    const decodeVec = (vector) => {
+        const next = {
+            buyStrategy: combination.buyStrategy,
+            sellStrategy: combination.sellStrategy,
+            buyParams: cloneStage4Object(combination.buyParams),
+            sellParams: cloneStage4Object(combination.sellParams),
+            riskManagement: combination.riskManagement ? cloneStage4Object(combination.riskManagement) : undefined
+        };
+        keyInfos.forEach((info, index) => {
+            const bound = boundRefs[info.key];
+            let value = clampStage4Value(vector[index], bound);
+            if (bound?.type === 'int') {
+                value = Math.round(value);
+            }
+            if (bound?.step) {
+                const base = Number.isFinite(bound.min) ? bound.min : 0;
+                value = base + Math.round((value - base) / bound.step) * bound.step;
+                value = clampStage4Value(value, bound);
+            }
+            const target = info.prefix === 'buy'
+                ? next.buyParams
+                : info.prefix === 'sell'
+                    ? next.sellParams
+                    : (next.riskManagement = next.riskManagement || {});
+            target[info.name] = value;
+        });
+
+        if (next.riskManagement && Object.keys(next.riskManagement).length === 0) {
+            delete next.riskManagement;
+        }
+        bounds.constraintFix?.(next);
+        return next;
+    };
+
+    bounds.constraintFix = (combo) => {
+        const adjustPair = (prefix) => {
+            const params = prefix === 'buy' ? combo.buyParams : combo.sellParams;
+            if (!params) return;
+            if (typeof params.shortPeriod === 'number' && typeof params.longPeriod === 'number') {
+                const shortBound = boundRefs[`${prefix}.shortPeriod`];
+                const longBound = boundRefs[`${prefix}.longPeriod`];
+                const minGap = 1;
+                let shortVal = clampStage4Value(params.shortPeriod, shortBound);
+                let longVal = clampStage4Value(params.longPeriod, longBound);
+                if (longVal <= shortVal + minGap) {
+                    longVal = clampStage4Value(shortVal + minGap, longBound);
+                }
+                if (shortVal >= longVal) {
+                    shortVal = clampStage4Value(longVal - minGap, shortBound);
+                }
+                params.shortPeriod = shortVal;
+                params.longPeriod = longVal;
+            }
+        };
+        adjustPair('buy');
+        adjustPair('sell');
+        if (combo.riskManagement) {
+            if (combo.riskManagement.stopLoss !== undefined) {
+                combo.riskManagement.stopLoss = clampStage4Value(combo.riskManagement.stopLoss, boundRefs['risk.stopLoss']);
+            }
+            if (combo.riskManagement.takeProfit !== undefined) {
+                combo.riskManagement.takeProfit = clampStage4Value(combo.riskManagement.takeProfit, boundRefs['risk.takeProfit']);
+            }
+            if (combo.riskManagement.stopLoss !== undefined && combo.riskManagement.takeProfit !== undefined) {
+                if (combo.riskManagement.stopLoss > combo.riskManagement.takeProfit) {
+                    combo.riskManagement.stopLoss = clampStage4Value(combo.riskManagement.takeProfit, boundRefs['risk.stopLoss']);
+                }
+            }
+            if (Object.keys(combo.riskManagement).length === 0) {
+                delete combo.riskManagement;
+            }
+        }
+        return combo;
+    };
+
+    const enrichedBest = {
+        ...currentBest,
+        params: combination
+    };
+
+    const api = window.batchOptimizationStage4;
+    const evaluator = api && typeof api.evaluate === 'function'
+        ? (list) => api.evaluate(list, { currentBest: enrichedBest })
+        : undefined;
+
+    return {
+        currentBest: enrichedBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective: (result) => {
+            if (result && Number.isFinite(result.score)) return result.score;
+            if (result && Number.isFinite(result.annualizedReturn)) return result.annualizedReturn;
+            return -Infinity;
+        }
+    };
+}
+
+async function handleStage4Run() {
+    if (stage4State.running) return;
+    const api = window.batchOptimizationStage4;
+    if (!api || typeof api.runStage4 !== 'function') {
+        showError('批量優化模組尚未就緒，請稍候再試');
+        return;
+    }
+
+    const currentBest = getCurrentBestFromResults();
+    if (!currentBest) {
+        showError('請先執行批量優化或交叉優化，取得最佳結果後再進行微調');
+        return;
+    }
+
+    const context = buildStage4Context(currentBest);
+    if (!context) {
+        showError('無法建立微調參數上下文，請確認批量優化結果');
+        return;
+    }
+
+    context.currentBest = context.currentBest || currentBest;
+    context.uiProgress = updateStage4Progress;
+
+    const method = getStage4MethodFromUI();
+
+    stage4State.running = true;
+    if (stage4State.runButton) {
+        stage4State.runButton.disabled = true;
+        stage4State.runButton.textContent = '執行中…';
+    }
+    updateStage4Status('準備中…', { busy: true });
+
+    try {
+        const row = await api.runStage4(method, context);
+        const status = row?.__stage4Status || 'inserted';
+        if (status === 'ignored') {
+            updateStage4Status('分數未優於既有結果，維持原狀', { done: true });
+            showInfo('第四階段完成：已有更佳分數的相同參數組合。');
+        } else if (status === 'updated') {
+            updateStage4Status('已覆蓋既有最佳組合', { done: true });
+            showSuccess('第四階段完成：已覆蓋既有最佳結果。');
+        } else {
+            updateStage4Status('已新增新的參數組合', { done: true });
+            showSuccess('第四階段完成：新增一筆局部微調結果。');
+        }
+    } catch (error) {
+        console.error('[Stage4] refinement failed:', error);
+        updateStage4Status(error?.message || '微調失敗', { error: true });
+        showError(error?.message || '第四階段微調失敗，請稍後再試。');
+    } finally {
+        stage4State.running = false;
+        if (stage4State.runButton) {
+            stage4State.runButton.disabled = false;
+            stage4State.runButton.textContent = '執行微調';
+        }
+    }
+}
+
+function initStage4Panel() {
+    stage4State.container = document.getElementById('stage4-refine');
+    if (!stage4State.container) return;
+    stage4State.toggle = document.getElementById('stage4-toggle');
+    stage4State.content = document.getElementById('stage4-content');
+    stage4State.methodSelect = document.getElementById('stage4-method');
+    stage4State.runButton = document.getElementById('stage4-run');
+    stage4State.status = document.getElementById('stage4-status');
+
+    if (stage4State.toggle && stage4State.content) {
+        stage4State.toggle.addEventListener('click', () => {
+            const isHidden = stage4State.content.classList.toggle('hidden');
+            stage4State.toggle.textContent = isHidden ? '展開' : '收合';
+            stage4State.toggle.setAttribute('aria-expanded', String(!isHidden));
+        });
+    }
+
+    if (stage4State.runButton) {
+        stage4State.runButton.addEventListener('click', handleStage4Run);
+    }
+
+    updateStage4Status('尚未開始');
+}
 
 // Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
 const stagedEntryControls = (() => {
@@ -2716,6 +3095,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();
+            initStage4Panel();
             initRollingTestFeature();
         }, 100);
 
