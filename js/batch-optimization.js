@@ -1,5 +1,15 @@
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
+
+// Patch Tag: LB-BATCH-OPT-FIX-20251001A - re-bind global strategy metadata for module scope
+const strategyDescriptions =
+    (typeof globalThis !== 'undefined' && globalThis.strategyDescriptions)
+        ? globalThis.strategyDescriptions
+        : {};
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-STAGE4-REFINE-20250930A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -189,7 +199,7 @@ function initBatchOptimization() {
     
     try {
         // 檢查必要的依賴是否存在
-        if (typeof strategyDescriptions === 'undefined') {
+        if (!strategyDescriptions || Object.keys(strategyDescriptions).length === 0) {
             console.error('[Batch Optimization] strategyDescriptions not found');
             return;
         }
@@ -609,7 +619,7 @@ let currentBatchProgress = {
 
 // 獲取策略的中文名稱
 function getStrategyChineseName(strategyKey) {
-    if (typeof strategyDescriptions !== 'undefined' && strategyDescriptions[strategyKey]) {
+    if (strategyDescriptions && strategyDescriptions[strategyKey]) {
         return strategyDescriptions[strategyKey].name || strategyKey;
     }
     return strategyKey;
@@ -1936,6 +1946,10 @@ function renderBatchResultsTable() {
                 optimizationType = '出場固定';
                 typeClass = 'bg-blue-100 text-blue-700';
             }
+        } else if ((result.source && result.source.startsWith('stage4-')) ||
+                   (typeof result.optimizationType === 'string' && result.optimizationType.startsWith('stage4-'))) {
+            optimizationType = '局部微調';
+            typeClass = 'bg-green-100 text-green-700';
         }
         
         // 顯示風險管理參數（如果有的話）
@@ -3220,13 +3234,398 @@ function hideBatchProgress() {
 }
 
 // 導出函數供外部使用
+function clampValue(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+function stableSerialize(value) {
+    if (Array.isArray(value)) return value.map((item) => stableSerialize(item));
+    if (value && typeof value === 'object') {
+        const entries = Object.entries(value)
+            .map(([key, val]) => [key, stableSerialize(val)])
+            .sort(([a], [b]) => a.localeCompare(b));
+        return entries;
+    }
+    return value;
+}
+
+function paramKey(params) {
+    if (!params || typeof params !== 'object') return 'null';
+    try {
+        return JSON.stringify(stableSerialize(params));
+    } catch (error) {
+        console.warn('[Stage4] Failed to serialize params for key:', error);
+        return String(Date.now());
+    }
+}
+
+function enforceOrderedPair(target, scope, shortName, longName, metaList) {
+    if (!target || typeof target !== 'object') return;
+    if (!(shortName in target) || !(longName in target)) return;
+    const shortMeta = metaList.find((meta) => meta.scope === scope && meta.name === shortName);
+    const longMeta = metaList.find((meta) => meta.scope === scope && meta.name === longName);
+    if (!shortMeta || !longMeta) return;
+    const minGap = shortMeta.step || 1;
+    if (target[shortName] >= target[longName]) {
+        const adjustedShort = Math.min(target[shortName], target[longName] - minGap);
+        target[shortName] = clampValue(adjustedShort, shortMeta.min, shortMeta.max);
+        target[longName] = clampValue(Math.max(target[shortName] + minGap, target[longName]), longMeta.min, longMeta.max);
+    }
+}
+
+function prepareStage4Context(currentBest, options = {}) {
+    if (!currentBest || typeof currentBest !== 'object') {
+        throw new Error('Stage4: currentBest missing');
+    }
+    const targetMetric = batchOptimizationConfig?.targetMetric || 'annualizedReturn';
+
+    const paramMeta = [];
+    const bounds = {};
+    const startRisk = {};
+
+    const collectTargets = (scope, strategyKey, params) => {
+        const desc = strategyDescriptions?.[strategyKey];
+        if (!desc || !Array.isArray(desc.optimizeTargets)) return;
+        desc.optimizeTargets.forEach((target) => {
+            const range = target.range || {};
+            const min = Number(range.from);
+            const max = Number(range.to);
+            if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+            const step = Number(range.step) || 1;
+            const type = Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(step) ? 'int' : 'float';
+            const key = `${scope}.${target.name}`;
+            paramMeta.push({
+                key,
+                scope,
+                name: target.name,
+                min,
+                max,
+                step,
+                type,
+                defaultValue: desc.defaultParams?.[target.name]
+            });
+            bounds[key] = { min, max, type };
+        });
+    };
+
+    collectTargets('buy', currentBest.buyStrategy, currentBest.buyParams);
+    collectTargets('sell', currentBest.sellStrategy, currentBest.sellParams);
+
+    const riskSource = { ...currentBest.riskManagement };
+    if (Number.isFinite(currentBest.usedStopLoss)) riskSource.stopLoss = currentBest.usedStopLoss;
+    if (Number.isFinite(currentBest.usedTakeProfit)) riskSource.takeProfit = currentBest.usedTakeProfit;
+
+    const addRiskTarget = (name, configValue) => {
+        const config = globalOptimizeTargets?.[name];
+        if (!config || !config.range) return;
+        const min = Number(config.range.from);
+        const max = Number(config.range.to);
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+        const step = Number(config.range.step) || 0.1;
+        const type = Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(step) ? 'int' : 'float';
+        const key = `risk.${name}`;
+        paramMeta.push({ key, scope: 'risk', name, min, max, step, type, defaultValue: min });
+        bounds[key] = { min, max, type };
+        if (Number.isFinite(configValue)) startRisk[name] = clampValue(configValue, min, max);
+    };
+
+    if (riskSource && Object.keys(riskSource).length > 0) {
+        if (riskSource.stopLoss !== undefined) addRiskTarget('stopLoss', riskSource.stopLoss);
+        if (riskSource.takeProfit !== undefined) addRiskTarget('takeProfit', riskSource.takeProfit);
+    }
+
+    if (paramMeta.length === 0) {
+        throw new Error('Stage4: 找不到可微調的參數');
+    }
+
+    bounds.constraintFix = (candidate) => {
+        const fixed = {
+            buyParams: { ...(candidate?.buyParams || {}) },
+            sellParams: { ...(candidate?.sellParams || {}) },
+            riskManagement: candidate?.riskManagement ? { ...candidate.riskManagement } : {}
+        };
+
+        paramMeta.forEach((meta) => {
+            const target = meta.scope === 'buy'
+                ? fixed.buyParams
+                : meta.scope === 'sell'
+                    ? fixed.sellParams
+                    : fixed.riskManagement;
+            if (!target) return;
+            let value = target[meta.name];
+            if (!Number.isFinite(value)) {
+                value = Number.isFinite(meta.defaultValue) ? meta.defaultValue : meta.min;
+            }
+            if (meta.type === 'int') value = Math.round(value);
+            target[meta.name] = clampValue(value, meta.min, meta.max);
+        });
+
+        enforceOrderedPair(fixed.buyParams, 'buy', 'shortPeriod', 'longPeriod', paramMeta);
+        enforceOrderedPair(fixed.sellParams, 'sell', 'shortPeriod', 'longPeriod', paramMeta);
+
+        if (fixed.riskManagement && Object.keys(fixed.riskManagement).length === 0) {
+            delete fixed.riskManagement;
+        }
+
+        return fixed;
+    };
+
+    const encodeVec = (chrom) => paramMeta.map((meta) => {
+        const source = meta.scope === 'buy'
+            ? chrom?.buyParams
+            : meta.scope === 'sell'
+                ? chrom?.sellParams
+                : chrom?.riskManagement;
+        let value = source?.[meta.name];
+        if (!Number.isFinite(value)) {
+            value = Number.isFinite(meta.defaultValue) ? meta.defaultValue : meta.min;
+        }
+        if (meta.type === 'int') value = Math.round(value);
+        return clampValue(value, meta.min, meta.max);
+    });
+
+    const decodeVec = (vec) => {
+        const result = {
+            buyParams: {},
+            sellParams: {},
+            riskManagement: {}
+        };
+        vec.forEach((value, index) => {
+            const meta = paramMeta[index];
+            const target = meta.scope === 'buy'
+                ? result.buyParams
+                : meta.scope === 'sell'
+                    ? result.sellParams
+                    : result.riskManagement;
+            let val = value;
+            if (meta.type === 'int') val = Math.round(val);
+            target[meta.name] = clampValue(val, meta.min, meta.max);
+        });
+        if (Object.keys(result.riskManagement).length === 0) {
+            delete result.riskManagement;
+        }
+        return bounds.constraintFix(result);
+    };
+
+    const start = bounds.constraintFix({
+        buyParams: { ...(currentBest.buyParams || {}) },
+        sellParams: { ...(currentBest.sellParams || {}) },
+        riskManagement: Object.keys(startRisk).length > 0 ? { ...startRisk } : undefined
+    });
+
+    const objective = (result) => {
+        if (!result) return -Infinity;
+        if (Number.isFinite(result.score)) return result.score;
+        const metrics = result.metrics || result;
+        const value = getMetricFromResult(metrics, targetMetric);
+        return Number.isFinite(value) ? value : -Infinity;
+    };
+
+    const evaluator = async (population) => {
+        const individuals = Array.isArray(population) ? population : [population];
+        const outputs = [];
+        for (const chrom of individuals) {
+            const candidate = bounds.constraintFix(chrom);
+            const baseParams = typeof getBacktestParams === 'function' ? getBacktestParams() : {};
+            baseParams.entryStrategy = getWorkerStrategyName(currentBest.buyStrategy);
+            baseParams.exitStrategy = getWorkerStrategyName(currentBest.sellStrategy);
+            baseParams.entryParams = { ...(candidate.buyParams || {}) };
+            baseParams.exitParams = { ...(candidate.sellParams || {}) };
+
+            if (currentBest.shortEntryStrategy) {
+                baseParams.shortEntryStrategy = getWorkerStrategyName(currentBest.shortEntryStrategy);
+                baseParams.shortEntryParams = { ...(currentBest.shortEntryParams || {}) };
+            }
+            if (currentBest.shortExitStrategy) {
+                baseParams.shortExitStrategy = getWorkerStrategyName(currentBest.shortExitStrategy);
+                baseParams.shortExitParams = { ...(currentBest.shortExitParams || {}) };
+            }
+
+            const risk = candidate.riskManagement || {};
+            if (risk.stopLoss !== undefined) {
+                baseParams.stopLoss = risk.stopLoss;
+            } else if (currentBest.riskManagement?.stopLoss !== undefined) {
+                baseParams.stopLoss = currentBest.riskManagement.stopLoss;
+            }
+            if (risk.takeProfit !== undefined) {
+                baseParams.takeProfit = risk.takeProfit;
+            } else if (currentBest.riskManagement?.takeProfit !== undefined) {
+                baseParams.takeProfit = currentBest.riskManagement.takeProfit;
+            }
+
+            const evaluation = await performSingleBacktestFast(baseParams);
+            if (!evaluation) continue;
+            const score = objective(evaluation);
+            const enriched = {
+                ...evaluation,
+                buyStrategy: currentBest.buyStrategy,
+                sellStrategy: currentBest.sellStrategy,
+                buyParams: { ...(candidate.buyParams || {}) },
+                sellParams: { ...(candidate.sellParams || {}) },
+                riskManagement: candidate.riskManagement ? { ...candidate.riskManagement } : undefined,
+                params: candidate,
+                metrics: evaluation.metrics ? { ...evaluation.metrics } : {
+                    annualizedReturn: evaluation.annualizedReturn,
+                    sharpeRatio: evaluation.sharpeRatio,
+                    sortinoRatio: evaluation.sortinoRatio,
+                    maxDrawdown: evaluation.maxDrawdown,
+                    tradeCount: evaluation.tradeCount ?? evaluation.tradesCount ?? evaluation.totalTrades
+                },
+                score
+            };
+            outputs.push(enriched);
+        }
+        return outputs;
+    };
+
+    return {
+        start,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective
+    };
+}
+
+function resolveRowScore(row, objective) {
+    if (!row) return -Infinity;
+    if (Number.isFinite(row.score)) return row.score;
+    try {
+        return objective(row);
+    } catch (error) {
+        console.warn('[Stage4] resolveRowScore fallback:', error);
+        return -Infinity;
+    }
+}
+
+async function runStage4(method, ctx) {
+    if (!ctx || !ctx.currentBest) throw new Error('Stage4: currentBest missing');
+    if (!ctx.bounds || typeof ctx.encodeVec !== 'function' || typeof ctx.decodeVec !== 'function') {
+        throw new Error('Stage4: 缺少必要的向量化工具');
+    }
+    if (typeof ctx.evaluator !== 'function' && typeof ctx.evaluator?.evaluate !== 'function') {
+        throw new Error('Stage4: evaluator 無效');
+    }
+    if (typeof ctx.objective !== 'function') {
+        throw new Error('Stage4: objective 無效');
+    }
+
+    const runnerOptions = {
+        start: ctx.start,
+        bounds: ctx.bounds,
+        encodeVec: ctx.encodeVec,
+        decodeVec: ctx.decodeVec,
+        evaluator: ctx.evaluator,
+        objective: ctx.objective,
+        onProgress: (payload) => ctx.uiProgress?.({ stage4: method, ...payload })
+    };
+
+    let runner;
+    if (method === 'spsa') {
+        runner = runSPSA;
+        runnerOptions.steps = ctx.steps ?? 30;
+        runnerOptions.a0 = ctx.a0 ?? 0.2;
+        runnerOptions.c0 = ctx.c0 ?? 0.1;
+        runnerOptions.alpha = ctx.alpha ?? 0.602;
+        runnerOptions.gamma = ctx.gamma ?? 0.101;
+    } else if (method === 'cem') {
+        runner = runCEM;
+        runnerOptions.iters = ctx.iters ?? 10;
+        runnerOptions.popSize = ctx.popSize ?? 40;
+        runnerOptions.eliteRatio = ctx.eliteRatio ?? 0.2;
+        runnerOptions.initSigma = ctx.initSigma ?? 0.15;
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    const refined = await runner(runnerOptions);
+
+    const evaluations = refined.bestEvaluation
+        ? [refined.bestEvaluation]
+        : await ctx.evaluator([refined.bestParams]);
+    const bestEvaluation = evaluations && evaluations.length > 0 ? evaluations[0] : null;
+    if (!bestEvaluation) throw new Error('Stage4: 無法取得微調結果');
+
+    const bestScore = Number.isFinite(refined.bestScore)
+        ? refined.bestScore
+        : ctx.objective(bestEvaluation);
+
+    const metrics = bestEvaluation.metrics || {
+        annualizedReturn: bestEvaluation.annualizedReturn,
+        sharpeRatio: bestEvaluation.sharpeRatio,
+        sortinoRatio: bestEvaluation.sortinoRatio,
+        maxDrawdown: bestEvaluation.maxDrawdown,
+        tradeCount: bestEvaluation.tradeCount ?? bestEvaluation.tradesCount ?? bestEvaluation.totalTrades
+    };
+
+    const row = {
+        ...bestEvaluation,
+        buyStrategy: bestEvaluation.buyStrategy || ctx.currentBest.buyStrategy,
+        sellStrategy: bestEvaluation.sellStrategy || ctx.currentBest.sellStrategy,
+        buyParams: bestEvaluation.buyParams || refined.bestParams?.buyParams || ctx.currentBest.buyParams || {},
+        sellParams: bestEvaluation.sellParams || refined.bestParams?.sellParams || ctx.currentBest.sellParams || {},
+        riskManagement: bestEvaluation.riskManagement || refined.bestParams?.riskManagement || ctx.currentBest.riskManagement,
+        params: bestEvaluation.params || refined.bestParams,
+        metrics,
+        score: bestScore,
+        source: `stage4-${method}`,
+        createdAt: Date.now(),
+        optimizationType: `stage4-${method}`,
+        optimizationTypes: ['stage4']
+    };
+
+    row.annualizedReturn = bestEvaluation.annualizedReturn;
+    row.sharpeRatio = bestEvaluation.sharpeRatio;
+    row.sortinoRatio = bestEvaluation.sortinoRatio;
+    row.maxDrawdown = bestEvaluation.maxDrawdown;
+    row.tradeCount = bestEvaluation.tradeCount ?? bestEvaluation.tradesCount ?? bestEvaluation.totalTrades ?? 0;
+    row.paramKey = paramKey(row.params || refined.bestParams || {});
+
+    let action = 'inserted';
+    const existingIndex = batchOptimizationResults.findIndex((existing) => {
+        if (!existing) return false;
+        const existingKey = existing.paramKey || (existing.params ? paramKey(existing.params) : null);
+        return existingKey === row.paramKey;
+    });
+
+    if (existingIndex >= 0) {
+        const existing = batchOptimizationResults[existingIndex];
+        const existingScore = resolveRowScore(existing, ctx.objective);
+        if (row.score > existingScore) {
+            batchOptimizationResults[existingIndex] = { ...existing, ...row };
+            action = 'updated';
+        } else {
+            action = 'ignored';
+        }
+    } else {
+        batchOptimizationResults.push(row);
+    }
+
+    if (action !== 'ignored') {
+        sortBatchResults();
+    }
+
+    return { row, action };
+}
+
 window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    runStage4,
+    paramKey,
+    prepareStage4Context,
+    getResults: () => [...batchOptimizationResults],
+    getTopResult: () => (batchOptimizationResults.length > 0 ? batchOptimizationResults[0] : null)
 };
+
+export { runStage4, paramKey, prepareStage4Context };
 
 // 測試風險管理優化功能
 function testRiskManagementOptimization() {
@@ -3388,7 +3787,7 @@ function testParameterRanges() {
 function checkAllStrategyParameters() {
     console.log('[Debug] Checking all strategy parameter configurations...');
     
-    if (typeof strategyDescriptions === 'undefined') {
+    if (!strategyDescriptions || Object.keys(strategyDescriptions).length === 0) {
         console.error('[Debug] strategyDescriptions not found');
         return;
     }

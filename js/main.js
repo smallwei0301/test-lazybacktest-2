@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-REFINE-20250930A
 
 // 全局變量
 let stockChart = null;
@@ -2654,18 +2655,123 @@ function initTabs() {
 }
 
 // --- 新增：初始化批量優化功能 ---
-function initBatchOptimizationFeature() {
-    // 等待DOM加載完成後初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.batchOptimization && window.batchOptimization.init) {
-                window.batchOptimization.init();
+function initStage4RefineControls() {
+    if (initStage4RefineControls.initialized) return;
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressEl = document.getElementById('stage4-progress');
+    if (!methodSelect || !runButton) return;
+
+    let running = false;
+
+    const updateProgress = (payload) => {
+        if (!progressEl) return;
+        if (!payload) {
+            progressEl.textContent = '';
+            progressEl.classList.add('hidden');
+            return;
+        }
+        const methodLabel = payload.stage4 === 'cem' ? 'CEM' : 'SPSA';
+        let stageText = '進行中';
+        if (typeof payload.step === 'number') {
+            stageText = `步驟 ${payload.step}`;
+        } else if (typeof payload.iter === 'number') {
+            stageText = `迭代 ${payload.iter}`;
+        }
+        const scoreText = Number.isFinite(payload.bestScore)
+            ? `，目前最佳分數：${payload.bestScore.toFixed(4)}`
+            : '';
+        progressEl.textContent = `方法 ${methodLabel} ${stageText}${scoreText}`;
+        progressEl.classList.remove('hidden');
+    };
+
+    runButton.addEventListener('click', async () => {
+        if (running) return;
+        if (!window.batchOptimization) {
+            showError('批量優化模組尚未載入');
+            return;
+        }
+
+        const currentBest = typeof window.batchOptimization.getTopResult === 'function'
+            ? window.batchOptimization.getTopResult()
+            : null;
+        if (!currentBest) {
+            showError('請先完成批量優化以產生結果');
+            return;
+        }
+
+        let context;
+        try {
+            context = window.batchOptimization.prepareStage4Context(currentBest);
+        } catch (error) {
+            console.error('[Stage4] prepare context error:', error);
+            showError(error?.message || '無法建立微調上下文');
+            return;
+        }
+
+        const method = methodSelect.value || 'spsa';
+        const spsaSteps = parseInt(document.getElementById('stage4-spsa-steps')?.value, 10);
+        const cemIters = parseInt(document.getElementById('stage4-cem-iters')?.value, 10);
+        const cemPop = parseInt(document.getElementById('stage4-cem-pop')?.value, 10);
+        const cemElite = parseFloat(document.getElementById('stage4-cem-elite')?.value);
+
+        const runnerOptions = {
+            ...context,
+            currentBest,
+            uiProgress: updateProgress
+        };
+
+        if (method === 'spsa' && Number.isFinite(spsaSteps) && spsaSteps > 0) {
+            runnerOptions.steps = spsaSteps;
+        } else if (method === 'cem') {
+            if (Number.isFinite(cemIters) && cemIters > 0) runnerOptions.iters = cemIters;
+            if (Number.isFinite(cemPop) && cemPop > 0) runnerOptions.popSize = cemPop;
+            if (Number.isFinite(cemElite) && cemElite > 0 && cemElite < 1) {
+                runnerOptions.eliteRatio = cemElite;
             }
-        });
-    } else {
+        }
+
+        running = true;
+        const originalText = runButton.textContent;
+        runButton.disabled = true;
+        runButton.textContent = '執行中…';
+        updateProgress({ stage4: method });
+
+        try {
+            const result = await window.batchOptimization.runStage4(method, runnerOptions);
+            if (result?.action === 'updated') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (result?.action === 'inserted') {
+                showSuccess('第四階段完成：已新增最佳結果');
+            } else if (result?.action === 'ignored') {
+                showInfo('第四階段完成：未優於既有結果');
+            }
+        } catch (error) {
+            console.error('[Stage4] run error:', error);
+            showError(`微調失敗：${error?.message || error}`);
+        } finally {
+            running = false;
+            runButton.disabled = false;
+            runButton.textContent = originalText;
+            updateProgress(null);
+        }
+    });
+
+    initStage4RefineControls.initialized = true;
+}
+
+function initBatchOptimizationFeature() {
+    const handler = () => {
         if (window.batchOptimization && window.batchOptimization.init) {
             window.batchOptimization.init();
         }
+        initStage4RefineControls();
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', handler);
+    } else {
+        handler();
     }
 }
 

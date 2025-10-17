@@ -1,5 +1,6 @@
 // --- 設定檔 ---
 
+// Patch Tag: LB-CONFIG-GLOBAL-20251002A
 const SAVED_STRATEGIES_KEY = 'stockBacktestStrategies_v3.4';
 
 // 策略說明資料 (包含優化目標與範圍)
@@ -67,3 +68,14 @@ const globalOptimizeTargets = {
     stopLoss: { label: '停損 (%)', range: { from: 1, to: 30, step: 0.5 } },
     takeProfit: { label: '停利 (%)', range: { from: 5, to: 100, step: 1 } }
 };
+
+// 將核心設定曝露至全域，供 ES modules（如 batch-optimization.js）讀取
+if (typeof globalThis !== 'undefined') {
+    if (!globalThis.SAVED_STRATEGIES_KEY) {
+        globalThis.SAVED_STRATEGIES_KEY = SAVED_STRATEGIES_KEY;
+    }
+    globalThis.strategyDescriptions = strategyDescriptions;
+    globalThis.longEntryToCoverMap = longEntryToCoverMap;
+    globalThis.longExitToShortMap = longExitToShortMap;
+    globalThis.globalOptimizeTargets = globalOptimizeTargets;
+}

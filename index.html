@@ -1899,6 +1899,54 @@
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <section id="stage4-refine" class="mt-6">
+                                                    <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                        <div class="card-header flex items-center justify-between">
+                                                            <div>
+                                                                <h4 class="card-title text-lg font-semibold">第四階段：局部微調</h4>
+                                                                <p class="text-xs" style="color: var(--muted-foreground);">針對當前最佳策略參數使用 SPSA 或 CEM 進行小幅調整，僅在按下執行後才會運算。</p>
+                                                            </div>
+                                                        </div>
+                                                        <div class="card-content space-y-4">
+                                                            <div class="grid gap-4 md:grid-cols-2">
+                                                                <label class="flex flex-col gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                    微調方法
+                                                                    <select id="stage4-method" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                        <option value="spsa">SPSA（同時估計梯度）</option>
+                                                                        <option value="cem">CEM（交叉熵法）</option>
+                                                                    </select>
+                                                                </label>
+                                                                <div class="flex items-end">
+                                                                    <button id="stage4-run" class="btn-primary px-4 py-2 rounded-md font-semibold text-sm" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
+                                                                        執行微調
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <details class="text-xs rounded-md border border-dashed border-border px-3 py-2" style="color: var(--muted-foreground);">
+                                                                <summary class="cursor-pointer text-foreground font-medium">進階參數（預設即可）</summary>
+                                                                <div class="mt-2 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+                                                                    <label class="flex flex-col gap-1">
+                                                                        <span>SPSA 步數</span>
+                                                                        <input type="number" id="stage4-spsa-steps" min="5" max="200" value="30" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1">
+                                                                        <span>CEM 迭代次數</span>
+                                                                        <input type="number" id="stage4-cem-iters" min="3" max="50" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1">
+                                                                        <span>CEM 母群大小</span>
+                                                                        <input type="number" id="stage4-cem-pop" min="10" max="200" value="40" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1">
+                                                                        <span>CEM 精英比例</span>
+                                                                        <input type="number" id="stage4-cem-elite" min="0.05" max="0.9" step="0.05" value="0.2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                </div>
+                                                            </details>
+                                                            <div id="stage4-progress" class="hidden text-xs" style="color: var(--muted-foreground);"></div>
+                                                        </div>
+                                                    </div>
+                                                </section>
                                             </div>
                                         </div>
                                     </div>
@@ -2453,7 +2501,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>
