@@ -9,6 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-STAGE4-UI-20260310A
 
 // 全局變量
 let stockChart = null;
@@ -2682,6 +2683,154 @@ function initRollingTestFeature() {
     }
 }
 
+function collectStage4Options(method) {
+    const readNumber = (id) => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const value = parseFloat(el.value);
+        return Number.isFinite(value) ? value : null;
+    };
+    if (method === 'cem') {
+        const cem = {};
+        const iters = readNumber('stage4-cem-iters');
+        if (iters !== null) cem.iters = iters;
+        const popSize = readNumber('stage4-cem-pop');
+        if (popSize !== null) cem.popSize = popSize;
+        const eliteRatio = readNumber('stage4-cem-elite');
+        if (eliteRatio !== null) cem.eliteRatio = eliteRatio;
+        const initSigma = readNumber('stage4-cem-sigma');
+        if (initSigma !== null) cem.initSigma = initSigma;
+        return { cem };
+    }
+    const spsa = {};
+    const steps = readNumber('stage4-spsa-steps');
+    if (steps !== null) spsa.steps = steps;
+    const a0 = readNumber('stage4-spsa-a0');
+    if (a0 !== null) spsa.a0 = a0;
+    const c0 = readNumber('stage4-spsa-c0');
+    if (c0 !== null) spsa.c0 = c0;
+    const alpha = readNumber('stage4-spsa-alpha');
+    if (alpha !== null) spsa.alpha = alpha;
+    const gamma = readNumber('stage4-spsa-gamma');
+    if (gamma !== null) spsa.gamma = gamma;
+    return { spsa };
+}
+
+function stage4ProgressReporter(progressEl, payload) {
+    if (!progressEl) return;
+    if (!payload || payload.status === 'idle') {
+        progressEl.classList.add('hidden');
+        progressEl.textContent = '';
+        return;
+    }
+    progressEl.classList.remove('hidden');
+    const parts = [];
+    if (payload.stage4) {
+        parts.push(`方法 ${payload.stage4.toUpperCase()}`);
+    }
+    if (Number.isFinite(payload.step)) {
+        parts.push(`步驟 ${payload.step}`);
+    }
+    if (Number.isFinite(payload.iter)) {
+        parts.push(`迭代 ${payload.iter}`);
+    }
+    if (Number.isFinite(payload.bestScore)) {
+        const formatted = Number(payload.bestScore).toFixed(4);
+        parts.push(`最佳分數 ${formatted}`);
+    }
+    if (parts.length === 0 && payload.status) {
+        parts.push(payload.status);
+    }
+    progressEl.textContent = parts.join('｜');
+}
+
+function upsertStage4RowFallback() {
+    console.warn('[Stage4] upsertResult not available, skipping table update');
+    return 'ignored';
+}
+
+function initStage4Refinement() {
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressEl = document.getElementById('stage4-progress');
+    if (!methodSelect || !runButton) return;
+
+    const stage4Api = window.batchOptimizationStage4 || null;
+    if (stage4Api && typeof stage4Api.setUiProgressHandler === 'function') {
+        stage4Api.setUiProgressHandler((payload) => stage4ProgressReporter(progressEl, payload));
+    }
+
+    runButton.addEventListener('click', async () => {
+        const method = methodSelect.value === 'cem' ? 'cem' : 'spsa';
+        if (!stage4Api || typeof stage4Api.runStage4 !== 'function') {
+            showError('第四階段模組尚未載入');
+            return;
+        }
+
+        const originalText = runButton.textContent;
+        runButton.disabled = true;
+        runButton.textContent = '執行中…';
+        stage4ProgressReporter(progressEl, { stage4: method, status: 'running' });
+
+        try {
+            const currentBest = stage4Api.getCurrentBest ? stage4Api.getCurrentBest() : null;
+            if (!currentBest) {
+                showError('尚未有可微調的結果');
+                stage4ProgressReporter(progressEl, { status: 'idle' });
+                return;
+            }
+
+            if (typeof stage4Api.buildContext !== 'function') {
+                showError('第四階段缺少上下文建構函式');
+                stage4ProgressReporter(progressEl, { status: 'idle' });
+                return;
+            }
+
+            const methodOptions = collectStage4Options(method);
+            const ctx = stage4Api.buildContext(currentBest, {
+                methodOptions,
+                uiProgress: (payload) => stage4ProgressReporter(progressEl, payload),
+            });
+
+            if (!ctx) {
+                showError('無法建立第四階段上下文');
+                stage4ProgressReporter(progressEl, { status: 'idle' });
+                return;
+            }
+
+            if (methodOptions && Object.keys(methodOptions).length > 0) {
+                ctx.methodOptions = methodOptions;
+            }
+
+            const row = await stage4Api.runStage4(method, ctx);
+            if (!row) {
+                showError('未取得微調結果');
+                stage4ProgressReporter(progressEl, { status: 'idle' });
+                return;
+            }
+
+            const action = typeof stage4Api.upsertResult === 'function'
+                ? stage4Api.upsertResult(row, ctx.baseResult)
+                : upsertStage4RowFallback(row);
+
+            if (action === 'updated') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (action === 'inserted') {
+                showSuccess('第四階段完成：已新增最佳結果');
+            } else {
+                showSuccess('第四階段完成：保留原最佳結果');
+            }
+        } catch (error) {
+            console.error('[Stage4] 微調失敗:', error);
+            showError(`第四階段微調失敗：${error?.message || error}`);
+        } finally {
+            runButton.disabled = false;
+            runButton.textContent = originalText;
+            stage4ProgressReporter(progressEl, { status: 'idle' });
+        }
+    });
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -2717,6 +2866,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             initBatchOptimizationFeature();
             initRollingTestFeature();
+            initStage4Refinement();
         }, 100);
 
         console.log('[Main] Initialization completed');
