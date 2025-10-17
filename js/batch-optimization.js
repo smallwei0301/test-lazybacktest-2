@@ -3219,6 +3219,244 @@ function hideBatchProgress() {
     }
 }
 
+const stage4ModuleCache = {
+    spsa: null,
+    cem: null
+};
+
+function cloneStage4Params(source) {
+    if (!source || typeof source !== 'object') return {};
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(source);
+        } catch (error) {}
+    }
+    return JSON.parse(JSON.stringify(source));
+}
+
+function normaliseParamRecord(params) {
+    if (!params || typeof params !== 'object') return {};
+    const out = {};
+    Object.keys(params)
+        .sort()
+        .forEach((key) => {
+            const value = params[key];
+            if (value === undefined || value === null) return;
+            if (typeof value === 'number') {
+                const scaled = Number.isFinite(value) ? Number(value.toFixed(6)) : value;
+                out[key] = scaled;
+            } else if (typeof value === 'string' || typeof value === 'boolean') {
+                out[key] = value;
+            }
+        });
+    return out;
+}
+
+function getSortPreference() {
+    const config = typeof getBatchOptimizationConfig === 'function'
+        ? getBatchOptimizationConfig()
+        : (batchOptimizationConfig || {});
+    return {
+        sortKey: config.sortKey || config.targetMetric || batchOptimizationConfig.sortKey || batchOptimizationConfig.targetMetric || 'annualizedReturn',
+        sortDirection: config.sortDirection || batchOptimizationConfig.sortDirection || 'desc'
+    };
+}
+
+function compareResultsForStage4(a, b, sortKey, sortDirection) {
+    let aValue = a?.[sortKey];
+    let bValue = b?.[sortKey];
+    if (sortKey === 'maxDrawdown') {
+        aValue = Math.abs(Number.isFinite(aValue) ? aValue : Infinity);
+        bValue = Math.abs(Number.isFinite(bValue) ? bValue : Infinity);
+        return sortDirection === 'desc' ? aValue - bValue : bValue - aValue;
+    }
+    aValue = Number.isFinite(aValue) ? aValue : -Infinity;
+    bValue = Number.isFinite(bValue) ? bValue : -Infinity;
+    return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+}
+
+function resolveHighlightedBatchRow() {
+    try {
+        const tbody = document.getElementById('batch-results-tbody');
+        if (!tbody) return null;
+        const highlighted = tbody.querySelector('tr[data-selected="true"]');
+        if (highlighted) {
+            const indexAttr = highlighted.getAttribute('data-index');
+            const index = Number.parseInt(indexAttr, 10);
+            if (Number.isInteger(index) && batchOptimizationResults[index]) {
+                return batchOptimizationResults[index];
+            }
+        }
+    } catch (error) {
+        console.warn('[Stage4] Failed to resolve highlighted row:', error);
+    }
+    return null;
+}
+
+function cloneComboForStage4(row) {
+    if (!row) return null;
+    return {
+        buyStrategy: row.buyStrategy,
+        sellStrategy: row.sellStrategy,
+        buyParams: cloneStage4Params(row.buyParams),
+        sellParams: cloneStage4Params(row.sellParams),
+        riskManagement: row.riskManagement ? cloneStage4Params(row.riskManagement) : undefined
+    };
+}
+
+async function loadStage4Runner(method) {
+    if (method !== 'spsa' && method !== 'cem') return null;
+    if (!stage4ModuleCache[method]) {
+        const modulePath = method === 'spsa' ? './spsa-stage4.js' : './cem-stage4.js';
+        stage4ModuleCache[method] = import(modulePath).catch(error => {
+            console.error('[Stage4] 無法載入模組:', modulePath, error);
+            stage4ModuleCache[method] = null;
+            throw error;
+        });
+    }
+    return stage4ModuleCache[method];
+}
+
+function getResultScoreForStage4(result) {
+    if (!result) return -Infinity;
+    const score = result.annualizedReturn;
+    return Number.isFinite(score) ? score : -Infinity;
+}
+
+function paramKeyFromCombo(combo) {
+    if (!combo) return '';
+    const payload = {
+        buyStrategy: combo.buyStrategy || null,
+        sellStrategy: combo.sellStrategy || null,
+        buyParams: normaliseParamRecord(combo.buyParams),
+        sellParams: normaliseParamRecord(combo.sellParams)
+    };
+    const risk = normaliseParamRecord(combo.riskManagement);
+    if (Object.keys(risk).length > 0) {
+        payload.riskManagement = risk;
+    }
+    return JSON.stringify(payload);
+}
+
+function toBatchResultRow({ combo, result, source }) {
+    if (!combo || !result) return null;
+    const row = {
+        ...result,
+        buyStrategy: combo.buyStrategy,
+        sellStrategy: combo.sellStrategy,
+        buyParams: cloneStage4Params(combo.buyParams),
+        sellParams: cloneStage4Params(combo.sellParams),
+        source,
+    };
+    if (combo.riskManagement) {
+        row.riskManagement = cloneStage4Params(combo.riskManagement);
+    }
+    if (!Number.isFinite(row.tradesCount) && Number.isFinite(result?.totalTrades)) {
+        row.tradesCount = result.totalTrades;
+    }
+    if (!Number.isFinite(row.tradesCount) && Number.isFinite(result?.tradeCount)) {
+        row.tradesCount = result.tradeCount;
+    }
+    row.optimizationType = row.optimizationType || source;
+    return row;
+}
+
+function upsertBatchResultRow(row) {
+    if (!row) return;
+    const keyNew = paramKeyFromCombo({
+        buyStrategy: row.buyStrategy,
+        sellStrategy: row.sellStrategy,
+        buyParams: row.buyParams,
+        sellParams: row.sellParams,
+        riskManagement: row.riskManagement
+    });
+    const i = batchOptimizationResults.findIndex(existing => {
+        const keyOld = paramKeyFromCombo({
+            buyStrategy: existing.buyStrategy,
+            sellStrategy: existing.sellStrategy,
+            buyParams: existing.buyParams,
+            sellParams: existing.sellParams,
+            riskManagement: existing.riskManagement
+        });
+        return keyOld === keyNew;
+    });
+    if (i >= 0) {
+        const oldScore = getResultScoreForStage4(batchOptimizationResults[i]);
+        const newScore = getResultScoreForStage4(row);
+        if (newScore > oldScore) {
+            batchOptimizationResults[i] = row;
+        }
+    } else {
+        batchOptimizationResults.push(row);
+    }
+    if (typeof sortBatchResults === 'function') {
+        sortBatchResults();
+    } else if (typeof renderBatchResultsTable === 'function') {
+        renderBatchResultsTable();
+    }
+    if (typeof showBatchResults === 'function') {
+        showBatchResults();
+    }
+}
+
+function getCurrentBestComboForStage4() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) return null;
+    const highlighted = resolveHighlightedBatchRow();
+    if (highlighted) {
+        return cloneComboForStage4(highlighted);
+    }
+    const { sortKey, sortDirection } = getSortPreference();
+    const sorted = [...batchOptimizationResults].sort((a, b) => compareResultsForStage4(a, b, sortKey, sortDirection));
+    const bestRow = sorted[0];
+    return cloneComboForStage4(bestRow);
+}
+
+async function runStage4(method, { onProgress } = {}) {
+    const startCombo = getCurrentBestComboForStage4();
+    if (!startCombo) {
+        console.warn('Stage4: no current best');
+        return null;
+    }
+
+    let runner = null;
+    try {
+        const module = await loadStage4Runner(method);
+        if (!module) {
+            console.warn('Stage4: unable to load module for method', method);
+            return null;
+        }
+        if (method === 'spsa') {
+            runner = module.runStage4SPSA;
+        } else if (method === 'cem') {
+            runner = module.runStage4CEM;
+        }
+    } catch (error) {
+        console.error('Stage4: module load failed', error);
+        return null;
+    }
+
+    if (typeof runner !== 'function') {
+        console.warn('Stage4: unknown method', method);
+        return null;
+    }
+
+    const context = {
+        startCombo,
+        onProgress,
+        evaluateCombo: executeBacktestForCombination,
+        strategyMeta: typeof strategyDescriptions !== 'undefined' ? strategyDescriptions : {},
+        riskMeta: typeof globalOptimizeTargets !== 'undefined' ? globalOptimizeTargets : {}
+    };
+
+    const out = await runner(context);
+    if (!out || !out.bestResult) return null;
+
+    const row = toBatchResultRow({ combo: out.bestCombo || startCombo, result: out.bestResult, source: `stage4-${method}` });
+    if (!row) return null;
+    upsertBatchResultRow(row);
+    return row;
+}
+
 // 導出函數供外部使用
 window.batchOptimization = {
     init: initBatchOptimization,
@@ -3227,6 +3465,12 @@ window.batchOptimization = {
     getWorkerStrategyName: getWorkerStrategyName,
     runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
 };
+
+window.batchOptimization.paramKeyFromCombo = paramKeyFromCombo;
+window.batchOptimization.toBatchResultRow = toBatchResultRow;
+window.batchOptimization.upsertBatchResultRow = upsertBatchResultRow;
+window.batchOptimization.getCurrentBestComboForStage4 = getCurrentBestComboForStage4;
+window.batchOptimization.runStage4 = runStage4;
 
 // 測試風險管理優化功能
 function testRiskManagementOptimization() {
