@@ -1,5 +1,9 @@
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-STAGE4-REFINE-20250705A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -48,6 +52,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let lastStage4Action = null;
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -3227,6 +3232,438 @@ window.batchOptimization = {
     getWorkerStrategyName: getWorkerStrategyName,
     runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
 };
+
+const STAGE4_VERSION_CODE = 'LB-STAGE4-REFINE-20250705A';
+
+function sortStage4Value(value) {
+    if (Array.isArray(value)) {
+        return value.map(sortStage4Value);
+    }
+    if (value && typeof value === 'object') {
+        const sorted = {};
+        Object.keys(value).sort().forEach((key) => {
+            sorted[key] = sortStage4Value(value[key]);
+        });
+        return sorted;
+    }
+    if (Number.isFinite(value)) {
+        return Number(value.toFixed(10));
+    }
+    return value;
+}
+
+export function paramKey(params) {
+    if (!params || typeof params !== 'object') return 'null';
+    try {
+        const sorted = sortStage4Value(params);
+        return JSON.stringify(sorted);
+    } catch (error) {
+        console.warn('[Stage4] Failed to stringify params for key:', error);
+        return 'null';
+    }
+}
+
+function stage4CloneParams(params) {
+    return {
+        entry: params?.entry ? { ...params.entry } : {},
+        exit: params?.exit ? { ...params.exit } : {}
+    };
+}
+
+function stage4ClampToSpec(value, spec) {
+    if (!spec) return value;
+    let next = value;
+    if (spec.enum && Array.isArray(spec.enum) && spec.enum.length > 0) {
+        if (!spec.enum.includes(next)) {
+            next = spec.enum[0];
+        }
+        return next;
+    }
+    const min = Number.isFinite(spec.min) ? spec.min : -Infinity;
+    const max = Number.isFinite(spec.max) ? spec.max : Infinity;
+    if (!Number.isFinite(next)) next = min;
+    if (next < min) next = min;
+    if (next > max) next = max;
+    if (spec.type === 'int') {
+        next = Math.round(next);
+    } else if (Number.isFinite(spec.step) && spec.step > 0) {
+        next = Math.round(next / spec.step) * spec.step;
+    }
+    if (next < min) next = min;
+    if (next > max) next = max;
+    return next;
+}
+
+function stage4ConstraintFix(params, specMap) {
+    if (!params || typeof params !== 'object') return params;
+    const next = stage4CloneParams(params);
+
+    const applyClamp = (scope) => {
+        const group = next[scope];
+        if (!group || typeof group !== 'object') return;
+        Object.keys(group).forEach((name) => {
+            const spec = specMap[`${scope}.${name}`];
+            group[name] = stage4ClampToSpec(group[name], spec);
+        });
+    };
+
+    const enforceOrder = (scope, shortKey, longKey) => {
+        const group = next[scope];
+        if (!group) return;
+        const shortSpec = specMap[`${scope}.${shortKey}`];
+        const longSpec = specMap[`${scope}.${longKey}`];
+        if (!shortSpec || !longSpec) return;
+        let shortVal = stage4ClampToSpec(group[shortKey], shortSpec);
+        let longVal = stage4ClampToSpec(group[longKey], longSpec);
+        const minGap = Number.isFinite(longSpec.step) && longSpec.step > 0 ? longSpec.step : 1;
+        if (!Number.isFinite(shortVal) || !Number.isFinite(longVal)) return;
+        if (shortVal >= longVal) {
+            longVal = Math.max(longVal, shortVal + minGap);
+        }
+        if (longVal > longSpec.max) {
+            longVal = longSpec.max;
+            shortVal = Math.min(shortVal, longVal - minGap);
+        }
+        if (shortVal < shortSpec.min) {
+            shortVal = shortSpec.min;
+        }
+        if (longVal < longSpec.min) {
+            longVal = Math.max(longSpec.min, shortVal + minGap);
+        }
+        if (shortVal >= longVal) {
+            shortVal = Math.max(shortSpec.min, Math.min(longVal - minGap, longSpec.max - minGap));
+        }
+        group[shortKey] = stage4ClampToSpec(shortVal, shortSpec);
+        group[longKey] = stage4ClampToSpec(longVal, longSpec);
+    };
+
+    applyClamp('entry');
+    applyClamp('exit');
+    enforceOrder('entry', 'shortPeriod', 'longPeriod');
+    enforceOrder('exit', 'shortPeriod', 'longPeriod');
+    enforceOrder('entry', 'shortEMA', 'longEMA');
+    enforceOrder('exit', 'shortEMA', 'longEMA');
+
+    return next;
+}
+
+function buildStage4ParameterSpace(currentBest) {
+    if (!currentBest) throw new Error('Stage4: currentBest missing');
+    const entryStrategy = currentBest.buyStrategy || currentBest.entryStrategy;
+    const exitStrategy = currentBest.sellStrategy || currentBest.exitStrategy;
+    if (!entryStrategy || !exitStrategy) {
+        throw new Error('Stage4: strategy combination incomplete');
+    }
+
+    const entryTargets = Array.isArray(strategyDescriptions[entryStrategy]?.optimizeTargets)
+        ? strategyDescriptions[entryStrategy].optimizeTargets
+        : [];
+    const exitTargets = Array.isArray(strategyDescriptions[exitStrategy]?.optimizeTargets)
+        ? strategyDescriptions[exitStrategy].optimizeTargets
+        : [];
+
+    const keyOrder = [];
+    const specMap = {};
+    const baseParams = {
+        entry: { ...(strategyDescriptions[entryStrategy]?.defaultParams || {}) },
+        exit: { ...(strategyDescriptions[exitStrategy]?.defaultParams || {}) }
+    };
+
+    const inheritParams = (scope, fields) => {
+        if (!fields || typeof fields !== 'object') return;
+        Object.keys(fields).forEach((key) => {
+            if (fields[key] !== undefined) {
+                baseParams[scope][key] = fields[key];
+            }
+        });
+    };
+
+    inheritParams('entry', currentBest.buyParams || currentBest.entryParams);
+    inheritParams('exit', currentBest.sellParams || currentBest.exitParams);
+
+    const addTargets = (scope, targets) => {
+        targets.forEach((target) => {
+            const range = target?.range || {};
+            const min = Number(range.from);
+            const max = Number(range.to);
+            if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+            const key = `${scope}.${target.name}`;
+            const type = Number.isFinite(range.step) && Number.isInteger(range.step)
+                && Number.isInteger(min) && Number.isInteger(max)
+                ? 'int'
+                : 'float';
+            specMap[key] = {
+                key,
+                label: target.label,
+                min,
+                max,
+                step: Number.isFinite(range.step) && range.step > 0 ? range.step : undefined,
+                type
+            };
+            keyOrder.push(key);
+            if (baseParams[scope][target.name] === undefined) {
+                const defaultValue = Number.isFinite(range.default)
+                    ? range.default
+                    : stage4ClampToSpec((min + max) / 2, specMap[key]);
+                baseParams[scope][target.name] = defaultValue;
+            }
+        });
+    };
+
+    addTargets('entry', entryTargets);
+    addTargets('exit', exitTargets);
+
+    const start = {
+        entry: {},
+        exit: {}
+    };
+
+    keyOrder.forEach((key) => {
+        const [scope, name] = key.split('.');
+        start[scope][name] = stage4ClampToSpec(baseParams[scope][name], specMap[key]);
+    });
+
+    const encodeVec = (params) => {
+        const merged = stage4CloneParams(params);
+        return keyOrder.map((key) => {
+            const [scope, name] = key.split('.');
+            const spec = specMap[key];
+            const value = merged[scope]?.[name] !== undefined ? merged[scope][name] : start[scope][name];
+            return stage4ClampToSpec(value, spec);
+        });
+    };
+
+    const decodeVec = (vector) => {
+        const next = stage4CloneParams(start);
+        vector.forEach((value, index) => {
+            const key = keyOrder[index];
+            if (!key) return;
+            const [scope, name] = key.split('.');
+            const spec = specMap[key];
+            next[scope][name] = stage4ClampToSpec(value, spec);
+        });
+        return next;
+    };
+
+    const bounds = keyOrder.reduce((acc, key) => {
+        acc[key] = specMap[key];
+        return acc;
+    }, {});
+    bounds.constraintFix = (params) => stage4ConstraintFix(params, specMap);
+
+    return {
+        entryStrategy,
+        exitStrategy,
+        keyOrder,
+        start,
+        bounds,
+        encodeVec,
+        decodeVec,
+        specMap
+    };
+}
+
+function resolveStage4Objective(customObjective) {
+    if (typeof customObjective === 'function') {
+        return customObjective;
+    }
+    const config = getBatchOptimizationConfig();
+    const sortKey = config?.sortKey || config?.targetMetric || 'annualizedReturn';
+    if (sortKey === 'maxDrawdown') {
+        return (metrics) => {
+            const value = metrics && Number.isFinite(metrics.maxDrawdown) ? metrics.maxDrawdown : null;
+            return value === null ? -Infinity : -Math.abs(value);
+        };
+    }
+    return (metrics) => {
+        if (!metrics) return -Infinity;
+        const value = metrics[sortKey];
+        return Number.isFinite(value) ? value : -Infinity;
+    };
+}
+
+function resolveStage4MethodOptions(method, ctxOptions = {}) {
+    if (method === 'spsa') {
+        return {
+            steps: Number.isFinite(ctxOptions.steps) && ctxOptions.steps > 0 ? Math.floor(ctxOptions.steps) : 30,
+            a0: Number.isFinite(ctxOptions.a0) ? ctxOptions.a0 : 0.2,
+            c0: Number.isFinite(ctxOptions.c0) ? ctxOptions.c0 : 0.1,
+            alpha: Number.isFinite(ctxOptions.alpha) ? ctxOptions.alpha : 0.602,
+            gamma: Number.isFinite(ctxOptions.gamma) ? ctxOptions.gamma : 0.101
+        };
+    }
+    if (method === 'cem') {
+        return {
+            iters: Number.isFinite(ctxOptions.iters) && ctxOptions.iters > 0 ? Math.floor(ctxOptions.iters) : 10,
+            popSize: Number.isFinite(ctxOptions.popSize) && ctxOptions.popSize > 0 ? Math.floor(ctxOptions.popSize) : 40,
+            eliteRatio: Number.isFinite(ctxOptions.eliteRatio) && ctxOptions.eliteRatio > 0 && ctxOptions.eliteRatio <= 1 ? ctxOptions.eliteRatio : 0.2,
+            initSigma: Number.isFinite(ctxOptions.initSigma) && ctxOptions.initSigma > 0 ? ctxOptions.initSigma : 0.15
+        };
+    }
+    return {};
+}
+
+function stage4RowScore(row, objective) {
+    if (!row) return -Infinity;
+    const base = row.metrics || row;
+    return objective(base);
+}
+
+function upsertStage4Row(row, objective) {
+    if (!row || !row.params) return 'ignored';
+    const key = paramKey(row.params);
+    const existingIndex = batchOptimizationResults.findIndex((existing) => existing && existing.params && paramKey(existing.params) === key);
+    const newScore = stage4RowScore(row, objective);
+    if (existingIndex >= 0) {
+        const existing = batchOptimizationResults[existingIndex];
+        const existingScore = stage4RowScore(existing, objective);
+        if (newScore > existingScore) {
+            batchOptimizationResults[existingIndex] = row;
+            return 'replaced';
+        }
+        return 'ignored';
+    }
+    batchOptimizationResults.push(row);
+    return 'inserted';
+}
+
+async function evaluateStage4Candidate(entryStrategy, exitStrategy, candidateParams) {
+    const baseParams = getBacktestParams();
+    baseParams.entryStrategy = getWorkerStrategyName(entryStrategy);
+    baseParams.exitStrategy = getWorkerStrategyName(exitStrategy);
+    baseParams.entryParams = { ...(candidateParams?.entry || {}) };
+    baseParams.exitParams = { ...(candidateParams?.exit || {}) };
+    const result = await performSingleBacktestFast(baseParams);
+    if (result) {
+        result.buyStrategy = entryStrategy;
+        result.sellStrategy = exitStrategy;
+        result.buyParams = { ...(candidateParams?.entry || {}) };
+        result.sellParams = { ...(candidateParams?.exit || {}) };
+    }
+    return result;
+}
+
+function buildStage4ResultRow(bestParams, metrics, score, method, space) {
+    const params = stage4CloneParams(bestParams);
+    const result = {
+        ...(metrics || {}),
+        buyStrategy: space.entryStrategy,
+        sellStrategy: space.exitStrategy,
+        buyParams: { ...(params.entry || {}) },
+        sellParams: { ...(params.exit || {}) },
+        params,
+        metrics: metrics || null,
+        score,
+        source: `stage4-${method}`,
+        stage4: true,
+        stage4Version: STAGE4_VERSION_CODE,
+        createdAt: Date.now()
+    };
+    return result;
+}
+
+export async function runStage4(method, ctx = {}) {
+    if (!method) throw new Error('Stage4: method missing');
+    const allowed = ['spsa', 'cem'];
+    if (!allowed.includes(method)) {
+        throw new Error(`Stage4: unknown method ${method}`);
+    }
+    const currentBest = ctx.currentBest;
+    if (!currentBest) throw new Error('Stage4: currentBest missing');
+
+    const space = buildStage4ParameterSpace(currentBest);
+    if (!space.keyOrder || space.keyOrder.length === 0) {
+        throw new Error('Stage4: no tunable parameters for this combination');
+    }
+
+    const objective = resolveStage4Objective(ctx.objective);
+    const methodOptions = resolveStage4MethodOptions(method, ctx.methodOptions || {});
+    const baseEvaluator = async (population) => {
+        const outputs = [];
+        for (const candidate of population) {
+            try {
+                const metrics = await evaluateStage4Candidate(space.entryStrategy, space.exitStrategy, candidate);
+                const score = objective(metrics);
+                outputs.push({
+                    metrics,
+                    params: candidate,
+                    score
+                });
+            } catch (error) {
+                console.warn('[Stage4] Candidate evaluation failed:', error);
+                outputs.push({ params: candidate, score: -Infinity });
+            }
+        }
+        return outputs;
+    };
+
+    const runnerOptions = {
+        start: space.start,
+        bounds: space.bounds,
+        encodeVec: (params) => space.encodeVec(params),
+        decodeVec: (vector) => {
+            const decoded = space.decodeVec(vector);
+            return space.bounds.constraintFix(decoded) || decoded;
+        },
+        evaluator: baseEvaluator,
+        objective: (result) => result?.score ?? -Infinity,
+        onProgress: (payload) => {
+            try {
+                ctx.uiProgress?.({ stage4: method, ...payload });
+            } catch (error) {
+                console.warn('[Stage4] uiProgress callback failed:', error);
+            }
+        },
+        ...methodOptions
+    };
+
+    let refined;
+    if (method === 'spsa') {
+        refined = await runSPSA(runnerOptions);
+    } else {
+        refined = await runCEM(runnerOptions);
+    }
+
+    if (!refined || !refined.bestParams) {
+        throw new Error('Stage4: 無法取得微調結果');
+    }
+
+    let metrics = refined?.bestMetrics || null;
+    if (!metrics) {
+        metrics = await evaluateStage4Candidate(space.entryStrategy, space.exitStrategy, refined.bestParams);
+    }
+    const score = objective(metrics);
+    const row = buildStage4ResultRow(refined.bestParams, metrics, score, method, space);
+    row.paramKey = paramKey(row.params);
+
+    const action = upsertStage4Row(row, objective);
+    lastStage4Action = action;
+
+    try {
+        sortBatchResults();
+        renderBatchResultsTable();
+    } catch (error) {
+        console.warn('[Stage4] Failed to refresh results table:', error);
+    }
+
+    return row;
+}
+
+function getBestStage4Result() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        return null;
+    }
+    return batchOptimizationResults[0];
+}
+
+window.batchOptimization.runStage4 = runStage4;
+window.batchOptimization.paramKey = paramKey;
+window.batchOptimization.getResultsSnapshot = () => Array.isArray(batchOptimizationResults) ? [...batchOptimizationResults] : [];
+window.batchOptimization.getBestResult = () => getBestStage4Result();
+window.batchOptimization.getLastStage4Action = () => lastStage4Action;
+window.batchOptimization.getConfig = () => ({ ...(batchOptimizationConfig || {}) });
+
+window.loadBatchStrategy = loadBatchStrategy;
 
 // 測試風險管理優化功能
 function testRiskManagementOptimization() {
