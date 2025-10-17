@@ -1091,6 +1091,14 @@
 - **Diagnostics**: 準備針對第二、第三視窗記錄 `cachedWindowData.length` 與原始快取長度，並比對批量優化單跑的 `rawDataUsed.fetchRange`，確認 Worker 僅接收到對應訓練期間的資料。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-03 — Patch LB-PROGRESS-MASCOT-20250708A
+- **Issue recap**: 回測進度面板仍使用單一 Tenor 動態圖示，若 Tenor API 阻斷或網路延遲會導致進度吉祥物消失，無法呼應最新的品牌素材需求。
+- **Fix**:
+  - `index.html` 移除 Tenor 相關屬性，改由前端自行載入吉祥物畫布，避免外部腳本載入風險。
+  - `js/main.js` 建立 `loadingMascotManager`，整合 120+ 組提供的 GIF／靜態圖，於每次回測啟動時隨機挑選並記錄來源，並更新版本碼為 `LB-PROGRESS-MASCOT-20250708A`。
+  - 內建來源清單會自動將 `http://` 轉為 `https://` 並去除重複，確保在 Netlify HTTPS 網站上不觸發混合內容警告。
+- **Testing**: 尚未執行（需於瀏覽器啟動回測流程確認隨機圖示與 console 無錯誤）。
+
 ### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
 - **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
 - **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。
