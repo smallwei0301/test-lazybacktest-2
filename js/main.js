@@ -11,6 +11,7 @@
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
+// Patch Tag: LB-PROGRESS-MASCOT-20260705A
 
 // 全局變量
 let stockChart = null;
@@ -20,7 +21,7 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260703A';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260705A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
 const loadingMascotState = {
     lastSource: null,
@@ -29,6 +30,9 @@ const loadingMascotState = {
         queue: [],
         timerId: null,
         lastTotalSources: 0,
+    },
+    visibility: {
+        hidden: false,
     },
 };
 
@@ -1632,6 +1636,100 @@ function getLoadingMascotContainer() {
     return document.getElementById('loadingGif');
 }
 
+function getLoadingMascotVisibilityState() {
+    if (!loadingMascotState.visibility) {
+        loadingMascotState.visibility = { hidden: false };
+    }
+    return loadingMascotState.visibility;
+}
+
+function isLoadingMascotHidden() {
+    return Boolean(getLoadingMascotVisibilityState().hidden);
+}
+
+function setLoadingMascotHiddenFlag(hidden) {
+    const visibility = getLoadingMascotVisibilityState();
+    visibility.hidden = Boolean(hidden);
+}
+
+function ensureLoadingMascotInfrastructure(container) {
+    if (!container) return {};
+
+    let toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (!toggle) {
+        toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'loading-mascot-toggle';
+        toggle.dataset.lbMascotToggle = 'true';
+        toggle.setAttribute('aria-label', '隱藏進度吉祥物圖片');
+        toggle.setAttribute('aria-pressed', 'false');
+        toggle.textContent = '-';
+        toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const containerEl = getLoadingMascotContainer();
+            if (!containerEl) return;
+            const nextHidden = !isLoadingMascotHidden();
+            setLoadingMascotHiddenFlag(nextHidden);
+            applyLoadingMascotHiddenState(containerEl, nextHidden);
+            if (nextHidden) {
+                cancelLoadingMascotRotation();
+            } else {
+                refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+            }
+        });
+        container.insertBefore(toggle, container.firstChild);
+    }
+
+    let fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = 'loading-mascot-fallback-visual';
+        fallback.dataset.lbMascotFallback = 'true';
+        fallback.setAttribute('aria-hidden', 'true');
+        fallback.textContent = '⌛';
+        container.appendChild(fallback);
+    }
+
+    if (typeof container.dataset.lbMascotMode !== 'string' || !container.dataset.lbMascotMode) {
+        container.dataset.lbMascotMode = 'image';
+    }
+
+    if (container.dataset.lbMascotHidden === 'true') {
+        setLoadingMascotHiddenFlag(true);
+    } else if (container.dataset.lbMascotHidden === 'false') {
+        setLoadingMascotHiddenFlag(false);
+    }
+
+    return { toggle, fallback };
+}
+
+function applyLoadingMascotHiddenState(container, hidden) {
+    if (!container) return;
+    const flag = hidden ? 'true' : 'false';
+    container.dataset.lbMascotHidden = flag;
+
+    const toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (toggle) {
+        toggle.dataset.state = hidden ? 'hidden' : 'visible';
+        toggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        toggle.setAttribute('aria-label', hidden ? '顯示進度吉祥物圖片' : '隱藏進度吉祥物圖片');
+        toggle.textContent = hidden ? '+' : '-';
+    }
+
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        const fallbackVisible = container.dataset.lbMascotMode === 'fallback' && !hidden;
+        fallback.setAttribute('aria-hidden', fallbackVisible ? 'false' : 'true');
+    }
+
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        const imageVisible = container.dataset.lbMascotMode !== 'fallback' && !hidden;
+        img.setAttribute('aria-hidden', imageVisible ? 'false' : 'true');
+    }
+}
+
 function computeLoadingMascotSources(container) {
     const externalSources = Array.isArray(window.LAZYBACKTEST_LOADING_MASCOT_SOURCES)
         ? window.LAZYBACKTEST_LOADING_MASCOT_SOURCES
@@ -1687,6 +1785,10 @@ function scheduleLoadingMascotRotation(totalSources) {
 
     rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
 
+    if (isLoadingMascotHidden()) {
+        return;
+    }
+
     if (!Number.isFinite(LOADING_MASCOT_ROTATION_INTERVAL) || LOADING_MASCOT_ROTATION_INTERVAL <= 0) {
         return;
     }
@@ -1707,36 +1809,56 @@ function handleLoadingMascotDisplayed(source, totalSources) {
     if (rotation) {
         rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
     }
+    if (isLoadingMascotHidden()) {
+        cancelLoadingMascotRotation();
+        return;
+    }
     scheduleLoadingMascotRotation(totalSources);
 }
 
 function ensureLoadingMascotImageElement(container) {
     if (!container) return null;
+    ensureLoadingMascotInfrastructure(container);
     let img = container.querySelector('img.loading-mascot-image');
     if (!img) {
-        container.innerHTML = '';
         img = document.createElement('img');
         img.className = 'loading-mascot-image';
         img.alt = 'LazyBacktest 進度吉祥物動畫';
         img.decoding = 'async';
         img.loading = 'eager';
         img.referrerPolicy = 'no-referrer';
-        img.setAttribute('aria-hidden', 'true');
+        img.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
         container.appendChild(img);
-    } else {
-        container.classList.remove('loading-mascot-fallback');
     }
+    container.classList.remove('loading-mascot-fallback');
+    container.dataset.lbMascotMode = 'image';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.setAttribute('aria-hidden', 'true');
+    }
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
     return img;
 }
 
 function showMascotHourglassFallback(container) {
     if (!container) return;
-    container.innerHTML = '';
+    ensureLoadingMascotInfrastructure(container);
     container.classList.add('loading-mascot-fallback');
-    container.textContent = '⌛';
     container.dataset.lbMascotSource = 'hourglass';
     container.dataset.lbMascotCurrent = 'hourglass';
+    container.dataset.lbMascotMode = 'fallback';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.textContent = '⌛';
+        fallback.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
+    }
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        img.setAttribute('aria-hidden', 'true');
+        img.removeAttribute('src');
+    }
     loadingMascotState.lastSource = null;
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
     cancelLoadingMascotRotation();
 }
 
@@ -1747,15 +1869,25 @@ function refreshLoadingMascotImage(options = {}) {
         return;
     }
 
-    cancelLoadingMascotRotation();
+    ensureLoadingMascotInfrastructure(container);
+
+    const hidden = isLoadingMascotHidden();
+    applyLoadingMascotHiddenState(container, hidden);
 
     const sources = computeLoadingMascotSources(container);
+    const poolSize = Array.isArray(sources) ? sources.length : 0;
     container.dataset.lbMascotSanitiser = LOADING_MASCOT_VERSION;
-    container.dataset.lbMascotPoolSize = String(sources.length);
+    container.dataset.lbMascotPoolSize = String(poolSize);
     container.dataset.lbMascotVersion = LOADING_MASCOT_VERSION;
 
-    if (!Array.isArray(sources) || sources.length === 0) {
+    cancelLoadingMascotRotation();
+
+    if (!Array.isArray(sources) || poolSize === 0) {
         showMascotHourglassFallback(container);
+        return;
+    }
+
+    if (hidden) {
         return;
     }
 

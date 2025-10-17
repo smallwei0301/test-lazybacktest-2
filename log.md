@@ -1128,3 +1128,12 @@
 - **Diagnostics**: 人工調整來源清單與瀏覽器 devtools 人為延遲，驗證單輪顯示順序不重複且換輪時不會立即重覆上一張，並確認時鐘限制生效。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-05 — Patch LB-PROGRESS-MASCOT-20260705A
+- **Issue recap**: 載入吉祥物無法由使用者自行關閉，長時間回測時可能造成視覺干擾，亦缺乏顯示狀態的可及性標示。
+- **Fix**:
+  - `index.html` 注入位於圖片左上角的顯示/隱藏按鈕與 fallback 容器，並預設開啟、符合 `aria-pressed` 無障礙語意。
+  - `css/style.css` 調整畫布指標事件與最小高度，新增 `loading-mascot-toggle`、隱藏狀態提示與 fallback 顯示動畫，確保響應式排版穩定。
+  - `js/main.js` 導入 `ensureLoadingMascotInfrastructure`、`applyLoadingMascotHiddenState` 等輔助函式，記錄顯示狀態並在隱藏時停止輪播、維持來源隊列。
+- **Diagnostics**: 透過 DevTools 手動觸發 `refreshLoadingMascotImage`、輪播逾時與 fallback 情境，確認隱藏狀態可持續、重開時重取新圖且沙漏備援不會移除控制鈕。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
