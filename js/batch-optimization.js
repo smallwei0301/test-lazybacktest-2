@@ -1,6 +1,12 @@
 import { runSPSA } from './spsa-runner.js';
 import { runCEM } from './cem-runner.js';
 
+// Patch Tag: LB-BATCH-OPT-FIX-20251001A - re-bind global strategy metadata for module scope
+const strategyDescriptions =
+    (typeof window !== 'undefined' && window.strategyDescriptions)
+        ? window.strategyDescriptions
+        : {};
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
 // Patch Tag: LB-STAGE4-REFINE-20250930A
@@ -193,7 +199,7 @@ function initBatchOptimization() {
     
     try {
         // 檢查必要的依賴是否存在
-        if (typeof strategyDescriptions === 'undefined') {
+        if (!strategyDescriptions || Object.keys(strategyDescriptions).length === 0) {
             console.error('[Batch Optimization] strategyDescriptions not found');
             return;
         }
@@ -613,7 +619,7 @@ let currentBatchProgress = {
 
 // 獲取策略的中文名稱
 function getStrategyChineseName(strategyKey) {
-    if (typeof strategyDescriptions !== 'undefined' && strategyDescriptions[strategyKey]) {
+    if (strategyDescriptions && strategyDescriptions[strategyKey]) {
         return strategyDescriptions[strategyKey].name || strategyKey;
     }
     return strategyKey;
@@ -3781,7 +3787,7 @@ function testParameterRanges() {
 function checkAllStrategyParameters() {
     console.log('[Debug] Checking all strategy parameter configurations...');
     
-    if (typeof strategyDescriptions === 'undefined') {
+    if (!strategyDescriptions || Object.keys(strategyDescriptions).length === 0) {
         console.error('[Debug] strategyDescriptions not found');
         return;
     }

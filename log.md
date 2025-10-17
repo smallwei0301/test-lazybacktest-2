@@ -1098,3 +1098,11 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+
+## 2026-03-03 — Patch LB-BATCH-OPT-FIX-20251001A
+- **Issue recap**: 導入 Stage4 模組化腳本後，批量優化面板的策略清單未渲染，使用者無法勾選買賣策略組合。
+- **Fix**:
+  - `js/batch-optimization.js` 於模組頂部重新綁定 `window.strategyDescriptions`，確保 ES module 可存取全域策略說明並保留原先的選單生成邏輯。
+  - 強化初始化時的依賴檢查，若策略描述仍缺失即中止載入並輸出錯誤，避免產生空白清單。
+- **Diagnostics**: 重新載入批量優化面板，確認買入／賣出策略清單恢復顯示，勾選狀態與全選/清除按鈕皆可正常運作。
+- **Testing**: 未執行自動化測試（前端介面修復）。
