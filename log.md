@@ -1098,3 +1098,12 @@
   1. 針對出現差異的視窗列印 `trainingPayload.dataStartDate`、`cachedWindowData[0/last].date`，確保裁切範圍覆蓋暖身+訓練期間。
   2. 若仍有差異，改為在 Worker `runOptimization` 內紀錄 `baseParams.startDate/endDate`，比對是否仍帶入超出視窗的日期。
   3. 若裁切成功但結果仍優於批量面板，需再排查 `optimizeRiskManagementParameters` 是否應同步裁切或調整 trials。
+
+## 2026-03-03 — Patch LB-STAGE4-REFINE-20251002A
+- **Issue recap**: 批量優化第三階段結束後無法直接在 UI 觸發局部微調，使用者需手動重組參數並重新回測，導致最佳組合難以延續。
+- **Fix**:
+  - 新增 `js/spsa-stage4.js`、`js/cem-stage4.js`，分別實作 SPSA 與 CEM 微調流程，統一透過 `executeBacktestForCombination` 進行評估並支援數值參數正規化與邊界約束。
+  - `js/batch-optimization.js` 追加 `paramKeyFromCombo`、`toBatchResultRow`、`upsertBatchResultRow` 等 API，導入 Stage4 執行入口 `runStage4`，採動態載入微調模組並以現有結果為起點更新列表。
+  - `index.html` 在批量優化結果表下方加入「第四階段：局部微調」控制區；`js/main.js` 綁定按鈕事件，按需鎖定按鈕狀態並呼叫 Stage4 執行。
+- **Diagnostics**: Stage4 執行結束後確認結果表仍由既有排序／渲染函式更新，並檢查 `batchOptimizationResults` 中新列的 `source` 標記與年化報酬覆蓋邏輯。
+- **Testing**: `node --input-type=module - <<'NODE' import('./js/spsa-stage4.js').then(m=>console.log('spsa keys',Object.keys(m))); NODE`、`node --input-type=module - <<'NODE' import('./js/cem-stage4.js').then(m=>console.log('cem keys',Object.keys(m))); NODE`
