@@ -1127,42 +1127,44 @@
                                     <h3 class="card-title">執行中...</h3>
                                 </div>
                                 <div class="card-content">
-                                    <div class="space-y-3">
-                                        <div class="flex items-center gap-3">
-                                            <div
-                                                class="loading-mascot-wrapper square w-14 h-14 overflow-hidden flex items-center justify-center"
-                                                aria-hidden="true"
-                                            >
-                                            <div
-                                                id="loadingGif"
-                                                class="loading-mascot-canvas"
-                                                data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
-                                            >
-                                                <img
-                                                    class="loading-mascot-image"
-                                                    src="https://i.imgur.com/zwj3cZQ.gif"
-                                                    alt="LazyBacktest 進度吉祥物動畫"
-                                                    decoding="async"
-                                                    loading="eager"
-                                                    referrerpolicy="no-referrer"
-                                                    aria-hidden="true"
-                                                    />
-                                                </div>
-                                            </div>
+                                    <div class="space-y-4">
+                                        <div class="space-y-2">
                                             <p
                                                 id="loadingText"
-                                                class="text-sm text-muted"
+                                                class="text-sm text-muted text-center"
                                                 style="color: var(--muted-foreground);"
                                             >
                                                 準備中...
                                             </p>
+                                            <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                                <div
+                                                    id="progressBar"
+                                                    class="bg-primary h-2 rounded-full transition-all duration-300"
+                                                    style="width: 0%; background-color: var(--primary);"
+                                                ></div>
+                                            </div>
                                         </div>
-                                        <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                        <div class="flex justify-center">
                                             <div
-                                                id="progressBar"
-                                                class="bg-primary h-2 rounded-full transition-all duration-300"
-                                                style="width: 0%; background-color: var(--primary);"
-                                            ></div>
+                                                class="loading-mascot-wrapper square"
+                                                aria-hidden="true"
+                                            >
+                                                <div
+                                                    id="loadingGif"
+                                                    class="loading-mascot-canvas"
+                                                    data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
+                                                >
+                                                    <img
+                                                        class="loading-mascot-image"
+                                                        src="https://i.imgur.com/zwj3cZQ.gif"
+                                                        alt="LazyBacktest 進度吉祥物動畫"
+                                                        decoding="async"
+                                                        loading="eager"
+                                                        referrerpolicy="no-referrer"
+                                                        aria-hidden="true"
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

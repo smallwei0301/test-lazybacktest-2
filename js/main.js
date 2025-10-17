@@ -9,7 +9,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
-// Patch Tag: LB-PROGRESS-MASCOT-20260305A
+// Patch Tag: LB-PROGRESS-MASCOT-20260310A
 
 // 全局變量
 let stockChart = null;
@@ -19,7 +19,7 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260305A';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260310A';
 const loadingMascotState = { lastSource: null };
 
 window.cachedDataStore = cachedDataStore;

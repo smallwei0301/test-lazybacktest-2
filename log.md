@@ -859,6 +859,12 @@
 - **Diagnostics**: 對同一資料集連續啟動「啟動 AI 預測」取得固定種子結果，再按「新的預測」產生新 seed，確認測試勝率、混淆矩陣與交易摘要完全一致；重複啟動舊種子可 100% 重現前一次結果，IndexedDB 可見最新 `lstm_v1_model` 條目。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/ai-prediction.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-10 — Patch LB-PROGRESS-MASCOT-20260310A
+- **Issue recap**: 回測時的吉祥物改為隨機來源後尺寸偏離原始設計，且仍位於進度列左側，使用者視線難以聚焦於進度狀態。
+- **Fix**: 建立 `--loading-mascot-size` 變數維持原本 3.5rem 尺寸並統一於樣式層置中；進度卡改為先顯示狀態文字與進度條，再於下方中央呈現吉祥物。
+- **Diagnostics**: 於桌機與行動裝置檢視執行卡，確認吉祥物固定方形尺寸、水平垂直皆置中且會在每次回測切換來源，進度文字仍與百分比同步更新。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-12-24 — Patch LB-AI-HYBRID-20251224A / LB-AI-ANNS-REPRO-20251224B
 - **Issue recap**: AI 預測表未揭露實際進出價格與完整進場條件，種子列表無法快速整理，且 ANN/LSTM 的交易報酬仍沿用前一日收盤對收盤的估算方式，導致凱利資金管理與重播種子與實際邏輯不一致。
 - **Fix**:
