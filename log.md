@@ -1,4 +1,12 @@
 
+## 2026-03-12 — Patch LB-PROGRESS-MASCOT-20260315A
+- **Scope**: 回測進度吉祥物輪播節奏與來源序列。
+- **Updates**:
+  - 將輪播間隔延長至 4 秒，並以版本碼 `LB-PROGRESS-MASCOT-20260315A` 同步主控腳本與診斷橋接介面。
+  - 以 Fisher–Yates 洗牌建立輪播序列，維持同一輪內不重複且完整跑完所有來源後才重新洗牌，並避免新一輪立即重覆上一張圖片。
+  - 當來源載入失敗或缺料時重置序列並回退沙漏，確保下一次排程可重新嘗試並維持計時器安全。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/loading-mascot-sources.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-03-10 — Patch LB-PROGRESS-MASCOT-20260310B
 - **Scope**: 回測進度吉祥物自動輪播。
 - **Updates**:

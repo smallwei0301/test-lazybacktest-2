@@ -19,12 +19,14 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260310B';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260315A';
 const loadingMascotState = {
     lastSource: null,
     rotationTimerId: null,
-    rotationIntervalMs: 3000,
+    rotationIntervalMs: 4000,
     autoRotate: false,
+    rotationOrder: [],
+    rotationOrderKey: '',
 };
 
 function getMascotWindow() {
@@ -54,6 +56,95 @@ function scheduleLoadingMascotRotation() {
         if (!loadingMascotState.autoRotate) return;
         refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
     }, loadingMascotState.rotationIntervalMs);
+}
+
+function resetLoadingMascotRotationOrder() {
+    loadingMascotState.rotationOrder = [];
+    loadingMascotState.rotationOrderKey = '';
+}
+
+function shuffleMascotSources(list) {
+    const pool = Array.isArray(list) ? list.slice() : [];
+    for (let i = pool.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = pool[i];
+        pool[i] = pool[j];
+        pool[j] = temp;
+    }
+    return pool;
+}
+
+function ensureMascotRotationOrder(sources, previous, options) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+        resetLoadingMascotRotationOrder();
+        return;
+    }
+
+    const key = JSON.stringify(sources);
+    if (loadingMascotState.rotationOrderKey !== key) {
+        loadingMascotState.rotationOrderKey = key;
+        loadingMascotState.rotationOrder = [];
+    }
+
+    if (!Array.isArray(loadingMascotState.rotationOrder) || loadingMascotState.rotationOrder.length === 0) {
+        const order = shuffleMascotSources(sources);
+        if (order.length > 1 && previous) {
+            const previousIndex = order.indexOf(previous);
+            if (previousIndex >= 0) {
+                order.splice(previousIndex, 1);
+                order.push(previous);
+            }
+            if (order[0] === previous) {
+                const swapIndex = order.findIndex((item) => item !== previous);
+                if (swapIndex > 0) {
+                    const temp = order[0];
+                    order[0] = order[swapIndex];
+                    order[swapIndex] = temp;
+                }
+            }
+        }
+        loadingMascotState.rotationOrder = order;
+    }
+}
+
+function popMascotRotationCandidate(sources, previous, options) {
+    if (!Array.isArray(sources) || sources.length === 0) return null;
+
+    const allowSameWhenSingle = options?.allowSameWhenSingle !== false;
+    const forceNew = Boolean(options?.forceNew);
+    const uniqueCount = sources.length;
+
+    if (forceNew && uniqueCount === 1 && previous === sources[0] && !allowSameWhenSingle) {
+        return null;
+    }
+
+    ensureMascotRotationOrder(sources, previous, options);
+
+    if (!Array.isArray(loadingMascotState.rotationOrder) || loadingMascotState.rotationOrder.length === 0) {
+        if (allowSameWhenSingle && uniqueCount === 1) {
+            return sources[0];
+        }
+        return null;
+    }
+
+    let candidate = loadingMascotState.rotationOrder.shift();
+
+    if (
+        forceNew
+        && uniqueCount > 1
+        && candidate === previous
+        && Array.isArray(loadingMascotState.rotationOrder)
+        && loadingMascotState.rotationOrder.length > 0
+    ) {
+        loadingMascotState.rotationOrder.push(candidate);
+        candidate = loadingMascotState.rotationOrder.shift() || candidate;
+    }
+
+    if (!candidate && allowSameWhenSingle && uniqueCount === 1) {
+        return sources[0];
+    }
+
+    return candidate || null;
 }
 
 window.cachedDataStore = cachedDataStore;
@@ -1701,6 +1792,7 @@ function ensureLoadingMascotImageElement(container) {
 
 function showMascotHourglassFallback(container) {
     if (!container) return;
+    resetLoadingMascotRotationOrder();
     container.innerHTML = '';
     container.classList.add('loading-mascot-fallback');
     container.textContent = '⌛';
@@ -1735,36 +1827,30 @@ function refreshLoadingMascotImage(options = {}) {
     const allowSameWhenSingle = options.allowSameWhenSingle !== false;
 
     const previous = loadingMascotState.lastSource || container.dataset.lbMascotCurrent || null;
-    const pool = sources.slice();
+    const attempted = new Set();
 
-    if (forceNew && pool.length > 1 && previous) {
-        const index = pool.indexOf(previous);
-        if (index >= 0) {
-            pool.splice(index, 1);
+    const drawCandidate = () => {
+        let candidate = popMascotRotationCandidate(sources, previous, {
+            forceNew,
+            allowSameWhenSingle,
+        });
+
+        while (candidate && attempted.has(candidate)) {
+            candidate = popMascotRotationCandidate(sources, previous, {
+                forceNew,
+                allowSameWhenSingle,
+            });
         }
-    }
 
-    if (pool.length === 0) {
-        if (allowSameWhenSingle && previous) {
-            pool.push(previous);
-        } else {
-            showMascotHourglassFallback(container);
-            return;
-        }
-    }
-
-    const candidates = pool.slice();
+        if (!candidate) return null;
+        attempted.add(candidate);
+        return candidate;
+    };
 
     const attemptNext = () => {
-        if (candidates.length === 0) {
-            showMascotHourglassFallback(container);
-            return;
-        }
-
-        const pickIndex = Math.floor(Math.random() * candidates.length);
-        const [candidate] = candidates.splice(pickIndex, 1);
+        const candidate = drawCandidate();
         if (!candidate) {
-            attemptNext();
+            showMascotHourglassFallback(container);
             return;
         }
 
@@ -1866,6 +1952,7 @@ function showLoading(m = "處理中...") {
 
     loadingMascotState.autoRotate = true;
     cancelLoadingMascotRotationTimer();
+    resetLoadingMascotRotationOrder();
     refreshLoadingMascotImage({ forceNew: true });
 
     progressAnimator.reset();
