@@ -1,4 +1,20 @@
 
+## 2026-10-01 — Patch LB-STRATEGY-COMPARISON-20251001A
+- **Scope**: 策略快照兼容性補強與比較面板數據正規化。
+- **Updates**:
+  - 快照與比較面板的數值正規化改以 `parseFloat` 搭配逗號剔除，兼容舊版策略保存的 `12.3%`、`1,234` 等字串格式。
+  - 儲存策略下拉清單改用正規化後的年化與 Sharpe 值，避免舊資料一律顯示 `N/A`。
+  - 策略快照與比較面板版本更新至 `LB-STRATEGY-COMPARISON-20251001A`，並在無法取得趨勢模組時安全降級。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js','js/strategy-comparison.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-09-30 — Patch LB-STRATEGY-COMPARISON-20250930A
+- **Scope**: 策略比較面板與資金基準文案調整。
+- **Updates**:
+  - 將「初始本金」與「總資金」文案改為「初始本金-固定金額買入」與「總資金-獲利再投入」，並同步更新工具提示與範例文字。
+  - 新增「策略比較」分頁，支援多選已儲存策略比較年化報酬、夏普值、最大回撤、敏感度、滾動測試評分與趨勢狀態，缺漏數據時提示需先測試。
+  - 儲存策略時一併紀錄敏感度摘要、滾動測試總分與趨勢區間資料，並提供欄位勾選機制以利後續擴充。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js','js/strategy-comparison.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
