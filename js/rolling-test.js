@@ -20,6 +20,8 @@
         },
         version: 'LB-ROLLING-TEST-20250930A',
         batchOptimizerInitialized: false,
+        aggregate: null,
+        aggregateGeneratedAt: null,
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -389,6 +391,8 @@
         if (summary) summary.textContent = '';
         const intro = document.getElementById('rolling-report-intro');
         if (intro) intro.textContent = '';
+        state.aggregate = null;
+        state.aggregateGeneratedAt = null;
     }
 
     function renderRollingReport() {
@@ -418,6 +422,8 @@
         });
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        state.aggregate = aggregate;
+        state.aggregateGeneratedAt = new Date().toISOString();
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -691,8 +697,8 @@
     }
 
     function resolvePositionBasisLabel(value) {
-        if (value === 'initialCapital') return '初始本金';
-        if (value === 'totalCapital') return '總資金';
+        if (value === 'initialCapital') return '初始本金-固定金額買入';
+        if (value === 'totalCapital') return '總資金-獲利再投入';
         return '';
     }
 
