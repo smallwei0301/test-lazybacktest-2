@@ -18,6 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
+        lastAggregateSummary: null,
         version: 'LB-ROLLING-TEST-20250930A',
         batchOptimizerInitialized: false,
     };
@@ -389,10 +390,12 @@
         if (summary) summary.textContent = '';
         const intro = document.getElementById('rolling-report-intro');
         if (intro) intro.textContent = '';
+        state.lastAggregateSummary = null;
     }
 
     function renderRollingReport() {
         if (!state.results || state.results.length === 0) {
+            state.lastAggregateSummary = null;
             clearRollingReport();
             return;
         }
@@ -418,6 +421,7 @@
         });
 
         const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        state.lastAggregateSummary = createAggregateSummary(aggregate);
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -691,8 +695,8 @@
     }
 
     function resolvePositionBasisLabel(value) {
-        if (value === 'initialCapital') return '初始本金';
-        if (value === 'totalCapital') return '總資金';
+        if (value === 'initialCapital') return '初始本金-固定金額買入';
+        if (value === 'totalCapital') return '總資金-獲利再投入';
         return '';
     }
 
@@ -785,6 +789,28 @@
             medianSortino,
             averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
+        };
+    }
+
+    function createAggregateSummary(aggregate) {
+        if (!aggregate) return null;
+        return {
+            score: Number.isFinite(aggregate.score) ? Number(aggregate.score) : null,
+            gradeLabel: typeof aggregate.gradeLabel === 'string' ? aggregate.gradeLabel : null,
+            passRate: Number.isFinite(aggregate.passRate) ? Number(aggregate.passRate) : null,
+            passCount: Number.isFinite(aggregate.passCount) ? Number(aggregate.passCount) : null,
+            totalWindows: Number.isFinite(aggregate.totalWindows) ? Number(aggregate.totalWindows) : null,
+            averageAnnualizedReturn: Number.isFinite(aggregate.averageAnnualizedReturn)
+                ? Number(aggregate.averageAnnualizedReturn)
+                : null,
+            averageMaxDrawdown: Number.isFinite(aggregate.averageMaxDrawdown)
+                ? Number(aggregate.averageMaxDrawdown)
+                : null,
+            medianSharpe: Number.isFinite(aggregate.medianSharpe) ? Number(aggregate.medianSharpe) : null,
+            medianSortino: Number.isFinite(aggregate.medianSortino) ? Number(aggregate.medianSortino) : null,
+            averageWalkForwardEfficiency: Number.isFinite(aggregate.averageWalkForwardEfficiency)
+                ? Number(aggregate.averageWalkForwardEfficiency)
+                : null,
         };
     }
 
@@ -2241,6 +2267,10 @@
     window.rollingTest = {
         init: initRollingTest,
         refreshPlan: updateRollingPlanPreview,
+        getLatestAggregateSummary() {
+            if (!state.lastAggregateSummary) return null;
+            return { ...state.lastAggregateSummary };
+        },
         state,
     };
 })();

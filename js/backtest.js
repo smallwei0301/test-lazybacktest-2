@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-STRATEGY-COMPARISON-20251001A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -6272,7 +6273,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--primary);">年化報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
+                                <span class="tooltiptext">將總報酬率根據實際回測期間（從第一個有效數據點到最後一個數據點）轉換為年平均複利報酬率。<br>公式：((最終價值 / 初始本金-固定金額買入)^(1 / 年數) - 1) * 100%<br>注意：此數值對回測時間長度敏感，短期高報酬可能導致極高的年化報酬率。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${annualizedReturn>=0?'text-emerald-600':'text-rose-600'}">${annualizedReturn>=0?'+':''}${annualizedReturn.toFixed(2)}%</p>
@@ -6296,7 +6297,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-emerald-600">總報酬率</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略最終總資產相對於初始本金的報酬率。<br>公式：(最終價值 - 初始本金) / 初始本金 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
+                                <span class="tooltiptext">策略最終總資產相對於初始本金-固定金額買入的報酬率。<br>公式：(最終價值 - 初始本金-固定金額買入) / 初始本金-固定金額買入 * 100%<br>此為線性報酬率，不考慮時間因素。</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold ${returnRate>=0?'text-emerald-600':'text-rose-600'}">${returnRate>=0?'+':''}${returnRate.toFixed(2)}%</p>
@@ -6326,7 +6327,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium text-rose-600">最大回撤</p>
                             <span class="tooltip ml-2">
                                 <span class="info-icon inline-flex items-center justify-center w-5 h-5 text-xs rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext">策略**總資金**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
+                                <span class="tooltiptext">策略**總資金-獲利再投入**曲線從歷史最高點回落到最低點的最大百分比跌幅。公式：(峰值 - 谷值) / 峰值 * 100%</span>
                             </span>
                         </div>
                         <p class="text-2xl font-bold text-rose-600">${maxDD}%</p>
@@ -6980,7 +6981,7 @@ function displayBacktestResult(result) {
                 </div>
                 <div class="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm">
                     <div class="text-center">
-                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金</p>
+                        <p class="text-sm text-blue-600 font-medium mb-3">💰 初始本金-固定金額買入</p>
                         <p class="text-base font-semibold text-gray-800">${result.initialCapital.toLocaleString()}元</p>
                     </div>
                 </div>
@@ -8850,11 +8851,11 @@ function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_ST
 function saveStrategyToLocalStorage(name, settings, metrics) { 
     try { 
         const strategies = getSavedStrategies(); 
-        strategies[name] = { 
-            settings: { 
-                stockNo: settings.stockNo, 
-                startDate: settings.startDate, 
-                endDate: settings.endDate, 
+        strategies[name] = {
+            settings: {
+                stockNo: settings.stockNo,
+                startDate: settings.startDate,
+                endDate: settings.endDate,
                 initialCapital: settings.initialCapital, 
                 tradeTiming: settings.tradeTiming, 
                 entryStrategy: settings.entryStrategy,
@@ -8876,9 +8877,9 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
                 positionBasis: settings.positionBasis, 
                 buyFee: settings.buyFee, 
                 sellFee: settings.sellFee 
-            }, 
-            metrics: metrics 
-        }; 
+            },
+            metrics: metrics || {}
+        };
         
         localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); 
         return true; 
@@ -8893,27 +8894,140 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
     } 
 }
 function deleteStrategyFromLocalStorage(name) { try { const strategies = getSavedStrategies(); if (strategies[name]) { delete strategies[name]; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); return true; } return false; } catch (e) { console.error("刪除策略時發生錯誤:", e); showError(`刪除策略失敗: ${e.message}`); return false; } }
-function populateSavedStrategiesDropdown() { 
-    const selectElement = document.getElementById('loadStrategySelect'); 
+function populateSavedStrategiesDropdown() {
+    const selectElement = document.getElementById('loadStrategySelect');
     if (!selectElement) return;
-    
-    selectElement.innerHTML = '<option value="">-- 選擇要載入的策略 --</option>'; 
-    const strategies = getSavedStrategies(); 
-    const strategyNames = Object.keys(strategies).sort(); 
-    
-    strategyNames.forEach(name => { 
-        const strategyData = strategies[name]; 
-        if (!strategyData) return; // 跳過 null 或 undefined 的策略資料 
-        
-        const metrics = strategyData.metrics || {}; // 修正：年化報酬率已經是百分比格式，不需要再乘以100
-        const annReturn = (metrics.annualizedReturn !== null && !isNaN(metrics.annualizedReturn)) ? metrics.annualizedReturn.toFixed(2) + '%' : 'N/A'; 
-        const sharpe = (metrics.sharpeRatio !== null && !isNaN(metrics.sharpeRatio)) ? metrics.sharpeRatio.toFixed(2) : 'N/A'; 
-        const displayText = `${name} (年化:${annReturn} | Sharpe:${sharpe})`; 
-        const option = document.createElement('option'); 
-        option.value = name; 
-        option.textContent = displayText; 
-        selectElement.appendChild(option); 
-    }); 
+
+    selectElement.innerHTML = '<option value="">-- 選擇要載入的策略 --</option>';
+    const strategies = getSavedStrategies();
+    const strategyNames = Object.keys(strategies).sort();
+
+    strategyNames.forEach(name => {
+        const strategyData = strategies[name];
+        if (!strategyData) return; // 跳過 null 或 undefined 的策略資料
+
+        const metrics = strategyData.metrics || {};
+        const annValue = normalizeNumberForSnapshot(metrics.annualizedReturn);
+        const sharpeValue = normalizeNumberForSnapshot(metrics.sharpeRatio);
+        const annReturn = Number.isFinite(annValue) ? `${annValue.toFixed(2)}%` : 'N/A';
+        const sharpe = Number.isFinite(sharpeValue) ? sharpeValue.toFixed(2) : 'N/A';
+        const displayText = `${name} (年化:${annReturn} | Sharpe:${sharpe})`;
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = displayText;
+        selectElement.appendChild(option);
+    });
+}
+
+function normalizeNumberForSnapshot(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed === '') return null;
+        const sanitized = trimmed.replace(/,/g, '');
+        const parsed = Number.parseFloat(sanitized);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function normalizeIntegerForSnapshot(value) {
+    const num = normalizeNumberForSnapshot(value);
+    if (!Number.isFinite(num)) return null;
+    return Math.trunc(num);
+}
+
+function buildSensitivitySnapshot(source) {
+    if (!source) return null;
+    const sensitivityData = source.sensitivityAnalysis || source.parameterSensitivity || source.sensitivityData || null;
+    const summary = sensitivityData?.summary || null;
+    if (!summary) return null;
+    return {
+        stabilityScore: normalizeNumberForSnapshot(summary.stabilityScore),
+        averageDriftPercent: normalizeNumberForSnapshot(summary.averageDriftPercent),
+        positiveDriftPercent: normalizeNumberForSnapshot(summary.positiveDriftPercent),
+        negativeDriftPercent: normalizeNumberForSnapshot(summary.negativeDriftPercent),
+        scenarioCount: normalizeIntegerForSnapshot(summary.scenarioCount),
+    };
+}
+
+function getRollingSummaryForStorage() {
+    try {
+        if (!window.rollingTest || typeof window.rollingTest.getLatestAggregateSummary !== 'function') {
+            return null;
+        }
+        const summary = window.rollingTest.getLatestAggregateSummary();
+        if (!summary) return null;
+        return {
+            score: normalizeNumberForSnapshot(summary.score),
+            gradeLabel: typeof summary.gradeLabel === 'string' ? summary.gradeLabel : null,
+            passRate: normalizeNumberForSnapshot(summary.passRate),
+            passCount: normalizeIntegerForSnapshot(summary.passCount),
+            totalWindows: normalizeIntegerForSnapshot(summary.totalWindows),
+            averageAnnualizedReturn: normalizeNumberForSnapshot(summary.averageAnnualizedReturn),
+            averageMaxDrawdown: normalizeNumberForSnapshot(summary.averageMaxDrawdown),
+            medianSharpe: normalizeNumberForSnapshot(summary.medianSharpe),
+            medianSortino: normalizeNumberForSnapshot(summary.medianSortino),
+            averageWalkForwardEfficiency: normalizeNumberForSnapshot(summary.averageWalkForwardEfficiency),
+        };
+    } catch (error) {
+        console.warn('[Strategy Snapshot] 無法擷取滾動測試摘要:', error);
+        return null;
+    }
+}
+
+function sanitizeTrendSummary(summary) {
+    if (!summary) return null;
+    const trendState = typeof trendAnalysisState !== 'undefined' ? trendAnalysisState : null;
+    const aggregated = {};
+    const aggregatedSource = summary.aggregatedByType || {};
+    Object.keys(aggregatedSource).forEach((key) => {
+        const item = aggregatedSource[key];
+        if (!item) return;
+        aggregated[key] = {
+            coveragePct: normalizeNumberForSnapshot(item.coveragePct),
+            returnPct: normalizeNumberForSnapshot(item.returnPct),
+            days: normalizeIntegerForSnapshot(item.days),
+        };
+    });
+    const latest = summary.latest || {};
+    return {
+        latestLabel: typeof latest.label === 'string' ? latest.label : null,
+        latestDate: typeof latest.date === 'string' ? latest.date : null,
+        latestReturnPct: normalizeNumberForSnapshot(latest.returnPct),
+        latestCoveragePct: normalizeNumberForSnapshot(latest.coveragePct),
+        averageConfidence: normalizeNumberForSnapshot(summary.averageConfidence),
+        aggregatedByType: aggregated,
+        sliderSensitivity: normalizeNumberForSnapshot(trendState?.sensitivity),
+    };
+}
+
+function buildStrategyMetricsSnapshot() {
+    const metrics = {
+        snapshotVersion: 'LB-STRATEGY-COMPARISON-20251001A',
+        capturedAt: new Date().toISOString(),
+    };
+
+    const result = lastOverallResult || null;
+    metrics.annualizedReturn = normalizeNumberForSnapshot(result?.annualizedReturn);
+    metrics.sharpeRatio = normalizeNumberForSnapshot(result?.sharpeRatio);
+    metrics.maxDrawdown = normalizeNumberForSnapshot(result?.maxDrawdown);
+    metrics.totalTrades = normalizeIntegerForSnapshot(
+        result?.totalTrades ?? result?.tradesCount ?? result?.tradeCount,
+    );
+    metrics.winRate = normalizeNumberForSnapshot(result?.winRate ?? result?.winRatio);
+    metrics.returnRate = normalizeNumberForSnapshot(result?.returnRate);
+    metrics.finalValue = normalizeNumberForSnapshot(result?.finalValue);
+    metrics.buyHoldAnnualizedReturn = normalizeNumberForSnapshot(result?.buyHoldAnnualizedReturn);
+    metrics.buyHoldReturnRate = normalizeNumberForSnapshot(result?.buyHoldReturnRate ?? result?.buyHoldTotalReturn);
+
+    metrics.sensitivity = buildSensitivitySnapshot(result);
+    metrics.rolling = getRollingSummaryForStorage();
+    const trendSummary = typeof trendAnalysisState !== 'undefined' ? trendAnalysisState?.summary : null;
+    metrics.trend = sanitizeTrendSummary(trendSummary || null);
+
+    return metrics;
 }
 function saveStrategy() { 
     // 生成預設策略名稱（使用中文名稱）
@@ -8979,12 +9093,19 @@ function saveStrategy() {
             return; 
         } 
     } 
-    const currentSettings = getBacktestParams(); 
-    const currentMetrics = { annualizedReturn: lastOverallResult?.annualizedReturn, sharpeRatio: lastOverallResult?.sharpeRatio }; 
-    
-    if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) { 
-        populateSavedStrategiesDropdown(); 
-        showSuccess(`策略 "${trimmedName}" 已儲存！`); 
+    const currentSettings = getBacktestParams();
+    const currentMetrics = buildStrategyMetricsSnapshot();
+
+    if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) {
+        populateSavedStrategiesDropdown();
+        if (window.strategyComparisonPanel && typeof window.strategyComparisonPanel.refreshFromStorage === 'function') {
+            try {
+                window.strategyComparisonPanel.refreshFromStorage();
+            } catch (error) {
+                console.warn('[Strategy Snapshot] 無法同步策略比較面板：', error);
+            }
+        }
+        showSuccess(`策略 "${trimmedName}" 已儲存！`);
     }
 }
 function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
