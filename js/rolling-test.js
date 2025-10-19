@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.0 ---
-// Patch Tag: LB-ROLLING-TEST-20250930A
+// --- 滾動測試模組 - v2.1 ---
+// Patch Tag: LB-ROLLING-WINDOWS-20260710A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,8 +18,9 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250930A',
+        version: 'LB-ROLLING-WINDOWS-20260710A',
         batchOptimizerInitialized: false,
+        manualWindowMode: false,
     };
 
     const DEFAULT_THRESHOLDS = {
@@ -41,6 +42,16 @@
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
     const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
+
+    const DEFAULT_TRAINING_MONTHS = 36;
+    const DEFAULT_TESTING_MONTHS = 12;
+    const DEFAULT_STEP_MONTHS = 6;
+    const MIN_TRAINING_MONTHS = 6;
+    const MIN_TESTING_MONTHS = 3;
+    const MIN_STEP_MONTHS = 1;
+    const DEFAULT_WINDOW_COUNT = 2;
+    const TRAINING_TO_TESTING_RATIO = DEFAULT_TRAINING_MONTHS / DEFAULT_TESTING_MONTHS;
+    const STEP_TO_TESTING_RATIO = DEFAULT_STEP_MONTHS / DEFAULT_TESTING_MONTHS;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -99,6 +110,14 @@
             });
         }
 
+        const windowModeToggle = document.getElementById('rolling-window-mode-toggle');
+        if (windowModeToggle) {
+            windowModeToggle.addEventListener('click', () => {
+                toggleManualWindowMode();
+            });
+        }
+
+        applyManualWindowModeUI();
         updateRollingPlanPreview();
         syncRollingOptimizeUI();
         state.initialized = true;
@@ -108,13 +127,14 @@
         if (event) event.preventDefault();
         if (state.running) return;
 
-        const config = getRollingConfig();
+        let config = getRollingConfig();
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
+        config = resolveWindowDurations(config, availability);
         const windows = computeRollingWindows(config, availability);
 
         if (!Array.isArray(cachedRows) || cachedRows.length === 0) {
-            setPlanWarning(true);
+            setPlanWarning(true, '尚未偵測到可用回測資料');
             setAlert('請先在主畫面執行一次完整回測，以建立快取資料後再啟動滾動測試。', 'error');
             showError?.('滾動測試需要可用的回測快取資料，請先執行一次回測');
             return;
@@ -128,7 +148,7 @@
 
         const coverageIssues = validateWindowCoverage(windows, cachedRows, config);
         if (coverageIssues.length > 0) {
-            setPlanWarning(true);
+            setPlanWarning(true, '視窗覆蓋不足，請調整滾動設定');
             const primary = coverageIssues[0];
             const detail = coverageIssues.length > 1 ? `（共 ${coverageIssues.length} 項問題）` : '';
             setAlert(`滾動測試無法啟動：${primary}${detail}`, 'error');
@@ -978,9 +998,10 @@
         const windows = [];
         const startDate = new Date(Math.max(new Date(config.baseStart).getTime(), new Date(availability.start).getTime()));
         const finalDate = new Date(Math.min(new Date(config.baseEnd).getTime(), new Date(availability.end).getTime()));
+        const desiredWindows = Math.max(1, Math.round(config.windowCount || 1));
 
         let currentTrainStart = startDate;
-        while (currentTrainStart < finalDate) {
+        while (currentTrainStart < finalDate && windows.length < desiredWindows) {
             const trainingEnd = addDays(addMonthsClamped(currentTrainStart, config.trainingMonths), -1);
             const testingStart = addDays(trainingEnd, 1);
             const testingEnd = addDays(addMonthsClamped(testingStart, config.testingMonths), -1);
@@ -1160,9 +1181,10 @@
     }
 
     function getRollingConfig() {
-        const trainingMonths = clampNumber(readInputValue('rolling-training-months', 36), 6, 120);
-        const testingMonths = clampNumber(readInputValue('rolling-testing-months', 12), 3, 36);
-        const stepMonths = clampNumber(readInputValue('rolling-step-months', 6), 1, 24);
+        const windowCount = clampNumber(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT), 1, 24);
+        const trainingMonths = clampNumber(readInputValue('rolling-training-months', DEFAULT_TRAINING_MONTHS), MIN_TRAINING_MONTHS, 120);
+        const testingMonths = clampNumber(readInputValue('rolling-testing-months', DEFAULT_TESTING_MONTHS), MIN_TESTING_MONTHS, 36);
+        const stepMonths = clampNumber(readInputValue('rolling-step-months', DEFAULT_STEP_MONTHS), MIN_STEP_MONTHS, 24);
         const minTrades = clampNumber(readInputValue('rolling-min-trades', 10), 0, 1000);
         const thresholds = {
             annualizedReturn: clampNumber(readInputValue('rolling-threshold-ann', DEFAULT_THRESHOLDS.annualizedReturn), 0, 200),
@@ -1177,14 +1199,118 @@
             trainingMonths,
             testingMonths,
             stepMonths,
+            windowCount,
             minTrades,
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
             optimization,
+            manualWindowMode: isManualWindowMode(),
         };
     }
 
+    function resolveWindowDurations(config, availability) {
+        const resolved = { ...config };
+        resolved.trainingMonths = clampNumber(resolved.trainingMonths, MIN_TRAINING_MONTHS, 240);
+        resolved.testingMonths = clampNumber(resolved.testingMonths, MIN_TESTING_MONTHS, 120);
+        resolved.stepMonths = clampNumber(resolved.stepMonths, MIN_STEP_MONTHS, 120);
+        resolved.windowCount = clampNumber(Math.round(resolved.windowCount || DEFAULT_WINDOW_COUNT), 1, 36);
+
+        if (!resolved.manualWindowMode) {
+            const range = resolveEffectiveRange(resolved, availability);
+            if (range) {
+                const totalMonths = Math.max(diffInMonths(range.start, range.end), 0);
+                const autoDurations = computeAutoWindowDurations(totalMonths, resolved.windowCount);
+                resolved.trainingMonths = autoDurations.training;
+                resolved.testingMonths = autoDurations.testing;
+                resolved.stepMonths = autoDurations.step;
+                syncAutoWindowInputs(autoDurations);
+            } else {
+                syncAutoWindowInputs({
+                    training: resolved.trainingMonths,
+                    testing: resolved.testingMonths,
+                    step: resolved.stepMonths,
+                });
+            }
+        }
+
+        return resolved;
+    }
+
+    function syncAutoWindowInputs(durations) {
+        if (isManualWindowMode()) return;
+        updateNumberInput('rolling-training-months', durations.training);
+        updateNumberInput('rolling-testing-months', durations.testing);
+        updateNumberInput('rolling-step-months', durations.step);
+
+        const hintEl = document.getElementById('rolling-window-mode-hint');
+        if (hintEl) {
+            hintEl.textContent = `目前採用自動比例配置，系統已調整為訓練 ${durations.training} 個月 / 測試 ${durations.testing} 個月 / 平移 ${durations.step} 個月。需要自訂時可展開手動設定。`;
+        }
+    }
+
+    function updateNumberInput(id, value) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.value !== String(value)) {
+            el.value = value;
+        }
+    }
+
+    function computeAutoWindowDurations(totalMonths, windowCount) {
+        const minTraining = MIN_TRAINING_MONTHS;
+        const minTesting = MIN_TESTING_MONTHS;
+        const minStep = MIN_STEP_MONTHS;
+
+        let training = DEFAULT_TRAINING_MONTHS;
+        let testing = DEFAULT_TESTING_MONTHS;
+        let step = DEFAULT_STEP_MONTHS;
+
+        const defaultSpan = training + testing + step * Math.max(windowCount - 1, 0);
+
+        if (!Number.isFinite(totalMonths) || totalMonths <= 0) {
+            return { training, testing, step };
+        }
+
+        if (totalMonths < defaultSpan) {
+            let candidateTesting = Math.floor(totalMonths / (TRAINING_TO_TESTING_RATIO + 1 + STEP_TO_TESTING_RATIO * Math.max(windowCount - 1, 0)));
+            if (!Number.isFinite(candidateTesting) || candidateTesting < minTesting) candidateTesting = minTesting;
+            let candidateTraining = Math.max(minTraining, Math.round(candidateTesting * TRAINING_TO_TESTING_RATIO));
+            let candidateStep = Math.max(minStep, Math.round(candidateTesting * STEP_TO_TESTING_RATIO));
+            let candidateSpan = candidateTraining + candidateTesting + candidateStep * Math.max(windowCount - 1, 0);
+
+            if (candidateSpan > totalMonths) {
+                let attempts = 0;
+                while (candidateSpan > totalMonths && attempts < 200) {
+                    attempts += 1;
+                    if (candidateTraining > minTraining) candidateTraining -= 1;
+                    candidateSpan = candidateTraining + candidateTesting + candidateStep * Math.max(windowCount - 1, 0);
+                    if (candidateSpan <= totalMonths) break;
+                    if (candidateTesting > minTesting) candidateTesting -= 1;
+                    candidateTraining = Math.max(minTraining, Math.round(candidateTesting * TRAINING_TO_TESTING_RATIO));
+                    candidateStep = Math.max(minStep, Math.round(candidateTesting * STEP_TO_TESTING_RATIO));
+                    candidateSpan = candidateTraining + candidateTesting + candidateStep * Math.max(windowCount - 1, 0);
+                    if (candidateSpan <= totalMonths) break;
+                    if (candidateStep > minStep) candidateStep -= 1;
+                    candidateSpan = candidateTraining + candidateTesting + candidateStep * Math.max(windowCount - 1, 0);
+                }
+            }
+
+            training = Math.max(minTraining, candidateTraining);
+            testing = Math.max(minTesting, candidateTesting);
+            step = Math.max(minStep, candidateStep);
+        }
+
+        if (step > testing) {
+            step = Math.max(minStep, Math.floor(testing / 2) || minStep);
+        }
+
+        if (training < testing) {
+            training = Math.max(testing, minTraining);
+        }
+
+        return { training, testing, step };
+    }
     function getRollingOptimizationConfig() {
         const enabled = Boolean(document.getElementById('rolling-optimize-enabled')?.checked);
         const targetSelect = document.getElementById('rolling-optimize-target');
@@ -1255,6 +1381,41 @@
                 label.classList.add('opacity-60');
             }
         });
+    }
+
+    function isManualWindowMode() {
+        return Boolean(state.manualWindowMode);
+    }
+
+    function toggleManualWindowMode() {
+        setManualWindowMode(!isManualWindowMode());
+    }
+
+    function setManualWindowMode(enabled) {
+        state.manualWindowMode = Boolean(enabled);
+        applyManualWindowModeUI();
+        updateRollingPlanPreview();
+    }
+
+    function applyManualWindowModeUI() {
+        const advancedContainer = document.getElementById('rolling-window-advanced');
+        const labelEl = document.getElementById('rolling-window-mode-label');
+        const hintEl = document.getElementById('rolling-window-mode-hint');
+
+        if (advancedContainer) {
+            if (isManualWindowMode()) advancedContainer.classList.remove('hidden');
+            else advancedContainer.classList.add('hidden');
+        }
+
+        if (labelEl) {
+            labelEl.textContent = isManualWindowMode() ? '切換回自動配置' : '手動調整視窗設定';
+        }
+
+        if (hintEl) {
+            hintEl.textContent = isManualWindowMode()
+                ? '目前為手動模式，系統會沿用下方欄位數值建立視窗。'
+                : `目前採用自動比例配置，會根據可用資料長度維持 ${DEFAULT_TRAINING_MONTHS} / ${DEFAULT_TESTING_MONTHS} / ${DEFAULT_STEP_MONTHS} 個月的預設比例。需要自訂時可展開手動設定。`;
+        }
     }
 
     const OPTIMIZE_SCOPE_DEFINITIONS = {
@@ -2011,8 +2172,10 @@
     function updateRollingPlanPreview() {
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
-        const config = getRollingConfig();
-        const windows = computeRollingWindows(config, availability);
+        const rawConfig = getRollingConfig();
+        const resolvedConfig = resolveWindowDurations(rawConfig, availability);
+        const windows = computeRollingWindows(resolvedConfig, availability);
+        const effectiveRange = resolveEffectiveRange(resolvedConfig, availability);
 
         const summaryEl = document.getElementById('rolling-plan-summary');
         const rangeEl = document.getElementById('rolling-plan-range');
@@ -2029,7 +2192,8 @@
         if (tbody) tbody.innerHTML = '';
 
         if (!availability || !Array.isArray(cachedRows) || cachedRows.length === 0) {
-            setPlanWarning(true);
+            setPlanWarning(true, '尚未偵測到可用回測資料');
+            setPlanRecommendation(null);
             if (summaryEl) summaryEl.textContent = '尚未取得快取資料，請先執行一次主回測。';
             return;
         }
@@ -2037,13 +2201,16 @@
         setPlanWarning(false);
         if (!windows || windows.length === 0) {
             if (summaryEl) summaryEl.textContent = '目前設定下無法產生有效視窗，請調整視窗長度或日期區間。';
+            setPlanRecommendation(effectiveRange ? buildRangeRecommendation(effectiveRange, resolvedConfig) : null);
             return;
         }
 
         if (summaryEl) {
-            summaryEl.textContent = `共 ${windows.length} 個視窗（訓練 ${config.trainingMonths} 個月 / 測試 ${config.testingMonths} 個月 / 平移 ${config.stepMonths} 個月）`;
+            const modeLabel = resolvedConfig.manualWindowMode ? '手動' : '自動';
+            summaryEl.textContent = `共 ${windows.length} 個視窗（${modeLabel}：訓練 ${resolvedConfig.trainingMonths} 個月 / 測試 ${resolvedConfig.testingMonths} 個月 / 平移 ${resolvedConfig.stepMonths} 個月）`;
         }
 
+        setPlanRecommendation(effectiveRange ? buildRangeRecommendation(effectiveRange, resolvedConfig) : null);
         if (tbody) {
             windows.forEach((win, index) => {
                 const tr = document.createElement('tr');
@@ -2059,11 +2226,51 @@
         }
     }
 
-    function setPlanWarning(visible) {
+    function setPlanWarning(visible, message) {
         const warningEl = document.getElementById('rolling-plan-warning');
         if (!warningEl) return;
+        if (typeof message === 'string' && message) warningEl.textContent = message;
         if (visible) warningEl.classList.remove('hidden');
         else warningEl.classList.add('hidden');
+    }
+
+    function setPlanRecommendation(message) {
+        const recommendationEl = document.getElementById('rolling-plan-recommendation');
+        if (!recommendationEl) return;
+        if (typeof message === 'string' && message) {
+            recommendationEl.textContent = message;
+            recommendationEl.classList.remove('hidden');
+        } else {
+            recommendationEl.textContent = '';
+            recommendationEl.classList.add('hidden');
+        }
+    }
+
+    function resolveEffectiveRange(config, availability) {
+        if (!config || !availability || !config.baseStart || !config.baseEnd) return null;
+        const baseStartTime = new Date(config.baseStart).getTime();
+        const baseEndTime = new Date(config.baseEnd).getTime();
+        const dataStartTime = new Date(availability.start).getTime();
+        const dataEndTime = new Date(availability.end).getTime();
+        if (!Number.isFinite(baseStartTime) || !Number.isFinite(baseEndTime) || !Number.isFinite(dataStartTime) || !Number.isFinite(dataEndTime)) {
+            return null;
+        }
+        const start = new Date(Math.max(baseStartTime, dataStartTime));
+        const end = new Date(Math.min(baseEndTime, dataEndTime));
+        if (start > end) return null;
+        return { start, end };
+    }
+
+    function buildRangeRecommendation(range) {
+        if (!range || !(range.start instanceof Date) || !(range.end instanceof Date)) return null;
+        const daySpan = diffInDays(range.start, range.end);
+        if (!Number.isFinite(daySpan) || daySpan <= 0) return null;
+        const years = daySpan / 365;
+        if (years >= 5) return null;
+        let readable;
+        if (years >= 1) readable = `${years.toFixed(1)} 年`;
+        else readable = `${Math.max(1, Math.round(daySpan / 30))} 個月`;
+        return `目前回測區間約 ${readable}，建議改用至少 5 年資料以提升穩健度。`;
     }
 
     function countTradingDays(startIso, endIso, rowsOverride) {
@@ -2217,6 +2424,23 @@
         const result = new Date(date);
         result.setDate(result.getDate() + days);
         return result;
+    }
+
+    function diffInDays(start, end) {
+        const startTime = new Date(start).getTime();
+        const endTime = new Date(end).getTime();
+        if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return Number.NaN;
+        const diffMs = endTime - startTime;
+        return diffMs / (1000 * 60 * 60 * 24);
+    }
+
+    function diffInMonths(start, end) {
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return 0;
+        let months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+        if (endDate.getDate() >= startDate.getDate()) months += 1;
+        return Math.max(months, 0);
     }
 
     function formatPercent(value) {
