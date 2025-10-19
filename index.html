@@ -1927,33 +1927,52 @@
                                         <div class="card-header flex flex-col gap-2">
                                             <h3 class="card-title text-base">滾動測試設定</h3>
                                             <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                參考國際量化機構常見的 Walk-Forward 測試（先以固定視窗訓練，再用下一段資料驗證），快速檢查策略在不同市況的穩健度。
-                                                建議先在左側執行一次完整回測，以建立快取資料後再進行滾動測試。
+                                                參考國際量化機構常見的 Walk-Forward 測試（先以固定視窗訓練，再用下一段資料驗證）
+，快速檢查策略在不同市況的穩健度。
+                                                <span id="rolling-cache-hint">建議先在左側執行一次完整回測，以建立快取資料後再進行滾動測試。</span>
                                             </p>
+                                            <p id="rolling-range-recommendation" class="text-xs leading-relaxed hidden" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div class="card-content">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練視窗（月）
-                                                    <input id="rolling-training-months" data-rolling-input type="number" min="6" max="120" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    測試視窗（月）
-                                                    <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="36" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    視窗平移（月）
-                                                    <input id="rolling-step-months" data-rolling-input type="number" min="1" max="24" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
+                                                    滾動測試次數
+                                                    <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依目前比例自動調整訓練期、測試期與平移間隔。</span>
                                                 </label>
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                     測試至少成交筆數
                                                     <input id="rolling-min-trades" data-rolling-input type="number" min="1" max="200" step="1" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若小於門檻，將標註樣本不足。</span>
                                                 </label>
-                                                <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
+                                            </div>
+                                            <div class="rounded-md border border-border bg-muted/10 mt-2" style="border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                                                <button id="rolling-toggle-advanced" type="button" class="w-full flex items-center justify-between px-3 py-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    <span>顯示進階設定（訓練 / 測試 / 平移）</span>
+                                                    <i data-lucide="chevron-down" class="lucide w-4 h-4"></i>
+                                                </button>
+                                                <div id="rolling-advanced-config" class="hidden border-t border-border px-3 py-3 space-y-3" style="border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">進階模式可覆寫自動比例。欲回到自動配置，請重新調整滾動測試次數。</p>
+                                                    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            訓練視窗（月）
+                                                            <input id="rolling-training-months" data-rolling-input type="number" min="6" max="120" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            測試視窗（月）
+                                                            <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="36" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            視窗平移（月）
+                                                            <input id="rolling-step-months" data-rolling-input type="number" min="1" max="24" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
                                                     <legend class="font-medium">通過門檻（滾動測試）</legend>
                                                     <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
                                                         <label class="flex items-center gap-2">

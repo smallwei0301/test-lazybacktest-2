@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.0 ---
-// Patch Tag: LB-ROLLING-TEST-20250930A
+// --- 滾動測試模組 - v2.1 ---
+// Patch Tag: LB-ROLLING-TEST-20250930B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250930A',
+        version: 'LB-ROLLING-TEST-20250930B',
         batchOptimizerInitialized: false,
     };
 
@@ -41,6 +41,9 @@
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
     const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
+    const DEFAULT_WINDOW_COUNT = 2;
+    const MIN_WINDOW_COUNT = 1;
+    const MAX_WINDOW_COUNT = 24;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -81,11 +84,16 @@
         inputs.forEach((input) => {
             ['change', 'input'].forEach((evt) => {
                 input.addEventListener(evt, () => {
-                    updateRollingPlanPreview();
-                    syncRollingOptimizeUI();
+                    handleRollingInputChange(input);
                 });
             });
         });
+
+        const advancedToggle = document.getElementById('rolling-toggle-advanced');
+        if (advancedToggle) {
+            advancedToggle.addEventListener('click', toggleRollingAdvancedSettings);
+            advancedToggle.setAttribute('aria-expanded', 'false');
+        }
 
         const startBtn = document.getElementById('start-rolling-test');
         const stopBtn = document.getElementById('stop-rolling-test');
@@ -99,6 +107,7 @@
             });
         }
 
+        autoAdjustRollingDurations({ suppressPreview: true });
         updateRollingPlanPreview();
         syncRollingOptimizeUI();
         state.initialized = true;
@@ -1164,6 +1173,8 @@
         const testingMonths = clampNumber(readInputValue('rolling-testing-months', 12), 3, 36);
         const stepMonths = clampNumber(readInputValue('rolling-step-months', 6), 1, 24);
         const minTrades = clampNumber(readInputValue('rolling-min-trades', 10), 0, 1000);
+        const windowCountValue = clampNumber(Math.round(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT)), MIN_WINDOW_COUNT, MAX_WINDOW_COUNT);
+        const windowCount = Math.round(windowCountValue);
         const thresholds = {
             annualizedReturn: clampNumber(readInputValue('rolling-threshold-ann', DEFAULT_THRESHOLDS.annualizedReturn), 0, 200),
             sharpeRatio: clampNumber(readInputValue('rolling-threshold-sharpe', DEFAULT_THRESHOLDS.sharpeRatio), 0, 10),
@@ -1181,6 +1192,7 @@
             thresholds,
             baseStart: params?.startDate || lastFetchSettings?.startDate || null,
             baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            windowCount,
             optimization,
         };
     }
@@ -2008,6 +2020,206 @@
         return Math.min(Math.max(value, min), max);
     }
 
+    function handleRollingInputChange(changedInput) {
+        if (changedInput?.id === 'rolling-window-count') {
+            autoAdjustRollingDurations({ suppressPreview: true });
+        }
+        updateRollingPlanPreview();
+        syncRollingOptimizeUI();
+    }
+
+    function toggleRollingAdvancedSettings(event) {
+        if (event) event.preventDefault();
+        const container = document.getElementById('rolling-advanced-config');
+        const button = document.getElementById('rolling-toggle-advanced');
+        if (!container || !button) return;
+
+        const nowHidden = container.classList.contains('hidden');
+        if (nowHidden) container.classList.remove('hidden');
+        else container.classList.add('hidden');
+
+        const expanded = !container.classList.contains('hidden');
+        button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+
+        const label = button.querySelector('span');
+        if (label) {
+            label.textContent = expanded
+                ? '隱藏進階設定（訓練 / 測試 / 平移）'
+                : '顯示進階設定（訓練 / 測試 / 平移）';
+        }
+
+        const icon = button.querySelector('i[data-lucide]');
+        if (icon) {
+            icon.style.transition = 'transform 0.2s ease';
+            icon.style.transform = expanded ? 'rotate(180deg)' : '';
+        }
+
+        if (typeof window !== 'undefined' && window.lucide?.createIcons) {
+            try { window.lucide.createIcons(); } catch (error) { /* noop */ }
+        }
+    }
+
+    function autoAdjustRollingDurations(options = {}) {
+        const { suppressPreview = false } = options || {};
+        const rawDesired = readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT);
+        const desired = clampNumber(Math.round(rawDesired || DEFAULT_WINDOW_COUNT), MIN_WINDOW_COUNT, MAX_WINDOW_COUNT);
+
+        const windowInput = document.getElementById('rolling-window-count');
+        if (windowInput && windowInput.value !== String(desired)) {
+            windowInput.value = String(desired);
+        }
+
+        const range = resolveBacktestRange();
+        const availability = getCachedAvailability();
+        if (!range || !availability) {
+            return;
+        }
+
+        const baseTraining = clampNumber(readInputValue('rolling-training-months', 36), 6, 120);
+        const baseTesting = clampNumber(readInputValue('rolling-testing-months', 12), 3, 36);
+        const baseStep = clampNumber(readInputValue('rolling-step-months', 6), 1, 24);
+
+        const candidate = searchDurationsForWindows({
+            desiredCount: desired,
+            baseTraining,
+            baseTesting,
+            baseStep,
+            range,
+            availability,
+        });
+
+        if (!candidate || candidate.windows === 0) {
+            return;
+        }
+
+        applyNumericValue('rolling-training-months', candidate.trainingMonths);
+        applyNumericValue('rolling-testing-months', candidate.testingMonths);
+        applyNumericValue('rolling-step-months', candidate.stepMonths);
+
+        if (!suppressPreview) {
+            updateRollingPlanPreview();
+        }
+    }
+
+    function searchDurationsForWindows({ desiredCount, baseTraining, baseTesting, baseStep, range, availability }) {
+        if (!Number.isFinite(desiredCount) || desiredCount <= 0) return null;
+        if (!range?.start || !range?.end) return null;
+
+        const ratioTraining = Math.max(1, baseTraining);
+        const ratioTesting = Math.max(1, baseTesting);
+        const ratioStep = Math.max(1, baseStep);
+
+        let scale = 1;
+        let bestCandidate = null;
+        let previousSignature = null;
+
+        for (let iteration = 0; iteration < 30; iteration += 1) {
+            const candidate = buildDurationCandidate(scale, ratioTraining, ratioTesting, ratioStep);
+            const signature = `${candidate.trainingMonths}-${candidate.testingMonths}-${candidate.stepMonths}`;
+            if (signature === previousSignature && bestCandidate) {
+                break;
+            }
+            previousSignature = signature;
+
+            const config = {
+                trainingMonths: candidate.trainingMonths,
+                testingMonths: candidate.testingMonths,
+                stepMonths: candidate.stepMonths,
+                baseStart: range.start,
+                baseEnd: range.end,
+            };
+
+            const windows = computeRollingWindows(config, availability);
+            const diff = Math.abs(windows.length - desiredCount);
+            const candidateResult = { ...candidate, diff, windows: windows.length };
+
+            if (shouldReplaceCandidate(candidateResult, bestCandidate, desiredCount)) {
+                bestCandidate = candidateResult;
+            }
+
+            if (diff === 0) break;
+
+            if (windows.length > desiredCount) scale *= 1.15;
+            else if (windows.length < desiredCount) scale *= 0.85;
+            else break;
+
+            scale = clampNumber(scale, 0.1, 8);
+        }
+
+        return bestCandidate;
+    }
+
+    function buildDurationCandidate(scale, ratioTraining, ratioTesting, ratioStep) {
+        const training = clampNumber(Math.round(ratioTraining * scale), 6, 120);
+        const testing = clampNumber(Math.round(ratioTesting * scale), 3, 36);
+        let step = clampNumber(Math.round(ratioStep * scale), 1, 24);
+        if (step > testing) step = testing;
+        if (step < 1) step = 1;
+        return { trainingMonths: training, testingMonths: testing, stepMonths: step };
+    }
+
+    function shouldReplaceCandidate(candidate, currentBest, desiredCount) {
+        if (!candidate) return false;
+        if (!currentBest) return true;
+        if (candidate.diff < currentBest.diff) return true;
+        if (candidate.diff > currentBest.diff) return false;
+        if (desiredCount && candidate.windows >= desiredCount && currentBest.windows < desiredCount) return true;
+        if (candidate.windows > currentBest.windows) return true;
+        if (candidate.trainingMonths < currentBest.trainingMonths) return true;
+        if (candidate.testingMonths < currentBest.testingMonths) return true;
+        if (candidate.stepMonths < currentBest.stepMonths) return true;
+        return false;
+    }
+
+    function applyNumericValue(id, value) {
+        const el = document.getElementById(id);
+        if (!el || !Number.isFinite(value)) return;
+        const rounded = Math.round(value);
+        if (el.value !== String(rounded)) {
+            el.value = String(rounded);
+        }
+    }
+
+    function resolveBacktestRange() {
+        const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const start = params?.startDate || lastFetchSettings?.startDate || null;
+        const end = params?.endDate || lastFetchSettings?.endDate || null;
+        if (!start || !end) return null;
+        return { start, end };
+    }
+
+    function updateCacheHint(hasCache) {
+        const hint = document.getElementById('rolling-cache-hint');
+        if (!hint) return;
+        if (hasCache) hint.classList.add('hidden');
+        else hint.classList.remove('hidden');
+    }
+
+    function updateRangeRecommendation(config, availability) {
+        const messageEl = document.getElementById('rolling-range-recommendation');
+        if (!messageEl) return;
+
+        const startIso = config?.baseStart || availability?.start;
+        const endIso = config?.baseEnd || availability?.end;
+        const spanYears = computeYearSpan(startIso, endIso);
+        if (spanYears !== null && spanYears < 5) {
+            messageEl.textContent = '目前回測區間短於五年，建議改用較長期間以提高滾動測試穩健度。';
+            messageEl.classList.remove('hidden');
+        } else {
+            messageEl.textContent = '';
+            messageEl.classList.add('hidden');
+        }
+    }
+
+    function computeYearSpan(startIso, endIso) {
+        if (!startIso || !endIso) return null;
+        const start = new Date(startIso);
+        const end = new Date(endIso);
+        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return null;
+        const diffMs = end.getTime() - start.getTime();
+        return diffMs / (365.25 * 24 * 60 * 60 * 1000);
+    }
+
     function updateRollingPlanPreview() {
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
@@ -2017,6 +2229,10 @@
         const summaryEl = document.getElementById('rolling-plan-summary');
         const rangeEl = document.getElementById('rolling-plan-range');
         const tbody = document.getElementById('rolling-plan-tbody');
+
+        const hasCacheRows = Array.isArray(cachedRows) && cachedRows.length > 0;
+        updateCacheHint(hasCacheRows);
+        updateRangeRecommendation(config, availability);
 
         if (rangeEl) {
             if (availability) {
@@ -2028,7 +2244,7 @@
 
         if (tbody) tbody.innerHTML = '';
 
-        if (!availability || !Array.isArray(cachedRows) || cachedRows.length === 0) {
+        if (!availability || !hasCacheRows) {
             setPlanWarning(true);
             if (summaryEl) summaryEl.textContent = '尚未取得快取資料，請先執行一次主回測。';
             return;
@@ -2040,8 +2256,19 @@
             return;
         }
 
+        const desiredWindows = Number.isFinite(config?.windowCount) ? config.windowCount : DEFAULT_WINDOW_COUNT;
         if (summaryEl) {
-            summaryEl.textContent = `共 ${windows.length} 個視窗（訓練 ${config.trainingMonths} 個月 / 測試 ${config.testingMonths} 個月 / 平移 ${config.stepMonths} 個月）`;
+            let summaryText = `共 ${windows.length} 個視窗（訓練 ${config.trainingMonths} 個月 / 測試 ${config.testingMonths} 個月 / 平移 ${config.stepMonths} 個月）`;
+            if (Number.isFinite(desiredWindows) && desiredWindows > 0) {
+                if (windows.length === desiredWindows) {
+                    summaryText += '，已符合預期的滾動次數。';
+                } else if (windows.length < desiredWindows) {
+                    summaryText += `，低於預期的 ${desiredWindows} 次，建議延長回測期間或調整進階設定。`;
+                } else {
+                    summaryText += `，高於預期的 ${desiredWindows} 次，可縮短視窗或放慢平移間隔。`;
+                }
+            }
+            summaryEl.textContent = summaryText;
         }
 
         if (tbody) {
