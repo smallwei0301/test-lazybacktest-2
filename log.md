@@ -1,4 +1,12 @@
 
+## 2026-07-10 — Patch LB-ROLLING-WINDOWS-20260710A
+- **Issue recap**: Walk-Forward 面板以三個月數字欄位設定訓練/測試/平移長度，使用者無法快速指定滾動次數，也缺乏針對短區間資料的提醒。
+- **Fix**:
+  - `index.html` 新增「滾動測試次數」輸入框與手動視窗設定折疊區，預設自動依 36/12/6 比例分配視窗並提供五年資料建議。
+  - `js/rolling-test.js` 引入自動視窗配置演算法、回測區間建議提示與手動模式切換，更新模組版本碼至 `LB-ROLLING-WINDOWS-20260710A`。
+- **Diagnostics**: 透過 `updateRollingPlanPreview` 自動更新提示，確保視窗配置與資料範圍建議同步顯示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
