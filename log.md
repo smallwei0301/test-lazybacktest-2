@@ -1,4 +1,12 @@
 
+## 2026-07-10 — Patch LB-ROLLING-TEST-20250930B
+- **Scope**: Walk-Forward 設定體驗優化與提示調整。
+- **Updates**:
+  - 新增「滾動測試次數」輸入，系統會依既有比例自動調整訓練期、測試期與平移間隔，並保留可展開的進階設定以供手動覆寫。
+  - 將訓練／測試視窗欄位移入摺疊容器並加上動畫切換，提供隱藏提示訊息與折疊控制。
+  - 當快取已建立時隱藏「請先回測」提醒，並在回測區間短於五年時顯示延長區間建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/rolling-test.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
