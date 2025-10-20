@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.3 ---
-// Patch Tag: LB-BATCH-OPT-20260717B
+// --- 批量策略優化功能 - v1.2.4 ---
+// Patch Tag: LB-BATCH-OPT-20260717C
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717C';
 
 let batchDebugSession = null;
 
@@ -119,6 +119,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let lastHeadlessOptimizationSummary = null;
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -1676,6 +1677,109 @@ function getDefaultStrategyParams(strategy) {
 }
 
 // 分批處理
+function computeCombinationDifferences(headlessSummary, batchSummary) {
+    if (!headlessSummary || !batchSummary) {
+        return { missing: true };
+    }
+
+    const differences = {};
+    if ((headlessSummary.buyStrategy || null) !== (batchSummary.buyStrategy || null)
+        || (headlessSummary.sellStrategy || null) !== (batchSummary.sellStrategy || null)) {
+        differences.strategy = {
+            headlessBuy: headlessSummary.buyStrategy || null,
+            batchBuy: batchSummary.buyStrategy || null,
+            headlessSell: headlessSummary.sellStrategy || null,
+            batchSell: batchSummary.sellStrategy || null
+        };
+    }
+
+    const scopes = ['buyParams', 'sellParams', 'riskManagement'];
+    scopes.forEach((scope) => {
+        const headlessParams = headlessSummary[scope] || {};
+        const batchParams = batchSummary[scope] || {};
+        const keys = new Set([...Object.keys(headlessParams), ...Object.keys(batchParams)]);
+        const mismatches = [];
+
+        keys.forEach((key) => {
+            const headlessValue = headlessParams[key];
+            const batchValue = batchParams[key];
+            if (JSON.stringify(headlessValue) !== JSON.stringify(batchValue)) {
+                mismatches.push({ key, headless: headlessValue, batch: batchValue });
+            }
+        });
+
+        if (mismatches.length > 0) {
+            differences[scope] = mismatches;
+        }
+    });
+
+    return Object.keys(differences).length > 0 ? differences : null;
+}
+
+function recordHeadlessBatchComparison(bestResult) {
+    try {
+        if (!lastHeadlessOptimizationSummary) {
+            recordBatchDebug('headless-compare-skip', {
+                reason: 'no-headless-summary',
+                batchBest: bestResult ? summarizeCombination(bestResult) : null
+            }, { phase: 'collect', console: false });
+            return;
+        }
+
+        const summary = lastHeadlessOptimizationSummary;
+        const metricLabel = summary.metricLabel || batchOptimizationConfig.targetMetric || 'annualizedReturn';
+        const headlessMetric = Number.isFinite(summary.metric) ? summary.metric : null;
+        const batchMetricValue = bestResult ? getMetricFromResult(bestResult, metricLabel) : NaN;
+        const batchMetric = Number.isFinite(batchMetricValue) ? batchMetricValue : null;
+        const metricDelta = headlessMetric !== null && batchMetric !== null ? batchMetric - headlessMetric : null;
+        const matched = metricDelta !== null ? Math.abs(metricDelta) <= 1e-6 : false;
+
+        const headlessCombination = summary.combination || null;
+        const batchCombination = bestResult ? summarizeCombination(bestResult) : null;
+        const differences = computeCombinationDifferences(headlessCombination, batchCombination);
+
+        recordBatchDebug('headless-compare', {
+            matched,
+            metricLabel,
+            headlessMetric,
+            batchMetric,
+            metricDelta,
+            headlessCombination,
+            batchCombination,
+            differences,
+            headlessTimestamp: summary.timestamp,
+            headlessSource: summary.source || 'external-headless'
+        }, {
+            phase: 'collect',
+            console: matched ? false : 'warn',
+            consoleLevel: matched ? 'log' : 'warn',
+            level: matched ? 'info' : 'warn'
+        });
+
+        if (!matched) {
+            console.warn('[Batch Optimization] Headless optimization and batch panel best metrics differ:', {
+                metricLabel,
+                headlessMetric,
+                batchMetric,
+                metricDelta,
+                headlessCombination,
+                batchCombination,
+                differences
+            });
+        }
+
+        summary.lastComparedAt = Date.now();
+        summary.lastComparisonMatched = matched;
+        summary.lastComparisonDelta = metricDelta;
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to compare headless and batch results:', error);
+        recordBatchDebug('headless-compare-error', {
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        }, { phase: 'collect', level: 'error', consoleLevel: 'error' });
+    }
+}
+
 function processBatch(batches, batchIndex, config) {
     // 檢查是否被停止
     if (isBatchOptimizationStopped) {
@@ -1694,6 +1798,11 @@ function processBatch(batches, batchIndex, config) {
         const bestResult = batchOptimizationResults && batchOptimizationResults.length > 0
             ? summarizeResult(batchOptimizationResults[0])
             : null;
+        if (batchOptimizationResults && batchOptimizationResults.length > 0) {
+            recordHeadlessBatchComparison(batchOptimizationResults[0]);
+        } else {
+            recordHeadlessBatchComparison(null);
+        }
         finalizeBatchDebugSession({
             status: 'completed',
             processedBatches: batches.length,
@@ -4877,6 +4986,64 @@ function cloneCombinationResult(result) {
     return clone;
 }
 
+function captureBatchResultsSnapshot() {
+    if (!Array.isArray(batchOptimizationResults)) {
+        return [];
+    }
+
+    try {
+        return JSON.parse(JSON.stringify(batchOptimizationResults));
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to deep clone batch results snapshot via JSON:', error);
+        return batchOptimizationResults.map(result => clonePlainObject(result));
+    }
+}
+
+function restoreBatchResultsSnapshot(snapshot) {
+    if (!Array.isArray(snapshot)) {
+        batchOptimizationResults = [];
+        return;
+    }
+
+    try {
+        batchOptimizationResults = JSON.parse(JSON.stringify(snapshot));
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to restore batch results snapshot via JSON:', error);
+        batchOptimizationResults = snapshot.map(result => clonePlainObject(result));
+    }
+}
+
+function captureBatchWorkerStatusSnapshot(status) {
+    if (!status || typeof status !== 'object') {
+        return { concurrencyLimit: 0, inFlightCount: 0, entries: [] };
+    }
+
+    const snapshot = {
+        concurrencyLimit: status.concurrencyLimit ?? 0,
+        inFlightCount: status.inFlightCount ?? 0,
+        entries: Array.isArray(status.entries)
+            ? status.entries.map(entry => clonePlainObject(entry))
+            : []
+    };
+
+    return snapshot;
+}
+
+function restoreBatchWorkerStatusSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        batchWorkerStatus = { concurrencyLimit: 0, inFlightCount: 0, entries: [] };
+        return;
+    }
+
+    batchWorkerStatus = {
+        concurrencyLimit: snapshot.concurrencyLimit ?? 0,
+        inFlightCount: snapshot.inFlightCount ?? 0,
+        entries: Array.isArray(snapshot.entries)
+            ? snapshot.entries.map(entry => clonePlainObject(entry))
+            : []
+    };
+}
+
 function sanitizeOptimizationConfig(config = {}) {
     const sanitized = clonePlainObject(config) || {};
 
@@ -4949,8 +5116,15 @@ async function runCombinationOptimizationHeadless(combination, config, options =
     const previousDebugSession = batchDebugSession;
     const previousProgress = { ...currentBatchProgress };
     const previousStopFlag = isBatchOptimizationStopped;
+    const previousResultsSnapshot = captureBatchResultsSnapshot();
+    const previousWorkerStatusSnapshot = captureBatchWorkerStatusSnapshot(batchWorkerStatus);
+    const previousConfigSnapshot = clonePlainObject(batchOptimizationConfig);
+    const previousRunningFlag = Boolean(window.batchOptimizationRunning);
+    const previousWorkerInstance = batchOptimizationWorker;
 
     let headlessSession = null;
+
+    lastHeadlessOptimizationSummary = null;
 
     try {
         isBatchOptimizationStopped = false;
@@ -4961,6 +5135,16 @@ async function runCombinationOptimizationHeadless(combination, config, options =
             mode: 'headless'
         });
 
+        recordBatchDebug('headless-state-snapshot', {
+            resultsCount: previousResultsSnapshot.length,
+            workerEntries: Array.isArray(previousWorkerStatusSnapshot.entries)
+                ? previousWorkerStatusSnapshot.entries.length
+                : 0,
+            runningFlag: previousRunningFlag,
+            stopFlag: previousStopFlag,
+            progress: clonePlainObject(previousProgress)
+        }, { phase: 'external', console: false });
+
         recordBatchDebug('headless-cache-state', {
             baselineCache: baselineCacheSummary,
             overrideCache: overrideCacheSummary,
@@ -4969,6 +5153,38 @@ async function runCombinationOptimizationHeadless(combination, config, options =
         }, { phase: 'external', console: false });
 
         const result = await optimizeCombinationIterative(preparedCombination, preparedConfig, preparedOptions);
+
+        if (result) {
+            const metricLabel = result.__metricLabel || preparedConfig.targetMetric || 'annualizedReturn';
+            let metricValue = Number.isFinite(result.__finalMetric) ? result.__finalMetric : null;
+            if (metricValue === null) {
+                const fallbackMetric = getMetricFromResult(result, metricLabel);
+                metricValue = Number.isFinite(fallbackMetric) ? fallbackMetric : null;
+            }
+
+            lastHeadlessOptimizationSummary = {
+                combination: summarizeCombination(result),
+                metric: metricValue,
+                metricLabel,
+                timestamp: Date.now(),
+                source: preparedOptions.sessionContext.source || 'external-headless',
+                baselineCache: baselineCacheSummary,
+                overrideCache: overrideCacheSummary
+            };
+
+            recordBatchDebug('headless-result', {
+                combination: lastHeadlessOptimizationSummary.combination,
+                metric: lastHeadlessOptimizationSummary.metric,
+                metricLabel,
+                baselineCache: baselineCacheSummary,
+                overrideCache: overrideCacheSummary
+            }, { phase: 'external', console: false });
+        } else {
+            lastHeadlessOptimizationSummary = null;
+            recordBatchDebug('headless-result-missing', {
+                combination: summarizeCombination(preparedCombination)
+            }, { phase: 'external', level: 'warn', consoleLevel: 'warn' });
+        }
 
         if (headlessSession && batchDebugSession === headlessSession) {
             finalizeBatchDebugSession({
@@ -4998,14 +5214,26 @@ async function runCombinationOptimizationHeadless(combination, config, options =
             lastOverallResult = previousOverallResult;
         }
 
+        restoreBatchResultsSnapshot(previousResultsSnapshot);
+        restoreBatchWorkerStatusSnapshot(previousWorkerStatusSnapshot);
+        batchOptimizationConfig = clonePlainObject(previousConfigSnapshot) || {};
+        window.batchOptimizationRunning = previousRunningFlag;
+        batchOptimizationWorker = previousWorkerInstance;
+        currentBatchProgress = { ...previousProgress };
+        isBatchOptimizationStopped = previousStopFlag;
+
         if (headlessSession && batchDebugSession === headlessSession) {
+            recordBatchDebug('headless-state-restore', {
+                resultsCount: Array.isArray(batchOptimizationResults) ? batchOptimizationResults.length : 0,
+                workerEntries: Array.isArray(batchWorkerStatus.entries) ? batchWorkerStatus.entries.length : 0,
+                runningFlag: window.batchOptimizationRunning,
+                stopFlag: isBatchOptimizationStopped,
+                progress: clonePlainObject(currentBatchProgress)
+            }, { phase: 'external', console: false });
             batchDebugSession = previousDebugSession || null;
         } else if (previousDebugSession) {
             batchDebugSession = previousDebugSession;
         }
-
-        isBatchOptimizationStopped = previousStopFlag;
-        Object.assign(currentBatchProgress, previousProgress);
     }
 }
 

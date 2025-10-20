@@ -1318,3 +1318,11 @@ NODE`
 - **Diagnostics**: 實機流程中先執行滾動測試訓練期優化再切回批量面板，透過除錯 log 比對 headless cache 範圍恢復情形並確認面板重跑後的最佳解與獨立批量優化一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-07-19 — Patch LB-BATCH-OPT-20260717C
+- **Issue recap**: 仍有用戶回報滾動測試完成後切換回批量優化，最佳參數與訓練窗內 headless 結果不一致，推測尚有全域狀態污染或缺乏對拍紀錄。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 進一步快照 `batchOptimizationResults`、`batchWorkerStatus`、`batchOptimizationConfig`、`window.batchOptimizationRunning` 與進度資訊，結束後完整復原並以 `headless-state-snapshot/headless-state-restore` 記錄狀態，模組版號更新為 `LB-BATCH-OPT-20260717C`。
+  - 建立 `lastHeadlessOptimizationSummary` 與 `recordHeadlessBatchComparison`，批量面板完成時即時計算與 headless 最佳解差距並輸出 `headless-compare` 除錯事件，若數值或參數不匹配會即時示警。
+- **Diagnostics**: 透過除錯 log 檢視快照還原與對拍輸出，確認在滾動測試 → 批量優化流程中 `runningFlag`、最佳組合與年化報酬差距均回到預期值，必要時可比對 `differences` 欄位快速找出缺失參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
