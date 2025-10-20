@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-BATCH-CACHE-20250924A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -136,6 +137,269 @@ function enrichParamsWithLookback(params) {
         dataStartDate,
         lookbackDays,
     };
+}
+
+function resolveCoverageCheckFn() {
+    if (typeof coverageCoversRange === 'function') {
+        return (coverage, targetRange) => coverageCoversRange(coverage, targetRange);
+    }
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    function parseISOToUTC(iso) {
+        if (!iso) return NaN;
+        const [y, m, d] = iso.split('-').map((val) => parseInt(val, 10));
+        if ([y, m, d].some((num) => Number.isNaN(num))) return NaN;
+        return Date.UTC(y, (m || 1) - 1, d || 1);
+    }
+    function normalizeRange(startISO, endISO) {
+        const start = parseISOToUTC(startISO);
+        const end = parseISOToUTC(endISO);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+        return { start, end: end + DAY_MS };
+    }
+    function mergeRangeBounds(ranges) {
+        if (!Array.isArray(ranges) || ranges.length === 0) return [];
+        const sorted = [...ranges].sort((a, b) => a.start - b.start);
+        const merged = [sorted[0]];
+        for (let i = 1; i < sorted.length; i += 1) {
+            const current = sorted[i];
+            const last = merged[merged.length - 1];
+            if (current.start <= last.end) {
+                last.end = Math.max(last.end, current.end);
+            } else {
+                merged.push({ ...current });
+            }
+        }
+        return merged;
+    }
+    return (coverage, targetRange) => {
+        if (!targetRange) return false;
+        const targetBounds = normalizeRange(targetRange.start, targetRange.end);
+        if (!targetBounds) return false;
+        const mergedBounds = mergeRangeBounds(
+            (coverage || [])
+                .map((range) => normalizeRange(range.start, range.end))
+                .filter((range) => !!range)
+        );
+        if (mergedBounds.length === 0) return false;
+        let cursor = targetBounds.start;
+        for (let i = 0; i < mergedBounds.length && cursor < targetBounds.end; i += 1) {
+            const segment = mergedBounds[i];
+            if (segment.end <= cursor) continue;
+            if (segment.start > cursor) return false;
+            cursor = Math.max(cursor, segment.end);
+        }
+        return cursor >= targetBounds.end;
+    };
+}
+
+function resolveBatchCacheReplay(preparedParams, options = {}) {
+    const result = {
+        useCachedData: false,
+        cachedData: null,
+        cachedMeta: null,
+        cacheEntry: null,
+        cacheKey: null,
+        source: null,
+        reason: null,
+    };
+    if (!preparedParams || typeof preparedParams !== 'object') {
+        result.reason = 'invalid_params';
+        return result;
+    }
+    const overrideData = Array.isArray(options.overrideData) && options.overrideData.length > 0
+        ? options.overrideData
+        : null;
+    const overrideMeta = overrideData ? options.overrideMeta || null : null;
+    if (overrideData) {
+        result.useCachedData = true;
+        result.cachedData = overrideData;
+        if (overrideMeta && typeof overrideMeta === 'object') {
+            result.cachedMeta = { ...overrideMeta };
+            if (!Array.isArray(result.cachedMeta.coverage) && typeof computeCoverageFromRows === 'function') {
+                result.cachedMeta.coverage = computeCoverageFromRows(overrideData);
+            }
+        }
+        result.source = 'override';
+        result.reason = 'override_data';
+        return result;
+    }
+
+    const marketValue = preparedParams.marketType
+        || preparedParams.market
+        || (typeof currentMarket !== 'undefined' ? currentMarket : 'TWSE')
+        || 'TWSE';
+    const normalizedMarket = typeof normalizeMarketKeyForCache === 'function'
+        ? normalizeMarketKeyForCache(marketValue)
+        : (typeof normalizeMarketValue === 'function'
+            ? normalizeMarketValue(marketValue)
+            : (marketValue || 'TWSE').toUpperCase());
+    const priceMode = (preparedParams.priceMode || (preparedParams.adjustedPrice ? 'adjusted' : 'raw') || 'raw')
+        .toString()
+        .toLowerCase();
+    const rangeStart = preparedParams.dataStartDate || preparedParams.startDate || preparedParams.effectiveStartDate;
+    const rangeEnd = preparedParams.endDate;
+    const coverageCheck = resolveCoverageCheckFn();
+    const evaluateCandidate = (dataset, meta, sourceLabel) => {
+        if (!Array.isArray(dataset) || dataset.length === 0) {
+            return { ok: false, reason: 'empty_dataset' };
+        }
+        const resolvedMeta = { ...(meta || {}) };
+        if (typeof resolvedMeta.priceMode === 'string') {
+            const normalizedMode = resolvedMeta.priceMode.toLowerCase();
+            if (normalizedMode !== priceMode) {
+                return { ok: false, reason: 'price_mode_mismatch' };
+            }
+        }
+        if (typeof resolvedMeta.splitAdjustment === 'boolean') {
+            if (Boolean(resolvedMeta.splitAdjustment) !== Boolean(preparedParams.splitAdjustment)) {
+                return { ok: false, reason: 'split_flag_mismatch' };
+            }
+        }
+        const coverage = Array.isArray(resolvedMeta.coverage) && resolvedMeta.coverage.length > 0
+            ? resolvedMeta.coverage
+            : (typeof computeCoverageFromRows === 'function'
+                ? computeCoverageFromRows(dataset)
+                : null);
+        if (!coverage || !rangeStart || !rangeEnd) {
+            if (!rangeStart || !rangeEnd) {
+                return { ok: false, reason: 'invalid_range' };
+            }
+            return { ok: false, reason: 'coverage_missing' };
+        }
+        const covers = coverageCheck(coverage, { start: rangeStart, end: rangeEnd });
+        if (!covers) {
+            return { ok: false, reason: 'coverage_insufficient' };
+        }
+        resolvedMeta.coverage = coverage;
+        if (!resolvedMeta.effectiveStartDate && preparedParams.effectiveStartDate) {
+            resolvedMeta.effectiveStartDate = preparedParams.effectiveStartDate;
+        }
+        if (!resolvedMeta.lookbackDays && Number.isFinite(preparedParams.lookbackDays)) {
+            resolvedMeta.lookbackDays = preparedParams.lookbackDays;
+        }
+        resolvedMeta.priceMode = resolvedMeta.priceMode || priceMode;
+        resolvedMeta.splitAdjustment = typeof resolvedMeta.splitAdjustment === 'boolean'
+            ? resolvedMeta.splitAdjustment
+            : Boolean(preparedParams.splitAdjustment);
+        return { ok: true, meta: resolvedMeta, source: sourceLabel };
+    };
+
+    const curSettings = {
+        stockNo: preparedParams.stockNo,
+        startDate: rangeStart,
+        dataStartDate: rangeStart,
+        endDate: rangeEnd,
+        effectiveStartDate: preparedParams.effectiveStartDate || preparedParams.startDate,
+        market: normalizedMarket,
+        adjustedPrice: Boolean(preparedParams.adjustedPrice),
+        splitAdjustment: Boolean(preparedParams.splitAdjustment),
+        priceMode,
+        lookbackDays: preparedParams.lookbackDays,
+    };
+
+    if (typeof buildCacheKey !== 'function') {
+        result.reason = 'missing_build_cache_key';
+        return result;
+    }
+    const cacheKey = buildCacheKey(curSettings);
+    result.cacheKey = cacheKey;
+
+    if (typeof hydrateDatasetFromStorage === 'function') {
+        try {
+            hydrateDatasetFromStorage(cacheKey, curSettings);
+        } catch (error) {
+            console.warn('[Batch Optimization] hydrateDatasetFromStorage failed:', error);
+        }
+    }
+    if (typeof materializeSupersetCacheEntry === 'function') {
+        try {
+            materializeSupersetCacheEntry(cacheKey, curSettings);
+        } catch (error) {
+            console.warn('[Batch Optimization] materializeSupersetCacheEntry failed:', error);
+        }
+    }
+
+    const store = (typeof cachedDataStore !== 'undefined' && cachedDataStore instanceof Map)
+        ? cachedDataStore
+        : null;
+    if (store) {
+        const rawEntry = store.get(cacheKey) || null;
+        const entry = typeof ensureDatasetCacheEntryFresh === 'function'
+            ? ensureDatasetCacheEntryFresh(cacheKey, rawEntry, normalizedMarket)
+            : rawEntry;
+        if (entry && Array.isArray(entry.data) && entry.data.length > 0) {
+            const candidateMeta = typeof buildCachedMetaFromEntry === 'function'
+                ? buildCachedMetaFromEntry(entry, curSettings.effectiveStartDate, curSettings.lookbackDays)
+                : {
+                    priceMode: entry.priceMode || priceMode,
+                    splitAdjustment: typeof entry.splitAdjustment === 'boolean'
+                        ? entry.splitAdjustment
+                        : Boolean(preparedParams.splitAdjustment),
+                    coverage: Array.isArray(entry.coverage) ? entry.coverage : null,
+                };
+            if (!Array.isArray(candidateMeta.coverage) && Array.isArray(entry.coverage)) {
+                candidateMeta.coverage = entry.coverage;
+            }
+            const evaluation = evaluateCandidate(entry.data, candidateMeta, 'cache_entry');
+            if (evaluation.ok) {
+                result.useCachedData = true;
+                result.cachedData = entry.data;
+                result.cachedMeta = evaluation.meta;
+                result.cacheEntry = entry;
+                result.source = evaluation.source;
+                result.reason = 'cache_entry_hit';
+                return result;
+            }
+            result.reason = evaluation.reason;
+        } else if (entry === null && rawEntry) {
+            result.reason = 'cache_entry_stale';
+        }
+    } else {
+        result.reason = 'missing_cache_store';
+    }
+
+    const fallbackData = Array.isArray(options.fallbackData) && options.fallbackData.length > 0
+        ? options.fallbackData
+        : ((typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) && cachedStockData.length > 0)
+            ? cachedStockData
+            : null);
+    const fallbackMetaSource = options.fallbackMeta
+        || (typeof lastFetchSettings !== 'undefined' ? lastFetchSettings : null)
+        || null;
+    if (fallbackData) {
+        const fallbackMeta = {
+            ...(fallbackMetaSource || {}),
+            priceMode: (fallbackMetaSource?.priceMode
+                || (fallbackMetaSource?.adjustedPrice ? 'adjusted' : 'raw')
+                || priceMode).toString().toLowerCase(),
+            splitAdjustment: typeof fallbackMetaSource?.splitAdjustment === 'boolean'
+                ? fallbackMetaSource.splitAdjustment
+                : Boolean(fallbackMetaSource?.splitAdjustment || preparedParams.splitAdjustment),
+        };
+        if (!Array.isArray(fallbackMeta.coverage) && typeof computeCoverageFromRows === 'function') {
+            fallbackMeta.coverage = computeCoverageFromRows(fallbackData);
+        }
+        const evaluation = evaluateCandidate(fallbackData, fallbackMeta, 'session_cache');
+        if (evaluation.ok) {
+            result.useCachedData = true;
+            result.cachedData = fallbackData;
+            result.cachedMeta = evaluation.meta;
+            result.source = evaluation.source;
+            result.reason = 'session_cache_hit';
+            return result;
+        }
+        result.reason = evaluation.reason;
+    }
+
+    if (!result.reason) {
+        result.reason = 'no_valid_cache';
+    }
+    return result;
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestBatchOptimizationUtils = window.lazybacktestBatchOptimizationUtils || {};
+    window.lazybacktestBatchOptimizationUtils.resolveCacheReplay = resolveBatchCacheReplay;
 }
 
 function resetBatchWorkerStatus() {
@@ -1333,9 +1597,6 @@ async function executeBacktestForCombination(combination, options = {}) {
                 const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                     ? options.cachedDataOverride
                     : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
@@ -1364,11 +1625,22 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
+                const cacheDecision = resolveBatchCacheReplay(preparedParams, {
+                    overrideData,
+                    overrideMeta: options?.cachedMeta || null,
+                });
+                const useCachedData = cacheDecision.useCachedData;
+                const cachedPayload = useCachedData ? cacheDecision.cachedData : null;
+                const cachedMeta = useCachedData ? cacheDecision.cachedMeta : null;
+                if (!useCachedData) {
+                    console.log('[Batch Optimization] Cache unavailable for combination backtest:', cacheDecision.reason || 'unknown');
+                }
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
+                    cachedData: cachedPayload,
+                    cachedMeta: cachedMeta,
                 });
 
                 // 設定超時
@@ -1585,9 +1857,6 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1661,6 +1930,16 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        const cacheDecision = resolveBatchCacheReplay(preparedParams, {
+            overrideData,
+            overrideMeta: options?.cachedMeta || null,
+        });
+        const useCachedData = cacheDecision.useCachedData;
+        const cachedPayload = useCachedData ? cacheDecision.cachedData : null;
+        const cachedMeta = useCachedData ? cacheDecision.cachedMeta : null;
+        if (!useCachedData) {
+            console.log('[Batch Optimization] Cache unavailable for single parameter optimization:', cacheDecision.reason || 'unknown');
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -1670,7 +1949,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedPayload,
+            cachedMeta: cachedMeta,
         });
         
         // 設定超時
@@ -1748,9 +2028,6 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1798,6 +2075,16 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
+        const cacheDecision = resolveBatchCacheReplay(preparedParams, {
+            overrideData,
+            overrideMeta: options?.cachedMeta || null,
+        });
+        const useCachedData = cacheDecision.useCachedData;
+        const cachedPayload = useCachedData ? cacheDecision.cachedData : null;
+        const cachedMeta = useCachedData ? cacheDecision.cachedMeta : null;
+        if (!useCachedData) {
+            console.log('[Batch Optimization] Cache unavailable for risk optimization:', cacheDecision.reason || 'unknown');
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -1807,7 +2094,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedPayload,
+            cachedMeta: cachedMeta,
         });
     });
 }
@@ -4654,11 +4942,16 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
+            const cacheDecision = resolveBatchCacheReplay(preparedParams, {
+                fallbackData: cachedStockData,
+                fallbackMeta: typeof lastFetchSettings !== 'undefined' ? lastFetchSettings : null,
+            });
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
+                useCachedData: cacheDecision.useCachedData,
+                cachedData: cacheDecision.useCachedData ? cacheDecision.cachedData : null,
+                cachedMeta: cacheDecision.useCachedData ? cacheDecision.cachedMeta : null,
             });
             
         } catch (error) {
