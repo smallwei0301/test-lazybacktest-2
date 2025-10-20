@@ -1901,10 +1901,10 @@
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div class="card-content">
-                                                        <div class="overflow-x-auto">
-                                                            <table id="batch-results-table" class="min-w-full divide-y divide-border" style="border-color: var(--border);">
-                                                                <thead class="bg-muted" style="background-color: var(--muted);">
+                                                <div class="card-content">
+                                                    <div class="overflow-x-auto">
+                                                        <table id="batch-results-table" class="min-w-full divide-y divide-border" style="border-color: var(--border);">
+                                                            <thead class="bg-muted" style="background-color: var(--muted);">
                                                                     <tr>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">排名</th>
                                                                         <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider" style="color: var(--muted-foreground);">類型</th>
@@ -1919,11 +1919,57 @@
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody id="batch-results-tbody" class="bg-background divide-y divide-border" style="background-color: var(--background); border-color: var(--border);"></tbody>
-                                                            </table>
-                                                        </div>
+                                                        </table>
                                                     </div>
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        <section id="stage4-refine" class="mt-6">
+                                            <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
+                                                <div class="card-header flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                                    <div>
+                                                        <h4 class="card-title text-lg font-semibold">第四階段：局部微調</h4>
+                                                        <p class="text-sm text-muted-foreground" style="color: var(--muted-foreground);">以目前最佳解為基礎，使用 SPSA 或 CEM 在參數空間內做局部探索。</p>
+                                                    </div>
+                                                    <div class="flex items-center gap-3">
+                                                        <select id="stage4-method" class="px-3 py-1.5 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                            <option value="spsa">SPSA（隨機梯度）</option>
+                                                            <option value="cem">CEM（精英抽樣）</option>
+                                                        </select>
+                                                        <button id="stage4-run" class="btn-primary px-4 py-2 rounded text-sm font-semibold" style="background: linear-gradient(135deg, var(--primary), var(--accent));">執行微調</button>
+                                                    </div>
+                                                </div>
+                                                <div class="card-content space-y-3">
+                                                    <div id="stage4-progress-text" class="text-xs text-muted-foreground" style="color: var(--muted-foreground);"></div>
+                                                    <details class="bg-muted/30 rounded-md px-4 py-3" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent);">
+                                                        <summary class="text-sm font-medium cursor-pointer text-muted-foreground" style="color: var(--muted-foreground);">進階參數</summary>
+                                                        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">SPSA 步數</span>
+                                                                <input id="stage4-spsa-steps" type="number" min="5" step="1" value="30" class="px-3 py-1.5 border border-border rounded bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 迭代次數</span>
+                                                                <input id="stage4-cem-iters" type="number" min="1" step="1" value="10" class="px-3 py-1.5 border border-border rounded bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 母體大小</span>
+                                                                <input id="stage4-cem-popSize" type="number" min="4" step="1" value="40" class="px-3 py-1.5 border border-border rounded bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 精英比例</span>
+                                                                <input id="stage4-cem-eliteRatio" type="number" min="0.05" max="0.5" step="0.05" value="0.2" class="px-3 py-1.5 border border-border rounded bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </label>
+                                                            <label class="flex flex-col gap-1">
+                                                                <span class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">CEM 初始標準差</span>
+                                                                <input id="stage4-cem-initSigma" type="number" min="0.01" max="0.5" step="0.01" value="0.15" class="px-3 py-1.5 border border-border rounded bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                            </label>
+                                                        </div>
+                                                    </details>
+                                                </div>
+                                            </div>
+                                        </section>
                                         </div>
                                     </div>
                                 </div>
@@ -2536,7 +2582,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>
