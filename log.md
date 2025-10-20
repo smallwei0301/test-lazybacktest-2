@@ -1,5 +1,14 @@
 
 
+## 2026-07-11 — Patch LB-BATCH-OPT-20250711A
+- **Scope**: 批量優化載入流程、欄位映射與進度元件治理。
+- **Updates**:
+  - 新增 `BATCH_STRATEGY_NAME_MAP` 強制所有批量策略在送往 Worker 前完成映射，缺失時立即以 `showError` 通知並丟出錯誤。
+  - 將 `updateBatchStrategyParams` 改為表驅動欄位解析，若參數鍵缺少對應輸入欄位即中止載入並提示補齊映射。
+  - 重構 `loadBatchStrategy`，同步設置做多/做空與風控數值後僅觸發一次事件，並新增 DOM 與優化結果即時比對。
+  - 移除重複定義的 `showBatchProgress`/`hideBatchProgress`，保留具進度狀態追蹤的版本。
+- **Testing**: 待瀏覽器環境執行批量載入與回測流程，確認 console 無錯誤後再行備註。
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
