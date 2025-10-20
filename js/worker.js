@@ -11262,6 +11262,7 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
+  forceFreshData = false,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -11284,10 +11285,14 @@ async function runOptimization(
   // Data acquisition policy:
   // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
   // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
+  if (forceFreshData) {
+    workerLastDataset = null;
+  }
   if (useCache) {
     if (Array.isArray(cachedData) && cachedData.length > 0) {
       stockData = cachedData;
     } else if (
+      !forceFreshData &&
       Array.isArray(workerLastDataset) &&
       workerLastDataset.length > 0
     ) {
@@ -11302,6 +11307,7 @@ async function runOptimization(
     if (Array.isArray(cachedData) && cachedData.length > 0) {
       stockData = cachedData;
     } else if (
+      !forceFreshData &&
       Array.isArray(workerLastDataset) &&
       workerLastDataset.length > 0
     ) {
@@ -11490,6 +11496,7 @@ self.onmessage = async function (e) {
     optimizeParamName,
     optimizeRange,
   } = e.data;
+  const forceFreshData = Boolean(e.data?.forceFreshData);
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
@@ -11605,6 +11612,9 @@ self.onmessage = async function (e) {
         effectiveStartDate,
         marketKey,
       );
+      if (forceFreshData) {
+        workerLastDataset = null;
+      }
       if (useCachedData && Array.isArray(cachedData) && cachedData.length > 0) {
         console.log("[Worker] Using cached data for backtest.");
         dataToUse = cachedData;
@@ -11719,6 +11729,11 @@ self.onmessage = async function (e) {
             diagnostics: replayDiagnostics,
           };
         }
+      } else if (!forceFreshData && Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+        console.log("[Worker] Using worker's cached dataset for backtest.");
+        dataToUse = workerLastDataset;
+      } else if (Array.isArray(cachedData) && cachedData.length > 0) {
+        dataToUse = cachedData;
       } else {
         console.log("[Worker] Fetching new data for backtest.");
         outcome = await fetchStockData(
@@ -11936,7 +11951,8 @@ self.onmessage = async function (e) {
         optimizeParamName,
         optimizeRange,
         useCachedData,
-        cachedData || workerLastDataset,
+        cachedData,
+        forceFreshData,
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
