@@ -1,5 +1,13 @@
 
 
+## 2026-10-30 — Patch LB-ROLLING-TEST-20251028B / LB-STRATEGY-COMPARE-20260710D
+- **Issue recap**: OOS 品質指標達門檻仍僅給予部分分數，導致報告與計算細節不一致；滾動測試的窗分數拆解缺少加權說明；策略比較在儲存含滾動測試成果的策略後仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/rolling-test.js` 調整 OOS 品質計分為「達標即滿分、未達門檻線性折減」，並新增統計權重拆解與品質加權原值說明，更新模組版號 `LB-ROLLING-TEST-20251028B`。
+  - `js/backtest.js` 於策略快照儲存 Walk-Forward 總分（0～100 分）與通過比例，避免比較表出現預設提示訊息，同步更新版本碼 `LB-STRATEGY-COMPARE-20260710D`。
+  - `README.md` 補述 OOS 品質達標即給滿分的規則，與 UI 說明一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:

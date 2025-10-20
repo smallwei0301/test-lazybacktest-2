@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710C';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710D';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8945,7 +8945,9 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
+        rollingScore: Number.isFinite(rollingAggregate?.totalScore)
+            ? Number(rollingAggregate.totalScore) * 100
+            : normaliseMetricNumber(rollingAggregate?.score),
         rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
