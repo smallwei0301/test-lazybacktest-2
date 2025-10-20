@@ -1,4 +1,30 @@
 
+
+## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
+- **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
+- **Updates**:
+  - 依照設計在分頁捲動標籤加入 Lucide 圖示，移除卡片標題上的圖示，維持介面層級一致性。
+  - 策略比較表的平均狀態信心改採與摘要相同的百分比格式，並兼容舊版儲存的數據。
+  - 更新策略快照版本碼為 `LB-STRATEGY-COMPARE-20260710C`，供後續除錯追蹤。
+- **Testing**: 需於瀏覽器啟動回測流程確認無 console error（本地容器無法啟動瀏覽器）。
+
+## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710B
+- **Scope**: 策略比較分頁視覺與指標呈現微調。
+- **Updates**:
+  - 分頁內「策略比較設定」、「比較結果」標題新增 Lucide 圖示，與其他分頁標頭風格一致。
+  - 策略比較表缺漏資料的提示字色改為站內慣用的橘色（`var(--secondary)`），維持一致的提醒層級。
+  - 將趨勢區間欄位的「覆蓋」資訊改為呈現平均狀態信心，更新儲存快照版本碼為 `LB-STRATEGY-COMPARE-20260710B`。
+- **Testing**: 需於瀏覽器啟動回測流程確認無 console error（本地容器無法啟動瀏覽器）。
+
+## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710A
+- **Scope**: 策略比較分頁、儲存指標擴充與資金基準命名調整。
+- **Updates**:
+  - 將「初始本金」、「總資金」文案更新為「初始本金-固定金額買入」、「總資金-獲利再投入」，同步調整 tooltip 與報表標題。
+  - 儲存策略時追加年化、Sharpe、最大回撤、交易次數、敏感度、滾動測試、趨勢摘要等指標快照，並標記版本碼 `LB-STRATEGY-COMPARE-20260710A`。
+  - 新增「策略比較」分頁，可多選策略與欄位，缺漏資訊時提示「請先測試後保存策略」，資料來源連動儲存結果。
+  - 滾動測試模組記錄彙總評分至 `state.aggregate`，供策略比較表讀取滾動測試分數與產出時間。
+- **Testing**: 尚未執行自動化測試（需於瀏覽器環境驗證 UI 互動）。
+
 ## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
 - **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
 - **Fix**:
@@ -46,6 +72,7 @@
   - 新增進階設定折疊容器，保留原始欄位供專業使用者手動覆寫，同步更新版本代碼與版面文字。
   - 視窗預覽顯示目標次數與實際結果，若資料不足或期間少於五年會提示延長回測與建議使用五年以上數據。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
