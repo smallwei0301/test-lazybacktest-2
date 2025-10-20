@@ -1,5 +1,14 @@
 
 
+## 2026-10-30 — Patch LB-BATCH-LOADSYNC-20261030A
+- **Scope**: 批量優化載入流程同步化與欄位映射整備。
+- **Updates**:
+  - 將批量載入流程統一透過查表更新進場／出場參數，缺少映射時立即丟出錯誤，並同步檢查 DOM 欄位是否存在。
+  - 取消出場策略回退預設行為，選項缺漏時改以錯誤提示需補齊映射；載入完成後對拍 `getBacktestParams` 確認策略、參數與風控一致。
+  - 重構載入順序與事件觸發，先同步設定 buy/sell 與風控，再一次觸發變更事件與自訂事件記錄，並整合進度條 show/hide 重複函式。
+  - 新增版本代碼 `BATCH_LOAD_SYNC_PATCH` 並於載入成功時記錄，協助追蹤批量載入修補狀態。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
