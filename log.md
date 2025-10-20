@@ -1,5 +1,15 @@
 
 
+## 2025-10-22 — Patch LB-BATCH-CACHE-20251022A
+- **Issue recap**: Walk-Forward 自動優化後立即切換批量優化，仍可能沿用失效的全域快取或覆寫視窗，導致最佳參數無法重現；缺乏可追蹤的快取決策日誌。
+- **Fix**:
+  - `js/batch-optimization.js` 改為優先回填 `cachedDataStore` 內與請求相符的資料集，僅在覆蓋檢查通過時才傳給 Worker，若範圍不足會強制重抓。
+  - `resolveWorkerCachePayload` 新增資料範圍摘要、來源標記與需求記錄，並共用 `logBatchCacheDecision` 在單參數優化與組合回測時輸出 debug log。
+- **Diagnostics**:
+  - 切換「滾動測試自動優化 → 批量優化」情境，確認 console 會列印 `required`、`summary`、`source`，對照是否命中視窗或全域快取。
+  - 觀察當覆寫資料不足時是否出現 `cachedDataOverride skipped` 訊息並改為重新抓取。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-18 — Patch LB-BATCH-CACHE-20251018A
 - **Scope**: 批量優化快取覆用檢查與共用載入流程。
 - **Updates**:
