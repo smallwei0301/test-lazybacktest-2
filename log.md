@@ -1233,3 +1233,10 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-10-30 — Patch LB-ROLLING-TEST-20251028B & LB-BATCH-OPT-20250930B
+- **Issue recap**: OOS 品質卡片需要在指標達標時直接給予滿分，且批量優化的快速回測未完全對齊單次優化所用的資料暖身設定，導致結果不一致。
+- **Fix**:
+  - `js/rolling-test.js` 調整 OOS 品質指標累積邏輯，只要指標達到使用者設定的最低門檻即給予 1 分，並更新模組版號至 `LB-ROLLING-TEST-20251028B`。
+  - `js/batch-optimization.js` 新增批量優化快取中繼資料建構函式，將快速回測訊息帶入 `dataStartDate`、`effectiveStartDate`、`lookbackDays` 與快取診斷，確保與單次優化使用相同暖身期間與日期設定，並更新補丁代碼至 `LB-BATCH-OPT-20250930B`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

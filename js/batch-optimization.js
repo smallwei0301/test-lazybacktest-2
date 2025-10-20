@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2 ---
+// Patch Tag: LB-BATCH-OPT-20250930B
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -136,6 +136,45 @@ function enrichParamsWithLookback(params) {
         dataStartDate,
         lookbackDays,
     };
+}
+
+function buildBatchCachedMeta() {
+    try {
+        const dataDebug = (typeof lastOverallResult === 'object' && lastOverallResult)
+            ? lastOverallResult.dataDebug || {}
+            : {};
+        const coverage = typeof computeCoverageFromRows === 'function' && Array.isArray(cachedStockData)
+            ? computeCoverageFromRows(cachedStockData)
+            : null;
+        const meta = {
+            summary: dataDebug.summary || null,
+            adjustments: Array.isArray(dataDebug.adjustments) ? dataDebug.adjustments : [],
+            debugSteps: Array.isArray(dataDebug.debugSteps) ? dataDebug.debugSteps : [],
+            adjustmentFallbackApplied: Boolean(dataDebug.adjustmentFallbackApplied),
+            priceSource: dataDebug.priceSource || null,
+            dataSource: dataDebug.dataSource || null,
+            splitDiagnostics: dataDebug.splitDiagnostics || null,
+            diagnostics: typeof lastDatasetDiagnostics === 'object' ? lastDatasetDiagnostics : null,
+            coverage,
+            fetchRange: dataDebug.fetchRange || null,
+        };
+        if (dataDebug.adjustmentFallbackInfo && typeof dataDebug.adjustmentFallbackInfo === 'object') {
+            meta.adjustmentFallbackInfo = dataDebug.adjustmentFallbackInfo;
+        }
+        if (dataDebug.finmindStatus && typeof dataDebug.finmindStatus === 'object') {
+            meta.finmindStatus = dataDebug.finmindStatus;
+        }
+        if (Array.isArray(dataDebug.adjustmentDebugLog)) {
+            meta.adjustmentDebugLog = dataDebug.adjustmentDebugLog;
+        }
+        if (Array.isArray(dataDebug.adjustmentChecks)) {
+            meta.adjustmentChecks = dataDebug.adjustmentChecks;
+        }
+        return meta;
+    } catch (error) {
+        console.warn('[Batch Optimization] buildBatchCachedMeta failed:', error);
+        return null;
+    }
 }
 
 function resetBatchWorkerStatus() {
@@ -4653,14 +4692,28 @@ function performSingleBacktestFast(params) {
             };
             
             // 發送回測請求 - 使用緩存數據提高速度
-            const preparedParams = enrichParamsWithLookback(params);
-            worker.postMessage({
+            const preparedParams = enrichParamsWithLookback({ ...params });
+            const dataStartDate = preparedParams.dataStartDate || preparedParams.startDate || null;
+            const effectiveStartDate = preparedParams.effectiveStartDate || preparedParams.startDate || null;
+            const lookbackDays = Number.isFinite(preparedParams.lookbackDays) ? preparedParams.lookbackDays : null;
+            const hasCachedData = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+            const message = {
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
-            });
-            
+                useCachedData: hasCachedData,
+                dataStartDate,
+                effectiveStartDate,
+                lookbackDays,
+            };
+            if (hasCachedData) {
+                message.cachedData = cachedStockData;
+                const cachedMeta = buildBatchCachedMeta();
+                if (cachedMeta) {
+                    message.cachedMeta = cachedMeta;
+                }
+            }
+            worker.postMessage(message);
+
         } catch (error) {
             console.error('[Cross Optimization] Error in performSingleBacktestFast:', error);
             resolve(null);
