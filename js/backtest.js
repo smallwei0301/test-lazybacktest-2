@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-WORKER-CACHE-20260715A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -7570,16 +7571,52 @@ function runOptimizationInternal(optimizeType) {
     optRange = config.range; 
     console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
     
-    const curSettings={
+    let curSettings={
         stockNo: params.stockNo,
         startDate: params.startDate,
         endDate: params.endDate,
         market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
         adjustedPrice: Boolean(params.adjustedPrice),
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+        splitAdjustment: Boolean(params.splitAdjustment),
+        dataStartDate: params.dataStartDate || params.startDate,
+        effectiveStartDate: params.effectiveStartDate || params.startDate,
+        lookbackDays: params.lookbackDays,
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
+
+    let cachePayload = null;
+    if (typeof workerDatasetHelpers === 'object' && workerDatasetHelpers && typeof workerDatasetHelpers.buildWorkerDatasetSettings === 'function') {
+        const datasetSettings = workerDatasetHelpers.buildWorkerDatasetSettings(params, {
+            startDate: params.startDate,
+            endDate: params.endDate,
+            dataStartDate: params.dataStartDate || params.startDate,
+            effectiveStartDate: params.effectiveStartDate || params.startDate,
+            market: curSettings.market,
+            priceMode: curSettings.priceMode,
+            adjustedPrice: curSettings.adjustedPrice,
+            splitAdjustment: curSettings.splitAdjustment,
+            lookbackDays: params.lookbackDays,
+        });
+        cachePayload = workerDatasetHelpers.resolveWorkerCachePayload(datasetSettings, { includeMeta: true });
+        if (cachePayload && cachePayload.settings) {
+            curSettings = { ...cachePayload.settings };
+            curSettings.splitAdjustment = datasetSettings.splitAdjustment;
+        } else {
+            curSettings = { ...datasetSettings };
+        }
+    } else {
+        const fallbackUseCache = typeof needsDataFetch === 'function'
+            ? !needsDataFetch(curSettings)
+            : false;
+        cachePayload = {
+            useCachedData: fallbackUseCache,
+            cachedData: fallbackUseCache && Array.isArray(cachedStockData) ? cachedStockData : null,
+            cachedMeta: null,
+        };
+    }
+
+    const useCache = Boolean(cachePayload?.useCachedData);
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`;
     
     // 先清除之前的結果，但不隱藏優化進度
     clearPreviousResults(); 
@@ -7610,27 +7647,14 @@ function runOptimizationInternal(optimizeType) {
             useCachedData:useCache 
         }; 
         
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData=cachedStockData;
-            const cacheEntry = ensureDatasetCacheEntryFresh(
-                buildCacheKey(curSettings),
-                cachedDataStore.get(buildCacheKey(curSettings)),
-                curSettings.market,
-            );
-                if (cacheEntry) {
-                    workerMsg.cachedMeta = {
-                        summary: cacheEntry.summary || null,
-                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                        priceSource: cacheEntry.priceSource || null,
-                        dataSource: cacheEntry.dataSource || null,
-                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
-                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
-                        finmindStatus: cacheEntry.finmindStatus || null,
-                    };
-                }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
+        if(useCache && cachePayload?.cachedData) {
+            workerMsg.cachedData = cachePayload.cachedData;
+            if (cachePayload.cachedMeta) {
+                workerMsg.cachedMeta = cachePayload.cachedMeta;
+            }
+        } else {
+            console.log(`[Main] Fetching data for ${optimizeType} opt.`);
+        }
         
         optimizationWorker.postMessage(workerMsg); 
         

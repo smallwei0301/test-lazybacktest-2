@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-BATCH-CACHE-20260715A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -135,6 +136,39 @@ function enrichParamsWithLookback(params) {
         effectiveStartDate,
         dataStartDate,
         lookbackDays,
+    };
+}
+
+function buildCacheSettingsFromParams(params = {}) {
+    if (!params || typeof params !== 'object') return null;
+    const helpers = (typeof workerDatasetHelpers === 'object' && workerDatasetHelpers);
+    if (helpers && typeof helpers.buildWorkerDatasetSettings === 'function') {
+        return helpers.buildWorkerDatasetSettings(params, {
+            startDate: params.startDate,
+            endDate: params.endDate,
+            dataStartDate: params.dataStartDate || params.startDate,
+            effectiveStartDate: params.effectiveStartDate || params.startDate,
+            market: params.market || params.marketType || currentMarket || 'TWSE',
+            priceMode: params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw',
+            adjustedPrice: params.adjustedPrice,
+            splitAdjustment: params.splitAdjustment,
+            lookbackDays: params.lookbackDays,
+        });
+    }
+
+    const market = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
+    return {
+        stockNo: params.stockNo,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        dataStartDate: params.dataStartDate || params.startDate,
+        effectiveStartDate: params.effectiveStartDate || params.startDate,
+        market,
+        marketType: market,
+        adjustedPrice: Boolean(params.adjustedPrice),
+        splitAdjustment: Boolean(params.splitAdjustment),
+        priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+        lookbackDays: params.lookbackDays,
     };
 }
 
@@ -1329,13 +1363,55 @@ async function executeBacktestForCombination(combination, options = {}) {
             // 創建臨時worker執行回測
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
+                const preparedParams = enrichParamsWithLookback(params);
 
-                const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-                    ? options.cachedDataOverride
-                    : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+                const cacheHelpers = (typeof workerDatasetHelpers === 'object' && workerDatasetHelpers);
+                const datasetSettings = buildCacheSettingsFromParams(preparedParams) || preparedParams;
+                let cachePayload = null;
+                if (cacheHelpers && typeof cacheHelpers.resolveWorkerCachePayload === 'function') {
+                    cachePayload = cacheHelpers.resolveWorkerCachePayload(datasetSettings, {
+                        overrideData: options?.cachedDataOverride,
+                        includeMeta: false,
+                    });
+                } else {
+                    const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                        ? options.cachedDataOverride
+                        : null;
+                    let fallbackData = overrideData
+                        || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+                    let fallbackUseCache = Array.isArray(overrideData) && overrideData.length > 0;
+                    if (!fallbackUseCache && Array.isArray(fallbackData) && fallbackData.length > 0) {
+                        if (typeof needsDataFetch === 'function') {
+                            fallbackUseCache = !needsDataFetch({ ...(datasetSettings || {}) });
+                        } else if (typeof buildCacheKey === 'function' && typeof lastFetchSettings === 'object' && lastFetchSettings) {
+                            try {
+                                const currentKey = buildCacheKey(datasetSettings || {});
+                                const lastKey = buildCacheKey(lastFetchSettings);
+                                fallbackUseCache = Boolean(currentKey && lastKey && currentKey === lastKey);
+                            } catch (error) {
+                                console.warn('[Batch Optimization] executeBacktestForCombination 快取檢查失敗，改為重新抓取。', error);
+                                fallbackUseCache = false;
+                            }
+                        }
+                        if (!fallbackUseCache) {
+                            fallbackData = null;
+                        }
+                    }
+                    cachePayload = {
+                        useCachedData: fallbackUseCache,
+                        cachedData: fallbackData,
+                    };
+                }
+
+                const useCachedData = Boolean(cachePayload?.useCachedData);
+                const cachedDataForWorker = useCachedData ? cachePayload.cachedData : null;
+                if (!useCachedData && !options?.cachedDataOverride && Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+                    console.debug('[Batch Optimization] 跳過不相容的快取資料，交由 Worker 重新抓取回測區間。', {
+                        comboIndex: combination?.index,
+                        startDate: datasetSettings?.dataStartDate || datasetSettings?.startDate,
+                        endDate: datasetSettings?.endDate,
+                    });
+                }
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
@@ -1363,13 +1439,16 @@ async function executeBacktestForCombination(combination, options = {}) {
                     resolve(null);
                 };
 
-                const preparedParams = enrichParamsWithLookback(params);
-                tempWorker.postMessage({
+                const workerMessage = {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
-                });
+                };
+                if (Array.isArray(cachedDataForWorker) && cachedDataForWorker.length > 0) {
+                    workerMessage.cachedData = cachedDataForWorker;
+                }
+
+                tempWorker.postMessage(workerMessage);
 
                 // 設定超時
                 setTimeout(() => {
@@ -1581,13 +1660,55 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         }
 
         const optimizeWorker = new Worker(workerUrl);
+        const preparedParams = enrichParamsWithLookback(params);
 
-        const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-            ? options.cachedDataOverride
-            : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const cacheHelpers = (typeof workerDatasetHelpers === 'object' && workerDatasetHelpers);
+        const datasetSettings = buildCacheSettingsFromParams(preparedParams) || preparedParams;
+        let cachePayload = null;
+        if (cacheHelpers && typeof cacheHelpers.resolveWorkerCachePayload === 'function') {
+            cachePayload = cacheHelpers.resolveWorkerCachePayload(datasetSettings, {
+                overrideData: options?.cachedDataOverride,
+                includeMeta: false,
+            });
+        } else {
+            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : null;
+            let fallbackData = overrideData
+                || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+            let fallbackUseCache = Array.isArray(overrideData) && overrideData.length > 0;
+            if (!fallbackUseCache && Array.isArray(fallbackData) && fallbackData.length > 0) {
+                if (typeof needsDataFetch === 'function') {
+                    fallbackUseCache = !needsDataFetch({ ...(datasetSettings || {}) });
+                } else if (typeof buildCacheKey === 'function' && typeof lastFetchSettings === 'object' && lastFetchSettings) {
+                    try {
+                        const currentKey = buildCacheKey(datasetSettings || {});
+                        const lastKey = buildCacheKey(lastFetchSettings);
+                        fallbackUseCache = Boolean(currentKey && lastKey && currentKey === lastKey);
+                    } catch (error) {
+                        console.warn('[Batch Optimization] 無法比對快取 key，改為重新抓取。', error);
+                        fallbackUseCache = false;
+                    }
+                }
+                if (!fallbackUseCache) {
+                    fallbackData = null;
+                }
+            }
+            cachePayload = {
+                useCachedData: fallbackUseCache,
+                cachedData: fallbackData,
+            };
+        }
+
+        const useCachedData = Boolean(cachePayload?.useCachedData);
+        const cachedDataForWorker = useCachedData ? cachePayload.cachedData : null;
+        if (!useCachedData && !options?.cachedDataOverride && Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+            console.debug('[Batch Optimization] 既有快取與需求區間不符，改為由 Worker 重新抓取資料。', {
+                optimizeParam: optimizeTarget?.name,
+                startDate: datasetSettings?.dataStartDate || datasetSettings?.startDate,
+                endDate: datasetSettings?.endDate,
+            });
+        }
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1659,19 +1780,21 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         };
         
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
-        
-        const preparedParams = enrichParamsWithLookback(params);
 
         // 發送優化任務
-        optimizeWorker.postMessage({
+        const workerMessage = {
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
-        });
+        };
+        if (Array.isArray(cachedDataForWorker) && cachedDataForWorker.length > 0) {
+            workerMessage.cachedData = cachedDataForWorker;
+        }
+
+        optimizeWorker.postMessage(workerMessage);
         
         // 設定超時
         setTimeout(() => {
