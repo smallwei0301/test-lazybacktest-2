@@ -1,3 +1,12 @@
+## 2026-07-11 — Patch LB-CACHE-GUARD-20250623A
+- **Scope**: 批量優化與單次優化共用資料快取檢查，防止沿用過期範圍。
+- **Updates**:
+  - `js/main.js` 新增 `resolveCachedDatasetPayload` 與快取需求正規化工具，整合 `needsDataFetch`、`buildCacheKey`、`lastFetchSettings` 與 coverage 檢查，統一判斷快取是否可沿用並回傳 `cachedMeta`。
+  - `js/backtest.js`、`js/batch-optimization.js` 透過共用 helper 傳遞 `cachedData`／`cachedMeta`，若範圍不符則自動停用舊快取並記錄原因，避免批量優化在更換日期區間後仍沿用舊資料。
+  - 批量優化在單參數搜尋與組合回測時皆改用 helper 結果，必要時會記錄 bypass 原因並讓 Worker 自行重抓資料。
+- **Testing / Verification**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+  - 手動 QA 計畫：於主頁變更回測起訖日後直接執行批量優化，確認優化結果與立即回測、單次優化一致，並於瀏覽器 console 無錯誤（待 Netlify/Staging 實測）。
 
 
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
