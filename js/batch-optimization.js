@@ -1,5 +1,9 @@
+import { runSPSA } from './spsa-runner.js';
+import { runCEM } from './cem-runner.js';
+
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-STAGE4-REFINE-20250930A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -3763,6 +3767,8 @@ function loadBatchStrategy(index) {
     switchTab('optimization');
 }
 
+window.loadBatchStrategy = loadBatchStrategy;
+
 // 添加測試按鈕（開發用）
 function addTestButton() {
     const batchOptimizationDiv = document.querySelector('#batchOptimization');
@@ -4078,14 +4084,253 @@ function hideBatchProgress() {
     }
 }
 
+// --- Stage 4 Local Refinement helpers ---
+const STAGE4_METRIC_KEYS = [
+    'annualizedReturn',
+    'sharpeRatio',
+    'sortinoRatio',
+    'maxDrawdown',
+    'totalReturn',
+    'winRate',
+    'profitFactor',
+    'tradesCount',
+    'totalTrades',
+    'tradeCount'
+];
+
+function cloneStage4Object(source) {
+    if (!source || typeof source !== 'object') return {};
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(source);
+        } catch (error) {
+            console.warn('[Stage4] structuredClone failed, fallback to JSON:', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(source));
+    } catch (error) {
+        console.warn('[Stage4] JSON clone failed, returning shallow copy:', error);
+        return { ...source };
+    }
+}
+
+function normaliseForKey(value) {
+    if (value === null || value === undefined) return value;
+    if (Array.isArray(value)) {
+        return value.map((item) => normaliseForKey(item));
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value)
+            .filter(([key]) => key !== undefined)
+            .sort(([a], [b]) => a.localeCompare(b));
+        return entries.map(([key, val]) => [key, normaliseForKey(val)]);
+    }
+    return value;
+}
+
+export function paramKey(params) {
+    return JSON.stringify(normaliseForKey(params));
+}
+
+function copyStage4Metrics(target, source) {
+    STAGE4_METRIC_KEYS.forEach((key) => {
+        if (source && source[key] !== undefined) {
+            target[key] = source[key];
+        }
+    });
+}
+
+function buildStage4Row(method, currentBest, refinedParams, metrics, score) {
+    const buyStrategy = refinedParams.entryStrategy || currentBest.buyStrategy;
+    const sellStrategy = refinedParams.exitStrategy || currentBest.sellStrategy;
+    const buyParams = cloneStage4Object(refinedParams.entryParams || currentBest.buyParams || {});
+    const sellParams = cloneStage4Object(refinedParams.exitParams || currentBest.sellParams || {});
+    const riskSource = refinedParams.riskParams || refinedParams.risk || currentBest.riskManagement || {};
+    const riskManagement = (riskSource && (riskSource.stopLoss !== undefined || riskSource.takeProfit !== undefined))
+        ? cloneStage4Object(riskSource)
+        : (currentBest.riskManagement ? cloneStage4Object(currentBest.riskManagement) : null);
+
+    const row = {
+        buyStrategy,
+        sellStrategy,
+        buyParams,
+        sellParams,
+        riskManagement,
+        params: cloneStage4Object(refinedParams),
+        metrics: cloneStage4Object(metrics),
+        score: Number.isFinite(score) ? score : (metrics && Number.isFinite(metrics.score) ? metrics.score : -Infinity),
+        source: `stage4-${method}`,
+        createdAt: Date.now(),
+        optimizationType: 'stage4',
+        crossOptimization: false
+    };
+
+    copyStage4Metrics(row, metrics);
+
+    if (metrics && metrics.usedStopLoss !== undefined) {
+        row.usedStopLoss = metrics.usedStopLoss;
+    }
+    if (metrics && metrics.usedTakeProfit !== undefined) {
+        row.usedTakeProfit = metrics.usedTakeProfit;
+    }
+
+    return row;
+}
+
+function upsertStage4Row(row) {
+    if (!row || !row.params) return 'ignored';
+    const key = paramKey(row.params);
+    let status = 'inserted';
+
+    const existingIndex = batchOptimizationResults.findIndex((existing) => {
+        if (!existing || !existing.params) return false;
+        return paramKey(existing.params) === key;
+    });
+
+    if (existingIndex >= 0) {
+        const existingScore = Number.isFinite(batchOptimizationResults[existingIndex].score)
+            ? batchOptimizationResults[existingIndex].score
+            : -Infinity;
+        if (row.score > existingScore) {
+            batchOptimizationResults[existingIndex] = row;
+            status = 'updated';
+        } else {
+            status = 'ignored';
+        }
+    } else {
+        batchOptimizationResults.unshift(row);
+    }
+
+    if (status !== 'ignored') {
+        try {
+            sortBatchResults();
+            renderBatchResultsTable();
+        } catch (error) {
+            console.error('[Stage4] Failed to refresh results table:', error);
+        }
+    }
+
+    return status;
+}
+
+function ensureArrayResult(result) {
+    if (Array.isArray(result)) return result;
+    if (result === undefined || result === null) return [];
+    return [result];
+}
+
+function wrapEvaluator(evaluator) {
+    return async (population) => {
+        const payload = Array.isArray(population) ? population : [population];
+        const output = await evaluator(payload);
+        return ensureArrayResult(output);
+    };
+}
+
+function wrapObjective(objective) {
+    if (typeof objective === 'function') return objective;
+    return (record) => {
+        if (!record || typeof record !== 'object') return -Infinity;
+        if (Number.isFinite(record.score)) return record.score;
+        if (Number.isFinite(record.annualizedReturn)) return record.annualizedReturn;
+        return -Infinity;
+    };
+}
+
+function mergeMetrics(record, fallbackScore) {
+    if (!record || typeof record !== 'object') return { score: fallbackScore };
+    if (!Number.isFinite(record.score) && Number.isFinite(fallbackScore)) {
+        record.score = fallbackScore;
+    }
+    return record;
+}
+
+export async function runStage4(method, ctx) {
+    if (!ctx || typeof ctx !== 'object') throw new Error('Stage4: context missing');
+    const {
+        currentBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress,
+        options = {}
+    } = ctx;
+
+    if (!currentBest || !currentBest.params) {
+        throw new Error('Stage4: currentBest missing');
+    }
+    if (!bounds || typeof bounds !== 'object') {
+        throw new Error('Stage4: bounds missing');
+    }
+    if (typeof encodeVec !== 'function' || typeof decodeVec !== 'function') {
+        throw new Error('Stage4: encode/decode missing');
+    }
+    if (typeof evaluator !== 'function') {
+        throw new Error('Stage4: evaluator missing');
+    }
+
+    const start = cloneStage4Object(currentBest.params);
+    const objectiveFn = wrapObjective(objective);
+    const evaluatorFn = wrapEvaluator(evaluator);
+
+    let refined = null;
+    const runnerOptions = {
+        start,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator: evaluatorFn,
+        objective: objectiveFn,
+        onProgress: (payload) => uiProgress?.({ stage4: method, ...payload }),
+        ...options
+    };
+
+    if (method === 'spsa') {
+        refined = await runSPSA(runnerOptions);
+    } else if (method === 'cem') {
+        refined = await runCEM(runnerOptions);
+    } else {
+        throw new Error('Stage4: unknown method');
+    }
+
+    if (!refined || !refined.bestParams) {
+        throw new Error('Stage4: refinement failed to return params');
+    }
+
+    let metrics = refined.bestEvaluation;
+    if (!metrics) {
+        const evaluation = await evaluatorFn([refined.bestParams]);
+        metrics = evaluation[0];
+    }
+
+    metrics = mergeMetrics(cloneStage4Object(metrics), refined.bestScore);
+
+    const row = buildStage4Row(method, currentBest, refined.bestParams, metrics, refined.bestScore);
+    const action = upsertStage4Row(row);
+    Object.defineProperty(row, '__stage4Action', { value: action, enumerable: false });
+
+    return row;
+}
+
 // 導出函數供外部使用
 window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    getResults: () => batchOptimizationResults,
+    getConfig: () => ({ ...batchOptimizationConfig }),
+    runStage4,
+    paramKey,
+    performSingleBacktestFast
 };
+
+export { runStage4, paramKey, performSingleBacktestFast };
+
 
 // 測試風險管理優化功能
 function testRiskManagementOptimization() {

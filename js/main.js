@@ -46,6 +46,11 @@ let preOptimizationResult = null; // 儲存優化前的回測結果，用於對�
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
+const stage4State = {
+    running: false,
+    modulePromise: null
+};
+
 function initDates() { const eD=new Date(); const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-5); document.getElementById('endDate').value=formatDate(eD); document.getElementById('startDate').value=formatDate(sD); document.getElementById('recentYears').value=5; }
 function applyRecentYears() { const nYI=document.getElementById('recentYears'); const eDI=document.getElementById('endDate'); const sDI=document.getElementById('startDate'); const nY=parseInt(nYI.value); const eDS=eDI.value; if(isNaN(nY)||nY<1){showError("請輸入有效年數");return;} if(!eDS){showError("請先選結束日期");return;} const eD=new Date(eDS); if(isNaN(eD)){showError("結束日期格式無效");return;} const sD=new Date(eD); sD.setFullYear(eD.getFullYear()-nY); const eY=1992; if(sD.getFullYear()<eY){sD.setFullYear(eY,0,1); const aY=eD.getFullYear()-eY; nYI.value=aY; showInfo(`資料最早至 ${eY} 年，已調整`);} else {showInfo(`已設定開始日期 ${formatDate(sD)}`);} sDI.value=formatDate(sD); }
 function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
@@ -2770,6 +2775,412 @@ function initTabs() {
 }
 
 // --- 新增：初始化批量優化功能 ---
+function cloneStage4Value(value) {
+    if (value === null || value === undefined) return value;
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            console.warn('[Stage4] structuredClone failed, fallback to JSON clone:', error);
+        }
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            console.warn('[Stage4] JSON clone failed, returning shallow copy:', error);
+            return Array.isArray(value) ? [...value] : { ...value };
+        }
+    }
+    return value;
+}
+
+function loadStage4Module() {
+    if (!stage4State.modulePromise) {
+        stage4State.modulePromise = import('./batch-optimization.js');
+    }
+    return stage4State.modulePromise;
+}
+
+function updateStage4ProgressUI(statusEl, bestEl, progressEl, payload, method) {
+    if (!statusEl || !bestEl || !progressEl) return;
+    progressEl.classList.remove('hidden');
+    if (payload?.step) {
+        statusEl.textContent = `SPSA 進度：第 ${payload.step} 步`;
+    } else if (payload?.iter) {
+        statusEl.textContent = `CEM 進度：第 ${payload.iter} 輪`;
+    } else {
+        statusEl.textContent = method === 'cem' ? 'CEM 執行中…' : 'SPSA 執行中…';
+    }
+    if (Number.isFinite(payload?.bestScore)) {
+        bestEl.textContent = `目前最佳分數：${payload.bestScore.toFixed(4)}`;
+    }
+}
+
+function resetStage4Progress(statusEl, bestEl, progressEl) {
+    if (statusEl) statusEl.textContent = '準備中…';
+    if (bestEl) bestEl.textContent = '';
+    if (progressEl) progressEl.classList.add('hidden');
+}
+
+function computeRowScore(row, metricKey) {
+    if (!row) return -Infinity;
+    const preferLower = metricKey === 'maxDrawdown';
+    const metricValue = row[metricKey] ?? row?.metrics?.[metricKey];
+    if (!Number.isFinite(metricValue)) {
+        if (preferLower) {
+            return Number.isFinite(row.score) ? row.score : -Infinity;
+        }
+        return Number.isFinite(row.score) ? row.score : -Infinity;
+    }
+    const normalized = preferLower ? -Math.abs(metricValue) : metricValue;
+    return Number.isFinite(normalized) ? normalized : -Infinity;
+}
+
+function pickCurrentBestResult(results, metricKey) {
+    let bestRow = null;
+    let bestScore = -Infinity;
+    results.forEach((row) => {
+        const score = computeRowScore(row, metricKey);
+        if (score > bestScore) {
+            bestScore = score;
+            bestRow = row;
+        }
+    });
+    return { row: bestRow, score: bestScore };
+}
+
+function buildStage4CurrentBest(row, score) {
+    const params = row.params ? cloneStage4Value(row.params) : {
+        entryStrategy: row.buyStrategy,
+        exitStrategy: row.sellStrategy,
+        entryParams: cloneStage4Value(row.buyParams || {}),
+        exitParams: cloneStage4Value(row.sellParams || {}),
+        riskParams: {}
+    };
+
+    if (!params.riskParams || typeof params.riskParams !== 'object') {
+        params.riskParams = {};
+    }
+
+    const riskSource = row.riskManagement || {};
+    const usedStop = Number.isFinite(row.usedStopLoss) ? row.usedStopLoss : riskSource.stopLoss;
+    const usedTake = Number.isFinite(row.usedTakeProfit) ? row.usedTakeProfit : riskSource.takeProfit;
+    if (Number.isFinite(usedStop)) params.riskParams.stopLoss = usedStop;
+    if (Number.isFinite(usedTake)) params.riskParams.takeProfit = usedTake;
+    if (!Object.keys(params.riskParams).length) delete params.riskParams;
+
+    return {
+        ...row,
+        params,
+        score: Number.isFinite(score) ? score : (Number.isFinite(row.score) ? row.score : -Infinity)
+    };
+}
+
+function addStage4Bound(bounds, prefix, target) {
+    if (!target || !target.range) return;
+    const key = `${prefix}.${target.name}`;
+    const range = target.range;
+    const step = Number.isFinite(range.step) ? range.step : 1;
+    const min = Number(range.from);
+    const max = Number(range.to);
+    bounds[key] = {
+        min,
+        max,
+        step,
+        type: Number.isInteger(step) && Number.isInteger(min) && Number.isInteger(max) ? 'int' : 'float'
+    };
+}
+
+function applyStrategyConstraint(strategyKey, params) {
+    if (!params || typeof params !== 'object') return;
+    const smaSet = new Set(['ma_cross', 'ma_cross_exit', 'short_ma_cross', 'cover_ma_cross']);
+    const macdSet = new Set(['macd_cross', 'macd_cross_exit', 'short_macd_cross', 'cover_macd_cross']);
+    if (smaSet.has(strategyKey)) {
+        if (Number.isFinite(params.shortPeriod) && Number.isFinite(params.longPeriod)) {
+            const minGap = 1;
+            if (params.shortPeriod >= params.longPeriod) {
+                params.longPeriod = params.shortPeriod + minGap;
+            }
+        }
+    }
+    if (macdSet.has(strategyKey)) {
+        if (Number.isFinite(params.shortPeriod) && Number.isFinite(params.longPeriod)) {
+            if (params.shortPeriod >= params.longPeriod) {
+                params.longPeriod = params.shortPeriod + 1;
+            }
+        }
+    }
+}
+
+function buildStage4Bounds(currentBest) {
+    const bounds = {};
+    const entryStrategy = currentBest.params.entryStrategy;
+    const exitStrategy = currentBest.params.exitStrategy;
+    const entryDesc = strategyDescriptions?.[entryStrategy];
+    const exitDesc = strategyDescriptions?.[exitStrategy];
+
+    if (entryDesc?.optimizeTargets) {
+        entryDesc.optimizeTargets.forEach((target) => addStage4Bound(bounds, 'entry', target));
+    }
+    if (exitDesc?.optimizeTargets) {
+        exitDesc.optimizeTargets.forEach((target) => addStage4Bound(bounds, 'exit', target));
+    }
+
+    const riskParams = currentBest.params.riskParams || {};
+    const hasRisk = Object.keys(riskParams).length > 0;
+    if (hasRisk && globalOptimizeTargets) {
+        if (riskParams.stopLoss !== undefined && globalOptimizeTargets.stopLoss) {
+            bounds['risk.stopLoss'] = {
+                min: globalOptimizeTargets.stopLoss.range.from,
+                max: globalOptimizeTargets.stopLoss.range.to,
+                step: globalOptimizeTargets.stopLoss.range.step,
+                type: 'float'
+            };
+        }
+        if (riskParams.takeProfit !== undefined && globalOptimizeTargets.takeProfit) {
+            bounds['risk.takeProfit'] = {
+                min: globalOptimizeTargets.takeProfit.range.from,
+                max: globalOptimizeTargets.takeProfit.range.to,
+                step: globalOptimizeTargets.takeProfit.range.step,
+                type: 'float'
+            };
+        }
+    }
+
+    bounds.constraintFix = (candidate) => {
+        if (!candidate || typeof candidate !== 'object') return candidate;
+        if (candidate.entryParams) {
+            applyStrategyConstraint(entryStrategy, candidate.entryParams);
+        }
+        if (candidate.exitParams) {
+            applyStrategyConstraint(exitStrategy, candidate.exitParams);
+        }
+        if (candidate.riskParams) {
+            Object.entries(candidate.riskParams).forEach(([key, value]) => {
+                const bound = bounds[`risk.${key}`];
+                if (bound) {
+                    const min = Number(bound.min ?? 0);
+                    const max = Number(bound.max ?? 0);
+                    if (!Number.isFinite(value)) {
+                        candidate.riskParams[key] = min;
+                    } else {
+                        candidate.riskParams[key] = Math.min(max, Math.max(min, value));
+                    }
+                }
+            });
+        }
+        return candidate;
+    };
+
+    return bounds;
+}
+
+function getValueAtPath(source, path) {
+    const parts = path.split('.');
+    let cursor = source;
+    for (const part of parts) {
+        if (cursor === null || cursor === undefined) return undefined;
+        cursor = cursor[part];
+    }
+    return cursor;
+}
+
+function setValueAtPath(target, path, value) {
+    const parts = path.split('.');
+    let cursor = target;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const key = parts[i];
+        if (!cursor[key] || typeof cursor[key] !== 'object') {
+            cursor[key] = {};
+        }
+        cursor = cursor[key];
+    }
+    cursor[parts[parts.length - 1]] = value;
+}
+
+function createStage4EncodeDecode(bounds, template) {
+    const keys = Object.keys(bounds).filter((key) => key !== 'constraintFix');
+    return {
+        encodeVec: (chrom) => keys.map((key) => getValueAtPath(chrom, key)),
+        decodeVec: (vector) => {
+            const clone = cloneStage4Value(template);
+            vector.forEach((value, index) => {
+                setValueAtPath(clone, keys[index], value);
+            });
+            return clone;
+        }
+    };
+}
+
+function buildStage4Objective(metricKey) {
+    const preferLower = metricKey === 'maxDrawdown';
+    return (record) => {
+        if (!record || typeof record !== 'object') return -Infinity;
+        const metricValue = record[metricKey] ?? record.metrics?.[metricKey];
+        if (!Number.isFinite(metricValue)) {
+            return Number.isFinite(record.score) ? record.score : -Infinity;
+        }
+        return preferLower ? -Math.abs(metricValue) : metricValue;
+    };
+}
+
+function buildStage4BacktestParams(candidate) {
+    const params = cloneStage4Value(candidate);
+    const base = getBacktestParams();
+    const mapFn = window.batchOptimization?.getWorkerStrategyName;
+    base.entryStrategy = typeof mapFn === 'function' ? mapFn(params.entryStrategy) : params.entryStrategy;
+    base.exitStrategy = typeof mapFn === 'function' ? mapFn(params.exitStrategy) : params.exitStrategy;
+    base.entryParams = cloneStage4Value(params.entryParams || {});
+    base.exitParams = cloneStage4Value(params.exitParams || {});
+    if (params.riskParams) {
+        if (Number.isFinite(params.riskParams.stopLoss)) {
+            base.stopLoss = params.riskParams.stopLoss;
+        }
+        if (Number.isFinite(params.riskParams.takeProfit)) {
+            base.takeProfit = params.riskParams.takeProfit;
+        }
+    }
+    return base;
+}
+
+function buildStage4Evaluator(moduleRef) {
+    return async (population) => {
+        const payload = Array.isArray(population) ? population : [population];
+        const results = [];
+        for (const candidate of payload) {
+            try {
+                const params = buildStage4BacktestParams(candidate);
+                const evaluation = await moduleRef.performSingleBacktestFast(params);
+                results.push(evaluation);
+            } catch (error) {
+                console.error('[Stage4] 評估候選時失敗:', error);
+                results.push(null);
+            }
+        }
+        return results;
+    };
+}
+
+function readStage4Options(method) {
+    const options = {};
+    if (method === 'spsa') {
+        const steps = parseInt(document.getElementById('stage4-spsa-steps')?.value, 10);
+        if (Number.isFinite(steps) && steps > 0) {
+            options.steps = steps;
+        }
+    } else if (method === 'cem') {
+        const iters = parseInt(document.getElementById('stage4-cem-iters')?.value, 10);
+        const popSize = parseInt(document.getElementById('stage4-cem-pop')?.value, 10);
+        const eliteRatio = parseFloat(document.getElementById('stage4-cem-elite')?.value);
+        const initSigma = parseFloat(document.getElementById('stage4-cem-sigma')?.value);
+        if (Number.isFinite(iters) && iters > 0) options.iters = iters;
+        if (Number.isFinite(popSize) && popSize > 0) options.popSize = popSize;
+        if (Number.isFinite(eliteRatio) && eliteRatio > 0 && eliteRatio < 1) options.eliteRatio = eliteRatio;
+        if (Number.isFinite(initSigma) && initSigma > 0) options.initSigma = initSigma;
+    }
+    return options;
+}
+
+function ensureStage4ResultsAvailable() {
+    if (!window.batchOptimization || typeof window.batchOptimization.getResults !== 'function') return [];
+    const results = window.batchOptimization.getResults();
+    return Array.isArray(results) ? results : [];
+}
+
+function buildStage4Context(method, moduleRef, progressCb) {
+    const results = ensureStage4ResultsAvailable();
+    if (!Array.isArray(results) || results.length === 0) {
+        throw new Error('請先完成批量優化第二/第三階段，取得初始結果');
+    }
+    const config = (window.batchOptimization && typeof window.batchOptimization.getConfig === 'function')
+        ? window.batchOptimization.getConfig()
+        : {};
+    const metricKey = config.targetMetric || config.sortKey || 'annualizedReturn';
+    const { row: bestRow, score } = pickCurrentBestResult(results, metricKey);
+    if (!bestRow) {
+        throw new Error('找不到可用的最佳結果，請先檢查批量優化結果表');
+    }
+    const currentBest = buildStage4CurrentBest(bestRow, score);
+    const bounds = buildStage4Bounds(currentBest);
+    const boundKeys = Object.keys(bounds).filter((key) => key !== 'constraintFix');
+    if (boundKeys.length === 0) {
+        throw new Error('此組策略沒有可微調的參數');
+    }
+    const template = cloneStage4Value(currentBest.params);
+    const { encodeVec, decodeVec } = createStage4EncodeDecode(bounds, template);
+    const evaluator = buildStage4Evaluator(moduleRef);
+    const objective = buildStage4Objective(metricKey);
+    const options = readStage4Options(method);
+
+    return {
+        currentBest,
+        bounds,
+        encodeVec,
+        decodeVec,
+        evaluator,
+        objective,
+        uiProgress: progressCb,
+        options
+    };
+}
+
+function initStage4FineTuningPanel() {
+    const container = document.getElementById('stage4-refine');
+    if (!container) return;
+    const methodSelect = container.querySelector('#stage4-method');
+    const runButton = container.querySelector('#stage4-run');
+    const progressEl = container.querySelector('#stage4-progress');
+    const statusEl = container.querySelector('#stage4-status');
+    const bestEl = container.querySelector('#stage4-best');
+
+    if (!runButton) return;
+
+    runButton.addEventListener('click', async () => {
+        if (stage4State.running) return;
+        const method = methodSelect?.value || 'spsa';
+        try {
+            stage4State.running = true;
+            const originalText = runButton.textContent;
+            runButton.disabled = true;
+            runButton.textContent = '執行中…';
+            resetStage4Progress(statusEl, bestEl, progressEl);
+            progressEl?.classList.remove('hidden');
+            statusEl.textContent = '準備中…';
+
+            const moduleRef = await loadStage4Module();
+            const context = buildStage4Context(method, moduleRef, (payload) => updateStage4ProgressUI(statusEl, bestEl, progressEl, payload, method));
+            const row = await moduleRef.runStage4(method, context);
+            const action = Object.getOwnPropertyDescriptor(row, '__stage4Action')?.value || 'inserted';
+            const bestScore = Number.isFinite(row?.score) ? row.score : null;
+            if (progressEl) {
+                progressEl.classList.remove('hidden');
+            }
+            if (statusEl) {
+                statusEl.textContent = '微調完成';
+            }
+            if (bestEl && Number.isFinite(bestScore)) {
+                bestEl.textContent = `最終最佳分數：${bestScore.toFixed(4)}`;
+            }
+            if (action === 'updated') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (action === 'ignored') {
+                showInfo('第四階段完成：已有更佳結果，維持原設定');
+            } else {
+                showSuccess('第四階段完成：已新增最佳結果');
+            }
+        } catch (error) {
+            console.error('[Stage4] 執行微調時發生錯誤:', error);
+            showError(error?.message || '第四階段微調失敗');
+            resetStage4Progress(statusEl, bestEl, progressEl);
+        } finally {
+            stage4State.running = false;
+            runButton.disabled = false;
+            runButton.textContent = '執行微調';
+        }
+    });
+}
+
 function initBatchOptimizationFeature() {
     // 等待DOM加載完成後初始化
     if (document.readyState === 'loading') {
@@ -2777,11 +3188,13 @@ function initBatchOptimizationFeature() {
             if (window.batchOptimization && window.batchOptimization.init) {
                 window.batchOptimization.init();
             }
+            initStage4FineTuningPanel();
         });
     } else {
         if (window.batchOptimization && window.batchOptimization.init) {
             window.batchOptimization.init();
         }
+        initStage4FineTuningPanel();
     }
 }
 
