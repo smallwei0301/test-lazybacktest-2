@@ -1,4 +1,13 @@
 
+## 2026-10-22 — Patch LB-ROLLING-TEST-20251022A
+- **Issue recap**: OOS 品質在多項指標未達門檻時仍可能顯示滿分，Walk-Forward 總分超出 100 分，且使用者回測後仍看見「請先執行回測」提示。
+- **Fix**:
+  - `js/rolling-test.js` 重新計算 OOS 品質，改以門檻達成權重折減確保未達標不會取得高分，並同步調整品質合格門檻至 0.7。
+  - 將單窗分數與總分統一截斷在 0～100 分內，並以簡潔「合格／未達標」等文案回饋各指標卡片狀態。
+  - 監聽 `lazybacktest:visible-data-changed` 事件與橋接資料作為快取備援，讓主回測完成後滾動測試預覽能立即解除「請先執行回測」警示。
+- **Docs**: `README.md` 更新 Walk-Forward 說明為 `LB-ROLLING-TEST-20251022A`，記錄品質折減、滿分截斷與自動刷新細節。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-10-18 — Patch LB-ROLLING-TEST-20251018A
 - **Issue recap**: OOS 品質在多項指標未達門檻時仍可能顯示滿分，總分僅顯示 0～1 小數且儀表板說明過於制式。
 - **Fix**:

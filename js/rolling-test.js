@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.2 ---
-// Patch Tag: LB-ROLLING-TEST-20251018A
+// --- 滾動測試模組 - v2.3 ---
+// Patch Tag: LB-ROLLING-TEST-20251022A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251018A',
+        version: 'LB-ROLLING-TEST-20251022A',
         batchOptimizerInitialized: false,
     };
 
@@ -147,6 +147,12 @@
             });
         }
 
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+            window.addEventListener('lazybacktest:visible-data-changed', () => {
+                updateRollingPlanPreview();
+            });
+        }
+
         updateRollingPlanPreview();
         syncRollingOptimizeUI();
         state.initialized = true;
@@ -167,6 +173,8 @@
             showError?.('滾動測試需要可用的回測快取資料，請先執行一次回測');
             return;
         }
+
+        setPlanWarning('');
 
         if (!windows || windows.length === 0) {
             setPlanWarning('目前設定無法建立有效的 Walk-Forward 視窗，請調整滾動測試次數或回測期間。');
@@ -551,70 +559,70 @@
     }
 
     function describeTotalScoreStatus(aggregate) {
-        if (!Number.isFinite(aggregate?.totalScore)) return '尚無足夠資料，請先完成滾動測試';
-        if (aggregate.gradeLevel === 2) return '整體評級：專業合格';
-        if (aggregate.gradeLevel === 1) return '整體評級：可進一步觀察';
-        if (aggregate.gradeLevel === 0) return '整體評級：未通過，建議調整策略';
-        return '尚無足夠資料，請檢查視窗設定';
+        if (!Number.isFinite(aggregate?.totalScore)) return '資料不足，請完成一次滾動測試';
+        if (aggregate.gradeLevel === 2) return '合格';
+        if (aggregate.gradeLevel === 1) return '可進一步觀察';
+        if (aggregate.gradeLevel === 0) return '未通過，建議調整策略';
+        return '資料不足，請檢查視窗設定';
     }
 
     function describeQualityStatus(aggregate) {
         const quality = Number.isFinite(aggregate?.medianOosQuality) ? aggregate.medianOosQuality : null;
         const credibility = Number.isFinite(aggregate?.medianCredibility) ? aggregate.medianCredibility : null;
         if (quality === null || credibility === null) {
-            return '品質與信度資料不足，建議延長樣本';
+            return '資料不足，建議延長樣本';
         }
-        const qualityPass = quality >= 0.6;
+        const qualityPass = quality >= 0.7;
         const credibilityPass = credibility >= 0.5;
-        if (qualityPass && credibilityPass) return '品質與信度皆合格';
-        if (qualityPass) return '品質合格，信度待加強';
-        if (credibilityPass) return '信度合格，品質待調整';
-        return '品質與信度皆偏弱，建議調整策略';
+        if (qualityPass && credibilityPass) return '合格';
+        if (!qualityPass && !credibilityPass) return '品質與信度不足，建議延長樣本';
+        if (!qualityPass) return '品質不足，建議調整策略';
+        return '信度不足，建議增加樣本';
     }
 
     function describeWfeStatus(aggregate) {
         const wfe = Number.isFinite(aggregate?.medianWfePercent) ? aggregate.medianWfePercent : null;
-        if (wfe === null) return '尚無 WFE 資訊，請檢查視窗樣本';
-        if (wfe >= 80) return '穩定度合格';
-        if (wfe >= 60) return '穩定度略低，建議增加視窗或資料';
-        return '穩定度不足，建議調整訓練與測試期';
+        if (wfe === null) return '資料不足，請檢查視窗樣本';
+        if (wfe >= 80) return '合格';
+        if (wfe >= 60) return '略低，建議增加視窗';
+        return '未達標，建議調整視窗與資料';
     }
 
     function describeCredibilityStatus(aggregate) {
         const psrRatio = Number.isFinite(aggregate?.psrAbove95Ratio) ? aggregate.psrAbove95Ratio : null;
         const medianDsr = Number.isFinite(aggregate?.medianDsr) ? aggregate.medianDsr : null;
         if (psrRatio === null || medianDsr === null) {
-            return '統計可信度不足，建議增加樣本';
+            return '資料不足，建議延長樣本';
         }
         const psrPass = psrRatio >= 0.5;
         const dsrPass = medianDsr >= 0.7;
-        if (psrPass && dsrPass) return '統計可信度合格';
-        if (!psrPass && dsrPass) return 'Sharpe 顯著度不足，建議延長測試';
-        if (psrPass && !dsrPass) return '多次嘗試折現後偏弱，建議收斂參數';
-        return '統計可信度不足，建議增加樣本與視窗';
+        if (psrPass && dsrPass) return '合格';
+        if (!psrPass && !dsrPass) return '未達標，建議延長樣本';
+        if (!psrPass) return 'Sharpe 顯著度不足';
+        return '多次嘗試折現後偏弱';
     }
 
     function describeSharpeStatus(aggregate) {
         const sharpe = Number.isFinite(aggregate?.overallSharpe) ? aggregate.overallSharpe : null;
         const dsr = Number.isFinite(aggregate?.overallDsr) ? aggregate.overallDsr : null;
-        if (sharpe === null) return '尚無整體 Sharpe 資訊';
+        if (sharpe === null) return '資料不足';
         const sharpeThreshold = Number.isFinite(aggregate?.thresholds?.sharpeRatio)
             ? aggregate.thresholds.sharpeRatio
             : DEFAULT_THRESHOLDS.sharpeRatio;
         const sharpePass = sharpe >= sharpeThreshold;
         const dsrPass = Number.isFinite(dsr) && dsr > 0;
-        if (sharpePass && dsrPass) return 'Sharpe 達標且顯著';
-        if (sharpePass) return 'Sharpe 達標，顯著度待加強';
-        if (dsrPass) return 'Sharpe 略低，可信度尚可';
-        return 'Sharpe 未達門檻，建議調整策略';
+        if (sharpePass && dsrPass) return '合格';
+        if (sharpePass) return '達標，顯著度待加強';
+        if (dsrPass) return 'Sharpe 偏低，可信度尚可';
+        return '未達標，建議調整策略';
     }
 
     function describePassRateStatus(aggregate) {
         const passRate = Number.isFinite(aggregate?.passRate) ? aggregate.passRate : null;
-        if (passRate === null) return '視窗通過率資料不足';
-        if (passRate >= 60) return '視窗通過率合格';
-        if (passRate >= 40) return '通過率偏低，建議觀察';
-        return '通過率不足，建議調整參數與視窗';
+        if (passRate === null) return '資料不足';
+        if (passRate >= 60) return '合格';
+        if (passRate >= 40) return '偏低，建議觀察';
+        return '未達標，建議調整參數';
     }
 
     function renderWindowTable(aggregate) {
@@ -948,7 +956,8 @@
         const wfeAdjustment = Number.isFinite(medianWfeRatio)
             ? clampNumber(medianWfeRatio, WFE_ADJUST_MIN, WFE_ADJUST_MAX)
             : 1;
-        const totalScore = Number.isFinite(medianWindowScore) ? medianWindowScore * wfeAdjustment : null;
+        const rawTotalScore = Number.isFinite(medianWindowScore) ? medianWindowScore * wfeAdjustment : null;
+        const totalScore = Number.isFinite(rawTotalScore) ? clampNumber(rawTotalScore, 0, 1) : null;
 
         const oosQualityValues = analyses.map((analysis) => (Number.isFinite(analysis?.oosQuality?.value) ? analysis.oosQuality.value : null));
         const medianOosQuality = median(oosQualityValues);
@@ -984,6 +993,7 @@
 
         let grade = resolveGrade({
             totalScore,
+            rawTotalScore,
             medianWfeRatio,
             psrRatio: psrAbove95Ratio,
             medianDsr,
@@ -1315,47 +1325,84 @@
 
     function computeOosQualityScore(metrics, thresholds) {
         if (!metrics || metrics.error) {
-            return { value: null, components: {} };
+            return { value: null, components: {}, passRatio: 0, blendedScore: null };
         }
         const components = {};
         let weightedSum = 0;
         let weightTotal = 0;
+        let passWeight = 0;
 
-        const accumulate = (key, score, weight) => {
-            const normalized = Number.isFinite(score) ? clamp01(score) : 0;
-            components[key] = normalized;
-            weightedSum += weight * normalized;
+        const accumulate = (key, normalized, weight, passed, meta = {}) => {
+            const score = Number.isFinite(normalized) ? clamp01(normalized) : 0;
+            components[key] = {
+                score,
+                pass: Boolean(passed),
+                ...meta,
+            };
+            weightedSum += weight * score;
             weightTotal += weight;
+            if (passed) passWeight += weight;
         };
 
         const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
         const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
-        const annScore = normalizeRange(toFiniteNumber(metrics.annualizedReturn), annThreshold, annTarget);
-        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn);
+        const annValue = toFiniteNumber(metrics.annualizedReturn);
+        const annPassed = Number.isFinite(annValue) ? annValue >= annThreshold : false;
+        const annScore = normalizeRange(annValue, annThreshold, annTarget);
+        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPassed, {
+            value: annValue,
+            threshold: annThreshold,
+        });
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
         const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
-        const sharpeScore = normalizeRange(toFiniteNumber(metrics.sharpeRatio), sharpeThreshold, sharpeTarget);
-        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio);
+        const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
+        const sharpePassed = Number.isFinite(sharpeValue) ? sharpeValue >= sharpeThreshold : false;
+        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
+        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePassed, {
+            value: sharpeValue,
+            threshold: sharpeThreshold,
+        });
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
         const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
-        const sortinoScore = normalizeRange(toFiniteNumber(metrics.sortinoRatio), sortinoThreshold, sortinoTarget);
-        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio);
+        const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
+        const sortinoPassed = Number.isFinite(sortinoValue) ? sortinoValue >= sortinoThreshold : false;
+        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
+        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPassed, {
+            value: sortinoValue,
+            threshold: sortinoThreshold,
+        });
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
         const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
         const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
-        const drawdownScore = normalizeInverseRange(toFiniteNumber(metrics.maxDrawdown), drawdownBest, drawdownWorst);
-        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown);
+        const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
+        const drawdownPassed = Number.isFinite(drawdownValue) ? drawdownValue <= drawdownThreshold : false;
+        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
+        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPassed, {
+            value: drawdownValue,
+            threshold: drawdownThreshold,
+        });
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
         const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
-        const winRateScore = normalizeRange(toFiniteNumber(metrics.winRate), winRateThreshold, winRateTarget);
-        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate);
+        const winRateValue = toFiniteNumber(metrics.winRate);
+        const winRatePassed = Number.isFinite(winRateValue) ? winRateValue >= winRateThreshold : false;
+        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
+        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePassed, {
+            value: winRateValue,
+            threshold: winRateThreshold,
+        });
 
-        const value = weightTotal > 0 ? weightedSum / weightTotal : null;
-        return { value, components };
+        if (weightTotal <= 0) {
+            return { value: null, components, passRatio: 0, blendedScore: null };
+        }
+
+        const blendedScore = weightedSum / weightTotal;
+        const passRatio = clamp01(passWeight / weightTotal);
+        const value = blendedScore * passRatio;
+        return { value, components, passRatio, blendedScore };
     }
 
     function computeWindowAnalysis(metrics, thresholds, options) {
@@ -2901,6 +2948,24 @@
             }
         }
 
+        if (typeof window !== 'undefined') {
+            const bridge = window.lazybacktestAIBridge || null;
+            const bridgeData = bridge && typeof bridge.getVisibleStockData === 'function'
+                ? bridge.getVisibleStockData()
+                : null;
+            const fallbackCandidates = [
+                bridgeData,
+                Array.isArray(window.visibleStockData) ? window.visibleStockData : null,
+            ];
+            for (let i = 0; i < fallbackCandidates.length; i += 1) {
+                const candidate = fallbackCandidates[i];
+                if (Array.isArray(candidate) && candidate.length > 0) {
+                    cachedStockData = candidate;
+                    return cachedStockData;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -2958,17 +3023,20 @@
 
     function formatScorePoints(value, decimals = 1) {
         if (!Number.isFinite(value)) return '—';
-        return `${(value * 100).toFixed(decimals)} 分`;
+        const clamped = clampNumber(value, 0, 1);
+        return `${(clamped * 100).toFixed(decimals)} 分`;
     }
 
     function formatScore(value) {
         if (!Number.isFinite(value)) return '—';
-        return value.toFixed(2);
+        const clamped = clampNumber(value, 0, 1);
+        return clamped.toFixed(2);
     }
 
     function formatProbability(value) {
         if (!Number.isFinite(value)) return '—';
-        return `${(value * 100).toFixed(1)}%`;
+        const clamped = clampNumber(value, 0, 1);
+        return `${(clamped * 100).toFixed(1)}%`;
     }
 
     function formatDuration(ms) {
