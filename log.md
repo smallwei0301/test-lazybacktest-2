@@ -1260,3 +1260,10 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-11-09 — Patch LB-ROLLING-TEST-20251109A / LB-STRATEGY-COMPARE-20260710D
+- **Issue recap**: OOS 品質達標仍僅獲得部分分數，策略比較在完成滾動測試後儲存仍顯示「請先測試後保存策略」，且使用者希望卡片清楚解釋窗分數與品質分數的換算。
+- **Fix**:
+  - `js/rolling-test.js` 將指標正規化改為達門檻即給滿分、未達門檻才線性遞減，並補充「窗分數中位 = 品質分數中位 × 統計權重中位」與「品質分數取加權原值與達標權重比較低值」的說明，同步更新版本碼 `LB-ROLLING-TEST-20251109A`。
+  - `js/backtest.js` 將滾動測試總分（0～1）換算成 0～100 分後存入策略快照，修正儲存策略後比較表仍顯示缺資料的問題，並更新快照版本碼 `LB-STRATEGY-COMPARE-20260710D`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
