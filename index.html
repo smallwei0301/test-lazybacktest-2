@@ -1938,11 +1938,6 @@
                                                     <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                 </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    測試至少成交筆數
-                                                    <input id="rolling-min-trades" data-rolling-input type="number" min="1" max="200" step="1" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若小於門檻，將標註樣本不足。</span>
-                                                </label>
                                                 <div class="md:col-span-2 xl:col-span-3 flex flex-col gap-3">
                                                     <button type="button" id="toggle-rolling-advanced" class="self-start text-xs font-semibold inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">
                                                         顯示進階設定
@@ -2129,34 +2124,21 @@
                                             <p id="rolling-report-intro" class="text-xs" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div class="card-content space-y-6">
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" id="rolling-scoreboard"></div>
-                                            <div class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
-                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">總結</h4>
-                                                <p id="rolling-score-summary" class="text-xs leading-relaxed" style="color: var(--muted-foreground);"></p>
+                                            <div id="rolling-grade-card" class="p-4 border rounded-lg flex flex-col gap-2" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                                <span class="text-xs font-medium" style="color: var(--muted-foreground);">判定等級</span>
+                                                <span id="rolling-grade-label" class="text-2xl font-semibold" style="color: var(--foreground);">—</span>
                                             </div>
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" id="rolling-scoreboard"></div>
+                                            <details id="rolling-score-summary" class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                <summary class="text-sm font-semibold cursor-pointer" style="color: var(--foreground);">查看整體說明</summary>
+                                                <div id="rolling-score-summary-content" class="mt-2 text-xs leading-relaxed space-y-2" style="color: var(--muted-foreground);"></div>
+                                            </details>
                                             <div>
                                                 <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">逐窗指標</h4>
                                                 <div class="overflow-x-auto">
                                                     <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                         <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
-                                                            <tr>
-                                                                <th class="px-3 py-2 text-left font-semibold">迭代</th>
-                                                                <th class="px-3 py-2 text-left font-semibold">測試期間</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">年化%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">Sharpe</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">Sortino</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">勝率%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">交易數</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">PSR95</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">DSR</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">可信度</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">WFE%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">窗分數</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">樣本</th>
-                                                                <th class="px-3 py-2 text-left font-semibold">參數摘要</th>
-                                                                <th class="px-3 py-2 text-left font-semibold">評語</th>
-                                                            </tr>
+                                                            <tr id="rolling-window-header"></tr>
                                                         </thead>
                                                         <tbody id="rolling-window-report" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
                                                     </table>

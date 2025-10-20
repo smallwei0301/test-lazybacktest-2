@@ -1,5 +1,5 @@
 // --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251022A
+// Patch Tag: LB-ROLLING-TEST-20251028A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251022A',
+        version: 'LB-ROLLING-TEST-20251028A',
         batchOptimizerInitialized: false,
     };
 
@@ -436,12 +436,23 @@
     function clearRollingReport() {
         const report = document.getElementById('rolling-test-report');
         if (report) report.classList.add('hidden');
+        const gradeLabel = document.getElementById('rolling-grade-label');
+        if (gradeLabel) gradeLabel.textContent = '—';
+        const gradeCard = document.getElementById('rolling-grade-card');
+        if (gradeCard) {
+            gradeCard.style.borderColor = 'var(--border)';
+            gradeCard.style.backgroundColor = 'color-mix(in srgb, var(--primary) 6%, transparent)';
+        }
         const scoreboard = document.getElementById('rolling-scoreboard');
         if (scoreboard) scoreboard.innerHTML = '';
         const table = document.getElementById('rolling-window-report');
         if (table) table.innerHTML = '';
+        const header = document.getElementById('rolling-window-header');
+        if (header) header.innerHTML = '';
         const summary = document.getElementById('rolling-score-summary');
-        if (summary) summary.textContent = '';
+        const summaryContent = document.getElementById('rolling-score-summary-content');
+        if (summary) summary.open = false;
+        if (summaryContent) summaryContent.innerHTML = '';
         const intro = document.getElementById('rolling-report-intro');
         if (intro) intro.textContent = '';
     }
@@ -472,7 +483,7 @@
             };
         });
 
-        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS);
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -481,12 +492,56 @@
         }
         if (report) report.classList.remove('hidden');
 
+        renderGradeCard(aggregate);
         renderScoreboard(aggregate);
         renderWindowTable(aggregate);
+        renderSummaryDetails(aggregate);
+    }
+
+    function renderGradeCard(aggregate) {
+        const card = document.getElementById('rolling-grade-card');
+        const label = document.getElementById('rolling-grade-label');
+        if (!card || !label) return;
+
+        const gradeLabel = aggregate?.gradeLabel || '尚無結果';
+        const accent = aggregate?.gradeColor || 'var(--foreground)';
+
+        label.textContent = gradeLabel;
+        label.style.color = accent;
+        card.style.borderColor = accent;
+        card.style.backgroundColor = `color-mix(in srgb, ${accent} 12%, transparent)`;
+    }
+
+    function renderSummaryDetails(aggregate) {
         const summary = document.getElementById('rolling-score-summary');
-        if (summary) {
-            summary.textContent = aggregate.summaryText;
+        const content = document.getElementById('rolling-score-summary-content');
+        if (!summary || !content) return;
+
+        content.innerHTML = '';
+        const hasText = typeof aggregate?.summaryText === 'string' && aggregate.summaryText.trim().length > 0;
+        summary.classList.toggle('hidden', !hasText);
+        if (!hasText) {
+            summary.open = false;
+            return;
         }
+
+        const parts = aggregate.summaryText.split('；').map((part) => part.trim()).filter((part) => part.length > 0);
+        if (parts.length <= 1) {
+            const paragraph = document.createElement('p');
+            paragraph.textContent = aggregate.summaryText;
+            content.appendChild(paragraph);
+        } else {
+            const list = document.createElement('ul');
+            list.className = 'list-disc space-y-1 pl-4';
+            parts.forEach((part) => {
+                const item = document.createElement('li');
+                item.textContent = part;
+                list.appendChild(item);
+            });
+            content.appendChild(list);
+        }
+
+        summary.open = false;
     }
 
     function renderScoreboard(aggregate) {
@@ -500,39 +555,45 @@
                 value: formatScorePoints(aggregate.totalScore),
                 accent: aggregate.gradeColor,
                 description: describeTotalScoreStatus(aggregate),
+                detailBuilder: () => buildTotalScoreDetail(aggregate),
             },
             {
                 title: 'OOS 品質 / 信度',
                 value: `${formatScore(aggregate.medianOosQuality)} / ${formatProbability(aggregate.medianCredibility)}`,
                 description: describeQualityStatus(aggregate),
+                detailBuilder: () => buildQualityDetail(aggregate),
             },
             {
                 title: 'WFE 中位',
                 value: formatPercent(aggregate.medianWfePercent),
                 description: describeWfeStatus(aggregate),
+                detailBuilder: () => buildWfeDetail(aggregate),
             },
             {
                 title: 'PSR / DSR',
                 value: `${formatProbability(aggregate.medianPsr)} / ${formatProbability(aggregate.medianDsr)}`,
                 description: describeCredibilityStatus(aggregate),
+                detailBuilder: () => buildCredibilityDetail(aggregate),
             },
             {
                 title: '整體 Sharpe',
                 value: formatNumber(aggregate.overallSharpe),
                 description: describeSharpeStatus(aggregate),
+                detailBuilder: () => buildSharpeDetail(aggregate),
             },
             {
                 title: '通過視窗比例',
                 value: formatPercent(aggregate.passRate),
                 description: describePassRateStatus(aggregate),
+                detailBuilder: () => buildPassRateDetail(aggregate),
             },
         ];
 
         cards.forEach((card) => {
             const el = document.createElement('div');
-            el.className = 'p-4 border rounded-lg shadow-sm flex flex-col gap-1';
+            el.className = 'p-4 border rounded-lg shadow-sm flex flex-col gap-2';
             el.style.borderColor = 'var(--border)';
-            el.style.background = 'linear-gradient(135deg, color-mix(in srgb, var(--primary) 4%, transparent) 0%, var(--background) 100%)';
+            el.style.background = 'linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, transparent) 0%, var(--background) 100%)';
 
             const title = document.createElement('div');
             title.textContent = card.title;
@@ -552,8 +613,271 @@
             el.appendChild(title);
             el.appendChild(value);
             el.appendChild(desc);
+
+            if (typeof card.detailBuilder === 'function') {
+                const detailContent = card.detailBuilder();
+                if (detailContent) {
+                    const details = document.createElement('details');
+                    details.className = 'text-[11px] leading-relaxed';
+                    const summary = document.createElement('summary');
+                    summary.className = 'cursor-pointer select-none font-medium';
+                    summary.textContent = '查看計算細節';
+                    details.appendChild(summary);
+                    details.appendChild(detailContent);
+                    el.appendChild(details);
+                }
+            }
+
             scoreboard.appendChild(el);
         });
+    }
+
+    function buildTotalScoreDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1';
+
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-4 space-y-1';
+
+        const addItem = (label, value) => {
+            const li = document.createElement('li');
+            li.textContent = `${label}：${value}`;
+            list.appendChild(li);
+        };
+
+        addItem('窗分數中位', formatScore(aggregate.medianWindowScore));
+        addItem('WFE 調整係數', Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—');
+        addItem('總分（0-100）', formatScorePoints(aggregate.totalScore));
+        addItem('通過視窗', `${aggregate.passCount}/${aggregate.totalWindows}`);
+
+        container.appendChild(list);
+        return container;
+    }
+
+    function buildQualityDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1 space-y-2';
+
+        const summary = document.createElement('p');
+        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權原值 ${formatScore(aggregate.medianOosQualityRaw)}），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
+        container.appendChild(summary);
+
+        const credibilityLine = document.createElement('p');
+        credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}、統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
+        container.appendChild(credibilityLine);
+
+        const gridWrapper = document.createElement('div');
+        gridWrapper.className = 'space-y-1';
+
+        const header = document.createElement('div');
+        header.className = 'grid grid-cols-4 gap-2 font-medium';
+        header.innerHTML = '<span>指標</span><span class="text-right">中位值</span><span class="text-right">門檻</span><span class="text-right">分數</span>';
+        gridWrapper.appendChild(header);
+
+        const thresholds = aggregate.thresholds || DEFAULT_THRESHOLDS;
+        const componentScores = aggregate.qualityComponentMedians || {};
+        const componentConfig = [
+            {
+                key: 'annualizedReturn',
+                label: '年化報酬',
+                median: aggregate.medianAnnualizedReturn,
+                threshold: thresholds.annualizedReturn,
+                comparator: '≥',
+                formatter: formatPercent,
+            },
+            {
+                key: 'sharpeRatio',
+                label: 'Sharpe',
+                median: aggregate.medianSharpe,
+                threshold: thresholds.sharpeRatio,
+                comparator: '≥',
+                formatter: formatNumber,
+            },
+            {
+                key: 'sortinoRatio',
+                label: 'Sortino',
+                median: aggregate.medianSortino,
+                threshold: thresholds.sortinoRatio,
+                comparator: '≥',
+                formatter: formatNumber,
+            },
+            {
+                key: 'maxDrawdown',
+                label: '最大回撤',
+                median: aggregate.medianMaxDrawdown,
+                threshold: thresholds.maxDrawdown,
+                comparator: '≤',
+                formatter: formatPercent,
+            },
+            {
+                key: 'winRate',
+                label: '勝率',
+                median: aggregate.medianWinRate,
+                threshold: thresholds.winRate,
+                comparator: '≥',
+                formatter: formatPercent,
+            },
+        ];
+
+        componentConfig.forEach((config) => {
+            const row = document.createElement('div');
+            row.className = 'grid grid-cols-4 gap-2 text-[11px] items-center';
+
+            const labelEl = document.createElement('span');
+            labelEl.textContent = config.label;
+
+            const medianEl = document.createElement('span');
+            medianEl.className = 'text-right';
+            medianEl.textContent = config.formatter(config.median);
+
+            const thresholdEl = document.createElement('span');
+            thresholdEl.className = 'text-right';
+            thresholdEl.textContent = Number.isFinite(config.threshold)
+                ? `${config.comparator} ${config.formatter(config.threshold)}`
+                : '—';
+
+            const scoreEl = document.createElement('span');
+            scoreEl.className = 'text-right';
+            scoreEl.textContent = Number.isFinite(componentScores[config.key])
+                ? formatScore(componentScores[config.key])
+                : '—';
+
+            row.appendChild(labelEl);
+            row.appendChild(medianEl);
+            row.appendChild(thresholdEl);
+            row.appendChild(scoreEl);
+            gridWrapper.appendChild(row);
+        });
+
+        container.appendChild(gridWrapper);
+        return container;
+    }
+
+    function buildWfeDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1 space-y-2';
+
+        const summary = document.createElement('p');
+        summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)}，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
+        container.appendChild(summary);
+
+        const values = Array.isArray(aggregate.wfeValuesPercent) ? aggregate.wfeValuesPercent : [];
+        const items = values
+            .map((value, index) => (Number.isFinite(value) ? `視窗 ${index + 1}：${formatPercent(value)}` : null))
+            .filter((item) => item);
+        if (items.length > 0) {
+            const list = document.createElement('ul');
+            list.className = 'list-disc pl-4 space-y-1';
+            items.forEach((text) => {
+                const li = document.createElement('li');
+                li.textContent = text;
+                list.appendChild(li);
+            });
+            container.appendChild(list);
+        }
+
+        return container;
+    }
+
+    function buildCredibilityDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1 space-y-2';
+
+        const sampleText = Number.isFinite(aggregate.medianSampleCount)
+            ? `${Math.round(aggregate.medianSampleCount)} 筆`
+            : '—';
+        const minTrlText = Number.isFinite(aggregate.medianMinTrackRecordLength)
+            ? `／需求 ≥ ${Math.ceil(aggregate.medianMinTrackRecordLength)} 日`
+            : '';
+        const summary = document.createElement('p');
+        summary.textContent = `PSR≥95% 視窗比 ${formatProbability(aggregate.psrAbove95Ratio)}，DSR 中位 ${formatProbability(aggregate.medianDsr)}，樣本中位 ${sampleText}${minTrlText}。`;
+        container.appendChild(summary);
+
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-4 space-y-1';
+        const psrValues = Array.isArray(aggregate.psrValues) ? aggregate.psrValues : [];
+        const dsrValues = Array.isArray(aggregate.dsrValues) ? aggregate.dsrValues : [];
+        const sampleCounts = Array.isArray(aggregate.sampleCounts) ? aggregate.sampleCounts : [];
+        const minTrlValues = Array.isArray(aggregate.minTrackRecordValues) ? aggregate.minTrackRecordValues : [];
+
+        aggregate.evaluations.forEach((evaluation, index) => {
+            const psrText = Number.isFinite(psrValues[index]) ? formatProbability(psrValues[index]) : '—';
+            const dsrText = Number.isFinite(dsrValues[index]) ? formatProbability(dsrValues[index]) : '—';
+            const sampleValue = Number.isFinite(sampleCounts[index]) ? Math.round(sampleCounts[index]) : null;
+            const minTrlValue = Number.isFinite(minTrlValues[index]) ? Math.ceil(minTrlValues[index]) : null;
+            const details = [];
+            details.push(`PSR ${psrText}`);
+            details.push(`DSR ${dsrText}`);
+            if (sampleValue !== null) details.push(`樣本 ${sampleValue}`);
+            if (minTrlValue !== null) details.push(`需求 ≥ ${minTrlValue}`);
+            if (details.length === 0) return;
+            const li = document.createElement('li');
+            li.textContent = `視窗 ${index + 1}：${details.join('、')}`;
+            list.appendChild(li);
+        });
+
+        if (list.children.length > 0) {
+            container.appendChild(list);
+        }
+        return container;
+    }
+
+    function buildSharpeDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1';
+
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-4 space-y-1';
+
+        const items = [
+            `整體 Sharpe ${formatNumber(aggregate.overallSharpe)}`,
+            `整體 PSR ${formatProbability(aggregate.overallPsr)}`,
+            `整體 DSR ${formatProbability(aggregate.overallDsr)}`,
+            `Sharpe 中位 ${formatNumber(aggregate.medianSharpe)}`,
+            `Sortino 中位 ${formatNumber(aggregate.medianSortino)}`,
+            `最大回撤中位 ${formatPercent(aggregate.medianMaxDrawdown)}`,
+            `勝率中位 ${formatPercent(aggregate.medianWinRate)}`,
+        ];
+
+        if (Number.isFinite(aggregate.medianMinTrackRecordLength)) {
+            items.push(`MinTRL 中位 ≥ ${Math.ceil(aggregate.medianMinTrackRecordLength)} 日`);
+        }
+
+        items.forEach((text) => {
+            const li = document.createElement('li');
+            li.textContent = text;
+            list.appendChild(li);
+        });
+
+        container.appendChild(list);
+        return container;
+    }
+
+    function buildPassRateDetail(aggregate) {
+        const container = document.createElement('div');
+        container.className = 'mt-1 space-y-2';
+
+        const summary = document.createElement('p');
+        summary.textContent = `通過 ${aggregate.passCount}/${aggregate.totalWindows} 視窗（${formatPercent(aggregate.passRate)}）`;
+        container.appendChild(summary);
+
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-4 space-y-1';
+        aggregate.evaluations.forEach((evaluation, index) => {
+            const li = document.createElement('li');
+            const status = evaluation.evaluation.pass ? '通過' : '未通過';
+            let text = `視窗 ${index + 1}：${status}`;
+            if (!evaluation.evaluation.pass && Array.isArray(evaluation.evaluation.reasons) && evaluation.evaluation.reasons.length > 0) {
+                text += `（${evaluation.evaluation.reasons.join('、')}）`;
+            }
+            li.textContent = text;
+            list.appendChild(li);
+        });
+
+        if (list.children.length > 0) {
+            container.appendChild(list);
+        }
+        return container;
     }
 
     function describeTotalScoreStatus(aggregate) {
@@ -630,107 +954,146 @@
     }
 
     function renderWindowTable(aggregate) {
+        const header = document.getElementById('rolling-window-header');
         const tbody = document.getElementById('rolling-window-report');
-        if (!tbody) return;
+        if (!header || !tbody) return;
+
+        header.innerHTML = '';
         tbody.innerHTML = '';
 
-        aggregate.evaluations.forEach((entry) => {
+        const evaluations = Array.isArray(aggregate?.evaluations) ? aggregate.evaluations : [];
+
+        const leadHeader = document.createElement('th');
+        leadHeader.className = 'px-3 py-2 text-left font-semibold';
+        leadHeader.textContent = '指標';
+        header.appendChild(leadHeader);
+
+        evaluations.forEach((entry, index) => {
+            const th = document.createElement('th');
+            th.className = 'px-3 py-2 text-left font-semibold';
+            th.textContent = `視窗 ${index + 1}`;
+            header.appendChild(th);
+        });
+
+        if (evaluations.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = evaluations.length + 1;
+            cell.className = 'px-3 py-4 text-center text-sm';
+            cell.textContent = '尚無資料';
+            row.appendChild(cell);
+            tbody.appendChild(row);
+            return;
+        }
+
+        const rows = [
+            {
+                label: '測試期間',
+                className: 'text-left',
+                getValue: (entry) => `${entry.window.testingStart} ~ ${entry.window.testingEnd}`,
+            },
+            {
+                label: '年化%',
+                className: (entry) => {
+                    if (Number.isFinite(entry.metrics.annualizedReturn)) {
+                        return `text-right ${entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
+                    }
+                    return 'text-right';
+                },
+                getValue: (entry) => formatPercent(entry.metrics.annualizedReturn),
+            },
+            {
+                label: 'Sharpe',
+                className: 'text-right',
+                getValue: (entry) => formatNumber(entry.metrics.sharpeRatio),
+            },
+            {
+                label: 'Sortino',
+                className: 'text-right',
+                getValue: (entry) => formatNumber(entry.metrics.sortinoRatio),
+            },
+            {
+                label: 'MaxDD%',
+                className: 'text-right',
+                getValue: (entry) => formatPercent(entry.metrics.maxDrawdown),
+            },
+            {
+                label: '勝率%',
+                className: 'text-right',
+                getValue: (entry) => formatPercent(entry.metrics.winRate),
+            },
+            {
+                label: '交易數',
+                className: 'text-right',
+                getValue: (entry) => (Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—'),
+            },
+            {
+                label: 'PSR95',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.psrProbability),
+            },
+            {
+                label: 'DSR',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.dsrProbability),
+            },
+            {
+                label: '可信度',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.credibility),
+            },
+            {
+                label: 'WFE%',
+                className: 'text-right',
+                getValue: (entry) => (Number.isFinite(entry.analysis?.wfe) ? formatPercent(entry.analysis.wfe) : '—'),
+            },
+            {
+                label: '窗分數',
+                className: 'text-right',
+                getValue: (entry) => formatScorePoints(entry.analysis?.windowScore),
+            },
+            {
+                label: '樣本',
+                className: 'text-right',
+                getValue: (entry) => {
+                    const samples = Number.isFinite(entry.analysis?.sampleCount) ? entry.analysis.sampleCount : null;
+                    const minTrl = Number.isFinite(entry.analysis?.minTrackRecordLength) ? entry.analysis.minTrackRecordLength : null;
+                    if (Number.isFinite(samples)) {
+                        const requirement = Number.isFinite(minTrl) && minTrl > samples ? ` / ≥ ${Math.ceil(minTrl)}` : '';
+                        return `${Math.round(samples)}${requirement}`;
+                    }
+                    return '—';
+                },
+            },
+            {
+                label: '參數摘要',
+                className: 'text-left whitespace-pre-wrap',
+                getValue: (entry) => buildParameterSummary(entry.paramsSnapshot),
+            },
+            {
+                label: '評語',
+                className: 'text-left',
+                getValue: (entry) => entry.comment || '—',
+            },
+        ];
+
+        rows.forEach((rowConfig) => {
             const tr = document.createElement('tr');
 
-            const indexCell = document.createElement('td');
-            indexCell.className = 'px-3 py-2';
-            indexCell.textContent = entry.index + 1;
-            tr.appendChild(indexCell);
+            const labelCell = document.createElement('td');
+            labelCell.className = 'px-3 py-2 font-semibold text-left';
+            labelCell.textContent = rowConfig.label;
+            tr.appendChild(labelCell);
 
-            const periodCell = document.createElement('td');
-            periodCell.className = 'px-3 py-2';
-            periodCell.textContent = `${entry.window.testingStart} ~ ${entry.window.testingEnd}`;
-            tr.appendChild(periodCell);
-
-            const annCell = document.createElement('td');
-            annCell.className = `px-3 py-2 text-right ${Number.isFinite(entry.metrics.annualizedReturn) && entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
-            annCell.textContent = formatPercent(entry.metrics.annualizedReturn);
-            tr.appendChild(annCell);
-
-            const sharpeCell = document.createElement('td');
-            sharpeCell.className = 'px-3 py-2 text-right';
-            sharpeCell.textContent = formatNumber(entry.metrics.sharpeRatio);
-            tr.appendChild(sharpeCell);
-
-            const sortinoCell = document.createElement('td');
-            sortinoCell.className = 'px-3 py-2 text-right';
-            sortinoCell.textContent = formatNumber(entry.metrics.sortinoRatio);
-            tr.appendChild(sortinoCell);
-
-            const maxddCell = document.createElement('td');
-            maxddCell.className = 'px-3 py-2 text-right';
-            maxddCell.textContent = formatPercent(entry.metrics.maxDrawdown);
-            tr.appendChild(maxddCell);
-
-            const winRateCell = document.createElement('td');
-            winRateCell.className = 'px-3 py-2 text-right';
-            winRateCell.textContent = formatPercent(entry.metrics.winRate);
-            tr.appendChild(winRateCell);
-
-            const tradesCell = document.createElement('td');
-            tradesCell.className = 'px-3 py-2 text-right';
-            tradesCell.textContent = Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—';
-            tr.appendChild(tradesCell);
-
-            const psrCell = document.createElement('td');
-            psrCell.className = 'px-3 py-2 text-right';
-            psrCell.textContent = formatProbability(entry.metrics?.analysis?.psrProbability);
-            tr.appendChild(psrCell);
-
-            const dsrCell = document.createElement('td');
-            dsrCell.className = 'px-3 py-2 text-right';
-            dsrCell.textContent = formatProbability(entry.metrics?.analysis?.dsrProbability);
-            tr.appendChild(dsrCell);
-
-            const credibilityCell = document.createElement('td');
-            credibilityCell.className = 'px-3 py-2 text-right';
-            credibilityCell.textContent = formatProbability(entry.metrics?.analysis?.credibility);
-            tr.appendChild(credibilityCell);
-
-            const wfeCell = document.createElement('td');
-            wfeCell.className = 'px-3 py-2 text-right';
-            wfeCell.textContent = Number.isFinite(entry.metrics?.analysis?.wfe)
-                ? formatPercent(entry.metrics.analysis.wfe)
-                : '—';
-            tr.appendChild(wfeCell);
-
-            const windowScoreCell = document.createElement('td');
-            windowScoreCell.className = 'px-3 py-2 text-right';
-            windowScoreCell.textContent = formatScorePoints(entry.metrics?.analysis?.windowScore);
-            tr.appendChild(windowScoreCell);
-
-            const sampleCell = document.createElement('td');
-            sampleCell.className = 'px-3 py-2 text-right';
-            const samples = Number.isFinite(entry.metrics?.analysis?.sampleCount)
-                ? entry.metrics.analysis.sampleCount
-                : null;
-            const minTrl = Number.isFinite(entry.metrics?.analysis?.minTrackRecordLength)
-                ? entry.metrics.analysis.minTrackRecordLength
-                : null;
-            if (Number.isFinite(samples)) {
-                const requirement = Number.isFinite(minTrl) && minTrl > samples
-                    ? ` / ≥ ${Math.ceil(minTrl)}`
-                    : '';
-                sampleCell.textContent = `${Math.round(samples)}${requirement}`;
-            } else {
-                sampleCell.textContent = '—';
-            }
-            tr.appendChild(sampleCell);
-
-            const paramsCell = document.createElement('td');
-            paramsCell.className = 'px-3 py-2 text-left whitespace-pre-wrap';
-            paramsCell.textContent = buildParameterSummary(entry.paramsSnapshot);
-            tr.appendChild(paramsCell);
-
-            const commentCell = document.createElement('td');
-            commentCell.className = 'px-3 py-2 text-left';
-            commentCell.textContent = entry.comment || '—';
-            tr.appendChild(commentCell);
+            evaluations.forEach((entry, index) => {
+                const cell = document.createElement('td');
+                const className = typeof rowConfig.className === 'function'
+                    ? rowConfig.className(entry, index)
+                    : rowConfig.className || 'text-right';
+                cell.className = `px-3 py-2 ${className}`.trim();
+                cell.textContent = rowConfig.getValue(entry, index);
+                tr.appendChild(cell);
+            });
 
             tbody.appendChild(tr);
         });
@@ -879,14 +1242,14 @@
         return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
-    function computeAggregateReport(entries, thresholds, minTrades, options = {}) {
+    function computeAggregateReport(entries, thresholds, options = {}) {
         const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : thresholds.sharpeRatio;
         const optimizationTrials = options?.optimizationEnabled
             ? Math.max(1, Number(options?.optimizationTrials) || 60)
             : 1;
 
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds, minTrades);
+            const evaluation = evaluateWindow(entry.testing, thresholds);
             const commentParts = [];
             const analysis = computeWindowAnalysis(entry.testing, thresholds, {
                 srBenchmark,
@@ -906,9 +1269,6 @@
                 }
                 if (Number.isFinite(entry.training?.annualizedReturn) && Number.isFinite(entry.testing?.annualizedReturn)) {
                     commentParts.push(`訓練 ${formatPercent(entry.training.annualizedReturn)} → 測試 ${formatPercent(entry.testing.annualizedReturn)}`);
-                }
-                if (!Number.isFinite(entry.testing?.tradesCount) || entry.testing.tradesCount < minTrades) {
-                    commentParts.push(`交易樣本 ${entry.testing.tradesCount || 0} 筆`);
                 }
                 if (Number.isFinite(analysis?.minTrackRecordLength) && Number.isFinite(analysis?.sampleCount)
                     && analysis.sampleCount > 0 && analysis.minTrackRecordLength > analysis.sampleCount) {
@@ -946,8 +1306,12 @@
         const averageSharpe = average(validMetrics.map((m) => m.sharpeRatio));
         const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
         const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
+        const medianAnnualizedReturn = median(validMetrics.map((m) => m.annualizedReturn));
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
+        const medianMaxDrawdown = median(validMetrics.map((m) => m.maxDrawdown));
+        const medianWinRate = median(validMetrics.map((m) => m.winRate));
+        const medianTrades = median(validMetrics.map((m) => m.tradesCount));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
 
@@ -965,8 +1329,14 @@
 
         const oosQualityValues = analyses.map((analysis) => (Number.isFinite(analysis?.oosQuality?.value) ? analysis.oosQuality.value : null));
         const medianOosQuality = median(oosQualityValues);
+        const oosQualityRawValues = analyses.map((analysis) => (Number.isFinite(analysis?.oosQuality?.rawValue) ? analysis.oosQuality.rawValue : null));
+        const medianOosQualityRaw = median(oosQualityRawValues);
         const oosPassRatios = analyses.map((analysis) => (Number.isFinite(analysis?.oosQuality?.passRatio) ? analysis.oosQuality.passRatio : null));
         const medianOosPassRatio = median(oosPassRatios);
+        const qualityComponentsList = analyses.map((analysis) => (analysis?.oosQuality?.components && typeof analysis.oosQuality.components === 'object'
+            ? analysis.oosQuality.components
+            : null));
+        const qualityComponentMedians = computeMedianComponents(qualityComponentsList);
         const credibilityValues = analyses.map((analysis) => (Number.isFinite(analysis?.credibility) ? analysis.credibility : null));
         const medianCredibility = median(credibilityValues);
         const statWeightValues = analyses.map((analysis) => (Number.isFinite(analysis?.statWeight) ? analysis.statWeight : null));
@@ -978,6 +1348,11 @@
         const medianDsr = median(dsrValues);
         const psrAbove95Count = analyses.filter((analysis) => Number.isFinite(analysis?.psrProbability) && analysis.psrProbability >= 0.95).length;
         const psrAbove95Ratio = analyses.length > 0 ? psrAbove95Count / analyses.length : 0;
+
+        const sampleCounts = analyses.map((analysis) => (Number.isFinite(analysis?.sampleCount) ? analysis.sampleCount : null));
+        const medianSampleCount = median(sampleCounts);
+        const minTrackRecordValues = analyses.map((analysis) => (Number.isFinite(analysis?.minTrackRecordLength) ? analysis.minTrackRecordLength : null));
+        const medianMinTrackRecordLength = median(minTrackRecordValues);
 
         const overallMoments = combineReturnMoments(analyses.map((analysis) => analysis?.stats));
         const overallSharpe = computeAnnualizedSharpeFromMoments(overallMoments);
@@ -1051,8 +1426,12 @@
             averageSharpe,
             averageSortino,
             averageMaxDrawdown,
+            medianAnnualizedReturn,
             medianSharpe,
             medianSortino,
+            medianMaxDrawdown,
+            medianWinRate,
+            medianTrades,
             medianOosQuality,
             medianOosPassRatio,
             medianCredibility,
@@ -1060,10 +1439,25 @@
             medianPsr,
             medianDsr,
             psrAbove95Ratio,
+            medianSampleCount,
+            medianMinTrackRecordLength,
             overallSharpe,
             overallPsr,
             overallDsr,
             thresholds,
+            medianOosQualityRaw,
+            qualityComponentMedians,
+            qualityComponents: qualityComponentsList,
+            oosQualityValues,
+            oosPassRatios,
+            windowScores,
+            wfeValuesPercent,
+            credibilityValues,
+            psrValues,
+            dsrValues,
+            sampleCounts,
+            minTrackRecordValues,
+            oosQualityRawValues,
         };
     }
 
@@ -1112,7 +1506,7 @@
         return { label: '未通過建議調整', color: 'var(--destructive)', level: 0 };
     }
 
-    function evaluateWindow(metrics, thresholds, minTrades) {
+    function evaluateWindow(metrics, thresholds) {
         const reasons = [];
         if (!metrics || metrics.error) {
             reasons.push(metrics?.error || '無法取得結果');
@@ -1144,12 +1538,6 @@
             const pass = metrics.winRate >= thresholds.winRate;
             if (!pass) reasons.push(`勝率低於 ${thresholds.winRate}%`);
             checks.push(pass);
-        }
-        if (Number.isFinite(minTrades) && minTrades > 0) {
-            if (!Number.isFinite(metrics.tradesCount) || metrics.tradesCount < minTrades) {
-                reasons.push(`交易樣本低於 ${minTrades} 筆`);
-                checks.push(false);
-            }
         }
 
         const pass = checks.length > 0 ? checks.every(Boolean) : false;
@@ -1392,6 +1780,24 @@
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;
         const value = Number.isFinite(rawValue) ? Math.min(rawValue, passRatio) : null;
         return { value, components, passRatio, rawValue };
+    }
+
+    function computeMedianComponents(componentList) {
+        const keys = new Set();
+        componentList.forEach((components) => {
+            if (!components || typeof components !== 'object') return;
+            Object.keys(components).forEach((key) => keys.add(key));
+        });
+        const result = {};
+        keys.forEach((key) => {
+            const values = componentList
+                .map((components) => (components && Number.isFinite(components[key]) ? components[key] : null));
+            const medianValue = median(values);
+            if (Number.isFinite(medianValue)) {
+                result[key] = medianValue;
+            }
+        });
+        return result;
     }
 
     function computeWindowAnalysis(metrics, thresholds, options) {
@@ -1845,7 +2251,6 @@
     function getRollingConfig(availability) {
         const windowCountRaw = clampNumber(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT), 1, 24);
         const windowCount = Math.max(1, Math.round(windowCountRaw));
-        const minTrades = clampNumber(readInputValue('rolling-min-trades', 10), 0, 1000);
         const thresholds = {
             annualizedReturn: clampNumber(readInputValue('rolling-threshold-ann', DEFAULT_THRESHOLDS.annualizedReturn), 0, 200),
             sharpeRatio: clampNumber(readInputValue('rolling-threshold-sharpe', DEFAULT_THRESHOLDS.sharpeRatio), 0, 10),
@@ -1883,7 +2288,6 @@
             trainingMonths,
             testingMonths,
             stepMonths,
-            minTrades,
             thresholds,
             baseStart,
             baseEnd,

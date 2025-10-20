@@ -1,4 +1,13 @@
 
+## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
+- **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
+- **Fix**:
+  - `index.html` 將「判定等級」卡片移至報告頂端僅顯示評級，新增可展開的總結說明、移除最少成交筆數欄位，並把逐窗表格改為指標列 × 視窗欄的轉置排版。
+  - `js/rolling-test.js` 擴充 `computeAggregateReport` 與儀表卡，加入 OOS 指標分數、PSR／DSR／WFE／窗分數等可展開細節，調整總分卡片、評級卡與轉置後的逐窗渲染，並完全移除成交筆數門檻判定。
+  - `clearRollingReport`、`renderSummaryDetails` 與相關說明改為支援新的 grade 卡與可折疊總結，確保回報資料時能重設狀態。
+- **Docs**: `README.md` 更新為 LB-ROLLING-TEST-20251028A，說明評級卡片、詳細分數明細、轉置表格與成交筆數門檻調整。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-10-22 — Patch LB-ROLLING-TEST-20251022A
 - **Issue recap**: 使用者回報 OOS 品質在多數指標未達門檻時仍顯示滿分、Walk-Forward 總分可能超過 100 分，且主回測完成後滾動測試面板仍出現「請先執行一次主回測」提示。
 - **Fix**:
