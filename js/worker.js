@@ -6208,6 +6208,61 @@ function calculateDailyReturns(portfolioValues) {
   return returns;
 }
 
+function computeReturnDistributionStats(dailyReturns) {
+  if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) {
+    return {
+      count: 0,
+      mean: null,
+      variance: null,
+      stdev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+  const finite = dailyReturns.filter((value) => Number.isFinite(value));
+  const n = finite.length;
+  if (n === 0) {
+    return {
+      count: 0,
+      mean: null,
+      variance: null,
+      stdev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+  const mean = finite.reduce((sum, value) => sum + value, 0) / n;
+  let m2 = 0;
+  let m3 = 0;
+  let m4 = 0;
+  for (let i = 0; i < n; i += 1) {
+    const deviation = finite[i] - mean;
+    const deviation2 = deviation * deviation;
+    m2 += deviation2;
+    m3 += deviation2 * deviation;
+    m4 += deviation2 * deviation2;
+  }
+  m2 /= n;
+  m3 /= n;
+  m4 /= n;
+  const variance = m2;
+  const stdev = Math.sqrt(Math.max(variance, 0));
+  let skewness = null;
+  let kurtosis = null;
+  if (stdev > 0) {
+    skewness = m3 / (stdev * stdev * stdev);
+    kurtosis = m4 / (variance * variance);
+  }
+  return {
+    count: n,
+    mean,
+    variance,
+    stdev,
+    skewness,
+    kurtosis,
+  };
+}
+
 function calculateSharpeRatio(dailyReturns, annualReturnPct) {
   if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
   const riskFreeRate = 0.01;
@@ -9895,6 +9950,7 @@ function runStrategy(data, params, options = {}) {
       validPortfolioSlice,
       dates.slice(startIdx),
     );
+    const returnStats = computeReturnDistributionStats(dailyR);
     const sharpeR = calculateSharpeRatio(dailyR, annualR);
     const sortinoR = calculateSortinoRatio(dailyR, annualR);
 
@@ -10272,6 +10328,8 @@ function runStrategy(data, params, options = {}) {
       longEntryStageStates: trimmedEntryStageStates,
       longExitStageStates: trimmedExitStageStates,
       diagnostics: runtimeDiagnostics,
+      returnDistribution: returnStats,
+      dailyReturnSeries: Array.isArray(dailyR) ? dailyR.slice() : [],
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
     };
