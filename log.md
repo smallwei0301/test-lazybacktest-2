@@ -1,5 +1,27 @@
 
 
+
+## 2026-07-11 — Patch LB-ROLLING-TEST-20251028B
+- **Scope**: Walk-Forward 報告 OOS 品質門檻飽和。
+- **Updates**:
+  - `js/rolling-test.js` 將 OOS 品質改為「達標即滿分」的飽和計分，未達門檻時依實際值佔門檻比例換算，最大回撤則使用門檻/實際值，並持續受達標權重比限制。
+  - 更新模組版號為 `LB-ROLLING-TEST-20251028B` 以利追蹤。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-11 — Patch LB-BATCH-OPT-20260711A
+- **Scope**: 批量優化快取對齊與暖身檢查。
+- **Updates**:
+  - `js/batch-optimization.js` 新增資料範圍檢查，僅在快取涵蓋暖身起點與回測結束日時才沿用，否則改為重新抓取，確保與單次優化共享相同資料窗口。
+  - 同步更新模組版號為 `LB-BATCH-OPT-20260711A`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-11 — Patch LB-STRATEGY-COMPARE-20260710D
+- **Scope**: 策略比較滾動測試分數快照修正。
+- **Updates**:
+  - `js/backtest.js` 儲存策略時改讀取 `totalScore`，確保已跑過滾動測試的策略不再出現「請先測試後保存策略」。
+  - 更新策略比較快照版本碼至 `LB-STRATEGY-COMPARE-20260710D`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:

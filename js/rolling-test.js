@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251028B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251028B',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -40,21 +40,6 @@
         sortinoRatio: 0.20,
         maxDrawdown: 0.10,
         winRate: 0.10,
-    };
-
-    const QUALITY_TARGETS = {
-        annualizedReturn: 15,
-        sharpeRatio: 1.2,
-        sortinoRatio: 1.5,
-        maxDrawdownSpan: 15,
-        maxDrawdownFloor: 5,
-        winRateBonus: 10,
-    };
-
-    const QUALITY_OFFSETS = {
-        annualizedReturn: Math.max(QUALITY_TARGETS.annualizedReturn - DEFAULT_THRESHOLDS.annualizedReturn, 0.01),
-        sharpeRatio: Math.max(QUALITY_TARGETS.sharpeRatio - DEFAULT_THRESHOLDS.sharpeRatio, 0.01),
-        sortinoRatio: Math.max(QUALITY_TARGETS.sortinoRatio - DEFAULT_THRESHOLDS.sortinoRatio, 0.01),
     };
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
@@ -1746,40 +1731,54 @@
             }
         };
 
-        const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
+        const computeComponentScore = (value, threshold, orientation = 'higher') => {
+            if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+            if (orientation === 'higher') {
+                if (value >= threshold) return 1;
+                if (threshold === 0) return value > 0 ? 1 : 0;
+                return clamp01(value / threshold);
+            }
+            const absValue = Math.abs(value);
+            const absThreshold = Math.abs(threshold);
+            if (absValue <= absThreshold) return 1;
+            if (absValue === 0) return 0;
+            return clamp01(absThreshold / absValue);
+        };
+
+        const isComponentPassing = (value, threshold, orientation = 'higher') => {
+            if (!Number.isFinite(value) || !Number.isFinite(threshold)) return false;
+            if (orientation === 'higher') return value >= threshold;
+            return Math.abs(value) <= Math.abs(threshold);
+        };
+
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
-        const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
+        const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
+        const annScore = computeComponentScore(annValue, annThreshold, 'higher');
+        const annPass = isComponentPassing(annValue, annThreshold, 'higher');
         accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
 
-        const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
-        const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
+        const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
+        const sharpeScore = computeComponentScore(sharpeValue, sharpeThreshold, 'higher');
+        const sharpePass = isComponentPassing(sharpeValue, sharpeThreshold, 'higher');
         accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
 
-        const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
-        const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
+        const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
+        const sortinoScore = computeComponentScore(sortinoValue, sortinoThreshold, 'higher');
+        const sortinoPass = isComponentPassing(sortinoValue, sortinoThreshold, 'higher');
         accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
 
-        const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
-        const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
+        const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
+        const drawdownScore = computeComponentScore(drawdownValue, drawdownThreshold, 'lower');
+        const drawdownPass = isComponentPassing(drawdownValue, drawdownThreshold, 'lower');
         accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
 
-        const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
-        const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
+        const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
+        const winRateScore = computeComponentScore(winRateValue, winRateThreshold, 'higher');
+        const winRatePass = isComponentPassing(winRateValue, winRateThreshold, 'higher');
         accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;

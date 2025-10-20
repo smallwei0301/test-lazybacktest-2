@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2 ---
+// Patch Tag: LB-BATCH-OPT-20260711A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -136,6 +136,63 @@ function enrichParamsWithLookback(params) {
         dataStartDate,
         lookbackDays,
     };
+}
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseDateToMs(value) {
+    if (!value) return null;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : null;
+}
+
+function cachedRowsCoverRange(params, rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    if (typeof computeCoverageFromRows !== 'function') return true;
+    const coverage = computeCoverageFromRows(rows);
+    if (!Array.isArray(coverage) || coverage.length === 0) return false;
+
+    const requiredStartMs = parseDateToMs(params?.dataStartDate || params?.effectiveStartDate || params?.startDate);
+    const requiredEndMs = parseDateToMs(params?.endDate);
+    if (requiredStartMs === null || requiredEndMs === null) {
+        return true;
+    }
+
+    let earliest = Infinity;
+    let latest = -Infinity;
+    coverage.forEach((range) => {
+        if (!range) return;
+        const startMs = parseDateToMs(range.start);
+        const endMs = parseDateToMs(range.end);
+        if (startMs !== null && startMs < earliest) earliest = startMs;
+        if (endMs !== null && endMs > latest) latest = endMs;
+    });
+
+    if (!Number.isFinite(earliest) || !Number.isFinite(latest)) {
+        return false;
+    }
+
+    return earliest <= requiredStartMs + ONE_DAY_MS && latest >= requiredEndMs - ONE_DAY_MS;
+}
+
+function resolveCacheUsageForParams(preparedParams, overrideRows) {
+    const baseRows = Array.isArray(overrideRows) && overrideRows.length > 0
+        ? overrideRows
+        : (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+
+    if (!Array.isArray(baseRows) || baseRows.length === 0) {
+        return { useCachedData: false, cachedData: null };
+    }
+
+    if (!cachedRowsCoverRange(preparedParams, baseRows)) {
+        console.warn('[Batch Optimization] Cached dataset does not fully cover required 範圍，改為重新抓取。', {
+            requiredStart: preparedParams?.dataStartDate || preparedParams?.effectiveStartDate || preparedParams?.startDate,
+            requiredEnd: preparedParams?.endDate,
+        });
+        return { useCachedData: false, cachedData: null };
+    }
+
+    return { useCachedData: true, cachedData: baseRows };
 }
 
 function resetBatchWorkerStatus() {
@@ -1333,9 +1390,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                 const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                     ? options.cachedDataOverride
                     : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+                const preparedParams = enrichParamsWithLookback(params);
+                const cacheDecision = resolveCacheUsageForParams(preparedParams, overrideData);
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
@@ -1363,12 +1419,11 @@ async function executeBacktestForCombination(combination, options = {}) {
                     resolve(null);
                 };
 
-                const preparedParams = enrichParamsWithLookback(params);
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
-                    useCachedData,
-                    cachedData: cachedPayload
+                    useCachedData: cacheDecision.useCachedData,
+                    cachedData: cacheDecision.cachedData
                 });
 
                 // 設定超時
@@ -1585,9 +1640,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const preparedParams = enrichParamsWithLookback(params);
+        const cacheDecision = resolveCacheUsageForParams(preparedParams, overrideData);
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1660,8 +1714,6 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
-        const preparedParams = enrichParamsWithLookback(params);
-
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
@@ -1669,8 +1721,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
-            useCachedData,
-            cachedData: cachedPayload
+            useCachedData: cacheDecision.useCachedData,
+            cachedData: cacheDecision.cachedData
         });
         
         // 設定超時
@@ -1748,9 +1800,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const preparedParams = enrichParamsWithLookback(params);
+        const cacheDecision = resolveCacheUsageForParams(preparedParams, overrideData);
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1797,8 +1848,6 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             resolve({ value: undefined, metric: -Infinity });
         };
         
-        const preparedParams = enrichParamsWithLookback(params);
-
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
@@ -1806,8 +1855,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
-            useCachedData,
-            cachedData: cachedPayload
+            useCachedData: cacheDecision.useCachedData,
+            cachedData: cacheDecision.cachedData
         });
     });
 }
