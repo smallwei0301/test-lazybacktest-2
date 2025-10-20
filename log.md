@@ -1,5 +1,47 @@
 
 
+## 2026-07-15 — Patch LB-BATCH-OPT-20260715B
+- **Scope**: 批量優化策略映射 hydration 修正。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `hydrateStrategyNameMap`，在 `strategyDescriptions` 完整載入後補齊所有策略映射，避免批量優化提前報缺、導致無法回傳最佳參數。
+  - `getWorkerStrategyName` 改於查詢前觸發 hydration，並允許 `none` 類型策略返回 `null`，確保缺席的進/出場或風控欄位不會阻斷流程。
+  - `initBatchOptimization` 初始化階段即進行映射同步，確保 UI 載入與優化流程使用相同的策略對照表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-16 — Patch LB-BATCH-OPT-20260716C
+- **Scope**: 批量優化／滾動測試同步的全程 debug log 與結果追蹤。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `startBatchDebugSession`、`recordBatchDebug`、`downloadBatchDebugLog` 等工具，於批量優化啟動時建立版本化除錯紀錄，並可從瀏覽器匯出 JSON 供交叉分析。
+  - 在組合優化、worker 執行、參數搜尋、結果排序與 DOM 載入等節點加入紀錄，遇到缺結果、超時、映射遺失或載入不一致時即時寫入警示；成功流程則保留最佳指標與參數快照，協助比對批量與滾動測試最佳解。
+  - `window.batchOptimization` 新增 `getDebugLog`、`downloadDebugLog` 等介面，並於停止／錯誤時統一輸出結案資訊，確保每次執行都有完整的時間線與摘要。
+- **Diagnostics**: 本地模擬缺映射、worker 超時與 DOM 對拍錯誤情境，確認 log 會依序記錄 `strategy-mapping-missing`、`worker-run-timeout`、`dom-sync-mismatch` 等事件並可成功下載檔案比對。
+- **Testing**: `node - <<'NODE'
+const fs = require('fs');
+const vm = require('vm');
+['js/batch-optimization.js'].forEach((file) => {
+  const code = fs.readFileSync(file, 'utf8');
+  new vm.Script(code, { filename: file });
+});
+console.log('scripts compile');
+NODE`
+
+## 2026-07-15 — Patch LB-BATCH-OPT-20260715A
+- **Scope**: 批量優化策略映射與 Walk-Forward 同步
+- **Updates**:
+  - 新增 `resolveWorkerStrategyName` 並在批量/滾動優化流程僅針對實際存在的策略鍵進行映射，避免缺少出場策略時誤觸強制錯誤。
+  - `optimizeStrategyWithInternalConvergence`、`optimizeMultipleStrategyParameters` 與交叉優化僅在策略存在時覆寫 worker 名稱，確保滾動測試與批量面板共用相同參數來源。
+  - `executeBacktestForCombination` 遇到未設定的出場策略時不再強制套用映射或殘留舊鍵，防止 Walk-Forward 迭代回退為預設策略導致最佳參數走位。
+- **Testing**: 容器無法啟動瀏覽器與 Proxy，待於實機執行批量優化 + 滾動測試流程確認最佳參數重新對齊。
+
+## 2026-07-11 — Patch LB-BATCH-OPT-20260711A
+- **Scope**: 批量優化載入流程、映射與驗證強化。
+- **Updates**:
+  - 將 Worker 策略名稱改為查表模式，缺少映射時立即透過錯誤訊息阻擋，避免回退到預設策略掩蓋問題。
+  - 將 `updateBatchStrategyParams` 改寫為表驅動欄位對照，欄位不存在即記錄錯誤且不寫入，確保參數欄位完整維護。
+  - 載入批量結果時同步設定進出場與風險管理欄位，再觸發一次變更事件並進行 DOM 取值比對，第一時間揭露映射遺失或策略走位。
+  - 刪除重複的 `hideBatchProgress` 定義並新增欄位與策略映射一致性的防護流程。
+- **Testing**: 需於瀏覽器啟動回測功能確認載入策略後無 console error，並驗證對拍警示。（容器環境無法啟動瀏覽器）
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
