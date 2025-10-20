@@ -1,5 +1,14 @@
 
 
+## 2025-10-18 — Patch LB-BATCH-CACHE-20251018A
+- **Scope**: 批量優化快取覆用檢查與共用載入流程。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `resolveWorkerCachePayload` helper，統一使用 `needsDataFetch`／`buildCacheKey` 與 `lastFetchSettings` 檢查資料是否覆蓋目標區間，並在快取失效時自動改為讓 Worker 重新抓取資料。
+  - 單參數優化、風險參數優化與組合回測皆改用新 helper 傳遞 `cachedData`／`cachedMeta`，避免再度出現條件分歧造成錯誤覆用舊資料。
+- **Testing**:
+  - `node - <<'NODE' ...` 編譯 `js/batch-optimization.js`（本地容器）
+  - 手動情境（待實機）：調整回測日期後直接啟動批量優化，確認最終結果與立即回測、單次優化輸出一致且 console 無錯誤。
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
