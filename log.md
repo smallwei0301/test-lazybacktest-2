@@ -1,5 +1,23 @@
 
 
+## 2025-10-20 — Patch LB-BATCH-CACHE-20251020A
+- **Issue recap**: 滾動測試自動優化後，批量優化沿用被裁成訓練視窗的快取資料，導致 Worker 無法取得完整回測區間而回傳空集合。
+- **Fix**:
+  - `js/batch-optimization.js` 新增資料時間軸解析 helper，檢查 `cachedDataOverride` 與全域快取的實際首末日期，範圍不足時改為強制重抓並輸出診斷訊息。
+  - 快取覆用優先取用 cache entry 內的原始資料列，僅在覆蓋完整區間時才傳入 Worker，避免使用殘留的視窗資料。
+- **Testing**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+  - 手動待辦：實測「先執行滾動測試優化 → 立即啟動批量優化」流程，確認最佳參數與單次回測一致且 console 無錯誤。
+
+## 2025-10-18 — Patch LB-BATCH-CACHE-20251018A
+- **Scope**: 批量優化快取覆用檢查與共用載入流程。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `resolveWorkerCachePayload` helper，統一使用 `needsDataFetch`／`buildCacheKey` 與 `lastFetchSettings` 檢查資料是否覆蓋目標區間，並在快取失效時自動改為讓 Worker 重新抓取資料。
+  - 單參數優化、風險參數優化與組合回測皆改用新 helper 傳遞 `cachedData`／`cachedMeta`，避免再度出現條件分歧造成錯誤覆用舊資料。
+- **Testing**:
+  - `node - <<'NODE' ...` 編譯 `js/batch-optimization.js`（本地容器）
+  - 手動情境（待實機）：調整回測日期後直接啟動批量優化，確認最終結果與立即回測、單次優化輸出一致且 console 無錯誤。
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
