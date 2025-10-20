@@ -47,7 +47,8 @@ let batchOptimizationWorker = null;
 let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
-let batchOptimizationStartTime = null;
+const BATCH_LOAD_SYNC_PATCH = 'LB-BATCH-LOADSYNC-20261030A';
+console.info(`[Batch Optimization] Patch ${BATCH_LOAD_SYNC_PATCH} activated`);
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -377,7 +378,6 @@ function startBatchOptimization() {
     
     // 重置停止標誌和開始時間
     isBatchOptimizationStopped = false;
-    batchOptimizationStartTime = Date.now();
     
     // 初始化進度追蹤
     currentBatchProgress.startTime = Date.now();
@@ -579,20 +579,38 @@ function showBatchProgress() {
     try {
         const progressElement = document.getElementById('batch-optimization-progress');
         const resultsElement = document.getElementById('batch-optimization-results');
-        
+
         if (progressElement) {
             progressElement.classList.remove('hidden');
         }
-        
+
         if (resultsElement) {
             resultsElement.classList.add('hidden');
         }
-        
-        // 重置進度
-        currentBatchProgress = { current: 0, total: 0, phase: 'preparing' };
-        updateBatchProgress();
+
+        currentBatchProgress = {
+            current: 0,
+            total: 0,
+            phase: 'preparing',
+            startTime: Date.now(),
+            lastUpdateTime: null,
+            estimatedTotalTime: null,
+            isLongRunning: false,
+            manualPercentage: 0,
+            manualMessage: '',
+            lastCombination: null
+        };
+
+        renderBatchProgress();
     } catch (error) {
         console.error('[Batch Optimization] Error showing progress:', error);
+    }
+}
+
+function hideBatchProgress() {
+    const progressElement = document.getElementById('batch-optimization-progress');
+    if (progressElement) {
+        progressElement.classList.add('hidden');
     }
 }
 
@@ -604,8 +622,114 @@ let currentBatchProgress = {
     startTime: null,
     lastUpdateTime: null,
     estimatedTotalTime: null,
-    isLongRunning: false
+    isLongRunning: false,
+    manualPercentage: null,
+    manualMessage: '',
+    lastCombination: null
 };
+
+function renderBatchProgress() {
+    const progressText = document.getElementById('batch-progress-text');
+    const progressBar = document.getElementById('batch-progress-bar');
+    const progressDetail = document.getElementById('batch-progress-detail');
+    const progressCombination = document.getElementById('batch-progress-combination');
+    const timeEstimate = document.getElementById('batch-time-estimate');
+    const longWaitNotice = document.getElementById('batch-long-wait-notice');
+    const hourglass = document.getElementById('batch-progress-hourglass');
+
+    const computedPercentage = typeof currentBatchProgress.manualPercentage === 'number'
+        ? currentBatchProgress.manualPercentage
+        : (currentBatchProgress.total > 0
+            ? (currentBatchProgress.current / currentBatchProgress.total) * 100
+            : 0);
+    const displayPercentage = Number.isFinite(computedPercentage)
+        ? Math.max(0, Math.min(100, Math.round(computedPercentage)))
+        : 0;
+
+    if (progressText) {
+        progressText.textContent = `${displayPercentage}%`;
+    }
+    if (progressBar) {
+        progressBar.style.width = `${displayPercentage}%`;
+    }
+
+    if (progressCombination) {
+        const combination = currentBatchProgress.lastCombination;
+        if (combination && combination.buyStrategy && combination.sellStrategy) {
+            const buyName = strategyDescriptions?.[combination.buyStrategy]?.name || combination.buyStrategy;
+            const sellName = strategyDescriptions?.[combination.sellStrategy]?.name || combination.sellStrategy;
+            const currentIndex = combination.current ?? currentBatchProgress.current;
+            const totalCount = combination.total ?? currentBatchProgress.total;
+            progressCombination.textContent = `🔄 正在優化組合 ${currentIndex}/${totalCount}：${buyName} + ${sellName}`;
+        } else {
+            progressCombination.textContent = '';
+        }
+    }
+
+    if (hourglass) {
+        if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
+            hourglass.classList.add('animate-spin');
+        } else {
+            hourglass.classList.remove('animate-spin');
+        }
+    }
+
+    let detailMessage = currentBatchProgress.manualMessage;
+    if (!detailMessage) {
+        switch (currentBatchProgress.phase) {
+            case 'preparing':
+                detailMessage = '準備策略組合...';
+                break;
+            case 'optimizing':
+                detailMessage = `優化中... ${currentBatchProgress.current}/${currentBatchProgress.total}`;
+                break;
+            case 'completed':
+                detailMessage = '優化完成！';
+                break;
+            case 'failed':
+                detailMessage = '優化失敗，請重試。';
+                break;
+            default:
+                detailMessage = '';
+        }
+    }
+    if (progressDetail) {
+        progressDetail.textContent = detailMessage;
+    }
+
+    if (currentBatchProgress.startTime && currentBatchProgress.current > 0 && currentBatchProgress.total > 0) {
+        const elapsedTime = Date.now() - currentBatchProgress.startTime;
+        const avgTimePerItem = elapsedTime / currentBatchProgress.current;
+        const remaining = Math.max(currentBatchProgress.total - currentBatchProgress.current, 0);
+        const estimatedRemainingTime = avgTimePerItem * remaining * 1.2;
+        const alpha = 0.3;
+        currentBatchProgress.estimatedTotalTime = currentBatchProgress.estimatedTotalTime == null
+            ? estimatedRemainingTime
+            : alpha * estimatedRemainingTime + (1 - alpha) * currentBatchProgress.estimatedTotalTime;
+
+        if (timeEstimate) {
+            const remainingMinutes = Math.ceil(currentBatchProgress.estimatedTotalTime / 60000);
+            if (remainingMinutes > 0) {
+                timeEstimate.textContent = `預估剩餘時間：約 ${remainingMinutes} 分鐘`;
+                if (remainingMinutes > 2 && !currentBatchProgress.isLongRunning) {
+                    currentBatchProgress.isLongRunning = true;
+                    if (longWaitNotice) {
+                        longWaitNotice.classList.remove('hidden');
+                    }
+                }
+            } else {
+                timeEstimate.textContent = '預估剩餘時間：不到1分鐘';
+            }
+        }
+    } else {
+        if (timeEstimate) {
+            timeEstimate.textContent = '';
+        }
+        if (longWaitNotice) {
+            longWaitNotice.classList.add('hidden');
+        }
+    }
+}
 
 // 獲取策略的中文名稱
 function getStrategyChineseName(strategyKey) {
@@ -639,122 +763,71 @@ function resetBatchProgress() {
         startTime: null,
         lastUpdateTime: null,
         estimatedTotalTime: null,
-        isLongRunning: false
+        isLongRunning: false,
+        manualPercentage: null,
+        manualMessage: '',
+        lastCombination: null
     };
-    
-    // 清空進度顯示
-    const progressText = document.getElementById('batch-progress-text');
-    const progressBar = document.getElementById('batch-progress-bar');
-    const progressDetail = document.getElementById('batch-progress-detail');
-    const timeEstimate = document.getElementById('batch-time-estimate');
-    const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
-    
-    if (progressText) progressText.textContent = '0%';
-    if (progressBar) progressBar.style.width = '0%';
-    if (progressDetail) progressDetail.textContent = '已停止';
-    if (timeEstimate) timeEstimate.textContent = '';
-    if (longWaitNotice) longWaitNotice.classList.add('hidden');
-    if (hourglass) hourglass.classList.remove('animate-spin');
+
+    renderBatchProgress();
 }
 
-// 更新進度顯示
-function updateBatchProgress(currentCombination = null) {
-    const progressText = document.getElementById('batch-progress-text');
-    const progressBar = document.getElementById('batch-progress-bar');
-    const progressDetail = document.getElementById('batch-progress-detail');
-    const progressCombination = document.getElementById('batch-progress-combination');
-    const timeEstimate = document.getElementById('batch-time-estimate');
-    const longWaitNotice = document.getElementById('batch-long-wait-notice');
-    const hourglass = document.getElementById('batch-progress-hourglass');
-    
-    if (progressText && progressBar && progressDetail) {
-        // 計算精確的百分比（每1%更新）
-        const rawPercentage = currentBatchProgress.total > 0 ? 
-            (currentBatchProgress.current / currentBatchProgress.total) * 100 : 0;
-        const percentage = Math.floor(rawPercentage); // 確保是整數百分比
-        
-        // 避免NaN%問題
-        const displayPercentage = isNaN(percentage) ? 0 : percentage;
-        
-        progressText.textContent = `${displayPercentage}%`;
-        progressBar.style.width = `${displayPercentage}%`;
-        
-        // 顯示當前處理組合資訊
-        if (progressCombination && currentCombination) {
-            const { buyStrategy, sellStrategy, current, total } = currentCombination;
-            const buyStrategyName = strategyDescriptions[buyStrategy]?.name || buyStrategy;
-            const sellStrategyName = strategyDescriptions[sellStrategy]?.name || sellStrategy;
-            progressCombination.textContent = `🔄 正在優化組合 ${current}/${total}：${buyStrategyName} + ${sellStrategyName}`;
-        } else if (progressCombination) {
-            progressCombination.textContent = '';
+function updateBatchProgress(update = {}, messageArg) {
+    let updateObject;
+    if (typeof update === 'number') {
+        updateObject = { percentage: update };
+        if (typeof messageArg === 'string') {
+            updateObject.message = messageArg;
         }
-        
-        // 計算剩餘時間預估
-        if (currentBatchProgress.startTime && currentBatchProgress.current > 0) {
-            const elapsedTime = Date.now() - currentBatchProgress.startTime;
-            const avgTimePerItem = elapsedTime / currentBatchProgress.current;
-            const remaining = currentBatchProgress.total - currentBatchProgress.current;
-            const estimatedRemainingTime = avgTimePerItem * remaining;
-            
-            // 更加保守的時間預估策略：
-            // 1. 如果沒有初始預估，使用當前預估
-            // 2. 如果有初始預估，使用較大值（更保守）
-            // 3. 添加 20% 的緩衝時間避免預估過於樂觀
-            const conservativeRemainingTime = estimatedRemainingTime * 1.2;
-            
-            if (!currentBatchProgress.estimatedTotalTime) {
-                currentBatchProgress.estimatedTotalTime = conservativeRemainingTime;
-            } else {
-                // 使用移動平均來平滑預估時間，避免大幅波動
-                const alpha = 0.3; // 平滑因子
-                currentBatchProgress.estimatedTotalTime = 
-                    alpha * conservativeRemainingTime + (1 - alpha) * currentBatchProgress.estimatedTotalTime;
-            }
-            
-            // 顯示剩餘時間
-            if (timeEstimate) {
-                const remainingMinutes = Math.ceil(currentBatchProgress.estimatedTotalTime / 60000);
-                if (remainingMinutes > 0) {
-                    timeEstimate.textContent = `預估剩餘時間：約 ${remainingMinutes} 分鐘`;
-                    
-                    // 檢查是否為長時間運行
-                    if (remainingMinutes > 2 && !currentBatchProgress.isLongRunning) {
-                        currentBatchProgress.isLongRunning = true;
-                        if (longWaitNotice) {
-                            longWaitNotice.classList.remove('hidden');
-                        }
-                    }
-                } else {
-                    timeEstimate.textContent = '預估剩餘時間：不到1分鐘';
-                }
-            }
+    } else if (typeof update === 'object' && update !== null) {
+        updateObject = { ...update };
+        if (typeof messageArg === 'string' && updateObject.message === undefined) {
+            updateObject.message = messageArg;
         }
-        
-        // 更新沙漏動畫
-        if (hourglass) {
-            if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
-                hourglass.classList.add('animate-spin');
-            } else {
-                hourglass.classList.remove('animate-spin');
-            }
+    } else {
+        updateObject = {};
+        if (typeof messageArg === 'string') {
+            updateObject.message = messageArg;
         }
-        
-        let detailText = '';
-        switch (currentBatchProgress.phase) {
-            case 'preparing':
-                detailText = '準備策略組合...';
-                break;
-            case 'optimizing':
-                detailText = `優化中... ${currentBatchProgress.current}/${currentBatchProgress.total}`;
-                break;
-                break;
-            case 'completed':
-                detailText = '優化完成！';
-                break;
-        }
-        progressDetail.textContent = detailText;
     }
+
+    if (typeof updateObject.current === 'number' && Number.isFinite(updateObject.current)) {
+        currentBatchProgress.current = updateObject.current;
+    }
+    if (typeof updateObject.total === 'number' && Number.isFinite(updateObject.total)) {
+        currentBatchProgress.total = updateObject.total;
+    }
+    if (typeof updateObject.phase === 'string') {
+        currentBatchProgress.phase = updateObject.phase;
+    }
+    if (typeof updateObject.percentage === 'number' && Number.isFinite(updateObject.percentage)) {
+        currentBatchProgress.manualPercentage = Math.max(0, Math.min(100, updateObject.percentage));
+    } else if (updateObject.percentage === null) {
+        currentBatchProgress.manualPercentage = null;
+    }
+    if (typeof updateObject.message === 'string') {
+        currentBatchProgress.manualMessage = updateObject.message;
+    } else if (updateObject.message === null) {
+        currentBatchProgress.manualMessage = '';
+    }
+
+    if (updateObject.combination) {
+        currentBatchProgress.lastCombination = updateObject.combination;
+    } else if (updateObject.buyStrategy || updateObject.sellStrategy) {
+        currentBatchProgress.lastCombination = {
+            buyStrategy: updateObject.buyStrategy,
+            sellStrategy: updateObject.sellStrategy,
+            current: updateObject.current,
+            total: updateObject.total
+        };
+    }
+
+    if (!currentBatchProgress.startTime) {
+        currentBatchProgress.startTime = Date.now();
+    }
+    currentBatchProgress.lastUpdateTime = Date.now();
+
+    renderBatchProgress();
 }
 
 // 執行批量優化
@@ -789,8 +862,13 @@ async function executeBatchOptimization(config) {
         
         // 重置進度狀態，接著分批處理
         currentBatchProgress = {
+            ...currentBatchProgress,
             current: 0,
-            total: limitedCombinations.length
+            total: limitedCombinations.length,
+            phase: 'optimizing',
+            manualPercentage: null,
+            manualMessage: '',
+            lastCombination: null
         };
         
         updateBatchProgress(35, `開始處理 ${limitedCombinations.length} 個優化組合...`);
@@ -3568,6 +3646,246 @@ function formatNumber(value) {
     return value.toFixed(2);
 }
 
+const PARAM_FIELD_OVERRIDES = {
+    entry: {
+        'k_d_cross': { thresholdX: 'KdThresholdX' },
+        'macd_cross': { signalPeriod: 'SignalPeriod' },
+        'turtle_stop_loss': { stopLossPeriod: 'StopLossPeriod' }
+    },
+    exit: {
+        'k_d_cross_exit': { thresholdY: 'KdThresholdY' },
+        'macd_cross_exit': { signalPeriod: 'SignalPeriod' },
+        'turtle_stop_loss': { stopLossPeriod: 'StopLossPeriod' },
+        'cover_k_d_cross': { thresholdX: 'CoverKdThresholdX' },
+        'cover_macd_cross': { signalPeriod: 'CoverSignalPeriod' },
+        'cover_trailing_stop': { percentage: 'CoverTrailingStopPercentage' },
+        'cover_turtle_breakout': { breakoutPeriod: 'CoverBreakoutPeriod' }
+    },
+    shortEntry: {
+        'short_k_d_cross': { thresholdY: 'ShortKdThresholdY' },
+        'short_macd_cross': { signalPeriod: 'ShortSignalPeriod' },
+        'short_turtle_stop_loss': { stopLossPeriod: 'ShortStopLossPeriod' }
+    },
+    shortExit: {
+        'cover_k_d_cross': { thresholdX: 'CoverKdThresholdX' },
+        'cover_macd_cross': { signalPeriod: 'CoverSignalPeriod' },
+        'cover_trailing_stop': { percentage: 'CoverTrailingStopPercentage' },
+        'cover_turtle_breakout': { breakoutPeriod: 'CoverBreakoutPeriod' }
+    },
+    shared: {}
+};
+
+const PARAM_FIELD_MAP_CACHE = new Map();
+
+function resolveStrategyDescriptionKey(type, strategyName) {
+    if (!strategyName || typeof strategyName !== 'string') {
+        return null;
+    }
+
+    if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+        return strategyName;
+    }
+
+    const candidates = [];
+    if (type === 'exit') {
+        if (!strategyName.endsWith('_exit')) {
+            candidates.push(`${strategyName}_exit`);
+        }
+        candidates.push(strategyName);
+        if (strategyName.endsWith('_exit')) {
+            candidates.push(strategyName.replace(/_exit$/, ''));
+        }
+    } else {
+        candidates.push(strategyName);
+    }
+
+    for (const candidate of candidates) {
+        if (candidate && strategyDescriptions[candidate]) {
+            return candidate;
+        }
+    }
+
+    return candidates[0] || strategyName;
+}
+
+function buildParamFieldMap(type, strategyName) {
+    const normalizedType = ['entry', 'exit', 'shortEntry', 'shortExit'].includes(type) ? type : 'entry';
+    const descriptionKey = resolveStrategyDescriptionKey(normalizedType, strategyName);
+    const cacheKey = `${normalizedType}::${descriptionKey || ''}`;
+
+    if (PARAM_FIELD_MAP_CACHE.has(cacheKey)) {
+        return PARAM_FIELD_MAP_CACHE.get(cacheKey);
+    }
+
+    if (!descriptionKey) {
+        PARAM_FIELD_MAP_CACHE.set(cacheKey, null);
+        return null;
+    }
+
+    const strategyInfo = typeof strategyDescriptions === 'object' ? strategyDescriptions[descriptionKey] : null;
+    if (!strategyInfo || !strategyInfo.defaultParams) {
+        PARAM_FIELD_MAP_CACHE.set(cacheKey, null);
+        return null;
+    }
+
+    const overrides = (PARAM_FIELD_OVERRIDES[normalizedType] && PARAM_FIELD_OVERRIDES[normalizedType][descriptionKey]) || {};
+    const sharedOverrides = PARAM_FIELD_OVERRIDES.shared || {};
+    const fieldMap = {};
+    const prefixMap = {
+        entry: 'entry',
+        exit: 'exit',
+        shortEntry: 'shortEntry',
+        shortExit: 'shortExit'
+    };
+    const prefix = prefixMap[normalizedType] || 'entry';
+
+    for (const paramKey of Object.keys(strategyInfo.defaultParams)) {
+        const overrideSuffix = overrides[paramKey] || sharedOverrides[paramKey];
+        const suffix = overrideSuffix || paramKey.charAt(0).toUpperCase() + paramKey.slice(1);
+        fieldMap[paramKey] = `${prefix}${suffix}`;
+    }
+
+    PARAM_FIELD_MAP_CACHE.set(cacheKey, fieldMap);
+    return fieldMap;
+}
+
+function raiseBatchLoadError(message) {
+    const error = new Error(message);
+    error.isBatchLoadError = true;
+    console.error(`[Batch Optimization] ${message}`);
+    if (typeof showError === 'function') {
+        showError(message);
+    }
+    throw error;
+}
+
+function resolveStrategySelection(type, strategyName, selectElement) {
+    const label = type === 'entry' ? '進場' : type === 'exit' ? '出場' : type;
+    if (!selectElement) {
+        raiseBatchLoadError(`批量優化載入失敗：找不到${label}策略選單，請檢查頁面結構。`);
+    }
+
+    const availableValues = Array.from(selectElement.options || []).map(option => option.value);
+    const candidates = [];
+    if (strategyName) {
+        candidates.push(strategyName);
+        if (type === 'exit') {
+            if (strategyName.endsWith('_exit')) {
+                candidates.push(strategyName.replace(/_exit$/, ''));
+            } else {
+                candidates.push(`${strategyName}_exit`);
+            }
+        }
+    }
+    if (selectElement.value && !candidates.includes(selectElement.value)) {
+        candidates.push(selectElement.value);
+    }
+
+    let matchedValue = null;
+    for (const candidate of candidates) {
+        if (candidate && availableValues.includes(candidate)) {
+            matchedValue = candidate;
+            break;
+        }
+    }
+
+    if (!matchedValue) {
+        const displayName = strategyName || '(未提供)';
+        raiseBatchLoadError(`批量優化載入失敗：找不到${label}策略「${displayName}」對應的選項，請補齊批量載入的策略映射。`);
+    }
+
+    return {
+        selectValue: matchedValue,
+        strategyKey: resolveStrategyDescriptionKey(type, strategyName || matchedValue)
+    };
+}
+
+function areParamValuesEqual(a, b) {
+    if (a === b) return true;
+    if (a === undefined || a === null) return b === undefined || b === null;
+    if (b === undefined || b === null) return a === undefined || a === null;
+
+    const numA = Number(a);
+    const numB = Number(b);
+    if (Number.isFinite(numA) && Number.isFinite(numB)) {
+        return Math.abs(numA - numB) <= 1e-6;
+    }
+
+    if (typeof a === 'boolean' || typeof b === 'boolean') {
+        return Boolean(a) === Boolean(b);
+    }
+
+    return String(a) === String(b);
+}
+
+function diffParams(expected = {}, actual = {}) {
+    const mismatches = [];
+    const keys = Object.keys(expected || {});
+    for (const key of keys) {
+        if (!areParamValuesEqual(expected[key], actual[key])) {
+            mismatches.push(`${key}: ${expected[key]} ≠ ${actual[key]}`);
+        }
+    }
+    return mismatches;
+}
+
+function validateLoadedStrategy(sourceResult, appliedState) {
+    if (typeof getBacktestParams !== 'function') {
+        console.warn('[Batch Optimization] getBacktestParams 不可用，略過載入後檢查');
+        return [];
+    }
+
+    let snapshot;
+    try {
+        snapshot = getBacktestParams();
+    } catch (error) {
+        console.warn('[Batch Optimization] getBacktestParams 執行失敗：', error);
+        return [];
+    }
+
+    if (!snapshot || typeof snapshot !== 'object') {
+        return [];
+    }
+
+    const mismatches = [];
+
+    if (appliedState.entry?.selectValue && snapshot.entryStrategy !== appliedState.entry.selectValue) {
+        mismatches.push(`進場策略 ${snapshot.entryStrategy} ≠ ${appliedState.entry.selectValue}`);
+    }
+
+    if (appliedState.exit?.selectValue && snapshot.exitStrategy !== appliedState.exit.selectValue) {
+        mismatches.push(`出場策略 ${snapshot.exitStrategy} ≠ ${appliedState.exit.selectValue}`);
+    }
+
+    if (appliedState.entry?.params && Object.keys(appliedState.entry.params).length > 0) {
+        const entryDiffs = diffParams(appliedState.entry.params, snapshot.entryParams || {});
+        if (entryDiffs.length > 0) {
+            mismatches.push(`進場參數不一致（${entryDiffs.join('，')}）`);
+        }
+    }
+
+    if (appliedState.exit?.params && Object.keys(appliedState.exit.params).length > 0) {
+        const exitDiffs = diffParams(appliedState.exit.params, snapshot.exitParams || {});
+        if (exitDiffs.length > 0) {
+            mismatches.push(`出場參數不一致（${exitDiffs.join('，')}）`);
+        }
+    }
+
+    const riskState = appliedState.risk || {};
+    if (riskState.stopLoss !== undefined) {
+        if (!areParamValuesEqual(riskState.stopLoss, snapshot.stopLoss)) {
+            mismatches.push(`停損 ${snapshot.stopLoss} ≠ ${riskState.stopLoss}`);
+        }
+    }
+    if (riskState.takeProfit !== undefined) {
+        if (!areParamValuesEqual(riskState.takeProfit, snapshot.takeProfit)) {
+            mismatches.push(`停利 ${snapshot.takeProfit} ≠ ${riskState.takeProfit}`);
+        }
+    }
+
+    return mismatches;
+}
+
 // 載入批量優化策略
 function loadBatchStrategy(index) {
     const result = batchOptimizationResults[index];
@@ -3575,193 +3893,129 @@ function loadBatchStrategy(index) {
         console.error('[Batch Optimization] No result found at index:', index);
         return;
     }
-    
-    console.log('[Batch Optimization] Loading strategy at index:', index);
-    console.log('[Batch Optimization] Full result object:', result);
-    console.log('[Batch Optimization] buyStrategy:', result.buyStrategy);
-    console.log('[Batch Optimization] sellStrategy:', result.sellStrategy);
-    console.log('[Batch Optimization] sellStrategy type:', typeof result.sellStrategy);
-    console.log('[Batch Optimization] Has sellStrategy property:', 'sellStrategy' in result);
-    console.log('[Batch Optimization] Object keys:', Object.keys(result));
-    
-    // 檢查是否有 exitStrategy 字段（這可能是問題所在）
-    if ('exitStrategy' in result) {
-        console.warn('[Batch Optimization] Found exitStrategy field:', result.exitStrategy);
-        console.warn('[Batch Optimization] This might be overriding sellStrategy');
-    }
-    
-    // 更新策略選擇
-    const entryStrategyElement = document.getElementById('entryStrategy');
-    const exitStrategyElement = document.getElementById('exitStrategy');
-    
-    if (entryStrategyElement) {
-        entryStrategyElement.value = result.buyStrategy;
-        // 觸發策略變更事件
-        entryStrategyElement.dispatchEvent(new Event('change'));
-    }
-    
-    if (exitStrategyElement) {
-        // 優先使用 sellStrategy，如果不存在則檢查 exitStrategy，最後使用預設策略
-        let exitStrategy = result.sellStrategy;
-        if (!exitStrategy && result.exitStrategy) {
-            console.warn('[Batch Optimization] Using exitStrategy as fallback:', result.exitStrategy);
-            exitStrategy = result.exitStrategy;
+
+    try {
+        if (!result.buyStrategy) {
+            raiseBatchLoadError('批量優化載入失敗：結果缺少進場策略，請檢查優化回傳。');
         }
-        if (!exitStrategy) {
-            console.warn('[Batch Optimization] No exit strategy found, using default');
-            exitStrategy = 'stop_loss_take_profit';
+
+        const entryStrategyElement = document.getElementById('entryStrategy');
+        const exitStrategyElement = document.getElementById('exitStrategy');
+
+        const appliedState = {
+            entry: { params: {} },
+            exit: { params: {} },
+            risk: {}
+        };
+
+        const entrySelection = resolveStrategySelection('entry', result.buyStrategy, entryStrategyElement);
+        entryStrategyElement.value = entrySelection.selectValue;
+        appliedState.entry.selectValue = entrySelection.selectValue;
+        appliedState.entry.strategyKey = entrySelection.strategyKey;
+
+        const exitStrategySource = result.sellStrategy || result.exitStrategy;
+        if (!exitStrategySource) {
+            raiseBatchLoadError('批量優化載入失敗：結果缺少出場策略，請檢查優化回傳。');
         }
-        
-        // 關鍵修復：將批量優化的完整策略ID轉換為HTML select期待的簡化版本
-        let selectValue = exitStrategy;
-        if (exitStrategy.endsWith('_exit')) {
-            // 移除 '_exit' 後綴，因為HTML select中可能只存儲基礎名稱
-            const baseStrategy = exitStrategy.replace('_exit', '');
-            console.log(`[Batch Optimization] Converting strategy from '${exitStrategy}' to '${baseStrategy}'`);
-            selectValue = baseStrategy;
+        const exitSelection = resolveStrategySelection('exit', exitStrategySource, exitStrategyElement);
+        exitStrategyElement.value = exitSelection.selectValue;
+        appliedState.exit.selectValue = exitSelection.selectValue;
+        appliedState.exit.strategyKey = exitSelection.strategyKey;
+
+        const entryParams = (result.buyParams && typeof result.buyParams === 'object') ? result.buyParams : {};
+        if (Object.keys(entryParams).length > 0) {
+            appliedState.entry.params = updateBatchStrategyParams('entry', entryParams, entrySelection.strategyKey);
         }
-        
-        console.log('[Batch Optimization] Setting exit strategy to:', selectValue);
-        console.log('[Batch Optimization] Available options in select:', Array.from(exitStrategyElement.options).map(o => o.value));
-        
-        // 檢查選項是否存在
-        const optionExists = Array.from(exitStrategyElement.options).some(option => option.value === selectValue);
-        if (!optionExists) {
-            console.warn(`[Batch Optimization] Option '${selectValue}' not found in select, trying original value '${exitStrategy}'`);
-            selectValue = exitStrategy; // 回退到原始值
-            
-            // 如果還是不存在，使用預設策略
-            const fallbackExists = Array.from(exitStrategyElement.options).some(option => option.value === selectValue);
-            if (!fallbackExists) {
-                console.warn(`[Batch Optimization] Neither '${selectValue}' nor original value found, using stop_loss_take_profit`);
-                selectValue = 'stop_loss_take_profit';
+
+        const exitParamsCandidate = (result.sellParams && typeof result.sellParams === 'object' && Object.keys(result.sellParams).length > 0)
+            ? result.sellParams
+            : ((result.exitParams && typeof result.exitParams === 'object') ? result.exitParams : {});
+        if (Object.keys(exitParamsCandidate).length > 0) {
+            appliedState.exit.params = updateBatchStrategyParams('exit', exitParamsCandidate, exitSelection.strategyKey);
+        }
+
+        const ensureRiskInput = (id, label) => {
+            const element = document.getElementById(id);
+            if (!element) {
+                raiseBatchLoadError(`批量優化載入失敗：找不到${label}輸入欄位 (${id})，請補齊欄位映射。`);
             }
+            return element;
+        };
+
+        const riskManagement = (result.riskManagement && typeof result.riskManagement === 'object') ? result.riskManagement : {};
+        const appliedRisk = {};
+        const riskMessages = [];
+
+        if (riskManagement.stopLoss !== undefined) {
+            const input = ensureRiskInput('stopLoss', '停損');
+            input.value = riskManagement.stopLoss;
+            appliedRisk.stopLoss = riskManagement.stopLoss;
+            riskMessages.push(`停損 ${riskManagement.stopLoss}%`);
         }
-        
-        exitStrategyElement.value = selectValue;
-        
-        // 如果出場策略為 null 或使用預設策略，顯示訊息給用戶
-        if (!result.sellStrategy) {
-            console.log('[Batch Optimization] 出場策略未觸發，使用策略:', selectValue);
-            if (selectValue === 'stop_loss_take_profit') {
-                showInfo('此優化結果的出場策略未觸發，已載入預設的停損停利策略。您可以根據需要調整出場策略。');
-            } else {
-                const strategyName = strategyDescriptions[result.sellStrategy]?.name || strategyDescriptions[selectValue]?.name || selectValue;
-                showInfo(`已載入出場策略：${strategyName}`);
-            }
+        if (riskManagement.takeProfit !== undefined) {
+            const input = ensureRiskInput('takeProfit', '停利');
+            input.value = riskManagement.takeProfit;
+            appliedRisk.takeProfit = riskManagement.takeProfit;
+            riskMessages.push(`停利 ${riskManagement.takeProfit}%`);
         }
-        
-        // 觸發策略變更事件
-        exitStrategyElement.dispatchEvent(new Event('change'));
-    }
-    
-    // 更新策略參數
-    updateBatchStrategyParams('entry', result.buyParams, result.buyStrategy);
-    // 更新出場策略參數，優先使用 sellParams，然後嘗試 exitParams
-    const exitParams = result.sellParams || result.exitParams;
-    const exitStrategyName = result.sellStrategy || result.exitStrategy;
-    if (exitParams && Object.keys(exitParams).length > 0) {
-        updateBatchStrategyParams('exit', exitParams, exitStrategyName);
-        console.log('[Batch Optimization] 已更新出場策略參數:', exitParams, '策略:', exitStrategyName);
-    } else {
-        console.log('[Batch Optimization] 出場策略參數為空，跳過參數更新');
-    }
-    
-    // 檢查並應用風險管理參數
-    console.log('[Batch Optimization] Checking for risk management parameters...');
-    console.log('[Batch Optimization] Result has riskManagement:', 'riskManagement' in result);
-    console.log('[Batch Optimization] riskManagement value:', result.riskManagement);
-    
-    if (result.riskManagement) {
-        console.log('[Batch Optimization] 應用風險管理參數:', result.riskManagement);
-        
-        // 設定停損
-        if (result.riskManagement.stopLoss !== undefined) {
-            const stopLossInput = document.getElementById('stopLoss');
-            if (stopLossInput) {
-                console.log('[Batch Optimization] 設定停損前的值:', stopLossInput.value);
-                stopLossInput.value = result.riskManagement.stopLoss;
-                console.log('[Batch Optimization] 設定停損後的值:', stopLossInput.value);
-                console.log('[Batch Optimization] 設定停損:', result.riskManagement.stopLoss);
-            } else {
-                console.error('[Batch Optimization] 找不到停損輸入框 (stopLoss)');
-            }
-        }
-        
-        // 設定停利
-        if (result.riskManagement.takeProfit !== undefined) {
-            const takeProfitInput = document.getElementById('takeProfit');
-            if (takeProfitInput) {
-                console.log('[Batch Optimization] 設定停利前的值:', takeProfitInput.value);
-                takeProfitInput.value = result.riskManagement.takeProfit;
-                console.log('[Batch Optimization] 設定停利後的值:', takeProfitInput.value);
-                console.log('[Batch Optimization] 設定停利:', result.riskManagement.takeProfit);
-            } else {
-                console.error('[Batch Optimization] 找不到停利輸入框 (takeProfit)');
-            }
-        }
-        
-        showInfo(`已載入優化的風險管理參數：停損 ${result.riskManagement.stopLoss || 0}%，停利 ${result.riskManagement.takeProfit || 0}%`);
-    } else {
-        console.log('[Batch Optimization] 沒有風險管理參數需要載入');
-        
-        // 檢查是否為風險管理策略但沒有參數
-        if (result.sellStrategy === 'fixed_stop_loss' || result.sellStrategy === 'cover_fixed_stop_loss') {
-            console.warn('[Batch Optimization] 這是風險管理策略但沒有找到 riskManagement 參數');
-            console.warn('[Batch Optimization] 完整結果物件:', result);
-        }
-        
-        // 對於非風險管理策略，載入該組合實際使用的停損停利參數
-        console.log('[Batch Optimization] Checking for used risk management parameters...');
-        console.log('[Batch Optimization] usedStopLoss:', result.usedStopLoss);
-        console.log('[Batch Optimization] usedTakeProfit:', result.usedTakeProfit);
-        
-        if (result.usedStopLoss !== undefined || result.usedTakeProfit !== undefined) {
-            console.log('[Batch Optimization] 載入該組合實際使用的風險管理參數');
-            
-            // 設定停損
+
+        if (riskMessages.length === 0 && (result.usedStopLoss !== undefined || result.usedTakeProfit !== undefined)) {
             if (result.usedStopLoss !== undefined) {
-                const stopLossInput = document.getElementById('stopLoss');
-                if (stopLossInput) {
-                    console.log('[Batch Optimization] 設定實際使用的停損前的值:', stopLossInput.value);
-                    stopLossInput.value = result.usedStopLoss;
-                    console.log('[Batch Optimization] 設定實際使用的停損後的值:', stopLossInput.value);
-                } else {
-                    console.error('[Batch Optimization] 找不到停損輸入框 (stopLoss)');
-                }
+                const input = ensureRiskInput('stopLoss', '停損');
+                input.value = result.usedStopLoss;
+                appliedRisk.stopLoss = result.usedStopLoss;
+                riskMessages.push(`停損 ${result.usedStopLoss}%`);
             }
-            
-            // 設定停利
             if (result.usedTakeProfit !== undefined) {
-                const takeProfitInput = document.getElementById('takeProfit');
-                if (takeProfitInput) {
-                    console.log('[Batch Optimization] 設定實際使用的停利前的值:', takeProfitInput.value);
-                    takeProfitInput.value = result.usedTakeProfit;
-                    console.log('[Batch Optimization] 設定實際使用的停利後的值:', takeProfitInput.value);
-                } else {
-                    console.error('[Batch Optimization] 找不到停利輸入框 (takeProfit)');
-                }
+                const input = ensureRiskInput('takeProfit', '停利');
+                input.value = result.usedTakeProfit;
+                appliedRisk.takeProfit = result.usedTakeProfit;
+                riskMessages.push(`停利 ${result.usedTakeProfit}%`);
             }
-            
-            showInfo(`已載入該組合使用的風險管理參數：停損 ${result.usedStopLoss || 0}%，停利 ${result.usedTakeProfit || 0}%`);
+        }
+
+        appliedState.risk = appliedRisk;
+
+        ['entryStrategy', 'exitStrategy'].forEach((id) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.dispatchEvent(new Event('change'));
+            }
+        });
+
+        const mismatches = validateLoadedStrategy(result, appliedState);
+        if (mismatches.length > 0) {
+            raiseBatchLoadError(`批量優化載入檢查失敗：${mismatches.join('；')}。請補齊欄位映射或重新整理策略結果。`);
+        }
+
+        const entryStrategyName = (strategyDescriptions && strategyDescriptions[entrySelection.strategyKey]?.name) || entrySelection.selectValue;
+        let successMessage = `進場策略已載入：${entryStrategyName}`;
+        if (riskMessages.length > 0) {
+            successMessage += `；已套用風險管理：${riskMessages.join('，')}`;
+        }
+        if (typeof showSuccess === 'function') {
+            showSuccess(successMessage);
+        }
+
+        if (typeof switchTab === 'function') {
+            switchTab('optimization');
+        }
+
+        if (typeof confirm === 'function' && typeof runBacktestInternal === 'function') {
+            if (confirm('批量優化策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？')) {
+                setTimeout(() => { runBacktestInternal(); }, 100);
+            }
+        }
+
+        console.log(`[Batch Optimization] Strategy at index ${index} loaded via ${BATCH_LOAD_SYNC_PATCH}`, appliedState);
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to load strategy:', error);
+        if (!error?.isBatchLoadError && typeof showError === 'function') {
+            showError('批量優化載入失敗，請檢查控制台錯誤。');
         }
     }
-    
-    // 顯示進場策略載入成功的通知
-    const entryStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-    showSuccess(`進場策略已載入：${entryStrategyName}`);
-    
-    // 顯示確認對話框並自動執行回測
-    if (confirm(`批量優化策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
-        // 自動執行回測
-        setTimeout(() => {
-            runBacktestInternal();
-        }, 100);
-    }
-    
-    // 切換到優化頁籤
-    switchTab('optimization');
 }
+
 
 // 添加測試按鈕（開發用）
 function addTestButton() {
@@ -3839,51 +4093,55 @@ function testLoadStrategyFix() {
 
 // 更新策略參數
 function updateBatchStrategyParams(type, params, strategyName = null) {
-    // 檢查參數是否有效
     if (!params || typeof params !== 'object') {
         console.warn(`[Batch Optimization] Invalid params for ${type}:`, params);
-        return;
+        return {};
     }
-    
-    try {
-        // 獲取當前選擇的策略，用於特殊參數名稱映射
-        // 優先使用傳入的策略名稱，否則從DOM獲取
-        let currentStrategy = strategyName;
-        if (!currentStrategy) {
-            const strategySelect = document.getElementById(`${type}Strategy`);
-            currentStrategy = strategySelect ? strategySelect.value : '';
-        }
-        
-        console.log(`[Batch Optimization] Updating ${type} params for strategy: ${currentStrategy}`, params);
-        
-        for (const [key, value] of Object.entries(params)) {
-            if (key && value !== undefined && value !== null) {
-                // 基礎ID生成
-                let inputId = `${type}${key.charAt(0).toUpperCase() + key.slice(1)}`;
-                
-                // KD策略的特殊參數名稱映射（與 loadStrategy 函數保持一致）
-                if ((currentStrategy === 'k_d_cross' || currentStrategy === 'k_d_cross_exit') && key === 'thresholdX') {
-                    inputId = `${type}KdThresholdX`;
-                } else if ((currentStrategy === 'k_d_cross_exit' || currentStrategy.includes('k_d_cross')) && key === 'thresholdY') {
-                    inputId = `${type}KdThresholdY`;
-                } else if ((currentStrategy === 'macd_cross' || currentStrategy === 'macd_cross_exit') && key === 'signalPeriod') {
-                    inputId = `${type}SignalPeriod`;
-                } else if (currentStrategy === 'turtle_stop_loss' && key === 'stopLossPeriod') {
-                    inputId = `${type}StopLossPeriod`;
-                }
-                
-                const input = document.getElementById(inputId);
-                if (input) {
-                    input.value = value;
-                    console.log(`[Batch Optimization] Set ${inputId} = ${value} (strategy: ${currentStrategy})`);
-                } else {
-                    console.warn(`[Batch Optimization] Input element not found: ${inputId} for strategy ${currentStrategy}, key: ${key}`);
-                }
-            }
-        }
-    } catch (error) {
-        console.error(`[Batch Optimization] Error updating strategy params for ${type}:`, error);
+
+    const entries = Object.entries(params).filter(([, value]) => value !== undefined && value !== null);
+    if (entries.length === 0) {
+        return {};
     }
+
+    const strategySelect = document.getElementById(`${type}Strategy`);
+    const activeStrategy = strategyName || (strategySelect ? strategySelect.value : null);
+    const fieldMap = buildParamFieldMap(type, activeStrategy);
+
+    if (!fieldMap) {
+        raiseBatchLoadError(`批量優化載入失敗：無法建立 ${type} 策略 ${activeStrategy || '(未提供)'} 的欄位映射，請補齊策略描述。`);
+    }
+
+    console.log(`[Batch Optimization] Updating ${type} params for strategy: ${activeStrategy}`, params);
+
+    const appliedValues = {};
+    const missingKeys = [];
+    const missingInputs = [];
+
+    for (const [key, value] of entries) {
+        const inputId = fieldMap[key];
+        if (!inputId) {
+            missingKeys.push(key);
+            continue;
+        }
+        const input = document.getElementById(inputId);
+        if (!input) {
+            missingInputs.push(`${key}->${inputId}`);
+            continue;
+        }
+        input.value = value;
+        appliedValues[key] = value;
+        console.log(`[Batch Optimization] Set ${inputId} = ${value} (strategy: ${activeStrategy})`);
+    }
+
+    if (missingKeys.length > 0) {
+        raiseBatchLoadError(`批量優化載入失敗：${type} 策略 ${activeStrategy || '(未提供)'} 缺少參數欄位 ${missingKeys.join(', ')}，請補齊欄位映射。`);
+    }
+
+    if (missingInputs.length > 0) {
+        raiseBatchLoadError(`批量優化載入失敗：找不到 ${type} 策略 ${activeStrategy || '(未提供)'} 的輸入欄位 ${missingInputs.join(', ')}，請補齊欄位映射。`);
+    }
+
+    return appliedValues;
 }
 
 // 儲存批量優化策略
@@ -4002,81 +4260,6 @@ function generateStrategyCombinations(buyStrategies, sellStrategies) {
     return combinations;
 }
 
-// 更新批量進度（支援自訂訊息）
-function updateBatchProgress(percentage, message) {
-    const progressBar = document.getElementById('batch-progress-bar');
-    const progressText = document.getElementById('batch-progress-text');
-    const progressDetail = document.getElementById('batch-progress-detail');
-    
-    if (progressBar) {
-        progressBar.style.width = `${percentage}%`;
-    }
-
-    if (progressText) {
-        progressText.textContent = `${Math.round(percentage)}%`;
-    }
-
-    if (progressDetail && message) {
-        let displayMessage = message;
-        
-        // 計算剩餘時間（只有在進度 > 5% 時才顯示）
-        if (percentage > 5 && batchOptimizationStartTime) {
-            const elapsedTime = Date.now() - batchOptimizationStartTime;
-            const estimatedTotal = (elapsedTime / percentage) * 100;
-            const remainingTime = estimatedTotal - elapsedTime;
-            
-            if (remainingTime > 0) {
-                const remainingMinutes = Math.ceil(remainingTime / (1000 * 60));
-                const remainingSeconds = Math.ceil((remainingTime % (1000 * 60)) / 1000);
-                
-                if (remainingMinutes > 0) {
-                    displayMessage += ` (預計剩餘: ${remainingMinutes}分${remainingSeconds}秒)`;
-                } else {
-                    displayMessage += ` (預計剩餘: ${remainingSeconds}秒)`;
-                }
-            }
-        }
-        
-        progressDetail.textContent = displayMessage;
-    }
-}
-
-// 顯示批量優化進度
-function showBatchProgress() {
-    console.log('[Batch Optimization] showBatchProgress called');
-    const progressElement = document.getElementById('batch-optimization-progress');
-    if (progressElement) {
-        console.log('[Batch Optimization] Progress element found, showing...');
-        progressElement.classList.remove('hidden');
-    } else {
-        console.error('[Batch Optimization] Progress element not found!');
-    }
-    
-    // 隱藏結果區域
-    const resultsDiv = document.getElementById('batch-optimization-results');
-    if (resultsDiv) {
-        resultsDiv.classList.add('hidden');
-    }
-    
-    // 初始化進度
-    updateBatchProgress(0, '準備中...');
-}
-
-// 隱藏批量優化進度
-function hideBatchProgress() {
-    const progressElement = document.getElementById('batch-optimization-progress');
-    if (progressElement) {
-        progressElement.classList.add('hidden');
-    }
-}
-
-// 隱藏批量進度
-function hideBatchProgress() {
-    const progressElement = document.getElementById('batch-optimization-progress');
-    if (progressElement) {
-        progressElement.classList.add('hidden');
-    }
-}
 
 // 導出函數供外部使用
 window.batchOptimization = {
