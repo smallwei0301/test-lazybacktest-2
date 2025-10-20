@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930B
+// Patch Tag: LB-BATCH-OPT-20251003A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -65,6 +65,22 @@ function clonePlainObject(value) {
         console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
         return { ...value };
     }
+}
+
+function getStrategyDescriptionsMap() {
+    if (typeof strategyDescriptions !== 'undefined' && strategyDescriptions) {
+        return strategyDescriptions;
+    }
+    if (typeof window !== 'undefined' && window.strategyDescriptions) {
+        return window.strategyDescriptions;
+    }
+    return {};
+}
+
+function getStrategyInfo(strategyKey) {
+    if (!strategyKey) return null;
+    const descriptions = getStrategyDescriptionsMap();
+    return descriptions[strategyKey] || null;
 }
 
 function prepareBaseParamsForOptimization(source) {
@@ -371,7 +387,7 @@ function generateStrategyOptions() {
         
         // 生成買入策略選項
         buyStrategies.forEach(strategy => {
-            const strategyInfo = strategyDescriptions[strategy];
+            const strategyInfo = getStrategyInfo(strategy);
             if (strategyInfo) {
                 const div = document.createElement('div');
                 div.className = 'flex items-center';
@@ -387,7 +403,7 @@ function generateStrategyOptions() {
         
         // 生成賣出策略選項
         sellStrategies.forEach(strategy => {
-            const strategyInfo = strategyDescriptions[strategy];
+            const strategyInfo = getStrategyInfo(strategy);
             if (strategyInfo) {
                 const div = document.createElement('div');
                 div.className = 'flex items-center';
@@ -571,12 +587,12 @@ function validateBatchStrategies() {
     }
     
     // 檢查選擇的策略是否為 null 或無效
-    const invalidBuyStrategies = buyStrategies.filter(strategy => 
-        !strategy || strategy === 'null' || !strategyDescriptions[strategy]
+    const invalidBuyStrategies = buyStrategies.filter(strategy =>
+        !strategy || strategy === 'null' || !getStrategyInfo(strategy)
     );
-    
-    const invalidSellStrategies = sellStrategies.filter(strategy => 
-        !strategy || strategy === 'null' || !strategyDescriptions[strategy]
+
+    const invalidSellStrategies = sellStrategies.filter(strategy =>
+        !strategy || strategy === 'null' || !getStrategyInfo(strategy)
     );
     
     if (invalidBuyStrategies.length > 0) {
@@ -721,8 +737,9 @@ let currentBatchProgress = {
 
 // 獲取策略的中文名稱
 function getStrategyChineseName(strategyKey) {
-    if (typeof strategyDescriptions !== 'undefined' && strategyDescriptions[strategyKey]) {
-        return strategyDescriptions[strategyKey].name || strategyKey;
+    const info = getStrategyInfo(strategyKey);
+    if (info) {
+        return info.name || strategyKey;
     }
     return strategyKey;
 }
@@ -795,8 +812,10 @@ function updateBatchProgress(currentCombination = null) {
         // 顯示當前處理組合資訊
         if (progressCombination && currentCombination) {
             const { buyStrategy, sellStrategy, current, total } = currentCombination;
-            const buyStrategyName = strategyDescriptions[buyStrategy]?.name || buyStrategy;
-            const sellStrategyName = strategyDescriptions[sellStrategy]?.name || sellStrategy;
+            const buyInfo = getStrategyInfo(buyStrategy);
+            const sellInfo = getStrategyInfo(sellStrategy);
+            const buyStrategyName = buyInfo?.name || buyStrategy;
+            const sellStrategyName = sellInfo?.name || sellStrategy;
             progressCombination.textContent = `🔄 正在優化組合 ${current}/${total}：${buyStrategyName} + ${sellStrategyName}`;
         } else if (progressCombination) {
             progressCombination.textContent = '';
@@ -1018,11 +1037,12 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
             
             // Phase 1: 優化進場策略的所有參數直到內部收斂
             console.log(`[Batch Optimization] Phase 1: Optimizing entry strategy ${currentCombo.buyStrategy}`);
-            if (allowEntryOptimization && currentCombo.buyStrategy && strategyDescriptions[currentCombo.buyStrategy]) {
+            if (allowEntryOptimization && currentCombo.buyStrategy && getStrategyInfo(currentCombo.buyStrategy)) {
+                const strategyInfo = getStrategyInfo(currentCombo.buyStrategy);
                 const optimizedEntryParams = await optimizeStrategyWithInternalConvergence(
                     currentCombo.buyStrategy,
                     'entry',
-                    strategyDescriptions[currentCombo.buyStrategy],
+                    strategyInfo,
                     config.targetMetric,
                     config.parameterTrials,
                     currentCombo, // 包含當前出場參數的完整上下文
@@ -1038,11 +1058,12 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
 
             // Phase 2: 基於最新進場參數，優化出場策略的所有參數直到內部收斂
             console.log(`[Batch Optimization] Phase 2: Optimizing exit strategy ${currentCombo.sellStrategy}`);
-            if (allowExitOptimization && currentCombo.sellStrategy && strategyDescriptions[currentCombo.sellStrategy]) {
+            if (allowExitOptimization && currentCombo.sellStrategy && getStrategyInfo(currentCombo.sellStrategy)) {
+                const strategyInfo = getStrategyInfo(currentCombo.sellStrategy);
                 const optimizedExitParams = await optimizeStrategyWithInternalConvergence(
                     currentCombo.sellStrategy,
                     'exit',
-                    strategyDescriptions[currentCombo.sellStrategy],
+                    strategyInfo,
                     config.targetMetric,
                     config.parameterTrials,
                     currentCombo, // 包含已更新的進場參數
@@ -1304,7 +1325,7 @@ async function optimizeCombinations(combinations, config, sharedOptions = {}) {
 // 獲取策略預設參數
 function getDefaultStrategyParams(strategy) {
     try {
-        const strategyInfo = strategyDescriptions[strategy];
+        const strategyInfo = getStrategyInfo(strategy);
         if (strategyInfo && strategyInfo.defaultParams) {
             return { ...strategyInfo.defaultParams };
         }
@@ -1554,7 +1575,7 @@ async function executeBacktestForCombination(combination, options = {}) {
 async function optimizeStrategyParameters(strategy, strategyType, targetMetric, trials = 100) {
     return new Promise((resolve) => {
         try {
-            const strategyInfo = strategyDescriptions[strategy];
+            const strategyInfo = getStrategyInfo(strategy);
             const sharedOptions = batchOptimizationSharedOptions || {};
 
             // 檢查是否為風險管理控制策略
@@ -1620,7 +1641,8 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
             return;
         } catch (error) {
             console.error('[Batch Optimization] Error in optimizeStrategyParameters:', error);
-            resolve(strategyDescriptions[strategy]?.defaultParams || {});
+            const fallbackInfo = getStrategyInfo(strategy);
+            resolve(fallbackInfo?.defaultParams || {});
         }
     });
 }
@@ -2085,10 +2107,12 @@ function renderBatchResultsTable() {
     batchOptimizationResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
-        
-        const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+
+        const buyInfo = getStrategyInfo(result.buyStrategy);
+        const sellInfo = getStrategyInfo(result.sellStrategy);
+        const buyStrategyName = buyInfo?.name || result.buyStrategy;
+        const sellStrategyName = result.sellStrategy ?
+            (sellInfo?.name || result.sellStrategy) :
             '未觸發';
         
         // 判斷優化類型並處理合併的類型標籤
@@ -2401,7 +2425,8 @@ async function startEntryCrossOptimization() {
             const bestEntryResult = findBestResultForStrategy(entryStrategy, 'entry');
             
             if (!bestEntryResult) {
-                console.warn(`找不到 ${strategyDescriptions[entryStrategy]?.name || entryStrategy} 的最佳結果`);
+                const entryInfo = getStrategyInfo(entryStrategy);
+                console.warn(`找不到 ${entryInfo?.name || entryStrategy} 的最佳結果`);
                 continue;
             }
             
@@ -2547,7 +2572,8 @@ async function startExitCrossOptimization() {
             const bestExitResult = findBestResultForStrategy(exitStrategy, 'exit');
             
             if (!bestExitResult) {
-                console.warn(`找不到 ${strategyDescriptions[exitStrategy]?.name || exitStrategy} 的最佳結果`);
+                const exitInfo = getStrategyInfo(exitStrategy);
+                console.warn(`找不到 ${exitInfo?.name || exitStrategy} 的最佳結果`);
                 continue;
             }
             
@@ -2877,8 +2903,8 @@ function buildLocalRefinementTask(candidate, config, targetMetric) {
         return null;
     }
 
-    const entryInfo = strategyDescriptions[candidate.buyStrategy];
-    const exitInfo = strategyDescriptions[candidate.sellStrategy];
+    const entryInfo = getStrategyInfo(candidate.buyStrategy);
+    const exitInfo = getStrategyInfo(candidate.sellStrategy);
 
     const entryTargets = Array.isArray(entryInfo?.optimizeTargets)
         ? entryInfo.optimizeTargets.filter(target => target?.range && isFinite(target.range.from) && isFinite(target.range.to))
@@ -3426,7 +3452,7 @@ function incrementLocalRefinementProgress(context) {
 
 function ensureInitialParams(params, strategyKey) {
     const cloned = clonePlainObject(params);
-    const strategyInfo = strategyDescriptions[strategyKey];
+    const strategyInfo = getStrategyInfo(strategyKey);
     const defaults = strategyInfo?.defaultParams ? { ...strategyInfo.defaultParams } : {};
     const targets = Array.isArray(strategyInfo?.optimizeTargets) ? strategyInfo.optimizeTargets : [];
 
@@ -3560,7 +3586,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             baseParams.entryParams = { ...entryParams };
             
             // 優化出場策略參數
-            const exitStrategyInfo = strategyDescriptions[exitStrategy];
+            const exitStrategyInfo = getStrategyInfo(exitStrategy);
             console.log('[Cross Optimization] Exit strategy info:', exitStrategyInfo);
             
             if (exitStrategyInfo && exitStrategyInfo.optimizeTargets) {
@@ -3579,7 +3605,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             baseParams.exitParams = { ...exitParams };
             
             // 優化進場策略參數
-            const entryStrategyInfo = strategyDescriptions[entryStrategy];
+            const entryStrategyInfo = getStrategyInfo(entryStrategy);
             console.log('[Cross Optimization] Entry strategy info:', entryStrategyInfo);
             
             if (entryStrategyInfo && entryStrategyInfo.optimizeTargets) {
@@ -3968,7 +3994,9 @@ function loadBatchStrategy(index) {
             if (selectValue === 'stop_loss_take_profit') {
                 showInfo('此優化結果的出場策略未觸發，已載入預設的停損停利策略。您可以根據需要調整出場策略。');
             } else {
-                const strategyName = strategyDescriptions[result.sellStrategy]?.name || strategyDescriptions[selectValue]?.name || selectValue;
+                const sellInfo = getStrategyInfo(result.sellStrategy);
+                const selectedInfo = getStrategyInfo(selectValue);
+                const strategyName = sellInfo?.name || selectedInfo?.name || selectValue;
                 showInfo(`已載入出場策略：${strategyName}`);
             }
         }
@@ -4070,7 +4098,8 @@ function loadBatchStrategy(index) {
     }
     
     // 顯示進場策略載入成功的通知
-    const entryStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
+    const entryInfo = getStrategyInfo(result.buyStrategy);
+    const entryStrategyName = entryInfo?.name || result.buyStrategy;
     showSuccess(`進場策略已載入：${entryStrategyName}`);
     
     // 顯示確認對話框並自動執行回測
@@ -4246,8 +4275,9 @@ async function optimizeAllStrategies(buyStrategies, sellStrategies, config) {
     
     // 優化進場策略
     for (const strategy of buyStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
-            `優化進場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
+        const strategyInfo = getStrategyInfo(strategy);
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
+            `優化進場策略: ${strategyInfo?.name || strategy}...`);
         
         optimizedBuy[strategy] = await optimizeStrategyParameters(strategy, 'entry', config.targetMetric, config.parameterTrials);
         completedStrategies++;
@@ -4255,8 +4285,9 @@ async function optimizeAllStrategies(buyStrategies, sellStrategies, config) {
     
     // 優化出場策略
     for (const strategy of sellStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
-            `優化出場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
+        const strategyInfo = getStrategyInfo(strategy);
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
+            `優化出場策略: ${strategyInfo?.name || strategy}...`);
         
         optimizedSell[strategy] = await optimizeStrategyParameters(strategy, 'exit', config.targetMetric, config.parameterTrials);
         completedStrategies++;
@@ -4569,16 +4600,18 @@ function testParameterRanges() {
 function checkAllStrategyParameters() {
     console.log('[Debug] Checking all strategy parameter configurations...');
     
-    if (typeof strategyDescriptions === 'undefined') {
-        console.error('[Debug] strategyDescriptions not found');
+    const descriptions = getStrategyDescriptionsMap();
+    const strategyKeys = Object.keys(descriptions);
+    if (strategyKeys.length === 0) {
+        console.error('[Debug] strategyDescriptions not found or empty');
         return;
     }
-    
-    const strategies = Object.keys(strategyDescriptions);
+
+    const strategies = strategyKeys;
     console.log(`[Debug] Found ${strategies.length} strategies to check`);
-    
+
     strategies.forEach(strategyKey => {
-        const strategy = strategyDescriptions[strategyKey];
+        const strategy = descriptions[strategyKey];
         console.log(`\n[Debug] Strategy: ${strategyKey} (${strategy.name})`);
         console.log(`[Debug] Default params:`, strategy.defaultParams);
         
@@ -4593,14 +4626,14 @@ function checkAllStrategyParameters() {
     });
     
     // 統計
-    const strategiesWithParams = strategies.filter(key => 
-        strategyDescriptions[key].optimizeTargets && 
-        strategyDescriptions[key].optimizeTargets.length > 0
+    const strategiesWithParams = strategies.filter(key =>
+        descriptions[key].optimizeTargets &&
+        descriptions[key].optimizeTargets.length > 0
     );
-    
-    const multiParamStrategies = strategies.filter(key => 
-        strategyDescriptions[key].optimizeTargets && 
-        strategyDescriptions[key].optimizeTargets.length > 1
+
+    const multiParamStrategies = strategies.filter(key =>
+        descriptions[key].optimizeTargets &&
+        descriptions[key].optimizeTargets.length > 1
     );
     
     console.log(`\n[Debug] Summary:`);
@@ -4611,7 +4644,7 @@ function checkAllStrategyParameters() {
     if (multiParamStrategies.length > 0) {
         console.log(`[Debug] - Multi-parameter strategies:`);
         multiParamStrategies.forEach(key => {
-            const paramCount = strategyDescriptions[key].optimizeTargets.length;
+            const paramCount = descriptions[key].optimizeTargets.length;
             console.log(`[Debug]   * ${key}: ${paramCount} parameters`);
         });
     }
@@ -4801,8 +4834,10 @@ function updateCrossOptimizationProgress(currentTask = null) {
         
         // 更新詳細信息
         if (currentTask) {
-            const entryName = strategyDescriptions[currentTask.entryStrategy]?.name || currentTask.entryStrategy;
-            const exitName = strategyDescriptions[currentTask.exitStrategy]?.name || currentTask.exitStrategy;
+            const entryInfo = getStrategyInfo(currentTask.entryStrategy);
+            const exitInfo = getStrategyInfo(currentTask.exitStrategy);
+            const entryName = entryInfo?.name || currentTask.entryStrategy;
+            const exitName = exitInfo?.name || currentTask.exitStrategy;
             const rankInfo = currentTask.rank ? `第${currentTask.rank}名 ` : '';
             const rangeInfo = currentTask.rangeLabel ? `（${currentTask.rangeLabel}）` : '';
             progressDetail.textContent = `🔄 正在優化: ${rankInfo}${entryName} + ${exitName}${rangeInfo} (${crossOptimizationProgress.current}/${crossOptimizationProgress.total})`;

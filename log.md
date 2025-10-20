@@ -1217,6 +1217,14 @@
   - 驗證交叉優化與局部微調結果皆帶有 `baseSettings` 與 `dataWindow`，載入後不再回退至全域 UI 狀態。
 - **Testing**: 受限於容器環境未連線代理，暫未執行實際回測；待可連線後需以 2330／2412／0050 等案例確認 console 無錯誤。
 
+## 2026-03-03 — Patch LB-BATCH-OPT-20251003A
+- **Issue recap**: 批量優化結果表格在 `strategyDescriptions` 尚未注入時因 ReferenceError 中斷渲染，整張卡片僅剩灰底標題，使用者無法閱讀最佳組合。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `getStrategyDescriptionsMap`／`getStrategyInfo`，所有策略名稱讀取改為透過安全 fallback，缺少描述時維持顯示代碼避免程式終止。
+  - 調整批量進度、結果渲染、交叉優化與局部微調流程的策略名稱引用，確保部分流程先於描述載入時不再拋錯，仍沿用暖身覆寫與排序結果。
+- **Diagnostics**: 於瀏覽器 console 觀察批量優化執行與載入過程，驗證在 `strategyDescriptions` 延遲或缺失時表格仍列出策略代碼、交叉優化進度卡持續更新，且載入按鈕可正常套用參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
 - **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
 - **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。
