@@ -48,7 +48,23 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
+function hydrateStrategyNameMap() {
+    if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+        return;
+    }
+
+    Object.keys(strategyDescriptions).forEach((key) => {
+        if (!BATCH_STRATEGY_NAME_MAP.has(key)) {
+            BATCH_STRATEGY_NAME_MAP.set(key, key);
+        }
+    });
+}
+
 function getWorkerStrategyName(batchStrategyName) {
+    if (batchStrategyName === 'none') {
+        return null;
+    }
+
     if (!batchStrategyName) {
         const message = '[Batch Optimization] Strategy name is required for worker mapping';
         console.error(message);
@@ -56,6 +72,10 @@ function getWorkerStrategyName(batchStrategyName) {
             showError('批量優化缺少策略名稱，無法建立回測請求。');
         }
         throw new Error(message);
+    }
+
+    if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
+        hydrateStrategyNameMap();
     }
 
     if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
@@ -290,7 +310,9 @@ function initBatchOptimization() {
             console.error('[Batch Optimization] strategyDescriptions not found');
             return;
         }
-        
+
+        hydrateStrategyNameMap();
+
         // 生成策略選項
         generateStrategyOptions();
         

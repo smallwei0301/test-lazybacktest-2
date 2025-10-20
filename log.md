@@ -1,5 +1,13 @@
 
 
+## 2026-07-15 — Patch LB-BATCH-OPT-20260715B
+- **Scope**: 批量優化策略映射 hydration 修正。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `hydrateStrategyNameMap`，在 `strategyDescriptions` 完整載入後補齊所有策略映射，避免批量優化提前報缺、導致無法回傳最佳參數。
+  - `getWorkerStrategyName` 改於查詢前觸發 hydration，並允許 `none` 類型策略返回 `null`，確保缺席的進/出場或風控欄位不會阻斷流程。
+  - `initBatchOptimization` 初始化階段即進行映射同步，確保 UI 載入與優化流程使用相同的策略對照表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-15 — Patch LB-BATCH-OPT-20260715A
 - **Scope**: 批量優化策略映射與 Walk-Forward 同步
 - **Updates**:
