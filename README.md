@@ -74,5 +74,17 @@ netlify dev
 
 若仍看到 CORS 或被重導到 `/errors` 的情形，請在 CLI 中觀察 Function 的 log（netlify dev 會顯示），並回報該 log。若需要，我可以協助把 Function 增加更進階的重試或錯誤分類邏輯。
 
+## 5. Walk-Forward 評分公式（LB-ROLLING-TEST-20251018A）
+
+新版滾動測試評分改為「OOS 品質 × 統計可信度 × 穩健度」的乘積流程，並採中位數避免極端值干擾：
+
+- **OOS 品質**：以使用者門檻作為 0 分起點，根據 15% 年化報酬、Sharpe 1.2、Sortino 1.5、MaxDD 10%～25%、勝率門檻 +10% 的範圍做線性轉換至 0～1，再以 0.35／0.25／0.20／0.10／0.10 權重加總。
+- **統計可信度**：透過 Web Worker 回傳的 OOS 報酬序列計算 Probabilistic Sharpe Ratio（PSR95）與 Deflated Sharpe Ratio（DSR），兩者平均後映射為 0.5～1 的 StatWeight，並同步輸出最短樣本需求（MinTRL）。
+- **穩健度調整**：每個視窗計算 Walk-Forward Efficiency（WFE = OOS 年化 ÷ IS 年化），跨視窗取中位數並截斷於 0.8～1.2，形成 WFE 調整因子。
+- **總分**：每個視窗的 `WindowScore = OOS 品質 × StatWeight`，跨窗取中位數後再乘上 WFE 調整因子，即為最後的 Walk-Forward 分數；結果會換算成 0～100 分顯示，評級邏輯維持 TotalScore ≥ 0.70（專業合格）、≥0.50（可進一步觀察）兩級門檻，未達條件則建議調整。
+- **介面提示**：Walk-Forward 總分卡片提供整體評級文字，其他指標卡片會以「合格／待加強」的白話說明呈現品質、統計可信度與視窗通過率，協助新手快速判讀。
+
+若要於文件或 UI 提及此版本，請註記補丁代碼 `LB-ROLLING-TEST-20251018A`，以利對照 `log.md` 追蹤更新內容。
+
 ---
 如有問題，請回報。
