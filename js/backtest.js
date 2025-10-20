@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710A';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710B';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8876,7 +8876,7 @@ const STRATEGY_COMPARISON_METRICS = [
     {
         key: 'trendCurrent',
         label: '目前趨勢區間',
-        description: '趨勢摘要推論的最新區間與區間報酬',
+        description: '趨勢摘要推論的最新區間、近況報酬與平均狀態信心',
         defaultChecked: true,
     },
 ];
@@ -8957,7 +8957,7 @@ function collectStrategyMetricSnapshot() {
         trendLatestCoveragePct: normaliseMetricNumber(latestCoverage),
         trendAverageConfidence: normaliseMetricNumber(
             Number.isFinite(trendSummary?.averageConfidence)
-                ? trendSummary.averageConfidence
+                ? trendSummary.averageConfidence * 100
                 : null,
         ),
     };
@@ -9194,7 +9194,7 @@ function updateStrategyComparisonTable() {
 }
 
 function formatStrategyComparisonValue(metricKey, metrics) {
-    const placeholder = '<span style="color: var(--destructive);">請先測試後保存策略</span>';
+    const placeholder = '<span style="color: var(--secondary);">請先測試後保存策略</span>';
     if (!metrics || typeof metrics !== 'object') return placeholder;
     switch (metricKey) {
         case 'annualizedReturn': {
@@ -9240,10 +9240,14 @@ function formatStrategyComparisonValue(metricKey, metrics) {
             const label = resolveStrategyComparisonTrendLabel(metrics.trendLatestLabel);
             if (!label) return placeholder;
             const returnText = normaliseMetricNumber(metrics.trendLatestReturnPct);
-            const coverageText = normaliseMetricNumber(metrics.trendLatestCoveragePct);
+            const confidenceText = normaliseMetricNumber(metrics.trendAverageConfidence);
             const parts = [label];
             if (returnText !== null) parts.push(`近況 ${formatPercentSigned(returnText, 2)}`);
-            if (coverageText !== null) parts.push(`覆蓋 ${formatPercentPlain(coverageText, 1)}`);
+            if (confidenceText !== null) {
+                parts.push(`平均狀態信心 ${formatPercentPlain(confidenceText, 1)}`);
+            } else {
+                return placeholder;
+            }
             return parts.join('｜');
         }
         default:
