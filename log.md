@@ -1,5 +1,13 @@
 
 
+## 2026-07-12 — Patch LB-BATCH-CACHE-20260712A
+- **Scope**: 批量優化與回測快取驗證，避免沿用過期資料區間。
+- **Updates**:
+  - 新增 `resolveWorkerDatasetCache` 共用 helper，整合 `needsDataFetch`、`cachedDataStore`、`lastFetchSettings` 檢查流程，統一回傳 `cachedMeta`／`cachedData`。
+  - `runOptimizationInternal`、批量優化的單參數優化與組合回測皆改用 helper，當日期區間不符時自動關閉快取並要求 Worker 重新抓取。
+  - 批量優化在快取被拒用時輸出診斷，協助比對使用者先調整日期後直接優化的情境。
+- **Testing**: `node tests/resolveWorkerDatasetCache.test.js`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:

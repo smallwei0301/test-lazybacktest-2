@@ -7570,7 +7570,7 @@ function runOptimizationInternal(optimizeType) {
     optRange = config.range; 
     console.log(`[Main] Optimizing ${optimizeType}: Param=${selectedParamName}, Label=${optLabel}, Range:`, optRange); 
     
-    const curSettings={
+    const fallbackCurSettings = {
         stockNo: params.stockNo,
         startDate: params.startDate,
         endDate: params.endDate,
@@ -7578,8 +7578,28 @@ function runOptimizationInternal(optimizeType) {
         adjustedPrice: Boolean(params.adjustedPrice),
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
+    let cacheDecision = null;
+    if (typeof resolveWorkerDatasetCache === 'function') {
+        cacheDecision = resolveWorkerDatasetCache(params) || null;
+    }
+    if (!cacheDecision) {
+        const needsFetchFallback = typeof needsDataFetch === 'function'
+            ? needsDataFetch(fallbackCurSettings)
+            : true;
+        cacheDecision = {
+            useCachedData: !needsFetchFallback,
+            cachedData: !needsFetchFallback && Array.isArray(cachedStockData) ? cachedStockData : null,
+            cachedMeta: null,
+            cacheEntry: null,
+            cacheKey: typeof buildCacheKey === 'function' ? buildCacheKey(fallbackCurSettings) : '',
+            curSettings: { ...fallbackCurSettings },
+            needsFetch: needsFetchFallback,
+            source: needsFetchFallback ? null : 'fallback',
+        };
+    }
+    const curSettings = cacheDecision.curSettings ? { ...cacheDecision.curSettings } : { ...fallbackCurSettings };
+    const useCache = Boolean(cacheDecision.useCachedData && Array.isArray(cacheDecision.cachedData));
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`;
     
     // 先清除之前的結果，但不隱藏優化進度
     clearPreviousResults(); 
@@ -7601,36 +7621,24 @@ function runOptimizationInternal(optimizeType) {
     
     try { 
         optimizationWorker=new Worker(workerUrl); 
-        const workerMsg={ 
-            type:'runOptimization', 
-            params, 
-            optimizeTargetStrategy: optimizeType, 
-            optimizeParamName:selectedParamName, 
-            optimizeRange:optRange, 
-            useCachedData:useCache 
-        }; 
-        
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData=cachedStockData;
-            const cacheEntry = ensureDatasetCacheEntryFresh(
-                buildCacheKey(curSettings),
-                cachedDataStore.get(buildCacheKey(curSettings)),
-                curSettings.market,
-            );
-                if (cacheEntry) {
-                    workerMsg.cachedMeta = {
-                        summary: cacheEntry.summary || null,
-                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                        priceSource: cacheEntry.priceSource || null,
-                        dataSource: cacheEntry.dataSource || null,
-                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
-                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
-                        finmindStatus: cacheEntry.finmindStatus || null,
-                    };
-                }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
+        const workerMsg={
+            type:'runOptimization',
+            params,
+            optimizeTargetStrategy: optimizeType,
+            optimizeParamName:selectedParamName,
+            optimizeRange:optRange,
+            useCachedData:useCache
+        };
+
+        if(useCache) {
+            workerMsg.cachedData = cacheDecision.cachedData;
+            if (cacheDecision.cachedMeta) {
+                workerMsg.cachedMeta = cacheDecision.cachedMeta;
+            }
+            console.log(`[Main] Optimization using cached dataset (${cacheDecision.source || 'unknown'}).`);
+        } else {
+            console.log(`[Main] Fetching data for ${optimizeType} opt.`, cacheDecision.needsFetch ? '' : '(cache bypassed)');
+        }
         
         optimizationWorker.postMessage(workerMsg); 
         
