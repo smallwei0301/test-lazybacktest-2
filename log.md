@@ -1,4 +1,13 @@
 
+## 2026-07-12 — Patch LB-ROLLING-TEST-20251005B
+- **Scope**: Walk-Forward 評分公式、PSR／DSR 統計可信度與報告版面調整。
+- **Updates**:
+  - 導入 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，計算統計權重並建立中位數 WFE 調整的 Walk-Forward 總分（OOS 品質 × 統計可信度 × WFE）。
+  - 逐窗表格新增 PSR95、DSR、WFE、視窗分數與樣本檢查欄位，樣本不足時會以提示色標示並於評語欄出現提醒。
+  - 總結卡片改為顯示 OOS 品質、PSR≥95% 視窗比、DSR 中位數等指標，評級門檻更新為「專業合格／可進一步觀察／未通過建議調整」，並在說明段落同步描述新公式流程。
+  - 訓練期自動優化預設開啟，進階設定預設展開顯示優化選項，並調整卡片間距讓排版與其他分頁一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-10 — Patch LB-ROLLING-TEST-20250930B
 - **Scope**: Walk-Forward 視窗自動調整與使用者提醒優化。
 - **Updates**:

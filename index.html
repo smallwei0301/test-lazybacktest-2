@@ -1921,7 +1921,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-content hidden" id="rolling-test-tab">
+                            <div class="tab-content hidden space-y-6" id="rolling-test-tab">
                                 <div class="space-y-6">
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
@@ -2004,7 +2004,7 @@
                                                     </div>
                                                 </div>
                                                 <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" />
+                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" checked />
                                                     <span>啟用訓練期自動優化</span>
                                                 </label>
                                                 <div id="rolling-optimize-settings" class="hidden space-y-3">
@@ -2128,7 +2128,7 @@
                                             <p id="rolling-report-intro" class="text-xs" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div class="card-content space-y-6">
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="rolling-scoreboard"></div>
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-6" id="rolling-scoreboard"></div>
                                             <div class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
                                                 <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">總結</h4>
                                                 <p id="rolling-score-summary" class="text-xs leading-relaxed" style="color: var(--muted-foreground);"></p>
@@ -2147,6 +2147,11 @@
                                                                 <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">勝率%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">交易數</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">PSR95</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">DSR</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">WFE</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">視窗分數</th>
+                                                                <th class="px-3 py-2 text-left font-semibold">樣本檢查</th>
                                                                 <th class="px-3 py-2 text-left font-semibold">參數摘要</th>
                                                                 <th class="px-3 py-2 text-left font-semibold">評語</th>
                                                             </tr>
@@ -2156,12 +2161,12 @@
                                                 </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
-                                                <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
+                                                <p>Walk-Forward 評分依照 PSR / DSR 文獻與 Pardo (2014) 建議，將品質、統計可信度與穩健度一併納入：</p>
                                                 <ol class="list-decimal pl-4 space-y-1">
-                                                    <li>先計算測試期的年化報酬、Sharpe、Sortino、勝率與最大回撤相對門檻的比率；門檻分別為 8%、1、1.2、45% 與 25%。比率轉換為分數時套用分段函數：ratio ≥ 2 給 95 分起跳並以每增加 0.1 再加 1 分；1 ≤ ratio &lt; 2 時在 70~95 分間線性插值；ratio &lt; 1 時以 70 × ratio 換算。</li>
-                                                    <li>計算 WFE = (測試期年化報酬 ÷ 訓練期年化報酬) × 100%，並以 67% 作為基準，同樣透過上述分段函數換算分數，以對應 Pardo (2014) 建議的 Walk-Forward 檢核。</li>
-                                                    <li>依權重 28%（年化報酬）、24%（Sharpe）、16%（Sortino）、12%（最大回撤）、10%（勝率）、10%（WFE）加總分數後除以權重總和並四捨五入，即得 0~100 分的 Walk-Forward 評分。</li>
-                                                    <li>評級門檻沿用 TradeStation 與資產管理機構常用標準：總分 ≥ 85 且合格視窗 ≥ 70% 為「專業合格」，70~84 分為「可進一步驗證」，55~69 分建議調整或加風控，低於 55 分視為未通過。</li>
+                                                    <li>把測試期的年化報酬、Sharpe、Sortino、勝率與最大回撤依預設門檻正規化到 0～1，形成 OOS 品質分數。</li>
+                                                    <li>計算 Probabilistic Sharpe Ratio（PSR）與 Deflated Sharpe Ratio（DSR），平均後得到 0.5～1 倍的統計權重，避免一次性高分。</li>
+                                                    <li>單窗分數 = OOS 品質 × 統計權重；總分取所有視窗分數的中位數，再乘上中位數 WFE（限制在 0.8～1.2 倍）以反映穩健度。</li>
+                                                    <li>等級門檻：總分 ≥ 70%、median WFE ≥ 0.8、PSR ≥ 95% 視窗比 ≥ 50%、DSR 機率中位數 ≥ 70% 為「專業合格」。總分 ≥ 50%、median WFE ≥ 0.6、PSR ≥ 95% 視窗比 ≥ 30% 為「可進一步觀察」，其餘視為「未通過建議調整」。若整體 DSR 落在 0 以下，評級會再下修一級。</li>
                                                 </ol>
                                             </div>
                                         </div>
