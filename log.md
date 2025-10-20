@@ -1,5 +1,11 @@
 
 
+## 2025-10-24 — Patch LB-BATCH-CACHE-20251024A
+- **Issue recap**: 滾動測試啟動後僅裁切視窗資料傳給 Worker，但批量優化仍沿用舊的全域快取或 Session 快取，導致最佳參數落在舊資料範圍；重新整理頁面後仍可能沿用殘缺快取。
+- **Fix**: `js/batch-optimization.js` 在快取檢查判定需要重新抓取時，於 Worker 回傳結果後同步更新 `cachedStockData`、`lastFetchSettings` 與 Session 快取條目，並在開發者模式卡片記錄快取決策與資料範圍。
+- **Diagnostics**: 交替執行滾動視窗優化與批量優化，確認開發者模式卡片出現「批量快取診斷」紀錄，標示沿用/重建快取與需求區間，並驗證重新整理後批量優化仍能重現首次最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-22 — Patch LB-BATCH-CACHE-20251022A
 - **Issue recap**: Walk-Forward 自動優化後立即切換批量優化，仍可能沿用失效的全域快取或覆寫視窗，導致最佳參數無法重現；缺乏可追蹤的快取決策日誌。
 - **Fix**:

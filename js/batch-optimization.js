@@ -3,6 +3,7 @@
 // Patch Tag: LB-BATCH-CACHE-20251018A
 // Patch Tag: LB-BATCH-CACHE-20251020A
 // Patch Tag: LB-BATCH-CACHE-20251022A
+// Patch Tag: LB-BATCH-CACHE-20251024A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -489,6 +490,17 @@ function logBatchCacheDecision(context, params, cachePayload) {
     try {
         const summary = cachePayload.datasetSummary
             || (cachePayload.cachedData ? summariseDatasetRangeForDebug(cachePayload.cachedData) : null);
+        recordBatchDeveloperLog(cachePayload.useCachedData ? 'info' : 'warning', {
+            status: cachePayload.useCachedData ? '沿用快取' : '重新抓取',
+            context,
+            reason: cachePayload.reason,
+            source: cachePayload.source,
+            required: cachePayload.required || null,
+            summary,
+            priceMode: params?.priceMode
+                || (params?.adjustedPrice ? 'adjusted' : 'raw'),
+            market: params?.market || params?.marketType || currentMarket || null,
+        });
         console.debug('[Batch Optimization][Cache]', {
             context,
             stockNo: params?.stockNo || null,
@@ -503,6 +515,163 @@ function logBatchCacheDecision(context, params, cachePayload) {
     } catch (error) {
         console.warn('[Batch Optimization] Failed to log cache decision:', error);
     }
+}
+
+function recordBatchDeveloperLog(kind, details = {}) {
+    if (typeof window === 'undefined' || !window.lazybacktestTodaySuggestionLog) return;
+    try {
+        const log = window.lazybacktestTodaySuggestionLog;
+        const severity = kind === 'warning' || kind === 'error'
+            ? 'warning'
+            : kind === 'success'
+                ? 'success'
+                : 'info';
+        const summary = details && typeof details.summary === 'object' ? details.summary : null;
+        const datasetRange = summary?.hasData
+            ? `${summary.start || '未知'} ~ ${summary.end || '未知'}`
+            : summary
+                ? '無有效日期'
+                : null;
+        const developerNotes = [];
+        if (details.context) developerNotes.push(`場景：${details.context}`);
+        if (details.reason) developerNotes.push(`決策：${details.reason}`);
+        if (details.status && details.status !== details.reason) {
+            developerNotes.push(`狀態：${details.status}`);
+        }
+        if (details.source) developerNotes.push(`來源：${details.source}`);
+        if (details.required) {
+            const start = details.required.start || '未知';
+            const end = details.required.end || '未知';
+            developerNotes.push(`需求區間：${start} → ${end}`);
+        }
+        if (summary) {
+            const rows = Number.isFinite(summary.valid) ? summary.valid : summary.length || 0;
+            developerNotes.push(`資料筆數：${rows}`);
+            if (summary.start || summary.end) {
+                developerNotes.push(`資料範圍：${summary.start || '未知'} → ${summary.end || '未知'}`);
+            }
+        }
+        if (details.fetchRange) {
+            const start = details.fetchRange.start || '未知';
+            const end = details.fetchRange.end || '未知';
+            developerNotes.push(`抓取範圍：${start} → ${end}`);
+        }
+        if (details.market) developerNotes.push(`市場：${details.market}`);
+        if (details.priceMode) {
+            const modeText = typeof details.priceMode === 'string'
+                ? details.priceMode.toUpperCase()
+                : String(details.priceMode);
+            developerNotes.push(`價格模式：${modeText}`);
+        }
+
+        const meta = {
+            datasetRange,
+            datasetRows: summary ? (Number.isFinite(summary.valid) ? summary.valid : summary.length || 0) : undefined,
+            priceMode: details.priceMode || null,
+            dataSource: details.source || null,
+        };
+
+        log.record(severity, {
+            label: '批量快取診斷',
+            status: details.status || details.reason || kind,
+            developerNotes,
+        }, meta);
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to record batch developer log:', error);
+    }
+}
+
+function applyBatchWorkerResultToCache(preparedParams, workerResult, cachePayload, extra = {}) {
+    if (!preparedParams || !workerResult || !cachePayload || cachePayload.useCachedData) return;
+
+    const dataset = Array.isArray(workerResult.rawDataUsed) && workerResult.rawDataUsed.length > 0
+        ? workerResult.rawDataUsed
+        : Array.isArray(workerResult.rawData) && workerResult.rawData.length > 0
+            ? workerResult.rawData
+            : null;
+    if (!dataset) return;
+
+    const marketKey = (preparedParams.market || preparedParams.marketType || currentMarket || lastFetchSettings?.market || 'TWSE').toUpperCase();
+    const priceMode = (preparedParams.priceMode
+        || (preparedParams.adjustedPrice ? 'adjusted' : 'raw')
+        || (lastFetchSettings?.priceMode || 'raw')).toLowerCase();
+
+    const settings = {
+        stockNo: preparedParams.stockNo || lastFetchSettings?.stockNo || null,
+        startDate: preparedParams.startDate || preparedParams.effectiveStartDate || lastFetchSettings?.startDate || null,
+        dataStartDate: preparedParams.dataStartDate || preparedParams.startDate || preparedParams.effectiveStartDate || lastFetchSettings?.dataStartDate || null,
+        endDate: preparedParams.endDate || lastFetchSettings?.endDate || null,
+        effectiveStartDate: preparedParams.effectiveStartDate || preparedParams.startDate || lastFetchSettings?.effectiveStartDate || null,
+        market: marketKey,
+        adjustedPrice: preparedParams.adjustedPrice ?? lastFetchSettings?.adjustedPrice ?? null,
+        splitAdjustment: preparedParams.splitAdjustment ?? lastFetchSettings?.splitAdjustment ?? null,
+        priceMode,
+        lookbackDays: preparedParams.lookbackDays ?? lastFetchSettings?.lookbackDays ?? null,
+    };
+
+    cachedStockData = dataset;
+    lastFetchSettings = { ...settings };
+
+    let coverage = null;
+    if (typeof computeCoverageFromRows === 'function') {
+        try {
+            coverage = computeCoverageFromRows(dataset);
+        } catch (error) {
+            console.warn('[Batch Optimization] Failed to compute coverage from worker result:', error);
+        }
+    }
+
+    if (typeof buildCacheKey === 'function' && cachedDataStore instanceof Map) {
+        try {
+            const cacheKey = buildCacheKey(settings);
+            if (cacheKey) {
+                const cacheEntry = {
+                    stockNo: settings.stockNo,
+                    stockName: workerResult.stockName || null,
+                    data: dataset,
+                    coverage: Array.isArray(coverage) ? coverage : [],
+                    dataSource: extra.dataSource || workerResult.dataSource || cachePayload.source || 'worker-fetch',
+                    fetchedAt: Date.now(),
+                    priceMode: settings.priceMode,
+                    splitAdjustment: settings.splitAdjustment,
+                    dataStartDate: settings.dataStartDate,
+                    effectiveStartDate: settings.effectiveStartDate,
+                    lookbackDays: settings.lookbackDays,
+                    summary: workerResult?.dataDebug?.summary || null,
+                    adjustments: Array.isArray(workerResult?.dataDebug?.adjustments) ? workerResult.dataDebug.adjustments : [],
+                    debugSteps: Array.isArray(workerResult?.dataDebug?.debugSteps) ? workerResult.dataDebug.debugSteps : [],
+                    adjustmentFallbackApplied: Boolean(workerResult?.dataDebug?.adjustmentFallbackApplied),
+                    priceSource: workerResult?.dataDebug?.priceSource || workerResult.priceSource || null,
+                    splitDiagnostics: workerResult?.dataDebug?.splitDiagnostics || null,
+                    finmindStatus: workerResult?.dataDebug?.finmindStatus || null,
+                    fetchRange: workerResult?.dataDebug?.fetchRange || { start: settings.dataStartDate, end: settings.endDate },
+                };
+                cachedDataStore.set(cacheKey, cacheEntry);
+                if (typeof persistSessionDataCacheEntry === 'function') {
+                    try {
+                        persistSessionDataCacheEntry(cacheKey, cacheEntry, { market: settings.market });
+                    } catch (persistError) {
+                        console.warn('[Batch Optimization] Failed to persist session cache entry:', persistError);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('[Batch Optimization] Failed to update batch cache entry:', error);
+        }
+    }
+
+    const summary = summariseDatasetRangeForDebug(dataset);
+    recordBatchDeveloperLog('success', {
+        status: '快取重建',
+        context: extra.context || 'worker-fetch',
+        reason: cachePayload.reason || 'refetched',
+        source: extra.dataSource || workerResult.dataSource || cachePayload.source || 'worker-fetch',
+        required: cachePayload.required || null,
+        summary,
+        fetchRange: workerResult?.dataDebug?.fetchRange || null,
+        priceMode: settings.priceMode,
+        market: settings.market,
+    });
 }
 
 function resetBatchWorkerStatus() {
@@ -1698,20 +1867,26 @@ async function executeBacktestForCombination(combination, options = {}) {
                 const tempWorker = new Worker(workerUrl);
 
                 tempWorker.onmessage = function(e) {
-                    if (e.data.type === 'result') {
-                        const result = e.data.data;
-                        
+                    const { type, data, dataSource } = e.data || {};
+                    if (type === 'result') {
+                        const result = data;
+
                         // 確保結果包含實際使用的停損停利參數
                         if (result) {
                             result.usedStopLoss = params.stopLoss;
                             result.usedTakeProfit = params.takeProfit;
                             console.log(`[Batch Optimization] Backtest completed with stopLoss: ${params.stopLoss}, takeProfit: ${params.takeProfit}`);
                         }
-                        
+
+                        applyBatchWorkerResultToCache(preparedParams, result, cachePayload, {
+                            context: 'combination-backtest',
+                            dataSource,
+                        });
+
                         tempWorker.terminate();
                         resolve(result);
-                    } else if (e.data.type === 'error') {
-                        console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
+                    } else if (type === 'error') {
+                        console.error('[Batch Optimization] Worker error:', e.data?.data?.message || e.data?.error);
                         tempWorker.terminate();
                         resolve(null);
                     }
@@ -1957,10 +2132,15 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const optimizeWorker = new Worker(workerUrl);
 
         optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
+            const { type, data, dataSource } = e.data;
+
             if (type === 'result') {
                 optimizeWorker.terminate();
+
+                applyBatchWorkerResultToCache(preparedParams, data, cachePayload, {
+                    context: `optimize-${strategyType}`,
+                    dataSource,
+                });
 
                 console.debug('[Batch Optimization] optimizeSingleStrategyParameter worker returned data:', data);
 
@@ -2126,11 +2306,16 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         const optimizeWorker = new Worker(workerUrl);
 
         optimizeWorker.onmessage = function(e) {
-            const { type, data } = e.data;
-            
+            const { type, data, dataSource } = e.data;
+
             if (type === 'result') {
                 optimizeWorker.terminate();
-                
+
+                applyBatchWorkerResultToCache(preparedParams, data, cachePayload, {
+                    context: 'optimize-risk',
+                    dataSource,
+                });
+
                 if (data && data.results && data.results.length > 0) {
                     // 根據目標指標排序結果
                     const sortedResults = data.results.sort((a, b) => {
