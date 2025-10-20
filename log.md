@@ -1,5 +1,23 @@
 
 
+## 2025-10-18 — Patch LB-BATCH-CACHE-20251018A
+- **Scope**: 批量優化快取覆用檢查與共用載入流程。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `resolveWorkerCachePayload` helper，統一使用 `needsDataFetch`／`buildCacheKey` 與 `lastFetchSettings` 檢查資料是否覆蓋目標區間，並在快取失效時自動改為讓 Worker 重新抓取資料。
+  - 單參數優化、風險參數優化與組合回測皆改用新 helper 傳遞 `cachedData`／`cachedMeta`，避免再度出現條件分歧造成錯誤覆用舊資料。
+- **Testing**:
+  - `node - <<'NODE' ...` 編譯 `js/batch-optimization.js`（本地容器）
+  - 手動情境（待實機）：調整回測日期後直接啟動批量優化，確認最終結果與立即回測、單次優化輸出一致且 console 無錯誤。
+
+## 2025-10-20 — Patch LB-BATCH-CACHE-20251020A
+- **Issue recap**: 執行 Walk-Forward 自動優化後，`cachedStockData` 會暫時被訓練窗資料覆蓋，`resolveWorkerCachePayload` 僅檢查快取覆蓋範圍而未比對最後一次抓取的日期，導致批量優化沿用不足的資料集，最佳參數搜尋結果為空。
+- **Fix**:
+  - `js/batch-optimization.js` 擴充 `resolveWorkerCachePayload`，即使 `needsDataFetch` 通過仍會核對 `lastFetchSettings` 與實際 `cachedStockData` 首末日期，偵測到訓練窗遺留時改為強制重新抓取全域快取。
+  - 新增 `lastFetchStartsTooLate`、`lastFetchEndsTooEarly`、`cachedRowsMissingWarmup` 等診斷原因，協助追蹤資料區間不符的情況。
+- **Testing**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+  - 手動情境（待實機）：先執行滾動測試自動優化，再回到批量優化面板檢查最佳參數是否重新出現且 console 無快取範圍警告。
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
