@@ -1260,3 +1260,11 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-07-10 — Patch LB-SEO-20260710A
+- **Issue recap**: 首頁 `<head>` 缺少描述、社群分享與結構化資料，導致搜尋引擎與社群預覽缺乏完整資訊。
+- **Fix**:
+  - `index.html` 新增 canonical、描述、Open Graph、Twitter Card 與 robots 等基本 SEO 標籤。
+  - `index.html` 注入 WebApplication 與 FAQPage 的 JSON-LD 結構化資料，標示免費工具特色與常見問答。
+- **Diagnostics**: 以本地檢視原始碼確認標籤順序正確、JSON-LD 經過 JSON Lint 驗證為有效格式。
+- **Testing**: 尚未執行自動化測試（靜態標籤調整）。
