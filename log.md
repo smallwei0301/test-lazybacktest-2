@@ -1,4 +1,12 @@
 
+## 2026-07-10 — Patch LB-ROLLING-TEST-20250930B
+- **Scope**: Walk-Forward 視窗自動調整與使用者提醒優化。
+- **Updates**:
+  - 以「滾動測試次數」取代固定訓練／測試／平移月份，依既有 36：12：6 比例與回測區間自動縮放視窗長度。
+  - 新增進階設定折疊容器，保留原始欄位供專業使用者手動覆寫，同步更新版本代碼與版面文字。
+  - 視窗預覽顯示目標次數與實際結果，若資料不足或期間少於五年會提示延長回測與建議使用五年以上數據。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
@@ -1184,4 +1192,11 @@
   - `js/main.js` 更新 `applyLoadingMascotHiddenState` 配合新樣式維持顯示狀態與 aria 屬性，同步提升版本碼至 `LB-PROGRESS-MASCOT-20260709A`。
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-07-10 — Patch LB-ROLLING-TEST-20251015A
+- **Issue recap**: Walk-Forward 評分仍沿用舊的 0~100 分制，缺乏 PSR/DSR 統計可信度與 WFE 中位數，導致策略穩健度判讀與實務門檻脫節。
+- **Fix**:
+  - `js/worker.js` 回傳每日 OOS 報酬與報酬分佈矩（moments），供前端計算 PSR、DSR 與 MinTRL。
+  - `js/rolling-test.js` 導入「OOS 品質 × 統計可信度 × WFE」新評分流程，新增 Credibility/StatWeight、median Sharpe、WFE 中位數與等級門檻判斷。
+  - `index.html` 更新滾動測試報告說明、調整卡片間距與進階設定預設值，確保門檻與優化選項收納於折疊區。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
