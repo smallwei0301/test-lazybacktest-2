@@ -3,6 +3,7 @@
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-CACHE-GUARD-20250623A
 // Patch Tag: LB-US-BACKTEST-20250621A
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
@@ -2651,6 +2652,164 @@ function needsDataFetch(cur) {
     const rangeStart = cur.dataStartDate || cur.startDate;
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 
+}
+
+function normalizeCacheRequestForDataset(source) {
+    if (!source || typeof source !== 'object') return null;
+    const marketValue = source.market || source.marketType || currentMarket || 'TWSE';
+    const priceMode = (source.priceMode || (source.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const normalized = {
+        stockNo: source.stockNo || source.symbol || '',
+        startDate: source.startDate || source.effectiveStartDate || null,
+        endDate: source.endDate || null,
+        dataStartDate: source.dataStartDate
+            || source.warmupStartDate
+            || source.bufferedStartDate
+            || source.effectiveStartDate
+            || source.startDate
+            || null,
+        effectiveStartDate: source.effectiveStartDate || source.startDate || null,
+        lookbackDays: source.lookbackDays || null,
+        market: marketValue,
+        marketType: source.marketType || source.market || marketValue,
+        adjustedPrice: Boolean(source.adjustedPrice || (priceMode === 'adjusted')),
+        priceMode,
+        splitAdjustment: Boolean(source.splitAdjustment),
+    };
+
+    if (!normalized.stockNo || !normalized.endDate) {
+        return null;
+    }
+    return normalized;
+}
+
+function resolveCachedDatasetPayload(requestSource, options = {}) {
+    const normalized = normalizeCacheRequestForDataset(requestSource);
+    const result = {
+        useCachedData: false,
+        cachedData: null,
+        cachedMeta: null,
+        reason: 'invalid_request',
+        request: normalized,
+    };
+
+    const overrideData = Array.isArray(options.cachedDataOverride) && options.cachedDataOverride.length > 0
+        ? options.cachedDataOverride
+        : null;
+    if (overrideData) {
+        result.useCachedData = true;
+        result.cachedData = overrideData;
+        result.cachedMeta = options.cachedMetaOverride || null;
+        result.reason = 'override';
+        return result;
+    }
+
+    const datasetCandidate = Array.isArray(options.cachedDataCandidate) && options.cachedDataCandidate.length > 0
+        ? options.cachedDataCandidate
+        : (Array.isArray(cachedStockData) && cachedStockData.length > 0 ? cachedStockData : null);
+
+    if (!normalized) {
+        result.reason = 'invalid_request';
+        return result;
+    }
+
+    if (!datasetCandidate) {
+        result.reason = 'no_dataset';
+        return result;
+    }
+
+    let fetchRequired = true;
+    if (typeof needsDataFetch === 'function') {
+        fetchRequired = needsDataFetch(normalized);
+    } else if (typeof buildCacheKey === 'function' && lastFetchSettings) {
+        try {
+            const requestedKey = buildCacheKey(normalized);
+            const lastKey = buildCacheKey(lastFetchSettings);
+            fetchRequired = requestedKey !== lastKey;
+        } catch (error) {
+            console.warn('[Cache Guard] Failed to compare cache keys:', error);
+            fetchRequired = true;
+        }
+    } else {
+        fetchRequired = false;
+    }
+
+    if (fetchRequired) {
+        result.reason = 'needs_fetch';
+        return result;
+    }
+
+    let cacheMeta = null;
+    let cacheKey = null;
+    if (typeof buildCacheKey === 'function') {
+        try {
+            cacheKey = buildCacheKey(normalized);
+        } catch (error) {
+            console.warn('[Cache Guard] Failed to build cache key:', error);
+        }
+    }
+
+    if (cacheKey && lastFetchSettings && typeof buildCacheKey === 'function') {
+        try {
+            const lastKey = buildCacheKey(lastFetchSettings);
+            if (lastKey && lastKey !== cacheKey) {
+                result.reason = 'last_fetch_mismatch';
+                return result;
+            }
+        } catch (error) {
+            console.warn('[Cache Guard] Failed to compare with last fetch settings:', error);
+        }
+    }
+
+    if (cacheKey && cachedDataStore instanceof Map) {
+        const normalizedMarket = typeof normalizeMarketKeyForCache === 'function'
+            ? normalizeMarketKeyForCache(normalized.market)
+            : normalizeMarketValue(normalized.market);
+        let entry = cachedDataStore.get(cacheKey) || null;
+        if (entry && typeof ensureDatasetCacheEntryFresh === 'function') {
+            entry = ensureDatasetCacheEntryFresh(cacheKey, entry, normalizedMarket);
+        }
+        if (!entry) {
+            result.reason = 'cache_entry_missing';
+            return result;
+        }
+        if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) {
+            result.reason = 'cache_missing_coverage';
+            return result;
+        }
+        const range = {
+            start: normalized.dataStartDate || normalized.startDate,
+            end: normalized.endDate,
+        };
+        if (range.start && range.end && typeof coverageCoversRange === 'function') {
+            if (!coverageCoversRange(entry.coverage, range)) {
+                result.reason = 'coverage_incomplete';
+                return result;
+            }
+        }
+        cacheMeta = {
+            summary: entry.summary || null,
+            adjustments: Array.isArray(entry.adjustments) ? entry.adjustments : [],
+            debugSteps: Array.isArray(entry.debugSteps) ? entry.debugSteps : [],
+            adjustmentFallbackApplied: Boolean(entry.adjustmentFallbackApplied),
+            priceSource: entry.priceSource || null,
+            dataSource: entry.dataSource || null,
+            splitAdjustment: Boolean(entry.splitAdjustment),
+            splitDiagnostics: entry.splitDiagnostics || null,
+            finmindStatus: entry.finmindStatus || null,
+        };
+    }
+
+    result.useCachedData = true;
+    result.cachedData = datasetCandidate;
+    result.cachedMeta = cacheMeta;
+    result.reason = 'cache_valid';
+    return result;
+}
+
+if (typeof window !== 'undefined') {
+    window.resolveCachedDatasetPayload = resolveCachedDatasetPayload;
+    window.normalizeCacheRequestForDataset = normalizeCacheRequestForDataset;
 }
 // --- 新增：請求並顯示策略建議 ---
 function getSuggestion() {

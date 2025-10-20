@@ -3,6 +3,7 @@
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
+// Patch Tag: LB-CACHE-GUARD-20250623A
 // Patch Tag: LB-TREND-SENSITIVITY-20250817A
 // Patch Tag: LB-TREND-REGRESSION-20250903A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
@@ -7575,11 +7576,37 @@ function runOptimizationInternal(optimizeType) {
         startDate: params.startDate,
         endDate: params.endDate,
         market: (params.market || params.marketType || currentMarket || 'TWSE').toUpperCase(),
+        marketType: params.market || params.marketType || currentMarket || 'TWSE',
         adjustedPrice: Boolean(params.adjustedPrice),
         priceMode: (params.priceMode || (params.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toLowerCase(),
+        splitAdjustment: Boolean(params.splitAdjustment),
+        dataStartDate: params.dataStartDate || lastFetchSettings?.dataStartDate || params.startDate,
+        effectiveStartDate: params.effectiveStartDate || lastFetchSettings?.effectiveStartDate || params.startDate,
+        lookbackDays: params.lookbackDays || lastFetchSettings?.lookbackDays || null,
     };
-    const useCache=!needsDataFetch(curSettings); 
-    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`; 
+
+    let cacheDecision = null;
+    if (typeof resolveCachedDatasetPayload === 'function') {
+        cacheDecision = resolveCachedDatasetPayload(curSettings, {
+            cachedDataCandidate: Array.isArray(cachedStockData) ? cachedStockData : null,
+        });
+    }
+
+    if (!cacheDecision) {
+        const fallbackUseCache = !needsDataFetch(curSettings);
+        cacheDecision = {
+            useCachedData: fallbackUseCache,
+            cachedData: fallbackUseCache && Array.isArray(cachedStockData) ? cachedStockData : null,
+            cachedMeta: null,
+            reason: fallbackUseCache ? 'fallback_cache' : 'fallback_fetch',
+        };
+    }
+
+    const useCache = Boolean(cacheDecision.useCachedData);
+    if (!useCache) {
+        console.log('[Main] Cache bypassed for optimization due to:', cacheDecision.reason);
+    }
+    const msg=`⌛ 開始優化 ${msgAction} (${optLabel}) (${useCache?'使用快取':'載入新數據'})...`;
     
     // 先清除之前的結果，但不隱藏優化進度
     clearPreviousResults(); 
@@ -7601,36 +7628,21 @@ function runOptimizationInternal(optimizeType) {
     
     try { 
         optimizationWorker=new Worker(workerUrl); 
-        const workerMsg={ 
-            type:'runOptimization', 
-            params, 
-            optimizeTargetStrategy: optimizeType, 
-            optimizeParamName:selectedParamName, 
-            optimizeRange:optRange, 
-            useCachedData:useCache 
-        }; 
-        
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData=cachedStockData;
-            const cacheEntry = ensureDatasetCacheEntryFresh(
-                buildCacheKey(curSettings),
-                cachedDataStore.get(buildCacheKey(curSettings)),
-                curSettings.market,
-            );
-                if (cacheEntry) {
-                    workerMsg.cachedMeta = {
-                        summary: cacheEntry.summary || null,
-                        adjustments: Array.isArray(cacheEntry.adjustments) ? cacheEntry.adjustments : [],
-                        debugSteps: Array.isArray(cacheEntry.debugSteps) ? cacheEntry.debugSteps : [],
-                        adjustmentFallbackApplied: Boolean(cacheEntry.adjustmentFallbackApplied),
-                        priceSource: cacheEntry.priceSource || null,
-                        dataSource: cacheEntry.dataSource || null,
-                        splitAdjustment: Boolean(cacheEntry.splitAdjustment),
-                        splitDiagnostics: cacheEntry.splitDiagnostics || null,
-                        finmindStatus: cacheEntry.finmindStatus || null,
-                    };
-                }
-        } else console.log(`[Main] Fetching data for ${optimizeType} opt.`);
+        const workerMsg={
+            type:'runOptimization',
+            params,
+            optimizeTargetStrategy: optimizeType,
+            optimizeParamName:selectedParamName,
+            optimizeRange:optRange,
+            useCachedData:useCache
+        };
+
+        if(useCache && cacheDecision.cachedData) {
+            workerMsg.cachedData=cacheDecision.cachedData;
+            if (cacheDecision.cachedMeta) {
+                workerMsg.cachedMeta = cacheDecision.cachedMeta;
+            }
+        } else console.log(`[Main] Fetching data for ${optimizeType} opt. Reason: ${cacheDecision.reason}`);
         
         optimizationWorker.postMessage(workerMsg); 
         

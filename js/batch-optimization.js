@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-CACHE-GUARD-20250623A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -1335,7 +1336,6 @@ async function executeBacktestForCombination(combination, options = {}) {
                     : null;
                 const cachedPayload = overrideData
                     || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
@@ -1364,11 +1364,39 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
+
+                let cacheDecision = null;
+                if (typeof resolveCachedDatasetPayload === 'function') {
+                    cacheDecision = resolveCachedDatasetPayload(preparedParams, {
+                        cachedDataOverride: overrideData,
+                        cachedDataCandidate: cachedPayload,
+                    });
+                }
+
+                if (!cacheDecision) {
+                    const fallbackUseCache = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+                    cacheDecision = {
+                        useCachedData: fallbackUseCache,
+                        cachedData: fallbackUseCache ? cachedPayload : null,
+                        cachedMeta: null,
+                        reason: fallbackUseCache ? 'fallback_cache' : 'fallback_fetch',
+                    };
+                }
+
+                const useCachedData = Boolean(cacheDecision?.useCachedData);
+                const payloadData = useCachedData ? cacheDecision?.cachedData : null;
+                const payloadMeta = useCachedData ? cacheDecision?.cachedMeta : null;
+
+                if (!useCachedData) {
+                    console.log('[Batch Optimization] executeBacktestForCombination will bypass cache due to:', cacheDecision?.reason);
+                }
+
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
+                    cachedData: payloadData,
+                    cachedMeta: payloadMeta || undefined,
                 });
 
                 // 設定超時
@@ -1587,8 +1615,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             : null;
         const cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
-        
+
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
             
@@ -1662,6 +1689,32 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         
         const preparedParams = enrichParamsWithLookback(params);
 
+        let cacheDecision = null;
+        if (typeof resolveCachedDatasetPayload === 'function') {
+            cacheDecision = resolveCachedDatasetPayload(preparedParams, {
+                cachedDataOverride: overrideData,
+                cachedDataCandidate: cachedPayload,
+            });
+        }
+
+        if (!cacheDecision) {
+            const fallbackUseCache = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+            cacheDecision = {
+                useCachedData: fallbackUseCache,
+                cachedData: fallbackUseCache ? cachedPayload : null,
+                cachedMeta: null,
+                reason: fallbackUseCache ? 'fallback_cache' : 'fallback_fetch',
+            };
+        }
+
+        const useCachedData = Boolean(cacheDecision?.useCachedData);
+        const payloadData = useCachedData ? cacheDecision?.cachedData : null;
+        const payloadMeta = useCachedData ? cacheDecision?.cachedMeta : null;
+
+        if (!useCachedData) {
+            console.log('[Batch Optimization] optimizeSingleStrategyParameter will bypass cache due to:', cacheDecision?.reason);
+        }
+
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
@@ -1670,7 +1723,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: payloadData,
+            cachedMeta: payloadMeta || undefined,
         });
         
         // 設定超時
