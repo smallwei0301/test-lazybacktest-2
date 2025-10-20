@@ -1,6 +1,7 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
 // Patch Tag: LB-BATCH-CACHE-20251018A
+// Patch Tag: LB-BATCH-CACHE-20251020A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -49,6 +50,8 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+
+const CACHE_DATE_TOLERANCE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -139,16 +142,104 @@ function enrichParamsWithLookback(params) {
     };
 }
 
+function normalizeNumericTimestamp(value) {
+    if (!Number.isFinite(value)) return Number.NaN;
+    return value > 1e12 ? value : value * 1000;
+}
+
 function parseIsoDateToUtcSafe(value) {
-    if (!value) return NaN;
+    if (value === undefined || value === null || value === '') return Number.NaN;
+
+    if (typeof value === 'number') {
+        return normalizeNumericTimestamp(value);
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return Number.NaN;
+        if (/^\d+$/.test(trimmed)) {
+            const numeric = Number(trimmed);
+            if (Number.isFinite(numeric)) {
+                return normalizeNumericTimestamp(numeric);
+            }
+        }
+        value = trimmed;
+    }
+
     if (typeof parseISODateToUTC === 'function') {
-        return parseISODateToUTC(value);
+        try {
+            const parsedByHelper = parseISODateToUTC(value);
+            if (Number.isFinite(parsedByHelper)) return parsedByHelper;
+        } catch (error) {
+            // ignore and fall through
+        }
     }
     if (typeof parseISOToUTC === 'function') {
-        return parseISOToUTC(value);
+        try {
+            const parsedByLegacy = parseISOToUTC(value);
+            if (Number.isFinite(parsedByLegacy)) return parsedByLegacy;
+        } catch (error) {
+            // ignore and fall through
+        }
     }
     const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? NaN : parsed;
+    return Number.isNaN(parsed) ? Number.NaN : parsed;
+}
+
+function resolveRowTimestampForCache(row) {
+    if (!row || typeof row !== 'object') return Number.NaN;
+    const candidates = [
+        row.date,
+        row.Date,
+        row.tradeDate,
+        row.trade_date,
+        row.timestamp,
+        row.time,
+        row.t,
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+        const ts = parseIsoDateToUtcSafe(candidates[i]);
+        if (Number.isFinite(ts)) {
+            return ts;
+        }
+    }
+    return Number.NaN;
+}
+
+function datasetCoversRange(rows, startIso, endIso, toleranceMs = CACHE_DATE_TOLERANCE_MS) {
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+
+    let minTs = Number.POSITIVE_INFINITY;
+    let maxTs = Number.NEGATIVE_INFINITY;
+    let validCount = 0;
+
+    for (let i = 0; i < rows.length; i += 1) {
+        const ts = resolveRowTimestampForCache(rows[i]);
+        if (!Number.isFinite(ts)) continue;
+        validCount += 1;
+        if (ts < minTs) minTs = ts;
+        if (ts > maxTs) maxTs = ts;
+    }
+
+    if (!Number.isFinite(minTs) || !Number.isFinite(maxTs) || validCount === 0) {
+        return false;
+    }
+
+    if (startIso) {
+        const startTs = parseIsoDateToUtcSafe(startIso);
+        if (Number.isFinite(startTs) && (minTs - startTs) > toleranceMs) {
+            return false;
+        }
+    }
+
+    if (endIso) {
+        const endTs = parseIsoDateToUtcSafe(endIso);
+        if (Number.isFinite(endTs) && (endTs - maxTs) > toleranceMs) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function resolveWorkerCachePayload(params, options = {}) {
@@ -160,24 +251,8 @@ function resolveWorkerCachePayload(params, options = {}) {
         reason: 'uninitialized',
     };
 
-    const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-        ? options.cachedDataOverride
-        : null;
-    if (overrideData) {
-        result.useCachedData = true;
-        result.cachedData = overrideData;
-        result.reason = 'overrideProvided';
-        return result;
-    }
-
     if (!params || typeof params !== 'object') {
         result.reason = 'invalidParams';
-        return result;
-    }
-
-    const hasGlobalCache = Array.isArray(cachedStockData) && cachedStockData.length > 0;
-    if (!hasGlobalCache) {
-        result.reason = 'noGlobalCache';
         return result;
     }
 
@@ -194,6 +269,33 @@ function resolveWorkerCachePayload(params, options = {}) {
         splitAdjustment: params.splitAdjustment ?? lastFetchSettings?.splitAdjustment ?? null,
         lookbackDays: params.lookbackDays ?? lastFetchSettings?.lookbackDays ?? null,
     };
+
+    const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+        ? options.cachedDataOverride
+        : null;
+    if (overrideData) {
+        const overrideStart = normalizedSettings.dataStartDate || normalizedSettings.startDate;
+        const overrideEnd = normalizedSettings.endDate;
+        if (datasetCoversRange(overrideData, overrideStart, overrideEnd)) {
+            result.useCachedData = true;
+            result.cachedData = overrideData;
+            result.reason = 'overrideProvided';
+            if (options.cachedMetaOverride) {
+                result.cachedMeta = options.cachedMetaOverride;
+            }
+            return result;
+        }
+        console.info('[Batch Optimization] cachedDataOverride skipped due to insufficient coverage', {
+            requiredStart: overrideStart,
+            requiredEnd: overrideEnd,
+        });
+    }
+
+    const hasGlobalCache = Array.isArray(cachedStockData) && cachedStockData.length > 0;
+    if (!hasGlobalCache) {
+        result.reason = 'noGlobalCache';
+        return result;
+    }
 
     if (!normalizedSettings.stockNo || !normalizedSettings.startDate || !normalizedSettings.endDate) {
         result.reason = 'missingCoreSettings';
@@ -258,6 +360,12 @@ function resolveWorkerCachePayload(params, options = {}) {
         return result;
     }
 
+    const coverageStart = normalizedSettings.dataStartDate || normalizedSettings.startDate;
+    if (!datasetCoversRange(cachedStockData, coverageStart, normalizedSettings.endDate)) {
+        result.reason = 'globalDatasetInsufficient';
+        return result;
+    }
+
     if (typeof buildCacheKey === 'function' && cachedDataStore instanceof Map) {
         const cacheKey = buildCacheKey(normalizedSettings);
         const normalizedMarketKey = typeof normalizeMarketKeyForCache === 'function'
@@ -270,7 +378,6 @@ function resolveWorkerCachePayload(params, options = {}) {
             result.reason = 'missingCoverage';
             return result;
         }
-        const coverageStart = normalizedSettings.dataStartDate || normalizedSettings.startDate;
         if (typeof coverageCoversRange === 'function'
             && !coverageCoversRange(cacheEntry.coverage, { start: coverageStart, end: normalizedSettings.endDate })) {
             result.reason = 'coverageInsufficient';

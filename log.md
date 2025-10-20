@@ -1269,3 +1269,11 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-10 — Patch LB-BATCH-CACHE-20251020A
+- **Issue recap**: 先執行滾動測試的自動優化後再回到批量優化面板，最佳參數欄位偶爾回傳空值；推查發現裁切後的視窗快取在覆用時可能缺少暖身或測試期尾端資料，批量優化沿用失效快取導致 Worker 回傳 `no_data`。
+- **Fix**:
+  - `js/batch-optimization.js` 擴充 `resolveWorkerCachePayload`，針對 `cachedDataOverride` 與全域 `cachedStockData` 皆檢查實際資料範圍是否涵蓋 `dataStartDate`～`endDate`，不足時改為強制重新抓取，並記錄範圍不足原因。
+  - 新增跨來源時間戳解析工具，支援數值／字串時間戳並允許 7 天容忍，以符合暖身緩衝的最小需求。
+- **Diagnostics**: 滾動測試訓練窗與批量面板交替執行，確認覆用視窗快取時 `cachedDataOverride` 與全域快取皆通過範圍檢查，並於控制台觀察覆寫被拒後改為重新抓取的資訊訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
