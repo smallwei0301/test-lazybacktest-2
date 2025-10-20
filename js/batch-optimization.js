@@ -138,6 +138,19 @@ function enrichParamsWithLookback(params) {
     };
 }
 
+function buildWorkerPayloadEnvelope(params) {
+    const enriched = enrichParamsWithLookback(params);
+    const lookbackDays = Number.isFinite(enriched?.lookbackDays) ? enriched.lookbackDays : null;
+    const effectiveStartDate = enriched?.effectiveStartDate || enriched?.startDate || null;
+    const dataStartDate = enriched?.dataStartDate || effectiveStartDate || enriched?.startDate || null;
+    return {
+        params: enriched,
+        lookbackDays,
+        effectiveStartDate,
+        dataStartDate,
+    };
+}
+
 function resetBatchWorkerStatus() {
     batchWorkerStatus.concurrencyLimit = 0;
     batchWorkerStatus.inFlightCount = 0;
@@ -1363,12 +1376,15 @@ async function executeBacktestForCombination(combination, options = {}) {
                     resolve(null);
                 };
 
-                const preparedParams = enrichParamsWithLookback(params);
+                const envelope = buildWorkerPayloadEnvelope(params);
                 tempWorker.postMessage({
                     type: 'runBacktest',
-                    params: preparedParams,
+                    params: envelope.params,
+                    dataStartDate: envelope.dataStartDate,
+                    effectiveStartDate: envelope.effectiveStartDate,
+                    lookbackDays: envelope.lookbackDays,
                     useCachedData,
-                    cachedData: cachedPayload
+                    cachedData: cachedPayload,
                 });
 
                 // 設定超時
@@ -1660,17 +1676,20 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
-        const preparedParams = enrichParamsWithLookback(params);
+        const envelope = buildWorkerPayloadEnvelope(params);
 
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
-            params: preparedParams,
+            params: envelope.params,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
+            dataStartDate: envelope.dataStartDate,
+            effectiveStartDate: envelope.effectiveStartDate,
+            lookbackDays: envelope.lookbackDays,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedPayload,
         });
         
         // 設定超時
@@ -1797,17 +1816,20 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             resolve({ value: undefined, metric: -Infinity });
         };
         
-        const preparedParams = enrichParamsWithLookback(params);
+        const envelope = buildWorkerPayloadEnvelope(params);
 
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
-            params: preparedParams,
+            params: envelope.params,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
+            dataStartDate: envelope.dataStartDate,
+            effectiveStartDate: envelope.effectiveStartDate,
+            lookbackDays: envelope.lookbackDays,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedPayload,
         });
     });
 }
@@ -3541,11 +3563,14 @@ function performSingleBacktest(params) {
             
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
-            const preparedParams = enrichParamsWithLookback(params);
+            const envelope = buildWorkerPayloadEnvelope(params);
             worker.postMessage({
                 type: 'runBacktest',
-                params: preparedParams,
-                useCachedData: false
+                params: envelope.params,
+                dataStartDate: envelope.dataStartDate,
+                effectiveStartDate: envelope.effectiveStartDate,
+                lookbackDays: envelope.lookbackDays,
+                useCachedData: false,
             });
             
         } catch (error) {
@@ -4653,12 +4678,15 @@ function performSingleBacktestFast(params) {
             };
             
             // 發送回測請求 - 使用緩存數據提高速度
-            const preparedParams = enrichParamsWithLookback(params);
+            const envelope = buildWorkerPayloadEnvelope(params);
             worker.postMessage({
                 type: 'runBacktest',
-                params: preparedParams,
+                params: envelope.params,
+                dataStartDate: envelope.dataStartDate,
+                effectiveStartDate: envelope.effectiveStartDate,
+                lookbackDays: envelope.lookbackDays,
                 useCachedData: true,
-                cachedData: cachedStockData
+                cachedData: cachedStockData,
             });
             
         } catch (error) {
